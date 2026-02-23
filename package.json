@@ -1,0 +1,17 @@
+{
+  "name": "salesforce-pro-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @salesforce-pro/api & npm run dev -w @salesforce-pro/web",
+    "dev:api": "npm run dev -w @salesforce-pro/api",
+    "dev:web": "npm run dev -w @salesforce-pro/web",
+    "build": "npm run build -ws",
+    "prisma:migrate": "npm run prisma:migrate -w @salesforce-pro/api",
+    "prisma:seed": "npm run prisma:seed -w @salesforce-pro/api"
+  }
+}

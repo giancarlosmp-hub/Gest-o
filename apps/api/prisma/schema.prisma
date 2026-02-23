@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  diretor
+  gerente
+  vendedor
+}
+
+enum OpportunityStage {
+  prospeccao
+  negociacao
+  proposta
+  ganho
+  perdido
+}
+
+enum ActivityType {
+  ligacao
+  whatsapp
+  visita
+  reuniao
+}
+
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  role         Role
+  region       String?
+  createdAt    DateTime      @default(now())
+  clients      Client[]
+  companies    Company[]
+  contacts     Contact[]
+  opportunities Opportunity[]
+  activities   Activity[]
+  goals        Goal[]
+  sales        Sale[]
+}
+
+model Client {
+  id            String      @id @default(cuid())
+  name          String
+  city          String
+  state         String
+  region        String
+  ownerSellerId String
+  ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
+  opportunities Opportunity[]
+  createdAt     DateTime    @default(now())
+}
+
+model Company {
+  id            String    @id @default(cuid())
+  name          String
+  cnpj          String?
+  segment       String
+  ownerSellerId String
+  ownerSeller   User      @relation(fields: [ownerSellerId], references: [id])
+  contacts      Contact[]
+  createdAt     DateTime  @default(now())
+}
+
+model Contact {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String
+  email         String
+  companyId     String
+  company       Company   @relation(fields: [companyId], references: [id])
+  ownerSellerId String
+  ownerSeller   User      @relation(fields: [ownerSellerId], references: [id])
+  createdAt     DateTime  @default(now())
+}
+
+model Opportunity {
+  id                String           @id @default(cuid())
+  title             String
+  value             Float
+  stage             OpportunityStage
+  expectedCloseDate DateTime
+  clientId          String
+  client            Client           @relation(fields: [clientId], references: [id])
+  ownerSellerId     String
+  ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
+  activities        Activity[]
+  createdAt         DateTime         @default(now())
+}
+
+model Activity {
+  id            String       @id @default(cuid())
+  type          ActivityType
+  notes         String
+  dueDate       DateTime
+  done          Boolean      @default(false)
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  ownerSellerId String
+  ownerSeller   User         @relation(fields: [ownerSellerId], references: [id])
+  createdAt     DateTime     @default(now())
+}
+
+model Goal {
+  id          String   @id @default(cuid())
+  month       String
+  targetValue Float
+  sellerId    String
+  seller      User     @relation(fields: [sellerId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model Sale {
+  id        String   @id @default(cuid())
+  date      DateTime
+  value     Float
+  sellerId  String
+  seller    User     @relation(fields: [sellerId], references: [id])
+  createdAt DateTime @default(now())
+}
