@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
 app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/", crudRoutes);

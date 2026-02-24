@@ -1,9 +1,9 @@
-import { PrismaClient, Role } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-async function upsertUser(name: string, email: string, role: Role, region?: string) {
+async function upsertUser(name, email, role, region) {
   const passwordHash = await bcrypt.hash("123456", 10);
   return prisma.user.upsert({
     where: { email },
@@ -56,7 +56,7 @@ async function main() {
       data: {
         name: `Contato ${seller.name}`,
         phone: "11999999999",
-        email: `${seller.email}`,
+        email: seller.email,
         companyId: company.id,
         ownerSellerId: seller.id
       }
@@ -92,4 +92,9 @@ async function main() {
   console.log("Seed finalizado", { diretor: diretor.email, gerente: gerente.email });
 }
 
-main().finally(async () => prisma.$disconnect());
+main()
+  .catch((error) => {
+    console.error("Falha no seed", error);
+    process.exit(1);
+  })
+  .finally(async () => prisma.$disconnect());

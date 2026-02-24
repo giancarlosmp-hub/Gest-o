@@ -1,0 +1,53 @@
+name: Docker Compose CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and start stack
+        run: docker compose up -d --build
+
+      - name: Wait for API health
+        run: |
+          for i in {1..60}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/health || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "API healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in time"
+          docker compose logs api
+          exit 1
+
+      - name: Smoke test health endpoint
+        run: |
+          curl -f http://localhost:4000/health
+
+      - name: Smoke test auth login
+        run: |
+          curl -f -X POST http://localhost:4000/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"diretor@empresa.com","password":"123456"}'
+
+      - name: Print service status
+        if: always()
+        run: docker compose ps
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

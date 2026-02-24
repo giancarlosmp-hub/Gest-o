@@ -19,11 +19,29 @@ Monorepo completo com frontend React + Vite + TypeScript e backend Node.js + Exp
 
 ## Rodar com Docker Compose
 ```bash
-docker compose up --build
+docker compose up -d --build
+```
+Valide os serviços:
+```bash
+docker compose ps
+curl http://localhost:4000/health
 ```
 Acesse:
 - Web: `http://localhost:5173`
 - API: `http://localhost:4000`
+
+### Validação no Windows (CMD)
+```cmd
+docker compose down -v
+docker compose up -d --build
+docker compose ps
+curl http://localhost:4000/health
+curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d "{\"email\":\"diretor@empresa.com\",\"password\":\"123456\"}"
+```
+Esperado:
+- `docker compose up -d --build` finaliza sem erro.
+- `curl http://localhost:4000/health` retorna HTTP 200.
+- Login retorna HTTP 200 com usuário `diretor@empresa.com`.
 
 ## Rodar local (sem Docker)
 1. Suba um PostgreSQL local.
