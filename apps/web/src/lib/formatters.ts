@@ -28,3 +28,8 @@ export function formatCompactNumberBR(value: number) {
 export function formatPercentBR(value: number, digits = 1) {
   return `${(value ?? 0).toFixed(digits).replace(".", ",")}%`;
 }
+
+export function formatDateBR(value: string | Date) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(value));
+}

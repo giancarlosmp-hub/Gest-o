@@ -85,7 +85,12 @@ model Opportunity {
   title             String
   value             Float
   stage             OpportunityStage
+  proposalDate      DateTime
+  followUpDate      DateTime
   expectedCloseDate DateTime
+  lastContactAt     DateTime?
+  probability       Int?
+  notes             String?
   clientId          String
   client            Client           @relation(fields: [clientId], references: [id])
   ownerSellerId     String
