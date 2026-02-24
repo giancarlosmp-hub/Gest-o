@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, work]
+
+jobs:
+  build-and-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build workspaces
+        run: npm run build
+
+      - name: Docker compose build
+        run: docker compose build
+
+      - name: Docker compose up
+        run: docker compose up -d
+
+      - name: Wait API healthy
+        run: |
+          for i in {1..40}; do
+            status=$(docker inspect --format='{{json .State.Health.Status}}' $(docker compose ps -q api) | tr -d '"')
+            if [ "$status" = "healthy" ]; then
+              echo "API saudável"
+              break
+            fi
+            if [ "$i" -eq 40 ]; then
+              echo "API não ficou healthy"
+              docker compose logs --no-color
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Test login endpoint
+        run: |
+          code=$(curl -s -o /tmp/login.out -w "%{http_code}" -X POST http://localhost:4000/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"diretor@empresa.com","password":"123456"}')
+          cat /tmp/login.out
+          test "$code" = "200"
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

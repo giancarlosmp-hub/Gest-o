@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+import { Role } from "@salesforce-pro/shared";
 
 declare global {
   namespace Express {

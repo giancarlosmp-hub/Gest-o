@@ -7,9 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "start:docker": "npm run prisma:generate && npm run prisma:push && npm run prisma:seed && npm run start",
+    "start:docker": "npm run prisma:generate && npm run prisma:push && npm run prisma:seed && node dist/server.js",
     "prisma:generate": "prisma generate",
-    "prisma:push": "prisma db push --accept-data-loss",
+    "prisma:push": "prisma db push",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "tsx prisma/seed.ts"
   },

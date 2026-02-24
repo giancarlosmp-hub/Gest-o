@@ -29,6 +29,14 @@ const authLoginLimiter = rateLimit({
   message: { message: "Muitas tentativas de login. Aguarde e tente novamente." }
 });
 
+const authRefreshLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: isDev ? 120 : 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Muitas tentativas de refresh. Aguarde alguns segundos." }
+});
+
 app.use(helmet());
 app.use(cors({ origin: env.frontendUrl, credentials: true }));
 app.use(generalLimiter);
@@ -37,8 +45,10 @@ app.use(cookieParser());
 app.use(morgan("dev"));
 
 app.get("/", (_req, res) => res.status(200).json({ status: "ok", service: "salesforce-pro-api" }));
-app.get("/health", (_req, res) => res.json({ ok: true }));
+app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+
 app.use("/auth/login", authLoginLimiter);
+app.use("/auth/refresh", authRefreshLimiter);
 app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/", crudRoutes);

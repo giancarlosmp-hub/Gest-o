@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import api, { clearAccessToken, hasAccessToken, setAccessToken } from "../lib/apiClient";
+import api, { clearAccessToken, hasAccessToken, refreshOnBootOnce, setAccessToken } from "../lib/apiClient";
 
 type User = {
   id: string;
@@ -23,14 +23,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchMe = async () => {
-    if (!hasAccessToken()) {
-      setLoading(false);
-      return;
-    }
+    const { data } = await api.get("/auth/me");
+    setUser(data);
+  };
 
+  const bootstrapAuth = async () => {
     try {
-      const { data } = await api.get("/auth/me");
-      setUser(data);
+      if (hasAccessToken()) {
+        await fetchMe();
+        return;
+      }
+
+      const newToken = await refreshOnBootOnce();
+      if (!newToken) {
+        setUser(null);
+        return;
+      }
+
+      await fetchMe();
     } catch {
       setUser(null);
       clearAccessToken();
@@ -40,7 +50,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    fetchMe();
+    bootstrapAuth();
   }, []);
 
   const login = async (email: string, password: string) => {

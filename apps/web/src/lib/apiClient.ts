@@ -7,6 +7,7 @@ const api = axios.create({
 
 let accessToken = localStorage.getItem("accessToken") || "";
 let refreshPromise: Promise<string | null> | null = null;
+let bootRefreshAttempted = false;
 
 export const setAccessToken = (token: string) => {
   accessToken = token;
@@ -25,14 +26,14 @@ const isAuthRoute = (url?: string) => {
   return ["/auth/login", "/auth/refresh", "/auth/logout"].some((route) => url.includes(route));
 };
 
-const shouldAttemptRefresh = (config?: InternalAxiosRequestConfig) => {
+const shouldAttemptRefresh = (config?: InternalAxiosRequestConfig & { _retry?: boolean }) => {
   if (!config) return false;
   if (config._retry) return false;
   if (isAuthRoute(config.url)) return false;
   return Boolean(accessToken);
 };
 
-const refreshAccessToken = async (): Promise<string | null> => {
+export const refreshAccessToken = async (): Promise<string | null> => {
   if (!refreshPromise) {
     refreshPromise = api
       .post("/auth/refresh")
@@ -54,6 +55,12 @@ const refreshAccessToken = async (): Promise<string | null> => {
   return refreshPromise;
 };
 
+export const refreshOnBootOnce = async (): Promise<string | null> => {
+  if (bootRefreshAttempted) return null;
+  bootRefreshAttempted = true;
+  return refreshAccessToken();
+};
+
 api.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
@@ -64,8 +71,8 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const originalConfig = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
-    if (error.response?.status !== 401 || !shouldAttemptRefresh(originalConfig)) {
+    const originalConfig = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
+    if (!originalConfig || error.response?.status !== 401 || !shouldAttemptRefresh(originalConfig)) {
       return Promise.reject(error);
     }
 
