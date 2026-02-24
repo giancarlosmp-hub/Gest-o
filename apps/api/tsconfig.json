@@ -7,5 +7,5 @@
     "module": "NodeNext",
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "prisma/seed.ts"]
+  "include": ["src/**/*.ts"]
 }

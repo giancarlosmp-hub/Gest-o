@@ -12,7 +12,11 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use((r) => r, async (error) => {
-  if (error.response?.status === 401 && !error.config._retry) {
+  const status = error.response?.status;
+  const requestUrl = String(error.config?.url || "");
+  const isAuthRoute = requestUrl.includes("/auth/login") || requestUrl.includes("/auth/refresh");
+
+  if (status === 401 && !error.config?._retry && !isAuthRoute) {
     error.config._retry = true;
     try {
       const { data } = await api.post("/auth/refresh");
@@ -21,9 +25,12 @@ api.interceptors.response.use((r) => r, async (error) => {
       return api(error.config);
     } catch {
       clearAccessToken();
-      window.location.href = "/login";
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
     }
   }
+
   return Promise.reject(error);
 });
 
