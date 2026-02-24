@@ -4,6 +4,7 @@ import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
 import CrudSimplePage from "./pages/CrudSimplePage";
+import OpportunitiesPage from "./pages/OpportunitiesPage";
 import { useAuth } from "./context/AuthContext";
 
 const Placeholder = ({ title }: { title: string }) => <div className="bg-white p-6 rounded-xl shadow"><h2 className="text-2xl font-bold">{title}</h2><p className="text-slate-500">Em breve.</p></div>;
@@ -20,7 +21,7 @@ export default function App() {
         <Route path="clientes" element={<CrudSimplePage endpoint="/clients" title="Clientes" fields={[{ key: "name", label: "Nome" }, { key: "city", label: "Cidade" }, { key: "state", label: "UF" }, { key: "region", label: "Região" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="contatos" element={<CrudSimplePage endpoint="/contacts" title="Contatos" fields={[{ key: "name", label: "Nome" }, { key: "phone", label: "Telefone" }, { key: "email", label: "Email" }, { key: "companyId", label: "ID empresa" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="empresas" element={<CrudSimplePage endpoint="/companies" title="Empresas" fields={[{ key: "name", label: "Nome" }, { key: "cnpj", label: "CNPJ" }, { key: "segment", label: "Segmento" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
-        <Route path="oportunidades" element={<CrudSimplePage endpoint="/opportunities" title="Oportunidades" fields={[{ key: "title", label: "Título" }, { key: "value", label: "Valor", type: "number" }, { key: "stage", label: "Estágio" }, { key: "expectedCloseDate", label: "Fechamento (ISO)" }, { key: "clientId", label: "ID cliente" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
+        <Route path="oportunidades" element={<OpportunitiesPage />} />
         <Route path="atividades" element={<CrudSimplePage endpoint="/activities" title="Atividades" fields={[{ key: "type", label: "Tipo" }, { key: "notes", label: "Notas" }, { key: "dueDate", label: "Vencimento (ISO)" }, { key: "opportunityId", label: "ID oportunidade" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="relatórios" element={<Placeholder title="Relatórios" />} />
         <Route path="usuários" element={user?.role === "vendedor" ? <Navigate to="/"/> : <CrudSimplePage endpoint="/users" title="Usuários" fields={[{ key: "name", label: "Nome" }, { key: "email", label: "Email" }, { key: "role", label: "Papel" }, { key: "region", label: "Região" }, { key: "password", label: "Senha" }]} readOnly={user?.role !== "diretor"} />} />

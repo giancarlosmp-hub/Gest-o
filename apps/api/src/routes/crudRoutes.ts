@@ -44,10 +44,53 @@ router.delete("/contacts/:id", async (req, res) => { await prisma.contact.delete
 
 router.get("/opportunities", async (req, res) => {
   const stage = req.query.stage as any;
-  res.json(await prisma.opportunity.findMany({ where: { ...sellerWhere(req), ...(stage ? { stage } : {}) }, include: { client: true }, orderBy: { createdAt: "desc" } }));
+  const ownerSellerId = req.query.ownerSellerId as string | undefined;
+  const clientId = req.query.clientId as string | undefined;
+  const from = req.query.from as string | undefined;
+  const to = req.query.to as string | undefined;
+  const overdue = req.query.overdue === "true";
+  const dueSoon = req.query.dueSoon === "true";
+
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const in3Days = new Date(todayStart);
+  in3Days.setDate(in3Days.getDate() + 3);
+
+  const followUpDateWhere: any = {
+    ...(from ? { gte: new Date(from) } : {}),
+    ...(to ? { lte: new Date(to) } : {}),
+  };
+
+  if (overdue) {
+    followUpDateWhere.lt = todayStart;
+  }
+
+  if (dueSoon) {
+    followUpDateWhere.gte = todayStart;
+    followUpDateWhere.lte = in3Days;
+  }
+
+  const blockedStages = overdue || dueSoon ? ["ganho", "perdido"] : [];
+  const where: any = {
+    ...sellerWhere(req),
+    ...(stage ? { stage } : {}),
+    ...(ownerSellerId ? { ownerSellerId } : {}),
+    ...(clientId ? { clientId } : {}),
+    ...((overdue || dueSoon || from || to) ? { followUpDate: followUpDateWhere } : {}),
+    ...(blockedStages.length ? { NOT: { stage: { in: blockedStages } } } : {}),
+  };
+
+  res.json(await prisma.opportunity.findMany({
+    where,
+    include: {
+      client: true,
+      ownerSeller: { select: { id: true, name: true, email: true } }
+    },
+    orderBy: [{ followUpDate: "asc" }, { value: "desc" }]
+  }));
 });
-router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => res.status(201).json(await prisma.opportunity.create({ data: { ...req.body, expectedCloseDate: new Date(req.body.expectedCloseDate), ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
-router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => res.json(await prisma.opportunity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.expectedCloseDate ? { expectedCloseDate: new Date(req.body.expectedCloseDate) } : {}) } })));
+router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => res.status(201).json(await prisma.opportunity.create({ data: { ...req.body, proposalDate: new Date(req.body.proposalDate), followUpDate: new Date(req.body.followUpDate), expectedCloseDate: new Date(req.body.expectedCloseDate), lastContactAt: req.body.lastContactAt ? new Date(req.body.lastContactAt) : null, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
+router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => res.json(await prisma.opportunity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.proposalDate ? { proposalDate: new Date(req.body.proposalDate) } : {}), ...(req.body.followUpDate ? { followUpDate: new Date(req.body.followUpDate) } : {}), ...(req.body.expectedCloseDate ? { expectedCloseDate: new Date(req.body.expectedCloseDate) } : {}), ...(req.body.lastContactAt !== undefined ? { lastContactAt: req.body.lastContactAt ? new Date(req.body.lastContactAt) : null } : {}) } })));
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({ where: sellerWhere(req), include: { opportunity: true }, orderBy: { createdAt: "desc" } })));

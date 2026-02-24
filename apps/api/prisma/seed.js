@@ -61,12 +61,20 @@ async function main() {
         ownerSellerId: seller.id
       }
     });
+    const followUpDate = new Date(now);
+    followUpDate.setDate(now.getDate() + 2);
+
     const opp = await prisma.opportunity.create({
       data: {
         title: `Oportunidade ${seller.name}`,
         value: 25000,
         stage: "negociacao",
+        proposalDate: now,
+        followUpDate,
         expectedCloseDate: now,
+        lastContactAt: now,
+        probability: 70,
+        notes: "Lead qualificado para fechamento nesta safra.",
         clientId: client.id,
         ownerSellerId: seller.id
       }

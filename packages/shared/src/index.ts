@@ -45,7 +45,12 @@ export const opportunitySchema = z.object({
   title: z.string().min(2),
   value: z.number().nonnegative(),
   stage: OpportunityStageEnum,
+  proposalDate: z.string(),
+  followUpDate: z.string(),
   expectedCloseDate: z.string(),
+  lastContactAt: z.string().optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  notes: z.string().max(2000).optional(),
   clientId: z.string(),
   ownerSellerId: z.string().optional()
 });
