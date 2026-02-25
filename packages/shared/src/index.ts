@@ -89,6 +89,50 @@ export const goalSchema = z.object({
   sellerId: z.string()
 });
 
+export const dashboardPerformanceSchema = z.object({
+  sellerId: z.string(),
+  seller: z.string(),
+  sales: z.number(),
+  revenue: z.number(),
+  objective: z.number(),
+  realizedPercent: z.number()
+});
+
+export const dashboardSummarySchema = z.object({
+  totalRevenue: z.number(),
+  totalSales: z.number(),
+  newLeads: z.number(),
+  conversionRate: z.number(),
+  objectiveTotal: z.number(),
+  performance: z.array(dashboardPerformanceSchema),
+  recentActivities: z.array(z.unknown())
+});
+
+export const dashboardSalesSeriesSchema = z.object({
+  labels: z.array(z.string()),
+  realizedDaily: z.array(z.number()),
+  realizedAccumulated: z.array(z.number()),
+  objectiveDaily: z.array(z.number()),
+  objectiveAccumulated: z.array(z.number()),
+  objectiveTotal: z.number(),
+  realizedTotal: z.number()
+});
+
+export const dashboardPortfolioSchema = z.object({
+  walletStatus: z.object({
+    active: z.number(),
+    inactiveRecent: z.number(),
+    inactiveOld: z.number()
+  }),
+  abcCurve: z.object({
+    A: z.object({ clients: z.number(), percentRevenue: z.number() }),
+    B: z.object({ clients: z.number(), percentRevenue: z.number() }),
+    C: z.object({ clients: z.number(), percentRevenue: z.number() })
+  }),
+  totalClients: z.number(),
+  soldToday: z.number()
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ClientInput = z.infer<typeof clientSchema>;
 export type CompanyInput = z.infer<typeof companySchema>;
@@ -97,6 +141,9 @@ export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
+export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
+export type DashboardSalesSeries = z.infer<typeof dashboardSalesSeriesSchema>;
+export type DashboardPortfolio = z.infer<typeof dashboardPortfolioSchema>;
 
 export interface AuthUser {
   id: string;
