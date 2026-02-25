@@ -22,7 +22,11 @@ export function formatNumberBR(value: number) {
 }
 
 export function formatCompactNumberBR(value: number) {
-  return compactNumberFormatter.format(value ?? 0);
+  // remove espaços que alguns browsers colocam no formato compact (ex.: "1,2 mil")
+  return compactNumberFormatter
+    .format(value ?? 0)
+    .replace(/\s/g, "")
+    .toLowerCase();
 }
 
 export function formatPercentBR(value: number, digits = 1) {
