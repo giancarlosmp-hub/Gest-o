@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import OpportunityDetailsPage from "./pages/OpportunityDetailsPage";
 import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="contatos" element={<CrudSimplePage endpoint="/contacts" title="Contatos" fields={[{ key: "name", label: "Nome" }, { key: "phone", label: "Telefone" }, { key: "email", label: "Email" }, { key: "companyId", label: "ID empresa" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="empresas" element={<CrudSimplePage endpoint="/companies" title="Empresas" fields={[{ key: "name", label: "Nome" }, { key: "cnpj", label: "CNPJ" }, { key: "segment", label: "Segmento" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="oportunidades" element={<OpportunitiesPage />} />
+        <Route path="oportunidades/:id" element={<OpportunityDetailsPage />} />
         <Route path="atividades" element={<CrudSimplePage endpoint="/activities" title="Atividades" fields={[{ key: "type", label: "Tipo" }, { key: "notes", label: "Notas" }, { key: "dueDate", label: "Vencimento (ISO)" }, { key: "opportunityId", label: "ID oportunidade" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="relatórios" element={<Placeholder title="Relatórios" />} />
         <Route path="usuários" element={user?.role === "vendedor" ? <Navigate to="/"/> : <CrudSimplePage endpoint="/users" title="Usuários" fields={[{ key: "name", label: "Nome" }, { key: "email", label: "Email" }, { key: "role", label: "Papel" }, { key: "region", label: "Região" }, { key: "password", label: "Senha" }]} readOnly={user?.role !== "diretor"} />} />

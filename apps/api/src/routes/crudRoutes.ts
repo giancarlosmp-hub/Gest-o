@@ -50,6 +50,20 @@ const getDaysOverdue = (expectedCloseDate: Date, stage: string, todayStart: Date
   return Math.floor((todayStart.getTime() - expectedCloseDate.getTime()) / 86400000);
 };
 
+const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
+  ...opportunity,
+  proposalDate: opportunity.proposalDate.toISOString(),
+  followUpDate: opportunity.followUpDate.toISOString(),
+  expectedCloseDate: opportunity.expectedCloseDate.toISOString(),
+  lastContactAt: opportunity.lastContactAt ? opportunity.lastContactAt.toISOString() : null,
+  plantingForecastDate: opportunity.plantingForecastDate ? opportunity.plantingForecastDate.toISOString() : null,
+  createdAt: opportunity.createdAt.toISOString(),
+  client: opportunity.client?.name,
+  owner: opportunity.ownerSeller?.name,
+  daysOverdue: getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart),
+  weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
+});
+
 const assertProbability = (probability: number | null | undefined) => {
   if (probability === null || probability === undefined) return true;
   return probability >= 0 && probability <= 100;
@@ -162,21 +176,7 @@ router.get("/opportunities", async (req, res) => {
     orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }]
   });
 
-  res.json(opportunities.map((opportunity) => {
-    const daysOverdue = getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart);
-    return {
-      ...opportunity,
-      proposalDate: opportunity.proposalDate.toISOString(),
-      followUpDate: opportunity.followUpDate.toISOString(),
-      expectedCloseDate: opportunity.expectedCloseDate.toISOString(),
-      lastContactAt: opportunity.lastContactAt ? opportunity.lastContactAt.toISOString() : null,
-      createdAt: opportunity.createdAt.toISOString(),
-      client: opportunity.client.name,
-      owner: opportunity.ownerSeller.name,
-      daysOverdue,
-      weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
-    };
-  }));
+  res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
 });
 
 router.get("/opportunities/summary", async (req, res) => {
@@ -224,6 +224,24 @@ router.get("/opportunities/summary", async (req, res) => {
   }
 
   res.json({ totalPipelineValue, totalWeightedValue, totalsByStage, overdueCount, overdueValue, breakdownByCrop, breakdownBySeason });
+});
+
+router.get("/opportunities/:id", async (req, res) => {
+  const todayStart = getUtcTodayStart();
+  const opportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    include: {
+      client: true,
+      ownerSeller: true
+    }
+  });
+
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  return res.json(serializeOpportunity(opportunity, todayStart));
 });
 
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
