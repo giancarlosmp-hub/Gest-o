@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, timelineEventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 
@@ -287,6 +287,17 @@ router.get("/clients", async (req, res) => {
   const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
   res.json(data);
 });
+router.get("/clients/:id", async (req, res) => {
+  const data = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    }
+  });
+
+  if (!data) return res.status(404).json({ message: "Não encontrado" });
+  res.json(data);
+});
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
   const data = await prisma.client.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
   res.status(201).json(data);
@@ -548,9 +559,19 @@ router.get("/events", async (req, res) => {
 
   res.json(events);
 });
-router.post("/events", validateBody(timelineEventSchema), async (req, res) => {
-  if (!req.body.clientId && !req.body.opportunityId) {
-    return res.status(400).json({ message: "clientId ou opportunityId é obrigatório" });
+router.post("/events", validateBody(eventSchema), async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.body.opportunityId,
+      ...sellerWhere(req)
+    },
+    select: {
+      clientId: true
+    }
+  });
+
+  if (!opportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
 
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
@@ -558,7 +579,7 @@ router.post("/events", validateBody(timelineEventSchema), async (req, res) => {
     type: req.body.type,
     description: req.body.description,
     opportunityId: req.body.opportunityId,
-    clientId: req.body.clientId,
+    clientId: opportunity.clientId,
     ownerSellerId
   });
 

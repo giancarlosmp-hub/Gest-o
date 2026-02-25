@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import OpportunityDetailsPage from "./pages/OpportunityDetailsPage";
+import ClientDetailsPage from "./pages/ClientDetailsPage";
 import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -23,11 +24,12 @@ export default function App() {
         <Route path="equipe" element={<Placeholder title="Equipe" />} />
         <Route path="objetivos" element={<ObjectivesPage />} />
         <Route path="metas" element={<Navigate to="/objetivos" replace />} />
-        <Route path="clientes" element={<CrudSimplePage endpoint="/clients" title="Clientes" fields={[{ key: "name", label: "Nome" }, { key: "city", label: "Cidade" }, { key: "state", label: "UF" }, { key: "region", label: "Região" }, { key: "potentialHa", label: "Potencial (ha)", type: "number" }, { key: "farmSizeHa", label: "Área total (ha)", type: "number" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
+        <Route path="clientes" element={<CrudSimplePage endpoint="/clients" title="Clientes" detailsPath="/clientes" fields={[{ key: "name", label: "Nome" }, { key: "city", label: "Cidade" }, { key: "state", label: "UF" }, { key: "region", label: "Região" }, { key: "potentialHa", label: "Potencial (ha)", type: "number" }, { key: "farmSizeHa", label: "Área total (ha)", type: "number" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="contatos" element={<CrudSimplePage endpoint="/contacts" title="Contatos" fields={[{ key: "name", label: "Nome" }, { key: "phone", label: "Telefone" }, { key: "email", label: "Email" }, { key: "companyId", label: "ID empresa" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="empresas" element={<CrudSimplePage endpoint="/companies" title="Empresas" fields={[{ key: "name", label: "Nome" }, { key: "cnpj", label: "CNPJ" }, { key: "segment", label: "Segmento" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="oportunidades" element={<OpportunitiesPage />} />
         <Route path="oportunidades/:id" element={<OpportunityDetailsPage />} />
+        <Route path="clientes/:id" element={<ClientDetailsPage />} />
         <Route path="atividades" element={<CrudSimplePage endpoint="/activities" title="Atividades" fields={[{ key: "type", label: "Tipo" }, { key: "notes", label: "Notas" }, { key: "dueDate", label: "Vencimento (ISO)" }, { key: "opportunityId", label: "ID oportunidade" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
