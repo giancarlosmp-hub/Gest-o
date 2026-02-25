@@ -7,6 +7,7 @@ import { useAuth } from "../context/AuthContext";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
+type ViewMode = "list" | "pipeline";
 
 type Opportunity = {
   id: string;
@@ -109,6 +110,8 @@ const emptySummary: Summary = {
   overdueValue: 0
 };
 
+const PIPELINE_VIEW_STORAGE_KEY = "opportunities:viewMode";
+
 function toDateInput(value?: string | null) {
   if (!value) return "";
   return new Date(value).toISOString().slice(0, 10);
@@ -133,6 +136,7 @@ export default function OpportunitiesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>({
     stage: "",
@@ -149,6 +153,18 @@ export default function OpportunitiesPage() {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
     return () => clearTimeout(timer);
   }, [search]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const savedMode = localStorage.getItem(`${PIPELINE_VIEW_STORAGE_KEY}:${user.id}`);
+    if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
+  }, [user?.id]);
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (!user?.id) return;
+    localStorage.setItem(`${PIPELINE_VIEW_STORAGE_KEY}:${user.id}`, mode);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -234,6 +250,15 @@ export default function OpportunitiesPage() {
   };
 
   const getSellerName = (item: Opportunity) => item.ownerSeller?.name || item.owner || item.ownerSellerId;
+
+  const opportunitiesByStage = useMemo(() => {
+    return stages.reduce<Record<Stage, Opportunity[]>>((acc, stage) => {
+      acc[stage] = sortedItems.filter((item) => item.stage === stage);
+      return acc;
+    }, { prospeccao: [], negociacao: [], proposta: [], ganho: [], perdido: [] });
+  }, [sortedItems]);
+
+  const getWeightedValue = (item: Opportunity) => item.weightedValue ?? (Number(item.value || 0) * Number(item.probability || 0)) / 100;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -325,7 +350,22 @@ export default function OpportunitiesPage() {
     <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
-        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Modo Lista profissional</span>
+        <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
+          <button
+            type="button"
+            className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+            onClick={() => handleViewModeChange("list")}
+          >
+            Lista
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+            onClick={() => handleViewModeChange("pipeline")}
+          >
+            Pipeline
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -409,58 +449,96 @@ export default function OpportunitiesPage() {
         <button disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-500 md:col-span-4">{isSaving ? "Salvando..." : "Salvar"}</button>
       </form>
 
-      <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="min-w-[1500px] w-full text-sm">
-          <thead>
-            <tr className="bg-slate-50 text-left text-slate-600">
-              <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? Array.from({ length: 6 }).map((_, index) => (
-              <tr key={`skeleton-${index}`} className="border-t border-slate-100">
-                <td className="p-2" colSpan={15}><div className="h-8 animate-pulse rounded bg-slate-100" /></td>
+      {viewMode === "list" ? (
+        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <table className="min-w-[1500px] w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 text-left text-slate-600">
+                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
               </tr>
-            )) : sortedItems.length ? sortedItems.map((item) => {
-              const status = getReturnStatus(item);
-              const weighted = item.weightedValue ?? (Number(item.value || 0) * Number(item.probability || 0)) / 100;
-              return (
-                <tr key={item.id} className="border-t border-slate-100">
-                  <td className="p-2 font-medium text-slate-800">{item.title}</td>
-                  <td className="p-2">{getClientName(item)}</td>
-                  <td className="p-2">{getSellerName(item)}</td>
-                  <td className="p-2">{stageLabel[item.stage]}</td>
-                  <td className="p-2">{formatCurrencyBRL(item.value)}</td>
-                  <td className="p-2">{item.probability ?? 0}%</td>
-                  <td className="p-2">{formatCurrencyBRL(weighted)}</td>
-                  <td className="p-2">{item.crop || "-"}</td>
-                  <td className="p-2">{item.season || "-"}</td>
-                  <td className="p-2">{item.areaHa ?? "-"}</td>
-                  <td className="p-2">{item.productOffered || "-"}</td>
-                  <td className="p-2">{formatDateBR(item.proposalDate)}</td>
-                  <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
-                  <td className="p-2">
-                    {status === "overdue" ? <Badge className="bg-red-100 text-red-700">Atrasado</Badge> : null}
-                    {status === "dueSoon" ? <Badge className="bg-yellow-100 text-yellow-800">Vence em até 2 dias</Badge> : null}
-                    {status === "ok" ? <Badge className="bg-emerald-100 text-emerald-700">OK</Badge> : null}
-                  </td>
-                  <td className="space-x-2 whitespace-nowrap p-2">
-                    <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
-                    <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
-                    <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
-                  </td>
+            </thead>
+            <tbody>
+              {loading ? Array.from({ length: 6 }).map((_, index) => (
+                <tr key={`skeleton-${index}`} className="border-t border-slate-100">
+                  <td className="p-2" colSpan={15}><div className="h-8 animate-pulse rounded bg-slate-100" /></td>
                 </tr>
+              )) : sortedItems.length ? sortedItems.map((item) => {
+                const weighted = getWeightedValue(item);
+                return (
+                  <tr key={item.id} className="border-t border-slate-100">
+                    <td className="p-2 font-medium text-slate-800">{item.title}</td>
+                    <td className="p-2">{getClientName(item)}</td>
+                    <td className="p-2">{getSellerName(item)}</td>
+                    <td className="p-2">{stageLabel[item.stage]}</td>
+                    <td className="p-2">{formatCurrencyBRL(item.value)}</td>
+                    <td className="p-2">{item.probability ?? 0}%</td>
+                    <td className="p-2">{formatCurrencyBRL(weighted)}</td>
+                    <td className="p-2">{item.crop || "-"}</td>
+                    <td className="p-2">{item.season || "-"}</td>
+                    <td className="p-2">{item.areaHa ?? "-"}</td>
+                    <td className="p-2">{item.productOffered || "-"}</td>
+                    <td className="p-2">{formatDateBR(item.proposalDate)}</td>
+                    <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
+                    <td className="p-2"><ReturnStatusBadge status={getReturnStatus(item)} /></td>
+                    <td className="space-x-2 whitespace-nowrap p-2">
+                      <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
+                      <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
+                      <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
+                    </td>
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td colSpan={15} className="p-8 text-center text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid min-w-[1050px] grid-cols-5 gap-3">
+            {stages.map((stage) => {
+              const stageItems = opportunitiesByStage[stage];
+              const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
+              const stageWeightedTotal = stageItems.reduce((sum, item) => sum + getWeightedValue(item), 0);
+              return (
+                <div key={stage} className="flex min-h-[320px] flex-col rounded-xl border border-slate-200 bg-slate-50">
+                  <div className="border-b border-slate-200 px-3 py-2">
+                    <div className="font-semibold text-slate-800">{stageLabel[stage]}</div>
+                    <div className="text-xs text-slate-500">{stageItems.length} oportunidade(s)</div>
+                  </div>
+                  <div className="flex-1 space-y-2 overflow-y-auto p-3">
+                    {loading ? Array.from({ length: 3 }).map((_, index) => (
+                      <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
+                    )) : stageItems.length ? stageItems.map((item) => (
+                      <div key={item.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                        <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+                        <div className="text-xs text-slate-600">{getClientName(item)}</div>
+                        <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
+                        <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
+                        <ReturnStatusBadge status={getReturnStatus(item)} />
+                      </div>
+                    )) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
+                  </div>
+                  <div className="border-t border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                    <div>Total: <span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
+                    <div>Ponderado: <span className="font-semibold text-slate-900">{formatCurrencyBRL(stageWeightedTotal)}</span></div>
+                  </div>
+                </div>
               );
-            }) : (
-              <tr>
-                <td colSpan={15} className="p-8 text-center text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function ReturnStatusBadge({ status }: { status: ReturnStatus }) {
+  if (status === "overdue") return <Badge className="bg-red-100 text-red-700">Atrasado</Badge>;
+  if (status === "dueSoon") return <Badge className="bg-yellow-100 text-yellow-800">Vence em até 2 dias</Badge>;
+  return <Badge className="bg-emerald-100 text-emerald-700">OK</Badge>;
 }
 
 function Card({ title, value, loading }: { title: string; value: string; loading?: boolean }) {
