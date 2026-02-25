@@ -27,7 +27,9 @@ type Opportunity = {
   owner?: string;
   weightedValue?: number;
   areaHa?: number | null;
-  offeredProduct?: string | null;
+  productOffered?: string | null;
+  plantingForecastDate?: string | null;
+  expectedTicketPerHa?: number | null;
 };
 
 type Client = { id: string; name: string };
@@ -50,42 +52,73 @@ type Filters = {
   overdue: boolean;
 };
 
+type FormState = {
+  title: string;
+  value: string;
+  stage: Stage;
+  probability: string;
+  proposalEntryDate: string;
+  expectedReturnDate: string;
+  crop: string;
+  season: string;
+  areaHa: string;
+  productOffered: string;
+  plantingForecastDate: string;
+  expectedTicketPerHa: string;
+  lastContactAt: string;
+  notes: string;
+  clientId: string;
+  ownerSellerId: string;
+};
+
 const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
+const cropSelectOptions = ["soja", "milho", "trigo", "pasto", "cobertura", "outros"];
 
 const stageLabel: Record<Stage, string> = {
   prospeccao: "Prospecção",
   negociacao: "Negociação",
   proposta: "Proposta",
   ganho: "Ganho",
-  perdido: "Perdido",
+  perdido: "Perdido"
 };
 
-const emptyForm = {
+const emptyForm: FormState = {
   title: "",
-  value: 0,
-  stage: "prospeccao" as Stage,
+  value: "",
+  stage: "prospeccao",
+  probability: "",
+  proposalEntryDate: "",
+  expectedReturnDate: "",
   crop: "",
   season: "",
-  proposalDate: "",
-  followUpDate: "",
-  expectedCloseDate: "",
+  areaHa: "",
+  productOffered: "",
+  plantingForecastDate: "",
+  expectedTicketPerHa: "",
   lastContactAt: "",
-  probability: "",
   notes: "",
   clientId: "",
-  ownerSellerId: "",
+  ownerSellerId: ""
 };
 
 const emptySummary: Summary = {
   totalPipelineValue: 0,
   totalWeightedValue: 0,
   overdueCount: 0,
-  overdueValue: 0,
+  overdueValue: 0
 };
 
 function toDateInput(value?: string | null) {
   if (!value) return "";
   return new Date(value).toISOString().slice(0, 10);
+}
+
+function sanitizeNumericInput(value: string, allowDecimal = true) {
+  const normalized = value.replace(/,/g, ".").replace(/[^\d.]/g, "");
+  if (!allowDecimal) return normalized.replace(/\./g, "");
+  const [int, ...decimals] = normalized.split(".");
+  if (!decimals.length) return int;
+  return `${int}.${decimals.join("")}`;
 }
 
 export default function OpportunitiesPage() {
@@ -95,8 +128,9 @@ export default function OpportunitiesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [details, setDetails] = useState<Opportunity | null>(null);
-  const [form, setForm] = useState<any>(emptyForm);
+  const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filters, setFilters] = useState<Filters>({
@@ -107,7 +141,7 @@ export default function OpportunitiesPage() {
     season: "",
     dateFrom: "",
     dateTo: "",
-    overdue: false,
+    overdue: false
   });
 
   useEffect(() => {
@@ -132,7 +166,7 @@ export default function OpportunitiesPage() {
       const [oppRes, summaryRes, clientsRes] = await Promise.all([
         api.get(`/opportunities${query}`),
         api.get("/opportunities/summary"),
-        api.get("/clients"),
+        api.get("/clients")
       ]);
 
       setItems(oppRes.data || []);
@@ -156,7 +190,10 @@ export default function OpportunitiesPage() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [items]);
 
-  const cropOptions = useMemo(() => Array.from(new Set(items.map((item) => item.crop).filter(Boolean))) as string[], [items]);
+  const cropOptions = useMemo(() => {
+    const dynamic = Array.from(new Set(items.map((item) => item.crop).filter(Boolean))) as string[];
+    return Array.from(new Set([...cropSelectOptions, ...dynamic]));
+  }, [items]);
   const seasonOptions = useMemo(() => Array.from(new Set(items.map((item) => item.season).filter(Boolean))) as string[], [items]);
 
   const getReturnStatus = (item: Opportunity): ReturnStatus => {
@@ -199,17 +236,45 @@ export default function OpportunitiesPage() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+
+    const value = Number(form.value);
+    const probability = Number(form.probability);
+    if (Number.isNaN(value) || value < 0) {
+      toast.error("Valor precisa ser maior ou igual a zero");
+      return;
+    }
+    if (Number.isNaN(probability) || probability < 0 || probability > 100) {
+      toast.error("Probabilidade deve estar entre 0 e 100");
+      return;
+    }
+    if (form.expectedReturnDate < form.proposalEntryDate) {
+      toast.error("Retorno previsto não pode ser anterior à entrada da proposta");
+      return;
+    }
+
     const payload = {
-      ...form,
-      value: Number(form.value),
-      probability: form.probability === "" ? undefined : Number(form.probability),
+      title: form.title,
+      value,
+      stage: form.stage,
+      probability,
+      proposalEntryDate: form.proposalEntryDate,
+      expectedReturnDate: form.expectedReturnDate,
+      proposalDate: form.proposalEntryDate,
+      followUpDate: form.expectedReturnDate,
+      expectedCloseDate: form.expectedReturnDate,
       lastContactAt: form.lastContactAt || undefined,
       notes: form.notes || undefined,
+      clientId: form.clientId,
       ownerSellerId: form.ownerSellerId || undefined,
       crop: form.crop || undefined,
       season: form.season || undefined,
+      areaHa: form.areaHa ? Number(form.areaHa) : undefined,
+      productOffered: form.productOffered || undefined,
+      plantingForecastDate: form.plantingForecastDate || undefined,
+      expectedTicketPerHa: form.expectedTicketPerHa ? Number(form.expectedTicketPerHa) : undefined
     };
 
+    setIsSaving(true);
     try {
       if (editing) await api.put(`/opportunities/${editing}`, payload);
       else await api.post("/opportunities", payload);
@@ -218,23 +283,33 @@ export default function OpportunitiesPage() {
       setEditing(null);
       await load();
       toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Erro ao salvar oportunidade");
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const onEdit = (item: Opportunity) => {
     setEditing(item.id);
     setForm({
-      ...item,
-      proposalDate: toDateInput(item.proposalDate),
-      followUpDate: toDateInput(item.followUpDate),
-      expectedCloseDate: toDateInput(item.expectedCloseDate),
+      title: item.title,
+      value: item.value ? String(item.value) : "",
+      stage: item.stage,
+      probability: item.probability !== null && item.probability !== undefined ? String(item.probability) : "",
+      proposalEntryDate: toDateInput(item.proposalDate),
+      expectedReturnDate: toDateInput(item.expectedCloseDate),
       lastContactAt: toDateInput(item.lastContactAt),
-      probability: item.probability ?? "",
-      notes: item.notes ?? "",
       crop: item.crop ?? "",
       season: item.season ?? "",
+      areaHa: item.areaHa ? String(item.areaHa) : "",
+      productOffered: item.productOffered ?? "",
+      plantingForecastDate: toDateInput(item.plantingForecastDate),
+      expectedTicketPerHa: item.expectedTicketPerHa ? String(item.expectedTicketPerHa) : "",
+      notes: item.notes ?? "",
+      clientId: item.clientId,
+      ownerSellerId: item.ownerSellerId
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -296,27 +371,41 @@ export default function OpportunitiesPage() {
 
       <form onSubmit={submit} className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
         <input required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <input required type="number" className="rounded-lg border border-slate-200 p-2" placeholder="Valor" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-        <select required className="rounded-lg border border-slate-200 p-2" value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
-        <input type="number" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => setForm({ ...form, probability: e.target.value })} />
-        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.proposalDate} onChange={(e) => setForm({ ...form, proposalDate: e.target.value })} />
-        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.followUpDate} onChange={(e) => setForm({ ...form, followUpDate: e.target.value })} />
-        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
-        <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.lastContactAt} onChange={(e) => setForm({ ...form, lastContactAt: e.target.value })} />
-        <input className="rounded-lg border border-slate-200 p-2" placeholder="Cultura" value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
-        <input className="rounded-lg border border-slate-200 p-2" placeholder="Safra" value={form.season} onChange={(e) => setForm({ ...form, season: e.target.value })} />
         <select required className="rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
           <option value="">Selecione cliente</option>
           {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
         </select>
-        {user?.role !== "vendedor" && (
-          <select className="rounded-lg border border-slate-200 p-2" value={form.ownerSellerId} onChange={(e) => setForm({ ...form, ownerSellerId: e.target.value })}>
-            <option value="">Vendedor automático</option>
+        {user?.role !== "vendedor" ? (
+          <select required className="rounded-lg border border-slate-200 p-2" value={form.ownerSellerId} onChange={(e) => setForm({ ...form, ownerSellerId: e.target.value })}>
+            <option value="">Selecione vendedor</option>
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </select>
-        )}
+        ) : <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user.name} />}
+        <select required className="rounded-lg border border-slate-200 p-2" value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value as Stage })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
+
+        <input required inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Valor" value={form.value} onChange={(e) => setForm({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+        <input required inputMode="numeric" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => setForm({ ...form, probability: sanitizeNumericInput(e.target.value, false) })} />
+        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.proposalEntryDate} onChange={(e) => setForm({ ...form, proposalEntryDate: e.target.value })} />
+        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.expectedReturnDate} onChange={(e) => setForm({ ...form, expectedReturnDate: e.target.value })} />
+
+        <select className="rounded-lg border border-slate-200 p-2" value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })}>
+          <option value="">Cultura (opcional)</option>
+          {cropSelectOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
+        </select>
+        <input list="season-suggestions" className="rounded-lg border border-slate-200 p-2" placeholder="Safra (ex: 2025/26)" value={form.season} onChange={(e) => setForm({ ...form, season: e.target.value })} />
+        <datalist id="season-suggestions">
+          <option value="2024/25" />
+          <option value="2025/26" />
+          <option value="2026/27" />
+        </datalist>
+        <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Área (ha)" value={form.areaHa} onChange={(e) => setForm({ ...form, areaHa: sanitizeNumericInput(e.target.value) })} />
+        <input className="rounded-lg border border-slate-200 p-2" placeholder="Produto ofertado" value={form.productOffered} onChange={(e) => setForm({ ...form, productOffered: e.target.value })} />
+        <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.plantingForecastDate} onChange={(e) => setForm({ ...form, plantingForecastDate: e.target.value })} />
+        <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Ticket esperado/ha" value={form.expectedTicketPerHa} onChange={(e) => setForm({ ...form, expectedTicketPerHa: sanitizeNumericInput(e.target.value) })} />
+        <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.lastContactAt} onChange={(e) => setForm({ ...form, lastContactAt: e.target.value })} />
+
         <textarea className="rounded-lg border border-slate-200 p-2 md:col-span-4" placeholder="Notas" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        <button className="rounded-lg bg-slate-900 px-3 py-2 text-white md:col-span-4">{editing ? "Atualizar" : "Criar"}</button>
+        <button disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-500 md:col-span-4">{isSaving ? "Salvando..." : "Salvar"}</button>
       </form>
 
       <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -346,7 +435,7 @@ export default function OpportunitiesPage() {
                   <td className="p-2">{item.crop || "-"}</td>
                   <td className="p-2">{item.season || "-"}</td>
                   <td className="p-2">{item.areaHa ?? "-"}</td>
-                  <td className="p-2">{item.offeredProduct || "-"}</td>
+                  <td className="p-2">{item.productOffered || "-"}</td>
                   <td className="p-2">{formatDateBR(item.proposalDate)}</td>
                   <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
                   <td className="p-2">

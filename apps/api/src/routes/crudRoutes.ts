@@ -55,15 +55,32 @@ const assertProbability = (probability: number | null | undefined) => {
   return probability >= 0 && probability <= 100;
 };
 
-const normalizeOpportunityDates = (payload: Record<string, unknown>) => ({
-  ...payload,
-  ...(payload.proposalDate ? { proposalDate: new Date(new Date(String(payload.proposalDate)).toISOString()) } : {}),
-  ...(payload.followUpDate ? { followUpDate: new Date(new Date(String(payload.followUpDate)).toISOString()) } : {}),
-  ...(payload.expectedCloseDate ? { expectedCloseDate: new Date(new Date(String(payload.expectedCloseDate)).toISOString()) } : {}),
-  ...(payload.lastContactAt !== undefined
-    ? { lastContactAt: payload.lastContactAt ? new Date(new Date(String(payload.lastContactAt)).toISOString()) : null }
-    : {})
-});
+const normalizeOpportunityDates = (payload: Record<string, unknown>) => {
+  const { proposalEntryDate: _proposalEntryDate, expectedReturnDate: _expectedReturnDate, ...cleanPayload } = payload;
+  const proposalDate = cleanPayload.proposalDate || _proposalEntryDate;
+  const expectedCloseDate = cleanPayload.expectedCloseDate || _expectedReturnDate;
+
+  return {
+    ...cleanPayload,
+    ...(proposalDate ? { proposalDate: new Date(new Date(String(proposalDate)).toISOString()) } : {}),
+    ...(payload.followUpDate ? { followUpDate: new Date(new Date(String(payload.followUpDate)).toISOString()) } : {}),
+    ...(expectedCloseDate ? { expectedCloseDate: new Date(new Date(String(expectedCloseDate)).toISOString()) } : {}),
+    ...(payload.plantingForecastDate !== undefined
+      ? { plantingForecastDate: payload.plantingForecastDate ? new Date(new Date(String(payload.plantingForecastDate)).toISOString()) : null }
+      : {}),
+    ...(payload.lastContactAt !== undefined
+      ? { lastContactAt: payload.lastContactAt ? new Date(new Date(String(payload.lastContactAt)).toISOString()) : null }
+      : {})
+  };
+};
+
+const validateDateOrder = (proposalDate?: string, expectedCloseDate?: string) => {
+  if (!proposalDate || !expectedCloseDate) return true;
+  const proposal = normalizeDateToUtc(proposalDate);
+  const expected = normalizeDateToUtc(expectedCloseDate);
+  if (!proposal || !expected) return true;
+  return expected >= proposal;
+};
 
 router.get("/clients", async (req, res) => {
   const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
@@ -212,6 +229,12 @@ router.get("/opportunities/summary", async (req, res) => {
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
 
+  const proposalDate = (req.body.proposalDate || req.body.proposalEntryDate) as string | undefined;
+  const expectedCloseDate = (req.body.expectedCloseDate || req.body.expectedReturnDate) as string | undefined;
+  if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+    return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
+  }
+
   const data = await prisma.opportunity.create({
     data: {
       ...(normalizeOpportunityDates(req.body) as any),
@@ -223,6 +246,12 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
 });
 router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
+
+  const proposalDate = (req.body.proposalDate || req.body.proposalEntryDate) as string | undefined;
+  const expectedCloseDate = (req.body.expectedCloseDate || req.body.expectedReturnDate) as string | undefined;
+  if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+    return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
+  }
 
   const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
   return res.json(data);
