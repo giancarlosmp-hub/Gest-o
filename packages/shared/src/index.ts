@@ -23,6 +23,8 @@ export const clientSchema = z.object({
   city: z.string().min(2),
   state: z.string().min(2),
   region: z.string().min(2),
+  potentialHa: z.number().nonnegative().optional(),
+  farmSizeHa: z.number().nonnegative().optional(),
   ownerSellerId: z.string().optional()
 });
 

@@ -96,6 +96,147 @@ const validateDateOrder = (proposalDate?: string, expectedCloseDate?: string) =>
   return expected >= proposal;
 };
 
+router.get("/reports/agro-crm", async (req, res) => {
+  const todayStart = getUtcTodayStart();
+  const opportunities = await prisma.opportunity.findMany({
+    where: sellerWhere(req),
+    include: {
+      client: {
+        select: {
+          id: true,
+          name: true,
+          potentialHa: true,
+          farmSizeHa: true
+        }
+      },
+      ownerSeller: {
+        select: {
+          id: true,
+          name: true
+        }
+      }
+    }
+  });
+
+  const byCrop: Record<string, { value: number; weighted: number; count: number }> = {};
+  const bySeason: Record<string, { value: number; weighted: number; count: number }> = {};
+  const overdueBySeller: Record<string, { sellerId: string; sellerName: string; overdueCount: number; overdueValue: number }> = {};
+  const byClient: Record<string, { clientId: string; clientName: string; weightedValue: number; value: number; opportunities: number }> = {};
+  const byStage: Record<string, number> = {};
+  const plantingWindow: Record<string, { month: string; opportunities: number; weightedValue: number; pipelineValue: number }> = {};
+  const portfolioByPotential: Record<string, { clientId: string; clientName: string; potentialHa: number; farmSizeHa: number; opportunities: number; weightedValue: number }> = {};
+
+  for (const opportunity of opportunities) {
+    const weightedValue = getWeightedValue(opportunity.value, opportunity.probability);
+    const cropKey = opportunity.crop || "não informado";
+    const seasonKey = opportunity.season || "não informado";
+    const stageKey = opportunity.stage;
+
+    if (!byCrop[cropKey]) byCrop[cropKey] = { value: 0, weighted: 0, count: 0 };
+    byCrop[cropKey].value += opportunity.value;
+    byCrop[cropKey].weighted += weightedValue;
+    byCrop[cropKey].count += 1;
+
+    if (!bySeason[seasonKey]) bySeason[seasonKey] = { value: 0, weighted: 0, count: 0 };
+    bySeason[seasonKey].value += opportunity.value;
+    bySeason[seasonKey].weighted += weightedValue;
+    bySeason[seasonKey].count += 1;
+
+    byStage[stageKey] = (byStage[stageKey] || 0) + 1;
+
+    const clientId = opportunity.client.id;
+    if (!byClient[clientId]) {
+      byClient[clientId] = {
+        clientId,
+        clientName: opportunity.client.name,
+        weightedValue: 0,
+        value: 0,
+        opportunities: 0
+      };
+    }
+    byClient[clientId].weightedValue += weightedValue;
+    byClient[clientId].value += opportunity.value;
+    byClient[clientId].opportunities += 1;
+
+    if (!portfolioByPotential[clientId]) {
+      portfolioByPotential[clientId] = {
+        clientId,
+        clientName: opportunity.client.name,
+        potentialHa: Number(opportunity.client.potentialHa || 0),
+        farmSizeHa: Number(opportunity.client.farmSizeHa || 0),
+        opportunities: 0,
+        weightedValue: 0
+      };
+    }
+    portfolioByPotential[clientId].opportunities += 1;
+    portfolioByPotential[clientId].weightedValue += weightedValue;
+
+    if (opportunity.plantingForecastDate) {
+      const month = opportunity.plantingForecastDate.toISOString().slice(0, 7);
+      if (!plantingWindow[month]) {
+        plantingWindow[month] = { month, opportunities: 0, weightedValue: 0, pipelineValue: 0 };
+      }
+      plantingWindow[month].opportunities += 1;
+      plantingWindow[month].weightedValue += weightedValue;
+      plantingWindow[month].pipelineValue += opportunity.value;
+    }
+
+    const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+    if (isOverdue) {
+      const sellerId = opportunity.ownerSeller.id;
+      if (!overdueBySeller[sellerId]) {
+        overdueBySeller[sellerId] = {
+          sellerId,
+          sellerName: opportunity.ownerSeller.name,
+          overdueCount: 0,
+          overdueValue: 0
+        };
+      }
+      overdueBySeller[sellerId].overdueCount += 1;
+      overdueBySeller[sellerId].overdueValue += opportunity.value;
+    }
+  }
+
+  const orderedStages = ["prospeccao", "negociacao", "proposta", "ganho"];
+  const stageConversion = orderedStages.slice(0, -1).map((stage, index) => {
+    const nextStage = orderedStages[index + 1];
+    const currentCount = byStage[stage] || 0;
+    const nextCount = byStage[nextStage] || 0;
+    return {
+      fromStage: stage,
+      toStage: nextStage,
+      baseCount: currentCount,
+      progressedCount: nextCount,
+      conversionRate: currentCount > 0 ? (nextCount / currentCount) * 100 : 0
+    };
+  });
+
+  res.json({
+    kpis: {
+      pipelineByCrop: Object.entries(byCrop)
+        .map(([crop, values]) => ({ crop, ...values }))
+        .sort((a, b) => b.weighted - a.weighted),
+      pipelineBySeason: Object.entries(bySeason)
+        .map(([season, values]) => ({ season, ...values }))
+        .sort((a, b) => b.weighted - a.weighted),
+      topClientsByWeightedValue: Object.values(byClient)
+        .sort((a, b) => b.weightedValue - a.weightedValue)
+        .slice(0, 10),
+      overdueBySeller: Object.values(overdueBySeller).sort((a, b) => b.overdueCount - a.overdueCount),
+      stageConversion
+    },
+    tables: {
+      portfolioByPotentialHa: Object.values(portfolioByPotential)
+        .map((row) => ({
+          ...row,
+          potentialCoveragePercent: row.farmSizeHa > 0 ? (row.potentialHa / row.farmSizeHa) * 100 : 0
+        }))
+        .sort((a, b) => b.potentialHa - a.potentialHa),
+      opportunitiesByPlantingWindow: Object.values(plantingWindow).sort((a, b) => a.month.localeCompare(b.month))
+    }
+  });
+});
+
 router.get("/clients", async (req, res) => {
   const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
   res.json(data);
