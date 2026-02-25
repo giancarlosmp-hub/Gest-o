@@ -1,7 +1,11 @@
 import { z } from "zod";
 
+/* ================= ROLES ================= */
+
 export const RoleEnum = z.enum(["diretor", "gerente", "vendedor"]);
 export type Role = z.infer<typeof RoleEnum>;
+
+/* ================= OPPORTUNITY ================= */
 
 export const OpportunityStageEnum = z.enum([
   "prospeccao",
@@ -11,12 +15,33 @@ export const OpportunityStageEnum = z.enum([
   "perdido"
 ]);
 
-export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao"]);
+/* ================= ACTIVITY ================= */
+
+export const ActivityTypeEnum = z.enum([
+  "ligacao",
+  "whatsapp",
+  "visita",
+  "reuniao"
+]);
+
+/* ================= TIMELINE ================= */
+
+export const TimelineEventTypeEnum = z.enum([
+  "comentario",
+  "atividade",
+  "mudanca_estagio",
+  "criacao_oportunidade",
+  "mudanca_followup"
+]);
+
+/* ================= AUTH ================= */
 
 export const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6)
 });
+
+/* ================= CLIENT ================= */
 
 export const clientSchema = z.object({
   name: z.string().min(2),
@@ -28,12 +53,16 @@ export const clientSchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+/* ================= COMPANY ================= */
+
 export const companySchema = z.object({
   name: z.string().min(2),
   cnpj: z.string().optional(),
   segment: z.string().min(2),
   ownerSellerId: z.string().optional()
 });
+
+/* ================= CONTACT ================= */
 
 export const contactSchema = z.object({
   name: z.string().min(2),
@@ -42,6 +71,8 @@ export const contactSchema = z.object({
   companyId: z.string(),
   ownerSellerId: z.string().optional()
 });
+
+/* ================= OPPORTUNITY ================= */
 
 export const opportunitySchema = z.object({
   title: z.string().min(2),
@@ -53,8 +84,6 @@ export const opportunitySchema = z.object({
   productOffered: z.string().min(2).optional(),
   plantingForecastDate: z.string().optional(),
   expectedTicketPerHa: z.number().nonnegative().optional(),
-  proposalEntryDate: z.string().optional(),
-  expectedReturnDate: z.string().optional(),
   proposalDate: z.string(),
   followUpDate: z.string(),
   expectedCloseDate: z.string(),
@@ -65,6 +94,8 @@ export const opportunitySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+/* ================= ACTIVITY ================= */
+
 export const activitySchema = z.object({
   type: ActivityTypeEnum,
   notes: z.string().min(2),
@@ -74,17 +105,22 @@ export const activitySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+/* ================= TIMELINE COMMENT ================= */
 
 export const timelineCommentSchema = z.object({
   message: z.string().min(1).max(2000),
   opportunityId: z.string().optional()
 });
 
+/* ================= GOAL ================= */
+
 export const goalSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   targetValue: z.number().positive(),
   sellerId: z.string()
 });
+
+/* ================= TYPES ================= */
 
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ClientInput = z.infer<typeof clientSchema>;

@@ -5,9 +5,22 @@ import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
+type EventType = "comentario" | "mudanca_etapa" | "status";
+
+type EventItem = {
+  id: string;
+  type: EventType;
+  description: string;
+  createdAt: string;
+  ownerSeller?: {
+    id: string;
+    name: string;
+  } | null;
+};
 
 type Opportunity = {
   id: string;
+  clientId: string;
   title: string;
   client?: string;
   owner?: string;
@@ -37,6 +50,12 @@ const stageLabel: Record<Stage, string> = {
   perdido: "Perdido"
 };
 
+const eventLabel: Record<EventType, string> = {
+  comentario: "Comentário",
+  mudanca_etapa: "Mudança de etapa",
+  status: "Status"
+};
+
 export default function OpportunityDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -46,13 +65,18 @@ export default function OpportunityDetailsPage() {
   const [interactionNote, setInteractionNote] = useState("");
   const [showLossModal, setShowLossModal] = useState(false);
   const [lossReason, setLossReason] = useState("");
+  const [events, setEvents] = useState<EventItem[]>([]);
 
   const load = async () => {
     if (!id) return;
     setLoading(true);
     try {
-      const response = await api.get(`/opportunities/${id}`);
-      setItem(response.data);
+      const [opportunityResponse, eventsResponse] = await Promise.all([
+        api.get(`/opportunities/${id}`),
+        api.get(`/events?opportunityId=${id}`)
+      ]);
+      setItem(opportunityResponse.data);
+      setEvents(eventsResponse.data || []);
     } catch {
       toast.error("Não foi possível carregar a oportunidade");
       navigate("/oportunidades");
@@ -74,6 +98,17 @@ export default function OpportunityDetailsPage() {
     if (!item?.areaHa || !item?.expectedTicketPerHa) return null;
     return item.areaHa * item.expectedTicketPerHa;
   }, [item]);
+
+  const registerEvent = async (payload: { type?: EventType; description: string }) => {
+    if (!item) return;
+
+    await api.post("/events", {
+      type: payload.type || "comentario",
+      description: payload.description,
+      opportunityId: item.id,
+      clientId: item.clientId
+    });
+  };
 
   const updateOpportunity = async (payload: Partial<Opportunity>) => {
     if (!item) return;
@@ -97,13 +132,11 @@ export default function OpportunityDetailsPage() {
     }
 
     const now = new Date();
-    const stamp = now.toLocaleString("pt-BR");
-    const appended = item.notes ? `${item.notes}\n[${stamp}] ${newEntry}` : `[${stamp}] ${newEntry}`;
 
-    await updateOpportunity({
-      lastContactAt: now.toISOString(),
-      notes: appended
-    });
+    await Promise.all([
+      registerEvent({ type: "comentario", description: newEntry }),
+      updateOpportunity({ lastContactAt: now.toISOString() })
+    ]);
 
     setInteractionNote("");
     toast.success("Interação registrada");
@@ -118,11 +151,13 @@ export default function OpportunityDetailsPage() {
     const currentIndex = stageFlow.indexOf(item.stage);
     const nextStage = stageFlow[Math.min(currentIndex + 1, stageFlow.length - 1)];
     await updateOpportunity({ stage: nextStage });
+    await registerEvent({ type: "mudanca_etapa", description: `Etapa avançada para ${stageLabel[nextStage]}` });
     toast.success("Etapa avançada");
   };
 
   const onMarkWon = async () => {
     await updateOpportunity({ stage: "ganho" });
+    await registerEvent({ type: "status", description: "Oportunidade marcada como ganho" });
     toast.success("Oportunidade marcada como ganho");
   };
 
@@ -132,11 +167,10 @@ export default function OpportunityDetailsPage() {
       toast.error("Informe o motivo da perda");
       return;
     }
-    const now = new Date().toLocaleString("pt-BR");
-    const lossNote = `[${now}] Motivo da perda: ${lossReason.trim()}`;
-    const combinedNotes = item?.notes ? `${item.notes}\n${lossNote}` : lossNote;
 
-    await updateOpportunity({ stage: "perdido", notes: combinedNotes });
+    await updateOpportunity({ stage: "perdido" });
+    await registerEvent({ type: "status", description: `Motivo da perda: ${lossReason.trim()}` });
+
     toast.success("Oportunidade marcada como perdida");
     setLossReason("");
     setShowLossModal(false);
@@ -163,7 +197,7 @@ export default function OpportunityDetailsPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
-        <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3 text-sm">
+        <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
           <p><strong>Título:</strong> {item.title}</p>
           <p><strong>Cliente:</strong> {item.client || "-"}</p>
           <p><strong>Vendedor:</strong> {item.owner || "-"}</p>
@@ -179,7 +213,7 @@ export default function OpportunityDetailsPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Bloco Agro</h3>
-        <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3 text-sm">
+        <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
           <p><strong>Cultura:</strong> {item.crop || "-"}</p>
           <p><strong>Safra:</strong> {item.season || "-"}</p>
           <p><strong>Área (ha):</strong> {item.areaHa ?? "-"}</p>
@@ -197,6 +231,19 @@ export default function OpportunityDetailsPage() {
           <textarea className="w-full rounded-lg border border-slate-200 p-2 text-sm" rows={3} placeholder="Escreva um resumo da interação" value={interactionNote} onChange={(event) => setInteractionNote(event.target.value)} />
           <button type="submit" disabled={saving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500">Registrar interação</button>
         </form>
+
+        <div className="mt-4 space-y-2">
+          {events.length ? events.map((event) => (
+            <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-semibold text-slate-800">{eventLabel[event.type]}</span>
+                <span className="text-xs text-slate-500">{formatDateBR(event.createdAt)}</span>
+              </div>
+              <p className="mt-1 text-slate-700">{event.description}</p>
+              <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Usuário"}</p>
+            </div>
+          )) : <p className="text-sm text-slate-500">Sem eventos registrados.</p>}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
