@@ -28,6 +28,14 @@ enum ActivityType {
   reuniao
 }
 
+enum TimelineEventType {
+  comentario
+  atividade
+  mudanca_estagio
+  criacao_oportunidade
+  mudanca_followup
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -43,6 +51,7 @@ model User {
   activities   Activity[]
   goals        Goal[]
   sales        Sale[]
+  timelineEvents TimelineEvent[]
 }
 
 model Client {
@@ -56,6 +65,7 @@ model Client {
   ownerSellerId String
   ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
   opportunities Opportunity[]
+  timelineEvents TimelineEvent[]
   createdAt     DateTime    @default(now())
 }
 
@@ -104,6 +114,7 @@ model Opportunity {
   ownerSellerId     String
   ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
   activities        Activity[]
+  timelineEvents    TimelineEvent[]
   createdAt         DateTime         @default(now())
 }
 
@@ -136,4 +147,22 @@ model Sale {
   sellerId  String
   seller    User     @relation(fields: [sellerId], references: [id])
   createdAt DateTime @default(now())
+}
+
+model TimelineEvent {
+  id            String            @id @default(cuid())
+  type          TimelineEventType
+  title         String
+  message       String
+  clientId      String
+  client        Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  opportunityId String?
+  opportunity   Opportunity?      @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User              @relation(fields: [userId], references: [id])
+  meta          Json?
+  createdAt     DateTime          @default(now())
+
+  @@index([clientId, createdAt(sort: Desc)])
+  @@index([opportunityId])
 }

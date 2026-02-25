@@ -33,6 +33,7 @@ async function main() {
 
   await prisma.goal.deleteMany();
   await prisma.sale.deleteMany();
+  await prisma.timelineEvent.deleteMany();
   await prisma.activity.deleteMany();
   await prisma.opportunity.deleteMany();
   await prisma.contact.deleteMany();
@@ -118,6 +119,22 @@ async function main() {
           }
         });
 
+        await prisma.timelineEvent.create({
+          data: {
+            type: "criacao_oportunidade",
+            title: "Oportunidade criada",
+            message: `A oportunidade \"${opportunity.title}\" foi criada no estágio ${opportunity.stage}.`,
+            clientId: client.id,
+            opportunityId: opportunity.id,
+            userId: seller.id,
+            createdAt: proposalDate,
+            meta: {
+              stage: opportunity.stage,
+              value: opportunity.value
+            }
+          }
+        });
+
         await prisma.activity.create({
           data: {
             type: oppIdx % 2 === 0 ? "visita" : "ligacao",
@@ -127,7 +144,32 @@ async function main() {
             opportunityId: opportunity.id
           }
         });
+
+        await prisma.timelineEvent.create({
+          data: {
+            type: "atividade",
+            title: "Atividade registrada",
+            message: `Atividade de ${oppIdx % 2 === 0 ? "visita" : "ligação"} vinculada à oportunidade ${opportunity.title}.`,
+            clientId: client.id,
+            opportunityId: opportunity.id,
+            userId: seller.id,
+            createdAt: followUpDate,
+            meta: {
+              activityType: oppIdx % 2 === 0 ? "visita" : "ligacao"
+            }
+          }
+        });
       }
+
+      await prisma.timelineEvent.create({
+        data: {
+          type: "comentario",
+          title: "Comentário",
+          message: `Cliente ${client.name} cadastrado e qualificado para prospecção inicial.`,
+          clientId: client.id,
+          userId: seller.id
+        }
+      });
     }
 
     await prisma.sale.create({

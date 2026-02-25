@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, goalSchema, opportunitySchema, timelineCommentSchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 
@@ -22,6 +22,46 @@ const STAGE_ALIASES: Record<string, "prospeccao" | "negociacao" | "proposta" | "
   ganho: "ganho",
   perdido: "perdido"
 };
+
+const TIMELINE_TYPE_LABEL: Record<string, string> = {
+  comentario: "Comentário",
+  atividade: "Atividade",
+  mudanca_estagio: "Stage",
+  criacao_oportunidade: "Oportunidade",
+  mudanca_followup: "Follow-up"
+};
+
+const createTimelineEvent = async ({
+  type,
+  title,
+  message,
+  clientId,
+  opportunityId,
+  userId,
+  meta,
+  createdAt
+}: {
+  type: "comentario" | "atividade" | "mudanca_estagio" | "criacao_oportunidade" | "mudanca_followup";
+  title: string;
+  message: string;
+  clientId: string;
+  opportunityId?: string | null;
+  userId: string;
+  meta?: Record<string, unknown>;
+  createdAt?: Date;
+}) => prisma.timelineEvent.create({
+  data: {
+    type,
+    title,
+    message,
+    clientId,
+    opportunityId: opportunityId || null,
+    userId,
+    meta: (meta as any) ?? undefined,
+    ...(createdAt ? { createdAt } : {})
+  }
+});
+
 
 const normalizeDateToUtc = (value: string, endOfDay = false) => {
   const plainDateMatch = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -241,6 +281,86 @@ router.get("/clients", async (req, res) => {
   const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
   res.json(data);
 });
+router.get("/clients/:id", async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    include: {
+      ownerSeller: { select: { id: true, name: true, role: true } },
+      opportunities: {
+        select: { id: true, title: true, stage: true, followUpDate: true, expectedCloseDate: true },
+        orderBy: { createdAt: "desc" }
+      }
+    }
+  });
+  if (!client) return res.status(404).json({ message: "Cliente não encontrado" });
+  res.json(client);
+});
+
+router.get("/clients/:id/timeline", async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+  if (!client) return res.status(404).json({ message: "Cliente não encontrado" });
+
+  const timeline = await prisma.timelineEvent.findMany({
+    where: { clientId: req.params.id },
+    include: {
+      user: { select: { id: true, name: true, role: true } },
+      opportunity: { select: { id: true, title: true } }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  res.json(timeline.map((event) => ({
+    ...event,
+    badgeLabel: TIMELINE_TYPE_LABEL[event.type] || event.type
+  })));
+});
+
+router.post("/clients/:id/timeline", validateBody(timelineCommentSchema), async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+  if (!client) return res.status(404).json({ message: "Cliente não encontrado" });
+
+  if (req.body.opportunityId) {
+    const opportunity = await prisma.opportunity.findFirst({ where: { id: req.body.opportunityId, clientId: req.params.id, ...sellerWhere(req) }, select: { id: true } });
+    if (!opportunity) return res.status(400).json({ message: "Oportunidade inválida para este cliente" });
+  }
+
+  const created = await createTimelineEvent({
+    type: "comentario",
+    title: "Comentário",
+    message: req.body.message,
+    clientId: req.params.id,
+    opportunityId: req.body.opportunityId,
+    userId: req.user!.id
+  });
+
+  const event = await prisma.timelineEvent.findUnique({
+    where: { id: created.id },
+    include: {
+      user: { select: { id: true, name: true, role: true } },
+      opportunity: { select: { id: true, title: true } }
+    }
+  });
+
+  res.status(201).json({
+    ...event,
+    badgeLabel: event ? TIMELINE_TYPE_LABEL[event.type] || event.type : "Comentário"
+  });
+});
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
   const data = await prisma.client.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
   res.status(201).json(data);
@@ -401,6 +521,16 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
     }
   });
 
+  await createTimelineEvent({
+    type: "criacao_oportunidade",
+    title: "Oportunidade criada",
+    message: `A oportunidade "${data.title}" foi criada no estágio ${data.stage}.`,
+    clientId: data.clientId,
+    opportunityId: data.id,
+    userId: req.user!.id,
+    meta: { stage: data.stage, value: data.value }
+  });
+
   return res.status(201).json(data);
 });
 router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => {
@@ -412,13 +542,60 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
   }
 
+  const current = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) } });
+  if (!current) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
   const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
+
+  if (req.body.stage && req.body.stage !== current.stage) {
+    await createTimelineEvent({
+      type: "mudanca_estagio",
+      title: "Mudança de estágio",
+      message: `Estágio alterado de ${current.stage} para ${data.stage}.`,
+      clientId: data.clientId,
+      opportunityId: data.id,
+      userId: req.user!.id,
+      meta: { from: current.stage, to: data.stage }
+    });
+  }
+
+  if (req.body.followUpDate && current.followUpDate.toISOString() !== data.followUpDate.toISOString()) {
+    await createTimelineEvent({
+      type: "mudanca_followup",
+      title: "Data de follow-up alterada",
+      message: `Follow-up alterado de ${current.followUpDate.toISOString()} para ${data.followUpDate.toISOString()}.`,
+      clientId: data.clientId,
+      opportunityId: data.id,
+      userId: req.user!.id,
+      meta: { from: current.followUpDate.toISOString(), to: data.followUpDate.toISOString() }
+    });
+  }
+
   return res.json(data);
 });
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({ where: sellerWhere(req), include: { opportunity: true }, orderBy: { createdAt: "desc" } })));
-router.post("/activities", validateBody(activitySchema), async (req, res) => res.status(201).json(await prisma.activity.create({ data: { ...req.body, dueDate: new Date(req.body.dueDate), ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
+router.post("/activities", validateBody(activitySchema), async (req, res) => {
+  const activity = await prisma.activity.create({ data: { ...req.body, dueDate: new Date(req.body.dueDate), ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
+
+  if (activity.opportunityId) {
+    const opportunity = await prisma.opportunity.findUnique({ where: { id: activity.opportunityId }, select: { id: true, clientId: true, title: true } });
+    if (opportunity) {
+      await createTimelineEvent({
+        type: "atividade",
+        title: "Atividade registrada",
+        message: `${activity.type} registrada para a oportunidade "${opportunity.title}".`,
+        clientId: opportunity.clientId,
+        opportunityId: opportunity.id,
+        userId: req.user!.id,
+        meta: { activityType: activity.type, dueDate: activity.dueDate.toISOString() }
+      });
+    }
+  }
+
+  return res.status(201).json(activity);
+});
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) } })));
 router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
 router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });

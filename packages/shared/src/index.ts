@@ -74,6 +74,12 @@ export const activitySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+
+export const timelineCommentSchema = z.object({
+  message: z.string().min(1).max(2000),
+  opportunityId: z.string().optional()
+});
+
 export const goalSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   targetValue: z.number().positive(),
@@ -87,6 +93,7 @@ export type ContactInput = z.infer<typeof contactSchema>;
 export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
+export type TimelineCommentInput = z.infer<typeof timelineCommentSchema>;
 
 export interface AuthUser {
   id: string;
