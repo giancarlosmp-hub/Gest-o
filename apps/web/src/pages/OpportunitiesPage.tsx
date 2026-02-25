@@ -100,6 +100,14 @@ const stageLabel: Record<Stage, string> = {
   perdido: "Perdido"
 };
 
+const stageWeight: Record<Stage, number> = {
+  prospeccao: 20,
+  negociacao: 40,
+  proposta: 70,
+  ganho: 100,
+  perdido: 0
+};
+
 const eventLabel: Record<EventType, string> = {
   comentario: "Comentário",
   mudanca_etapa: "Mudança de etapa",
@@ -147,6 +155,13 @@ function sanitizeNumericInput(value: string, allowDecimal = true) {
   return `${int}.${decimals.join("")}`;
 }
 
+function toDayStart(dateLike?: string | null) {
+  if (!dateLike) return null;
+  const date = new Date(dateLike);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 export default function OpportunitiesPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<Opportunity[]>([]);
@@ -178,6 +193,8 @@ export default function OpportunitiesPage() {
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
   const [pipelineInteraction, setPipelineInteraction] = useState("");
   const [isSavingPipelineInteraction, setIsSavingPipelineInteraction] = useState(false);
+  const isSeller = user?.role === "vendedor";
+  const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -189,6 +206,11 @@ export default function OpportunitiesPage() {
     const savedMode = localStorage.getItem(`${PIPELINE_VIEW_STORAGE_KEY}:${user.id}`);
     if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!isSeller || !user?.id) return;
+    setFilters((prev) => ({ ...prev, ownerSellerId: user.id }));
+  }, [isSeller, user?.id]);
 
   const handleViewModeChange = (mode: ViewMode) => {
     setViewMode(mode);
@@ -245,28 +267,28 @@ export default function OpportunitiesPage() {
 
   const getReturnStatus = (item: Opportunity): ReturnStatus => {
     if (["ganho", "perdido"].includes(item.stage)) return "ok";
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const returnDate = new Date(item.expectedCloseDate);
-    const returnDateStart = new Date(returnDate.getFullYear(), returnDate.getMonth(), returnDate.getDate());
+    const todayStart = toDayStart(new Date().toISOString());
+    const followUpDay = toDayStart(item.followUpDate || item.expectedCloseDate);
 
-    if (returnDateStart < todayStart) return "overdue";
+    if (!todayStart || !followUpDay) return "ok";
+    if (followUpDay < todayStart) return "overdue";
 
     const limit = new Date(todayStart);
     limit.setDate(limit.getDate() + 2);
-    if (returnDateStart <= limit) return "dueSoon";
+    if (followUpDay <= limit) return "dueSoon";
 
     return "ok";
   };
 
-  const sortedItems = useMemo(() => {
-    return [...items].sort((a, b) => {
-      const aOverdue = getReturnStatus(a) === "overdue" ? 0 : 1;
-      const bOverdue = getReturnStatus(b) === "overdue" ? 0 : 1;
-      if (aOverdue !== bOverdue) return aOverdue - bOverdue;
-      return new Date(a.expectedCloseDate).getTime() - new Date(b.expectedCloseDate).getTime();
-    });
-  }, [items]);
+  const statusPriority: Record<ReturnStatus, number> = { overdue: 0, dueSoon: 1, ok: 2 };
+
+  const sortByPipelinePriority = (a: Opportunity, b: Opportunity) => {
+    const byStatus = statusPriority[getReturnStatus(a)] - statusPriority[getReturnStatus(b)];
+    if (byStatus !== 0) return byStatus;
+    return Number(b.value || 0) - Number(a.value || 0);
+  };
+
+  const sortedItems = useMemo(() => [...items].sort(sortByPipelinePriority), [items]);
 
   const conversionRate = useMemo(() => {
     if (!items.length) return 0;
@@ -283,12 +305,15 @@ export default function OpportunitiesPage() {
 
   const opportunitiesByStage = useMemo(() => {
     return stages.reduce<Record<Stage, Opportunity[]>>((acc, stage) => {
-      acc[stage] = sortedItems.filter((item) => item.stage === stage);
+      acc[stage] = sortedItems.filter((item) => item.stage === stage).sort(sortByPipelinePriority);
       return acc;
     }, { prospeccao: [], negociacao: [], proposta: [], ganho: [], perdido: [] });
   }, [sortedItems]);
 
-  const getWeightedValue = (item: Opportunity) => item.weightedValue ?? (Number(item.value || 0) * Number(item.probability || 0)) / 100;
+  const getWeightedValue = (item: Opportunity) => {
+    const probability = item.probability ?? stageWeight[item.stage];
+    return Number(item.value || 0) * (Number(probability || 0) / 100);
+  };
 
   const handlePipelineCardDragStart = (event: DragEvent<HTMLDivElement>, item: Opportunity) => {
     const payload: DragOpportunityPayload = {
@@ -509,6 +534,20 @@ export default function OpportunitiesPage() {
     }
   };
 
+  const clearFilters = () => {
+    setFilters({
+      stage: "",
+      ownerSellerId: isSeller && user?.id ? user.id : "",
+      clientId: "",
+      crop: "",
+      season: "",
+      dateFrom: "",
+      dateTo: "",
+      overdue: false
+    });
+    setSearch("");
+  };
+
   return (
     <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -538,40 +577,46 @@ export default function OpportunitiesPage() {
         <Card title="Taxa de conversão" value={`${formatPercentBR(conversionRate)} (${items.filter((item) => item.stage === "ganho").length}/${items.length || 0})`} loading={loading} />
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-lg font-semibold text-slate-900">Filtros</h3>
-        <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-          <input className="rounded-lg border border-slate-200 p-2" placeholder="Busca por título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
-          <select className="rounded-lg border border-slate-200 p-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
-            <option value="">Todos estágios</option>
-            {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
-          </select>
-          <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
-            <option value="">Todos vendedores</option>
-            {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-          </select>
-          <select className="rounded-lg border border-slate-200 p-2" value={filters.clientId} onChange={(e) => setFilters((prev) => ({ ...prev, clientId: e.target.value }))}>
-            <option value="">Todos clientes</option>
-            {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-          </select>
-          <select className="rounded-lg border border-slate-200 p-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
-            <option value="">Todas culturas</option>
-            {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
-          </select>
-          <select className="rounded-lg border border-slate-200 p-2" value={filters.season} onChange={(e) => setFilters((prev) => ({ ...prev, season: e.target.value }))}>
-            <option value="">Todas safras</option>
-            {seasonOptions.map((season) => <option key={season} value={season}>{season}</option>)}
-          </select>
-          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
-          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
-            <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
-          </label>
-          <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={() => { setFilters({ stage: "", ownerSellerId: "", clientId: "", crop: "", season: "", dateFrom: "", dateTo: "", overdue: false }); setSearch(""); }}>
-            Limpar filtros
-          </button>
+      {viewMode === "list" ? (
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 text-lg font-semibold text-slate-900">Filtros</h3>
+          <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+            <input className="rounded-lg border border-slate-200 p-2" placeholder="Busca por título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select className="rounded-lg border border-slate-200 p-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
+              <option value="">Todos estágios</option>
+              {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
+            </select>
+            {canFilterByOwner ? (
+              <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
+                <option value="">Todos vendedores</option>
+                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+              </select>
+            ) : (
+              <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user?.name || "Meu pipeline"} />
+            )}
+            <select className="rounded-lg border border-slate-200 p-2" value={filters.clientId} onChange={(e) => setFilters((prev) => ({ ...prev, clientId: e.target.value }))}>
+              <option value="">Todos clientes</option>
+              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+            </select>
+            <select className="rounded-lg border border-slate-200 p-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
+              <option value="">Todas culturas</option>
+              {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
+            </select>
+            <select className="rounded-lg border border-slate-200 p-2" value={filters.season} onChange={(e) => setFilters((prev) => ({ ...prev, season: e.target.value }))}>
+              <option value="">Todas safras</option>
+              {seasonOptions.map((season) => <option key={season} value={season}>{season}</option>)}
+            </select>
+            <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
+            <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+              <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
+            </label>
+            <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
+              Limpar filtros
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <form onSubmit={submit} className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
         <input required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -696,61 +741,83 @@ export default function OpportunitiesPage() {
           </table>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid min-w-[1050px] grid-cols-5 gap-3">
-            {stages.map((stage) => {
-              const stageItems = opportunitiesByStage[stage];
-              const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
-              const stageWeightedTotal = stageItems.reduce((sum, item) => sum + getWeightedValue(item), 0);
-              return (
-                <div
-                  key={stage}
-                  className="flex min-h-[320px] flex-col rounded-xl border border-slate-200 bg-slate-50"
-                  onDragOver={handlePipelineColumnDragOver}
-                  onDrop={(event) => {
-                    handlePipelineColumnDrop(event, stage).catch(() => {
-                      toast.error("Erro inesperado ao mover oportunidade");
-                    });
-                  }}
-                >
-                  <div className="border-b border-slate-200 px-3 py-2">
-                    <div className="font-semibold text-slate-800">{stageLabel[stage]}</div>
-                    <div className="text-xs text-slate-500">{stageItems.length} oportunidade(s)</div>
+        <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-2 border-b border-slate-100 pb-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+            <input className="rounded-lg border border-slate-200 p-2" placeholder="Buscar título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+              <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
+            </label>
+            {canFilterByOwner ? (
+              <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
+                <option value="">Todos responsáveis</option>
+                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+              </select>
+            ) : (
+              <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user?.name || "Meu pipeline"} />
+            )}
+            <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
+              Limpar filtros
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[1050px] grid-cols-5 gap-3">
+              {stages.map((stage) => {
+                const stageItems = opportunitiesByStage[stage];
+                const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
+                const stageWeightedTotal = stageItems.reduce((sum, item) => sum + getWeightedValue(item), 0);
+                return (
+                  <div
+                    key={stage}
+                    className="flex min-h-[430px] flex-col rounded-xl border border-slate-200 bg-slate-50"
+                    onDragOver={handlePipelineColumnDragOver}
+                    onDrop={(event) => {
+                      handlePipelineColumnDrop(event, stage).catch(() => {
+                        toast.error("Erro inesperado ao mover oportunidade");
+                      });
+                    }}
+                  >
+                    <div className="space-y-1 border-b border-slate-200 px-3 py-3">
+                      <div className="font-semibold text-slate-800">{stageLabel[stage]}</div>
+                      <div className="text-xs text-slate-500">{stageItems.length} oportunidade(s)</div>
+                      <div className="flex items-center justify-between text-xs text-slate-600"><span>Total</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
+                      <div className="flex items-center justify-between text-xs text-slate-600"><span>Ponderado</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageWeightedTotal)}</span></div>
+                    </div>
+                    <div className="flex-1 space-y-2 overflow-y-auto p-3">
+                      {loading ? Array.from({ length: 3 }).map((_, index) => (
+                        <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
+                      )) : stageItems.length ? stageItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`space-y-2 rounded-lg border p-3 shadow-sm ${getReturnStatus(item) === "overdue" ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-white"}`}
+                          draggable
+                          onDragStart={(event) => handlePipelineCardDragStart(event, item)}
+                          onClick={() => openPipelineDrawer(item)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openPipelineDrawer(item);
+                            }
+                          }}
+                        >
+                          <div className="text-sm font-semibold text-slate-800">{item.title}</div>
+                          <div className="text-xs text-slate-600">{getClientName(item)}</div>
+                          <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
+                          <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
+                          <ReturnStatusBadge status={getReturnStatus(item)} />
+                        </div>
+                      )) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
+                    </div>
+                    <div className="mt-auto border-t border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                      <div className="flex items-center justify-between"><span>Total</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
+                      <div className="mt-1 flex items-center justify-between"><span>Ponderado</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageWeightedTotal)}</span></div>
+                    </div>
                   </div>
-                  <div className="flex-1 space-y-2 overflow-y-auto p-3">
-                    {loading ? Array.from({ length: 3 }).map((_, index) => (
-                      <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
-                    )) : stageItems.length ? stageItems.map((item) => (
-                      <div
-                        key={item.id}
-                        className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
-                        draggable
-                        onDragStart={(event) => handlePipelineCardDragStart(event, item)}
-                        onClick={() => openPipelineDrawer(item)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            openPipelineDrawer(item);
-                          }
-                        }}
-                      >
-                        <div className="text-sm font-semibold text-slate-800">{item.title}</div>
-                        <div className="text-xs text-slate-600">{getClientName(item)}</div>
-                        <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
-                        <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
-                        <ReturnStatusBadge status={getReturnStatus(item)} />
-                      </div>
-                    )) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
-                  </div>
-                  <div className="border-t border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                    <div>Total: <span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
-                    <div>Ponderado: <span className="font-semibold text-slate-900">{formatCurrencyBRL(stageWeightedTotal)}</span></div>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -831,7 +898,7 @@ export default function OpportunitiesPage() {
 
 function ReturnStatusBadge({ status }: { status: ReturnStatus }) {
   if (status === "overdue") return <Badge className="bg-red-100 text-red-700">Atrasado</Badge>;
-  if (status === "dueSoon") return <Badge className="bg-yellow-100 text-yellow-800">Vence em até 2 dias</Badge>;
+  if (status === "dueSoon") return <Badge className="bg-yellow-100 text-yellow-800">Vence em breve</Badge>;
   return <Badge className="bg-emerald-100 text-emerald-700">OK</Badge>;
 }
 
