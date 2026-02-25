@@ -51,6 +51,8 @@ model Client {
   city          String
   state         String
   region        String
+  potentialHa   Float?      @default(0)
+  farmSizeHa    Float?      @default(0)
   ownerSellerId String
   ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
   opportunities Opportunity[]
