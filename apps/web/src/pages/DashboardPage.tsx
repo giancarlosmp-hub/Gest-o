@@ -168,7 +168,7 @@ export default function DashboardPage() {
                 labels: series.labels,
                 datasets: [
                   {
-                    label: "Meta acumulada",
+                    label: "Objetivo acumulado",
                     data: series.target,
                     borderColor: chartPalette.primary,
                     backgroundColor: "rgba(37, 99, 235, 0.15)",
@@ -191,7 +191,7 @@ export default function DashboardPage() {
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <h3 className="mb-2 font-semibold text-slate-800">
-            Metas vs Realizado
+            Objetivos vs Realizado
           </h3>
           <div className="h-72 w-full">
             <Doughnut

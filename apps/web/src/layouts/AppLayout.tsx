@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
-const items = ["Dashboard","Equipe","Metas","Clientes","Contatos","Empresas","Oportunidades","Atividades","Relatórios","Usuários","Configurações"];
+const items = ["Dashboard","Equipe","Objetivos","Clientes","Contatos","Empresas","Oportunidades","Atividades","Relatórios","Usuários","Configurações"];
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
