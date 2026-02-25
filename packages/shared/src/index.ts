@@ -83,6 +83,13 @@ export const timelineEventSchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+export const eventSchema = z.object({
+  type: z.literal("comentario").default("comentario"),
+  description: z.string().min(2),
+  opportunityId: z.string(),
+  ownerSellerId: z.string().optional()
+});
+
 export const goalSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   targetValue: z.number().positive(),
@@ -141,6 +148,7 @@ export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
+export type EventInput = z.infer<typeof eventSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardSalesSeries = z.infer<typeof dashboardSalesSeriesSchema>;
 export type DashboardPortfolio = z.infer<typeof dashboardPortfolioSchema>;

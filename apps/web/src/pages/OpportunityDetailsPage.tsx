@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
@@ -56,6 +56,11 @@ const eventLabel: Record<EventType, string> = {
   status: "Status"
 };
 
+const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
+  dateStyle: "short",
+  timeStyle: "short"
+});
+
 export default function OpportunityDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -106,7 +111,6 @@ export default function OpportunityDetailsPage() {
       type: payload.type || "comentario",
       description: payload.description,
       opportunityId: item.id,
-      clientId: item.clientId
     });
   };
 
@@ -198,7 +202,7 @@ export default function OpportunityDetailsPage() {
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
         <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
           <p><strong>Título:</strong> {item.title}</p>
-          <p><strong>Cliente:</strong> {item.client || "-"}</p>
+          <p><strong>Cliente:</strong> {item.clientId ? <Link className="text-blue-700" to={`/clientes/${item.clientId}`}>{item.client || "-"}</Link> : (item.client || "-")}</p>
           <p><strong>Vendedor:</strong> {item.owner || "-"}</p>
           <p><strong>Etapa:</strong> {stageLabel[item.stage]}</p>
           <p><strong>Valor:</strong> {formatCurrencyBRL(item.value)}</p>
@@ -224,24 +228,25 @@ export default function OpportunityDetailsPage() {
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-lg font-semibold">Linha do tempo</h3>
+        <h3 className="mb-3 text-lg font-semibold">Registrar Interação</h3>
         <p className="text-sm"><strong>Última interação:</strong> {item.lastContactAt ? formatDateBR(item.lastContactAt) : "Sem interação registrada"}</p>
         <form className="mt-3 space-y-2" onSubmit={onRegisterInteraction}>
           <textarea className="w-full rounded-lg border border-slate-200 p-2 text-sm" rows={3} placeholder="Escreva um resumo da interação" value={interactionNote} onChange={(event) => setInteractionNote(event.target.value)} />
-          <button type="submit" disabled={saving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500">Registrar interação</button>
+          <button type="submit" disabled={saving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500">Salvar</button>
         </form>
 
-        <div className="mt-4 space-y-2">
+        <h3 className="mt-5 mb-3 text-lg font-semibold">Linha do Tempo</h3>
+        <div className="space-y-2">
           {events.length ? events.map((event) => (
             <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold text-slate-800">{eventLabel[event.type]}</span>
-                <span className="text-xs text-slate-500">{formatDateBR(event.createdAt)}</span>
+                <span className="text-xs text-slate-500">{dateTimeFormatter.format(new Date(event.createdAt))}</span>
               </div>
               <p className="mt-1 text-slate-700">{event.description}</p>
               <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Usuário"}</p>
             </div>
-          )) : <p className="text-sm text-slate-500">Sem eventos registrados.</p>}
+          )) : <p className="text-sm text-slate-500">Sem interações registradas.</p>}
         </div>
       </section>
 
