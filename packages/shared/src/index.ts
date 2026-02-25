@@ -12,6 +12,7 @@ export const OpportunityStageEnum = z.enum([
 ]);
 
 export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao"]);
+export const EventTypeEnum = z.enum(["comentario", "mudanca_etapa", "status"]);
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -74,6 +75,14 @@ export const activitySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+export const eventSchema = z.object({
+  type: EventTypeEnum.default("comentario"),
+  description: z.string().min(2),
+  clientId: z.string().optional(),
+  opportunityId: z.string().optional(),
+  ownerSellerId: z.string().optional()
+});
+
 export const goalSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/),
   targetValue: z.number().positive(),
@@ -87,6 +96,7 @@ export type ContactInput = z.infer<typeof contactSchema>;
 export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
+export type EventInput = z.infer<typeof eventSchema>;
 
 export interface AuthUser {
   id: string;

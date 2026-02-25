@@ -28,6 +28,12 @@ enum ActivityType {
   reuniao
 }
 
+enum EventType {
+  comentario
+  mudanca_etapa
+  status
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -41,6 +47,7 @@ model User {
   contacts     Contact[]
   opportunities Opportunity[]
   activities   Activity[]
+  events       Event[]
   goals        Goal[]
   sales        Sale[]
 }
@@ -56,6 +63,7 @@ model Client {
   ownerSellerId String
   ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
   opportunities Opportunity[]
+  events        Event[]
   createdAt     DateTime    @default(now())
 }
 
@@ -104,7 +112,21 @@ model Opportunity {
   ownerSellerId     String
   ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
   activities        Activity[]
+  events            Event[]
   createdAt         DateTime         @default(now())
+}
+
+model Event {
+  id            String       @id @default(cuid())
+  type          EventType
+  description   String
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  ownerSellerId String
+  ownerSeller   User         @relation(fields: [ownerSellerId], references: [id])
+  createdAt     DateTime     @default(now())
 }
 
 model Activity {
