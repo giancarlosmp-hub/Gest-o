@@ -75,7 +75,7 @@ export const activitySchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
-export const eventSchema = z.object({
+export const timelineEventSchema = z.object({
   type: EventTypeEnum.default("comentario"),
   description: z.string().min(2),
   clientId: z.string().optional(),
@@ -96,7 +96,7 @@ export type ContactInput = z.infer<typeof contactSchema>;
 export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
-export type EventInput = z.infer<typeof eventSchema>;
+export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 
 export interface AuthUser {
   id: string;

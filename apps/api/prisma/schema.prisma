@@ -47,7 +47,7 @@ model User {
   contacts     Contact[]
   opportunities Opportunity[]
   activities   Activity[]
-  events       Event[]
+  timelineEvents TimelineEvent[]
   goals        Goal[]
   sales        Sale[]
 }
@@ -63,7 +63,7 @@ model Client {
   ownerSellerId String
   ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
   opportunities Opportunity[]
-  events        Event[]
+  timelineEvents TimelineEvent[]
   createdAt     DateTime    @default(now())
 }
 
@@ -112,11 +112,11 @@ model Opportunity {
   ownerSellerId     String
   ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
   activities        Activity[]
-  events            Event[]
+  timelineEvents    TimelineEvent[]
   createdAt         DateTime         @default(now())
 }
 
-model Event {
+model TimelineEvent {
   id            String       @id @default(cuid())
   type          EventType
   description   String
