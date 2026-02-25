@@ -74,6 +74,8 @@ async function main() {
         expectedCloseDate: now,
         lastContactAt: now,
         probability: 70,
+        crop: "soja",
+        season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
         notes: "Lead qualificado para fechamento nesta safra.",
         clientId: client.id,
         ownerSellerId: seller.id

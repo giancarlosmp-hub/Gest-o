@@ -88,3 +88,24 @@ npm run dev
    - Diretor/Gerente criam metas; vendedor somente visualiza.
 7. RBAC:
    - Login com vendedor e validar ocultação de Usuários/Configurações.
+
+## Testes rápidos da API de oportunidades
+> Use um token JWT válido no header `Authorization: Bearer <token>`.
+
+```bash
+# Listar oportunidades (com client, owner, daysOverdue e weightedValue)
+curl "http://localhost:4000/opportunities" \\
+  -H "Authorization: Bearer <token>"
+
+# Filtrar por stage
+curl "http://localhost:4000/opportunities?stage=negociacao" \\
+  -H "Authorization: Bearer <token>"
+
+# Filtrar apenas atrasadas (expectedReturnDate/expectedCloseDate < hoje e sem ganho/perdido)
+curl "http://localhost:4000/opportunities?overdue=true" \\
+  -H "Authorization: Bearer <token>"
+
+# Resumo do pipeline
+curl "http://localhost:4000/opportunities/summary" \\
+  -H "Authorization: Bearer <token>"
+```
