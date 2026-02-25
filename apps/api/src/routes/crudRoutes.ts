@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 
@@ -86,6 +86,45 @@ const normalizeOpportunityDates = (payload: Record<string, unknown>) => {
       ? { lastContactAt: payload.lastContactAt ? new Date(new Date(String(payload.lastContactAt)).toISOString()) : null }
       : {})
   };
+};
+
+
+const createEvent = async ({
+  type = "comentario",
+  description,
+  opportunityId,
+  clientId,
+  ownerSellerId
+}: {
+  type?: "comentario" | "mudanca_etapa" | "status";
+  description: string;
+  opportunityId?: string;
+  clientId?: string;
+  ownerSellerId: string;
+}) => {
+  const normalizedDescription = description.trim();
+  if (!normalizedDescription) return null;
+
+  const relatedOpportunityId = opportunityId || undefined;
+  let relatedClientId = clientId || undefined;
+
+  if (!relatedClientId && relatedOpportunityId) {
+    const opportunity = await prisma.opportunity.findUnique({
+      where: { id: relatedOpportunityId },
+      select: { clientId: true }
+    });
+    relatedClientId = opportunity?.clientId;
+  }
+
+  return prisma.event.create({
+    data: {
+      type,
+      description: normalizedDescription,
+      opportunityId: relatedOpportunityId,
+      clientId: relatedClientId,
+      ownerSellerId
+    }
+  });
 };
 
 const validateDateOrder = (proposalDate?: string, expectedCloseDate?: string) => {
@@ -394,12 +433,23 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
   }
 
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
   const data = await prisma.opportunity.create({
     data: {
       ...(normalizeOpportunityDates(req.body) as any),
-      ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId)
+      ownerSellerId
     }
   });
+
+  if (req.body.notes?.trim()) {
+    await createEvent({
+      type: "comentario",
+      description: req.body.notes,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId
+    });
+  }
 
   return res.status(201).json(data);
 });
@@ -412,7 +462,33 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
     return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
   }
 
+  const previous = await prisma.opportunity.findUnique({
+    where: { id: req.params.id },
+    select: { stage: true, notes: true, clientId: true, ownerSellerId: true }
+  });
+
   const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
+
+  if (req.body.stage && previous && req.body.stage !== previous.stage) {
+    await createEvent({
+      type: "mudanca_etapa",
+      description: `Etapa alterada de ${previous.stage} para ${req.body.stage}`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.notes && previous && req.body.notes !== previous.notes) {
+    await createEvent({
+      type: "comentario",
+      description: req.body.notes,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
   return res.json(data);
 });
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
@@ -422,6 +498,43 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => res
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) } })));
 router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
 router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+router.get("/events", async (req, res) => {
+  const opportunityId = req.query.opportunityId as string | undefined;
+  const clientId = req.query.clientId as string | undefined;
+
+  const events = await prisma.event.findMany({
+    where: {
+      ...sellerWhere(req),
+      ...(opportunityId ? { opportunityId } : {}),
+      ...(clientId ? { clientId } : {})
+    },
+    include: {
+      ownerSeller: { select: { id: true, name: true } },
+      opportunity: { select: { id: true, title: true } },
+      client: { select: { id: true, name: true } }
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  res.json(events);
+});
+router.post("/events", validateBody(eventSchema), async (req, res) => {
+  if (!req.body.clientId && !req.body.opportunityId) {
+    return res.status(400).json({ message: "clientId ou opportunityId é obrigatório" });
+  }
+
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const created = await createEvent({
+    type: req.body.type,
+    description: req.body.description,
+    opportunityId: req.body.opportunityId,
+    clientId: req.body.clientId,
+    ownerSellerId
+  });
+
+  return res.status(201).json(created);
+});
 
 router.get("/goals", async (req, res) => {
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : (req.query.sellerId as string | undefined);
