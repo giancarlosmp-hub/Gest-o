@@ -1,29 +1,39 @@
-const ptBrNumberFormatter = new Intl.NumberFormat("pt-BR");
-
-const ptBrCompactFormatter = new Intl.NumberFormat("pt-BR", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-const ptBrCurrencyFormatter = new Intl.NumberFormat("pt-BR", {
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
   style: "currency",
   currency: "BRL",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-export function formatCompactNumber(value: number) {
-  return ptBrCompactFormatter.format(value).replace(/\s/g, "").toLowerCase();
+const numberFormatter = new Intl.NumberFormat("pt-BR");
+
+const compactNumberFormatter = new Intl.NumberFormat("pt-BR", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 1,
+});
+
+export function formatCurrencyBRL(value: number) {
+  return brlFormatter.format(value ?? 0);
 }
 
-export function formatNumber(value: number) {
-  return ptBrNumberFormatter.format(value);
+export function formatNumberBR(value: number) {
+  return numberFormatter.format(value ?? 0);
 }
 
-export function formatCurrency(value: number) {
-  return ptBrCurrencyFormatter.format(value);
+export function formatCompactNumberBR(value: number) {
+  // remove espaços que alguns browsers colocam no formato compact (ex.: "1,2 mil")
+  return compactNumberFormatter
+    .format(value ?? 0)
+    .replace(/\s/g, "")
+    .toLowerCase();
 }
 
-export function formatPercent(value: number) {
-  return `${value.toFixed(1).replace('.', ',')}%`;
+export function formatPercentBR(value: number, digits = 1) {
+  return `${(value ?? 0).toFixed(digits).replace(".", ",")}%`;
+}
+
+export function formatDateBR(value: string | Date) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("pt-BR").format(new Date(value));
 }
