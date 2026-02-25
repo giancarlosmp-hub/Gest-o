@@ -174,6 +174,10 @@ export default function OpportunitiesPage() {
   const [opportunityEvents, setOpportunityEvents] = useState<EventItem[]>([]);
   const [loadingOpportunityEvents, setLoadingOpportunityEvents] = useState(false);
   const [opportunityComment, setOpportunityComment] = useState("");
+  const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
+  const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
+  const [pipelineInteraction, setPipelineInteraction] = useState("");
+  const [isSavingPipelineInteraction, setIsSavingPipelineInteraction] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -466,6 +470,45 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
+  const openPipelineDrawer = (item: Opportunity) => {
+    setSelectedOpportunity(item);
+    setIsPipelineDrawerOpen(true);
+  };
+
+  const closePipelineDrawer = () => {
+    setIsPipelineDrawerOpen(false);
+    setSelectedOpportunity(null);
+    setPipelineInteraction("");
+  };
+
+  const onSavePipelineInteraction = async (event: FormEvent) => {
+    event.preventDefault();
+
+    if (!selectedOpportunity) return;
+
+    const description = pipelineInteraction.trim();
+    if (!description) {
+      toast.error("Digite uma interação antes de salvar");
+      return;
+    }
+
+    setIsSavingPipelineInteraction(true);
+    try {
+      await api.post("/events", {
+        type: "comentario",
+        description,
+        opportunityId: selectedOpportunity.id,
+        clientId: selectedOpportunity.clientId
+      });
+      setPipelineInteraction("");
+      toast.success("Interação registrada com sucesso");
+    } catch {
+      toast.error("Não foi possível registrar a interação");
+    } finally {
+      setIsSavingPipelineInteraction(false);
+    }
+  };
+
   return (
     <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -683,13 +726,13 @@ export default function OpportunitiesPage() {
                         className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
                         draggable
                         onDragStart={(event) => handlePipelineCardDragStart(event, item)}
-                        onClick={() => navigate(`/oportunidades/${item.id}`)}
+                        onClick={() => openPipelineDrawer(item)}
                         role="button"
                         tabIndex={0}
                         onKeyDown={(event) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            navigate(`/oportunidades/${item.id}`);
+                            openPipelineDrawer(item);
                           }
                         }}
                       >
@@ -711,6 +754,77 @@ export default function OpportunitiesPage() {
           </div>
         </div>
       )}
+
+      {isPipelineDrawerOpen && selectedOpportunity ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={closePipelineDrawer}>
+          <aside
+            className="h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">{selectedOpportunity.title}</h3>
+                <p className="mt-1 text-sm text-slate-500">{getClientName(selectedOpportunity)}</p>
+              </div>
+              <button type="button" className="rounded-md border border-slate-200 px-3 py-1.5 text-sm text-slate-600" onClick={closePipelineDrawer}>
+                Fechar
+              </button>
+            </div>
+
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Valor</span>
+                <span className="font-semibold text-slate-900">{formatCurrencyBRL(selectedOpportunity.value)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Etapa</span>
+                <span className="font-semibold text-slate-900">{stageLabel[selectedOpportunity.stage]}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Entrada da proposta</span>
+                <span className="font-semibold text-slate-900">{formatDateBR(selectedOpportunity.proposalDate)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Retorno previsto</span>
+                <span className="font-semibold text-slate-900">{formatDateBR(selectedOpportunity.expectedCloseDate)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Último contato</span>
+                <span className="font-semibold text-slate-900">{selectedOpportunity.lastContactAt ? formatDateBR(selectedOpportunity.lastContactAt) : "-"}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="mt-4 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+              onClick={() => navigate(`/oportunidades/${selectedOpportunity.id}`)}
+            >
+              Abrir detalhes
+            </button>
+
+            <form className="mt-6 space-y-3" onSubmit={onSavePipelineInteraction}>
+              <label className="block text-sm font-medium text-slate-800" htmlFor="pipeline-interaction">
+                Registrar Interação
+              </label>
+              <textarea
+                id="pipeline-interaction"
+                className="w-full rounded-lg border border-slate-200 p-2 text-sm"
+                rows={4}
+                placeholder="Descreva a interação com o cliente"
+                value={pipelineInteraction}
+                onChange={(event) => setPipelineInteraction(event.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={isSavingPipelineInteraction}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
+              >
+                {isSavingPipelineInteraction ? "Salvando..." : "Salvar interação"}
+              </button>
+            </form>
+          </aside>
+        </div>
+      ) : null}
     </div>
   );
 }
