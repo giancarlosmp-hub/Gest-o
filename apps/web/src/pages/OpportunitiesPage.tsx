@@ -1,4 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
@@ -127,12 +128,12 @@ export default function OpportunitiesPage() {
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [clients, setClients] = useState<Client[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
-  const [details, setDetails] = useState<Opportunity | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>({
     stage: "",
     ownerSellerId: "",
@@ -446,7 +447,7 @@ export default function OpportunitiesPage() {
                   <td className="space-x-2 whitespace-nowrap p-2">
                     <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
                     <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
-                    <button type="button" className="text-slate-700" onClick={() => setDetails(item)}>Detalhes</button>
+                    <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
                   </td>
                 </tr>
               );
@@ -458,25 +459,6 @@ export default function OpportunitiesPage() {
           </tbody>
         </table>
       </div>
-
-      {details ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setDetails(null)}>
-          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
-            <h4 className="text-lg font-semibold text-slate-900">Detalhes da oportunidade</h4>
-            <div className="mt-3 space-y-2 text-sm text-slate-700">
-              <p><strong>Título:</strong> {details.title}</p>
-              <p><strong>Cliente:</strong> {getClientName(details)}</p>
-              <p><strong>Vendedor:</strong> {getSellerName(details)}</p>
-              <p><strong>Valor:</strong> {formatCurrencyBRL(details.value)}</p>
-              <p><strong>Etapa:</strong> {stageLabel[details.stage]}</p>
-              <p><strong>Entrada proposta:</strong> {formatDateBR(details.proposalDate)}</p>
-              <p><strong>Retorno previsto:</strong> {formatDateBR(details.expectedCloseDate)}</p>
-              <p><strong>Notas:</strong> {details.notes || "-"}</p>
-            </div>
-            <button type="button" className="mt-4 rounded-lg bg-slate-900 px-3 py-2 text-white" onClick={() => setDetails(null)}>Fechar</button>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
