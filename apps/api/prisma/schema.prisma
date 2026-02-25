@@ -87,6 +87,10 @@ model Opportunity {
   stage             OpportunityStage
   crop              String?
   season            String?
+  areaHa            Float?
+  productOffered    String?
+  plantingForecastDate DateTime?
+  expectedTicketPerHa Float?
   proposalDate      DateTime
   followUpDate      DateTime
   expectedCloseDate DateTime
