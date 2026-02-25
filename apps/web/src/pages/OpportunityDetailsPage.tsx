@@ -151,7 +151,6 @@ export default function OpportunityDetailsPage() {
     const currentIndex = stageFlow.indexOf(item.stage);
     const nextStage = stageFlow[Math.min(currentIndex + 1, stageFlow.length - 1)];
     await updateOpportunity({ stage: nextStage });
-    await registerEvent({ type: "mudanca_etapa", description: `Etapa avançada para ${stageLabel[nextStage]}` });
     toast.success("Etapa avançada");
   };
 

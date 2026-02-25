@@ -22,6 +22,13 @@ const STAGE_ALIASES: Record<string, "prospeccao" | "negociacao" | "proposta" | "
   ganho: "ganho",
   perdido: "perdido"
 };
+const STAGE_LABELS: Record<"prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido", string> = {
+  prospeccao: "Prospecção",
+  negociacao: "Negociação",
+  proposta: "Proposta",
+  ganho: "Ganho",
+  perdido: "Perdido"
+};
 
 const normalizeDateToUtc = (value: string, endOfDay = false) => {
   const plainDateMatch = /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -464,15 +471,37 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 
   const previous = await prisma.opportunity.findUnique({
     where: { id: req.params.id },
-    select: { stage: true, notes: true, clientId: true, ownerSellerId: true }
+    select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true }
   });
 
   const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
 
   if (req.body.stage && previous && req.body.stage !== previous.stage) {
+    const fromStage = STAGE_ALIASES[previous.stage] || "prospeccao";
+    const toStage = STAGE_ALIASES[req.body.stage] || "prospeccao";
     await createEvent({
       type: "mudanca_etapa",
-      description: `Etapa alterada de ${previous.stage} para ${req.body.stage}`,
+      description: `Etapa alterada de ${STAGE_LABELS[fromStage]} para ${STAGE_LABELS[toStage]}`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.followUpDate && previous && previous.followUpDate.getTime() !== data.followUpDate.getTime()) {
+    await createEvent({
+      type: "status",
+      description: `Follow-up alterado de ${previous.followUpDate.toISOString().slice(0, 10)} para ${data.followUpDate.toISOString().slice(0, 10)}`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.probability !== undefined && previous && previous.probability !== data.probability) {
+    await createEvent({
+      type: "status",
+      description: `Probabilidade alterada de ${previous.probability ?? 0}% para ${data.probability ?? 0}%`,
       opportunityId: data.id,
       clientId: data.clientId,
       ownerSellerId: data.ownerSellerId

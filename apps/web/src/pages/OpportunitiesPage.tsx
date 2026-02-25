@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
 type ViewMode = "list" | "pipeline";
+type EventType = "comentario" | "mudanca_etapa" | "status";
 
 type Opportunity = {
   id: string;
@@ -35,6 +36,16 @@ type Opportunity = {
 };
 
 type Client = { id: string; name: string };
+type EventItem = {
+  id: string;
+  type: EventType;
+  description: string;
+  createdAt: string;
+  ownerSeller?: {
+    id: string;
+    name: string;
+  } | null;
+};
 
 type Summary = {
   totalPipelineValue: number;
@@ -82,6 +93,12 @@ const stageLabel: Record<Stage, string> = {
   proposta: "Proposta",
   ganho: "Ganho",
   perdido: "Perdido"
+};
+
+const eventLabel: Record<EventType, string> = {
+  comentario: "Comentário",
+  mudanca_etapa: "Mudança de etapa",
+  status: "Status"
 };
 
 const emptyForm: FormState = {
@@ -134,6 +151,7 @@ export default function OpportunitiesPage() {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAddingComment, setIsAddingComment] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -148,6 +166,9 @@ export default function OpportunitiesPage() {
     dateTo: "",
     overdue: false
   });
+  const [opportunityEvents, setOpportunityEvents] = useState<EventItem[]>([]);
+  const [loadingOpportunityEvents, setLoadingOpportunityEvents] = useState(false);
+  const [opportunityComment, setOpportunityComment] = useState("");
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -340,6 +361,54 @@ export default function OpportunitiesPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const loadOpportunityEvents = async (opportunityId: string) => {
+    setLoadingOpportunityEvents(true);
+    try {
+      const response = await api.get(`/events?opportunityId=${opportunityId}`);
+      setOpportunityEvents(response.data || []);
+    } finally {
+      setLoadingOpportunityEvents(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!editing) {
+      setOpportunityEvents([]);
+      setOpportunityComment("");
+      return;
+    }
+
+    loadOpportunityEvents(editing).catch(() => toast.error("Erro ao carregar histórico da oportunidade"));
+  }, [editing]);
+
+  const onAddOpportunityComment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editing) return;
+
+    const description = opportunityComment.trim();
+    if (!description) {
+      toast.error("Digite um comentário antes de adicionar");
+      return;
+    }
+
+    setIsAddingComment(true);
+    try {
+      await api.post("/events", {
+        type: "comentario",
+        description,
+        opportunityId: editing,
+        clientId: form.clientId
+      });
+      setOpportunityComment("");
+      await loadOpportunityEvents(editing);
+      toast.success("Comentário adicionado ao histórico");
+    } catch {
+      toast.error("Não foi possível adicionar o comentário");
+    } finally {
+      setIsAddingComment(false);
+    }
+  };
+
   const onDelete = async (id: string) => {
     await api.delete(`/opportunities/${id}`);
     await load();
@@ -448,6 +517,43 @@ export default function OpportunitiesPage() {
         <textarea className="rounded-lg border border-slate-200 p-2 md:col-span-4" placeholder="Notas" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
         <button disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-500 md:col-span-4">{isSaving ? "Salvando..." : "Salvar"}</button>
       </form>
+
+      {editing ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 text-lg font-semibold text-slate-900">Histórico</h3>
+          <form className="space-y-2" onSubmit={onAddOpportunityComment}>
+            <textarea
+              className="w-full rounded-lg border border-slate-200 p-2 text-sm"
+              rows={3}
+              placeholder="Escreva um comentário para esta oportunidade"
+              value={opportunityComment}
+              onChange={(event) => setOpportunityComment(event.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={isAddingComment}
+              className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-500"
+            >
+              {isAddingComment ? "Adicionando..." : "Adicionar comentário"}
+            </button>
+          </form>
+
+          <div className="mt-4 space-y-2">
+            {loadingOpportunityEvents ? <p className="text-sm text-slate-500">Carregando histórico...</p> : null}
+            {!loadingOpportunityEvents && opportunityEvents.length ? opportunityEvents.map((event) => (
+              <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-800">{eventLabel[event.type]}</span>
+                  <span className="text-xs text-slate-500">{formatDateBR(event.createdAt)}</span>
+                </div>
+                <p className="mt-1 text-slate-700">{event.description}</p>
+                <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Usuário"}</p>
+              </div>
+            )) : null}
+            {!loadingOpportunityEvents && !opportunityEvents.length ? <p className="text-sm text-slate-500">Sem eventos registrados para esta oportunidade.</p> : null}
+          </div>
+        </section>
+      ) : null}
 
       {viewMode === "list" ? (
         <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
