@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { DragEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
@@ -82,6 +82,11 @@ type FormState = {
   notes: string;
   clientId: string;
   ownerSellerId: string;
+};
+
+type DragOpportunityPayload = {
+  opportunityId: string;
+  sourceStage: Stage;
 };
 
 const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
@@ -280,6 +285,52 @@ export default function OpportunitiesPage() {
   }, [sortedItems]);
 
   const getWeightedValue = (item: Opportunity) => item.weightedValue ?? (Number(item.value || 0) * Number(item.probability || 0)) / 100;
+
+  const handlePipelineCardDragStart = (event: DragEvent<HTMLDivElement>, item: Opportunity) => {
+    const payload: DragOpportunityPayload = {
+      opportunityId: item.id,
+      sourceStage: item.stage
+    };
+    event.dataTransfer.setData("application/json", JSON.stringify(payload));
+    event.dataTransfer.effectAllowed = "move";
+  };
+
+  const handlePipelineColumnDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handlePipelineColumnDrop = async (event: DragEvent<HTMLDivElement>, destinationStage: Stage) => {
+    event.preventDefault();
+
+    const payloadRaw = event.dataTransfer.getData("application/json");
+    if (!payloadRaw) return;
+
+    let payload: DragOpportunityPayload;
+    try {
+      payload = JSON.parse(payloadRaw) as DragOpportunityPayload;
+    } catch {
+      return;
+    }
+
+    if (payload.sourceStage === destinationStage) return;
+
+    const previousItems = items;
+    const targetOpportunity = previousItems.find((item) => item.id === payload.opportunityId);
+    if (!targetOpportunity) return;
+
+    setItems((currentItems) => currentItems.map((item) => (
+      item.id === payload.opportunityId ? { ...item, stage: destinationStage } : item
+    )));
+
+    try {
+      await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
+    } catch {
+      setItems(previousItems);
+      toast.error("Não foi possível mover a oportunidade de etapa");
+      load().catch(() => toast.error("Erro ao atualizar pipeline"));
+    }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -609,7 +660,16 @@ export default function OpportunitiesPage() {
               const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
               const stageWeightedTotal = stageItems.reduce((sum, item) => sum + getWeightedValue(item), 0);
               return (
-                <div key={stage} className="flex min-h-[320px] flex-col rounded-xl border border-slate-200 bg-slate-50">
+                <div
+                  key={stage}
+                  className="flex min-h-[320px] flex-col rounded-xl border border-slate-200 bg-slate-50"
+                  onDragOver={handlePipelineColumnDragOver}
+                  onDrop={(event) => {
+                    handlePipelineColumnDrop(event, stage).catch(() => {
+                      toast.error("Erro inesperado ao mover oportunidade");
+                    });
+                  }}
+                >
                   <div className="border-b border-slate-200 px-3 py-2">
                     <div className="font-semibold text-slate-800">{stageLabel[stage]}</div>
                     <div className="text-xs text-slate-500">{stageItems.length} oportunidade(s)</div>
@@ -618,7 +678,21 @@ export default function OpportunitiesPage() {
                     {loading ? Array.from({ length: 3 }).map((_, index) => (
                       <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
                     )) : stageItems.length ? stageItems.map((item) => (
-                      <div key={item.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+                      <div
+                        key={item.id}
+                        className="space-y-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+                        draggable
+                        onDragStart={(event) => handlePipelineCardDragStart(event, item)}
+                        onClick={() => navigate(`/oportunidades/${item.id}`)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            navigate(`/oportunidades/${item.id}`);
+                          }
+                        }}
+                      >
                         <div className="text-sm font-semibold text-slate-800">{item.title}</div>
                         <div className="text-xs text-slate-600">{getClientName(item)}</div>
                         <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
