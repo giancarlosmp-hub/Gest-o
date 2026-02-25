@@ -28,105 +28,94 @@ enum ActivityType {
   reuniao
 }
 
-enum EventType {
+enum TimelineEventType {
   comentario
-  mudanca_etapa
-  status
+  atividade
+  mudanca_estagio
+  criacao_oportunidade
+  mudanca_followup
 }
 
 model User {
-  id           String        @id @default(cuid())
-  name         String
-  email        String        @unique
-  passwordHash String
-  role         Role
-  region       String?
-  createdAt    DateTime      @default(now())
-  clients      Client[]
-  companies    Company[]
-  contacts     Contact[]
-  opportunities Opportunity[]
-  activities   Activity[]
-  events       Event[]
-  goals        Goal[]
-  sales        Sale[]
+  id             String          @id @default(cuid())
+  name           String
+  email          String          @unique
+  passwordHash   String
+  role           Role
+  region         String?
+  createdAt      DateTime        @default(now())
+  clients        Client[]
+  companies      Company[]
+  contacts       Contact[]
+  opportunities  Opportunity[]
+  activities     Activity[]
+  goals          Goal[]
+  sales          Sale[]
+  timelineEvents TimelineEvent[]
 }
 
 model Client {
-  id            String      @id @default(cuid())
-  name          String
-  city          String
-  state         String
-  region        String
-  potentialHa   Float?      @default(0)
-  farmSizeHa    Float?      @default(0)
-  ownerSellerId String
-  ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
-  opportunities Opportunity[]
-  events        Event[]
-  createdAt     DateTime    @default(now())
+  id             String          @id @default(cuid())
+  name           String
+  city           String
+  state          String
+  region         String
+  potentialHa    Float?          @default(0)
+  farmSizeHa     Float?          @default(0)
+  ownerSellerId  String
+  ownerSeller    User            @relation(fields: [ownerSellerId], references: [id])
+  opportunities  Opportunity[]
+  timelineEvents TimelineEvent[]
+  createdAt      DateTime        @default(now())
 }
 
 model Company {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
   cnpj          String?
   segment       String
   ownerSellerId String
-  ownerSeller   User      @relation(fields: [ownerSellerId], references: [id])
+  ownerSeller   User     @relation(fields: [ownerSellerId], references: [id])
   contacts      Contact[]
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime @default(now())
 }
 
 model Contact {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   name          String
   phone         String
   email         String
   companyId     String
-  company       Company   @relation(fields: [companyId], references: [id])
+  company       Company  @relation(fields: [companyId], references: [id])
   ownerSellerId String
-  ownerSeller   User      @relation(fields: [ownerSellerId], references: [id])
-  createdAt     DateTime  @default(now())
+  ownerSeller   User     @relation(fields: [ownerSellerId], references: [id])
+  createdAt     DateTime @default(now())
 }
 
 model Opportunity {
-  id                String           @id @default(cuid())
-  title             String
-  value             Float
-  stage             OpportunityStage
-  crop              String?
-  season            String?
-  areaHa            Float?
-  productOffered    String?
-  plantingForecastDate DateTime?
-  expectedTicketPerHa Float?
-  proposalDate      DateTime
-  followUpDate      DateTime
-  expectedCloseDate DateTime
-  lastContactAt     DateTime?
-  probability       Int?
-  notes             String?
-  clientId          String
-  client            Client           @relation(fields: [clientId], references: [id])
-  ownerSellerId     String
-  ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
-  activities        Activity[]
-  events            Event[]
-  createdAt         DateTime         @default(now())
-}
-
-model Event {
-  id            String       @id @default(cuid())
-  type          EventType
-  description   String
-  clientId      String?
-  client        Client?      @relation(fields: [clientId], references: [id])
-  opportunityId String?
-  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
-  ownerSellerId String
-  ownerSeller   User         @relation(fields: [ownerSellerId], references: [id])
-  createdAt     DateTime     @default(now())
+  id                    String           @id @default(cuid())
+  title                 String
+  value                 Float
+  stage                 OpportunityStage
+  crop                  String?
+  season                String?
+  areaHa                Float?
+  productOffered        String?
+  plantingForecastDate  DateTime?
+  expectedTicketPerHa   Float?
+  proposalDate          DateTime
+  followUpDate          DateTime
+  expectedCloseDate     DateTime
+  lastContactAt         DateTime?
+  probability           Int?
+  notes                 String?
+  clientId              String
+  client                Client           @relation(fields: [clientId], references: [id])
+  ownerSellerId         String
+  ownerSeller           User             @relation(fields: [ownerSellerId], references: [id])
+  activities            Activity[]
+  timelineEvents        TimelineEvent[]
+  createdAt             DateTime         @default(now())
 }
 
 model Activity {
@@ -158,4 +147,22 @@ model Sale {
   sellerId  String
   seller    User     @relation(fields: [sellerId], references: [id])
   createdAt DateTime @default(now())
+}
+
+model TimelineEvent {
+  id            String            @id @default(cuid())
+  type          TimelineEventType
+  title         String
+  message       String
+  clientId      String
+  client        Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  opportunityId String?
+  opportunity   Opportunity?      @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User              @relation(fields: [userId], references: [id])
+  meta          Json?
+  createdAt     DateTime          @default(now())
+
+  @@index([clientId, createdAt(sort: Desc)])
+  @@index([opportunityId])
 }
