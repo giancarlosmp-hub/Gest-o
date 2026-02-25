@@ -1,17 +1,19 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
-import { formatCurrencyBRL, formatDateBR } from "../lib/formatters";
+import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
-type ViewMode = "lista" | "pipeline";
+type ReturnStatus = "overdue" | "dueSoon" | "ok";
 
 type Opportunity = {
   id: string;
   title: string;
   value: number;
   stage: Stage;
+  crop?: string | null;
+  season?: string | null;
   proposalDate: string;
   followUpDate: string;
   expectedCloseDate: string;
@@ -20,20 +22,32 @@ type Opportunity = {
   notes?: string | null;
   clientId: string;
   ownerSellerId: string;
-  client?: { id: string; name: string };
+  client?: { id: string; name: string } | string;
   ownerSeller?: { id: string; name: string };
+  owner?: string;
+  weightedValue?: number;
+  areaHa?: number | null;
+  offeredProduct?: string | null;
 };
 
 type Client = { id: string; name: string };
+
+type Summary = {
+  totalPipelineValue: number;
+  totalWeightedValue: number;
+  overdueCount: number;
+  overdueValue: number;
+};
 
 type Filters = {
   stage: string;
   ownerSellerId: string;
   clientId: string;
-  from: string;
-  to: string;
+  crop: string;
+  season: string;
+  dateFrom: string;
+  dateTo: string;
   overdue: boolean;
-  dueSoon: boolean;
 };
 
 const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
@@ -46,18 +60,12 @@ const stageLabel: Record<Stage, string> = {
   perdido: "Perdido",
 };
 
-const stageAccent: Record<Stage, string> = {
-  prospeccao: "from-sky-500 to-cyan-500",
-  negociacao: "from-indigo-500 to-blue-500",
-  proposta: "from-violet-500 to-fuchsia-500",
-  ganho: "from-emerald-500 to-green-500",
-  perdido: "from-slate-500 to-slate-600",
-};
-
 const emptyForm = {
   title: "",
   value: 0,
   stage: "prospeccao" as Stage,
+  crop: "",
+  season: "",
   proposalDate: "",
   followUpDate: "",
   expectedCloseDate: "",
@@ -68,6 +76,13 @@ const emptyForm = {
   ownerSellerId: "",
 };
 
+const emptySummary: Summary = {
+  totalPipelineValue: 0,
+  totalWeightedValue: 0,
+  overdueCount: 0,
+  overdueValue: 0,
+};
+
 function toDateInput(value?: string | null) {
   if (!value) return "";
   return new Date(value).toISOString().slice(0, 10);
@@ -76,76 +91,111 @@ function toDateInput(value?: string | null) {
 export default function OpportunitiesPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<Opportunity[]>([]);
+  const [summary, setSummary] = useState<Summary>(emptySummary);
   const [clients, setClients] = useState<Client[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
+  const [details, setDetails] = useState<Opportunity | null>(null);
   const [form, setForm] = useState<any>(emptyForm);
-  const [viewMode, setViewMode] = useState<ViewMode>("lista");
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
-  const [filters, setFilters] = useState<Filters>({ stage: "", ownerSellerId: "", clientId: "", from: "", to: "", overdue: false, dueSoon: false });
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filters, setFilters] = useState<Filters>({
+    stage: "",
+    ownerSellerId: "",
+    clientId: "",
+    crop: "",
+    season: "",
+    dateFrom: "",
+    dateTo: "",
+    overdue: false,
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const load = async () => {
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([key, value]) => {
-      if (typeof value === "boolean") {
-        if (value) params.set(key, "true");
-        return;
-      }
-      if (value) params.set(key, value);
-    });
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      Object.entries(filters).forEach(([key, value]) => {
+        if (typeof value === "boolean") {
+          if (value) params.set(key, "true");
+          return;
+        }
+        if (value) params.set(key, value);
+      });
+      if (debouncedSearch) params.set("search", debouncedSearch);
 
-    const [oppRes, clientsRes] = await Promise.all([
-      api.get(`/opportunities${params.toString() ? `?${params}` : ""}`),
-      api.get("/clients"),
-    ]);
-    setItems(oppRes.data);
-    setClients(clientsRes.data);
+      const query = params.toString() ? `?${params}` : "";
+      const [oppRes, summaryRes, clientsRes] = await Promise.all([
+        api.get(`/opportunities${query}`),
+        api.get("/opportunities/summary"),
+        api.get("/clients"),
+      ]);
+
+      setItems(oppRes.data || []);
+      setSummary(summaryRes.data || emptySummary);
+      setClients(clientsRes.data || []);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     load().catch(() => toast.error("Erro ao carregar oportunidades"));
-  }, [filters]);
+  }, [filters, debouncedSearch]);
 
   const sellers = useMemo(() => {
     const map = new Map<string, string>();
     items.forEach((item) => {
       if (item.ownerSeller?.id && item.ownerSeller?.name) map.set(item.ownerSeller.id, item.ownerSeller.name);
+      if (item.ownerSellerId && item.owner) map.set(item.ownerSellerId, item.owner);
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [items]);
 
-  const stageTotals = useMemo(() => {
-    return stages.reduce((acc, stage) => {
-      acc[stage] = items.filter((item) => item.stage === stage).reduce((sum, item) => sum + Number(item.value || 0), 0);
-      return acc;
-    }, {} as Record<Stage, number>);
-  }, [items]);
+  const cropOptions = useMemo(() => Array.from(new Set(items.map((item) => item.crop).filter(Boolean))) as string[], [items]);
+  const seasonOptions = useMemo(() => Array.from(new Set(items.map((item) => item.season).filter(Boolean))) as string[], [items]);
 
-  const opportunitiesByStage = useMemo(() => {
-    return stages.reduce((acc, stage) => {
-      acc[stage] = items.filter((item) => item.stage === stage);
-      return acc;
-    }, {} as Record<Stage, Opportunity[]>);
-  }, [items]);
-
-  const totalValue = useMemo(() => items.reduce((sum, item) => sum + Number(item.value || 0), 0), [items]);
-  const weightedValue = useMemo(() => items.reduce((sum, item) => sum + (Number(item.value || 0) * Number(item.probability || 0)) / 100, 0), [items]);
-
-  const getStatus = (item: Opportunity) => {
-    if (["ganho", "perdido"].includes(item.stage)) return null;
+  const getReturnStatus = (item: Opportunity): ReturnStatus => {
+    if (["ganho", "perdido"].includes(item.stage)) return "ok";
     const today = new Date();
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const followUp = new Date(item.followUpDate);
-    const followUpStart = new Date(followUp.getFullYear(), followUp.getMonth(), followUp.getDate());
+    const returnDate = new Date(item.expectedCloseDate);
+    const returnDateStart = new Date(returnDate.getFullYear(), returnDate.getMonth(), returnDate.getDate());
 
-    if (followUpStart < todayStart) return "overdue";
+    if (returnDateStart < todayStart) return "overdue";
 
     const limit = new Date(todayStart);
     limit.setDate(limit.getDate() + 2);
-    if (followUpStart >= todayStart && followUpStart <= limit) return "dueSoon";
+    if (returnDateStart <= limit) return "dueSoon";
 
-    return null;
+    return "ok";
   };
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
+      const aOverdue = getReturnStatus(a) === "overdue" ? 0 : 1;
+      const bOverdue = getReturnStatus(b) === "overdue" ? 0 : 1;
+      if (aOverdue !== bOverdue) return aOverdue - bOverdue;
+      return new Date(a.expectedCloseDate).getTime() - new Date(b.expectedCloseDate).getTime();
+    });
+  }, [items]);
+
+  const conversionRate = useMemo(() => {
+    if (!items.length) return 0;
+    const won = items.filter((item) => item.stage === "ganho").length;
+    return (won / items.length) * 100;
+  }, [items]);
+
+  const getClientName = (item: Opportunity) => {
+    if (typeof item.client === "string") return item.client;
+    return item.client?.name || item.clientId;
+  };
+
+  const getSellerName = (item: Opportunity) => item.ownerSeller?.name || item.owner || item.ownerSellerId;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -156,17 +206,18 @@ export default function OpportunitiesPage() {
       lastContactAt: form.lastContactAt || undefined,
       notes: form.notes || undefined,
       ownerSellerId: form.ownerSellerId || undefined,
+      crop: form.crop || undefined,
+      season: form.season || undefined,
     };
 
     try {
-      if (editing) {
-        await api.put(`/opportunities/${editing}`, payload);
-      } else {
-        await api.post("/opportunities", payload);
-      }
+      if (editing) await api.put(`/opportunities/${editing}`, payload);
+      else await api.post("/opportunities", payload);
+
       setForm(emptyForm);
       setEditing(null);
       await load();
+      toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
       toast.error(error.response?.data?.message || "Erro ao salvar oportunidade");
     }
@@ -182,74 +233,36 @@ export default function OpportunitiesPage() {
       lastContactAt: toDateInput(item.lastContactAt),
       probability: item.probability ?? "",
       notes: item.notes ?? "",
+      crop: item.crop ?? "",
+      season: item.season ?? "",
     });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const onDelete = async (id: string) => {
     await api.delete(`/opportunities/${id}`);
     await load();
-  };
-
-  const moveToStage = async (item: Opportunity, nextStage: Stage) => {
-    if (item.stage === nextStage) return;
-    const previousItems = items;
-    const updatedItems = items.map((current) => current.id === item.id ? { ...current, stage: nextStage } : current);
-
-    setItems(updatedItems);
-    try {
-      await api.put(`/opportunities/${item.id}`, {
-        title: item.title,
-        value: Number(item.value),
-        stage: nextStage,
-        proposalDate: toDateInput(item.proposalDate),
-        followUpDate: toDateInput(item.followUpDate),
-        expectedCloseDate: toDateInput(item.expectedCloseDate),
-        lastContactAt: toDateInput(item.lastContactAt) || undefined,
-        probability: item.probability ?? undefined,
-        notes: item.notes || undefined,
-        clientId: item.clientId,
-        ownerSellerId: item.ownerSellerId || undefined,
-      });
-      toast.success(`Oportunidade movida para ${stageLabel[nextStage]}`);
-    } catch {
-      setItems(previousItems);
-      toast.error("Não foi possível mover a oportunidade");
-    }
+    toast.success("Oportunidade excluída");
   };
 
   return (
-    <div className="space-y-5 pb-2">
+    <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setViewMode("lista")}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${viewMode === "lista" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-          >
-            Modo Lista
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("pipeline")}
-            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${viewMode === "pipeline" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
-          >
-            Modo Pipeline
-          </button>
-        </div>
+        <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">Modo Lista profissional</span>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-        <Card title="Total" value={formatCurrencyBRL(totalValue)} />
-        <Card title="Ponderado" value={formatCurrencyBRL(weightedValue)} />
-        {stages.map((stage) => (
-          <Card key={stage} title={`Total ${stageLabel[stage]}`} value={formatCurrencyBRL(stageTotals[stage])} />
-        ))}
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Card title="Pipeline total" value={formatCurrencyBRL(summary.totalPipelineValue)} loading={loading} />
+        <Card title="Valor ponderado" value={formatCurrencyBRL(summary.totalWeightedValue)} loading={loading} />
+        <Card title="Atrasadas" value={`${summary.overdueCount} • ${formatCurrencyBRL(summary.overdueValue)}`} loading={loading} />
+        <Card title="Taxa de conversão" value={`${formatPercentBR(conversionRate)} (${items.filter((item) => item.stage === "ganho").length}/${items.length || 0})`} loading={loading} />
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold text-slate-900">Filtros</h3>
-        <div className="grid gap-2 md:grid-cols-4 lg:grid-cols-6">
+        <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+          <input className="rounded-lg border border-slate-200 p-2" placeholder="Busca por título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
           <select className="rounded-lg border border-slate-200 p-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
             <option value="">Todos estágios</option>
             {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
@@ -262,27 +275,36 @@ export default function OpportunitiesPage() {
             <option value="">Todos clientes</option>
             {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
           </select>
-          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.from} onChange={(e) => setFilters((prev) => ({ ...prev, from: e.target.value }))} />
-          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.to} onChange={(e) => setFilters((prev) => ({ ...prev, to: e.target.value }))} />
-          <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={() => setFilters({ stage: "", ownerSellerId: "", clientId: "", from: "", to: "", overdue: false, dueSoon: false })}>Limpar filtros</button>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Atrasadas
+          <select className="rounded-lg border border-slate-200 p-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
+            <option value="">Todas culturas</option>
+            {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
+          </select>
+          <select className="rounded-lg border border-slate-200 p-2" value={filters.season} onChange={(e) => setFilters((prev) => ({ ...prev, season: e.target.value }))}>
+            <option value="">Todas safras</option>
+            {seasonOptions.map((season) => <option key={season} value={season}>{season}</option>)}
+          </select>
+          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
+          <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+            <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
           </label>
-          <label className="flex items-center gap-2 text-sm text-slate-700">
-            <input type="checkbox" checked={filters.dueSoon} onChange={(e) => setFilters((prev) => ({ ...prev, dueSoon: e.target.checked }))} />Vence em até 2 dias
-          </label>
+          <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={() => { setFilters({ stage: "", ownerSellerId: "", clientId: "", crop: "", season: "", dateFrom: "", dateTo: "", overdue: false }); setSearch(""); }}>
+            Limpar filtros
+          </button>
         </div>
       </div>
 
-      <form onSubmit={submit} className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
+      <form onSubmit={submit} className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
         <input required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
         <input required type="number" className="rounded-lg border border-slate-200 p-2" placeholder="Valor" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
         <select required className="rounded-lg border border-slate-200 p-2" value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
+        <input type="number" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => setForm({ ...form, probability: e.target.value })} />
         <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.proposalDate} onChange={(e) => setForm({ ...form, proposalDate: e.target.value })} />
         <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.followUpDate} onChange={(e) => setForm({ ...form, followUpDate: e.target.value })} />
         <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.expectedCloseDate} onChange={(e) => setForm({ ...form, expectedCloseDate: e.target.value })} />
         <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.lastContactAt} onChange={(e) => setForm({ ...form, lastContactAt: e.target.value })} />
-        <input type="number" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => setForm({ ...form, probability: e.target.value })} />
+        <input className="rounded-lg border border-slate-200 p-2" placeholder="Cultura" value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })} />
+        <input className="rounded-lg border border-slate-200 p-2" placeholder="Safra" value={form.season} onChange={(e) => setForm({ ...form, season: e.target.value })} />
         <select required className="rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
           <option value="">Selecione cliente</option>
           {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
@@ -293,125 +315,88 @@ export default function OpportunitiesPage() {
             {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </select>
         )}
-        <textarea className="rounded-lg border border-slate-200 p-2 md:col-span-3" placeholder="Notas" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        <button className="rounded-lg bg-slate-900 px-3 py-2 text-white md:col-span-3">{editing ? "Atualizar" : "Criar"}</button>
+        <textarea className="rounded-lg border border-slate-200 p-2 md:col-span-4" placeholder="Notas" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <button className="rounded-lg bg-slate-900 px-3 py-2 text-white md:col-span-4">{editing ? "Atualizar" : "Criar"}</button>
       </form>
 
-      {viewMode === "lista" ? (
-        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 text-left text-slate-600">
-                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Estágio</th><th className="p-2">Valor</th><th className="p-2">Prob.</th><th className="p-2">Entrada</th><th className="p-2">Retorno</th><th className="p-2">Status</th><th className="p-2">Ações</th>
+      <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <table className="min-w-[1500px] w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-slate-600">
+              <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? Array.from({ length: 6 }).map((_, index) => (
+              <tr key={`skeleton-${index}`} className="border-t border-slate-100">
+                <td className="p-2" colSpan={15}><div className="h-8 animate-pulse rounded bg-slate-100" /></td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => {
-                const status = getStatus(item);
-                return (
-                  <tr key={item.id} className={`border-t border-slate-100 ${status === "overdue" ? "bg-red-50/90" : status === "dueSoon" ? "bg-yellow-50/90" : ""}`}>
-                    <td className="p-2 font-medium text-slate-800">{item.title}</td>
-                    <td className="p-2">{item.client?.name || item.clientId}</td>
-                    <td className="p-2">{item.ownerSeller?.name || item.ownerSellerId}</td>
-                    <td className="p-2">{stageLabel[item.stage]}</td>
-                    <td className="p-2">{formatCurrencyBRL(item.value)}</td>
-                    <td className="p-2">{item.probability ?? "-"}%</td>
-                    <td className="p-2">{formatDateBR(item.proposalDate)}</td>
-                    <td className="p-2">{formatDateBR(item.followUpDate)}</td>
-                    <td className="p-2">
-                      {status === "overdue" ? <Badge className="bg-red-100 text-red-700">Vencida</Badge> : null}
-                      {status === "dueSoon" ? <Badge className="bg-yellow-100 text-yellow-700">Vence em até 2 dias</Badge> : null}
-                    </td>
-                    <td className="space-x-2 p-2">
-                      <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
-                      <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="overflow-x-auto pb-2">
-          <div className="grid min-w-[1100px] grid-cols-5 gap-4">
-            {stages.map((stage) => (
-              <section
-                key={stage}
-                className={`rounded-2xl border bg-white p-3 shadow-sm transition ${dragOverStage === stage ? "border-slate-400" : "border-slate-200"}`}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  setDragOverStage(stage);
-                }}
-                onDragLeave={() => setDragOverStage((prev) => (prev === stage ? null : prev))}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragOverStage(null);
-                  const droppedId = event.dataTransfer.getData("text/opportunity-id");
-                  const droppedItem = items.find((item) => item.id === droppedId);
-                  if (droppedItem) {
-                    moveToStage(droppedItem, stage);
-                  }
-                }}
-              >
-                <div className={`mb-3 rounded-xl bg-gradient-to-r ${stageAccent[stage]} px-3 py-2 text-white`}>
-                  <div className="text-sm font-semibold">{stageLabel[stage]}</div>
-                  <div className="text-xs opacity-90">{opportunitiesByStage[stage].length} oportunidade(s)</div>
-                  <div className="mt-1 text-sm font-bold">{formatCurrencyBRL(stageTotals[stage])}</div>
-                </div>
+            )) : sortedItems.length ? sortedItems.map((item) => {
+              const status = getReturnStatus(item);
+              const weighted = item.weightedValue ?? (Number(item.value || 0) * Number(item.probability || 0)) / 100;
+              return (
+                <tr key={item.id} className="border-t border-slate-100">
+                  <td className="p-2 font-medium text-slate-800">{item.title}</td>
+                  <td className="p-2">{getClientName(item)}</td>
+                  <td className="p-2">{getSellerName(item)}</td>
+                  <td className="p-2">{stageLabel[item.stage]}</td>
+                  <td className="p-2">{formatCurrencyBRL(item.value)}</td>
+                  <td className="p-2">{item.probability ?? 0}%</td>
+                  <td className="p-2">{formatCurrencyBRL(weighted)}</td>
+                  <td className="p-2">{item.crop || "-"}</td>
+                  <td className="p-2">{item.season || "-"}</td>
+                  <td className="p-2">{item.areaHa ?? "-"}</td>
+                  <td className="p-2">{item.offeredProduct || "-"}</td>
+                  <td className="p-2">{formatDateBR(item.proposalDate)}</td>
+                  <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
+                  <td className="p-2">
+                    {status === "overdue" ? <Badge className="bg-red-100 text-red-700">Atrasado</Badge> : null}
+                    {status === "dueSoon" ? <Badge className="bg-yellow-100 text-yellow-800">Vence em até 2 dias</Badge> : null}
+                    {status === "ok" ? <Badge className="bg-emerald-100 text-emerald-700">OK</Badge> : null}
+                  </td>
+                  <td className="space-x-2 whitespace-nowrap p-2">
+                    <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
+                    <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
+                    <button type="button" className="text-slate-700" onClick={() => setDetails(item)}>Detalhes</button>
+                  </td>
+                </tr>
+              );
+            }) : (
+              <tr>
+                <td colSpan={15} className="p-8 text-center text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
-                <div className="space-y-2">
-                  {opportunitiesByStage[stage].map((item) => {
-                    const status = getStatus(item);
-                    return (
-                      <article
-                        key={item.id}
-                        draggable
-                        onDragStart={(event) => {
-                          event.dataTransfer.setData("text/opportunity-id", item.id);
-                          setDraggingId(item.id);
-                        }}
-                        onDragEnd={() => {
-                          setDraggingId(null);
-                          setDragOverStage(null);
-                        }}
-                        className={`cursor-grab rounded-xl border p-3 shadow-sm transition active:cursor-grabbing ${draggingId === item.id ? "opacity-70" : ""} ${status === "overdue" ? "border-red-200 bg-red-50" : status === "dueSoon" ? "border-yellow-200 bg-yellow-50" : "border-slate-200 bg-white"}`}
-                      >
-                        <div className="mb-2 text-sm font-semibold text-slate-800">{item.title}</div>
-                        <div className="space-y-1 text-xs text-slate-600">
-                          <p>Cliente: {item.client?.name || item.clientId}</p>
-                          <p>Valor: <span className="font-semibold text-slate-800">{formatCurrencyBRL(item.value)}</span></p>
-                          <p>Retorno: {formatDateBR(item.followUpDate)}</p>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {status === "overdue" ? <Badge className="bg-red-100 text-red-700">Vencida</Badge> : null}
-                          {status === "dueSoon" ? <Badge className="bg-yellow-100 text-yellow-700">Vence em até 2 dias</Badge> : null}
-                        </div>
-                        <div className="mt-3 flex gap-3 text-xs">
-                          <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
-                          <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                  {!opportunitiesByStage[stage].length ? (
-                    <div className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-500">Arraste oportunidades para este estágio</div>
-                  ) : null}
-                </div>
-              </section>
-            ))}
+      {details ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" onClick={() => setDetails(null)}>
+          <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h4 className="text-lg font-semibold text-slate-900">Detalhes da oportunidade</h4>
+            <div className="mt-3 space-y-2 text-sm text-slate-700">
+              <p><strong>Título:</strong> {details.title}</p>
+              <p><strong>Cliente:</strong> {getClientName(details)}</p>
+              <p><strong>Vendedor:</strong> {getSellerName(details)}</p>
+              <p><strong>Valor:</strong> {formatCurrencyBRL(details.value)}</p>
+              <p><strong>Etapa:</strong> {stageLabel[details.stage]}</p>
+              <p><strong>Entrada proposta:</strong> {formatDateBR(details.proposalDate)}</p>
+              <p><strong>Retorno previsto:</strong> {formatDateBR(details.expectedCloseDate)}</p>
+              <p><strong>Notas:</strong> {details.notes || "-"}</p>
+            </div>
+            <button type="button" className="mt-4 rounded-lg bg-slate-900 px-3 py-2 text-white" onClick={() => setDetails(null)}>Fechar</button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function Card({ title, value }: { title: string; value: string }) {
+function Card({ title, value, loading }: { title: string; value: string; loading?: boolean }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
       <div className="text-xs text-slate-500">{title}</div>
-      <div className="font-bold text-slate-900">{value}</div>
+      {loading ? <div className="mt-1 h-6 w-3/4 animate-pulse rounded bg-slate-100" /> : <div className="font-bold text-slate-900">{value}</div>}
     </div>
   );
 }
