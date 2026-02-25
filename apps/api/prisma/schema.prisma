@@ -85,6 +85,8 @@ model Opportunity {
   title             String
   value             Float
   stage             OpportunityStage
+  crop              String?
+  season            String?
   proposalDate      DateTime
   followUpDate      DateTime
   expectedCloseDate DateTime

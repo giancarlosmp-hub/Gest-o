@@ -45,6 +45,8 @@ export const opportunitySchema = z.object({
   title: z.string().min(2),
   value: z.number().nonnegative(),
   stage: OpportunityStageEnum,
+  crop: z.string().min(2).optional(),
+  season: z.string().min(2).optional(),
   proposalDate: z.string(),
   followUpDate: z.string(),
   expectedCloseDate: z.string(),
