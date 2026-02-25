@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, timelineEventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 
@@ -123,7 +123,7 @@ const createEvent = async ({
     relatedClientId = opportunity?.clientId;
   }
 
-  return prisma.event.create({
+  return prisma.timelineEvent.create({
     data: {
       type,
       description: normalizedDescription,
@@ -532,7 +532,7 @@ router.get("/events", async (req, res) => {
   const opportunityId = req.query.opportunityId as string | undefined;
   const clientId = req.query.clientId as string | undefined;
 
-  const events = await prisma.event.findMany({
+  const events = await prisma.timelineEvent.findMany({
     where: {
       ...sellerWhere(req),
       ...(opportunityId ? { opportunityId } : {}),
@@ -548,7 +548,7 @@ router.get("/events", async (req, res) => {
 
   res.json(events);
 });
-router.post("/events", validateBody(eventSchema), async (req, res) => {
+router.post("/events", validateBody(timelineEventSchema), async (req, res) => {
   if (!req.body.clientId && !req.body.opportunityId) {
     return res.status(400).json({ message: "clientId ou opportunityId é obrigatório" });
   }
