@@ -9,7 +9,7 @@ export default function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const hidden = user?.role === "vendedor" ? ["Usuários", "Configurações"] : [];
+  const hidden = user?.role === "vendedor" ? ["Objetivos", "Usuários", "Configurações"] : [];
 
   const sidebar = (
     <aside className="bg-blue-700 text-white w-64 min-h-screen p-4 space-y-3">
