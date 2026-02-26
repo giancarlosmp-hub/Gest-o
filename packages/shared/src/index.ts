@@ -19,6 +19,8 @@ export const loginSchema = z.object({
   password: z.string().min(6)
 });
 
+export const ClientTypeEnum = z.enum(["PJ", "PF"]);
+
 export const clientSchema = z.object({
   name: z.string().min(2),
   city: z.string().min(2),
@@ -26,13 +28,17 @@ export const clientSchema = z.object({
   region: z.string().min(2),
   potentialHa: z.number().nonnegative().optional(),
   farmSizeHa: z.number().nonnegative().optional(),
+  clientType: ClientTypeEnum.optional(),
+  cnpj: z.string().optional(),
+  segment: z.string().min(2).optional(),
   ownerSellerId: z.string().optional()
 });
+
 
 export const companySchema = z.object({
   name: z.string().min(2),
   cnpj: z.string().optional(),
-  segment: z.string().min(2),
+  segment: z.string().min(2).optional(),
   ownerSellerId: z.string().optional()
 });
 
@@ -40,7 +46,7 @@ export const contactSchema = z.object({
   name: z.string().min(2),
   phone: z.string().min(8),
   email: z.string().email(),
-  companyId: z.string(),
+  clientId: z.string(),
   ownerSellerId: z.string().optional()
 });
 

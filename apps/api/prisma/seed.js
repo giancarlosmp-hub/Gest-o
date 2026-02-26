@@ -36,7 +36,6 @@ async function main() {
   await prisma.activity.deleteMany();
   await prisma.opportunity.deleteMany();
   await prisma.contact.deleteMany();
-  await prisma.company.deleteMany();
   await prisma.client.deleteMany();
 
   const now = new Date();
@@ -59,14 +58,7 @@ async function main() {
           region: seller.region || "Sudeste",
           potentialHa,
           farmSizeHa,
-          ownerSellerId: seller.id
-        }
-      });
-
-      const company = await prisma.company.create({
-        data: {
-          name: `Empresa ${seller.name} ${idx + 1}`,
-          cnpj: null,
+          clientType: "PJ",
           segment: "Agronegócio",
           ownerSellerId: seller.id
         }
@@ -77,7 +69,7 @@ async function main() {
           name: `Contato ${seller.name} ${idx + 1}`,
           phone: `1199999${String(idx).padStart(4, "0")}`,
           email: `${seller.email.replace("@", `.${idx + 1}@`)}`,
-          companyId: company.id,
+          clientId: client.id,
           ownerSellerId: seller.id
         }
       });
