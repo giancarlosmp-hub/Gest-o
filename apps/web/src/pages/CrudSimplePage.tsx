@@ -175,9 +175,25 @@ export default function CrudSimplePage({
 
     const name = String(form.name ?? "").trim();
     const state = String(form.state ?? "").trim();
+    const clientType = String(form.clientType ?? "").trim().toUpperCase();
+    const cnpjOrCpfDigits = String(form.cnpj ?? "").replace(/\D/g, "");
 
     if (!name) return "Nome é obrigatório.";
     if (state && !/^[A-Za-z]{2}$/.test(state)) return "UF deve conter exatamente 2 letras.";
+
+    if (cnpjOrCpfDigits) {
+      if (clientType === "PF" && cnpjOrCpfDigits.length !== 11) {
+        return "Para cliente PF, informe um CPF com 11 dígitos.";
+      }
+
+      if (clientType === "PJ" && cnpjOrCpfDigits.length !== 14) {
+        return "Para cliente PJ, informe um CNPJ com 14 dígitos.";
+      }
+
+      if (clientType !== "PF" && clientType !== "PJ" && ![11, 14].includes(cnpjOrCpfDigits.length)) {
+        return "CNPJ/CPF deve conter 11 (CPF) ou 14 (CNPJ) dígitos.";
+      }
+    }
 
     return null;
   };
