@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Search, SlidersHorizontal, UserRound } from "lucide-react";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatPercentBR } from "../lib/formatters";
+import { useAuth } from "../context/AuthContext";
 import {
   type SellerCardMetrics,
   buildSellerMetrics,
-  getCurrentMonthKey,
-  getPlaceholderObjective
+  getCurrentMonthKey
 } from "../lib/sellerMetrics";
 
 type TeamUser = {
@@ -31,6 +31,13 @@ type TeamActivity = {
   createdAt: string;
 };
 
+type SellerObjective = {
+  userId: string;
+  month: number;
+  year: number;
+  amount: number;
+};
+
 const roleLabel: Record<string, string> = {
   diretor: "Diretor",
   gerente: "Gerente",
@@ -53,29 +60,51 @@ function formatStatus(status?: string | null) {
 }
 
 export default function TeamPage() {
+  const { user } = useAuth();
   const [users, setUsers] = useState<TeamUser[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"todos" | "vendedores">("todos");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<TeamUser | null>(null);
   const [metricsBySeller, setMetricsBySeller] = useState<Record<string, SellerCardMetrics>>({});
+  const [objectiveModalUser, setObjectiveModalUser] = useState<TeamUser | null>(null);
+  const [objectiveAmount, setObjectiveAmount] = useState("");
+  const [objectiveMonth, setObjectiveMonth] = useState(() => getCurrentMonthKey());
+  const [savingObjective, setSavingObjective] = useState(false);
+
+  const isManagerProfile = user?.role === "gerente" || user?.role === "diretor";
+
+  const loadTeamData = async (monthYear = objectiveMonth) => {
+    const [yearString, monthString] = monthYear.split("-");
+    const year = Number(yearString);
+    const month = Number(monthString);
+    const monthKey = `${yearString}-${monthString}`;
+
+    const [usersResponse, opportunitiesResponse, activitiesResponse, objectivesResponse] = await Promise.all([
+      api.get<TeamUser[]>("/users"),
+      api.get<TeamOpportunity[]>("/opportunities"),
+      api.get<TeamActivity[]>("/activities"),
+      api.get<SellerObjective[]>(`/objectives?month=${month}&year=${year}`)
+    ]);
+
+    const loadedUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
+    const loadedOpportunities = Array.isArray(opportunitiesResponse.data) ? opportunitiesResponse.data : [];
+    const loadedActivities = Array.isArray(activitiesResponse.data) ? activitiesResponse.data : [];
+    const loadedObjectives = Array.isArray(objectivesResponse.data) ? objectivesResponse.data : [];
+
+    const objectivesBySeller = loadedObjectives.reduce<Record<string, number>>((acc, objective) => {
+      acc[objective.userId] = objective.amount;
+      return acc;
+    }, {});
+
+    setUsers(loadedUsers);
+    setMetricsBySeller(buildSellerMetrics(loadedUsers, loadedOpportunities, loadedActivities, objectivesBySeller, monthKey));
+  };
 
   useEffect(() => {
-    const loadUsers = async () => {
+    const run = async () => {
       try {
-        const monthKey = getCurrentMonthKey();
-        const [usersResponse, opportunitiesResponse, activitiesResponse] = await Promise.all([
-          api.get("/users"),
-          api.get<TeamOpportunity[]>("/opportunities"),
-          api.get<TeamActivity[]>("/activities")
-        ]);
-
-        const loadedUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
-        const loadedOpportunities = Array.isArray(opportunitiesResponse.data) ? opportunitiesResponse.data : [];
-        const loadedActivities = Array.isArray(activitiesResponse.data) ? activitiesResponse.data : [];
-
-        setUsers(loadedUsers);
-        setMetricsBySeller(buildSellerMetrics(loadedUsers, loadedOpportunities, loadedActivities, monthKey));
+        await loadTeamData(getCurrentMonthKey());
       } catch {
         const fallbackUsers = [
           { id: "seed-1", name: "Vendedor 1", role: "vendedor", status: "ativo" },
@@ -84,21 +113,50 @@ export default function TeamPage() {
         ];
 
         setUsers(fallbackUsers);
-        setMetricsBySeller(buildSellerMetrics(fallbackUsers, [], [], getCurrentMonthKey()));
+        setMetricsBySeller(buildSellerMetrics(fallbackUsers, [], [], {}, getCurrentMonthKey()));
       } finally {
         setLoading(false);
       }
     };
 
-    loadUsers();
+    void run();
   }, []);
 
   const filteredUsers = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return users
-      .filter((user) => (filter === "vendedores" ? user.role === "vendedor" : true))
-      .filter((user) => user.name.toLowerCase().includes(normalizedSearch));
+      .filter((teamUser) => (filter === "vendedores" ? teamUser.role === "vendedor" : true))
+      .filter((teamUser) => teamUser.name.toLowerCase().includes(normalizedSearch));
   }, [users, search, filter]);
+
+  const openObjectiveModal = (teamUser: TeamUser) => {
+    setObjectiveModalUser(teamUser);
+    setObjectiveAmount(String(metricsBySeller[teamUser.id]?.objectiveAmount ?? ""));
+  };
+
+  const handleSaveObjective = async () => {
+    if (!objectiveModalUser) return;
+
+    const [yearString, monthString] = objectiveMonth.split("-");
+    const parsedAmount = Number(objectiveAmount.replace(",", "."));
+
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
+
+    setSavingObjective(true);
+    try {
+      await api.put(`/objectives/${objectiveModalUser.id}`, {
+        month: Number(monthString),
+        year: Number(yearString),
+        amount: parsedAmount
+      });
+
+      await loadTeamData(objectiveMonth);
+      setObjectiveModalUser(null);
+      setObjectiveAmount("");
+    } finally {
+      setSavingObjective(false);
+    }
+  };
 
   return (
     <section className="space-y-5">
@@ -139,18 +197,20 @@ export default function TeamPage() {
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredUsers.map((user) => {
-            const metrics = metricsBySeller[user.id];
-            const objective = getPlaceholderObjective();
+          {filteredUsers.map((teamUser) => {
+            const metrics = metricsBySeller[teamUser.id];
+            const objective = metrics?.objectiveAmount ?? 0;
+            const progressWidth = objective > 0 ? Math.max(4, Math.min(100, metrics?.progressPercent ?? 0)) : 4;
+
             return (
-              <article key={user.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <article key={teamUser.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-4 flex items-start justify-between gap-3">
                   <div className="space-y-1">
-                    <h3 className="text-lg font-semibold text-slate-900">{user.name}</h3>
-                    <p className="text-sm text-slate-500">{formatRole(user.role)}</p>
+                    <h3 className="text-lg font-semibold text-slate-900">{teamUser.name}</h3>
+                    <p className="text-sm text-slate-500">{formatRole(teamUser.role)}</p>
                   </div>
                   <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                    {formatStatus(user.status)}
+                    {formatStatus(teamUser.status)}
                   </span>
                 </div>
 
@@ -189,15 +249,24 @@ export default function TeamPage() {
                     <div className="h-2 w-full rounded-full bg-slate-200">
                       <div
                         className="h-2 rounded-full bg-brand-700 transition-all"
-                        style={{ width: `${Math.max(4, Math.min(100, metrics?.progressPercent ?? 0))}%` }}
+                        style={{ width: `${progressWidth}%` }}
                       />
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-500">Objetivo placeholder: {formatCurrencyBRL(objective)}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">Objetivo do mês: {formatCurrencyBRL(objective)}</p>
                   </div>
                 </div>
 
+                {isManagerProfile && teamUser.role === "vendedor" && (
+                  <button
+                    onClick={() => openObjectiveModal(teamUser)}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+                  >
+                    Definir objetivo
+                  </button>
+                )}
+
                 <button
-                  onClick={() => setSelected(user)}
+                  onClick={() => setSelected(teamUser)}
                   className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                 >
                   <UserRound size={16} />
@@ -235,6 +304,55 @@ export default function TeamPage() {
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {objectiveModalUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold text-slate-900">Definir objetivo</h3>
+            <p className="mt-1 text-sm text-slate-500">Configure o objetivo mensal de {objectiveModalUser.name}.</p>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Objetivo do mês (R$)</span>
+                <input
+                  value={objectiveAmount}
+                  onChange={(event) => setObjectiveAmount(event.target.value)}
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-sm font-medium text-slate-700">Mês/ano (opcional)</span>
+                <input
+                  value={objectiveMonth}
+                  onChange={(event) => setObjectiveMonth(event.target.value)}
+                  type="month"
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex items-center gap-2">
+              <button
+                onClick={() => setObjectiveModalUser(null)}
+                className="inline-flex flex-1 items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveObjective}
+                disabled={savingObjective}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-60"
+              >
+                {savingObjective ? "Salvando..." : "Salvar"}
+              </button>
+            </div>
           </div>
         </div>
       )}

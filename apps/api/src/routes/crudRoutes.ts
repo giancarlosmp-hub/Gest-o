@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 
@@ -72,6 +72,29 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   daysOverdue: getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart),
   weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
 });
+
+
+const parseObjectivePeriod = (monthQuery?: string, yearQuery?: string) => {
+  const now = new Date();
+  const month = Number(monthQuery ?? now.getMonth() + 1);
+  const year = Number(yearQuery ?? now.getFullYear());
+
+  if (!Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return null;
+  }
+
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+
+  return {
+    month,
+    year,
+    monthKey
+  };
+};
 
 const assertProbability = (probability: number | null | undefined) => {
   if (probability === null || probability === undefined) return true;
@@ -612,6 +635,61 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   });
 
   return res.status(201).json(created);
+});
+
+
+router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
+  const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);
+
+  if (!parsedPeriod) {
+    return res.status(400).json({ message: "Mês/ano inválidos" });
+  }
+
+  const goals = await prisma.goal.findMany({
+    where: { month: parsedPeriod.monthKey },
+    orderBy: { createdAt: "desc" }
+  });
+
+  return res.json(
+    goals.map((goal) => ({
+      id: goal.id,
+      userId: goal.sellerId,
+      month: parsedPeriod.month,
+      year: parsedPeriod.year,
+      amount: goal.targetValue,
+      createdAt: goal.createdAt
+    }))
+  );
+});
+
+router.put("/objectives/:userId", authorize("diretor", "gerente"), validateBody(objectiveUpsertSchema), async (req, res) => {
+  const { month, year, amount } = req.body;
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  const seller = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true, role: true } });
+
+  if (!seller || seller.role !== "vendedor") {
+    return res.status(404).json({ message: "Vendedor não encontrado" });
+  }
+
+  const existing = await prisma.goal.findFirst({
+    where: {
+      sellerId: req.params.userId,
+      month: monthKey
+    }
+  });
+
+  const goal = existing
+    ? await prisma.goal.update({ where: { id: existing.id }, data: { targetValue: amount } })
+    : await prisma.goal.create({ data: { sellerId: req.params.userId, month: monthKey, targetValue: amount } });
+
+  return res.json({
+    id: goal.id,
+    userId: goal.sellerId,
+    month,
+    year,
+    amount: goal.targetValue,
+    createdAt: goal.createdAt
+  });
 });
 
 router.get("/goals", async (req, res) => {
