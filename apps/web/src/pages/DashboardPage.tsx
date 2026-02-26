@@ -356,8 +356,8 @@ export default function DashboardPage() {
         {series.objectiveTotal === 0 && (
           <div className="mt-2 text-sm text-amber-600">Objetivo do mês não definido.</div>
         )}
-        <div className="mt-4 grid grid-cols-1 gap-6 xl:grid-cols-12">
-          <div className="h-72 w-full xl:col-span-9">
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-stretch">
+          <div className="h-[340px] w-full xl:col-span-9 xl:h-[360px]">
             <Line
               options={lineOptions}
               data={{
@@ -383,50 +383,51 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="flex h-full flex-col gap-6 rounded-lg border border-slate-100 bg-slate-50/50 p-4 xl:col-span-3">
-            <div>
-              <div className="mb-1 text-sm font-medium text-slate-500">Faturado acumulado</div>
-              <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
-                {formatCurrencyBRL(salesPace.soldInMonth)}
+          <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 xl:col-span-3 xl:h-[360px]">
+            <div className="flex h-full flex-col gap-4 xl:overflow-y-auto xl:pr-1">
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-500">Faturado acumulado</div>
+                <div className="text-xl font-bold leading-tight text-slate-900 xl:text-2xl">
+                  {formatCurrencyBRL(salesPace.soldInMonth)}
+                </div>
               </div>
-            </div>
 
-            <div>
-              <div className="mb-1 text-sm font-medium text-slate-500">Objetivo do mês</div>
-              <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
-                {formatCurrencyBRL(salesPace.objectiveMonth)}
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-500">Objetivo do mês</div>
+                <div className="text-xl font-bold leading-tight text-slate-900 xl:text-2xl">
+                  {formatCurrencyBRL(salesPace.objectiveMonth)}
+                </div>
               </div>
-            </div>
 
-            <div>
-              <div className="mb-1 text-sm font-medium text-slate-500">Previsão projetada</div>
-              <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
-                {formatCurrencyBRL(salesPace.projectedRevenue)}
-              </div>
-              <div
-                className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
-                  salesPace.isProjectedAboveObjective
-                    ? "bg-green-100 text-green-700"
-                    : "bg-amber-100 text-amber-700"
-                }`}
-              >
-                {salesPace.isProjectedAboveObjective ? "Acima do objetivo" : "Abaixo do objetivo"}
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-500">
-                <span>Realizado</span>
-                <span
-                  className={`text-sm ${realizedTrendStyle.className}`}
-                  title="Comparado aos 3 dias anteriores"
-                  aria-label="Indicador de tendência do realizado"
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-500">Previsão projetada</div>
+                <div className="text-xl font-bold leading-tight text-slate-900 xl:text-2xl">
+                  {formatCurrencyBRL(salesPace.projectedRevenue)}
+                </div>
+                <div
+                  className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                    salesPace.isProjectedAboveObjective
+                      ? "bg-green-100 text-green-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
                 >
-                  {realizedTrendStyle.symbol}
-                </span>
+                  {salesPace.isProjectedAboveObjective ? "Acima do objetivo" : "Abaixo do objetivo"}
+                </div>
               </div>
-              <div className="text-xl font-semibold text-slate-900">{formatPercentBR(salesPace.realizedPercent)}</div>
-              <div className="mt-2 h-3 rounded-full bg-slate-100">
+
+              <div>
+                <div className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-500">
+                  <span>Realizado</span>
+                  <span
+                    className={`text-sm ${realizedTrendStyle.className}`}
+                    title="Comparado aos 3 dias anteriores"
+                    aria-label="Indicador de tendência do realizado"
+                  >
+                    {realizedTrendStyle.symbol}
+                  </span>
+                </div>
+                <div className="text-lg font-semibold text-slate-900">{formatPercentBR(salesPace.realizedPercent)}</div>
+                <div className="mt-2 h-3 rounded-full bg-slate-100">
                   <div
                     className="h-3 rounded-full bg-brand-600 transition-[width] duration-[600ms] ease-out motion-reduce:transition-none"
                     style={{ width: `${animatedRealizedPercent}%` }}
@@ -434,10 +435,11 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-            <div>
-              <div className="mb-1 text-sm font-medium text-slate-500">Necessário vender por dia útil</div>
-              <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
-                {salesPace.requiredPerBusinessDay === null ? "—" : formatCurrencyBRL(salesPace.requiredPerBusinessDay)}
+              <div>
+                <div className="mb-1 text-sm font-medium text-slate-500">Necessário vender por dia útil</div>
+                <div className="text-xl font-bold leading-tight text-slate-900 xl:text-2xl">
+                  {salesPace.requiredPerBusinessDay === null ? "—" : formatCurrencyBRL(salesPace.requiredPerBusinessDay)}
+                </div>
               </div>
             </div>
           </div>
