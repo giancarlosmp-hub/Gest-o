@@ -2,6 +2,7 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
+import BrandLogo from "../components/BrandLogo";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -22,7 +23,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-700 p-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-3 rounded-2xl bg-white p-6 shadow-lg">
-        <img src="/brand/demetra-logo-dark.svg" alt="Logo Demetra Agro" className="h-12 w-auto" />
+        <BrandLogo size="login" textClassName="text-slate-800" className="mb-1" />
         <p className="text-sm text-slate-600">Acesse o painel comercial.</p>
         <input className="w-full rounded-lg border p-2" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="w-full rounded-lg border p-2" type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} />

@@ -2,6 +2,7 @@ import { LogOut, Menu } from "lucide-react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import BrandLogo from "../components/BrandLogo";
 
 const items = ["Dashboard", "Equipe", "Objetivos", "Clientes", "Contatos", "Empresas", "Oportunidades", "Atividades", "Relatórios", "Usuários", "Configurações"];
 
@@ -14,7 +15,7 @@ export default function AppLayout() {
   const sidebar = (
     <aside className="bg-brand-700 text-white w-64 min-h-screen p-4 space-y-3">
       <h1 className="mb-6">
-        <img src="/brand/demetra-logo-light.svg" alt="Logo Demetra Agro" className="h-11 w-auto max-w-full" />
+        <BrandLogo size="sidebar" textClassName="text-white" />
       </h1>
       {items.filter((i) => !hidden.includes(i)).map((item) => {
         const path = "/" + (item === "Dashboard" ? "" : item.toLowerCase());
@@ -46,7 +47,7 @@ export default function AppLayout() {
           <button className="rounded-md p-1 text-brand-700 md:hidden" onClick={() => setOpen(true)} aria-label="Abrir menu">
             <Menu />
           </button>
-          <img src="/brand/demetra-logo-dark.svg" alt="Logo Demetra Agro" className="h-9 w-auto md:hidden" />
+          <BrandLogo size="header" textClassName="text-brand-700" className="md:hidden" />
           <div className="ml-auto flex items-center gap-3">
             <div className="text-sm text-slate-700"><strong>{user?.name}</strong> ({user?.role})</div>
             <button className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800" onClick={logout}>
