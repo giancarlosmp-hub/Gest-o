@@ -7,6 +7,8 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
+import { ClientType } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 
 const router = Router();
 router.use(authMiddleware);
@@ -120,6 +122,34 @@ const normalizeOpportunityDates = (payload: Record<string, unknown>) => {
       ? { lastContactAt: payload.lastContactAt ? new Date(new Date(String(payload.lastContactAt)).toISOString()) : null }
       : {})
   };
+};
+
+const CLIENT_SORT_FIELDS = new Set<keyof Prisma.ClientOrderByWithRelationInput>([
+  "name",
+  "city",
+  "state",
+  "region",
+  "segment",
+  "clientType",
+  "createdAt"
+]);
+
+const parsePositiveInt = (value: unknown, fallback: number) => {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+};
+
+const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationInput => {
+  if (!sortValue) return { createdAt: "desc" };
+
+  const [rawField, rawDirection] = sortValue.trim().split(/\s+/, 2);
+  const field = rawField as keyof Prisma.ClientOrderByWithRelationInput;
+  const direction = rawDirection?.toLowerCase() === "asc" ? "asc" : "desc";
+
+  if (!CLIENT_SORT_FIELDS.has(field)) return { createdAt: "desc" };
+
+  return { [field]: direction };
 };
 
 
@@ -311,8 +341,60 @@ router.get("/reports/agro-crm", async (req, res) => {
 });
 
 router.get("/clients", async (req, res) => {
-  const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
-  res.json(data);
+  const search = String(req.query.q || "").trim();
+  const state = String(req.query.uf || "").trim();
+  const region = String(req.query.regiao || "").trim();
+  const clientType = String(req.query.tipo || "").trim();
+  const sellerIdFilter = String(req.query.vendedorId || "").trim();
+  const page = parsePositiveInt(req.query.page, 1);
+  const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
+  const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
+
+  const parsedClientType = clientType.toUpperCase();
+  const isValidClientType = parsedClientType === ClientType.PF || parsedClientType === ClientType.PJ;
+
+  const where: Prisma.ClientWhereInput = {
+    ...sellerWhere(req),
+    ...(state ? { state: { equals: state, mode: "insensitive" } } : {}),
+    ...(region ? { region: { equals: region, mode: "insensitive" } } : {}),
+    ...(isValidClientType ? { clientType: parsedClientType } : {}),
+    ...(req.user?.role !== "vendedor" && sellerIdFilter ? { ownerSellerId: sellerIdFilter } : {}),
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search, mode: "insensitive" } },
+            { city: { contains: search, mode: "insensitive" } },
+            { state: { contains: search, mode: "insensitive" } },
+            { region: { contains: search, mode: "insensitive" } },
+            { segment: { contains: search, mode: "insensitive" } }
+          ]
+        }
+      : {})
+  };
+
+  const hasAdvancedQuery = ["q", "uf", "regiao", "tipo", "vendedorId", "page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+
+  if (!hasAdvancedQuery) {
+    const data = await prisma.client.findMany({ where, orderBy });
+    return res.json(data);
+  }
+
+  const [items, total] = await Promise.all([
+    prisma.client.findMany({
+      where,
+      orderBy,
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    }),
+    prisma.client.count({ where })
+  ]);
+
+  res.json({
+    items,
+    total,
+    page,
+    pageSize
+  });
 });
 router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
