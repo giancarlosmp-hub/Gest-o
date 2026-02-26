@@ -19,5 +19,5 @@ export default function LoginPage() {
     }
   };
 
-  return <div className="min-h-screen bg-blue-700 flex items-center justify-center p-4"><form onSubmit={onSubmit} className="bg-white p-6 rounded-xl w-full max-w-sm space-y-3"><h1 className="text-2xl font-bold">SalesForce Pro</h1><input className="w-full border p-2 rounded" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)}/><input className="w-full border p-2 rounded" type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)}/><button className="w-full bg-blue-700 text-white py-2 rounded">Entrar</button></form></div>;
+  return <div className="min-h-screen bg-blue-700 flex items-center justify-center p-4"><form onSubmit={onSubmit} className="bg-white p-6 rounded-xl w-full max-w-sm space-y-3"><h1 className="text-2xl font-bold">Demetra Agro Performance</h1><input className="w-full border p-2 rounded" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)}/><input className="w-full border p-2 rounded" type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)}/><button className="w-full bg-blue-700 text-white py-2 rounded">Entrar</button></form></div>;
 }
