@@ -14,9 +14,7 @@ type SidebarItem = {
 const items: SidebarItem[] = [
   { label: "Dashboard", path: "/" },
   { label: "Equipe", path: "/equipe", route: "equipe" },
-  { label: "Clientes", path: "/clientes" },
-  { label: "Contatos", path: "/contatos" },
-  { label: "Empresas", path: "/empresas" },
+  { label: "Clientes (Cliente 360)", path: "/clientes" },
   { label: "Oportunidades", path: "/oportunidades" },
   { label: "Atividades", path: "/atividades" },
   { label: "Relatórios", path: "/relatórios" },
