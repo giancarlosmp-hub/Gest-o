@@ -38,6 +38,11 @@ export default function CrudSimplePage({
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [quickFilters, setQuickFilters] = useState({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [isApplyingFilters, setIsApplyingFilters] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -56,9 +61,47 @@ export default function CrudSimplePage({
     }
   };
 
+  const loadClients = async () => {
+    setError(null);
+    setIsApplyingFilters(true);
+
+    const params: Record<string, string | number> = {
+      page,
+      pageSize
+    };
+
+    if (debouncedSearch) params.q = debouncedSearch;
+    if (quickFilters.uf) params.state = quickFilters.uf;
+    if (quickFilters.region) params.region = quickFilters.region;
+    if (quickFilters.clientType) params.clientType = quickFilters.clientType;
+    if (canFilterBySeller && quickFilters.ownerSellerId) params.ownerSellerId = quickFilters.ownerSellerId;
+
+    try {
+      const response = await api.get(endpoint, { params });
+      const payload = response.data;
+      setItems(Array.isArray(payload?.data) ? payload.data : []);
+      setTotalItems(Number(payload?.total ?? 0));
+      setTotalPages(Math.max(1, Number(payload?.totalPages ?? 1)));
+    } catch (e: any) {
+      setItems([]);
+      setTotalItems(0);
+      setTotalPages(1);
+      setError(e.response?.data?.message || "Não foi possível carregar os clientes.");
+    } finally {
+      setLoading(false);
+      setIsApplyingFilters(false);
+    }
+  };
+
   useEffect(() => {
+    if (isClientsPage) {
+      setLoading(true);
+      void loadClients();
+      return;
+    }
+
     void load();
-  }, [endpoint]);
+  }, [endpoint, isClientsPage, page, pageSize, debouncedSearch, quickFilters.uf, quickFilters.region, quickFilters.clientType, quickFilters.ownerSellerId, canFilterBySeller]);
 
   useEffect(() => {
     if (!isClientsPage || !canFilterBySeller) {
@@ -82,39 +125,25 @@ export default function CrudSimplePage({
     return () => clearTimeout(timer);
   }, [search]);
 
-  const filterOptions = useMemo(() => {
-    if (!isClientsPage) return { ufs: [] as string[], regions: [] as string[], clientTypes: [] as string[] };
+  const filterOptions = useMemo(() => ({
+    ufs: ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"],
+    regions: ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"],
+    clientTypes: ["PJ", "PF"]
+  }), []);
 
-    const compare = (a: string, b: string) => a.localeCompare(b, "pt-BR");
-    return {
-      ufs: Array.from(new Set(items.map((item) => String(item.state ?? "").trim().toUpperCase()).filter(Boolean))).sort(compare),
-      regions: Array.from(new Set(items.map((item) => String(item.region ?? "").trim()).filter(Boolean))).sort(compare),
-      clientTypes: Array.from(new Set(items.map((item) => String(item.clientType ?? "").trim().toUpperCase()).filter(Boolean))).sort(compare)
-    };
-  }, [isClientsPage, items]);
-
-  const visibleItems = useMemo(() => {
-    if (!isClientsPage) return items;
-
-    return items.filter((item) => {
-      const globalFields = [item.name, item.city, item.state, item.region, item.segment]
-        .map((value) => String(value ?? "").toLowerCase());
-
-      const matchesSearch = !debouncedSearch || globalFields.some((value) => value.includes(debouncedSearch));
-      const matchesUf = !quickFilters.uf || String(item.state ?? "").toUpperCase() === quickFilters.uf;
-      const matchesRegion = !quickFilters.region || String(item.region ?? "") === quickFilters.region;
-      const matchesClientType = !quickFilters.clientType || String(item.clientType ?? "").toUpperCase() === quickFilters.clientType;
-      const matchesSeller = !canFilterBySeller || !quickFilters.ownerSellerId || String(item.ownerSellerId ?? "") === quickFilters.ownerSellerId;
-
-      return matchesSearch && matchesUf && matchesRegion && matchesClientType && matchesSeller;
-    });
-  }, [canFilterBySeller, debouncedSearch, isClientsPage, items, quickFilters]);
+  const visibleItems = items;
 
   const clearClientFilters = () => {
     setSearch("");
     setDebouncedSearch("");
     setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+    setPage(1);
   };
+
+  useEffect(() => {
+    if (!isClientsPage) return;
+    setPage(1);
+  }, [debouncedSearch, quickFilters.uf, quickFilters.region, quickFilters.clientType, quickFilters.ownerSellerId, isClientsPage]);
 
   const parseFormValue = (fieldKey: string, fieldType: string | undefined, rawValue: string) => {
     if (fieldType === "number") return rawValue === "" ? "" : Number(rawValue);
@@ -267,7 +296,7 @@ export default function CrudSimplePage({
             ) : null}
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-sm text-slate-600">{visibleItems.length} clientes encontrados</span>
+            <span className="text-sm text-slate-600">{totalItems} clientes encontrados</span>
             <button
               type="button"
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
@@ -281,7 +310,12 @@ export default function CrudSimplePage({
 
       <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? <div className="p-4 text-slate-500">Carregando...</div> : null}
-        {error ? <div className="p-4 text-amber-600">{error}</div> : null}
+        {error ? (
+          <div className="space-y-3 p-4 text-amber-700">
+            <p>{error}</p>
+            <button type="button" className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm font-medium" onClick={() => (isClientsPage ? void loadClients() : void load())}>Tentar novamente</button>
+          </div>
+        ) : null}
         {!loading && !error ? (
           <table className="w-full text-sm">
             <thead>
@@ -306,10 +340,44 @@ export default function CrudSimplePage({
                   ) : null}
                 </tr>
               ))}
+              {visibleItems.length === 0 ? (
+                <tr>
+                  <td colSpan={fields.length + (detailsPath ? 1 : 0) + (!readOnly ? 1 : 0)} className="p-8 text-center text-slate-500">
+                    Nenhum registro encontrado com os filtros atuais.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         ) : null}
       </div>
+
+      {isClientsPage && !loading && !error ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="text-sm text-slate-600">
+            Página <span className="font-semibold text-slate-900">{page}</span> de <span className="font-semibold text-slate-900">{totalPages}</span> · Total de <span className="font-semibold text-slate-900">{totalItems}</span> clientes
+            {isApplyingFilters ? <span className="ml-2 text-slate-500">Atualizando...</span> : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page <= 1 || isApplyingFilters}
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page >= totalPages || isApplyingFilters}
+            >
+              Próximo
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {createInModal && isCreateModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
