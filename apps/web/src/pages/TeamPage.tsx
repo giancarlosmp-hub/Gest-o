@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Search, SlidersHorizontal, UserRound } from "lucide-react";
+import { Bar } from "react-chartjs-2";
+import {
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Legend,
+  LinearScale,
+  Tooltip,
+  type ChartOptions
+} from "chart.js";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
@@ -8,6 +18,8 @@ import {
   buildSellerMetrics,
   getCurrentMonthKey
 } from "../lib/sellerMetrics";
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
 type TeamUser = {
   id: string;
@@ -77,6 +89,7 @@ export default function TeamPage() {
   const [objectiveAmount, setObjectiveAmount] = useState("");
   const [objectiveMonth, setObjectiveMonth] = useState(() => getCurrentMonthKey());
   const [savingObjective, setSavingObjective] = useState(false);
+  const [teamActivitiesInMonth, setTeamActivitiesInMonth] = useState<number | null>(null);
 
   const isManagerProfile = user?.role === "gerente" || user?.role === "diretor";
 
@@ -97,6 +110,12 @@ export default function TeamPage() {
     const loadedOpportunities = Array.isArray(opportunitiesResponse.data) ? opportunitiesResponse.data : [];
     const loadedActivities = Array.isArray(activitiesResponse.data) ? activitiesResponse.data : [];
     const loadedObjectives = Array.isArray(objectivesResponse.data) ? objectivesResponse.data : [];
+    const sellerIds = new Set(loadedUsers.filter((teamUser) => teamUser.role === "vendedor").map((teamUser) => teamUser.id));
+
+    const activitiesInMonth = loadedActivities.filter((activity) => {
+      if (!sellerIds.has(activity.ownerSellerId)) return false;
+      return activity.createdAt?.slice(0, 7) === monthKey;
+    }).length;
 
     const objectivesBySeller = loadedObjectives.reduce<Record<string, number>>((acc, objective) => {
       acc[objective.userId] = objective.amount;
@@ -104,6 +123,7 @@ export default function TeamPage() {
     }, {});
 
     setUsers(loadedUsers);
+    setTeamActivitiesInMonth(activitiesInMonth);
     setMetricsBySeller(buildSellerMetrics(loadedUsers, loadedOpportunities, loadedActivities, objectivesBySeller, monthKey));
   };
 
@@ -119,6 +139,7 @@ export default function TeamPage() {
         ];
 
         setUsers(fallbackUsers);
+        setTeamActivitiesInMonth(null);
         setMetricsBySeller(buildSellerMetrics(fallbackUsers, [], [], {}, getCurrentMonthKey()));
       } finally {
         setLoading(false);
@@ -146,6 +167,84 @@ export default function TeamPage() {
   }, [users, metricsBySeller]);
 
   const topSellers = sellerRanking.slice(0, 3);
+
+  const teamSummary = useMemo(() => {
+    const sellerIds = new Set(users.filter((teamUser) => teamUser.role === "vendedor").map((teamUser) => teamUser.id));
+    const metricsList = Array.from(sellerIds).map((sellerId) => metricsBySeller[sellerId]).filter((value): value is SellerCardMetrics => Boolean(value));
+
+    const totalRevenue = metricsList.reduce((sum, metrics) => sum + (metrics.monthlyRevenue || 0), 0);
+    const totalObjective = metricsList.reduce((sum, metrics) => sum + (metrics.objectiveAmount || 0), 0);
+    const totalPipeline = metricsList.reduce((sum, metrics) => sum + (metrics.openPipelineValue || 0), 0);
+    const totalActivities = teamActivitiesInMonth ?? 0;
+    const progressPercent = totalObjective > 0 ? (totalRevenue / totalObjective) * 100 : 0;
+
+    return {
+      totalRevenue,
+      totalObjective,
+      totalPipeline,
+      totalActivities,
+      progressPercent
+    };
+  }, [users, metricsBySeller, teamActivitiesInMonth]);
+
+  const barChartOptions = useMemo<ChartOptions<"bar">>(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          display: false
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: "#4b5563" },
+          grid: { color: "rgba(15, 23, 42, 0.06)" }
+        },
+        y: {
+          ticks: { color: "#4b5563" },
+          grid: { color: "rgba(15, 23, 42, 0.08)" }
+        }
+      }
+    }),
+    []
+  );
+
+  const revenueBySellerChartData = useMemo(() => {
+    const labels = sellerRanking.map(({ seller }) => seller.name);
+    const values = sellerRanking.map(({ metrics }) => metrics?.monthlyRevenue ?? 0);
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: "Faturado no mês",
+          data: values,
+          backgroundColor: "#0B3C1D",
+          borderRadius: 6,
+          maxBarThickness: 42
+        }
+      ]
+    };
+  }, [sellerRanking]);
+
+  const progressBySellerChartData = useMemo(() => {
+    const labels = sellerRanking.map(({ seller }) => seller.name);
+    const values = sellerRanking.map(({ metrics }) => metrics?.progressPercent ?? 0);
+
+    return {
+      labels,
+      datasets: [
+        {
+          label: "% realizado",
+          data: values,
+          backgroundColor: "#348A4F",
+          borderRadius: 6,
+          maxBarThickness: 42
+        }
+      ]
+    };
+  }, [sellerRanking]);
 
   const openObjectiveModal = (teamUser: TeamUser) => {
     setObjectiveModalUser(teamUser);
@@ -215,6 +314,69 @@ export default function TeamPage() {
         </div>
       ) : (
         <>
+          <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Consolidado do time</h3>
+              <p className="text-sm text-slate-500">KPIs gerais do mês atual para acompanhamento rápido.</p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Total faturado no mês</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatCurrencyBRL(teamSummary.totalRevenue)}</p>
+              </article>
+              <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Objetivo total do mês</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatCurrencyBRL(teamSummary.totalObjective)}</p>
+              </article>
+              <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">% realizado do time</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatPercentBR(teamSummary.progressPercent, 0)}</p>
+              </article>
+              <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline total do time</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">{formatCurrencyBRL(teamSummary.totalPipeline)}</p>
+              </article>
+              <article className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">Atividades no mês</p>
+                <p className="mt-1 text-base font-semibold text-slate-900">
+                  {teamActivitiesInMonth === null ? "N/D" : teamSummary.totalActivities}
+                </p>
+              </article>
+            </div>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Faturado por vendedor (mês)</h3>
+              <div className="mt-4 h-72">
+                <Bar data={revenueBySellerChartData} options={barChartOptions} />
+              </div>
+            </article>
+
+            <article className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">% realizado por vendedor</h3>
+              <div className="mt-4 h-72">
+                <Bar
+                  data={progressBySellerChartData}
+                  options={{
+                    ...barChartOptions,
+                    scales: {
+                      ...barChartOptions.scales,
+                      y: {
+                        ticks: {
+                          color: "#4b5563",
+                          callback: (value) => `${Number(value)}%`
+                        },
+                        grid: { color: "rgba(15, 23, 42, 0.08)" }
+                      }
+                    }
+                  }}
+                />
+              </div>
+            </article>
+          </section>
+
           {isManagerProfile && (
             <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div>
