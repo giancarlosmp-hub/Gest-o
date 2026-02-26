@@ -74,6 +74,10 @@ const getBusinessDaysRemaining = (month: string) => {
 };
 
 const clampPercent = (value: number) => Math.max(0, Math.min(value, 100));
+const clampFiniteNonNegative = (value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(value, 0);
+};
 
 type RealizedTrendDirection = "up" | "down" | "flat";
 
@@ -131,6 +135,26 @@ const getRealizedTrend = (
   if (recentSum > previousSum) return "up";
   if (recentSum < previousSum) return "down";
   return "flat";
+};
+
+const getElapsedSalesDays = (labels: string[], referenceMonth: string) => {
+  if (!labels.length) return 0;
+
+  const [year, month] = referenceMonth.split("-").map(Number);
+  const now = new Date();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
+
+  if (!isCurrentMonth) return labels.length;
+
+  const parsedDays = labels
+    .map(getMonthDayFromLabel)
+    .filter((day): day is number => Number.isInteger(day));
+
+  if (parsedDays.length > 0) {
+    return parsedDays.filter((day) => day <= now.getDate()).length;
+  }
+
+  return Math.min(now.getDate(), labels.length);
 };
 
 export default function DashboardPage() {
@@ -238,6 +262,12 @@ export default function DashboardPage() {
     const requiredPerBusinessDay =
       remainingBusinessDays > 0 ? missingToSell / remainingBusinessDays : null;
     const percentObjectiveReached = objectiveMonth > 0 ? (soldInMonth / objectiveMonth) * 100 : 0;
+    const elapsedSalesDays = getElapsedSalesDays(series.labels, month);
+    const totalSalesDays = series.labels.length;
+    const projectedRevenueRaw =
+      elapsedSalesDays > 0 ? (series.realizedTotal / elapsedSalesDays) * totalSalesDays : 0;
+    const projectedRevenue = clampFiniteNonNegative(projectedRevenueRaw);
+    const isProjectedAboveObjective = projectedRevenue >= objectiveMonth;
 
     return {
       soldInMonth,
@@ -247,6 +277,8 @@ export default function DashboardPage() {
       percentObjectiveReached,
       missingToSell,
       requiredPerBusinessDay,
+      projectedRevenue,
+      isProjectedAboveObjective,
     };
   }, [summary, series, portfolio, month]);
 
@@ -363,6 +395,22 @@ export default function DashboardPage() {
               <div className="mb-1 text-sm font-medium text-slate-500">Objetivo do mês</div>
               <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
                 {formatCurrencyBRL(salesPace.objectiveMonth)}
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-sm font-medium text-slate-500">Previsão projetada</div>
+              <div className="text-2xl font-bold leading-tight text-slate-900 xl:text-3xl">
+                {formatCurrencyBRL(salesPace.projectedRevenue)}
+              </div>
+              <div
+                className={`mt-2 inline-flex rounded-full px-2 py-1 text-xs font-semibold ${
+                  salesPace.isProjectedAboveObjective
+                    ? "bg-green-100 text-green-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}
+              >
+                {salesPace.isProjectedAboveObjective ? "Acima do objetivo" : "Abaixo do objetivo"}
               </div>
             </div>
 
