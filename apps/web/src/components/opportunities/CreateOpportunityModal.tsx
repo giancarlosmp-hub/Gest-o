@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 
@@ -42,6 +42,7 @@ type CreateOpportunityModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFormChange: (next: FormState) => void;
   sanitizeNumericInput: (value: string, allowDecimal?: boolean) => string;
+  onQuickCreateClient: (payload: { name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
 };
 
 export default function CreateOpportunityModal({
@@ -61,14 +62,60 @@ export default function CreateOpportunityModal({
   onClose,
   onSubmit,
   onFormChange,
-  sanitizeNumericInput
+  sanitizeNumericInput,
+  onQuickCreateClient
 }: CreateOpportunityModalProps) {
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+  const [quickClient, setQuickClient] = useState({
+    name: "",
+    city: "",
+    state: "",
+    region: ""
+  });
 
   useEffect(() => {
     if (!open) return;
     titleInputRef.current?.focus();
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setIsQuickCreateOpen(false);
+    setIsCreatingClient(false);
+    setQuickCreateError(null);
+    setQuickClient({ name: "", city: "", state: "", region: "" });
+  }, [open]);
+
+  const handleQuickCreateClient = async () => {
+    const payload = {
+      name: quickClient.name.trim(),
+      city: quickClient.city.trim(),
+      state: quickClient.state.trim(),
+      region: quickClient.region.trim()
+    };
+
+    if (!payload.name || !payload.city || !payload.state || !payload.region) {
+      setQuickCreateError("Preencha nome, cidade, UF e região");
+      return;
+    }
+
+    setQuickCreateError(null);
+    setIsCreatingClient(true);
+
+    try {
+      const createdClient = await onQuickCreateClient(payload);
+      onFormChange({ ...form, clientId: createdClient.id });
+      setIsQuickCreateOpen(false);
+      setQuickClient({ name: "", city: "", state: "", region: "" });
+    } catch (error: any) {
+      setQuickCreateError(error?.message || "Não foi possível criar cliente");
+    } finally {
+      setIsCreatingClient(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -88,10 +135,36 @@ export default function CreateOpportunityModal({
         <form onSubmit={onSubmit} className="flex h-full flex-col">
           <div className="grid flex-1 gap-2 overflow-y-auto p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
             <input ref={titleInputRef} required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => onFormChange({ ...form, title: e.target.value })} />
-            <select required className="rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => onFormChange({ ...form, clientId: e.target.value })}>
-              <option value="">Selecione cliente</option>
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
+            <div className="space-y-2">
+              <select required className="w-full rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => onFormChange({ ...form, clientId: e.target.value })}>
+                <option value="">Selecione cliente</option>
+                {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+              </select>
+              <button
+                type="button"
+                className="text-sm font-medium text-brand-700 hover:text-brand-800"
+                onClick={() => {
+                  setIsQuickCreateOpen((current) => !current);
+                  setQuickCreateError(null);
+                }}
+              >
+                {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
+              </button>
+              {isQuickCreateOpen ? (
+                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="grid gap-2">
+                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => setQuickClient((prev) => ({ ...prev, name: e.target.value }))} />
+                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Cidade" value={quickClient.city} onChange={(e) => setQuickClient((prev) => ({ ...prev, city: e.target.value }))} />
+                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value }))} />
+                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Região" value={quickClient.region} onChange={(e) => setQuickClient((prev) => ({ ...prev, region: e.target.value }))} />
+                    {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
+                    <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
+                      {isCreatingClient ? "Criando cliente..." : "Salvar cliente"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
             {userRole !== "vendedor" ? (
               <select required className="rounded-lg border border-slate-200 p-2" value={form.ownerSellerId} onChange={(e) => onFormChange({ ...form, ownerSellerId: e.target.value })}>
                 <option value="">Selecione vendedor</option>

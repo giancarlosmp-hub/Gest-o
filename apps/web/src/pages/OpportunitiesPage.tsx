@@ -479,6 +479,30 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
+  const onQuickCreateClient = async (payload: { name: string; city: string; state: string; region: string }) => {
+    const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
+
+    try {
+      const response = await api.post("/clients", {
+        ...payload,
+        state: payload.state.toUpperCase(),
+        ownerSellerId
+      });
+
+      const createdClient = { id: response.data.id, name: response.data.name };
+      setClients((current) => {
+        const next = [...current, createdClient];
+        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+
+      toast.success("Cliente criado e selecionado");
+      return createdClient;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || "Não foi possível criar cliente";
+      throw new Error(errorMessage);
+    }
+  };
+
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
     setIsPipelineDrawerOpen(true);
@@ -724,6 +748,7 @@ export default function OpportunitiesPage() {
         onSubmit={submit}
         onFormChange={setForm}
         sanitizeNumericInput={sanitizeNumericInput}
+        onQuickCreateClient={onQuickCreateClient}
       />
 
       {viewMode === "list" ? (
