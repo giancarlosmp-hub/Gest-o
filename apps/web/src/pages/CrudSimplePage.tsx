@@ -60,6 +60,8 @@ export default function CrudSimplePage({
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
+  const isSeller = user?.role === "vendedor";
+  const canChooseOwnerSeller = user?.role === "diretor" || user?.role === "gerente";
 
   const load = async () => {
     setLoading(true);
@@ -228,7 +230,11 @@ export default function CrudSimplePage({
 
   const openCreateModal = () => {
     setEditing(null);
-    setForm({});
+    if (isClientsPage && isSeller && user?.id) {
+      setForm({ ownerSellerId: user.id });
+    } else {
+      setForm({});
+    }
     setFormError(null);
     setIsCreateModalOpen(true);
   };
@@ -244,8 +250,20 @@ export default function CrudSimplePage({
 
     setSaving(true);
     try {
-      if (editing) await api.put(`${endpoint}/${editing}`, form);
-      else await api.post(endpoint, form);
+      const payload = { ...form };
+
+      if (endpoint === "/clients") {
+        if (isSeller && user?.id) {
+          payload.ownerSellerId = user.id;
+        } else if (canChooseOwnerSeller) {
+          if (!payload.ownerSellerId) {
+            delete payload.ownerSellerId;
+          }
+        }
+      }
+
+      if (editing) await api.put(`${endpoint}/${editing}`, payload);
+      else await api.post(endpoint, payload);
 
       toast.success(editing ? "Registro atualizado com sucesso." : "Registro criado com sucesso.");
 
@@ -515,6 +533,41 @@ export default function CrudSimplePage({
               <div className="grid gap-3 md:grid-cols-2">
                 {fields.map((f) => {
                   const isRequired = endpoint === "/clients" ? f.key === "name" : true;
+                  const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
+
+                  if (isOwnerSellerField) {
+                    const sellerOptions = canChooseOwnerSeller
+                      ? users
+                      : user?.id && user?.name
+                        ? [{ id: user.id, name: user.name }]
+                        : [];
+                    const selectedOwnerSellerId = form.ownerSellerId ?? (isSeller && user?.id ? user.id : "");
+
+                    return (
+                      <div key={f.key} className="space-y-1 md:col-span-2">
+                        <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>{f.label}</label>
+                        <select
+                          id={`modal-${f.key}`}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                          value={selectedOwnerSellerId}
+                          disabled={isSeller}
+                          onChange={(e) => {
+                            setFormError(null);
+                            setForm({ ...form, ownerSellerId: e.target.value });
+                          }}
+                        >
+                          {canChooseOwnerSeller ? <option value="">Selecione o vendedor responsável</option> : null}
+                          {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                        </select>
+                        <p className="text-xs text-slate-500">
+                          {isSeller
+                            ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
+                            : "Defina o vendedor responsável para acompanhar este cliente."}
+                        </p>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={f.key} className="space-y-1">
                       <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>{f.label}</label>
