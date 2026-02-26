@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Doughnut, Line } from "react-chartjs-2";
+import { useLocation } from "react-router-dom";
 import {
   ArcElement,
   CategoryScale,
@@ -25,6 +26,7 @@ import {
   formatPercentBR,
 } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
+import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 
 ChartJS.register(
   CategoryScale,
@@ -73,6 +75,7 @@ const getBusinessDaysRemaining = (month: string) => {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const location = useLocation();
   const [month] = useState(getCurrentMonth());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [series, setSeries] = useState<DashboardSalesSeries | null>(null);
@@ -87,9 +90,9 @@ export default function DashboardPage() {
     });
   }, [user?.role]);
 
-  useEffect(() => {
+  const fetchDashboard = useCallback(() => {
     const querySeller = sellerId ? `&sellerId=${sellerId}` : "";
-    Promise.all([
+    return Promise.all([
       api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`),
       api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`),
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`),
@@ -99,6 +102,30 @@ export default function DashboardPage() {
       setPortfolio(portfolioResponse.data);
     });
   }, [month, sellerId]);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard, location.key]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      fetchDashboard();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") fetchDashboard();
+    };
+
+    window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+    window.addEventListener("focus", onRefresh);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+      window.removeEventListener("focus", onRefresh);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [fetchDashboard]);
 
   const lineOptions = useMemo<ChartOptions<"line">>(
     () => ({

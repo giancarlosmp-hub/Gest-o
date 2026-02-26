@@ -39,8 +39,14 @@ router.get("/summary", async (req, res) => {
   const whereSale = getSellerSalesFilter(req);
   const whereOwner = sellerWhere(req);
 
-  const [sales, opportunities, newLeads, goals, users, recentActivities] = await Promise.all([
-    prisma.sale.findMany({ where: { ...whereSale, date: { gte: start, lte: end } } }),
+  const [wonOpportunities, opportunitiesCreatedInMonth, newLeads, goals, users, recentActivities] = await Promise.all([
+    prisma.opportunity.findMany({
+      where: {
+        ...whereOwner,
+        stage: "ganho",
+        expectedCloseDate: { gte: start, lte: end }
+      }
+    }),
     prisma.opportunity.findMany({ where: { ...whereOwner, createdAt: { gte: start, lte: end } } }),
     prisma.client.count({ where: { ...whereOwner, createdAt: { gte: start, lte: end } } }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } }),
@@ -48,25 +54,26 @@ router.get("/summary", async (req, res) => {
     prisma.activity.findMany({ where: whereOwner, take: 8, orderBy: { createdAt: "desc" } })
   ]);
 
-  const salesBySeller = await prisma.sale.groupBy({
-    by: ["sellerId"],
-    where: { ...whereSale, date: { gte: start, lte: end } },
-    _sum: { value: true },
-    _count: { _all: true }
-  });
+  const salesBySeller = wonOpportunities.reduce<Record<string, { revenue: number; sales: number }>>((acc, opportunity) => {
+    if (!acc[opportunity.ownerSellerId]) acc[opportunity.ownerSellerId] = { revenue: 0, sales: 0 };
+    acc[opportunity.ownerSellerId].revenue += opportunity.value;
+    acc[opportunity.ownerSellerId].sales += 1;
+    return acc;
+  }, {});
 
-  const totalRevenue = sales.reduce((acc, sale) => acc + sale.value, 0);
-  const totalSales = sales.length;
-  const wonCount = opportunities.filter((opportunity) => opportunity.stage === "ganho").length;
-  const conversionRate = opportunities.length ? (wonCount / opportunities.length) * 100 : 0;
+  const totalRevenue = wonOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0);
+  const totalSales = wonOpportunities.length;
+  const conversionRate = opportunitiesCreatedInMonth.length
+    ? (totalSales / opportunitiesCreatedInMonth.length) * 100
+    : 0;
   const objectiveTotal = goals.reduce((acc, goal) => acc + goal.targetValue, 0);
 
   const performance = users
     .map((user) => {
-      const sellerSales = salesBySeller.find((row) => row.sellerId === user.id);
+      const sellerSales = salesBySeller[user.id];
       const sellerObjective = goals.find((goal) => goal.sellerId === user.id)?.targetValue || 0;
-      const revenue = sellerSales?._sum.value || 0;
-      const salesCount = sellerSales?._count._all || 0;
+      const revenue = sellerSales?.revenue || 0;
+      const salesCount = sellerSales?.sales || 0;
       const denominator = sellerObjective || objectiveTotal || 0;
       return {
         sellerId: user.id,
@@ -96,8 +103,17 @@ router.get("/sales-series", async (req, res) => {
   const { start, end } = getMonthRange(month);
   const whereSale = getSellerSalesFilter(req);
 
-  const [sales, goals] = await Promise.all([
-    prisma.sale.findMany({ where: { ...whereSale, date: { gte: start, lte: end } }, orderBy: { date: "asc" } }),
+  const whereOwner = sellerWhere(req);
+
+  const [wonOpportunities, goals] = await Promise.all([
+    prisma.opportunity.findMany({
+      where: {
+        ...whereOwner,
+        stage: "ganho",
+        expectedCloseDate: { gte: start, lte: end }
+      },
+      orderBy: { expectedCloseDate: "asc" }
+    }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } })
   ]);
 
@@ -122,9 +138,9 @@ router.get("/sales-series", async (req, res) => {
   for (let day = 1; day <= lastDay; day += 1) {
     labels.push(String(day));
 
-    const realizedOfDay = sales
-      .filter((sale) => sale.date.getDate() === day)
-      .reduce((acc, sale) => acc + sale.value, 0);
+    const realizedOfDay = wonOpportunities
+      .filter((opportunity) => opportunity.expectedCloseDate.getDate() === day)
+      .reduce((acc, opportunity) => acc + opportunity.value, 0);
     const objectiveOfDay = objectiveByDay.get(day) || 0;
 
     realizedRunning += realizedOfDay;

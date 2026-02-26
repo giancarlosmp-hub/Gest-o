@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
+import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -120,6 +121,7 @@ export default function OpportunityDetailsPage() {
     try {
       await api.put(`/opportunities/${item.id}`, payload);
       await load();
+      triggerDashboardRefresh();
     } finally {
       setSaving(false);
     }
