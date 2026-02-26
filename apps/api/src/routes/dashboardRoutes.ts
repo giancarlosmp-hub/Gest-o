@@ -159,6 +159,10 @@ router.get("/portfolio", async (req, res) => {
   const windowStart = new Date(end);
   windowStart.setDate(end.getDate() - 89);
 
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
   const [clients, wonOpportunities, recentWonOpportunities, soldTodayData] = await Promise.all([
     prisma.client.findMany({ where: whereOwner, select: { id: true, name: true } }),
     prisma.opportunity.findMany({
@@ -172,10 +176,7 @@ router.get("/portfolio", async (req, res) => {
     prisma.sale.aggregate({
       where: {
         ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : (req.query.sellerId ? { sellerId: req.query.sellerId as string } : {})),
-        date: {
-          gte: new Date(end.getFullYear(), end.getMonth(), end.getDate(), 0, 0, 0, 0),
-          lte: new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
-        }
+        date: { gte: todayStart, lte: todayEnd }
       },
       _sum: { value: true }
     })
@@ -216,21 +217,22 @@ router.get("/portfolio", async (req, res) => {
     C: { clients: 0, revenue: 0 }
   };
 
-  let cumulativeShare = 0;
-  for (const [, revenue] of sortedRevenue) {
-    const nextShare = totalRevenue > 0 ? cumulativeShare + (revenue / totalRevenue) * 100 : cumulativeShare;
-    if (cumulativeShare < 80) {
+  const totalClientsWithRevenue = sortedRevenue.length;
+  const limitA = Math.ceil(totalClientsWithRevenue * 0.2);
+  const limitB = Math.ceil(totalClientsWithRevenue * 0.5);
+
+  sortedRevenue.forEach(([, revenue], index) => {
+    if (index < limitA) {
       abcAccumulator.A.clients += 1;
       abcAccumulator.A.revenue += revenue;
-    } else if (cumulativeShare < 95) {
+    } else if (index < limitB) {
       abcAccumulator.B.clients += 1;
       abcAccumulator.B.revenue += revenue;
     } else {
       abcAccumulator.C.clients += 1;
       abcAccumulator.C.revenue += revenue;
     }
-    cumulativeShare = nextShare;
-  }
+  });
 
   const zeroRevenueClients = clients.length - sortedRevenue.length;
   if (zeroRevenueClients > 0) abcAccumulator.C.clients += zeroRevenueClients;
