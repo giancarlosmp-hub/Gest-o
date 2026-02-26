@@ -12,6 +12,7 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
 type ViewMode = "list" | "pipeline";
+type OpportunityModalMode = "create" | "edit";
 
 type Opportunity = {
   id: string;
@@ -157,7 +158,8 @@ export default function OpportunitiesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+  const [opportunityModalMode, setOpportunityModalMode] = useState<OpportunityModalMode>("create");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -409,7 +411,8 @@ export default function OpportunitiesPage() {
 
       setForm(emptyForm);
       setEditing(null);
-      setIsCreateModalOpen(false);
+      setOpportunityModalMode("create");
+      setIsOpportunityModalOpen(false);
       await load();
       toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
@@ -423,17 +426,19 @@ export default function OpportunitiesPage() {
 
   const openCreateModal = () => {
     setEditing(null);
+    setOpportunityModalMode("create");
     setForm({
       ...emptyForm,
       ownerSellerId: isSeller && user?.id ? user.id : ""
     });
     setSubmitError(null);
-    setIsCreateModalOpen(true);
+    setIsOpportunityModalOpen(true);
   };
 
-  const closeCreateModal = () => {
+  const closeOpportunityModal = () => {
     if (isSaving) return;
-    setIsCreateModalOpen(false);
+    setIsOpportunityModalOpen(false);
+    setOpportunityModalMode("create");
     setSubmitError(null);
     setEditing(null);
     setForm({
@@ -444,6 +449,7 @@ export default function OpportunitiesPage() {
 
   const onEdit = (item: Opportunity) => {
     setEditing(item.id);
+    setOpportunityModalMode("edit");
     setForm({
       title: item.title,
       value: item.value ? String(item.value) : "",
@@ -463,7 +469,7 @@ export default function OpportunitiesPage() {
       ownerSellerId: item.ownerSellerId
     });
     setSubmitError(null);
-    setIsCreateModalOpen(true);
+    setIsOpportunityModalOpen(true);
   };
 
   const onDelete = async (id: string) => {
@@ -701,8 +707,9 @@ export default function OpportunitiesPage() {
       ) : null}
 
       <CreateOpportunityModal
-        open={isCreateModalOpen}
-        title={editing ? "Editar oportunidade" : "Nova oportunidade"}
+        open={isOpportunityModalOpen}
+        title={opportunityModalMode === "edit" ? "Editar oportunidade" : "Nova oportunidade"}
+        submitLabel={opportunityModalMode === "edit" ? "Salvar alterações" : "Salvar"}
         form={form}
         clients={clients}
         sellers={sellers}
@@ -713,7 +720,7 @@ export default function OpportunitiesPage() {
         stages={stages}
         stageLabel={stageLabel}
         cropOptions={cropSelectOptions}
-        onClose={closeCreateModal}
+        onClose={closeOpportunityModal}
         onSubmit={submit}
         onFormChange={setForm}
         sanitizeNumericInput={sanitizeNumericInput}
@@ -964,13 +971,22 @@ export default function OpportunitiesPage() {
               </div>
             </form>
 
-            <button
-              type="button"
-              className="mt-4 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
-              onClick={() => navigate(`/oportunidades/${selectedOpportunity.id}`)}
-            >
-              Abrir detalhes
-            </button>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
+                onClick={() => onEdit(selectedOpportunity)}
+              >
+                Editar oportunidade
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
+                onClick={() => navigate(`/oportunidades/${selectedOpportunity.id}`)}
+              >
+                Abrir detalhes
+              </button>
+            </div>
 
             <form className="mt-6 space-y-3" onSubmit={onSavePipelineInteraction}>
               <label className="block text-sm font-medium text-slate-800" htmlFor="pipeline-interaction">

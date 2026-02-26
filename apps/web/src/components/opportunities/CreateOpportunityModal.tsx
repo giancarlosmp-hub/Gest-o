@@ -27,6 +27,7 @@ type SellerOption = { id: string; name: string };
 type CreateOpportunityModalProps = {
   open: boolean;
   title: string;
+  submitLabel: string;
   form: FormState;
   clients: ClientOption[];
   sellers: SellerOption[];
@@ -46,6 +47,7 @@ type CreateOpportunityModalProps = {
 export default function CreateOpportunityModal({
   open,
   title,
+  submitLabel,
   form,
   clients,
   sellers,
@@ -127,7 +129,7 @@ export default function CreateOpportunityModal({
               Cancelar
             </button>
             <button type="submit" disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
-              {isSaving ? "Salvando..." : "Salvar"}
+              {isSaving ? "Salvando..." : submitLabel}
             </button>
           </div>
         </form>
