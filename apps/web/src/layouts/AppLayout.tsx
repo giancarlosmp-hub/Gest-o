@@ -3,34 +3,53 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import BrandLogo from "../components/BrandLogo";
+import { canAccessRoute, type AppRoute } from "../lib/authorization";
 
-const items = ["Dashboard", "Equipe", "Objetivos", "Clientes", "Contatos", "Empresas", "Oportunidades", "Atividades", "Relatórios", "Usuários", "Configurações"];
+type SidebarItem = {
+  label: string;
+  path: string;
+  route?: AppRoute;
+};
+
+const items: SidebarItem[] = [
+  { label: "Dashboard", path: "/" },
+  { label: "Equipe", path: "/equipe", route: "equipe" },
+  { label: "Objetivos", path: "/objetivos", route: "objetivos" },
+  { label: "Clientes", path: "/clientes" },
+  { label: "Contatos", path: "/contatos" },
+  { label: "Empresas", path: "/empresas" },
+  { label: "Oportunidades", path: "/oportunidades" },
+  { label: "Atividades", path: "/atividades" },
+  { label: "Relatórios", path: "/relatórios" },
+  { label: "Usuários", path: "/usuários", route: "usuarios" },
+  { label: "Configurações", path: "/configurações", route: "configuracoes" }
+];
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const hidden = user?.role === "vendedor" ? ["Objetivos", "Usuários", "Configurações"] : [];
 
   const sidebar = (
     <aside className="bg-brand-700 text-white w-64 min-h-screen p-4 space-y-3">
       <h1 className="mb-6">
         <BrandLogo size="sidebar" textClassName="text-white" />
       </h1>
-      {items.filter((i) => !hidden.includes(i)).map((item) => {
-        const path = "/" + (item === "Dashboard" ? "" : item.toLowerCase());
-        const active = location.pathname === path;
-        return (
-          <Link
-            key={item}
-            to={path}
-            onClick={() => setOpen(false)}
-            className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-brand-700" : "hover:bg-brand-600"}`}
-          >
-            {item}
-          </Link>
-        );
-      })}
+      {items
+        .filter((item) => !item.route || canAccessRoute(item.route, user?.role))
+        .map((item) => {
+          const active = location.pathname === item.path;
+          return (
+            <Link
+              key={item.label}
+              to={item.path}
+              onClick={() => setOpen(false)}
+              className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-brand-700" : "hover:bg-brand-600"}`}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
     </aside>
   );
 
