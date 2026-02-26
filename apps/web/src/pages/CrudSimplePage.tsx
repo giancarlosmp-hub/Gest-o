@@ -82,9 +82,25 @@ export default function CrudSimplePage({
     try {
       const response = await api.get(endpoint, { params });
       const payload = response.data;
-      setItems(Array.isArray(payload?.data) ? payload.data : []);
-      setTotalItems(Number(payload?.total ?? 0));
-      setTotalPages(Math.max(1, Number(payload?.totalPages ?? 1)));
+
+      const resolvedItems = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+
+      const parsedTotal = Number(payload?.total);
+      const resolvedTotal = Number.isFinite(parsedTotal) ? parsedTotal : resolvedItems.length;
+      const parsedTotalPages = Number(payload?.totalPages);
+      const resolvedTotalPages = Number.isFinite(parsedTotalPages)
+        ? parsedTotalPages
+        : Math.max(1, Math.ceil(resolvedTotal / pageSize));
+
+      setItems(resolvedItems);
+      setTotalItems(resolvedTotal);
+      setTotalPages(Math.max(1, resolvedTotalPages));
     } catch (e: any) {
       setItems([]);
       setTotalItems(0);
