@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
+import { useAuth } from "../context/AuthContext";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -24,7 +25,9 @@ export default function CrudSimplePage({
   createButtonLabel = "Adicionar",
   createModalTitle = "Novo registro"
 }: CrudSimplePageProps) {
+  const { user } = useAuth();
   const [items, setItems] = useState<any[]>([]);
+  const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
   const [form, setForm] = useState<any>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -32,6 +35,12 @@ export default function CrudSimplePage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [quickFilters, setQuickFilters] = useState({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+
+  const isClientsPage = endpoint === "/clients";
+  const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
 
   const load = async () => {
     setLoading(true);
@@ -50,6 +59,62 @@ export default function CrudSimplePage({
   useEffect(() => {
     void load();
   }, [endpoint]);
+
+  useEffect(() => {
+    if (!isClientsPage || !canFilterBySeller) {
+      setUsers([]);
+      return;
+    }
+
+    api.get("/users")
+      .then((response) => {
+        const allUsers = Array.isArray(response.data) ? response.data : [];
+        const sellers = allUsers.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
+        setUsers(sellers);
+      })
+      .catch(() => {
+        setUsers([]);
+      });
+  }, [canFilterBySeller, isClientsPage]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const filterOptions = useMemo(() => {
+    if (!isClientsPage) return { ufs: [] as string[], regions: [] as string[], clientTypes: [] as string[] };
+
+    const compare = (a: string, b: string) => a.localeCompare(b, "pt-BR");
+    return {
+      ufs: Array.from(new Set(items.map((item) => String(item.state ?? "").trim().toUpperCase()).filter(Boolean))).sort(compare),
+      regions: Array.from(new Set(items.map((item) => String(item.region ?? "").trim()).filter(Boolean))).sort(compare),
+      clientTypes: Array.from(new Set(items.map((item) => String(item.clientType ?? "").trim().toUpperCase()).filter(Boolean))).sort(compare)
+    };
+  }, [isClientsPage, items]);
+
+  const visibleItems = useMemo(() => {
+    if (!isClientsPage) return items;
+
+    return items.filter((item) => {
+      const globalFields = [item.name, item.city, item.state, item.region, item.segment]
+        .map((value) => String(value ?? "").toLowerCase());
+
+      const matchesSearch = !debouncedSearch || globalFields.some((value) => value.includes(debouncedSearch));
+      const matchesUf = !quickFilters.uf || String(item.state ?? "").toUpperCase() === quickFilters.uf;
+      const matchesRegion = !quickFilters.region || String(item.region ?? "") === quickFilters.region;
+      const matchesClientType = !quickFilters.clientType || String(item.clientType ?? "").toUpperCase() === quickFilters.clientType;
+      const matchesSeller = !canFilterBySeller || !quickFilters.ownerSellerId || String(item.ownerSellerId ?? "") === quickFilters.ownerSellerId;
+
+      return matchesSearch && matchesUf && matchesRegion && matchesClientType && matchesSeller;
+    });
+  }, [canFilterBySeller, debouncedSearch, isClientsPage, items, quickFilters]);
+
+  const clearClientFilters = () => {
+    setSearch("");
+    setDebouncedSearch("");
+    setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+  };
 
   const parseFormValue = (fieldKey: string, fieldType: string | undefined, rawValue: string) => {
     if (fieldType === "number") return rawValue === "" ? "" : Number(rawValue);
@@ -157,6 +222,63 @@ export default function CrudSimplePage({
         </div>
       ) : null}
 
+      {isClientsPage ? (
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+            <input
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              placeholder="Buscar clientes..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <select
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              value={quickFilters.uf}
+              onChange={(e) => setQuickFilters((prev) => ({ ...prev, uf: e.target.value }))}
+            >
+              <option value="">UF (todas)</option>
+              {filterOptions.ufs.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+            </select>
+            <select
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              value={quickFilters.region}
+              onChange={(e) => setQuickFilters((prev) => ({ ...prev, region: e.target.value }))}
+            >
+              <option value="">Região (todas)</option>
+              {filterOptions.regions.map((region) => <option key={region} value={region}>{region}</option>)}
+            </select>
+            <select
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              value={quickFilters.clientType}
+              onChange={(e) => setQuickFilters((prev) => ({ ...prev, clientType: e.target.value }))}
+            >
+              <option value="">Tipo (todos)</option>
+              {filterOptions.clientTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
+            {canFilterBySeller ? (
+              <select
+                className="rounded-lg border border-slate-300 px-3 py-2"
+                value={quickFilters.ownerSellerId}
+                onChange={(e) => setQuickFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}
+              >
+                <option value="">Vendedor (todos)</option>
+                {users.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+              </select>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-slate-600">{visibleItems.length} clientes encontrados</span>
+            <button
+              type="button"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+              onClick={clearClientFilters}
+            >
+              Limpar filtros
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? <div className="p-4 text-slate-500">Carregando...</div> : null}
         {error ? <div className="p-4 text-amber-600">{error}</div> : null}
@@ -172,7 +294,7 @@ export default function CrudSimplePage({
               </tr>
             </thead>
             <tbody>
-              {items.map((it) => (
+              {visibleItems.map((it) => (
                 <tr key={it.id} className="border-t border-slate-100">
                   {fields.map((f) => <td key={f.key} className="p-2 text-slate-700">{String(it[f.key] ?? "")}</td>)}
                   {detailsPath ? <td className="p-2"><Link className="font-medium text-brand-700 hover:text-brand-800" to={`${detailsPath}/${it.id}`}>Abrir</Link></td> : null}
