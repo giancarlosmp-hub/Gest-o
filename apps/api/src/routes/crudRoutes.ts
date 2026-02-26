@@ -623,6 +623,9 @@ router.get("/opportunities", async (req, res) => {
   const dateFrom = req.query.dateFrom as string | undefined;
   const dateTo = req.query.dateTo as string | undefined;
   const overdue = req.query.overdue === "true";
+  const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
+  const page = parsePositiveInt(req.query.page, 1);
+  const pageSize = parsePositiveInt(req.query.pageSize, 20);
   const todayStart = getUtcTodayStart();
 
   const proposalDateWhere: Record<string, Date> = {};
@@ -651,16 +654,37 @@ router.get("/opportunities", async (req, res) => {
     ...(search ? { OR: [{ title: { contains: search, mode: "insensitive" } }, { client: { name: { contains: search, mode: "insensitive" } } }] } : {})
   };
 
-  const opportunities: any[] = await prisma.opportunity.findMany({
+  const baseQuery = {
     where,
     include: {
       client: { select: { id: true, name: true, city: true, state: true } },
       ownerSeller: { select: { id: true, name: true } }
     },
-    orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }]
-  });
+    orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }] as Prisma.Enumerable<Prisma.OpportunityOrderByWithRelationInput>
+  };
 
-  res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
+  if (!hasPagination) {
+    const opportunities: any[] = await prisma.opportunity.findMany(baseQuery);
+    return res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
+  }
+
+  const [total, opportunities] = await Promise.all([
+    prisma.opportunity.count({ where }),
+    prisma.opportunity.findMany({
+      ...baseQuery,
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return res.json({
+    items: opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)),
+    total,
+    page,
+    pageSize,
+    totalPages
+  });
 });
 
 router.get("/opportunities/summary", async (req, res) => {
