@@ -311,8 +311,50 @@ router.get("/reports/agro-crm", async (req, res) => {
 });
 
 router.get("/clients", async (req, res) => {
-  const data = await prisma.client.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } });
-  res.json(data);
+  const q = (req.query.q as string | undefined)?.trim();
+  const state = (req.query.state as string | undefined)?.trim().toUpperCase();
+  const region = (req.query.region as string | undefined)?.trim();
+  const clientType = (req.query.clientType as string | undefined)?.trim().toUpperCase();
+  const ownerSellerId = (req.query.ownerSellerId as string | undefined)?.trim();
+  const page = Math.max(1, Number(req.query.page ?? 1) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 10) || 10));
+
+  const where: any = {
+    ...sellerWhere(req),
+    ...(state ? { state } : {}),
+    ...(region ? { region } : {}),
+    ...(clientType === "PJ" || clientType === "PF" ? { clientType } : {}),
+    ...(ownerSellerId ? { ownerSellerId } : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { city: { contains: q, mode: "insensitive" } },
+            { state: { contains: q, mode: "insensitive" } },
+            { region: { contains: q, mode: "insensitive" } },
+            { segment: { contains: q, mode: "insensitive" } }
+          ]
+        }
+      : {})
+  };
+
+  const [total, data] = await Promise.all([
+    prisma.client.count({ where }),
+    prisma.client.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+
+  res.json({
+    data,
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  });
 });
 router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
