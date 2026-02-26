@@ -345,7 +345,7 @@ router.get("/clients", async (req, res) => {
   const state = String(req.query.uf || "").trim();
   const region = String(req.query.regiao || "").trim();
   const clientType = String(req.query.tipo || "").trim();
-  const sellerIdFilter = String(req.query.vendedorId || "").trim();
+  const ownerSellerIdFilter = String(req.query.ownerSellerId || req.query.vendedorId || "").trim();
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
@@ -358,7 +358,7 @@ router.get("/clients", async (req, res) => {
     ...(state ? { state: { equals: state, mode: "insensitive" } } : {}),
     ...(region ? { region: { equals: region, mode: "insensitive" } } : {}),
     ...(isValidClientType ? { clientType: parsedClientType } : {}),
-    ...(req.user?.role !== "vendedor" && sellerIdFilter ? { ownerSellerId: sellerIdFilter } : {}),
+    ...(req.user?.role !== "vendedor" && ownerSellerIdFilter ? { ownerSellerId: ownerSellerIdFilter } : {}),
     ...(search
       ? {
           OR: [
@@ -372,10 +372,21 @@ router.get("/clients", async (req, res) => {
       : {})
   };
 
-  const hasAdvancedQuery = ["q", "uf", "regiao", "tipo", "vendedorId", "page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
+  const hasAdvancedQuery = ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some((key) => req.query[key] !== undefined);
 
   if (!hasAdvancedQuery) {
-    const data = await prisma.client.findMany({ where, orderBy });
+    const data = await prisma.client.findMany({
+      where,
+      orderBy,
+      include: {
+        ownerSeller: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
+    });
     return res.json(data);
   }
 
@@ -384,11 +395,20 @@ router.get("/clients", async (req, res) => {
       where,
       orderBy,
       skip: (page - 1) * pageSize,
-      take: pageSize
+      take: pageSize,
+      include: {
+        ownerSeller: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
     }),
     prisma.client.count({ where })
   ]);
 
+  // Estrutura paginada final consumida pelo web: { items, total, page, pageSize }.
   res.json({
     items,
     total,
