@@ -81,7 +81,7 @@ export default function OpportunityDetailsPage() {
         api.get(`/events?opportunityId=${id}`)
       ]);
       setItem(opportunityResponse.data);
-      setEvents(eventsResponse.data || []);
+      setEvents(eventsResponse.data?.items || []);
     } catch {
       toast.error("Não foi possível carregar a oportunidade");
       navigate("/oportunidades");
