@@ -16,6 +16,17 @@ type CrudSimplePageProps = {
   createModalTitle?: string;
 };
 
+type ClientListItem = {
+  id: string;
+  ownerSellerId?: string;
+  ownerSellerName?: string;
+  ownerSeller?: {
+    id: string;
+    name: string;
+  };
+  [key: string]: unknown;
+};
+
 export default function CrudSimplePage({
   endpoint,
   title,
@@ -28,7 +39,7 @@ export default function CrudSimplePage({
 }: CrudSimplePageProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<ClientListItem[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
   const [form, setForm] = useState<any>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -151,6 +162,16 @@ export default function CrudSimplePage({
   }), []);
 
   const visibleItems = items;
+
+  const getCellValue = (item: ClientListItem, fieldKey: string) => {
+    if (isClientsPage && fieldKey === "ownerSellerId") {
+      return item.ownerSeller?.name || item.ownerSellerName || "—";
+    }
+
+    const value = item[fieldKey];
+    if (value === null || value === undefined || value === "") return "—";
+    return String(value);
+  };
 
   const clearClientFilters = () => {
     setSearch("");
@@ -388,7 +409,7 @@ export default function CrudSimplePage({
                   className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
                   onClick={(event) => onRowClick(event, it.id)}
                 >
-                  {fields.map((f) => <td key={f.key} className="p-2 text-slate-700">{String(it[f.key] ?? "")}</td>)}
+                  {fields.map((f) => <td key={f.key} className="p-2 text-slate-700">{getCellValue(it, f.key)}</td>)}
                   {detailsPath || !readOnly ? (
                     <td className="p-2">
                       <div className="flex items-center justify-end gap-2" data-row-action-menu="true">
