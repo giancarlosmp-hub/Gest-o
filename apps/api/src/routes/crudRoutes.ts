@@ -66,6 +66,8 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   plantingForecastDate: opportunity.plantingForecastDate ? opportunity.plantingForecastDate.toISOString() : null,
   createdAt: opportunity.createdAt.toISOString(),
   client: opportunity.client?.name,
+  clientCity: opportunity.client?.city || null,
+  clientState: opportunity.client?.state || null,
   owner: opportunity.ownerSeller?.name,
   daysOverdue: getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart),
   weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
@@ -368,7 +370,7 @@ router.get("/opportunities", async (req, res) => {
   const opportunities: any[] = await prisma.opportunity.findMany({
     where,
     include: {
-      client: { select: { id: true, name: true } },
+      client: { select: { id: true, name: true, city: true, state: true } },
       ownerSeller: { select: { id: true, name: true } }
     },
     orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }]
@@ -432,7 +434,14 @@ router.get("/opportunities/:id", async (req, res) => {
       ...sellerWhere(req)
     },
     include: {
-      client: true,
+      client: {
+        select: {
+          id: true,
+          name: true,
+          city: true,
+          state: true
+        }
+      },
       ownerSeller: true
     }
   });

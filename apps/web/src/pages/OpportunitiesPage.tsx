@@ -28,6 +28,8 @@ type Opportunity = {
   client?: { id: string; name: string } | string;
   ownerSeller?: { id: string; name: string };
   owner?: string;
+  clientCity?: string | null;
+  clientState?: string | null;
   weightedValue?: number;
   areaHa?: number | null;
   productOffered?: string | null;
@@ -193,6 +195,11 @@ export default function OpportunitiesPage() {
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
   const [pipelineInteraction, setPipelineInteraction] = useState("");
   const [isSavingPipelineInteraction, setIsSavingPipelineInteraction] = useState(false);
+  const [pipelineEvents, setPipelineEvents] = useState<EventItem[]>([]);
+  const [loadingPipelineEvents, setLoadingPipelineEvents] = useState(false);
+  const [isQuickActionLoading, setIsQuickActionLoading] = useState<"ganho" | "perdido" | null>(null);
+  const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
+  const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
 
@@ -504,6 +511,71 @@ export default function OpportunitiesPage() {
     setIsPipelineDrawerOpen(false);
     setSelectedOpportunity(null);
     setPipelineInteraction("");
+    setPipelineEvents([]);
+    setPipelineFollowUpDate("");
+  };
+
+  const loadPipelineEvents = async (opportunityId: string) => {
+    setLoadingPipelineEvents(true);
+    try {
+      const response = await api.get(`/events?opportunityId=${opportunityId}`);
+      setPipelineEvents(response.data || []);
+    } finally {
+      setLoadingPipelineEvents(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isPipelineDrawerOpen || !selectedOpportunity) return;
+
+    setPipelineFollowUpDate(toDateInput(selectedOpportunity.followUpDate || selectedOpportunity.expectedCloseDate));
+    loadPipelineEvents(selectedOpportunity.id).catch(() => toast.error("Erro ao carregar timeline da oportunidade"));
+  }, [isPipelineDrawerOpen, selectedOpportunity?.id]);
+
+  const updateOpportunityInState = (nextOpportunity: Opportunity) => {
+    setItems((currentItems) => currentItems.map((item) => (item.id === nextOpportunity.id ? { ...item, ...nextOpportunity } : item)));
+    setSelectedOpportunity((current) => (current?.id === nextOpportunity.id ? { ...current, ...nextOpportunity } : current));
+  };
+
+  const applyQuickStage = async (stage: "ganho" | "perdido") => {
+    if (!selectedOpportunity) return;
+    if (selectedOpportunity.stage === stage) {
+      toast.message(`A oportunidade já está como ${stageLabel[stage]}`);
+      return;
+    }
+
+    setIsQuickActionLoading(stage);
+    try {
+      const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { stage });
+      updateOpportunityInState(response.data);
+      await loadPipelineEvents(selectedOpportunity.id);
+      toast.success(`Oportunidade marcada como ${stageLabel[stage]}`);
+    } catch {
+      toast.error("Não foi possível atualizar a etapa");
+    } finally {
+      setIsQuickActionLoading(null);
+    }
+  };
+
+  const onScheduleFollowUp = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedOpportunity) return;
+    if (!pipelineFollowUpDate) {
+      toast.error("Selecione a data de follow-up");
+      return;
+    }
+
+    setIsSchedulingFollowUp(true);
+    try {
+      const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { followUpDate: pipelineFollowUpDate });
+      updateOpportunityInState(response.data);
+      await loadPipelineEvents(selectedOpportunity.id);
+      toast.success("Follow-up agendado com sucesso");
+    } catch {
+      toast.error("Não foi possível agendar o follow-up");
+    } finally {
+      setIsSchedulingFollowUp(false);
+    }
   };
 
   const onSavePipelineInteraction = async (event: FormEvent) => {
@@ -519,12 +591,20 @@ export default function OpportunitiesPage() {
 
     setIsSavingPipelineInteraction(true);
     try {
-      await api.post("/events", {
+      const response = await api.post("/events", {
         type: "comentario",
         description,
         opportunityId: selectedOpportunity.id,
         clientId: selectedOpportunity.clientId
       });
+
+      setPipelineEvents((current) => [
+        {
+          ...response.data,
+          ownerSeller: response.data?.ownerSeller || (user ? { id: user.id, name: user.name } : null)
+        },
+        ...current
+      ]);
       setPipelineInteraction("");
       toast.success("Interação registrada com sucesso");
     } catch {
@@ -844,15 +924,51 @@ export default function OpportunitiesPage() {
                 <span className="font-semibold text-slate-900">{formatCurrencyBRL(selectedOpportunity.value)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Cliente</span>
+                <span className="font-semibold text-right text-slate-900">{getClientName(selectedOpportunity)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Cidade/UF</span>
+                <span className="font-semibold text-slate-900">
+                  {selectedOpportunity.clientCity || selectedOpportunity.clientState
+                    ? `${selectedOpportunity.clientCity || "-"}/${selectedOpportunity.clientState || "-"}`
+                    : "-"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Status de prazo</span>
+                <ReturnStatusBadge status={getReturnStatus(selectedOpportunity)} />
+              </div>
+              <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Etapa</span>
                 <span className="font-semibold text-slate-900">{stageLabel[selectedOpportunity.stage]}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Cultura</span>
+                <span className="font-semibold text-slate-900">{selectedOpportunity.crop || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Safra</span>
+                <span className="font-semibold text-slate-900">{selectedOpportunity.season || "-"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Área (ha)</span>
+                <span className="font-semibold text-slate-900">{selectedOpportunity.areaHa ? `${selectedOpportunity.areaHa} ha` : "-"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Produto ofertado</span>
+                <span className="font-semibold text-right text-slate-900">{selectedOpportunity.productOffered || "-"}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Entrada da proposta</span>
                 <span className="font-semibold text-slate-900">{formatDateBR(selectedOpportunity.proposalDate)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span className="text-slate-500">Retorno previsto</span>
+                <span className="text-slate-500">Retorno / follow-up</span>
+                <span className="font-semibold text-slate-900">{formatDateBR(selectedOpportunity.followUpDate || selectedOpportunity.expectedCloseDate)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-slate-500">Fechamento previsto</span>
                 <span className="font-semibold text-slate-900">{formatDateBR(selectedOpportunity.expectedCloseDate)}</span>
               </div>
               <div className="flex items-center justify-between gap-3">
@@ -860,6 +976,47 @@ export default function OpportunitiesPage() {
                 <span className="font-semibold text-slate-900">{selectedOpportunity.lastContactAt ? formatDateBR(selectedOpportunity.lastContactAt) : "-"}</span>
               </div>
             </div>
+
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                disabled={isQuickActionLoading !== null}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
+                onClick={() => applyQuickStage("ganho")}
+              >
+                {isQuickActionLoading === "ganho" ? "Atualizando..." : "Marcar como Ganho"}
+              </button>
+              <button
+                type="button"
+                disabled={isQuickActionLoading !== null}
+                className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-rose-300"
+                onClick={() => applyQuickStage("perdido")}
+              >
+                {isQuickActionLoading === "perdido" ? "Atualizando..." : "Marcar como Perdido"}
+              </button>
+            </div>
+
+            <form className="mt-3 space-y-2" onSubmit={onScheduleFollowUp}>
+              <label className="block text-sm font-medium text-slate-800" htmlFor="pipeline-followup-date">
+                Agendar Follow-up
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pipeline-followup-date"
+                  type="date"
+                  className="w-full rounded-lg border border-slate-200 p-2 text-sm"
+                  value={pipelineFollowUpDate}
+                  onChange={(event) => setPipelineFollowUpDate(event.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={isSchedulingFollowUp}
+                  className="whitespace-nowrap rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isSchedulingFollowUp ? "Salvando..." : "Agendar Follow-up"}
+                </button>
+              </div>
+            </form>
 
             <button
               type="button"
@@ -877,7 +1034,7 @@ export default function OpportunitiesPage() {
                 id="pipeline-interaction"
                 className="w-full rounded-lg border border-slate-200 p-2 text-sm"
                 rows={4}
-                placeholder="Descreva a interação com o cliente"
+                placeholder="Ex.: Ligação com João, pediu revisão de preço e retorno na próxima terça."
                 value={pipelineInteraction}
                 onChange={(event) => setPipelineInteraction(event.target.value)}
               />
@@ -889,6 +1046,21 @@ export default function OpportunitiesPage() {
                 {isSavingPipelineInteraction ? "Salvando..." : "Salvar interação"}
               </button>
             </form>
+
+            <div className="mt-6">
+              <h4 className="text-sm font-semibold text-slate-900">Timeline</h4>
+              <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {loadingPipelineEvents ? <p className="text-sm text-slate-500">Carregando timeline...</p> : null}
+                {!loadingPipelineEvents && pipelineEvents.length ? pipelineEvents.map((event) => (
+                  <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
+                    <div className="text-xs uppercase tracking-wide text-slate-500">{eventLabel[event.type]}</div>
+                    <div className="mt-1 text-sm text-slate-800">{event.description}</div>
+                    <div className="mt-1 text-xs text-slate-500">{event.ownerSeller?.name || "Sistema"} • {formatDateBR(event.createdAt)}</div>
+                  </div>
+                )) : null}
+                {!loadingPipelineEvents && !pipelineEvents.length ? <p className="text-sm text-slate-500">Sem eventos registrados para esta oportunidade.</p> : null}
+              </div>
+            </div>
           </aside>
         </div>
       ) : null}
