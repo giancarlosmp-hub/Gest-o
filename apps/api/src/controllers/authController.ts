@@ -9,6 +9,7 @@ export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return res.status(401).json({ message: "Credenciais inválidas" });
+  if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
   const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
@@ -32,7 +33,7 @@ export async function refresh(req: Request, res: Response) {
 
 export async function me(req: Request, res: Response) {
   if (!req.user) return res.status(401).json({ message: "Não autenticado" });
-  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, name: true, email: true, role: true, region: true } });
+  const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, name: true, email: true, role: true, region: true, isActive: true } });
   return res.json(user);
 }
 

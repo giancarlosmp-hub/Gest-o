@@ -2,9 +2,10 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema } from "@salesforce-pro/shared";
+import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
+import { randomBytes } from "node:crypto";
 
 const router = Router();
 router.use(authMiddleware);
@@ -700,7 +701,7 @@ router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema),
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, createdAt: true } })));
+router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
 router.post("/users", authorize("diretor"), async (req, res) => {
   const { name, email, password, role, region } = req.body;
   const bcrypt = await import("bcryptjs");
@@ -709,5 +710,49 @@ router.post("/users", authorize("diretor"), async (req, res) => {
   res.status(201).json({ id: user.id, email: user.email });
 });
 router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
+router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivationSchema), async (req, res) => {
+  if (req.user!.id === req.params.id && !req.body.isActive) {
+    return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { isActive: req.body.isActive },
+    select: { id: true, name: true, role: true, isActive: true }
+  });
+
+  return res.json(updatedUser);
+});
+router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdateSchema), async (req, res) => {
+  if (req.user!.id === req.params.id && req.body.role !== "diretor") {
+    return res.status(400).json({ message: "Você não pode remover seu próprio papel de diretor" });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { role: req.body.role },
+    select: { id: true, name: true, role: true, isActive: true }
+  });
+
+  return res.json(updatedUser);
+});
+router.post("/users/:id/reset-password", authorize("diretor"), validateBody(userResetPasswordSchema), async (req, res) => {
+  const temporaryPasswordLength = req.body.temporaryPasswordLength ?? 12;
+  const temporaryPassword = randomBytes(temporaryPasswordLength).toString("base64url").slice(0, temporaryPasswordLength);
+  const bcrypt = await import("bcryptjs");
+  const passwordHash = await bcrypt.default.hash(temporaryPassword, 10);
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { passwordHash },
+    select: { id: true, name: true, email: true }
+  });
+
+  return res.json({
+    message: "Senha resetada com sucesso",
+    user: updatedUser,
+    temporaryPassword
+  });
+});
 
 export default router;
