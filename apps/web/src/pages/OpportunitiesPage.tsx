@@ -10,6 +10,7 @@ import TimelineEventList, { TimelineEventItem } from "../components/TimelineEven
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
+type OpportunityStatus = "open" | "closed" | "all";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
 type ViewMode = "list" | "pipeline";
 type OpportunityModalMode = "create" | "edit";
@@ -50,6 +51,7 @@ type Summary = {
 };
 
 type Filters = {
+  status: OpportunityStatus;
   stage: string;
   ownerSellerId: string;
   clientId: string;
@@ -93,6 +95,12 @@ const stageLabel: Record<Stage, string> = {
   proposta: "Proposta",
   ganho: "Ganho",
   perdido: "Perdido"
+};
+
+const statusLabel: Record<OpportunityStatus, string> = {
+  open: "Abertas",
+  closed: "Encerradas",
+  all: "Todas"
 };
 
 const stageWeight: Record<Stage, number> = {
@@ -168,6 +176,7 @@ export default function OpportunitiesPage() {
   const [viewMode, setViewMode] = useState<ViewMode>("pipeline");
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>({
+    status: "open",
     stage: "",
     ownerSellerId: "",
     clientId: "",
@@ -223,6 +232,8 @@ export default function OpportunitiesPage() {
         if (value) params.set(key, value);
       });
       if (debouncedSearch) params.set("search", debouncedSearch);
+
+      if (!params.has("status")) params.set("status", "open");
 
       const query = params.toString() ? `?${params}` : "";
       const [oppRes, summaryRes, clientsRes] = await Promise.all([
@@ -301,6 +312,12 @@ export default function OpportunitiesPage() {
       return acc;
     }, { prospeccao: [], negociacao: [], proposta: [], ganho: [], perdido: [] });
   }, [sortedItems]);
+
+  const pipelineStages = useMemo(() => {
+    if (filters.status === "open") return stages.filter((stage) => ["prospeccao", "negociacao", "proposta"].includes(stage));
+    if (filters.status === "closed") return stages.filter((stage) => ["ganho", "perdido"].includes(stage));
+    return stages;
+  }, [filters.status]);
 
   const getWeightedValue = (item: Opportunity) => {
     const probability = item.probability ?? stageWeight[item.stage];
@@ -631,6 +648,7 @@ export default function OpportunitiesPage() {
 
   const clearFilters = () => {
     setFilters({
+      status: "open",
       stage: "",
       ownerSellerId: isSeller && user?.id ? user.id : "",
       clientId: "",
@@ -697,6 +715,9 @@ export default function OpportunitiesPage() {
             <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
               <option value="">Todos estágios</option>
               {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
+            </select>
+            <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as OpportunityStatus }))}>
+              {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
             {canFilterByOwner ? (
               <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
@@ -800,6 +821,9 @@ export default function OpportunitiesPage() {
         <div className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="grid gap-2 border-b border-slate-100 pb-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
             <input className="rounded-lg border border-slate-200 p-2" placeholder="Buscar título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <select className="rounded-lg border border-slate-200 p-2" value={filters.status} onChange={(e) => setFilters((prev) => ({ ...prev, status: e.target.value as OpportunityStatus }))}>
+              {Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select>
             <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
               <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
             </label>
@@ -817,8 +841,8 @@ export default function OpportunitiesPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <div className="grid min-w-[1050px] grid-cols-5 gap-3">
-              {stages.map((stage) => {
+            <div className={`grid min-w-[1050px] gap-3 ${pipelineStages.length === 2 ? "grid-cols-2" : pipelineStages.length === 3 ? "grid-cols-3" : "grid-cols-5"}`}>
+              {pipelineStages.map((stage) => {
                 const stageItems = opportunitiesByStage[stage];
                 const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
                 const stageWeightedTotal = stageItems.reduce((sum, item) => sum + getWeightedValue(item), 0);
