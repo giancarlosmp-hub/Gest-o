@@ -27,9 +27,9 @@ export default function App() {
         <Route path="equipe" element={<RoleRoute route="equipe"><TeamPage /></RoleRoute>} />
         <Route path="objetivos" element={<RoleRoute route="objetivos"><ObjectivesPage /></RoleRoute>} />
         <Route path="metas" element={<Navigate to="/objetivos" replace />} />
-        <Route path="clientes" element={<CrudSimplePage endpoint="/clients" title="Clientes" detailsPath="/clientes" fields={[{ key: "name", label: "Nome" }, { key: "city", label: "Cidade" }, { key: "state", label: "UF" }, { key: "region", label: "Região" }, { key: "potentialHa", label: "Potencial (ha)", type: "number" }, { key: "farmSizeHa", label: "Área total (ha)", type: "number" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
-        <Route path="contatos" element={<CrudSimplePage endpoint="/contacts" title="Contatos" fields={[{ key: "name", label: "Nome" }, { key: "phone", label: "Telefone" }, { key: "email", label: "Email" }, { key: "companyId", label: "ID empresa" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
-        <Route path="empresas" element={<CrudSimplePage endpoint="/companies" title="Empresas" fields={[{ key: "name", label: "Nome" }, { key: "cnpj", label: "CNPJ" }, { key: "segment", label: "Segmento" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
+        <Route path="clientes" element={<CrudSimplePage endpoint="/clients" title="Clientes (Cliente 360)" detailsPath="/clientes" fields={[{ key: "name", label: "Nome" }, { key: "city", label: "Cidade" }, { key: "state", label: "UF" }, { key: "region", label: "Região" }, { key: "potentialHa", label: "Potencial (ha)", type: "number" }, { key: "farmSizeHa", label: "Área total (ha)", type: "number" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
+        <Route path="contatos" element={<Navigate to="/clientes?tab=contatos" replace />} />
+        <Route path="empresas" element={<Navigate to="/clientes?tab=empresas" replace />} />
         <Route path="oportunidades" element={<OpportunitiesPage />} />
         <Route path="oportunidades/:id" element={<OpportunityDetailsPage />} />
         <Route path="clientes/:id" element={<ClientDetailsPage />} />
