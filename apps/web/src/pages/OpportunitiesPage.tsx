@@ -1,7 +1,7 @@
 import { DragEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Search } from "lucide-react";
+import { MoreHorizontal, Search } from "lucide-react";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
@@ -85,6 +85,14 @@ type DragOpportunityPayload = {
   opportunityId: string;
   sourceStage: Stage;
 };
+
+type CloseAction = "ganho" | "perdido";
+
+type CloseOpportunityState = {
+  opportunityId: string;
+  stage: CloseAction;
+};
+
 
 const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
 const cropSelectOptions = ["soja", "milho", "trigo", "pasto", "cobertura", "outros"];
@@ -195,6 +203,9 @@ export default function OpportunitiesPage() {
   const [loadingMorePipelineEvents, setLoadingMorePipelineEvents] = useState(false);
   const [pipelineEventsCursor, setPipelineEventsCursor] = useState<string | null>(null);
   const [isQuickActionLoading, setIsQuickActionLoading] = useState<"ganho" | "perdido" | null>(null);
+  const [openCloseMenuId, setOpenCloseMenuId] = useState<string | null>(null);
+  const [closeOpportunityState, setCloseOpportunityState] = useState<CloseOpportunityState | null>(null);
+  const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
   const isSeller = user?.role === "vendedor";
@@ -567,25 +578,66 @@ export default function OpportunitiesPage() {
     setSelectedOpportunity((current) => (current?.id === nextOpportunity.id ? { ...current, ...nextOpportunity } : current));
   };
 
-  const applyQuickStage = async (stage: "ganho" | "perdido") => {
-    if (!selectedOpportunity) return;
-    if (selectedOpportunity.stage === stage) {
+  const openCloseModal = (opportunityId: string, stage: CloseAction) => {
+    setOpenCloseMenuId(null);
+    setCloseReason("");
+    setCloseOpportunityState({ opportunityId, stage });
+  };
+
+  const closeCloseModal = () => {
+    setCloseOpportunityState(null);
+    setCloseReason("");
+  };
+
+  const applyQuickStage = async (stage: "ganho" | "perdido", reason?: string, opportunityId?: string) => {
+    const targetId = opportunityId || selectedOpportunity?.id;
+    if (!targetId) return;
+
+    const targetOpportunity = items.find((item) => item.id === targetId) || (selectedOpportunity?.id === targetId ? selectedOpportunity : null);
+    if (!targetOpportunity) return;
+    if (targetOpportunity.stage === stage) {
       toast.message(`A oportunidade já está como ${stageLabel[stage]}`);
       return;
     }
 
     setIsQuickActionLoading(stage);
     try {
-      const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { stage });
-      updateOpportunityInState(response.data);
+      const response = await api.put(`/opportunities/${targetId}`, { stage });
+      const updatedOpportunity = response.data;
+      updateOpportunityInState(updatedOpportunity);
+
+      const reasonDescription = reason?.trim();
+      const eventDescription = reasonDescription
+        ? `Oportunidade encerrada como ${stageLabel[stage]}. Motivo/observação: ${reasonDescription}`
+        : `Oportunidade encerrada como ${stageLabel[stage]}`;
+
+      await api.post("/events", {
+        type: "status",
+        description: eventDescription,
+        opportunityId: targetId,
+        clientId: updatedOpportunity?.clientId || targetOpportunity.clientId
+      });
+
+      if (filters.status === "open") {
+        setItems((currentItems) => currentItems.filter((item) => item.id !== targetId));
+        if (selectedOpportunity?.id === targetId) closePipelineDrawer();
+      }
+
       triggerDashboardRefresh();
-      await loadPipelineEvents(selectedOpportunity.id);
-      toast.success(`Oportunidade marcada como ${stageLabel[stage]}`);
+      if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
+      toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
     } catch {
-      toast.error("Não foi possível atualizar a etapa");
+      toast.error("Não foi possível encerrar a oportunidade");
     } finally {
       setIsQuickActionLoading(null);
     }
+  };
+
+  const onConfirmCloseOpportunity = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!closeOpportunityState || isQuickActionLoading) return;
+    await applyQuickStage(closeOpportunityState.stage, closeReason, closeOpportunityState.opportunityId);
+    closeCloseModal();
   };
 
   const onScheduleFollowUp = async (event: FormEvent) => {
@@ -806,6 +858,23 @@ export default function OpportunitiesPage() {
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
+                      {!["ganho", "perdido"].includes(item.stage) ? (
+                        <span className="relative inline-block">
+                          <button
+                            type="button"
+                            className="text-slate-700"
+                            onClick={() => setOpenCloseMenuId((current) => (current === item.id ? null : item.id))}
+                          >
+                            Encerrar ▾
+                          </button>
+                          {openCloseMenuId === item.id ? (
+                            <span className="absolute right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -887,6 +956,27 @@ export default function OpportunitiesPage() {
                           <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
                           <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
                           <ReturnStatusBadge status={getReturnStatus(item)} />
+                          {!["ganho", "perdido"].includes(item.stage) ? (
+                            <div className="relative" onClick={(event) => event.stopPropagation()}>
+                              <button
+                                type="button"
+                                className="rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
+                                aria-label="Abrir ações de encerramento"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setOpenCloseMenuId((current) => (current === item.id ? null : item.id));
+                                }}
+                              >
+                                <MoreHorizontal size={14} />
+                              </button>
+                              {openCloseMenuId === item.id ? (
+                                <div className="absolute right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                  <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
+                                  <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
                         </div>
                       )) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
                     </div>
@@ -977,24 +1067,27 @@ export default function OpportunitiesPage() {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                disabled={isQuickActionLoading !== null}
-                className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-emerald-300"
-                onClick={() => applyQuickStage("ganho")}
-              >
-                {isQuickActionLoading === "ganho" ? "Atualizando..." : "Marcar como Ganho"}
-              </button>
-              <button
-                type="button"
-                disabled={isQuickActionLoading !== null}
-                className="rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-rose-300"
-                onClick={() => applyQuickStage("perdido")}
-              >
-                {isQuickActionLoading === "perdido" ? "Atualizando..." : "Marcar como Perdido"}
-              </button>
-            </div>
+            {!["ganho", "perdido"].includes(selectedOpportunity.stage) ? (
+              <div className="mt-4">
+                <p className="mb-2 text-sm font-medium text-slate-800">Encerrar</p>
+                <div className="relative inline-block">
+                  <button
+                    type="button"
+                    disabled={isQuickActionLoading !== null}
+                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    onClick={() => setOpenCloseMenuId((current) => (current === selectedOpportunity.id ? null : selectedOpportunity.id))}
+                  >
+                    {isQuickActionLoading ? "Atualizando..." : "Encerrar ▾"}
+                  </button>
+                  {openCloseMenuId === selectedOpportunity.id ? (
+                    <div className="absolute left-0 z-10 mt-1 min-w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                      <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(selectedOpportunity.id, "ganho")}>Marcar como Ganho</button>
+                      <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(selectedOpportunity.id, "perdido")}>Marcar como Perdido</button>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             <form className="mt-3 space-y-2" onSubmit={onScheduleFollowUp}>
               <label className="block text-sm font-medium text-slate-800" htmlFor="pipeline-followup-date">
@@ -1072,6 +1165,33 @@ export default function OpportunitiesPage() {
               </div>
             </div>
           </aside>
+        </div>
+      ) : null}
+
+      {closeOpportunityState ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCloseModal}>
+          <form className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-5" onSubmit={onConfirmCloseOpportunity} onClick={(event) => event.stopPropagation()}>
+            <h4 className="text-lg font-semibold text-slate-900">Confirmar encerramento</h4>
+            <p className="text-sm text-slate-600">Tem certeza que deseja marcar esta oportunidade como <strong>{stageLabel[closeOpportunityState.stage]}</strong>?</p>
+            <div>
+              <label className="block text-sm font-medium text-slate-700" htmlFor="close-reason">Motivo/Observação (opcional)</label>
+              <input
+                id="close-reason"
+                type="text"
+                maxLength={180}
+                className="mt-1 w-full rounded-lg border border-slate-200 p-2 text-sm"
+                placeholder="Ex.: cliente aprovou proposta / sem orçamento"
+                value={closeReason}
+                onChange={(event) => setCloseReason(event.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={closeCloseModal}>Cancelar</button>
+              <button type="submit" disabled={isQuickActionLoading !== null} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-400">
+                {isQuickActionLoading ? "Encerrando..." : `Confirmar como ${stageLabel[closeOpportunityState.stage]}`}
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
     </div>
