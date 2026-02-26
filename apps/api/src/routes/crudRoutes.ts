@@ -6,6 +6,7 @@ import { activitySchema, clientContactSchema, clientSchema, companySchema, conta
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
+import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -729,11 +730,11 @@ router.get("/events", async (req, res) => {
   const cursor = req.query.cursor as string | undefined;
 
   const events = await prisma.timelineEvent.findMany({
-    where: {
-      ...sellerWhere(req),
-      ...(opportunityId ? { opportunityId } : {}),
-      ...(clientId ? { clientId } : {})
-    },
+    where: buildTimelineEventWhere({
+      baseWhere: sellerWhere(req),
+      opportunityId,
+      clientId
+    }),
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     take,
     include: {
