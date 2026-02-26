@@ -4,11 +4,11 @@ import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
+import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
 type ViewMode = "list" | "pipeline";
-type EventType = "comentario" | "mudanca_etapa" | "status";
 
 type Opportunity = {
   id: string;
@@ -38,17 +38,6 @@ type Opportunity = {
 };
 
 type Client = { id: string; name: string };
-type EventItem = {
-  id: string;
-  type: EventType;
-  description: string;
-  createdAt: string;
-  ownerSeller?: {
-    id: string;
-    name: string;
-  } | null;
-};
-
 type Summary = {
   totalPipelineValue: number;
   totalWeightedValue: number;
@@ -108,12 +97,6 @@ const stageWeight: Record<Stage, number> = {
   proposta: 70,
   ganho: 100,
   perdido: 0
-};
-
-const eventLabel: Record<EventType, string> = {
-  comentario: "Comentário",
-  mudanca_etapa: "Mudança de etapa",
-  status: "Status"
 };
 
 const emptyForm: FormState = {
@@ -188,15 +171,17 @@ export default function OpportunitiesPage() {
     dateTo: "",
     overdue: false
   });
-  const [opportunityEvents, setOpportunityEvents] = useState<EventItem[]>([]);
+  const [opportunityEvents, setOpportunityEvents] = useState<TimelineEventItem[]>([]);
   const [loadingOpportunityEvents, setLoadingOpportunityEvents] = useState(false);
   const [opportunityComment, setOpportunityComment] = useState("");
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
   const [pipelineInteraction, setPipelineInteraction] = useState("");
   const [isSavingPipelineInteraction, setIsSavingPipelineInteraction] = useState(false);
-  const [pipelineEvents, setPipelineEvents] = useState<EventItem[]>([]);
+  const [pipelineEvents, setPipelineEvents] = useState<TimelineEventItem[]>([]);
   const [loadingPipelineEvents, setLoadingPipelineEvents] = useState(false);
+  const [loadingMorePipelineEvents, setLoadingMorePipelineEvents] = useState(false);
+  const [pipelineEventsCursor, setPipelineEventsCursor] = useState<string | null>(null);
   const [isQuickActionLoading, setIsQuickActionLoading] = useState<"ganho" | "perdido" | null>(null);
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
@@ -452,7 +437,7 @@ export default function OpportunitiesPage() {
     setLoadingOpportunityEvents(true);
     try {
       const response = await api.get(`/events?opportunityId=${opportunityId}`);
-      setOpportunityEvents(response.data || []);
+      setOpportunityEvents(response.data?.items || []);
     } finally {
       setLoadingOpportunityEvents(false);
     }
@@ -512,16 +497,30 @@ export default function OpportunitiesPage() {
     setSelectedOpportunity(null);
     setPipelineInteraction("");
     setPipelineEvents([]);
+    setPipelineEventsCursor(null);
     setPipelineFollowUpDate("");
   };
 
   const loadPipelineEvents = async (opportunityId: string) => {
     setLoadingPipelineEvents(true);
     try {
-      const response = await api.get(`/events?opportunityId=${opportunityId}`);
-      setPipelineEvents(response.data || []);
+      const response = await api.get(`/events?opportunityId=${opportunityId}&take=20`);
+      setPipelineEvents(response.data?.items || []);
+      setPipelineEventsCursor(response.data?.nextCursor || null);
     } finally {
       setLoadingPipelineEvents(false);
+    }
+  };
+
+  const loadMorePipelineEvents = async () => {
+    if (!selectedOpportunity || !pipelineEventsCursor) return;
+    setLoadingMorePipelineEvents(true);
+    try {
+      const response = await api.get(`/events?opportunityId=${selectedOpportunity.id}&take=20&cursor=${pipelineEventsCursor}`);
+      setPipelineEvents((current) => [...current, ...(response.data?.items || [])]);
+      setPipelineEventsCursor(response.data?.nextCursor || null);
+    } finally {
+      setLoadingMorePipelineEvents(false);
     }
   };
 
@@ -758,18 +757,12 @@ export default function OpportunitiesPage() {
           </form>
 
           <div className="mt-4 space-y-2">
-            {loadingOpportunityEvents ? <p className="text-sm text-slate-500">Carregando histórico...</p> : null}
-            {!loadingOpportunityEvents && opportunityEvents.length ? opportunityEvents.map((event) => (
-              <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-slate-800">{eventLabel[event.type]}</span>
-                  <span className="text-xs text-slate-500">{formatDateBR(event.createdAt)}</span>
-                </div>
-                <p className="mt-1 text-slate-700">{event.description}</p>
-                <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Usuário"}</p>
-              </div>
-            )) : null}
-            {!loadingOpportunityEvents && !opportunityEvents.length ? <p className="text-sm text-slate-500">Sem eventos registrados para esta oportunidade.</p> : null}
+            <TimelineEventList
+              events={opportunityEvents}
+              loading={loadingOpportunityEvents}
+              emptyMessage="Sem eventos registrados para esta oportunidade."
+              loadingMessage="Carregando histórico..."
+            />
           </div>
         </section>
       ) : null}
@@ -1050,15 +1043,16 @@ export default function OpportunitiesPage() {
             <div className="mt-6">
               <h4 className="text-sm font-semibold text-slate-900">Timeline</h4>
               <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                {loadingPipelineEvents ? <p className="text-sm text-slate-500">Carregando timeline...</p> : null}
-                {!loadingPipelineEvents && pipelineEvents.length ? pipelineEvents.map((event) => (
-                  <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
-                    <div className="text-xs uppercase tracking-wide text-slate-500">{eventLabel[event.type]}</div>
-                    <div className="mt-1 text-sm text-slate-800">{event.description}</div>
-                    <div className="mt-1 text-xs text-slate-500">{event.ownerSeller?.name || "Sistema"} • {formatDateBR(event.createdAt)}</div>
-                  </div>
-                )) : null}
-                {!loadingPipelineEvents && !pipelineEvents.length ? <p className="text-sm text-slate-500">Sem eventos registrados para esta oportunidade.</p> : null}
+                <TimelineEventList
+                  events={pipelineEvents}
+                  loading={loadingPipelineEvents}
+                  loadingMore={loadingMorePipelineEvents}
+                  hasMore={Boolean(pipelineEventsCursor)}
+                  onLoadMore={() => void loadMorePipelineEvents()}
+                  emptyMessage="Sem eventos registrados para esta oportunidade."
+                  loadingMessage="Carregando timeline..."
+                  compact
+                />
               </div>
             </div>
           </aside>

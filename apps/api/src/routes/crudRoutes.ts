@@ -468,6 +468,14 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
     }
   });
 
+  await createEvent({
+    type: "status",
+    description: `Oportunidade criada: ${data.title}`,
+    opportunityId: data.id,
+    clientId: data.clientId,
+    ownerSellerId
+  });
+
   if (req.body.notes?.trim()) {
     await createEvent({
       type: "comentario",
@@ -551,6 +559,9 @@ router.delete("/activities/:id", async (req, res) => { await prisma.activity.del
 router.get("/events", async (req, res) => {
   const opportunityId = req.query.opportunityId as string | undefined;
   const clientId = req.query.clientId as string | undefined;
+  const takeRaw = Number(req.query.take ?? 20);
+  const take = Number.isFinite(takeRaw) ? Math.min(Math.max(Math.trunc(takeRaw), 1), 100) : 20;
+  const cursor = req.query.cursor as string | undefined;
 
   const events = await prisma.timelineEvent.findMany({
     where: {
@@ -558,15 +569,23 @@ router.get("/events", async (req, res) => {
       ...(opportunityId ? { opportunityId } : {}),
       ...(clientId ? { clientId } : {})
     },
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    take,
     include: {
       ownerSeller: { select: { id: true, name: true } },
       opportunity: { select: { id: true, title: true } },
       client: { select: { id: true, name: true } }
     },
-    orderBy: { createdAt: "desc" }
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }]
   });
 
-  res.json(events);
+  const hasMore = events.length === take;
+  const nextCursor = hasMore ? events[events.length - 1]?.id ?? null : null;
+
+  res.json({
+    items: events,
+    nextCursor
+  });
 });
 router.post("/events", validateBody(eventSchema), async (req, res) => {
   const opportunity = await prisma.opportunity.findFirst({

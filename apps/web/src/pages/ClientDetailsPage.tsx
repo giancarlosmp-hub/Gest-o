@@ -2,24 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
-
-const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
-  dateStyle: "short",
-  timeStyle: "short"
-});
-
-type EventType = "comentario" | "mudanca_etapa" | "status";
-
-type EventItem = {
-  id: string;
-  type: EventType;
-  description: string;
-  createdAt: string;
-  ownerSeller?: {
-    id: string;
-    name: string;
-  } | null;
-};
+import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 
 type Client = {
   id: string;
@@ -31,17 +14,13 @@ type Client = {
   farmSizeHa?: number | null;
 };
 
-const eventLabel: Record<EventType, string> = {
-  comentario: "Comentário",
-  mudanca_etapa: "Mudança de etapa",
-  status: "Status"
-};
-
 export default function ClientDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [client, setClient] = useState<Client | null>(null);
-  const [events, setEvents] = useState<EventItem[]>([]);
+  const [events, setEvents] = useState<TimelineEventItem[]>([]);
+  const [eventsCursor, setEventsCursor] = useState<string | null>(null);
+  const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -51,10 +30,11 @@ export default function ClientDetailsPage() {
       try {
         const [clientRes, eventsRes] = await Promise.all([
           api.get(`/clients/${id}`),
-          api.get(`/events?clientId=${id}`)
+          api.get(`/events?clientId=${id}&take=20`)
         ]);
         setClient(clientRes.data);
-        setEvents(eventsRes.data || []);
+        setEvents(eventsRes.data?.items || []);
+        setEventsCursor(eventsRes.data?.nextCursor || null);
       } catch {
         toast.error("Não foi possível carregar os detalhes do cliente");
         navigate("/clientes");
@@ -65,6 +45,18 @@ export default function ClientDetailsPage() {
 
     void load();
   }, [id, navigate]);
+
+  const loadMoreEvents = async () => {
+    if (!id || !eventsCursor) return;
+    setLoadingMoreEvents(true);
+    try {
+      const response = await api.get(`/events?clientId=${id}&take=20&cursor=${eventsCursor}`);
+      setEvents((current) => [...current, ...(response.data?.items || [])]);
+      setEventsCursor(response.data?.nextCursor || null);
+    } finally {
+      setLoadingMoreEvents(false);
+    }
+  };
 
   if (loading) {
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-500">Carregando detalhes do cliente...</div>;
@@ -93,18 +85,15 @@ export default function ClientDetailsPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Linha do Tempo</h3>
-        <div className="space-y-2">
-          {events.length ? events.map((event) => (
-            <div key={event.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-slate-800">{eventLabel[event.type]}</span>
-                <span className="text-xs text-slate-500">{dateTimeFormatter.format(new Date(event.createdAt))}</span>
-              </div>
-              <p className="mt-1 text-slate-700">{event.description}</p>
-              <p className="mt-1 text-xs text-slate-500">por {event.ownerSeller?.name || "Usuário"}</p>
-            </div>
-          )) : <p className="text-sm text-slate-500">Sem interações registradas.</p>}
-        </div>
+        <TimelineEventList
+          events={events}
+          loading={loading}
+          hasMore={Boolean(eventsCursor)}
+          loadingMore={loadingMoreEvents}
+          onLoadMore={() => void loadMoreEvents()}
+          emptyMessage="Sem interações registradas."
+          loadingMessage="Carregando timeline..."
+        />
       </section>
     </div>
   );
