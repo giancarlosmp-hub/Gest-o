@@ -44,6 +44,16 @@ export const contactSchema = z.object({
   ownerSellerId: z.string().optional()
 });
 
+export const clientContactSchema = z.object({
+  name: z.string().min(2),
+  role: z.string().min(2).optional(),
+  department: z.string().min(2).optional(),
+  phone: z.string().min(8),
+  email: z.string().email(),
+  isPrimary: z.boolean().optional(),
+  notes: z.string().max(2000).optional()
+});
+
 export const opportunitySchema = z.object({
   title: z.string().min(2),
   value: z.number().nonnegative(),
@@ -163,6 +173,7 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type ClientInput = z.infer<typeof clientSchema>;
 export type CompanyInput = z.infer<typeof companySchema>;
 export type ContactInput = z.infer<typeof contactSchema>;
+export type ClientContactInput = z.infer<typeof clientContactSchema>;
 export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
