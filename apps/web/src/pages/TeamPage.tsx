@@ -21,11 +21,14 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
+type TeamRole = "diretor" | "gerente" | "vendedor";
+
 type TeamUser = {
   id: string;
   name: string;
-  role?: string;
+  role?: TeamRole;
   status?: string | null;
+  isActive?: boolean;
 };
 
 type TeamOpportunity = {
@@ -72,9 +75,12 @@ function formatRole(role?: string) {
   return roleLabel[role] ?? role.charAt(0).toUpperCase() + role.slice(1);
 }
 
-function formatStatus(status?: string | null) {
-  if (!status) return "Ativo";
-  return statusLabel[status.toLowerCase()] ?? status;
+function formatStatus(status?: string | null, isActive = true) {
+  if (typeof status === "string" && status.length > 0) {
+    return statusLabel[status.toLowerCase()] ?? status;
+  }
+
+  return isActive ? "Ativo" : "Inativo";
 }
 
 export default function TeamPage() {
@@ -92,6 +98,10 @@ export default function TeamPage() {
   const [teamActivitiesInMonth, setTeamActivitiesInMonth] = useState<number | null>(null);
 
   const isManagerProfile = user?.role === "gerente" || user?.role === "diretor";
+  const isDirector = user?.role === "diretor";
+  const [adminActionLoading, setAdminActionLoading] = useState<"toggleActive" | "resetPassword" | "changeRole" | null>(null);
+  const [temporaryPasswordFeedback, setTemporaryPasswordFeedback] = useState<string | null>(null);
+  const [adminActionMessage, setAdminActionMessage] = useState<string | null>(null);
 
   const loadTeamData = async (monthYear = objectiveMonth) => {
     const [yearString, monthString] = monthYear.split("-");
@@ -132,10 +142,10 @@ export default function TeamPage() {
       try {
         await loadTeamData(getCurrentMonthKey());
       } catch {
-        const fallbackUsers = [
-          { id: "seed-1", name: "Vendedor 1", role: "vendedor", status: "ativo" },
-          { id: "seed-2", name: "Vendedora 2", role: "vendedor", status: "ativo" },
-          { id: "seed-3", name: "Vendedor 3", role: "vendedor", status: "inativo" }
+        const fallbackUsers: TeamUser[] = [
+          { id: "seed-1", name: "Vendedor 1", role: "vendedor", status: "ativo", isActive: true },
+          { id: "seed-2", name: "Vendedora 2", role: "vendedor", status: "ativo", isActive: true },
+          { id: "seed-3", name: "Vendedor 3", role: "vendedor", status: "inativo", isActive: false }
         ];
 
         setUsers(fallbackUsers);
@@ -272,6 +282,52 @@ export default function TeamPage() {
       setObjectiveAmount("");
     } finally {
       setSavingObjective(false);
+    }
+  };
+
+  const handleToggleActive = async (teamUser: TeamUser) => {
+    if (!isDirector) return;
+    setAdminActionLoading("toggleActive");
+    setTemporaryPasswordFeedback(null);
+    setAdminActionMessage(null);
+
+    try {
+      await api.patch(`/users/${teamUser.id}/active`, { isActive: !teamUser.isActive });
+      await loadTeamData(objectiveMonth);
+      setSelected((previous) => (previous && previous.id === teamUser.id ? { ...previous, isActive: !teamUser.isActive } : previous));
+      setAdminActionMessage(`Usuário ${teamUser.isActive ? "desativado" : "ativado"} com sucesso.`);
+    } finally {
+      setAdminActionLoading(null);
+    }
+  };
+
+  const handleResetPassword = async (teamUser: TeamUser) => {
+    if (!isDirector) return;
+    setAdminActionLoading("resetPassword");
+    setAdminActionMessage(null);
+    setTemporaryPasswordFeedback(null);
+
+    try {
+      const response = await api.post<{ temporaryPassword: string }>(`/users/${teamUser.id}/reset-password`, {});
+      setTemporaryPasswordFeedback(response.data.temporaryPassword);
+      setAdminActionMessage("Senha resetada. Compartilhe a senha temporária com segurança.");
+    } finally {
+      setAdminActionLoading(null);
+    }
+  };
+
+  const handleChangeRole = async (teamUser: TeamUser, role: TeamRole) => {
+    if (!isDirector) return;
+    setAdminActionLoading("changeRole");
+    setAdminActionMessage(null);
+
+    try {
+      await api.patch(`/users/${teamUser.id}/role`, { role });
+      await loadTeamData(objectiveMonth);
+      setSelected((previous) => (previous && previous.id === teamUser.id ? { ...previous, role } : previous));
+      setAdminActionMessage("Role alterada com sucesso.");
+    } finally {
+      setAdminActionLoading(null);
     }
   };
 
@@ -456,7 +512,7 @@ export default function TeamPage() {
                       <p className="text-sm text-slate-500">{formatRole(teamUser.role)}</p>
                     </div>
                     <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                      {formatStatus(teamUser.status)}
+                      {formatStatus(teamUser.status, teamUser.isActive ?? true)}
                     </span>
                   </div>
 
@@ -536,13 +592,61 @@ export default function TeamPage() {
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-900">Detalhes do vendedor</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Placeholder para próximos PRs com dados de performance e carteira.
+              Acompanhe dados do usuário e execute ações administrativas conforme seu perfil.
             </p>
 
             <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
               <p><strong>Nome:</strong> {selected.name}</p>
               <p><strong>Role:</strong> {formatRole(selected.role)}</p>
-              <p><strong>Status:</strong> {formatStatus(selected.status)}</p>
+              <p><strong>Status:</strong> {formatStatus(selected.status, selected.isActive ?? true)}</p>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              <button
+                onClick={() => handleToggleActive(selected)}
+                disabled={!isDirector || adminActionLoading !== null}
+                title={!isDirector ? "Somente DIRETOR pode ativar/desativar usuários." : undefined}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {selected.isActive ? "Desativar usuário" : "Ativar usuário"}
+              </button>
+
+              <button
+                onClick={() => handleResetPassword(selected)}
+                disabled={!isDirector || adminActionLoading !== null}
+                title={!isDirector ? "Somente DIRETOR pode resetar senha." : undefined}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Resetar senha
+              </button>
+
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium text-slate-700">Alterar role</span>
+                <select
+                  value={selected.role ?? "vendedor"}
+                  onChange={(event) => handleChangeRole(selected, event.target.value as TeamRole)}
+                  disabled={!isDirector || adminActionLoading !== null}
+                  title={!isDirector ? "Somente DIRETOR pode alterar role." : undefined}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="diretor">Diretor</option>
+                  <option value="gerente">Gerente</option>
+                  <option value="vendedor">Vendedor</option>
+                </select>
+              </label>
+
+              {!isDirector && (
+                <p className="text-xs text-amber-700">
+                  Perfil GERENTE: você pode visualizar os controles, mas não pode alterar role, resetar senha ou ativar/desativar usuários.
+                </p>
+              )}
+
+              {adminActionMessage && <p className="text-xs text-emerald-700">{adminActionMessage}</p>}
+              {temporaryPasswordFeedback && (
+                <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                  Senha temporária: <strong>{temporaryPasswordFeedback}</strong>
+                </p>
+              )}
             </div>
 
             <button

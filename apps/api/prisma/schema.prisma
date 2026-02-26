@@ -41,6 +41,7 @@ model User {
   passwordHash String
   role         Role
   region       String?
+  isActive     Boolean       @default(true)
   createdAt    DateTime      @default(now())
   clients      Client[]
   companies    Company[]

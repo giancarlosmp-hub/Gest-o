@@ -102,6 +102,19 @@ export const objectiveUpsertSchema = z.object({
   amount: z.number().positive()
 });
 
+
+export const userActivationSchema = z.object({
+  isActive: z.boolean()
+});
+
+export const userRoleUpdateSchema = z.object({
+  role: RoleEnum
+});
+
+export const userResetPasswordSchema = z.object({
+  temporaryPasswordLength: z.number().int().min(8).max(32).optional()
+});
+
 export const dashboardPerformanceSchema = z.object({
   sellerId: z.string(),
   seller: z.string(),
@@ -154,6 +167,9 @@ export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
 export type ObjectiveUpsertInput = z.infer<typeof objectiveUpsertSchema>;
+export type UserActivationInput = z.infer<typeof userActivationSchema>;
+export type UserRoleUpdateInput = z.infer<typeof userRoleUpdateSchema>;
+export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
