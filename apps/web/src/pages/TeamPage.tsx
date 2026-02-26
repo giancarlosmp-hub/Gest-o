@@ -49,6 +49,12 @@ const statusLabel: Record<string, string> = {
   inativo: "Inativo"
 };
 
+const rankingMedalByPosition: Record<number, string> = {
+  1: "🥇",
+  2: "🥈",
+  3: "🥉"
+};
+
 function formatRole(role?: string) {
   if (!role) return "Não informado";
   return roleLabel[role] ?? role.charAt(0).toUpperCase() + role.slice(1);
@@ -129,6 +135,18 @@ export default function TeamPage() {
       .filter((teamUser) => teamUser.name.toLowerCase().includes(normalizedSearch));
   }, [users, search, filter]);
 
+  const sellerRanking = useMemo(() => {
+    return users
+      .filter((teamUser) => teamUser.role === "vendedor")
+      .map((teamUser) => ({
+        seller: teamUser,
+        metrics: metricsBySeller[teamUser.id]
+      }))
+      .sort((a, b) => (b.metrics?.monthlyRevenue ?? 0) - (a.metrics?.monthlyRevenue ?? 0));
+  }, [users, metricsBySeller]);
+
+  const topSellers = sellerRanking.slice(0, 3);
+
   const openObjectiveModal = (teamUser: TeamUser) => {
     setObjectiveModalUser(teamUser);
     setObjectiveAmount(String(metricsBySeller[teamUser.id]?.objectiveAmount ?? ""));
@@ -196,92 +214,159 @@ export default function TeamPage() {
           Carregando equipe...
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredUsers.map((teamUser) => {
-            const metrics = metricsBySeller[teamUser.id];
-            const objective = metrics?.objectiveAmount ?? 0;
-            const progressWidth = objective > 0 ? Math.max(4, Math.min(100, metrics?.progressPercent ?? 0)) : 4;
+        <>
+          {isManagerProfile && (
+            <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Ranking do time</h3>
+                <p className="text-sm text-slate-500">Vendedores ordenados por faturado no mês atual.</p>
+              </div>
 
-            return (
-              <article key={teamUser.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <h3 className="text-lg font-semibold text-slate-900">{teamUser.name}</h3>
-                    <p className="text-sm text-slate-500">{formatRole(teamUser.role)}</p>
-                  </div>
-                  <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                    {formatStatus(teamUser.status)}
-                  </span>
-                </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {topSellers.map(({ seller, metrics }, index) => {
+                  const position = index + 1;
+                  return (
+                    <article key={seller.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        {rankingMedalByPosition[position]} {position}º lugar
+                      </p>
+                      <p className="mt-1 text-base font-semibold text-slate-900">{seller.name}</p>
+                      <div className="mt-2 space-y-1 text-sm text-slate-600">
+                        <p>Faturado mês: <span className="font-medium text-slate-900">{formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)}</span></p>
+                        <p>% realizado: <span className="font-medium text-slate-900">{formatPercentBR(metrics?.progressPercent ?? 0, 0)}</span></p>
+                        <p>Pipeline total: <span className="font-medium text-slate-900">{formatCurrencyBRL(metrics?.openPipelineValue ?? 0)}</span></p>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
 
-                <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Faturado no mês</p>
-                    <p className="text-base font-semibold text-slate-900">
-                      {formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)}
-                    </p>
-                    {metrics?.isRevenueEstimated && (
-                      <p className="text-xs text-amber-700">Valor estimado com base no pipeline atual.</p>
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Posição</th>
+                      <th className="px-3 py-2 font-semibold">Nome</th>
+                      <th className="px-3 py-2 font-semibold">Faturado mês</th>
+                      <th className="px-3 py-2 font-semibold">% realizado</th>
+                      <th className="px-3 py-2 font-semibold">Pipeline total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                    {sellerRanking.map(({ seller, metrics }, index) => {
+                      const position = index + 1;
+                      return (
+                        <tr key={seller.id}>
+                          <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">
+                            {position}º {rankingMedalByPosition[position] ?? ""}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-2">{seller.name}</td>
+                          <td className="whitespace-nowrap px-3 py-2">{formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)}</td>
+                          <td className="whitespace-nowrap px-3 py-2">{formatPercentBR(metrics?.progressPercent ?? 0, 0)}</td>
+                          <td className="whitespace-nowrap px-3 py-2">{formatCurrencyBRL(metrics?.openPipelineValue ?? 0)}</td>
+                        </tr>
+                      );
+                    })}
+                    {!sellerRanking.length && (
+                      <tr>
+                        <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                          Nenhum vendedor encontrado para o ranking.
+                        </td>
+                      </tr>
                     )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="rounded-md border border-slate-200 bg-white p-2">
-                      <p className="text-xs text-slate-500">Oportunidades abertas</p>
-                      <p className="font-semibold text-slate-900">{metrics?.openOpportunities ?? 0}</p>
-                    </div>
-                    <div className="rounded-md border border-slate-200 bg-white p-2">
-                      <p className="text-xs text-slate-500">Pipeline aberto</p>
-                      <p className="font-semibold text-slate-900">{formatCurrencyBRL(metrics?.openPipelineValue ?? 0)}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-500">Última atividade</p>
-                    <p className="text-sm font-medium text-slate-700">{metrics?.lastActivityLabel ?? "Sem atividades"}</p>
-                  </div>
-
-                  <div>
-                    <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
-                      <span>Realizado ({formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)})</span>
-                      <span>{formatPercentBR(metrics?.progressPercent ?? 0, 0)}</span>
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-slate-200">
-                      <div
-                        className="h-2 rounded-full bg-brand-700 transition-all"
-                        style={{ width: `${progressWidth}%` }}
-                      />
-                    </div>
-                    <p className="mt-1 text-[11px] text-slate-500">Objetivo do mês: {formatCurrencyBRL(objective)}</p>
-                  </div>
-                </div>
-
-                {isManagerProfile && teamUser.role === "vendedor" && (
-                  <button
-                    onClick={() => openObjectiveModal(teamUser)}
-                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
-                  >
-                    Definir objetivo
-                  </button>
-                )}
-
-                <button
-                  onClick={() => setSelected(teamUser)}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                >
-                  <UserRound size={16} />
-                  Ver detalhes
-                </button>
-              </article>
-            );
-          })}
-
-          {!filteredUsers.length && (
-            <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 md:col-span-2 xl:col-span-3">
-              Nenhum vendedor encontrado para os filtros selecionados.
-            </div>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
-        </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredUsers.map((teamUser) => {
+              const metrics = metricsBySeller[teamUser.id];
+              const objective = metrics?.objectiveAmount ?? 0;
+              const progressWidth = objective > 0 ? Math.max(4, Math.min(100, metrics?.progressPercent ?? 0)) : 4;
+
+              return (
+                <article key={teamUser.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-semibold text-slate-900">{teamUser.name}</h3>
+                      <p className="text-sm text-slate-500">{formatRole(teamUser.role)}</p>
+                    </div>
+                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                      {formatStatus(teamUser.status)}
+                    </span>
+                  </div>
+
+                  <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Faturado no mês</p>
+                      <p className="text-base font-semibold text-slate-900">
+                        {formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)}
+                      </p>
+                      {metrics?.isRevenueEstimated && (
+                        <p className="text-xs text-amber-700">Valor estimado com base no pipeline atual.</p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="rounded-md border border-slate-200 bg-white p-2">
+                        <p className="text-xs text-slate-500">Oportunidades abertas</p>
+                        <p className="font-semibold text-slate-900">{metrics?.openOpportunities ?? 0}</p>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-white p-2">
+                        <p className="text-xs text-slate-500">Pipeline aberto</p>
+                        <p className="font-semibold text-slate-900">{formatCurrencyBRL(metrics?.openPipelineValue ?? 0)}</p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Última atividade</p>
+                      <p className="text-sm font-medium text-slate-700">{metrics?.lastActivityLabel ?? "Sem atividades"}</p>
+                    </div>
+
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs text-slate-600">
+                        <span>Realizado ({formatCurrencyBRL(metrics?.monthlyRevenue ?? 0)})</span>
+                        <span>{formatPercentBR(metrics?.progressPercent ?? 0, 0)}</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-slate-200">
+                        <div
+                          className="h-2 rounded-full bg-brand-700 transition-all"
+                          style={{ width: `${progressWidth}%` }}
+                        />
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">Objetivo do mês: {formatCurrencyBRL(objective)}</p>
+                    </div>
+                  </div>
+
+                  {isManagerProfile && teamUser.role === "vendedor" && (
+                    <button
+                      onClick={() => openObjectiveModal(teamUser)}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+                    >
+                      Definir objetivo
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setSelected(teamUser)}
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <UserRound size={16} />
+                    Ver detalhes
+                  </button>
+                </article>
+              );
+            })}
+
+            {!filteredUsers.length && (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500 md:col-span-2 xl:col-span-3">
+                Nenhum vendedor encontrado para os filtros selecionados.
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {selected && (
