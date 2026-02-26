@@ -34,6 +34,11 @@ enum EventType {
   status
 }
 
+enum ClientType {
+  PJ
+  PF
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -44,7 +49,6 @@ model User {
   isActive     Boolean       @default(true)
   createdAt    DateTime      @default(now())
   clients      Client[]
-  companies    Company[]
   contacts     Contact[]
   opportunities Opportunity[]
   activities   Activity[]
@@ -54,31 +58,24 @@ model User {
 }
 
 model Client {
-  id            String      @id @default(cuid())
-  name          String
-  city          String
-  state         String
-  region        String
-  potentialHa   Float?      @default(0)
-  farmSizeHa    Float?      @default(0)
-  ownerSellerId String
-  ownerSeller   User        @relation(fields: [ownerSellerId], references: [id])
-  contacts      Contact[]
-  opportunities Opportunity[]
+  id             String        @id @default(cuid())
+  name           String
+  city           String
+  state          String
+  region         String
+  potentialHa    Float?        @default(0)
+  farmSizeHa     Float?        @default(0)
+  clientType     ClientType    @default(PJ)
+  cnpj           String?
+  segment        String?
+  ownerSellerId  String
+  ownerSeller    User          @relation(fields: [ownerSellerId], references: [id])
+  contacts       Contact[]
+  opportunities  Opportunity[]
   timelineEvents TimelineEvent[]
-  createdAt     DateTime    @default(now())
+  createdAt      DateTime      @default(now())
 }
 
-model Company {
-  id            String    @id @default(cuid())
-  name          String
-  cnpj          String?
-  segment       String
-  ownerSellerId String
-  ownerSeller   User      @relation(fields: [ownerSellerId], references: [id])
-  contacts      Contact[]
-  createdAt     DateTime  @default(now())
-}
 
 model Contact {
   id            String    @id @default(cuid())
@@ -89,8 +86,6 @@ model Contact {
   department    String?
   clientId      String?
   client        Client?   @relation(fields: [clientId], references: [id])
-  companyId     String?
-  company       Company?  @relation(fields: [companyId], references: [id])
   isPrimary     Boolean   @default(false)
   notes         String?
   ownerSellerId String

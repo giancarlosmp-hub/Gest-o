@@ -433,12 +433,63 @@ router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/companies", async (req, res) => res.json(await prisma.company.findMany({ where: sellerWhere(req), orderBy: { createdAt: "desc" } })));
-router.post("/companies", validateBody(companySchema), async (req, res) => res.status(201).json(await prisma.company.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
-router.put("/companies/:id", validateBody(companySchema.partial()), async (req, res) => res.json(await prisma.company.update({ where: { id: req.params.id }, data: req.body })));
-router.delete("/companies/:id", async (req, res) => { await prisma.company.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+// Compatibilidade legada: empresas agora são clientes do tipo PJ
+router.get("/companies", async (req, res) => {
+  const data = await prisma.client.findMany({
+    where: {
+      ...sellerWhere(req),
+      clientType: "PJ"
+    },
+    orderBy: { createdAt: "desc" }
+  });
 
-router.get("/contacts", async (req, res) => res.json(await prisma.contact.findMany({ where: sellerWhere(req), include: { company: true }, orderBy: { createdAt: "desc" } })));
+  res.json(data.map((client) => ({
+    id: client.id,
+    name: client.name,
+    cnpj: client.cnpj,
+    segment: client.segment,
+    ownerSellerId: client.ownerSellerId,
+    createdAt: client.createdAt
+  })));
+});
+
+router.post("/companies", validateBody(companySchema), async (req, res) => {
+  const data = await prisma.client.create({
+    data: {
+      name: req.body.name,
+      city: "Não informado",
+      state: "NI",
+      region: req.user?.region || "Nacional",
+      clientType: "PJ",
+      cnpj: req.body.cnpj,
+      segment: req.body.segment,
+      ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId)
+    }
+  });
+
+  res.status(201).json(data);
+});
+
+router.put("/companies/:id", validateBody(companySchema.partial()), async (req, res) => {
+  const data = await prisma.client.update({
+    where: { id: req.params.id },
+    data: {
+      ...(req.body.name ? { name: req.body.name } : {}),
+      ...(req.body.cnpj !== undefined ? { cnpj: req.body.cnpj } : {}),
+      ...(req.body.segment !== undefined ? { segment: req.body.segment } : {}),
+      clientType: "PJ"
+    }
+  });
+
+  res.json(data);
+});
+
+router.delete("/companies/:id", async (req, res) => {
+  await prisma.client.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
+
+router.get("/contacts", async (req, res) => res.json(await prisma.contact.findMany({ where: sellerWhere(req), include: { client: true }, orderBy: { createdAt: "desc" } })));
 router.post("/contacts", validateBody(contactSchema), async (req, res) => res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
 router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => res.json(await prisma.contact.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/contacts/:id", async (req, res) => { await prisma.contact.delete({ where: { id: req.params.id } }); res.status(204).send(); });
