@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
+import { activitySchema, clientContactSchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
@@ -340,6 +340,96 @@ router.delete("/clients/:id", async (req, res) => {
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) return res.status(403).json({ message: "Sem permissão" });
   await prisma.client.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
+
+router.get("/clients/:id/contacts", async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!client) return res.status(404).json({ message: "Não encontrado" });
+
+  const contacts = await prisma.contact.findMany({
+    where: {
+      clientId: req.params.id,
+      ...sellerWhere(req)
+    },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }]
+  });
+
+  res.json(contacts);
+});
+
+router.post("/clients/:id/contacts", validateBody(clientContactSchema), async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!client) return res.status(404).json({ message: "Não encontrado" });
+
+  const data = await prisma.contact.create({
+    data: {
+      ...req.body,
+      clientId: req.params.id,
+      ownerSellerId: resolveOwnerId(req)
+    }
+  });
+
+  res.status(201).json(data);
+});
+
+router.put("/clients/:id/contacts/:contactId", validateBody(clientContactSchema.partial()), async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!client) return res.status(404).json({ message: "Não encontrado" });
+
+  const existingContact = await prisma.contact.findFirst({
+    where: {
+      id: req.params.contactId,
+      clientId: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!existingContact) return res.status(404).json({ message: "Não encontrado" });
+
+  const data = await prisma.contact.update({
+    where: { id: req.params.contactId },
+    data: req.body
+  });
+
+  res.json(data);
+});
+
+router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
+  const existingContact = await prisma.contact.findFirst({
+    where: {
+      id: req.params.contactId,
+      clientId: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!existingContact) return res.status(404).json({ message: "Não encontrado" });
+
+  await prisma.contact.delete({ where: { id: req.params.contactId } });
   res.status(204).send();
 });
 
