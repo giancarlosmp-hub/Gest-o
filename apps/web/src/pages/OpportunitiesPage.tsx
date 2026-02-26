@@ -6,6 +6,7 @@ import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatt
 import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
+import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
@@ -155,9 +156,10 @@ export default function OpportunitiesPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [isAddingComment, setIsAddingComment] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -172,9 +174,6 @@ export default function OpportunitiesPage() {
     dateTo: "",
     overdue: false
   });
-  const [opportunityEvents, setOpportunityEvents] = useState<TimelineEventItem[]>([]);
-  const [loadingOpportunityEvents, setLoadingOpportunityEvents] = useState(false);
-  const [opportunityComment, setOpportunityComment] = useState("");
   const [selectedOpportunity, setSelectedOpportunity] = useState<Opportunity | null>(null);
   const [isPipelineDrawerOpen, setIsPipelineDrawerOpen] = useState(false);
   const [pipelineInteraction, setPipelineInteraction] = useState("");
@@ -357,19 +356,26 @@ export default function OpportunitiesPage() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
     const value = Number(form.value);
     const probability = Number(form.probability);
     if (Number.isNaN(value) || value < 0) {
-      toast.error("Valor precisa ser maior ou igual a zero");
+      const errorMessage = "Valor precisa ser maior ou igual a zero";
+      setSubmitError(errorMessage);
+      toast.error(errorMessage);
       return;
     }
     if (Number.isNaN(probability) || probability < 0 || probability > 100) {
-      toast.error("Probabilidade deve estar entre 0 e 100");
+      const errorMessage = "Probabilidade deve estar entre 0 e 100";
+      setSubmitError(errorMessage);
+      toast.error(errorMessage);
       return;
     }
     if (form.expectedReturnDate < form.proposalEntryDate) {
-      toast.error("Retorno previsto não pode ser anterior à entrada da proposta");
+      const errorMessage = "Retorno previsto não pode ser anterior à entrada da proposta";
+      setSubmitError(errorMessage);
+      toast.error(errorMessage);
       return;
     }
 
@@ -403,14 +409,37 @@ export default function OpportunitiesPage() {
 
       setForm(emptyForm);
       setEditing(null);
+      setIsCreateModalOpen(false);
       await load();
       toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Erro ao salvar oportunidade");
+      const errorMessage = error.response?.data?.message || "Erro ao salvar oportunidade";
+      setSubmitError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const openCreateModal = () => {
+    setEditing(null);
+    setForm({
+      ...emptyForm,
+      ownerSellerId: isSeller && user?.id ? user.id : ""
+    });
+    setSubmitError(null);
+    setIsCreateModalOpen(true);
+  };
+
+  const closeCreateModal = () => {
+    if (isSaving) return;
+    setIsCreateModalOpen(false);
+    setSubmitError(null);
+    setEditing(null);
+    setForm({
+      ...emptyForm,
+      ownerSellerId: isSeller && user?.id ? user.id : ""
+    });
   };
 
   const onEdit = (item: Opportunity) => {
@@ -433,55 +462,8 @@ export default function OpportunitiesPage() {
       clientId: item.clientId,
       ownerSellerId: item.ownerSellerId
     });
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  const loadOpportunityEvents = async (opportunityId: string) => {
-    setLoadingOpportunityEvents(true);
-    try {
-      const response = await api.get(`/events?opportunityId=${opportunityId}`);
-      setOpportunityEvents(response.data?.items || []);
-    } finally {
-      setLoadingOpportunityEvents(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!editing) {
-      setOpportunityEvents([]);
-      setOpportunityComment("");
-      return;
-    }
-
-    loadOpportunityEvents(editing).catch(() => toast.error("Erro ao carregar histórico da oportunidade"));
-  }, [editing]);
-
-  const onAddOpportunityComment = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!editing) return;
-
-    const description = opportunityComment.trim();
-    if (!description) {
-      toast.error("Digite um comentário antes de adicionar");
-      return;
-    }
-
-    setIsAddingComment(true);
-    try {
-      await api.post("/events", {
-        type: "comentario",
-        description,
-        opportunityId: editing,
-        clientId: form.clientId
-      });
-      setOpportunityComment("");
-      await loadOpportunityEvents(editing);
-      toast.success("Comentário adicionado ao histórico");
-    } catch {
-      toast.error("Não foi possível adicionar o comentário");
-    } finally {
-      setIsAddingComment(false);
-    }
+    setSubmitError(null);
+    setIsCreateModalOpen(true);
   };
 
   const onDelete = async (id: string) => {
@@ -637,21 +619,30 @@ export default function OpportunitiesPage() {
     <div className="space-y-5 pb-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
-        <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
-            onClick={() => handleViewModeChange("list")}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            onClick={openCreateModal}
           >
-            Lista
+            Nova oportunidade
           </button>
-          <button
-            type="button"
-            className={`rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
-            onClick={() => handleViewModeChange("pipeline")}
-          >
-            Pipeline
-          </button>
+          <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+              onClick={() => handleViewModeChange("list")}
+            >
+              Lista
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+              onClick={() => handleViewModeChange("pipeline")}
+            >
+              Pipeline
+            </button>
+          </div>
         </div>
       </div>
 
@@ -703,77 +694,27 @@ export default function OpportunitiesPage() {
         </div>
       ) : null}
 
-      <form onSubmit={submit} className="grid gap-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-4">
-        <input required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <select required className="rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => setForm({ ...form, clientId: e.target.value })}>
-          <option value="">Selecione cliente</option>
-          {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-        </select>
-        {user?.role !== "vendedor" ? (
-          <select required className="rounded-lg border border-slate-200 p-2" value={form.ownerSellerId} onChange={(e) => setForm({ ...form, ownerSellerId: e.target.value })}>
-            <option value="">Selecione vendedor</option>
-            {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-          </select>
-        ) : <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user.name} />}
-        <select required className="rounded-lg border border-slate-200 p-2" value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value as Stage })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
-
-        <input required inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Valor" value={form.value} onChange={(e) => setForm({ ...form, value: sanitizeNumericInput(e.target.value) })} />
-        <input required inputMode="numeric" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => setForm({ ...form, probability: sanitizeNumericInput(e.target.value, false) })} />
-        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.proposalEntryDate} onChange={(e) => setForm({ ...form, proposalEntryDate: e.target.value })} />
-        <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.expectedReturnDate} onChange={(e) => setForm({ ...form, expectedReturnDate: e.target.value })} />
-
-        <select className="rounded-lg border border-slate-200 p-2" value={form.crop} onChange={(e) => setForm({ ...form, crop: e.target.value })}>
-          <option value="">Cultura (opcional)</option>
-          {cropSelectOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
-        </select>
-        <input list="season-suggestions" className="rounded-lg border border-slate-200 p-2" placeholder="Safra (ex: 2025/26)" value={form.season} onChange={(e) => setForm({ ...form, season: e.target.value })} />
-        <datalist id="season-suggestions">
-          <option value="2024/25" />
-          <option value="2025/26" />
-          <option value="2026/27" />
-        </datalist>
-        <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Área (ha)" value={form.areaHa} onChange={(e) => setForm({ ...form, areaHa: sanitizeNumericInput(e.target.value) })} />
-        <input className="rounded-lg border border-slate-200 p-2" placeholder="Produto ofertado" value={form.productOffered} onChange={(e) => setForm({ ...form, productOffered: e.target.value })} />
-        <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.plantingForecastDate} onChange={(e) => setForm({ ...form, plantingForecastDate: e.target.value })} />
-        <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Ticket esperado/ha" value={form.expectedTicketPerHa} onChange={(e) => setForm({ ...form, expectedTicketPerHa: sanitizeNumericInput(e.target.value) })} />
-        <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.lastContactAt} onChange={(e) => setForm({ ...form, lastContactAt: e.target.value })} />
-
-        <textarea className="rounded-lg border border-slate-200 p-2 md:col-span-4" placeholder="Notas" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-        <button disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-white disabled:cursor-not-allowed disabled:bg-slate-500 md:col-span-4">{isSaving ? "Salvando..." : "Salvar"}</button>
-      </form>
-
-      {editing ? (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-lg font-semibold text-slate-900">Histórico</h3>
-          <form className="space-y-2" onSubmit={onAddOpportunityComment}>
-            <textarea
-              className="w-full rounded-lg border border-slate-200 p-2 text-sm"
-              rows={3}
-              placeholder="Escreva um comentário para esta oportunidade"
-              value={opportunityComment}
-              onChange={(event) => setOpportunityComment(event.target.value)}
-            />
-            <button
-              type="submit"
-              disabled={isAddingComment}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-500"
-            >
-              {isAddingComment ? "Adicionando..." : "Adicionar comentário"}
-            </button>
-          </form>
-
-          <div className="mt-4 space-y-2">
-            <TimelineEventList
-              events={opportunityEvents}
-              loading={loadingOpportunityEvents}
-              emptyMessage="Sem eventos registrados para esta oportunidade."
-              loadingMessage="Carregando histórico..."
-            />
-          </div>
-        </section>
-      ) : null}
+      <CreateOpportunityModal
+        open={isCreateModalOpen}
+        title={editing ? "Editar oportunidade" : "Nova oportunidade"}
+        form={form}
+        clients={clients}
+        sellers={sellers}
+        userRole={user?.role}
+        userName={user?.name}
+        isSaving={isSaving}
+        errorMessage={submitError}
+        stages={stages}
+        stageLabel={stageLabel}
+        cropOptions={cropSelectOptions}
+        onClose={closeCreateModal}
+        onSubmit={submit}
+        onFormChange={setForm}
+        sanitizeNumericInput={sanitizeNumericInput}
+      />
 
       {viewMode === "list" ? (
+
         <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
           <table className="min-w-[1500px] w-full text-sm">
             <thead>
