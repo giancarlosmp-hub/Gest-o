@@ -19,5 +19,15 @@ export default function LoginPage() {
     }
   };
 
-  return <div className="min-h-screen bg-blue-700 flex items-center justify-center p-4"><form onSubmit={onSubmit} className="bg-white p-6 rounded-xl w-full max-w-sm space-y-3"><h1 className="text-2xl font-bold">Demetra Agro Performance</h1><input className="w-full border p-2 rounded" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)}/><input className="w-full border p-2 rounded" type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)}/><button className="w-full bg-blue-700 text-white py-2 rounded">Entrar</button></form></div>;
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-brand-700 p-4">
+      <form onSubmit={onSubmit} className="w-full max-w-sm space-y-3 rounded-2xl bg-white p-6 shadow-lg">
+        <img src="/brand/demetra-logo-dark.svg" alt="Logo Demetra Agro" className="h-12 w-auto" />
+        <p className="text-sm text-slate-600">Acesse o painel comercial.</p>
+        <input className="w-full rounded-lg border p-2" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="w-full rounded-lg border p-2" type="password" placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <button className="w-full rounded-lg bg-brand-700 py-2 font-medium text-white hover:bg-brand-800">Entrar</button>
+      </form>
+    </div>
+  );
 }
