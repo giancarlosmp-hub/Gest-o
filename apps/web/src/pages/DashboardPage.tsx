@@ -75,6 +75,64 @@ const getBusinessDaysRemaining = (month: string) => {
 
 const clampPercent = (value: number) => Math.max(0, Math.min(value, 100));
 
+type RealizedTrendDirection = "up" | "down" | "flat";
+
+const getMonthDayFromLabel = (label: string): number | null => {
+  const normalizedLabel = label.trim();
+  if (!normalizedLabel) return null;
+
+  if (/^\d{1,2}$/.test(normalizedLabel)) {
+    const day = Number(normalizedLabel);
+    return Number.isInteger(day) ? day : null;
+  }
+
+  const slashMatch = normalizedLabel.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const day = Number(slashMatch[1]);
+    return Number.isInteger(day) ? day : null;
+  }
+
+  const dateMatch = normalizedLabel.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (dateMatch) {
+    const day = Number(dateMatch[3]);
+    return Number.isInteger(day) ? day : null;
+  }
+
+  return null;
+};
+
+const getRealizedTrend = (
+  labels: string[],
+  realizedDaily: number[],
+  referenceMonth: string
+): RealizedTrendDirection => {
+  const [year, month] = referenceMonth.split("-").map(Number);
+  const now = new Date();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === month;
+
+  const validDailyValues = labels.reduce<number[]>((accumulator, label, index) => {
+    const value = realizedDaily[index];
+    if (!Number.isFinite(value)) return accumulator;
+
+    const day = getMonthDayFromLabel(label);
+    if (day !== null && isCurrentMonth && day > now.getDate()) return accumulator;
+
+    accumulator.push(value);
+    return accumulator;
+  }, []);
+
+  if (validDailyValues.length < 6) return "flat";
+
+  const recentWindow = validDailyValues.slice(-3);
+  const previousWindow = validDailyValues.slice(-6, -3);
+  const recentSum = recentWindow.reduce((sum, value) => sum + value, 0);
+  const previousSum = previousWindow.reduce((sum, value) => sum + value, 0);
+
+  if (recentSum > previousSum) return "up";
+  if (recentSum < previousSum) return "down";
+  return "flat";
+};
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const location = useLocation();
@@ -197,6 +255,21 @@ export default function DashboardPage() {
     [salesPace?.realizedPercent]
   );
 
+  const realizedTrend = useMemo<RealizedTrendDirection>(
+    () => getRealizedTrend(series?.labels ?? [], series?.realizedDaily ?? [], month),
+    [month, series?.labels, series?.realizedDaily]
+  );
+
+  const realizedTrendStyle = useMemo(() => {
+    if (realizedTrend === "up") {
+      return { symbol: "↑", className: "text-green-600" };
+    }
+    if (realizedTrend === "down") {
+      return { symbol: "↓", className: "text-red-600" };
+    }
+    return { symbol: "→", className: "text-slate-400" };
+  }, [realizedTrend]);
+
   useEffect(() => {
     setAnimatedRealizedPercent(0);
     const frame = requestAnimationFrame(() => {
@@ -294,7 +367,16 @@ export default function DashboardPage() {
             </div>
 
             <div>
-              <div className="mb-1 text-sm font-medium text-slate-500">Realizado</div>
+              <div className="mb-1 flex items-center gap-2 text-sm font-medium text-slate-500">
+                <span>Realizado</span>
+                <span
+                  className={`text-sm ${realizedTrendStyle.className}`}
+                  title="Comparado aos 3 dias anteriores"
+                  aria-label="Indicador de tendência do realizado"
+                >
+                  {realizedTrendStyle.symbol}
+                </span>
+              </div>
               <div className="text-xl font-semibold text-slate-900">{formatPercentBR(salesPace.realizedPercent)}</div>
               <div className="mt-2 h-3 rounded-full bg-slate-100">
                   <div
