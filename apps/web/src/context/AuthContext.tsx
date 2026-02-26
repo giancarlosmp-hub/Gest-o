@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import api, { clearAccessToken, setAccessToken } from "../lib/apiClient";
 
-type User = { id: string; name: string; email: string; role: "diretor" | "gerente" | "vendedor"; region?: string };
+export type UserRole = "diretor" | "gerente" | "vendedor";
+
+type User = { id: string; name: string; email: string; role: UserRole; region?: string };
 
 type AuthContextType = {
   user: User | null;
