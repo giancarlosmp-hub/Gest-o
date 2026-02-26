@@ -234,7 +234,7 @@ export default function DashboardPage() {
         {series.objectiveTotal === 0 && (
           <div className="mt-2 text-sm text-amber-600">Objetivo do mês não definido.</div>
         )}
-        <div className="mt-4 grid gap-4 xl:grid-cols-[1.4fr_1fr]">
+        <div className="mt-4 grid items-stretch gap-5 xl:grid-cols-[3fr_1fr]">
           <div className="h-72 w-full">
             <Line
               options={lineOptions}
@@ -261,23 +261,25 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="space-y-3">
-            <div className="text-sm text-slate-600">Faturado acumulado: <span className="font-semibold text-slate-900">{formatCurrencyBRL(salesPace.soldInMonth)}</span></div>
-            <div className="text-sm text-slate-600">Objetivo do mês: <span className="font-semibold text-slate-900">{formatCurrencyBRL(salesPace.objectiveMonth)}</span></div>
-            <div>
-              <div className="mb-1 flex items-center justify-between text-sm text-slate-600">
-                <span>Realizado: {formatPercentBR(salesPace.realizedPercent)}</span>
-                <span>{formatCurrencyBRL(salesPace.soldInMonth)} / {formatCurrencyBRL(salesPace.objectiveMonth)}</span>
-              </div>
-              <div className="h-2 rounded-full bg-slate-100">
-                <div
-                  className="h-2 rounded-full bg-brand-600"
-                  style={{ width: `${Math.min(salesPace.realizedPercent, 100)}%` }}
-                />
-              </div>
+          <div className="flex h-full flex-col justify-between rounded-lg border border-slate-100 bg-slate-50/50 p-4">
+            <div className="space-y-4">
+              <div className="text-base text-slate-600">Faturado acumulado: <span className="font-semibold text-slate-900">{formatCurrencyBRL(salesPace.soldInMonth)}</span></div>
+              <div className="text-base text-slate-600">Objetivo do mês: <span className="font-semibold text-slate-900">{formatCurrencyBRL(salesPace.objectiveMonth)}</span></div>
             </div>
-            <div className="text-sm text-slate-600">Falta vender: <span className="font-semibold text-slate-900">{formatCurrencyBRL(salesPace.missingToSell)}</span></div>
-            <div className="text-sm text-slate-600">Necessário vender por dia útil: <span className="font-semibold text-slate-900">{salesPace.requiredPerBusinessDay === null ? "—" : formatCurrencyBRL(salesPace.requiredPerBusinessDay)}</span></div>
+            <div className="space-y-4">
+              <div>
+                <div className="mb-2 flex items-center justify-between text-base font-medium text-slate-700">
+                <span>Realizado: {formatPercentBR(salesPace.realizedPercent)}</span>
+                </div>
+                <div className="h-3 rounded-full bg-slate-100">
+                  <div
+                    className="h-3 rounded-full bg-brand-600"
+                    style={{ width: `${Math.min(salesPace.realizedPercent, 100)}%` }}
+                  />
+                </div>
+              </div>
+              <div className="text-base text-slate-600">Necessário vender por dia útil: <span className="font-semibold text-slate-900">{salesPace.requiredPerBusinessDay === null ? "—" : formatCurrencyBRL(salesPace.requiredPerBusinessDay)}</span></div>
+            </div>
           </div>
         </div>
       </div>
