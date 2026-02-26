@@ -428,7 +428,13 @@ router.get("/clients/:id", async (req, res) => {
   res.json(data);
 });
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
-  const data = await prisma.client.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } });
+  const ownerSellerId = req.user!.role === "vendedor"
+    ? req.user!.id
+    : (req.user!.role === "gerente" || req.user!.role === "diretor")
+      ? resolveOwnerId(req, req.body.ownerSellerId)
+      : resolveOwnerId(req);
+
+  const data = await prisma.client.create({ data: { ...req.body, ownerSellerId } });
   res.status(201).json(data);
 });
 router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
