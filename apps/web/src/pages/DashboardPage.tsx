@@ -73,6 +73,8 @@ const getBusinessDaysRemaining = (month: string) => {
   return count;
 };
 
+const clampPercent = (value: number) => Math.max(0, Math.min(value, 100));
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const location = useLocation();
@@ -82,6 +84,7 @@ export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<DashboardPortfolio | null>(null);
   const [sellers, setSellers] = useState<SellerOption[]>([]);
   const [sellerId, setSellerId] = useState("");
+  const [animatedRealizedPercent, setAnimatedRealizedPercent] = useState(0);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -189,6 +192,20 @@ export default function DashboardPage() {
     };
   }, [summary, series, portfolio, month]);
 
+  const realizedPercentClamped = useMemo(
+    () => clampPercent(salesPace?.realizedPercent ?? 0),
+    [salesPace?.realizedPercent]
+  );
+
+  useEffect(() => {
+    setAnimatedRealizedPercent(0);
+    const frame = requestAnimationFrame(() => {
+      setAnimatedRealizedPercent(realizedPercentClamped);
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [realizedPercentClamped]);
+
   if (!summary || !series || !portfolio || !salesPace) {
     return <div className={cardClass}>Carregando dashboard...</div>;
   }
@@ -281,8 +298,8 @@ export default function DashboardPage() {
               <div className="text-xl font-semibold text-slate-900">{formatPercentBR(salesPace.realizedPercent)}</div>
               <div className="mt-2 h-3 rounded-full bg-slate-100">
                   <div
-                    className="h-3 rounded-full bg-brand-600"
-                    style={{ width: `${Math.min(salesPace.realizedPercent, 100)}%` }}
+                    className="h-3 rounded-full bg-brand-600 transition-[width] duration-[600ms] ease-out motion-reduce:transition-none"
+                    style={{ width: `${animatedRealizedPercent}%` }}
                   />
                 </div>
               </div>
