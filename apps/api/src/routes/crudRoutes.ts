@@ -53,6 +53,12 @@ const getUtcTodayStart = () => {
 };
 
 const getStageFilter = (stage?: string) => (stage ? STAGE_ALIASES[stage] : undefined);
+type OpportunityStatusFilter = "open" | "closed" | "all";
+const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
+  if (!status) return "open";
+  if (status === "open" || status === "closed" || status === "all") return status;
+  return undefined;
+};
 const getWeightedValue = (value: number, probability?: number | null) => value * ((probability ?? 0) / 100);
 
 const getDaysOverdue = (expectedCloseDate: Date, stage: string, todayStart: Date) => {
@@ -606,6 +612,8 @@ router.delete("/contacts/:id", async (req, res) => { await prisma.contact.delete
 router.get("/opportunities", async (req, res) => {
   const stage = getStageFilter(req.query.stage as string | undefined);
   if (req.query.stage && !stage) return res.status(400).json({ message: "stage inválido" });
+  const status = getOpportunityStatusFilter(req.query.status as string | undefined);
+  if (req.query.status && !status) return res.status(400).json({ message: "status inválido" });
 
   const ownerSellerId = (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined);
   const clientId = req.query.clientId as string | undefined;
@@ -631,6 +639,8 @@ router.get("/opportunities", async (req, res) => {
 
   const where: any = {
     ...sellerWhere(req),
+    ...(status === "open" ? { NOT: { stage: { in: [...CLOSED_STAGE_VALUES] } } } : {}),
+    ...(status === "closed" ? { stage: { in: [...CLOSED_STAGE_VALUES] } } : {}),
     ...(stage ? { stage } : {}),
     ...(ownerSellerId ? { ownerSellerId } : {}),
     ...(clientId ? { clientId } : {}),
