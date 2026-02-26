@@ -11,7 +11,7 @@ import ReportsPage from "./pages/ReportsPage";
 import ObjectivesPage from "./pages/ObjectivesPage";
 import { useAuth } from "./context/AuthContext";
 
-const Placeholder = ({ title }: { title: string }) => <div className="bg-white p-6 rounded-xl shadow"><h2 className="text-2xl font-bold">{title}</h2><p className="text-slate-500">Em breve.</p></div>;
+const Placeholder = ({ title }: { title: string }) => <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-2xl font-bold text-slate-900">{title}</h2><p className="text-slate-500">Em breve.</p></div>;
 
 export default function App() {
   const { user } = useAuth();

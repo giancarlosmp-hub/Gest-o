@@ -799,7 +799,7 @@ export default function OpportunitiesPage() {
                     <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
                     <td className="p-2"><ReturnStatusBadge status={getReturnStatus(item)} /></td>
                     <td className="space-x-2 whitespace-nowrap p-2">
-                      <button type="button" className="text-blue-700" onClick={() => onEdit(item)}>Editar</button>
+                      <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
                     </td>

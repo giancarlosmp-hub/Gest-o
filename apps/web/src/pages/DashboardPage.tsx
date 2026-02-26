@@ -39,15 +39,15 @@ ChartJS.register(
 type SellerOption = { id: string; name: string; role: string };
 
 const palette = {
-  primary: "#2563eb",
-  success: "#16a34a",
+  primary: "#0B3C1D",
+  success: "#2f9e44",
   warning: "#f59e0b",
-  danger: "#ef4444",
-  info: "#0ea5e9",
-  textMuted: "#64748b",
-  border: "#e2e8f0",
+  danger: "#ca8a04",
+  info: "#348A4F",
+  textMuted: "#4b5563",
+  border: "#d1d5db",
   surface: "#ffffff",
-  rest: "#cbd5e1",
+  rest: "#8CC49B",
 };
 
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
@@ -171,7 +171,7 @@ export default function DashboardPage() {
           <select
             value={sellerId}
             onChange={(event) => setSellerId(event.target.value)}
-            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
+            className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
           >
             <option value="">Todos vendedores</option>
             {sellers.map((seller) => (
@@ -213,7 +213,7 @@ export default function DashboardPage() {
             </div>
             <div className="h-2 rounded-full bg-slate-100">
               <div
-                className="h-2 rounded-full bg-blue-600"
+                className="h-2 rounded-full bg-brand-600"
                 style={{ width: `${Math.min(salesPace.realizedPercent, 100)}%` }}
               />
             </div>
@@ -236,7 +236,7 @@ export default function DashboardPage() {
                     label: "Faturado acumulado",
                     data: series.realizedAccumulated,
                     borderColor: palette.success,
-                    backgroundColor: "rgba(22, 163, 74, 0.2)",
+                    backgroundColor: "rgba(47, 158, 68, 0.2)",
                     borderWidth: 2,
                     tension: 0.3,
                   },
@@ -244,7 +244,7 @@ export default function DashboardPage() {
                     label: "Objetivo acumulado",
                     data: series.objectiveAccumulated,
                     borderColor: palette.primary,
-                    backgroundColor: "rgba(37, 99, 235, 0.2)",
+                    backgroundColor: "rgba(11, 60, 29, 0.2)",
                     borderWidth: 2,
                     tension: 0.3,
                   },

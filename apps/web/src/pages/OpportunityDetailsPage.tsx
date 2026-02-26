@@ -202,7 +202,7 @@ export default function OpportunityDetailsPage() {
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
         <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
           <p><strong>Título:</strong> {item.title}</p>
-          <p><strong>Cliente:</strong> {item.clientId ? <Link className="text-blue-700" to={`/clientes/${item.clientId}`}>{item.client || "-"}</Link> : (item.client || "-")}</p>
+          <p><strong>Cliente:</strong> {item.clientId ? <Link className="text-brand-700" to={`/clientes/${item.clientId}`}>{item.client || "-"}</Link> : (item.client || "-")}</p>
           <p><strong>Vendedor:</strong> {item.owner || "-"}</p>
           <p><strong>Etapa:</strong> {stageLabel[item.stage]}</p>
           <p><strong>Valor:</strong> {formatCurrencyBRL(item.value)}</p>

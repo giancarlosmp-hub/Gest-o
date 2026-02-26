@@ -2,4 +2,31 @@
 @tailwind components;
 @tailwind utilities;
 
-body { @apply bg-slate-100 text-slate-900; }
+:root {
+  --bg-app: #f7faf8;
+  --surface: #ffffff;
+  --text-main: #111827;
+  --text-muted: #4b5563;
+  --border-subtle: #d1d5db;
+  --brand-primary: #0b3c1d;
+  --brand-primary-hover: #092f18;
+  --brand-soft: #eff8f1;
+  --positive: #2f9e44;
+  --warning: #f59e0b;
+}
+
+body {
+  @apply bg-[color:var(--bg-app)] text-[color:var(--text-main)] antialiased;
+}
+
+input,
+select,
+textarea {
+  @apply border-slate-300;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  @apply border-brand-500 ring-2 ring-brand-100 outline-none;
+}

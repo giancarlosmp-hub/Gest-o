@@ -38,7 +38,7 @@ type AgroCrmResponse = {
 };
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
-const chartPalette = ["#2563eb", "#0ea5e9", "#14b8a6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+const chartPalette = ["#0B3C1D", "#236F3C", "#348A4F", "#5DAA72", "#8CC49B", "#F59E0B", "#CA8A04", "#4B5563"];
 
 const stageLabels: Record<string, string> = {
   prospeccao: "Prospecção",
@@ -54,7 +54,7 @@ const baseChartOptions = {
   plugins: {
     legend: {
       labels: {
-        color: "#334155",
+        color: "#374151",
         font: { family: "Inter, ui-sans-serif, system-ui", size: 12, weight: 600 }
       }
     }
@@ -93,8 +93,8 @@ export default function ReportsPage() {
       }
     },
     scales: {
-      x: { ticks: { color: "#475569" }, grid: { color: "#e2e8f0" } },
-      y: { ticks: { color: "#475569" }, grid: { color: "#e2e8f0" } }
+      x: { ticks: { color: "#4b5563" }, grid: { color: "#d1d5db" } },
+      y: { ticks: { color: "#4b5563" }, grid: { color: "#d1d5db" } }
     }
   };
 
@@ -106,8 +106,8 @@ export default function ReportsPage() {
       legend: { display: false }
     },
     scales: {
-      x: { ticks: { color: "#475569" }, grid: { color: "#e2e8f0" } },
-      y: { ticks: { color: "#475569" }, grid: { display: false } }
+      x: { ticks: { color: "#4b5563" }, grid: { color: "#d1d5db" } },
+      y: { ticks: { color: "#4b5563" }, grid: { display: false } }
     }
   };
 
@@ -115,8 +115,8 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-blue-200 bg-gradient-to-r from-blue-50 via-white to-cyan-50 p-6 shadow-sm">
-        <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Relatórios</div>
+      <div className="rounded-2xl border border-brand-200 bg-gradient-to-r from-brand-50 via-white to-brand-100 p-6 shadow-sm">
+        <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Relatórios</div>
         <h2 className="mt-1 text-2xl font-bold text-slate-900">Agro CRM</h2>
         <p className="mt-1 text-sm text-slate-600">Insights de carteira e pipeline para decisões comerciais de campo.</p>
       </div>
@@ -168,7 +168,7 @@ export default function ReportsPage() {
               options={overdueOptions}
               data={{
                 labels: report.kpis.overdueBySeller.map((item) => item.sellerName),
-                datasets: [{ data: report.kpis.overdueBySeller.map((item) => item.overdueCount), backgroundColor: "#f97316", borderRadius: 8 }]
+                datasets: [{ data: report.kpis.overdueBySeller.map((item) => item.overdueCount), backgroundColor: "#CA8A04", borderRadius: 8 }]
               }}
             />
           </div>
@@ -184,7 +184,7 @@ export default function ReportsPage() {
                   <span className="font-semibold text-slate-900">{formatPercentBR(item.conversionRate)}</span>
                 </div>
                 <div className="h-2 rounded-full bg-slate-100">
-                  <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.min(item.conversionRate, 100)}%` }} />
+                  <div className="h-2 rounded-full bg-brand-600" style={{ width: `${Math.min(item.conversionRate, 100)}%` }} />
                 </div>
                 <div className="mt-1 text-xs text-slate-500">{item.progressedCount} de {item.baseCount} oportunidades</div>
               </div>
