@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
@@ -39,33 +39,6 @@ const emptyContactForm: ContactFormState = {
   isPrimary: false
 };
 
-const buildMockContacts = (clientId: string): Contact[] => [
-  {
-    id: `${clientId}-contact-1`,
-    name: "Marina Souza",
-    roleSector: "Compras / Suprimentos",
-    phone: "(11) 99231-4455",
-    email: "marina.souza@cliente.com",
-    isPrimary: true
-  },
-  {
-    id: `${clientId}-contact-2`,
-    name: "Carlos Andrade",
-    roleSector: "Operações",
-    phone: "(11) 98547-1200",
-    email: "carlos.andrade@cliente.com",
-    isPrimary: false
-  },
-  {
-    id: `${clientId}-contact-3`,
-    name: "Fernanda Lima",
-    roleSector: "Financeiro",
-    phone: "(11) 97412-9833",
-    email: "fernanda.lima@cliente.com",
-    isPrimary: false
-  }
-];
-
 type DetailsTab = "timeline" | "contacts";
 
 export default function ClientDetailsPage() {
@@ -81,6 +54,35 @@ export default function ClientDetailsPage() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [contactForm, setContactForm] = useState<ContactFormState>(emptyContactForm);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [savingContact, setSavingContact] = useState(false);
+  const [removingContactId, setRemovingContactId] = useState<string | null>(null);
+
+  const loadContacts = useCallback(async () => {
+    if (!id) return;
+
+    setLoadingContacts(true);
+    setContactsError(null);
+
+    try {
+      const response = await api.get(`/clients/${id}/contacts`);
+      const normalizedContacts: Contact[] = (response.data || []).map((contact: any) => ({
+        id: String(contact.id),
+        name: String(contact.name || ""),
+        roleSector: String(contact.roleSector || ""),
+        phone: String(contact.phone || ""),
+        email: String(contact.email || ""),
+        isPrimary: Boolean(contact.isPrimary)
+      }));
+      setContacts(normalizedContacts);
+    } catch {
+      setContacts([]);
+      setContactsError("Não foi possível carregar os contatos deste cliente.");
+    } finally {
+      setLoadingContacts(false);
+    }
+  }, [id]);
 
   useEffect(() => {
     const load = async () => {
@@ -94,9 +96,6 @@ export default function ClientDetailsPage() {
         setClient(clientRes.data);
         setEvents(eventsRes.data?.items || []);
         setEventsCursor(eventsRes.data?.nextCursor || null);
-
-        // TODO: trocar por endpoint real quando disponível, ex: /clients/:id/contacts
-        setContacts(buildMockContacts(id));
       } catch {
         toast.error("Não foi possível carregar os detalhes do cliente");
         navigate("/clientes");
@@ -107,6 +106,10 @@ export default function ClientDetailsPage() {
 
     void load();
   }, [id, navigate]);
+
+  useEffect(() => {
+    void loadContacts();
+  }, [loadContacts]);
 
   const loadMoreEvents = async () => {
     if (!id || !eventsCursor) return;
@@ -150,14 +153,14 @@ export default function ClientDetailsPage() {
     setContactForm(emptyContactForm);
   };
 
-  const saveContact = () => {
+  const saveContact = async () => {
+    if (!id) return;
     if (!contactForm.name.trim() || !contactForm.email.trim()) {
       toast.error("Preencha pelo menos nome e email do contato.");
       return;
     }
 
-    const normalizedContact: Contact = {
-      id: editingContactId ?? `${id}-contact-${Date.now()}`,
+    const payload = {
       name: contactForm.name.trim(),
       roleSector: contactForm.roleSector.trim(),
       phone: contactForm.phone.trim(),
@@ -165,37 +168,37 @@ export default function ClientDetailsPage() {
       isPrimary: contactForm.isPrimary
     };
 
-    setContacts((current) => {
-      const next = editingContactId
-        ? current.map((contact) => (contact.id === editingContactId ? normalizedContact : contact))
-        : [...current, normalizedContact];
-
-      return next.map((contact) => ({
-        ...contact,
-        isPrimary: normalizedContact.isPrimary ? contact.id === normalizedContact.id : contact.isPrimary
-      }));
-    });
-
-    toast.success(editingContactId ? "Contato atualizado com sucesso." : "Contato adicionado com sucesso.");
-    closeContactModal();
-  };
-
-  const removeContact = (contactId: string) => {
-    setContacts((current) => {
-      const contactToDelete = current.find((contact) => contact.id === contactId);
-      const next = current.filter((contact) => contact.id !== contactId);
-
-      if (contactToDelete?.isPrimary && next.length) {
-        return next.map((contact, index) => ({
-          ...contact,
-          isPrimary: index === 0
-        }));
+    setSavingContact(true);
+    try {
+      if (editingContactId) {
+        await api.put(`/clients/${id}/contacts/${editingContactId}`, payload);
+      } else {
+        await api.post(`/clients/${id}/contacts`, payload);
       }
 
-      return next;
-    });
+      await loadContacts();
+      toast.success(editingContactId ? "Contato atualizado com sucesso." : "Contato adicionado com sucesso.");
+      closeContactModal();
+    } catch {
+      toast.error(editingContactId ? "Não foi possível atualizar o contato." : "Não foi possível adicionar o contato.");
+    } finally {
+      setSavingContact(false);
+    }
+  };
 
-    toast.success("Contato removido.");
+  const removeContact = async (contactId: string) => {
+    if (!id) return;
+
+    setRemovingContactId(contactId);
+    try {
+      await api.delete(`/clients/${id}/contacts/${contactId}`);
+      await loadContacts();
+      toast.success("Contato removido.");
+    } catch {
+      toast.error("Não foi possível remover o contato.");
+    } finally {
+      setRemovingContactId(null);
+    }
   };
 
   return (
@@ -240,7 +243,8 @@ export default function ClientDetailsPage() {
             <button
               type="button"
               onClick={openAddContactModal}
-              className="rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+              disabled={savingContact || Boolean(removingContactId) || loadingContacts}
+              className="rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Adicionar contato
             </button>
@@ -261,7 +265,23 @@ export default function ClientDetailsPage() {
                 </tr>
               </thead>
               <tbody>
-                {contacts.map((contact) => (
+                {loadingContacts && (
+                  <tr>
+                    <td colSpan={6} className="px-2 py-8 text-center text-sm text-slate-500">
+                      Carregando contatos...
+                    </td>
+                  </tr>
+                )}
+
+                {!loadingContacts && contactsError && (
+                  <tr>
+                    <td colSpan={6} className="px-2 py-8 text-center text-sm text-rose-600">
+                      {contactsError}
+                    </td>
+                  </tr>
+                )}
+
+                {!loadingContacts && !contactsError && contacts.map((contact) => (
                   <tr key={contact.id} className="border-b border-slate-100 text-slate-700">
                     <td className="px-2 py-3 font-medium text-slate-900">{contact.name}</td>
                     <td className="px-2 py-3">{contact.roleSector || "-"}</td>
@@ -279,23 +299,25 @@ export default function ClientDetailsPage() {
                         <button
                           type="button"
                           onClick={() => openEditContactModal(contact)}
-                          className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          disabled={savingContact || Boolean(removingContactId)}
+                          className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           Editar
                         </button>
                         <button
                           type="button"
                           onClick={() => removeContact(contact.id)}
-                          className="rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                          disabled={savingContact || Boolean(removingContactId)}
+                          className="rounded-md border border-rose-200 px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          Remover
+                          {removingContactId === contact.id ? "Removendo..." : "Remover"}
                         </button>
                       </div>
                     </td>
                   </tr>
                 ))}
 
-                {!contacts.length && (
+                {!loadingContacts && !contactsError && !contacts.length && (
                   <tr>
                     <td colSpan={6} className="px-2 py-8 text-center text-sm text-slate-500">
                       Nenhum contato cadastrado para este cliente.
@@ -386,16 +408,18 @@ export default function ClientDetailsPage() {
               <button
                 type="button"
                 onClick={closeContactModal}
+                disabled={savingContact}
                 className="inline-flex flex-1 items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                onClick={saveContact}
-                className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800"
+                onClick={() => void saveContact()}
+                disabled={savingContact}
+                className="inline-flex flex-1 items-center justify-center rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Salvar
+                {savingContact ? "Salvando..." : "Salvar"}
               </button>
             </div>
           </div>
