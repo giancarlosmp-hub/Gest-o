@@ -129,7 +129,7 @@ const emptySummary: Summary = {
   overdueValue: 0
 };
 
-const PIPELINE_VIEW_STORAGE_KEY = "opportunities:viewMode";
+const PIPELINE_VIEW_STORAGE_KEY = "opportunities.view";
 
 function toDateInput(value?: string | null) {
   if (!value) return "";
@@ -165,7 +165,7 @@ export default function OpportunitiesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("list");
+  const [viewMode, setViewMode] = useState<ViewMode>("pipeline");
   const navigate = useNavigate();
   const [filters, setFilters] = useState<Filters>({
     stage: "",
@@ -197,10 +197,9 @@ export default function OpportunitiesPage() {
   }, [search]);
 
   useEffect(() => {
-    if (!user?.id) return;
-    const savedMode = localStorage.getItem(`${PIPELINE_VIEW_STORAGE_KEY}:${user.id}`);
+    const savedMode = localStorage.getItem(PIPELINE_VIEW_STORAGE_KEY);
     if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
-  }, [user?.id]);
+  }, []);
 
   useEffect(() => {
     if (!isSeller || !user?.id) return;
@@ -209,8 +208,7 @@ export default function OpportunitiesPage() {
 
   const handleViewModeChange = (mode: ViewMode) => {
     setViewMode(mode);
-    if (!user?.id) return;
-    localStorage.setItem(`${PIPELINE_VIEW_STORAGE_KEY}:${user.id}`, mode);
+    localStorage.setItem(PIPELINE_VIEW_STORAGE_KEY, mode);
   };
 
   const load = async () => {
@@ -660,17 +658,17 @@ export default function OpportunitiesPage() {
           <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
             <button
               type="button"
-              className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
-              onClick={() => handleViewModeChange("list")}
-            >
-              Lista
-            </button>
-            <button
-              type="button"
               className={`rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
               onClick={() => handleViewModeChange("pipeline")}
             >
               Pipeline
+            </button>
+            <button
+              type="button"
+              className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+              onClick={() => handleViewModeChange("list")}
+            >
+              Lista
             </button>
           </div>
         </div>
