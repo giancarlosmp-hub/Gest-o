@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
+import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -346,6 +347,7 @@ export default function OpportunitiesPage() {
 
     try {
       await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
+      triggerDashboardRefresh();
     } catch {
       setItems(previousItems);
       toast.error("Não foi possível mover a oportunidade de etapa");
@@ -397,6 +399,7 @@ export default function OpportunitiesPage() {
     try {
       if (editing) await api.put(`/opportunities/${editing}`, payload);
       else await api.post("/opportunities", payload);
+      triggerDashboardRefresh();
 
       setForm(emptyForm);
       setEditing(null);
@@ -483,6 +486,7 @@ export default function OpportunitiesPage() {
 
   const onDelete = async (id: string) => {
     await api.delete(`/opportunities/${id}`);
+    triggerDashboardRefresh();
     await load();
     toast.success("Oportunidade excluída");
   };
@@ -547,6 +551,7 @@ export default function OpportunitiesPage() {
     try {
       const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { stage });
       updateOpportunityInState(response.data);
+      triggerDashboardRefresh();
       await loadPipelineEvents(selectedOpportunity.id);
       toast.success(`Oportunidade marcada como ${stageLabel[stage]}`);
     } catch {
@@ -568,6 +573,7 @@ export default function OpportunitiesPage() {
     try {
       const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { followUpDate: pipelineFollowUpDate });
       updateOpportunityInState(response.data);
+      triggerDashboardRefresh();
       await loadPipelineEvents(selectedOpportunity.id);
       toast.success("Follow-up agendado com sucesso");
     } catch {
