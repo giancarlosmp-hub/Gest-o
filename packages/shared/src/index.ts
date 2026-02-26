@@ -96,6 +96,12 @@ export const goalSchema = z.object({
   sellerId: z.string()
 });
 
+export const objectiveUpsertSchema = z.object({
+  month: z.number().int().min(1).max(12),
+  year: z.number().int().min(2000).max(2100),
+  amount: z.number().positive()
+});
+
 export const dashboardPerformanceSchema = z.object({
   sellerId: z.string(),
   seller: z.string(),
@@ -147,6 +153,7 @@ export type ContactInput = z.infer<typeof contactSchema>;
 export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
+export type ObjectiveUpsertInput = z.infer<typeof objectiveUpsertSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;

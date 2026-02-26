@@ -23,12 +23,12 @@ export type SellerCardMetrics = {
   openPipelineValue: number;
   lastActivityLabel: string;
   progressPercent: number;
+  objectiveAmount: number;
   isRevenueEstimated: boolean;
 };
 
 const CLOSED_STAGES = new Set(["ganho", "perdido"]);
 const WON_STAGE = "ganho";
-const PLACEHOLDER_OBJECTIVE = 100000;
 
 export const getCurrentMonthKey = () => new Date().toISOString().slice(0, 7);
 
@@ -43,12 +43,11 @@ const asDate = (value?: string) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-export const getPlaceholderObjective = () => PLACEHOLDER_OBJECTIVE;
-
 export function buildSellerMetrics(
   users: SellerLite[],
   opportunities: OpportunityLite[],
   activities: ActivityLite[],
+  objectivesBySeller: Record<string, number>,
   monthKey = getCurrentMonthKey()
 ): Record<string, SellerCardMetrics> {
   const result: Record<string, SellerCardMetrics> = {};
@@ -72,7 +71,8 @@ export function buildSellerMetrics(
       .filter((item): item is Date => Boolean(item))
       .sort((a, b) => b.getTime() - a.getTime())[0];
 
-    const progressPercent = (estimatedRevenue / PLACEHOLDER_OBJECTIVE) * 100;
+    const objectiveAmount = objectivesBySeller[user.id] ?? 0;
+    const progressPercent = objectiveAmount > 0 ? (estimatedRevenue / objectiveAmount) * 100 : 0;
 
     result[user.id] = {
       monthlyRevenue: estimatedRevenue,
@@ -80,6 +80,7 @@ export function buildSellerMetrics(
       openPipelineValue,
       lastActivityLabel: latestActivity ? formatDateBR(latestActivity) : "Sem atividades",
       progressPercent,
+      objectiveAmount,
       isRevenueEstimated
     };
   }
