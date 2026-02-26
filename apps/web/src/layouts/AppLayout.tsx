@@ -13,7 +13,7 @@ export default function AppLayout() {
 
   const sidebar = (
     <aside className="bg-blue-700 text-white w-64 min-h-screen p-4 space-y-3">
-      <h1 className="font-bold text-xl mb-6 flex items-center gap-2"><Trophy size={20}/>SalesForce Pro</h1>
+      <h1 className="font-bold text-xl mb-6 flex items-center gap-2"><Trophy size={20}/>Demetra Agro Performance</h1>
       {items.filter((i) => !hidden.includes(i)).map((item) => {
         const path = "/" + (item === "Dashboard" ? "" : item.toLowerCase());
         const active = location.pathname === path;
