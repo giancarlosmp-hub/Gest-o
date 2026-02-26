@@ -1,6 +1,7 @@
 import { DragEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
+import { Search } from "lucide-react";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
@@ -255,7 +256,6 @@ export default function OpportunitiesPage() {
     const dynamic = Array.from(new Set(items.map((item) => item.crop).filter(Boolean))) as string[];
     return Array.from(new Set([...cropSelectOptions, ...dynamic]));
   }, [items]);
-  const seasonOptions = useMemo(() => Array.from(new Set(items.map((item) => item.season).filter(Boolean))) as string[], [items]);
 
   const getReturnStatus = (item: Opportunity): ReturnStatus => {
     if (["ganho", "perdido"].includes(item.stage)) return "ok";
@@ -655,41 +655,47 @@ export default function OpportunitiesPage() {
 
       {viewMode === "list" ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="mb-3 text-lg font-semibold text-slate-900">Filtros</h3>
-          <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
-            <input className="rounded-lg border border-slate-200 p-2" placeholder="Busca por título ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} />
-            <select className="rounded-lg border border-slate-200 p-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
+          <h3 className="mb-3 text-base font-semibold text-slate-900">Filtros</h3>
+          <div className="grid gap-3 lg:grid-cols-10">
+            <div className="relative lg:col-span-2">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm"
+                placeholder="Busca por título ou cliente"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.stage} onChange={(e) => setFilters((prev) => ({ ...prev, stage: e.target.value }))}>
               <option value="">Todos estágios</option>
               {stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}
             </select>
             {canFilterByOwner ? (
-              <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
+              <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
                 <option value="">Todos vendedores</option>
                 {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
               </select>
             ) : (
-              <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user?.name || "Meu pipeline"} />
+              <input disabled className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500 lg:col-span-2" value={user?.name || "Meu pipeline"} />
             )}
-            <select className="rounded-lg border border-slate-200 p-2" value={filters.clientId} onChange={(e) => setFilters((prev) => ({ ...prev, clientId: e.target.value }))}>
+            <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.clientId} onChange={(e) => setFilters((prev) => ({ ...prev, clientId: e.target.value }))}>
               <option value="">Todos clientes</option>
               {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
             </select>
-            <select className="rounded-lg border border-slate-200 p-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
+            <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
               <option value="">Todas culturas</option>
               {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
             </select>
-            <select className="rounded-lg border border-slate-200 p-2" value={filters.season} onChange={(e) => setFilters((prev) => ({ ...prev, season: e.target.value }))}>
-              <option value="">Todas safras</option>
-              {seasonOptions.map((season) => <option key={season} value={season}>{season}</option>)}
-            </select>
-            <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
-            <input type="date" className="rounded-lg border border-slate-200 p-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+            <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
+            <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+            <label className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 lg:col-span-2">
               <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
             </label>
-            <button type="button" className="rounded-lg bg-slate-100 px-3 font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
-              Limpar filtros
-            </button>
+            <div className="flex lg:col-span-4 lg:justify-end">
+              <button type="button" className="h-10 rounded-lg bg-slate-100 px-4 text-sm font-medium text-slate-700 hover:bg-slate-200" onClick={clearFilters}>
+                Limpar filtros
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
