@@ -1,5 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -25,6 +26,7 @@ export default function CrudSimplePage({
   createButtonLabel = "Adicionar",
   createModalTitle = "Novo registro"
 }: CrudSimplePageProps) {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [items, setItems] = useState<any[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
@@ -43,6 +45,7 @@ export default function CrudSimplePage({
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
+  const [openActionsMenuId, setOpenActionsMenuId] = useState<string | null>(null);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -195,7 +198,8 @@ export default function CrudSimplePage({
 
       setForm({});
       setEditing(null);
-      await load();
+      if (isClientsPage) await loadClients();
+      else await load();
       if (createInModal) closeCreateModal();
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Erro ao salvar");
@@ -218,8 +222,27 @@ export default function CrudSimplePage({
   };
 
   const onDelete = async (id: string) => {
+    const userConfirmed = window.confirm("Tem certeza que deseja excluir este registro?");
+    if (!userConfirmed) return;
+
     await api.delete(`${endpoint}/${id}`);
-    await load();
+    if (isClientsPage) await loadClients();
+    else await load();
+  };
+
+  const onOpenDetails = (id: string) => {
+    if (!detailsPath) return;
+    navigate(`${detailsPath}/${id}`);
+  };
+
+  const onRowClick = (event: MouseEvent<HTMLTableRowElement>, id: string) => {
+    if (!detailsPath) return;
+
+    const targetElement = event.target as HTMLElement;
+    const clickedInteractiveElement = targetElement.closest("button, a, [data-row-action-menu='true']");
+    if (clickedInteractiveElement) return;
+
+    onOpenDetails(id);
   };
 
   return (
@@ -323,26 +346,74 @@ export default function CrudSimplePage({
                 {fields.map((f) => (
                   <th className="p-2 text-left" key={f.key}>{f.label}</th>
                 ))}
-                {detailsPath ? <th className="p-2 text-left">Detalhes</th> : null}
-                {!readOnly ? <th className="p-2 text-left" /> : null}
+                {detailsPath || !readOnly ? <th className="p-2 text-left">Ações</th> : null}
               </tr>
             </thead>
             <tbody>
               {visibleItems.map((it) => (
-                <tr key={it.id} className="border-t border-slate-100">
+                <tr
+                  key={it.id}
+                  className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                  onClick={(event) => onRowClick(event, it.id)}
+                >
                   {fields.map((f) => <td key={f.key} className="p-2 text-slate-700">{String(it[f.key] ?? "")}</td>)}
-                  {detailsPath ? <td className="p-2"><Link className="font-medium text-brand-700 hover:text-brand-800" to={`${detailsPath}/${it.id}`}>Abrir</Link></td> : null}
-                  {!readOnly ? (
-                    <td className="space-x-3 p-2">
-                      <button className="font-medium text-brand-700" onClick={() => onEdit(it)}>Editar</button>
-                      <button className="font-medium text-amber-700" onClick={() => onDelete(it.id)}>Excluir</button>
+                  {detailsPath || !readOnly ? (
+                    <td className="p-2">
+                      <div className="flex items-center justify-end gap-2" data-row-action-menu="true">
+                        {detailsPath ? (
+                          <button
+                            type="button"
+                            className="rounded-md border border-brand-200 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50 sm:text-sm"
+                            onClick={() => onOpenDetails(it.id)}
+                          >
+                            Abrir
+                          </button>
+                        ) : null}
+                        {!readOnly ? (
+                          <div className="relative">
+                            <button
+                              type="button"
+                              className="rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
+                              aria-label="Abrir ações"
+                              onClick={() => setOpenActionsMenuId((current) => current === it.id ? null : it.id)}
+                            >
+                              <MoreHorizontal size={16} />
+                            </button>
+
+                            {openActionsMenuId === it.id ? (
+                              <div className="absolute right-0 z-10 mt-1 min-w-28 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                <button
+                                  type="button"
+                                  className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100"
+                                  onClick={() => {
+                                    setOpenActionsMenuId(null);
+                                    onEdit(it);
+                                  }}
+                                >
+                                  Editar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50"
+                                  onClick={() => {
+                                    setOpenActionsMenuId(null);
+                                    void onDelete(it.id);
+                                  }}
+                                >
+                                  Excluir
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
                   ) : null}
                 </tr>
               ))}
               {visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={fields.length + (detailsPath ? 1 : 0) + (!readOnly ? 1 : 0)} className="p-8 text-center text-slate-500">
+                  <td colSpan={fields.length + (detailsPath || !readOnly ? 1 : 0)} className="p-8 text-center text-slate-500">
                     Nenhum registro encontrado com os filtros atuais.
                   </td>
                 </tr>
