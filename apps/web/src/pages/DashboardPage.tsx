@@ -30,6 +30,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { normalizeActivityType, toLabel } from "../constants/activityTypes";
+import DonutLegendChips from "../components/DonutLegendChips";
 
 ChartJS.register(
   CategoryScale,
@@ -84,6 +85,12 @@ const dashboardStatusColors = {
   attention: "#eab308",
   negative: "#dc2626",
 };
+
+const donutSegmentColors = [
+  dashboardStatusColors.positive,
+  dashboardStatusColors.attention,
+  dashboardStatusColors.negative,
+];
 
 const cardClass = "dashboard-card-enter rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
@@ -362,14 +369,7 @@ export default function DashboardPage() {
       },
       plugins: {
         legend: {
-          position: "bottom",
-          labels: {
-            color: palette.textMuted,
-            usePointStyle: true,
-            boxWidth: 10,
-            boxHeight: 10,
-            padding: 16,
-          },
+          display: false,
         },
       },
     }),
@@ -389,9 +389,9 @@ export default function DashboardPage() {
 
   const walletSegments = useMemo(
     () => [
-      { label: "Ativos", value: walletData[0], shortLabel: "A" },
-      { label: "Inativos 31–90", value: walletData[1], shortLabel: "B" },
-      { label: "Inativos >90", value: walletData[2], shortLabel: "C" },
+      { label: "Ativos", value: walletData[0], color: donutSegmentColors[0] },
+      { label: "Inativos recentes", value: walletData[1], color: donutSegmentColors[1] },
+      { label: "Inativos antigos", value: walletData[2], color: donutSegmentColors[2] },
     ],
     [walletData]
   );
@@ -409,9 +409,9 @@ export default function DashboardPage() {
 
   const abcSegments = useMemo(
     () => [
-      { label: "Classe A", value: abcData[0], shortLabel: "A" },
-      { label: "Classe B", value: abcData[1], shortLabel: "B" },
-      { label: "Classe C", value: abcData[2], shortLabel: "C" },
+      { label: "Classe A", value: abcData[0], color: donutSegmentColors[0] },
+      { label: "Classe B", value: abcData[1], color: donutSegmentColors[1] },
+      { label: "Classe C", value: abcData[2], color: donutSegmentColors[2] },
     ],
     [abcData]
   );
@@ -947,7 +947,7 @@ export default function DashboardPage() {
                 datasets: [
                   {
                     data: walletData,
-                    backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
+                    backgroundColor: donutSegmentColors,
                     borderColor: palette.surface,
                     borderWidth: 2,
                   },
@@ -955,16 +955,7 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {walletSegments.map((segment) => {
-              const percent = walletTotal > 0 ? ((segment.value / walletTotal) * 100).toFixed(1) : "0.0";
-              return (
-                <div key={segment.label} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
-                  {segment.shortLabel} {percent}%
-                </div>
-              );
-            })}
-          </div>
+          <DonutLegendChips items={walletSegments} total={walletTotal} />
         </div>
 
         <div className={cardClass}>
@@ -987,7 +978,7 @@ export default function DashboardPage() {
                 datasets: [
                   {
                     data: abcData,
-                    backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
+                    backgroundColor: donutSegmentColors,
                     borderColor: palette.surface,
                     borderWidth: 2,
                   },
@@ -995,16 +986,7 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {abcSegments.map((segment) => {
-              const percent = abcTotal > 0 ? ((segment.value / abcTotal) * 100).toFixed(1) : "0.0";
-              return (
-                <div key={segment.label} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
-                  {segment.shortLabel} {percent}%
-                </div>
-              );
-            })}
-          </div>
+          <DonutLegendChips items={abcSegments} total={abcTotal} formatValue={formatPercentBR} />
         </div>
 
         <div className={`${cardClass} flex min-h-[260px] flex-col p-5`}>
