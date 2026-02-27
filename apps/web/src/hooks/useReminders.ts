@@ -11,14 +11,24 @@ export type ReminderState = {
 
 type Activity = {
   id: string;
-  dueDate: string;
+  dueDate?: string;
   done: boolean;
 };
 
 type Opportunity = {
   id: string;
-  followUpDate: string;
+  followUpDate?: string;
+  stage?: string;
 };
+
+type ReminderMode = "todayAndOverdue" | "overdueOnly";
+
+type UseRemindersOptions = {
+  autoLoad?: boolean;
+  mode?: ReminderMode;
+};
+
+const CLOSED_OPPORTUNITY_STAGES = new Set(["ganho", "perdido"]);
 
 const initialReminders: ReminderState = {
   hasOverdueFollowUp: false,
@@ -61,7 +71,19 @@ export function endOfTodayLocal(referenceDate = new Date()) {
   return end;
 }
 
-export function useReminders(autoLoad = true) {
+function resolveReminderOptions(optionsOrAutoLoad?: boolean | UseRemindersOptions) {
+  if (typeof optionsOrAutoLoad === "boolean") {
+    return { autoLoad: optionsOrAutoLoad, mode: "todayAndOverdue" as ReminderMode };
+  }
+
+  return {
+    autoLoad: optionsOrAutoLoad?.autoLoad ?? true,
+    mode: optionsOrAutoLoad?.mode ?? "todayAndOverdue",
+  };
+}
+
+export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) {
+  const { autoLoad, mode } = resolveReminderOptions(optionsOrAutoLoad);
   const [loading, setLoading] = useState(false);
   const [reminders, setReminders] = useState<ReminderState>(initialReminders);
 
@@ -71,6 +93,14 @@ export function useReminders(autoLoad = true) {
     try {
       const month = getCurrentMonthParam();
       const todayEnd = endOfTodayLocal();
+      const todayStart = startOfTodayLocal();
+
+      const isInSelectedWindow = (date: Date) => {
+        if (mode === "overdueOnly") {
+          return date < todayStart;
+        }
+        return date <= todayEnd;
+      };
 
       const [activitiesResponse, opportunitiesResponse] = await Promise.all([
         api.get(`/activities?month=${month}`, { signal }),
@@ -87,12 +117,13 @@ export function useReminders(autoLoad = true) {
       const activitiesBadgeCount = activities.filter((item) => {
         if (item.done) return false;
         const dueDate = parseDate(item.dueDate);
-        return Boolean(dueDate && dueDate <= todayEnd);
+        return Boolean(dueDate && isInSelectedWindow(dueDate));
       }).length;
 
       const opportunitiesDueCount = opportunities.filter((item) => {
+        if (CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "")) return false;
         const followUpDate = parseDate(item.followUpDate);
-        return Boolean(followUpDate && followUpDate <= todayEnd);
+        return Boolean(followUpDate && isInSelectedWindow(followUpDate));
       }).length;
 
       if (!signal?.aborted) {
@@ -117,7 +148,7 @@ export function useReminders(autoLoad = true) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     if (!autoLoad) return;

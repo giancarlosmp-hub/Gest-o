@@ -75,7 +75,7 @@ const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 export default function HomePage() {
   const { user } = useAuth();
-  const { alerts, reminders, refreshReminders } = useReminders(false);
+  const { alerts, reminders, refreshReminders } = useReminders({ autoLoad: false });
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
