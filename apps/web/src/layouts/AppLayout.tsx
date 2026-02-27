@@ -31,16 +31,10 @@ export default function AppLayout() {
   const [open, setOpen] = useState(false);
   const { reminders } = useReminders();
 
-  const getSidebarLabel = (item: SidebarItem) => {
-    if (item.id === "agenda" && reminders.agendaBadgeCount > 0) {
-      return `Agenda (${reminders.agendaBadgeCount})`;
-    }
-
-    if (item.id === "atividades" && reminders.activitiesBadgeCount > 0) {
-      return `Atividades (${reminders.activitiesBadgeCount})`;
-    }
-
-    return item.label;
+  const getSidebarBadgeCount = (item: SidebarItem) => {
+    if (item.id === "agenda") return reminders.agendaBadgeCount;
+    if (item.id === "atividades") return reminders.activitiesBadgeCount;
+    return 0;
   };
 
   const isActiveItem = (item: SidebarItem) => {
@@ -58,16 +52,29 @@ export default function AppLayout() {
         .filter((item) => !item.route || canAccessRoute(item.route, user?.role))
         .map((item) => {
           const active = isActiveItem(item);
+          const badgeCount = getSidebarBadgeCount(item);
+          const badgeClassName = active
+            ? "bg-brand-500 text-white"
+            : "bg-white text-brand-700";
+
           return (
             <Link
               key={item.id}
               to={item.path}
               onClick={() => setOpen(false)}
-              className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${
+              className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
                 active ? "bg-white text-brand-700" : "hover:bg-brand-600"
               }`}
             >
-              {getSidebarLabel(item)}
+              <span>{item.label}</span>
+              {badgeCount > 0 && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs leading-none ${badgeClassName}`}
+                  aria-label={`${badgeCount} ${badgeCount === 1 ? "pendência" : "pendências"}`}
+                >
+                  {badgeCount}
+                </span>
+              )}
             </Link>
           );
         })}
