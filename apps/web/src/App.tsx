@@ -5,6 +5,7 @@ import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
+import HomePage from "./pages/HomePage";
 import CrudSimplePage from "./pages/CrudSimplePage";
 import OpportunitiesPage from "./pages/OpportunitiesPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -35,8 +36,8 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<DashboardPage />} />
-        <Route path="dashboard" element={<Navigate to="/" replace />} />
+        <Route index element={<HomePage />} />
+        <Route path="dashboard" element={<DashboardPage />} />
 
         <Route path="equipe" element={<RoleRoute route="equipe"><TeamPage /></RoleRoute>} />
         <Route path="objetivos" element={<RoleRoute route="objetivos"><ObjectivesPage /></RoleRoute>} />
