@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 
 export type ReminderState = {
@@ -38,6 +39,16 @@ const initialReminders: ReminderState = {
   activitiesBadgeCount: 0,
 };
 
+const REMINDERS_CACHE_TTL_MS = 60_000;
+
+type CacheEntry = {
+  dayKey: string;
+  expiresAt: number;
+  reminders: ReminderState;
+};
+
+const remindersCache = new Map<string, CacheEntry>();
+
 function isDevelopment() {
   return import.meta.env.DEV;
 }
@@ -50,6 +61,39 @@ function getCurrentMonthParam(referenceDate = new Date()) {
   const year = referenceDate.getFullYear();
   const month = String(referenceDate.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
+}
+
+function getDayKey(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = String(referenceDate.getMonth() + 1).padStart(2, "0");
+  const day = String(referenceDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getCacheKey(userId?: string) {
+  return userId ? `user:${userId}` : "anonymous";
+}
+
+function getCachedReminders(cacheKey: string, now = Date.now(), dayKey = getDayKey()) {
+  const cached = remindersCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= now || cached.dayKey !== dayKey) {
+    remindersCache.delete(cacheKey);
+    return null;
+  }
+  return cached.reminders;
+}
+
+function cacheReminders(cacheKey: string, reminders: ReminderState, now = Date.now(), dayKey = getDayKey()) {
+  remindersCache.set(cacheKey, {
+    reminders,
+    dayKey,
+    expiresAt: now + REMINDERS_CACHE_TTL_MS,
+  });
+}
+
+function clearRemindersCacheForKey(cacheKey: string) {
+  remindersCache.delete(cacheKey);
 }
 
 function parseDate(value?: string) {
@@ -84,71 +128,94 @@ function resolveReminderOptions(optionsOrAutoLoad?: boolean | UseRemindersOption
 
 export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) {
   const { autoLoad, mode } = resolveReminderOptions(optionsOrAutoLoad);
+  const { user } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [reminders, setReminders] = useState<ReminderState>(initialReminders);
 
-  const checkReminders = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
+  const cacheKey = getCacheKey(user?.id);
 
-    try {
-      const month = getCurrentMonthParam();
-      const todayEnd = endOfTodayLocal();
-      const todayStart = startOfTodayLocal();
+  const checkReminders = useCallback(
+    async (signal?: AbortSignal, force = false) => {
+      const dayKey = getDayKey();
+      const now = Date.now();
 
-      const isInSelectedWindow = (date: Date) => {
-        if (mode === "overdueOnly") {
-          return date < todayStart;
+      if (!force) {
+        const cached = getCachedReminders(cacheKey, now, dayKey);
+        if (cached) {
+          setReminders(cached);
+          setLoading(false);
+          return;
         }
-        return date <= todayEnd;
-      };
+      }
 
-      const [activitiesResponse, opportunitiesResponse] = await Promise.all([
-        api.get(`/activities?month=${month}`, { signal }),
-        api.get("/opportunities?status=open", { signal }),
-      ]);
+      setLoading(true);
 
-      const activities = Array.isArray(activitiesResponse.data) ? (activitiesResponse.data as Activity[]) : [];
+      try {
+        const month = getCurrentMonthParam();
+        const todayEnd = endOfTodayLocal();
+        const todayStart = startOfTodayLocal();
 
-      const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
-        ? opportunitiesResponse.data.items
-        : opportunitiesResponse.data;
-      const opportunities = Array.isArray(opportunitiesPayload) ? (opportunitiesPayload as Opportunity[]) : [];
+        const isInSelectedWindow = (date: Date) => {
+          if (mode === "overdueOnly") {
+            return date < todayStart;
+          }
+          return date <= todayEnd;
+        };
 
-      const activitiesBadgeCount = activities.filter((item) => {
-        if (item.done) return false;
-        const dueDate = parseDate(item.dueDate);
-        return Boolean(dueDate && isInSelectedWindow(dueDate));
-      }).length;
+        const [activitiesResponse, opportunitiesResponse] = await Promise.all([
+          api.get(`/activities?month=${month}`, { signal }),
+          api.get("/opportunities?status=open", { signal }),
+        ]);
 
-      const opportunitiesDueCount = opportunities.filter((item) => {
-        if (CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "")) return false;
-        const followUpDate = parseDate(item.followUpDate);
-        return Boolean(followUpDate && isInSelectedWindow(followUpDate));
-      }).length;
+        const activities = Array.isArray(activitiesResponse.data) ? (activitiesResponse.data as Activity[]) : [];
 
-      if (!signal?.aborted) {
-        setReminders({
+        const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
+          ? opportunitiesResponse.data.items
+          : opportunitiesResponse.data;
+        const opportunities = Array.isArray(opportunitiesPayload) ? (opportunitiesPayload as Opportunity[]) : [];
+
+        const activitiesBadgeCount = activities.filter((item) => {
+          if (item.done) return false;
+          const dueDate = parseDate(item.dueDate);
+          return Boolean(dueDate && isInSelectedWindow(dueDate));
+        }).length;
+
+        const opportunitiesDueCount = opportunities.filter((item) => {
+          if (CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "")) return false;
+          const followUpDate = parseDate(item.followUpDate);
+          return Boolean(followUpDate && isInSelectedWindow(followUpDate));
+        }).length;
+
+        const nextReminders: ReminderState = {
           hasOverdueFollowUp: false,
           upcomingMeetingsCount: 0,
           sellerWithoutActivityToday: false,
           activitiesBadgeCount,
           agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
-        });
-      }
-    } catch (error) {
-      if (!isAbortError(error) && isDevelopment()) {
-        console.error("[useReminders] Falha ao calcular lembretes", error);
-      }
+        };
 
-      if (!signal?.aborted) {
-        setReminders(initialReminders);
+        if (!signal?.aborted) {
+          cacheReminders(cacheKey, nextReminders, now, dayKey);
+          setReminders(nextReminders);
+        }
+      } catch (error) {
+        if (!isAbortError(error) && isDevelopment()) {
+          console.error("[useReminders] Falha ao calcular lembretes", error);
+        }
+
+        if (!signal?.aborted) {
+          clearRemindersCacheForKey(cacheKey);
+          setReminders(initialReminders);
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [mode]);
+    },
+    [cacheKey, mode],
+  );
 
   useEffect(() => {
     if (!autoLoad) return;
@@ -161,6 +228,22 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
       setLoading(false);
     };
   }, [autoLoad, checkReminders]);
+
+  useEffect(() => {
+    if (!autoLoad) return;
+
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0);
+    const msUntilNextMidnight = Math.max(nextMidnight.getTime() - now.getTime(), 0);
+
+    const timeoutId = window.setTimeout(() => {
+      clearRemindersCacheForKey(cacheKey);
+      void checkReminders(undefined, true);
+    }, msUntilNextMidnight + 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [autoLoad, cacheKey, checkReminders]);
 
   const alerts = useMemo(
     () => ({
@@ -175,6 +258,6 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
     reminders,
     loading,
     alerts,
-    refreshReminders: checkReminders,
+    refreshReminders: (signal?: AbortSignal) => checkReminders(signal, true),
   };
 }
