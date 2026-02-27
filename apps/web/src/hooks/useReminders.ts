@@ -8,6 +8,11 @@ export type ReminderState = {
   sellerWithoutActivityToday: boolean;
   agendaBadgeCount: number;
   activitiesBadgeCount: number;
+  breakdown?: {
+    activitiesDue: number;
+    followUpsDue: number;
+    overdueOpportunities: number;
+  };
 };
 
 type Activity = {
@@ -19,6 +24,7 @@ type Activity = {
 type Opportunity = {
   id: string;
   followUpDate?: string;
+  expectedCloseDate?: string;
   stage?: string;
 };
 
@@ -37,6 +43,11 @@ const initialReminders: ReminderState = {
   sellerWithoutActivityToday: false,
   agendaBadgeCount: 0,
   activitiesBadgeCount: 0,
+  breakdown: {
+    activitiesDue: 0,
+    followUpsDue: 0,
+    overdueOpportunities: 0,
+  },
 };
 
 const REMINDERS_CACHE_TTL_MS = 60_000;
@@ -70,8 +81,9 @@ function getDayKey(referenceDate = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
-function getCacheKey(userId?: string) {
-  return userId ? `user:${userId}` : "anonymous";
+function getCacheKey(userId?: string, mode: ReminderMode = "todayAndOverdue") {
+  const userScope = userId ? `user:${userId}` : "anonymous";
+  return `${userScope}:mode:${mode}`;
 }
 
 function getCachedReminders(cacheKey: string, now = Date.now(), dayKey = getDayKey()) {
@@ -133,7 +145,7 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
   const [loading, setLoading] = useState(false);
   const [reminders, setReminders] = useState<ReminderState>(initialReminders);
 
-  const cacheKey = getCacheKey(user?.id);
+  const cacheKey = getCacheKey(user?.id, mode);
 
   const checkReminders = useCallback(
     async (signal?: AbortSignal, force = false) => {
@@ -181,18 +193,44 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
           return Boolean(dueDate && isInSelectedWindow(dueDate));
         }).length;
 
-        const opportunitiesDueCount = opportunities.filter((item) => {
-          if (CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "")) return false;
-          const followUpDate = parseDate(item.followUpDate);
-          return Boolean(followUpDate && isInSelectedWindow(followUpDate));
-        }).length;
+        const isOpenOpportunity = (item: Opportunity) => !CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "");
+
+        const followUpOpportunityIds = new Set(
+          opportunities
+            .filter((item) => {
+              if (!isOpenOpportunity(item)) return false;
+              const followUpDate = parseDate(item.followUpDate);
+              return Boolean(followUpDate && isInSelectedWindow(followUpDate));
+            })
+            .map((item) => item.id),
+        );
+
+        const overdueOpportunityIds = new Set(
+          opportunities
+            .filter((item) => {
+              if (!isOpenOpportunity(item)) return false;
+              if (followUpOpportunityIds.has(item.id)) return false;
+              const expectedCloseDate = parseDate(item.expectedCloseDate);
+              return Boolean(expectedCloseDate && expectedCloseDate < todayStart);
+            })
+            .map((item) => item.id),
+        );
+
+        const followUpOpportunityCount = followUpOpportunityIds.size;
+        const overdueOpportunityCount = overdueOpportunityIds.size;
+        const uniqueFollowUpAndOverdueOpportunityCount = followUpOpportunityCount + overdueOpportunityCount;
 
         const nextReminders: ReminderState = {
           hasOverdueFollowUp: false,
           upcomingMeetingsCount: 0,
           sellerWithoutActivityToday: false,
           activitiesBadgeCount,
-          agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
+          agendaBadgeCount: activitiesBadgeCount + uniqueFollowUpAndOverdueOpportunityCount,
+          breakdown: {
+            activitiesDue: activitiesBadgeCount,
+            followUpsDue: followUpOpportunityCount,
+            overdueOpportunities: overdueOpportunityCount,
+          },
         };
 
         if (!signal?.aborted) {
