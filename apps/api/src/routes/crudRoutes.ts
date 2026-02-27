@@ -920,11 +920,19 @@ router.delete("/opportunities/:id", async (req, res) => {
  * - inclui ownerSeller (nome) e opportunity + client (para UI ficar profissional)
  */
 router.get("/activities", async (req, res) => {
+  const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  const type = typeof req.query.type === "string" ? req.query.type.trim() : "";
+  const doneQuery = typeof req.query.done === "string" ? req.query.done.trim().toLowerCase() : "";
   const month = req.query.month as string | undefined;
+  const clientId = typeof req.query.clientId === "string" ? req.query.clientId.trim() : "";
   const sellerIdQuery = req.query.sellerId as string | undefined;
 
   if (month && !/^\d{4}-\d{2}$/.test(month)) {
     return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  if (doneQuery && doneQuery !== "true" && doneQuery !== "false") {
+    return res.status(400).json({ message: "done deve ser true ou false" });
   }
 
   const sellerFilter: Prisma.ActivityWhereInput =
@@ -938,14 +946,43 @@ router.get("/activities", async (req, res) => {
     month
       ? (() => {
           const { start, end } = getMonthRangeFromKey(month);
-          return { createdAt: { gte: start, lte: end } };
+          return { dueDate: { gte: start, lte: end } };
         })()
       : {};
+
+  const doneFilter: Prisma.ActivityWhereInput =
+    doneQuery === "true" || doneQuery === "false"
+      ? { done: doneQuery === "true" }
+      : {};
+
+  const typeFilter: Prisma.ActivityWhereInput = type ? { type: type as any } : {};
+
+  const searchFilter: Prisma.ActivityWhereInput = q
+    ? {
+        OR: [
+          { notes: { contains: q, mode: "insensitive" } },
+          { opportunity: { title: { contains: q, mode: "insensitive" } } },
+          { opportunity: { client: { name: { contains: q, mode: "insensitive" } } } }
+        ]
+      }
+    : {};
+
+  const clientFilter: Prisma.ActivityWhereInput = clientId
+    ? {
+        opportunity: {
+          clientId
+        }
+      }
+    : {};
 
   const activities = await prisma.activity.findMany({
     where: {
       ...sellerFilter,
-      ...monthFilter
+      ...monthFilter,
+      ...doneFilter,
+      ...typeFilter,
+      ...searchFilter,
+      ...clientFilter
     },
     include: {
       ownerSeller: { select: { id: true, name: true } },
