@@ -879,7 +879,20 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 });
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({ where: sellerWhere(req), include: { opportunity: true }, orderBy: { createdAt: "desc" } })));
+router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({
+  where: sellerWhere(req),
+  include: {
+    ownerSeller: { select: { id: true, name: true } },
+    opportunity: {
+      select: {
+        id: true,
+        title: true,
+        client: { select: { id: true, name: true } }
+      }
+    }
+  },
+  orderBy: { createdAt: "desc" }
+})));
 router.get("/activities/monthly-counts", async (req, res) => {
   const month = (req.query.month as string | undefined) || getMonthKey(new Date());
   const sellerIdQuery = req.query.sellerId as string | undefined;
@@ -911,12 +924,44 @@ router.get("/activities/monthly-counts", async (req, res) => {
 });
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const relatedOpportunity = req.body.opportunityId
+    ? await prisma.opportunity.findFirst({
+      where: {
+        id: req.body.opportunityId,
+        ...sellerWhere(req)
+      },
+      select: { id: true, clientId: true }
+    })
+    : null;
+
+  if (req.body.opportunityId && !relatedOpportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const providedClientId = req.body.clientId || undefined;
+  const resolvedClientId = relatedOpportunity?.clientId || providedClientId;
+
+  if (providedClientId && relatedOpportunity && providedClientId !== relatedOpportunity.clientId) {
+    return res.status(400).json({ message: "Cliente informado é diferente do cliente da oportunidade" });
+  }
+
   const createdActivity = await prisma.activity.create({
     data: {
-      ...req.body,
+      type: req.body.type,
+      notes: req.body.notes,
       dueDate: new Date(req.body.dueDate),
+      done: req.body.done,
+      opportunityId: req.body.opportunityId,
       ownerSellerId
     }
+  });
+
+  await createEvent({
+    type: "status",
+    description: `Atividade criada: ${createdActivity.type}`,
+    opportunityId: createdActivity.opportunityId || undefined,
+    clientId: resolvedClientId,
+    ownerSellerId
   });
 
   const month = getMonthKey(createdActivity.createdAt);
@@ -930,7 +975,13 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
     }
   });
 });
-router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) } })));
+router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
+  const { clientId: _clientId, ...payload } = req.body;
+  return res.json(await prisma.activity.update({
+    where: { id: req.params.id },
+    data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
+  }));
+});
 router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
 router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 

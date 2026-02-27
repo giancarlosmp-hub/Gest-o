@@ -15,6 +15,7 @@ import { canAccessRoute } from "./lib/authorization";
 import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import ActivityKpisPage from "./pages/ActivityKpisPage";
+import ActivitiesPage from "./pages/ActivitiesPage";
 
 
 export default function App() {
@@ -34,7 +35,7 @@ export default function App() {
         <Route path="oportunidades" element={<OpportunitiesPage />} />
         <Route path="oportunidades/:id" element={<OpportunityDetailsPage />} />
         <Route path="clientes/:id" element={<ClientDetailsPage />} />
-        <Route path="atividades" element={<CrudSimplePage endpoint="/activities" title="Atividades" fields={[{ key: "type", label: "Tipo" }, { key: "notes", label: "Notas" }, { key: "dueDate", label: "Vencimento (ISO)" }, { key: "opportunityId", label: "ID oportunidade" }, { key: "ownerSellerId", label: "ID vendedor" }]} />} />
+        <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
         <Route path="usuários" element={canAccessRoute("usuarios", user?.role) ? <CrudSimplePage endpoint="/users" title="Usuários" fields={[{ key: "name", label: "Nome" }, { key: "email", label: "Email" }, { key: "role", label: "Papel" }, { key: "region", label: "Região" }, { key: "password", label: "Senha" }]} readOnly={user?.role !== "diretor"} /> : <Navigate to="/" replace />} />
