@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 
 export type ReminderState = {
@@ -28,6 +29,16 @@ const initialReminders: ReminderState = {
   activitiesBadgeCount: 0,
 };
 
+const REMINDERS_CACHE_TTL_MS = 60_000;
+
+type CacheEntry = {
+  dayKey: string;
+  expiresAt: number;
+  reminders: ReminderState;
+};
+
+const remindersCache = new Map<string, CacheEntry>();
+
 function isDevelopment() {
   return import.meta.env.DEV;
 }
@@ -40,6 +51,39 @@ function getCurrentMonthParam(referenceDate = new Date()) {
   const year = referenceDate.getFullYear();
   const month = String(referenceDate.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
+}
+
+function getDayKey(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = String(referenceDate.getMonth() + 1).padStart(2, "0");
+  const day = String(referenceDate.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getCacheKey(userId?: string) {
+  return userId ? `user:${userId}` : "anonymous";
+}
+
+function getCachedReminders(cacheKey: string, now = Date.now(), dayKey = getDayKey()) {
+  const cached = remindersCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= now || cached.dayKey !== dayKey) {
+    remindersCache.delete(cacheKey);
+    return null;
+  }
+  return cached.reminders;
+}
+
+function cacheReminders(cacheKey: string, reminders: ReminderState, now = Date.now(), dayKey = getDayKey()) {
+  remindersCache.set(cacheKey, {
+    reminders,
+    dayKey,
+    expiresAt: now + REMINDERS_CACHE_TTL_MS,
+  });
+}
+
+function clearRemindersCacheForKey(cacheKey: string) {
+  remindersCache.delete(cacheKey);
 }
 
 function parseDate(value?: string) {
@@ -62,10 +106,25 @@ export function endOfTodayLocal(referenceDate = new Date()) {
 }
 
 export function useReminders(autoLoad = true) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [reminders, setReminders] = useState<ReminderState>(initialReminders);
 
-  const checkReminders = useCallback(async (signal?: AbortSignal) => {
+  const cacheKey = getCacheKey(user?.id);
+
+  const checkReminders = useCallback(async (signal?: AbortSignal, force = false) => {
+    const dayKey = getDayKey();
+    const now = Date.now();
+
+    if (!force) {
+      const cached = getCachedReminders(cacheKey, now, dayKey);
+      if (cached) {
+        setReminders(cached);
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
 
     try {
@@ -95,14 +154,17 @@ export function useReminders(autoLoad = true) {
         return Boolean(followUpDate && followUpDate <= todayEnd);
       }).length;
 
+      const nextReminders: ReminderState = {
+        hasOverdueFollowUp: false,
+        upcomingMeetingsCount: 0,
+        sellerWithoutActivityToday: false,
+        activitiesBadgeCount,
+        agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
+      };
+
       if (!signal?.aborted) {
-        setReminders({
-          hasOverdueFollowUp: false,
-          upcomingMeetingsCount: 0,
-          sellerWithoutActivityToday: false,
-          activitiesBadgeCount,
-          agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
-        });
+        cacheReminders(cacheKey, nextReminders, now, dayKey);
+        setReminders(nextReminders);
       }
     } catch (error) {
       if (!isAbortError(error) && isDevelopment()) {
@@ -110,6 +172,7 @@ export function useReminders(autoLoad = true) {
       }
 
       if (!signal?.aborted) {
+        clearRemindersCacheForKey(cacheKey);
         setReminders(initialReminders);
       }
     } finally {
@@ -117,7 +180,7 @@ export function useReminders(autoLoad = true) {
         setLoading(false);
       }
     }
-  }, []);
+  }, [cacheKey]);
 
   useEffect(() => {
     if (!autoLoad) return;
@@ -130,6 +193,22 @@ export function useReminders(autoLoad = true) {
       setLoading(false);
     };
   }, [autoLoad, checkReminders]);
+
+  useEffect(() => {
+    if (!autoLoad) return;
+
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0);
+    const msUntilNextMidnight = Math.max(nextMidnight.getTime() - now.getTime(), 0);
+
+    const timeoutId = window.setTimeout(() => {
+      clearRemindersCacheForKey(cacheKey);
+      void checkReminders(undefined, true);
+    }, msUntilNextMidnight + 1000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [autoLoad, cacheKey, checkReminders]);
 
   const alerts = useMemo(
     () => ({
@@ -144,6 +223,6 @@ export function useReminders(autoLoad = true) {
     reminders,
     loading,
     alerts,
-    refreshReminders: checkReminders,
+    refreshReminders: (signal?: AbortSignal) => checkReminders(signal, true),
   };
 }
