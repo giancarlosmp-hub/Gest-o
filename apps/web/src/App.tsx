@@ -38,8 +38,16 @@ export default function App() {
         <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
-        <Route path="usuários" element={canAccessRoute("usuarios", user?.role) ? <CrudSimplePage endpoint="/users" title="Usuários" fields={[{ key: "name", label: "Nome" }, { key: "email", label: "Email" }, { key: "role", label: "Papel" }, { key: "region", label: "Região" }, { key: "password", label: "Senha" }]} readOnly={user?.role !== "diretor"} /> : <Navigate to="/" replace />} />
+        <Route
+          path="usuários"
+          element={canAccessRoute("usuarios", user?.role) ? <Navigate to="/configurações?secao=usuarios#usuarios" replace /> : <Navigate to="/" replace />}
+        />
+        <Route
+          path="usuarios"
+          element={canAccessRoute("usuarios", user?.role) ? <Navigate to="/configurações?secao=usuarios#usuarios" replace /> : <Navigate to="/" replace />}
+        />
         <Route path="configurações" element={canAccessRoute("configuracoes", user?.role) ? <SettingsPage /> : <Navigate to="/" replace />} />
+        <Route path="configuracoes" element={<Navigate to="/configurações" replace />} />
         <Route path="configurações/kpis-atividades" element={<RoleRoute route="configuracoes"><ActivityKpisPage /></RoleRoute>} />
       </Route>
     </Routes>
