@@ -4,28 +4,43 @@ import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import BrandLogo from "../components/BrandLogo";
 import { canAccessRoute, type AppRoute } from "../lib/authorization";
+import { useReminders } from "../hooks/useReminders";
 
 type SidebarItem = {
+  id: string;
   label: string;
   path: string;
   route?: AppRoute;
 };
 
 const items: SidebarItem[] = [
-  { label: "Home", path: "/" },
-  { label: "Dashboard", path: "/dashboard" },
-  { label: "Equipe", path: "/equipe", route: "equipe" },
-  { label: "Clientes (Cliente 360)", path: "/clientes" },
-  { label: "Oportunidades", path: "/oportunidades" },
-  { label: "Atividades", path: "/atividades" },
-  { label: "Relatórios", path: "/relatórios" },
-  { label: "Configurações", path: "/configurações", route: "configuracoes" }
+  { id: "home", label: "Home", path: "/" },
+  { id: "dashboard", label: "Dashboard", path: "/dashboard" },
+  { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
+  { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
+  { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
+  { id: "atividades", label: "Atividades", path: "/atividades" },
+  { id: "relatorios", label: "Relatórios", path: "/relatórios" },
+  { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
   const [open, setOpen] = useState(false);
+  const { reminders } = useReminders();
+
+  const getSidebarLabel = (item: SidebarItem) => {
+    if (item.id === "home" && reminders.agendaBadgeCount > 0) {
+      return `Agenda (${reminders.agendaBadgeCount})`;
+    }
+
+    if (item.id === "atividades" && reminders.activitiesBadgeCount > 0) {
+      return `Atividades (${reminders.activitiesBadgeCount})`;
+    }
+
+    return item.label;
+  };
 
   const sidebar = (
     <aside className="bg-brand-700 text-white w-64 min-h-screen p-4 space-y-3">
@@ -45,7 +60,7 @@ export default function AppLayout() {
               onClick={() => setOpen(false)}
               className={`block rounded-lg px-3 py-2 text-sm font-medium transition ${active ? "bg-white text-brand-700" : "hover:bg-brand-600"}`}
             >
-              {item.label}
+              {getSidebarLabel(item)}
             </Link>
           );
         })}
