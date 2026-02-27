@@ -35,7 +35,9 @@ export default function AppLayout() {
       {items
         .filter((item) => !item.route || canAccessRoute(item.route, user?.role))
         .map((item) => {
-          const active = location.pathname === item.path;
+          const active = item.path === "/"
+            ? location.pathname === "/"
+            : location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
           return (
             <Link
               key={item.label}
