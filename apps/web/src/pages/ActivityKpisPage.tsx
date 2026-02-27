@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Navigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
+import { ACTIVITY_TYPE_OPTIONS, normalizeActivityType } from "../constants/activityTypes";
 
 type Seller = {
   id: string;
@@ -16,16 +17,7 @@ type ActivityKpi = {
   targetValue: number;
 };
 
-const activityTypes = [
-  { key: "ligacao", label: "Ligação" },
-  { key: "mensagem", label: "Mensagem" },
-  { key: "visita_presencial", label: "Visita presencial" },
-  { key: "envio_proposta", label: "Envio de proposta" },
-  { key: "visita_tecnica", label: "Visita técnica" },
-  { key: "cliente_novo", label: "Cliente novo (prospecção)" }
-] as const;
-
-type ActivityTypeKey = (typeof activityTypes)[number]["key"];
+type ActivityTypeKey = (typeof ACTIVITY_TYPE_OPTIONS)[number]["value"];
 type KpiDraftBySeller = Record<string, Record<ActivityTypeKey, number>>;
 
 function getCurrentMonth() {
@@ -34,8 +26,8 @@ function getCurrentMonth() {
 
 const createEmptyDraft = (): Record<ActivityTypeKey, number> => ({
   ligacao: 0,
-  mensagem: 0,
-  visita_presencial: 0,
+  whatsapp: 0,
+  reuniao: 0,
   envio_proposta: 0,
   visita_tecnica: 0,
   cliente_novo: 0
@@ -71,9 +63,10 @@ export default function ActivityKpisPage() {
       }, {});
 
       for (const kpi of kpis) {
+        const normalizedType = normalizeActivityType(kpi.type);
         if (!nextDraft[kpi.sellerId]) continue;
-        if (!(kpi.type in nextDraft[kpi.sellerId])) continue;
-        nextDraft[kpi.sellerId][kpi.type as ActivityTypeKey] = kpi.targetValue;
+        if (!(normalizedType in nextDraft[kpi.sellerId])) continue;
+        nextDraft[kpi.sellerId][normalizedType as ActivityTypeKey] = kpi.targetValue;
       }
 
       setSellers(sellerList);
@@ -117,11 +110,11 @@ export default function ActivityKpisPage() {
 
     try {
       await Promise.all(
-        activityTypes.map((activityType) =>
+        ACTIVITY_TYPE_OPTIONS.map((activityType) =>
           api.put(`/activity-kpis/${sellerId}`, {
             month,
-            type: activityType.key,
-            targetValue: Number(sellerDraft[activityType.key] ?? 0)
+            type: activityType.value,
+            targetValue: Number(sellerDraft[activityType.value] ?? 0)
           })
         )
       );
@@ -168,8 +161,8 @@ export default function ActivityKpisPage() {
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">Vendedor</th>
-                {activityTypes.map((activityType) => (
-                  <th key={activityType.key} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                  <th key={activityType.value} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
                     {activityType.label}
                   </th>
                 ))}
@@ -179,13 +172,13 @@ export default function ActivityKpisPage() {
             <tbody className="divide-y divide-slate-100 bg-white">
               {pageLoading ? (
                 <tr>
-                  <td colSpan={activityTypes.length + 2} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={ACTIVITY_TYPE_OPTIONS.length + 2} className="px-4 py-8 text-center text-sm text-slate-500">
                     Carregando vendedores e KPIs...
                   </td>
                 </tr>
               ) : !hasSellers ? (
                 <tr>
-                  <td colSpan={activityTypes.length + 2} className="px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={ACTIVITY_TYPE_OPTIONS.length + 2} className="px-4 py-8 text-center text-sm text-slate-500">
                     Nenhum vendedor encontrado.
                   </td>
                 </tr>
@@ -193,14 +186,14 @@ export default function ActivityKpisPage() {
                 sellers.map((seller) => (
                   <tr key={seller.id} className="hover:bg-slate-50/70">
                     <td className="whitespace-nowrap px-4 py-3 text-sm font-medium text-slate-800">{seller.name}</td>
-                    {activityTypes.map((activityType) => (
-                      <td key={`${seller.id}-${activityType.key}`} className="px-3 py-2 text-center">
+                    {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                      <td key={`${seller.id}-${activityType.value}`} className="px-3 py-2 text-center">
                         <input
                           type="number"
                           min={0}
                           step={1}
-                          value={draft[seller.id]?.[activityType.key] ?? 0}
-                          onChange={(event) => updateCell(seller.id, activityType.key, event.target.value)}
+                          value={draft[seller.id]?.[activityType.value] ?? 0}
+                          onChange={(event) => updateCell(seller.id, activityType.value, event.target.value)}
                           className="w-24 rounded-md border border-slate-300 px-2 py-1 text-center text-sm shadow-sm outline-none ring-brand-200 focus:ring"
                         />
                       </td>

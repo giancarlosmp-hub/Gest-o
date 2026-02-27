@@ -11,7 +11,7 @@ export const OpportunityStageEnum = z.enum([
   "perdido"
 ]);
 
-export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao"]);
+export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "envio_proposta", "visita_tecnica", "cliente_novo"]);
 export const EventTypeEnum = z.enum(["comentario", "mudanca_etapa", "status"]);
 
 export const loginSchema = z.object({
