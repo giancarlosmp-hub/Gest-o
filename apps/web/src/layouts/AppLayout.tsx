@@ -18,7 +18,6 @@ const items: SidebarItem[] = [
   { label: "Oportunidades", path: "/oportunidades" },
   { label: "Atividades", path: "/atividades" },
   { label: "Relatórios", path: "/relatórios" },
-  { label: "Usuários", path: "/usuários", route: "usuarios" },
   { label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
 

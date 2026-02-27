@@ -1,9 +1,26 @@
-import { Settings2, Target } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
+import { Settings2, Target, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import CrudSimplePage from "./CrudSimplePage";
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
+  const location = useLocation();
+  const usersSectionRef = useRef<HTMLDivElement | null>(null);
+  const [showUsersSection, setShowUsersSection] = useState(false);
+
+  const shouldOpenUsersSection = location.hash === "#usuarios" || new URLSearchParams(location.search).get("secao") === "usuarios";
+
+  useEffect(() => {
+    if (!shouldOpenUsersSection) return;
+    setShowUsersSection(true);
+  }, [shouldOpenUsersSection]);
+
+  useEffect(() => {
+    if (!showUsersSection || !usersSectionRef.current) return;
+    usersSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [showUsersSection]);
 
   if (loading) return <div className="p-8">Carregando...</div>;
   if (!user) return <Navigate to="/login" replace />;
@@ -37,7 +54,44 @@ export default function SettingsPage() {
             Configurar KPIs
           </div>
         </Link>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
+              <Users size={20} />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900">Usuários</h3>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">
+            Cadastre, edite e organize os acessos dos usuários que atuam na operação comercial.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowUsersSection(true)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+          >
+            <Settings2 size={16} />
+            Gerenciar usuários
+          </button>
+        </div>
       </div>
+
+      {showUsersSection ? (
+        <div ref={usersSectionRef} id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+          <CrudSimplePage
+            endpoint="/users"
+            title="Usuários"
+            fields={[
+              { key: "name", label: "Nome" },
+              { key: "email", label: "Email" },
+              { key: "role", label: "Papel" },
+              { key: "region", label: "Região" },
+              { key: "password", label: "Senha" }
+            ]}
+            readOnly={user.role !== "diretor"}
+          />
+        </div>
+      ) : null}
     </section>
   );
 }
