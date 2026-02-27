@@ -1,7 +1,8 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
+import api from "../lib/apiClient";
 import type { AgendaEvent, AgendaEventType } from "../models/agenda";
 
 type Seller = { id: string; name: string };
@@ -173,6 +174,9 @@ export default function AgendaPage() {
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSellersLoading, setIsSellersLoading] = useState(false);
+  const [sellerOptions, setSellerOptions] = useState<Seller[]>([]);
   const [createForm, setCreateForm] = useState<CreateAgendaForm>({
     title: "",
     type: "reuniao_online",
@@ -182,14 +186,41 @@ export default function AgendaPage() {
   });
 
   const sellers = useMemo<Seller[]>(() => {
-    const all = [
-      { id: "seller-1", name: "Ana Vendedora" },
-      { id: "seller-2", name: "Bruno Vendedor" },
-      { id: "seller-3", name: "Carla Vendedora" }
-    ];
     if (!canFilterBySeller && user?.id && user?.name) return [{ id: user.id, name: user.name }];
-    return all;
-  }, [canFilterBySeller, user?.id, user?.name]);
+    return sellerOptions;
+  }, [canFilterBySeller, sellerOptions, user?.id, user?.name]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSellers = async () => {
+      if (!canFilterBySeller) {
+        setSellerOptions([]);
+        return;
+      }
+
+      setIsSellersLoading(true);
+      try {
+        const response = await api.get("/users");
+        if (!active) return;
+        const loadedSellers = (response.data || [])
+          .filter((item: any) => item?.role === "vendedor" && item?.id && item?.name)
+          .map((item: any) => ({ id: String(item.id), name: String(item.name) }));
+        setSellerOptions(loadedSellers);
+      } catch {
+        if (!active) return;
+        toast.error("Não foi possível carregar vendedores agora.");
+      } finally {
+        if (active) setIsSellersLoading(false);
+      }
+    };
+
+    loadSellers();
+
+    return () => {
+      active = false;
+    };
+  }, [canFilterBySeller]);
 
   const clients = useMemo<Client[]>(
     () => [
@@ -284,7 +315,25 @@ export default function AgendaPage() {
     setIsCreateOpen(false);
   };
 
-  const onCreateAgenda = (event: FormEvent<HTMLFormElement>) => {
+  const resolveAgendaOwnerId = () => {
+    if (user?.role === "vendedor") return user.id;
+    return createForm.sellerId || user?.id || "";
+  };
+
+  const mapCreatedAgendaEvent = (data: any): AgendaEvent => {
+    return {
+      id: String(data?.id || `event-${Date.now()}`),
+      userId: String(data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
+      title: String(data?.title || createForm.title.trim()),
+      description: String(data?.description || "Compromisso criado manualmente."),
+      type: createForm.type,
+      startDateTime: new Date(data?.startDateTime || createForm.startDateTime).toISOString(),
+      endDateTime: new Date(data?.endDateTime || createForm.endDateTime).toISOString(),
+      status: "agendado"
+    };
+  };
+
+  const onCreateAgenda = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     if (!createForm.title.trim() || !createForm.startDateTime || !createForm.endDateTime) {
@@ -297,26 +346,36 @@ export default function AgendaPage() {
       return;
     }
 
-    const ownerId = canFilterBySeller ? createForm.sellerId : user?.id;
+    const ownerId = resolveAgendaOwnerId();
     if (!ownerId) {
       toast.error("Selecione um vendedor para criar a agenda.");
       return;
     }
 
-    const createdEvent: AgendaEvent = {
-      id: `event-${Date.now()}`,
-      userId: ownerId,
-      title: createForm.title.trim(),
-      description: "Compromisso criado manualmente.",
-      type: createForm.type,
-      startDateTime: new Date(createForm.startDateTime).toISOString(),
-      endDateTime: new Date(createForm.endDateTime).toISOString(),
-      status: "agendado"
-    };
+    setIsSubmitting(true);
+    try {
+      const payload: Record<string, string> = {
+        title: createForm.title.trim(),
+        type: createForm.type,
+        startDateTime: new Date(createForm.startDateTime).toISOString(),
+        endDateTime: new Date(createForm.endDateTime).toISOString()
+      };
 
-    refreshEvents(createdEvent);
-    closeCreate();
-    toast.success("Agenda criada com sucesso.");
+      if (user?.role === "vendedor") {
+        payload.ownerSellerId = user.id;
+      } else if (createForm.sellerId) {
+        payload.ownerSellerId = createForm.sellerId;
+      }
+
+      const response = await api.post("/agenda", payload);
+      refreshEvents(mapCreatedAgendaEvent(response.data));
+      closeCreate();
+      toast.success("Agenda criada com sucesso.");
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || "Erro ao criar agenda.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -577,15 +636,17 @@ export default function AgendaPage() {
                       onChange={(event) => setCreateForm((current) => ({ ...current, sellerId: event.target.value }))}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      <option value="">Selecione</option>
-                      {sellers.map((seller) => (
-                        <option key={seller.id} value={seller.id}>
-                          {seller.name}
-                        </option>
-                      ))}
+                      {isSellersLoading ? <option value="">Carregando vendedores…</option> : <option value="">Padrão do sistema</option>}
+                      {!isSellersLoading
+                        ? sellers.map((seller) => (
+                          <option key={seller.id} value={seller.id}>
+                            {seller.name}
+                          </option>
+                        ))
+                        : null}
                     </select>
                   </div>
-                ) : null}
+                ) : <input type="hidden" value={user?.id || ""} readOnly />}
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">
@@ -613,8 +674,8 @@ export default function AgendaPage() {
                 <button type="button" onClick={closeCreate} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                   Cancelar
                 </button>
-                <button type="submit" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
-                  Salvar agenda
+                <button type="submit" disabled={isSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70">
+                  {isSubmitting ? "Salvando..." : "Salvar agenda"}
                 </button>
               </div>
             </form>
