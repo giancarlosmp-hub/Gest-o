@@ -74,6 +74,19 @@ export default function ActivitiesPage() {
     return () => clearTimeout(timeout);
   }, [filters.q]);
 
+  useEffect(() => {
+    if (!isModalOpen) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeCreateModal();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isModalOpen]);
+
   const loadLookups = async () => {
     try {
       const requests: Promise<any>[] = [api.get("/clients"), api.get("/opportunities")];
@@ -149,8 +162,8 @@ export default function ActivitiesPage() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.clientId || !form.notes.trim() || !form.dueDate) {
-      toast.error("Preencha cliente, notas e vencimento.");
+    if (!form.clientId || !form.notes.trim() || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
+      toast.error(canChooseSeller ? "Preencha vendedor, cliente, notas e vencimento." : "Preencha cliente, notas e vencimento.");
       return;
     }
 
@@ -263,6 +276,8 @@ export default function ActivitiesPage() {
       <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (
           <div className="p-4 text-slate-500">Carregando...</div>
+        ) : !activities.length ? (
+          <div className="p-8 text-center text-slate-500">Nenhuma atividade encontrada para os filtros atuais.</div>
         ) : (
           <table className="w-full text-sm">
             <thead>
@@ -312,9 +327,17 @@ export default function ActivitiesPage() {
       </div>
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-            <h3 className="mb-4 text-xl font-semibold">Nova atividade</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCreateModal}>
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-semibold">Nova atividade</h3>
+                <p className="text-sm text-slate-500">Registre uma próxima ação com cliente e mantenha o funil atualizado.</p>
+              </div>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500 hover:bg-slate-50" onClick={closeCreateModal} aria-label="Fechar modal">
+                ✕
+              </button>
+            </div>
             <form onSubmit={onSubmit} className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
@@ -331,7 +354,7 @@ export default function ActivitiesPage() {
                   <label className="text-sm">Vencimento</label>
                   <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
-                {!isSeller ? (
+                {canChooseSeller ? (
                   <div className="md:col-span-2">
                     <label className="text-sm">Vendedor responsável</label>
                     <select required className="w-full rounded-lg border border-slate-300 p-2" value={form.ownerSellerId} onChange={(event) => setForm((previous) => ({ ...previous, ownerSellerId: event.target.value }))}>
