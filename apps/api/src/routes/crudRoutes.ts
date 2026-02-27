@@ -879,7 +879,35 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 });
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({ where: sellerWhere(req), include: { opportunity: true }, orderBy: { createdAt: "desc" } })));
+router.get("/activities", async (req, res) => {
+  const month = req.query.month as string | undefined;
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerFilter = req.user!.role === "vendedor"
+    ? { ownerSellerId: req.user!.id }
+    : (sellerIdQuery ? { ownerSellerId: sellerIdQuery } : sellerWhere(req));
+  const monthFilter = month
+    ? (() => {
+        const { start, end } = getMonthRangeFromKey(month);
+        return { createdAt: { gte: start, lte: end } };
+      })()
+    : {};
+
+  return res.json(
+    await prisma.activity.findMany({
+      where: {
+        ...sellerFilter,
+        ...monthFilter
+      },
+      include: { opportunity: true },
+      orderBy: { createdAt: "desc" }
+    })
+  );
+});
 router.get("/activities/monthly-counts", async (req, res) => {
   const month = (req.query.month as string | undefined) || getMonthKey(new Date());
   const sellerIdQuery = req.query.sellerId as string | undefined;
