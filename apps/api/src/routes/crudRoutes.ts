@@ -7,7 +7,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ClientType } from "@prisma/client";
+import { ActivityType, ClientType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
 const router = Router();
@@ -104,6 +104,27 @@ const parseObjectivePeriod = (monthQuery?: string, yearQuery?: string) => {
     year,
     monthKey
   };
+};
+
+const getMonthKey = (date: Date) => date.toISOString().slice(0, 7);
+
+const getMonthRangeFromKey = (monthKey: string) => {
+  const [year, month] = monthKey.split("-").map(Number);
+  return {
+    start: new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0)),
+    end: new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+  };
+};
+
+const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
+  const { start, end } = getMonthRangeFromKey(monthKey);
+  return prisma.activity.count({
+    where: {
+      ownerSellerId,
+      type,
+      createdAt: { gte: start, lte: end }
+    }
+  });
 };
 
 const assertProbability = (probability: number | null | undefined) => {
@@ -859,7 +880,56 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({ where: sellerWhere(req), include: { opportunity: true }, orderBy: { createdAt: "desc" } })));
-router.post("/activities", validateBody(activitySchema), async (req, res) => res.status(201).json(await prisma.activity.create({ data: { ...req.body, dueDate: new Date(req.body.dueDate), ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
+router.get("/activities/monthly-counts", async (req, res) => {
+  const month = (req.query.month as string | undefined) || getMonthKey(new Date());
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
+  const { start, end } = getMonthRangeFromKey(month);
+
+  const groupedCounts = await prisma.activity.groupBy({
+    by: ["ownerSellerId", "type"],
+    where: {
+      ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+      createdAt: { gte: start, lte: end }
+    },
+    _count: { _all: true }
+  });
+
+  return res.json(
+    groupedCounts.map((countEntry) => ({
+      sellerId: countEntry.ownerSellerId,
+      type: countEntry.type,
+      month,
+      logicalCount: countEntry._count._all
+    }))
+  );
+});
+router.post("/activities", validateBody(activitySchema), async (req, res) => {
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const createdActivity = await prisma.activity.create({
+    data: {
+      ...req.body,
+      dueDate: new Date(req.body.dueDate),
+      ownerSellerId
+    }
+  });
+
+  const month = getMonthKey(createdActivity.createdAt);
+  const logicalCount = await getActivityCountByTypeInMonth(ownerSellerId, createdActivity.type, month);
+
+  return res.status(201).json({
+    ...createdActivity,
+    metrics: {
+      month,
+      logicalCount
+    }
+  });
+});
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { ...req.body, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) } })));
 router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
 router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
@@ -990,21 +1060,41 @@ router.get("/activity-kpis", async (req, res) => {
   }
 
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
+  const { start, end } = getMonthRangeFromKey(month);
 
-  const activityKpis = await prisma.activityKPI.findMany({
-    where: {
-      month,
-      ...(sellerId ? { sellerId } : {})
-    },
-    include: {
-      seller: {
-        select: { id: true, name: true, email: true }
-      }
-    },
-    orderBy: [{ sellerId: "asc" }, { type: "asc" }]
-  });
+  const [activityKpis, monthActivityCounts] = await Promise.all([
+    prisma.activityKPI.findMany({
+      where: {
+        month,
+        ...(sellerId ? { sellerId } : {})
+      },
+      include: {
+        seller: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: [{ sellerId: "asc" }, { type: "asc" }]
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId", "type"],
+      where: {
+        ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+        createdAt: { gte: start, lte: end }
+      },
+      _count: { _all: true }
+    })
+  ]);
 
-  return res.json(activityKpis);
+  const logicalCountBySellerAndType = new Map(
+    monthActivityCounts.map((countEntry) => [`${countEntry.ownerSellerId}:${countEntry.type}`, countEntry._count._all])
+  );
+
+  return res.json(
+    activityKpis.map((activityKpi) => ({
+      ...activityKpi,
+      logicalCount: logicalCountBySellerAndType.get(`${activityKpi.sellerId}:${activityKpi.type}`) ?? 0
+    }))
+  );
 });
 
 router.put("/activity-kpis/:sellerId", authorize("diretor", "gerente"), validateBody(activityKpiUpsertSchema), async (req, res) => {
