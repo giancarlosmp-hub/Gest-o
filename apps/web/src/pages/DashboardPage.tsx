@@ -77,6 +77,12 @@ const palette = {
   grid: "rgba(15, 23, 42, 0.08)",
 };
 
+const dashboardStatusColors = {
+  positive: "#16a34a",
+  attention: "#eab308",
+  negative: "#dc2626",
+};
+
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
 
@@ -300,7 +306,16 @@ export default function DashboardPage() {
       maintainAspectRatio: false,
       cutout: "65%",
       plugins: {
-        legend: { position: "bottom", labels: { color: palette.textMuted, usePointStyle: true } },
+        legend: {
+          position: "bottom",
+          labels: {
+            color: palette.textMuted,
+            usePointStyle: true,
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 16,
+          },
+        },
       },
     }),
     []
@@ -739,7 +754,7 @@ export default function DashboardPage() {
                 datasets: [
                   {
                     data: [portfolio.walletStatus.active, portfolio.walletStatus.inactiveRecent, portfolio.walletStatus.inactiveOld],
-                    backgroundColor: [palette.success, palette.warning, palette.danger],
+                    backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
                     borderColor: palette.surface,
                     borderWidth: 2,
                   },
@@ -768,7 +783,7 @@ export default function DashboardPage() {
                       portfolio.abcCurve.B.percentRevenue,
                       portfolio.abcCurve.C.percentRevenue,
                     ],
-                    backgroundColor: [palette.primary, palette.info, palette.rest],
+                    backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
                     borderColor: palette.surface,
                     borderWidth: 2,
                   },
