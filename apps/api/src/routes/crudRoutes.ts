@@ -2,7 +2,7 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activitySchema, clientContactSchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
+import { activityKpiUpsertSchema, activitySchema, clientContactSchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
@@ -981,6 +981,66 @@ router.get("/goals", async (req, res) => {
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : (req.query.sellerId as string | undefined);
   res.json(await prisma.goal.findMany({ where: sellerId ? { sellerId } : {}, include: { seller: { select: { name: true, email: true } } }, orderBy: [{ month: "desc" }] }));
 });
+router.get("/activity-kpis", async (req, res) => {
+  const month = req.query.month as string | undefined;
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
+
+  const activityKpis = await prisma.activityKPI.findMany({
+    where: {
+      month,
+      ...(sellerId ? { sellerId } : {})
+    },
+    include: {
+      seller: {
+        select: { id: true, name: true, email: true }
+      }
+    },
+    orderBy: [{ sellerId: "asc" }, { type: "asc" }]
+  });
+
+  return res.json(activityKpis);
+});
+
+router.put("/activity-kpis/:sellerId", authorize("diretor", "gerente"), validateBody(activityKpiUpsertSchema), async (req, res) => {
+  const seller = await prisma.user.findUnique({ where: { id: req.params.sellerId }, select: { id: true, role: true } });
+
+  if (!seller || seller.role !== "vendedor") {
+    return res.status(404).json({ message: "Vendedor não encontrado" });
+  }
+
+  const activityKpi = await prisma.activityKPI.upsert({
+    where: {
+      sellerId_month_type: {
+        sellerId: req.params.sellerId,
+        month: req.body.month,
+        type: req.body.type
+      }
+    },
+    update: {
+      targetValue: req.body.targetValue
+    },
+    create: {
+      sellerId: req.params.sellerId,
+      month: req.body.month,
+      type: req.body.type,
+      targetValue: req.body.targetValue
+    },
+    include: {
+      seller: {
+        select: { id: true, name: true, email: true }
+      }
+    }
+  });
+
+  return res.json(activityKpi);
+});
+
 router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema), async (req, res) => res.status(201).json(await prisma.goal.create({ data: req.body })));
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
