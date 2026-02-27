@@ -119,6 +119,13 @@ export const objectiveUpsertSchema = z.object({
 });
 
 
+export const activityKpiUpsertSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  type: z.string().min(1),
+  targetValue: z.number().int().nonnegative()
+});
+
+
 export const userActivationSchema = z.object({
   isActive: z.boolean()
 });
@@ -184,6 +191,7 @@ export type OpportunityInput = z.infer<typeof opportunitySchema>;
 export type ActivityInput = z.infer<typeof activitySchema>;
 export type GoalInput = z.infer<typeof goalSchema>;
 export type ObjectiveUpsertInput = z.infer<typeof objectiveUpsertSchema>;
+export type ActivityKpiUpsertInput = z.infer<typeof activityKpiUpsertSchema>;
 export type UserActivationInput = z.infer<typeof userActivationSchema>;
 export type UserRoleUpdateInput = z.infer<typeof userRoleUpdateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
