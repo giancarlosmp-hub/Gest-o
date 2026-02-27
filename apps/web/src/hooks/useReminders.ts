@@ -12,14 +12,24 @@ export type ReminderState = {
 
 type Activity = {
   id: string;
-  dueDate: string;
+  dueDate?: string;
   done: boolean;
 };
 
 type Opportunity = {
   id: string;
-  followUpDate: string;
+  followUpDate?: string;
+  stage?: string;
 };
+
+type ReminderMode = "todayAndOverdue" | "overdueOnly";
+
+type UseRemindersOptions = {
+  autoLoad?: boolean;
+  mode?: ReminderMode;
+};
+
+const CLOSED_OPPORTUNITY_STAGES = new Set(["ganho", "perdido"]);
 
 const initialReminders: ReminderState = {
   hasOverdueFollowUp: false,
@@ -105,82 +115,107 @@ export function endOfTodayLocal(referenceDate = new Date()) {
   return end;
 }
 
-export function useReminders(autoLoad = true) {
+function resolveReminderOptions(optionsOrAutoLoad?: boolean | UseRemindersOptions) {
+  if (typeof optionsOrAutoLoad === "boolean") {
+    return { autoLoad: optionsOrAutoLoad, mode: "todayAndOverdue" as ReminderMode };
+  }
+
+  return {
+    autoLoad: optionsOrAutoLoad?.autoLoad ?? true,
+    mode: optionsOrAutoLoad?.mode ?? "todayAndOverdue",
+  };
+}
+
+export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) {
+  const { autoLoad, mode } = resolveReminderOptions(optionsOrAutoLoad);
   const { user } = useAuth();
+
   const [loading, setLoading] = useState(false);
   const [reminders, setReminders] = useState<ReminderState>(initialReminders);
 
   const cacheKey = getCacheKey(user?.id);
 
-  const checkReminders = useCallback(async (signal?: AbortSignal, force = false) => {
-    const dayKey = getDayKey();
-    const now = Date.now();
+  const checkReminders = useCallback(
+    async (signal?: AbortSignal, force = false) => {
+      const dayKey = getDayKey();
+      const now = Date.now();
 
-    if (!force) {
-      const cached = getCachedReminders(cacheKey, now, dayKey);
-      if (cached) {
-        setReminders(cached);
-        setLoading(false);
-        return;
-      }
-    }
-
-    setLoading(true);
-
-    try {
-      const month = getCurrentMonthParam();
-      const todayEnd = endOfTodayLocal();
-
-      const [activitiesResponse, opportunitiesResponse] = await Promise.all([
-        api.get(`/activities?month=${month}`, { signal }),
-        api.get("/opportunities?status=open", { signal }),
-      ]);
-
-      const activities = Array.isArray(activitiesResponse.data) ? (activitiesResponse.data as Activity[]) : [];
-
-      const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
-        ? opportunitiesResponse.data.items
-        : opportunitiesResponse.data;
-      const opportunities = Array.isArray(opportunitiesPayload) ? (opportunitiesPayload as Opportunity[]) : [];
-
-      const activitiesBadgeCount = activities.filter((item) => {
-        if (item.done) return false;
-        const dueDate = parseDate(item.dueDate);
-        return Boolean(dueDate && dueDate <= todayEnd);
-      }).length;
-
-      const opportunitiesDueCount = opportunities.filter((item) => {
-        const followUpDate = parseDate(item.followUpDate);
-        return Boolean(followUpDate && followUpDate <= todayEnd);
-      }).length;
-
-      const nextReminders: ReminderState = {
-        hasOverdueFollowUp: false,
-        upcomingMeetingsCount: 0,
-        sellerWithoutActivityToday: false,
-        activitiesBadgeCount,
-        agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
-      };
-
-      if (!signal?.aborted) {
-        cacheReminders(cacheKey, nextReminders, now, dayKey);
-        setReminders(nextReminders);
-      }
-    } catch (error) {
-      if (!isAbortError(error) && isDevelopment()) {
-        console.error("[useReminders] Falha ao calcular lembretes", error);
+      if (!force) {
+        const cached = getCachedReminders(cacheKey, now, dayKey);
+        if (cached) {
+          setReminders(cached);
+          setLoading(false);
+          return;
+        }
       }
 
-      if (!signal?.aborted) {
-        clearRemindersCacheForKey(cacheKey);
-        setReminders(initialReminders);
+      setLoading(true);
+
+      try {
+        const month = getCurrentMonthParam();
+        const todayEnd = endOfTodayLocal();
+        const todayStart = startOfTodayLocal();
+
+        const isInSelectedWindow = (date: Date) => {
+          if (mode === "overdueOnly") {
+            return date < todayStart;
+          }
+          return date <= todayEnd;
+        };
+
+        const [activitiesResponse, opportunitiesResponse] = await Promise.all([
+          api.get(`/activities?month=${month}`, { signal }),
+          api.get("/opportunities?status=open", { signal }),
+        ]);
+
+        const activities = Array.isArray(activitiesResponse.data) ? (activitiesResponse.data as Activity[]) : [];
+
+        const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
+          ? opportunitiesResponse.data.items
+          : opportunitiesResponse.data;
+        const opportunities = Array.isArray(opportunitiesPayload) ? (opportunitiesPayload as Opportunity[]) : [];
+
+        const activitiesBadgeCount = activities.filter((item) => {
+          if (item.done) return false;
+          const dueDate = parseDate(item.dueDate);
+          return Boolean(dueDate && isInSelectedWindow(dueDate));
+        }).length;
+
+        const opportunitiesDueCount = opportunities.filter((item) => {
+          if (CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "")) return false;
+          const followUpDate = parseDate(item.followUpDate);
+          return Boolean(followUpDate && isInSelectedWindow(followUpDate));
+        }).length;
+
+        const nextReminders: ReminderState = {
+          hasOverdueFollowUp: false,
+          upcomingMeetingsCount: 0,
+          sellerWithoutActivityToday: false,
+          activitiesBadgeCount,
+          agendaBadgeCount: activitiesBadgeCount + opportunitiesDueCount,
+        };
+
+        if (!signal?.aborted) {
+          cacheReminders(cacheKey, nextReminders, now, dayKey);
+          setReminders(nextReminders);
+        }
+      } catch (error) {
+        if (!isAbortError(error) && isDevelopment()) {
+          console.error("[useReminders] Falha ao calcular lembretes", error);
+        }
+
+        if (!signal?.aborted) {
+          clearRemindersCacheForKey(cacheKey);
+          setReminders(initialReminders);
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false);
-      }
-    }
-  }, [cacheKey]);
+    },
+    [cacheKey, mode],
+  );
 
   useEffect(() => {
     if (!autoLoad) return;
