@@ -78,6 +78,7 @@ const palette = {
 };
 
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -730,7 +731,7 @@ export default function DashboardPage() {
         <div className={cardClass}>
           <h3 className="mb-2 font-semibold text-slate-800">Carteira de clientes</h3>
           <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
-          <div className="h-64 w-full">
+          <div className={doughnutContainerClass}>
             <Doughnut
               options={doughnutOptions}
               data={{
@@ -755,7 +756,7 @@ export default function DashboardPage() {
 
         <div className={cardClass}>
           <h3 className="mb-2 font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
-          <div className="h-64 w-full">
+          <div className={doughnutContainerClass}>
             <Doughnut
               options={doughnutOptions}
               data={{
