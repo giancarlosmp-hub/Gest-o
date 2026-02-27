@@ -88,6 +88,7 @@ export const activitySchema = z.object({
   dueDate: z.string(),
   done: z.boolean().optional(),
   opportunityId: z.string().optional(),
+  clientId: z.string().optional(),
   ownerSellerId: z.string().optional()
 });
 
