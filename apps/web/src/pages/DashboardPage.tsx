@@ -40,6 +40,29 @@ ChartJS.register(
 
 type SellerOption = { id: string; name: string; role: string };
 
+type ActivityKpi = {
+  sellerId: string;
+  type: string;
+  targetValue: number;
+  logicalCount?: number;
+  seller?: { id: string; name: string };
+};
+
+type Activity = {
+  id: string;
+  type: string;
+  ownerSellerId: string;
+  createdAt: string;
+};
+
+type ActivityTypeSummary = {
+  type: string;
+  target: number;
+  realized: number;
+  reachedPercent: number;
+  requiredDailyAverage: number;
+};
+
 const palette = {
   primary: "#0B3C1D",
   success: "#2f9e44",
@@ -56,6 +79,11 @@ const palette = {
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
+
+const getTypeLabel = (type: string) =>
+  type
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const getBusinessDaysRemaining = (month: string) => {
   const [year, monthN] = month.split("-").map(Number);
@@ -167,6 +195,8 @@ export default function DashboardPage() {
   const [sellers, setSellers] = useState<SellerOption[]>([]);
   const [sellerId, setSellerId] = useState("");
   const [animatedRealizedPercent, setAnimatedRealizedPercent] = useState(0);
+  const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -181,10 +211,14 @@ export default function DashboardPage() {
       api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`),
       api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`),
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`),
-    ]).then(([summaryResponse, seriesResponse, portfolioResponse]) => {
+      api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`),
+      api.get<Activity[]>(`/activities?month=${month}${querySeller}`),
+    ]).then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse]) => {
       setSummary(summaryResponse.data);
       setSeries(seriesResponse.data);
       setPortfolio(portfolioResponse.data);
+      setActivityKpis(activityKpisResponse.data);
+      setActivities(activitiesResponse.data);
     });
   }, [month, sellerId]);
 
@@ -237,6 +271,30 @@ export default function DashboardPage() {
       },
     }),
     []
+  );
+
+
+
+  const activityLineOptions = useMemo<ChartOptions<"line">>(
+    () => ({
+      ...lineOptions,
+      plugins: {
+        ...lineOptions.plugins,
+        tooltip: {
+          callbacks: {
+            label: (context) => `${context.dataset.label}: ${formatNumberBR(Number(context.raw || 0))}`,
+          },
+        },
+      },
+      scales: {
+        x: { ticks: { color: palette.textMuted }, grid: { color: palette.grid } },
+        y: {
+          ticks: { color: palette.textMuted, callback: (value) => formatNumberBR(Number(value)) },
+          grid: { color: palette.grid },
+        },
+      },
+    }),
+    [lineOptions]
   );
 
   const doughnutOptions = useMemo<ChartOptions<"doughnut">>(
@@ -310,6 +368,99 @@ export default function DashboardPage() {
 
     return () => cancelAnimationFrame(frame);
   }, [realizedPercentClamped]);
+
+  const activityPerformance = useMemo(() => {
+    const targetByType = new Map<string, number>();
+    const realizedByType = new Map<string, number>();
+    const realizedByDay = new Map<string, number>();
+
+    for (const item of activityKpis) {
+      targetByType.set(item.type, (targetByType.get(item.type) ?? 0) + Number(item.targetValue || 0));
+    }
+
+    for (const item of activities) {
+      realizedByType.set(item.type, (realizedByType.get(item.type) ?? 0) + 1);
+      const day = item.createdAt.slice(0, 10);
+      realizedByDay.set(day, (realizedByDay.get(day) ?? 0) + 1);
+    }
+
+    const activityTypes = Array.from(new Set([...targetByType.keys(), ...realizedByType.keys()]));
+    const summaryByType: ActivityTypeSummary[] = activityTypes
+      .map((type) => {
+        const target = targetByType.get(type) ?? 0;
+        const realized = realizedByType.get(type) ?? 0;
+        const missing = Math.max(target - realized, 0);
+        const businessDaysRemaining = getBusinessDaysRemaining(month);
+
+        return {
+          type,
+          target,
+          realized,
+          reachedPercent: target > 0 ? (realized / target) * 100 : 0,
+          requiredDailyAverage: businessDaysRemaining > 0 ? missing / businessDaysRemaining : 0,
+        };
+      })
+      .sort((a, b) => b.target - a.target);
+
+    const [year, monthN] = month.split("-").map(Number);
+    const lastDay = new Date(year, monthN, 0).getDate();
+    let runningRealized = 0;
+    let runningTarget = 0;
+    const totalTarget = summaryByType.reduce((sum, item) => sum + item.target, 0);
+    const targetPerDay = lastDay > 0 ? totalTarget / lastDay : 0;
+
+    const labels: string[] = [];
+    const realizedAccumulated: number[] = [];
+    const targetAccumulated: number[] = [];
+
+    for (let day = 1; day <= lastDay; day += 1) {
+      const dateKey = `${month}-${String(day).padStart(2, "0")}`;
+      runningRealized += realizedByDay.get(dateKey) ?? 0;
+      runningTarget += targetPerDay;
+      labels.push(String(day));
+      realizedAccumulated.push(runningRealized);
+      targetAccumulated.push(runningTarget);
+    }
+
+    const totalRealized = summaryByType.reduce((sum, item) => sum + item.realized, 0);
+    const reachedPercent = totalTarget > 0 ? (totalRealized / totalTarget) * 100 : 0;
+    const businessDaysRemaining = getBusinessDaysRemaining(month);
+
+    const rankingBySeller = user?.role === "vendedor"
+      ? []
+      : Array.from(
+          activityKpis.reduce<Map<string, { seller: string; target: number; realized: number }>>((acc, item) => {
+            const sellerName = item.seller?.name ?? sellers.find((seller) => seller.id === item.sellerId)?.name ?? "Sem nome";
+            if (!acc.has(item.sellerId)) {
+              acc.set(item.sellerId, { seller: sellerName, target: 0, realized: 0 });
+            }
+            const entry = acc.get(item.sellerId)!;
+            entry.target += Number(item.targetValue || 0);
+            entry.realized += Number(item.logicalCount || 0);
+            return acc;
+          }, new Map())
+        )
+          .map(([sellerId, values]) => ({
+            sellerId,
+            seller: values.seller,
+            target: values.target,
+            realized: values.realized,
+            reachedPercent: values.target > 0 ? (values.realized / values.target) * 100 : 0,
+          }))
+          .sort((a, b) => b.reachedPercent - a.reachedPercent);
+
+    return {
+      summaryByType,
+      labels,
+      realizedAccumulated,
+      targetAccumulated,
+      totalTarget,
+      totalRealized,
+      reachedPercent,
+      requiredDailyAverage: businessDaysRemaining > 0 ? Math.max(totalTarget - totalRealized, 0) / businessDaysRemaining : 0,
+      rankingBySeller,
+    };
+  }, [activityKpis, activities, month, sellers, user?.role]);
 
   if (!summary || !series || !portfolio || !salesPace) {
     return <div className={cardClass}>Carregando dashboard...</div>;
@@ -444,6 +595,137 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">Performance de Atividades</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          {user?.role === "vendedor" ? "Visão individual do mês atual." : "Consolidado do time no mês atual."}
+        </p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+          <div className={cardClass}>
+            <div className="text-sm text-slate-500">Meta mensal (total)</div>
+            <div className="text-2xl font-bold text-slate-900">{formatNumberBR(activityPerformance.totalTarget)}</div>
+          </div>
+          <div className={cardClass}>
+            <div className="text-sm text-slate-500">Realizado até hoje</div>
+            <div className="text-2xl font-bold text-slate-900">{formatNumberBR(activityPerformance.totalRealized)}</div>
+          </div>
+          <div className={cardClass}>
+            <div className="text-sm text-slate-500">% atingido</div>
+            <div className="text-2xl font-bold text-slate-900">{formatPercentBR(activityPerformance.reachedPercent)}</div>
+          </div>
+          <div className={cardClass}>
+            <div className="text-sm text-slate-500">Média diária necessária</div>
+            <div className="text-2xl font-bold text-slate-900">{formatNumberBR(activityPerformance.requiredDailyAverage)}</div>
+          </div>
+          <div className={cardClass}>
+            <div className="text-sm text-slate-500">Tipos monitorados</div>
+            <div className="text-2xl font-bold text-slate-900">{formatNumberBR(activityPerformance.summaryByType.length)}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-12">
+          <div className="h-[320px] xl:col-span-8">
+            <Line
+              options={activityLineOptions}
+              data={{
+                labels: activityPerformance.labels,
+                datasets: [
+                  {
+                    label: "Realizado acumulado (atividades)",
+                    data: activityPerformance.realizedAccumulated,
+                    borderColor: palette.success,
+                    backgroundColor: "rgba(47, 158, 68, 0.2)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                  },
+                  {
+                    label: "Meta acumulada (atividades)",
+                    data: activityPerformance.targetAccumulated,
+                    borderColor: palette.primary,
+                    backgroundColor: "rgba(11, 60, 29, 0.2)",
+                    borderWidth: 2,
+                    tension: 0.3,
+                  },
+                ],
+              }}
+            />
+          </div>
+
+          <div className="xl:col-span-4">
+            <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Meta mensal por tipo</h4>
+            <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-100">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50">
+                  <tr className="text-left text-slate-500">
+                    <th className="px-3 py-2">Tipo</th>
+                    <th className="px-3 py-2">Meta</th>
+                    <th className="px-3 py-2">Realizado</th>
+                    <th className="px-3 py-2">% atingido</th>
+                    <th className="px-3 py-2">Média diária</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityPerformance.summaryByType.map((item) => (
+                    <tr key={item.type} className="border-t border-slate-100">
+                      <td className="px-3 py-2 text-slate-700">{getTypeLabel(item.type)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.target)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.realized)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatPercentBR(item.reachedPercent)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.requiredDailyAverage)}</td>
+                    </tr>
+                  ))}
+                  {activityPerformance.summaryByType.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                        Sem metas de atividade configuradas para este mês.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {user?.role !== "vendedor" && (
+          <div className="mt-5">
+            <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Ranking por vendedor</h4>
+            <div className="overflow-x-auto rounded-lg border border-slate-100">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr className="text-left text-slate-500">
+                    <th className="px-3 py-2">Ranking</th>
+                    <th className="px-3 py-2">Vendedor</th>
+                    <th className="px-3 py-2">Meta</th>
+                    <th className="px-3 py-2">Realizado</th>
+                    <th className="px-3 py-2">% atingido</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activityPerformance.rankingBySeller.map((row, index) => (
+                    <tr key={row.sellerId} className="border-t border-slate-100">
+                      <td className="px-3 py-2">{index + 1}º</td>
+                      <td className="px-3 py-2 text-slate-700">{row.seller}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(row.target)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(row.realized)}</td>
+                      <td className="px-3 py-2 text-slate-700">{formatPercentBR(row.reachedPercent)}</td>
+                    </tr>
+                  ))}
+                  {activityPerformance.rankingBySeller.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-3 py-6 text-center text-slate-500">
+                        Sem dados de ranking para o período.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
