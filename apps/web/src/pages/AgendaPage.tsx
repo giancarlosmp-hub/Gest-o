@@ -1,0 +1,356 @@
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import type { AgendaEvent, AgendaEventType } from "../models/agenda";
+
+type Seller = { id: string; name: string };
+type Client = { id: string; name: string };
+type Opportunity = { id: string; title: string };
+
+type Visualizacao = "diaria" | "semanal";
+type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias";
+
+const TYPE_LABEL: Record<AgendaEventType, string> = {
+  reuniao_online: "Reunião online",
+  reuniao_presencial: "Reunião presencial",
+  roteiro_visita: "Roteiro de visita",
+  follow_up: "Follow-up"
+};
+
+const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
+  reuniao_online: "bg-blue-100 text-blue-800 border-blue-200",
+  reuniao_presencial: "bg-green-100 text-green-800 border-green-200",
+  roteiro_visita: "bg-green-100 text-green-800 border-green-200",
+  follow_up: "bg-amber-100 text-amber-800 border-amber-200"
+};
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function startOfWeek(date: Date) {
+  const next = startOfDay(date);
+  const day = next.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  next.setDate(next.getDate() + diff);
+  return next;
+}
+
+function endOfWeek(date: Date) {
+  const next = endOfDay(startOfWeek(date));
+  next.setDate(next.getDate() + 6);
+  return next;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function isPast(event: AgendaEvent) {
+  return event.status === "agendado" && new Date(event.endDateTime).getTime() < Date.now();
+}
+
+export default function AgendaPage() {
+  const { user } = useAuth();
+  const canFilterBySeller = user?.role === "gerente" || user?.role === "diretor";
+
+  const [view, setView] = useState<Visualizacao>("diaria");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("hoje");
+  const [selectedSellerId, setSelectedSellerId] = useState<string>("");
+  const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
+
+  const sellers = useMemo<Seller[]>(() => {
+    const all = [
+      { id: "seller-1", name: "Ana Vendedora" },
+      { id: "seller-2", name: "Bruno Vendedor" },
+      { id: "seller-3", name: "Carla Vendedora" }
+    ];
+    if (!canFilterBySeller && user?.id && user?.name) return [{ id: user.id, name: user.name }];
+    return all;
+  }, [canFilterBySeller, user?.id, user?.name]);
+
+  const clients = useMemo<Client[]>(
+    () => [
+      { id: "client-1", name: "Fazenda Santa Luz" },
+      { id: "client-2", name: "Agro Serra" },
+      { id: "client-3", name: "Grupo Horizonte" }
+    ],
+    []
+  );
+
+  const opportunities = useMemo<Opportunity[]>(
+    () => [
+      { id: "opp-1", title: "Pacote Safra 2026" },
+      { id: "opp-2", title: "Renovação de contrato" },
+      { id: "opp-3", title: "Expansão irrigação" }
+    ],
+    []
+  );
+
+  const events = useMemo<AgendaEvent[]>(() => {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    const inFiveDays = new Date(now);
+    inFiveDays.setDate(now.getDate() + 5);
+
+    return [
+      {
+        id: "event-1",
+        userId: "seller-1",
+        clientId: "client-1",
+        opportunityId: "opp-1",
+        title: "Kickoff técnico",
+        description: "Alinhar cronograma de implantação e responsáveis.",
+        type: "reuniao_online",
+        startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
+        endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
+        status: "agendado"
+      },
+      {
+        id: "event-2",
+        userId: "seller-2",
+        clientId: "client-2",
+        title: "Visita presencial - talhão 7",
+        description: "Avaliar necessidade de cobertura nitrogenada.",
+        type: "reuniao_presencial",
+        startDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 14, 0).toISOString(),
+        endDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 16, 0).toISOString(),
+        location: "Agro Serra - Campo A",
+        status: "agendado"
+      },
+      {
+        id: "event-3",
+        userId: "seller-1",
+        clientId: "client-1",
+        opportunityId: "opp-2",
+        title: "Follow-up proposta",
+        description: "Validar ajustes comerciais e próximo passo.",
+        type: "follow_up",
+        startDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 0).toISOString(),
+        endDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 30).toISOString(),
+        status: "agendado"
+      },
+      {
+        id: "event-4",
+        userId: "seller-3",
+        clientId: "client-3",
+        opportunityId: "opp-3",
+        title: "Roteiro de visita mensal",
+        description: "Mapear evolução das áreas demonstrativas.",
+        type: "roteiro_visita",
+        startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 8, 0).toISOString(),
+        endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0).toISOString(),
+        location: "Grupo Horizonte - Unidade Sul",
+        status: "agendado"
+      }
+    ];
+  }, []);
+
+  const filteredEvents = useMemo(() => {
+    const today = new Date();
+    const dayStart = startOfDay(today);
+    const dayEnd = endOfDay(today);
+    const weekStart = startOfWeek(today);
+    const weekEnd = endOfWeek(today);
+    const next7End = endOfDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7));
+
+    const byRole = events.filter((event) => {
+      if (user?.role === "vendedor") return event.userId === user.id;
+      if (canFilterBySeller && selectedSellerId) return event.userId === selectedSellerId;
+      return true;
+    });
+
+    const byPeriod = byRole.filter((event) => {
+      const start = new Date(event.startDateTime);
+
+      if (periodFilter === "hoje") return start >= dayStart && start <= dayEnd;
+      if (periodFilter === "esta_semana") return start >= weekStart && start <= weekEnd;
+      return start >= dayStart && start <= next7End;
+    });
+
+    return byPeriod.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
+  }, [canFilterBySeller, events, periodFilter, selectedSellerId, user?.id, user?.role]);
+
+  const eventsGrouped = useMemo(() => {
+    if (view === "diaria") {
+      return filteredEvents.reduce<Record<string, AgendaEvent[]>>((acc, event) => {
+        const label = new Date(event.startDateTime).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" });
+        acc[label] = [...(acc[label] || []), event];
+        return acc;
+      }, {});
+    }
+
+    const weekGroups: Record<string, AgendaEvent[]> = {};
+    filteredEvents.forEach((event) => {
+      const start = new Date(event.startDateTime);
+      const weekKey = `${startOfWeek(start).toLocaleDateString("pt-BR")} - ${endOfWeek(start).toLocaleDateString("pt-BR")}`;
+      weekGroups[weekKey] = [...(weekGroups[weekKey] || []), event];
+    });
+
+    return weekGroups;
+  }, [filteredEvents, view]);
+
+  const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
+  const clientById = useMemo(() => Object.fromEntries(clients.map((client) => [client.id, client.name])), [clients]);
+  const opportunityById = useMemo(() => Object.fromEntries(opportunities.map((opportunity) => [opportunity.id, opportunity.title])), [opportunities]);
+
+  return (
+    <section className="space-y-4">
+      <header className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">Agenda</h2>
+          <p className="text-sm text-slate-500">Planeje compromissos comerciais e acompanhe execuções da equipe.</p>
+        </div>
+
+        <button type="button" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
+          Nova agenda
+        </button>
+      </header>
+
+      <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
+        <div>
+          <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Visualização</label>
+          <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <option value="diaria">Lista diária</option>
+            <option value="semanal">Lista semanal</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Filtro de período</label>
+          <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <option value="hoje">Hoje</option>
+            <option value="esta_semana">Esta semana</option>
+            <option value="proximos_7_dias">Próximos 7 dias</option>
+          </select>
+        </div>
+
+        {canFilterBySeller ? (
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vendedor</label>
+            <select value={selectedSellerId} onChange={(event) => setSelectedSellerId(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <option value="">Todos</option>
+              {sellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>
+                  {seller.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+        {!filteredEvents.length ? (
+          <p className="p-8 text-center text-sm text-slate-500">Nenhum evento encontrado para os filtros selecionados.</p>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {Object.entries(eventsGrouped).map(([groupLabel, groupEvents]) => (
+              <div key={groupLabel} className="p-4">
+                <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-600">{groupLabel}</h3>
+                <div className="space-y-2">
+                  {groupEvents.map((event) => {
+                    const overdue = isPast(event);
+                    return (
+                      <button
+                        key={event.id}
+                        type="button"
+                        onClick={() => setSelectedEvent(event)}
+                        className="flex w-full flex-col gap-2 rounded-lg border border-slate-200 p-3 text-left transition hover:border-brand-300 hover:bg-brand-50/40 md:flex-row md:items-center md:justify-between"
+                      >
+                        <div>
+                          <p className="font-medium text-slate-900">{event.title}</p>
+                          <p className="text-xs text-slate-500">
+                            {formatDateTime(event.startDateTime)} - {new Date(event.endDateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+                          <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                          {overdue ? <span className="rounded-full border border-rose-200 bg-rose-100 px-2 py-1 text-rose-800">Vencido</span> : null}
+                          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">{sellerById[event.userId] || "Vendedor"}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedEvent ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setSelectedEvent(null)}>
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">{selectedEvent.title}</h3>
+                <p className="text-sm text-slate-500">{TYPE_LABEL[selectedEvent.type]}</p>
+              </div>
+              <button type="button" onClick={() => setSelectedEvent(null)} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
+                ✕
+              </button>
+            </div>
+
+            <dl className="grid gap-3 text-sm text-slate-700 md:grid-cols-2">
+              <div>
+                <dt className="font-medium text-slate-500">Início</dt>
+                <dd>{formatDateTime(selectedEvent.startDateTime)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Fim</dt>
+                <dd>{formatDateTime(selectedEvent.endDateTime)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Status</dt>
+                <dd className="capitalize">{selectedEvent.status.replace("_", " ")}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Local</dt>
+                <dd>{selectedEvent.location || "Não informado"}</dd>
+              </div>
+              <div className="md:col-span-2">
+                <dt className="font-medium text-slate-500">Descrição</dt>
+                <dd>{selectedEvent.description}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Cliente</dt>
+                <dd>
+                  {selectedEvent.clientId ? (
+                    <Link to={`/clientes/${selectedEvent.clientId}`} className="text-brand-700 underline">
+                      {clientById[selectedEvent.clientId] || "Ver cliente"}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-500">Oportunidade</dt>
+                <dd>
+                  {selectedEvent.opportunityId ? (
+                    <Link to={`/oportunidades/${selectedEvent.opportunityId}`} className="text-brand-700 underline">
+                      {opportunityById[selectedEvent.opportunityId] || "Ver oportunidade"}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
