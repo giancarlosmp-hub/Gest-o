@@ -726,7 +726,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div className={cardClass}>
           <h3 className="mb-2 font-semibold text-slate-800">Carteira de clientes</h3>
           <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
@@ -752,9 +752,7 @@ export default function DashboardPage() {
             <div>Inativos &gt;90: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.walletStatus.inactiveOld)}</span></div>
           </div>
         </div>
-      </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
         <div className={cardClass}>
           <h3 className="mb-2 font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
           <div className="h-64 w-full">
