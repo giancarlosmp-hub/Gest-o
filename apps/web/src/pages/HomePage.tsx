@@ -3,6 +3,7 @@ import { CalendarClock, CheckSquare, Clock3, MessageCircleWarning, SunMoon, User
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
+import { useReminders } from "../hooks/useReminders";
 
 type Activity = {
   id: string;
@@ -51,6 +52,7 @@ const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 export default function HomePage() {
   const { user } = useAuth();
+  const { alerts, reminders, refreshReminders } = useReminders(false);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,6 +60,7 @@ export default function HomePage() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
+      void refreshReminders();
       try {
         const [activitiesResponse, opportunitiesResponse] = await Promise.all([
           api.get("/activities"),
@@ -119,6 +122,24 @@ export default function HomePage() {
 
   return (
     <div className="space-y-4">
+      <section className="space-y-2">
+        {alerts.showOverdueFollowUpAlert && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+            Atenção: existem follow-ups vencidos.
+          </div>
+        )}
+        {alerts.showUpcomingMeetingBanner && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-700">
+            Lembrete: você possui {reminders.upcomingMeetingsCount} reunião(ões) nas próximas 2 horas.
+          </div>
+        )}
+        {alerts.showNoActivitiesWarning && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
+            Você ainda não registrou atividades hoje.
+          </div>
+        )}
+      </section>
+
       <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
         <div className="flex items-center gap-3 text-brand-900">
           <SunMoon size={22} />
