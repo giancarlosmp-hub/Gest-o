@@ -6,6 +6,9 @@ export type ReminderState = {
   hasOverdueFollowUp: boolean;
   upcomingMeetingsCount: number;
   sellerWithoutActivityToday: boolean;
+  tasksDueCount: number;
+  followUpsDueCount: number;
+  overdueOppsCount: number;
   agendaBadgeCount: number;
   activitiesBadgeCount: number;
   breakdown?: {
@@ -41,13 +44,16 @@ const initialReminders: ReminderState = {
   hasOverdueFollowUp: false,
   upcomingMeetingsCount: 0,
   sellerWithoutActivityToday: false,
+  tasksDueCount: 0,
+  followUpsDueCount: 0,
+  overdueOppsCount: 0,
   agendaBadgeCount: 0,
   activitiesBadgeCount: 0,
   breakdown: {
     activitiesDue: 0,
     followUpsDue: 0,
-    overdueOpportunities: 0,
-  },
+    overdueOpportunities: 0
+  }
 };
 
 const REMINDERS_CACHE_TTL_MS = 60_000;
@@ -100,7 +106,7 @@ function cacheReminders(cacheKey: string, reminders: ReminderState, now = Date.n
   remindersCache.set(cacheKey, {
     reminders,
     dayKey,
-    expiresAt: now + REMINDERS_CACHE_TTL_MS,
+    expiresAt: now + REMINDERS_CACHE_TTL_MS
   });
 }
 
@@ -134,7 +140,7 @@ function resolveReminderOptions(optionsOrAutoLoad?: boolean | UseRemindersOption
 
   return {
     autoLoad: optionsOrAutoLoad?.autoLoad ?? true,
-    mode: optionsOrAutoLoad?.mode ?? "todayAndOverdue",
+    mode: optionsOrAutoLoad?.mode ?? "todayAndOverdue"
   };
 }
 
@@ -177,7 +183,7 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
 
         const [activitiesResponse, opportunitiesResponse] = await Promise.all([
           api.get(`/activities?month=${month}`, { signal }),
-          api.get("/opportunities?status=open", { signal }),
+          api.get("/opportunities?status=open", { signal })
         ]);
 
         const activities = Array.isArray(activitiesResponse.data) ? (activitiesResponse.data as Activity[]) : [];
@@ -187,12 +193,14 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
           : opportunitiesResponse.data;
         const opportunities = Array.isArray(opportunitiesPayload) ? (opportunitiesPayload as Opportunity[]) : [];
 
-        const activitiesBadgeCount = activities.filter((item) => {
+        // 1) Tarefas (Atividades) pendentes no período
+        const tasksDueCount = activities.filter((item) => {
           if (item.done) return false;
           const dueDate = parseDate(item.dueDate);
           return Boolean(dueDate && isInSelectedWindow(dueDate));
         }).length;
 
+        // 2) Oportunidades (sem duplicar: se tem follow-up na janela, não entra como "atrasada")
         const isOpenOpportunity = (item: Opportunity) => !CLOSED_OPPORTUNITY_STAGES.has(item.stage ?? "");
 
         const followUpOpportunityIds = new Set(
@@ -202,35 +210,39 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
               const followUpDate = parseDate(item.followUpDate);
               return Boolean(followUpDate && isInSelectedWindow(followUpDate));
             })
-            .map((item) => item.id),
+            .map((item) => item.id)
         );
 
         const overdueOpportunityIds = new Set(
           opportunities
             .filter((item) => {
               if (!isOpenOpportunity(item)) return false;
-              if (followUpOpportunityIds.has(item.id)) return false;
+              if (followUpOpportunityIds.has(item.id)) return false; // evita duplicar
               const expectedCloseDate = parseDate(item.expectedCloseDate);
               return Boolean(expectedCloseDate && expectedCloseDate < todayStart);
             })
-            .map((item) => item.id),
+            .map((item) => item.id)
         );
 
-        const followUpOpportunityCount = followUpOpportunityIds.size;
-        const overdueOpportunityCount = overdueOpportunityIds.size;
-        const uniqueFollowUpAndOverdueOpportunityCount = followUpOpportunityCount + overdueOpportunityCount;
+        const followUpsDueCount = followUpOpportunityIds.size;
+        const overdueOppsCount = overdueOpportunityIds.size;
+
+        const agendaBadgeCount = tasksDueCount + followUpsDueCount + overdueOppsCount;
 
         const nextReminders: ReminderState = {
           hasOverdueFollowUp: false,
           upcomingMeetingsCount: 0,
           sellerWithoutActivityToday: false,
-          activitiesBadgeCount,
-          agendaBadgeCount: activitiesBadgeCount + uniqueFollowUpAndOverdueOpportunityCount,
+          tasksDueCount,
+          followUpsDueCount,
+          overdueOppsCount,
+          activitiesBadgeCount: tasksDueCount,
+          agendaBadgeCount,
           breakdown: {
-            activitiesDue: activitiesBadgeCount,
-            followUpsDue: followUpOpportunityCount,
-            overdueOpportunities: overdueOpportunityCount,
-          },
+            activitiesDue: tasksDueCount,
+            followUpsDue: followUpsDueCount,
+            overdueOpportunities: overdueOppsCount
+          }
         };
 
         if (!signal?.aborted) {
@@ -252,7 +264,7 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
         }
       }
     },
-    [cacheKey, mode],
+    [cacheKey, mode]
   );
 
   useEffect(() => {
@@ -287,15 +299,15 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
     () => ({
       showOverdueFollowUpAlert: reminders.hasOverdueFollowUp,
       showUpcomingMeetingBanner: reminders.upcomingMeetingsCount > 0,
-      showNoActivitiesWarning: reminders.sellerWithoutActivityToday,
+      showNoActivitiesWarning: reminders.sellerWithoutActivityToday
     }),
-    [reminders],
+    [reminders]
   );
 
   return {
     reminders,
     loading,
     alerts,
-    refreshReminders: (signal?: AbortSignal) => checkReminders(signal, true),
+    refreshReminders: (signal?: AbortSignal) => checkReminders(signal, true)
   };
 }

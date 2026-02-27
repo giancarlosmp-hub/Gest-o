@@ -1,10 +1,11 @@
 import { LogOut, Menu } from "lucide-react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import BrandLogo from "../components/BrandLogo";
 import { canAccessRoute, type AppRoute } from "../lib/authorization";
 import { useReminders } from "../hooks/useReminders";
+import SidebarNavItem from "../components/sidebar/SidebarNavItem";
 
 type SidebarItem = {
   id: string;
@@ -32,9 +33,21 @@ export default function AppLayout() {
   const { reminders } = useReminders();
 
   const getSidebarBadgeCount = (item: SidebarItem) => {
-    if (item.id === "agenda") return reminders.agendaBadgeCount;
+    if (item.id === "home") return reminders.agendaBadgeCount;
     if (item.id === "atividades") return reminders.activitiesBadgeCount;
     return 0;
+  };
+
+  const getSidebarTooltipText = (item: SidebarItem) => {
+    if (item.id === "home" && reminders.agendaBadgeCount > 0) {
+      return `${reminders.tasksDueCount} tarefas • ${reminders.followUpsDueCount} follow-ups • ${reminders.overdueOppsCount} atrasadas`;
+    }
+
+    if (item.id === "atividades" && reminders.activitiesBadgeCount > 0) {
+      return `${reminders.activitiesBadgeCount} tarefas pendentes`;
+    }
+
+    return undefined;
   };
 
   const isActiveItem = (item: SidebarItem) => {
@@ -53,29 +66,19 @@ export default function AppLayout() {
         .map((item) => {
           const active = isActiveItem(item);
           const badgeCount = getSidebarBadgeCount(item);
-          const badgeClassName = active
-            ? "bg-brand-500 text-white"
-            : "bg-white text-brand-700";
+          const itemLabel = item.id === "home" ? "Agenda" : item.label;
+          const tooltipText = getSidebarTooltipText(item);
 
           return (
-            <Link
+            <SidebarNavItem
               key={item.id}
               to={item.path}
+              active={active}
+              label={itemLabel}
+              badgeCount={badgeCount}
+              tooltipText={tooltipText}
               onClick={() => setOpen(false)}
-              className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
-                active ? "bg-white text-brand-700" : "hover:bg-brand-600"
-              }`}
-            >
-              <span>{item.label}</span>
-              {badgeCount > 0 && (
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs leading-none ${badgeClassName}`}
-                  aria-label={`${badgeCount} ${badgeCount === 1 ? "pendência" : "pendências"}`}
-                >
-                  {badgeCount}
-                </span>
-              )}
-            </Link>
+            />
           );
         })}
     </aside>
