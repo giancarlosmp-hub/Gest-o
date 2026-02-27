@@ -1,20 +1,44 @@
 import { Settings2, Target, Users } from "lucide-react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
-import UsersAdminPanel from "../components/settings/UsersAdminPanel";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import CrudSimplePage from "./CrudSimplePage";
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
+
+  // Mantém compatibilidade com as duas abordagens:
+  // - ?section=users (rota/redirect que já usamos)
+  // - ?secao=usuarios#usuarios (tentativa anterior do main)
   const [searchParams] = useSearchParams();
+  const location = useLocation();
+
+  const usersSectionRef = useRef<HTMLDivElement | null>(null);
+  const [showUsersSection, setShowUsersSection] = useState(false);
+
+  const section = (searchParams.get("section") || "").toLowerCase();
+  const secao = (searchParams.get("secao") || "").toLowerCase();
+  const shouldOpenUsersSection =
+    location.hash === "#usuarios" ||
+    section === "users" ||
+    section === "usuarios" ||
+    secao === "usuarios";
+
+  useEffect(() => {
+    if (!shouldOpenUsersSection) return;
+    setShowUsersSection(true);
+  }, [shouldOpenUsersSection]);
+
+  useEffect(() => {
+    if (!showUsersSection || !usersSectionRef.current) return;
+    usersSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [showUsersSection]);
 
   if (loading) return <div className="p-8">Carregando...</div>;
   if (!user) return <Navigate to="/login" replace />;
 
   const canAccess = user.role === "diretor" || user.role === "gerente";
   if (!canAccess) return <Navigate to="/dashboard" replace />;
-
-  const section = (searchParams.get("section") || "").toLowerCase();
-  const isUsersSection = section === "users" || section === "usuarios";
 
   return (
     <section className="space-y-6">
@@ -25,7 +49,7 @@ export default function SettingsPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Link
-          to="/configurações?section=users"
+          to="/configurações?section=users#usuarios"
           className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow"
         >
           <div className="flex items-center gap-3">
@@ -59,11 +83,43 @@ export default function SettingsPage() {
             Configurar KPIs
           </div>
         </Link>
+
+        {/* Card “Usuários” embutido na página (sem depender de componente externo) */}
+        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
+              <Users size={20} />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900">Usuários</h3>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">
+            Cadastre, edite e organize os acessos dos usuários que atuam na operação comercial.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowUsersSection(true)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
+          >
+            <Settings2 size={16} />
+            Gerenciar usuários
+          </button>
+        </div>
       </div>
 
-      {isUsersSection ? (
-        <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-          <UsersAdminPanel />
+      {showUsersSection ? (
+        <div ref={usersSectionRef} id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+          <CrudSimplePage
+            endpoint="/users"
+            title="Usuários"
+            fields={[
+              { key: "name", label: "Nome" },
+              { key: "email", label: "Email" },
+              { key: "role", label: "Papel" },
+              { key: "region", label: "Região" },
+              { key: "password", label: "Senha" }
+            ]}
+            readOnly={user.role !== "diretor"}
+          />
         </div>
       ) : null}
     </section>
