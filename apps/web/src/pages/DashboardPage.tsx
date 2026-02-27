@@ -798,17 +798,17 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className={cardClass}>
+        <div className={`${cardClass} flex min-h-[260px] flex-col p-5`}>
           <h3 className="mb-3 font-semibold text-slate-800">Performance da equipe</h3>
-          <div className="overflow-x-auto">
+          <div className="flex flex-1 items-center overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
-                  <th className="py-2 pr-3">Ranking</th>
-                  <th className="py-2 pr-3">Vendedor</th>
-                  <th className="py-2 pr-3">Vendas</th>
-                  <th className="py-2 pr-3">Faturamento</th>
-                  <th className="py-2 pr-3">Realizado</th>
+                  <th className="py-2.5 pr-3">Ranking</th>
+                  <th className="py-2.5 pr-3">Vendedor</th>
+                  <th className="py-2.5 pr-3">Vendas</th>
+                  <th className="py-2.5 pr-3">Faturamento</th>
+                  <th className="py-2.5 pr-3">Realizado</th>
                 </tr>
               </thead>
               <tbody>
@@ -816,11 +816,11 @@ export default function DashboardPage() {
                   const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "";
                   return (
                     <tr key={row.sellerId} className="border-b border-slate-100">
-                      <td className="py-2 pr-3">{medal || `#${index + 1}`}</td>
-                      <td className="py-2 pr-3 font-medium text-slate-800">{row.seller}</td>
-                      <td className="py-2 pr-3 text-slate-700">{formatNumberBR(row.sales)}</td>
-                      <td className="py-2 pr-3 text-slate-700">{formatCurrencyBRL(row.revenue)}</td>
-                      <td className="py-2 pr-3 text-slate-700">{formatPercentBR(row.realizedPercent)}</td>
+                      <td className="py-2.5 pr-3">{medal || `#${index + 1}`}</td>
+                      <td className="py-2.5 pr-3 font-medium text-slate-800">{row.seller}</td>
+                      <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.sales)}</td>
+                      <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.revenue)}</td>
+                      <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.realizedPercent)}</td>
                     </tr>
                   );
                 })}
