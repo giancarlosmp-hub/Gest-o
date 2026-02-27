@@ -11,6 +11,8 @@ import {
   PointElement,
   Tooltip,
   type ChartOptions,
+  type ChartType,
+  type Plugin,
 } from "chart.js";
 import type {
   DashboardPortfolio,
@@ -85,6 +87,46 @@ const dashboardStatusColors = {
 
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
+
+type DoughnutCenterTextOptions = {
+  label: string;
+  value: string;
+};
+
+declare module "chart.js" {
+  interface PluginOptionsByType<TType extends ChartType> {
+    doughnutCenterText?: DoughnutCenterTextOptions;
+  }
+}
+
+const doughnutCenterTextPlugin: Plugin<"doughnut"> = {
+  id: "doughnutCenterText",
+  afterDraw: (chart, _, options) => {
+    const centerText = options as DoughnutCenterTextOptions | undefined;
+    if (!centerText?.label || !centerText?.value) return;
+
+    const meta = chart.getDatasetMeta(0);
+    const firstArc = meta?.data?.[0];
+    if (!firstArc) return;
+
+    const { x, y, innerRadius } = firstArc as unknown as { x: number; y: number; innerRadius: number };
+    const labelFontSize = Math.max(Math.round(innerRadius * 0.2), 11);
+    const valueFontSize = Math.max(Math.round(innerRadius * 0.32), 14);
+
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#64748b";
+    ctx.font = `500 ${labelFontSize}px Inter, system-ui, sans-serif`;
+    ctx.fillText(centerText.label, x, y - valueFontSize * 0.5);
+
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `700 ${valueFontSize}px Inter, system-ui, sans-serif`;
+    ctx.fillText(centerText.value, x, y + valueFontSize * 0.55);
+    ctx.restore();
+  },
+};
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
 
@@ -319,6 +361,96 @@ export default function DashboardPage() {
       },
     }),
     []
+  );
+
+  const walletData = useMemo(
+    () => [
+      portfolio?.walletStatus.active ?? 0,
+      portfolio?.walletStatus.inactiveRecent ?? 0,
+      portfolio?.walletStatus.inactiveOld ?? 0,
+    ],
+    [portfolio?.walletStatus.active, portfolio?.walletStatus.inactiveRecent, portfolio?.walletStatus.inactiveOld]
+  );
+
+  const walletTotal = useMemo(() => walletData.reduce((acc, value) => acc + value, 0), [walletData]);
+
+  const walletSegments = useMemo(
+    () => [
+      { label: "Ativos", value: walletData[0], shortLabel: "A" },
+      { label: "Inativos 31–90", value: walletData[1], shortLabel: "B" },
+      { label: "Inativos >90", value: walletData[2], shortLabel: "C" },
+    ],
+    [walletData]
+  );
+
+  const abcData = useMemo(
+    () => [
+      portfolio?.abcCurve.A.percentRevenue ?? 0,
+      portfolio?.abcCurve.B.percentRevenue ?? 0,
+      portfolio?.abcCurve.C.percentRevenue ?? 0,
+    ],
+    [portfolio?.abcCurve.A.percentRevenue, portfolio?.abcCurve.B.percentRevenue, portfolio?.abcCurve.C.percentRevenue]
+  );
+
+  const abcTotal = useMemo(() => abcData.reduce((acc, value) => acc + value, 0), [abcData]);
+
+  const abcSegments = useMemo(
+    () => [
+      { label: "Classe A", value: abcData[0], shortLabel: "A" },
+      { label: "Classe B", value: abcData[1], shortLabel: "B" },
+      { label: "Classe C", value: abcData[2], shortLabel: "C" },
+    ],
+    [abcData]
+  );
+
+  const walletDoughnutOptions = useMemo<ChartOptions<"doughnut">>(
+    () => ({
+      ...doughnutOptions,
+      plugins: {
+        ...doughnutOptions.plugins,
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const value = Number(context.raw || 0);
+              const allValues = context.dataset.data.map((item) => Number(item || 0));
+              const total = allValues.reduce((acc, item) => acc + item, 0);
+              const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+              return `${context.label}: ${formatNumberBR(value)} (${percent}%)`;
+            },
+          },
+        },
+        doughnutCenterText: {
+          label: "Total",
+          value: `${formatNumberBR(walletTotal)} clientes`,
+        },
+      },
+    }),
+    [doughnutOptions, walletTotal]
+  );
+
+  const abcDoughnutOptions = useMemo<ChartOptions<"doughnut">>(
+    () => ({
+      ...doughnutOptions,
+      plugins: {
+        ...doughnutOptions.plugins,
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const value = Number(context.raw || 0);
+              const allValues = context.dataset.data.map((item) => Number(item || 0));
+              const total = allValues.reduce((acc, item) => acc + item, 0);
+              const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+              return `${context.label}: ${formatPercentBR(value)} (${percent}%)`;
+            },
+          },
+        },
+        doughnutCenterText: {
+          label: "Total",
+          value: formatPercentBR(abcTotal),
+        },
+      },
+    }),
+    [abcTotal, doughnutOptions]
   );
 
   const salesPace = useMemo(() => {
@@ -748,12 +880,13 @@ export default function DashboardPage() {
           <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
           <div className={doughnutContainerClass}>
             <Doughnut
-              options={doughnutOptions}
+              plugins={[doughnutCenterTextPlugin]}
+              options={walletDoughnutOptions}
               data={{
                 labels: ["Ativos", "Inativos recentes", "Inativos antigos"],
                 datasets: [
                   {
-                    data: [portfolio.walletStatus.active, portfolio.walletStatus.inactiveRecent, portfolio.walletStatus.inactiveOld],
+                    data: walletData,
                     backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
                     borderColor: palette.surface,
                     borderWidth: 2,
@@ -762,10 +895,15 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-            <div>Ativos: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.walletStatus.active)}</span></div>
-            <div>Inativos 31–90: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.walletStatus.inactiveRecent)}</span></div>
-            <div>Inativos &gt;90: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.walletStatus.inactiveOld)}</span></div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {walletSegments.map((segment) => {
+              const percent = walletTotal > 0 ? ((segment.value / walletTotal) * 100).toFixed(1) : "0.0";
+              return (
+                <div key={segment.label} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
+                  {segment.shortLabel} {percent}%
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -773,16 +911,13 @@ export default function DashboardPage() {
           <h3 className="mb-2 font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
           <div className={doughnutContainerClass}>
             <Doughnut
-              options={doughnutOptions}
+              plugins={[doughnutCenterTextPlugin]}
+              options={abcDoughnutOptions}
               data={{
                 labels: ["Classe A", "Classe B", "Classe C"],
                 datasets: [
                   {
-                    data: [
-                      portfolio.abcCurve.A.percentRevenue,
-                      portfolio.abcCurve.B.percentRevenue,
-                      portfolio.abcCurve.C.percentRevenue,
-                    ],
+                    data: abcData,
                     backgroundColor: [dashboardStatusColors.positive, dashboardStatusColors.attention, dashboardStatusColors.negative],
                     borderColor: palette.surface,
                     borderWidth: 2,
@@ -791,10 +926,15 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-            <div>A: {formatPercentBR(portfolio.abcCurve.A.percentRevenue)} ({formatNumberBR(portfolio.abcCurve.A.clients)} clientes)</div>
-            <div>B: {formatPercentBR(portfolio.abcCurve.B.percentRevenue)} ({formatNumberBR(portfolio.abcCurve.B.clients)} clientes)</div>
-            <div>C: {formatPercentBR(portfolio.abcCurve.C.percentRevenue)} ({formatNumberBR(portfolio.abcCurve.C.clients)} clientes)</div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {abcSegments.map((segment) => {
+              const percent = abcTotal > 0 ? ((segment.value / abcTotal) * 100).toFixed(1) : "0.0";
+              return (
+                <div key={segment.label} className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
+                  {segment.shortLabel} {percent}%
+                </div>
+              );
+            })}
           </div>
         </div>
 
