@@ -85,7 +85,7 @@ const dashboardStatusColors = {
   negative: "#dc2626",
 };
 
-const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+const cardClass = "dashboard-card-enter rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
 
 type DoughnutCenterTextOptions = {
@@ -354,6 +354,12 @@ export default function DashboardPage() {
       responsive: true,
       maintainAspectRatio: false,
       cutout: "65%",
+      animation: {
+        duration: 800,
+        easing: "easeOutCubic",
+        animateRotate: true,
+        animateScale: false,
+      },
       plugins: {
         legend: {
           position: "bottom",

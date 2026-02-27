@@ -19,6 +19,27 @@ body {
   @apply bg-[color:var(--bg-app)] text-[color:var(--text-main)] antialiased;
 }
 
+@keyframes dashboard-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dashboard-card-enter {
+  animation: dashboard-card-enter 300ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-card-enter {
+    animation: none;
+  }
+}
+
 input,
 select,
 textarea {
