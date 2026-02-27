@@ -20,7 +20,7 @@ const TYPE_LABEL: Record<AgendaEventType, string> = {
 const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
   reuniao_online: "bg-blue-100 text-blue-800 border-blue-200",
   reuniao_presencial: "bg-green-100 text-green-800 border-green-200",
-  roteiro_visita: "bg-green-100 text-green-800 border-green-200",
+  roteiro_visita: "bg-emerald-100 text-emerald-800 border-emerald-200",
   follow_up: "bg-amber-100 text-amber-800 border-amber-200"
 };
 
@@ -54,8 +54,105 @@ function formatDateTime(value: string) {
   return new Date(value).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 }
 
+function formatHour(value: string) {
+  return new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function isPast(event: AgendaEvent) {
   return event.status === "agendado" && new Date(event.endDateTime).getTime() < Date.now();
+}
+
+function getInitialEvents(): AgendaEvent[] {
+  const now = new Date();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  const inFiveDays = new Date(now);
+  inFiveDays.setDate(now.getDate() + 5);
+
+  return [
+    {
+      id: "event-1",
+      userId: "seller-1",
+      clientId: "client-1",
+      opportunityId: "opp-1",
+      title: "Kickoff técnico",
+      description: "Alinhar cronograma de implantação e responsáveis.",
+      type: "reuniao_online",
+      startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
+      endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
+      status: "agendado"
+    },
+    {
+      id: "event-2",
+      userId: "seller-2",
+      clientId: "client-2",
+      title: "Visita presencial - talhão 7",
+      description: "Avaliar necessidade de cobertura nitrogenada.",
+      type: "reuniao_presencial",
+      startDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 14, 0).toISOString(),
+      endDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 16, 0).toISOString(),
+      location: "Agro Serra - Campo A",
+      city: "Uberlândia",
+      status: "agendado"
+    },
+    {
+      id: "event-3",
+      userId: "seller-1",
+      clientId: "client-1",
+      opportunityId: "opp-2",
+      title: "Follow-up proposta",
+      description: "Validar ajustes comerciais e próximo passo.",
+      type: "follow_up",
+      startDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 0).toISOString(),
+      endDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 30).toISOString(),
+      status: "agendado"
+    },
+    {
+      id: "route-1",
+      userId: "seller-3",
+      clientId: "client-3",
+      title: "Parada 1 - Fazenda Horizonte",
+      description: "Conferir áreas demonstrativas e coletar feedback do gerente agrícola.",
+      observation: "Levar catálogo de soluções de irrigação.",
+      type: "roteiro_visita",
+      startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 0).toISOString(),
+      endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 45).toISOString(),
+      city: "Rio Verde",
+      location: "Grupo Horizonte - Unidade Sul",
+      mapsIntegration: { waypointOrder: 1 },
+      status: "agendado"
+    },
+    {
+      id: "route-2",
+      userId: "seller-3",
+      clientId: "client-2",
+      title: "Parada 2 - Agro Serra",
+      description: "Revisar plano de aplicação para próximo ciclo.",
+      observation: "Validar disponibilidade de maquinário para terça-feira.",
+      type: "roteiro_visita",
+      startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 15).toISOString(),
+      endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 0).toISOString(),
+      city: "Rio Verde",
+      location: "Agro Serra - Filial Centro",
+      mapsIntegration: { waypointOrder: 2 },
+      status: "agendado"
+    },
+    {
+      id: "route-3",
+      userId: "seller-3",
+      clientId: "client-1",
+      title: "Parada 3 - Santa Luz",
+      description: "Apresentar proposta final e próximos passos.",
+      observation: "Confirmar presença do decisor financeiro.",
+      type: "roteiro_visita",
+      startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0).toISOString(),
+      endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 40).toISOString(),
+      city: "Jataí",
+      location: "Fazenda Santa Luz - Sede",
+      mapsIntegration: { waypointOrder: 3 },
+      status: "agendado"
+    }
+  ];
 }
 
 export default function AgendaPage() {
@@ -66,6 +163,7 @@ export default function AgendaPage() {
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("hoje");
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
+  const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
 
   const sellers = useMemo<Seller[]>(() => {
     const all = [
@@ -94,66 +192,6 @@ export default function AgendaPage() {
     ],
     []
   );
-
-  const events = useMemo<AgendaEvent[]>(() => {
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(now.getDate() + 1);
-    const inFiveDays = new Date(now);
-    inFiveDays.setDate(now.getDate() + 5);
-
-    return [
-      {
-        id: "event-1",
-        userId: "seller-1",
-        clientId: "client-1",
-        opportunityId: "opp-1",
-        title: "Kickoff técnico",
-        description: "Alinhar cronograma de implantação e responsáveis.",
-        type: "reuniao_online",
-        startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
-        endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
-        status: "agendado"
-      },
-      {
-        id: "event-2",
-        userId: "seller-2",
-        clientId: "client-2",
-        title: "Visita presencial - talhão 7",
-        description: "Avaliar necessidade de cobertura nitrogenada.",
-        type: "reuniao_presencial",
-        startDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 14, 0).toISOString(),
-        endDateTime: new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 16, 0).toISOString(),
-        location: "Agro Serra - Campo A",
-        status: "agendado"
-      },
-      {
-        id: "event-3",
-        userId: "seller-1",
-        clientId: "client-1",
-        opportunityId: "opp-2",
-        title: "Follow-up proposta",
-        description: "Validar ajustes comerciais e próximo passo.",
-        type: "follow_up",
-        startDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 0).toISOString(),
-        endDateTime: new Date(inFiveDays.getFullYear(), inFiveDays.getMonth(), inFiveDays.getDate(), 11, 30).toISOString(),
-        status: "agendado"
-      },
-      {
-        id: "event-4",
-        userId: "seller-3",
-        clientId: "client-3",
-        opportunityId: "opp-3",
-        title: "Roteiro de visita mensal",
-        description: "Mapear evolução das áreas demonstrativas.",
-        type: "roteiro_visita",
-        startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 8, 0).toISOString(),
-        endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12, 0).toISOString(),
-        location: "Grupo Horizonte - Unidade Sul",
-        status: "agendado"
-      }
-    ];
-  }, []);
 
   const filteredEvents = useMemo(() => {
     const today = new Date();
@@ -203,6 +241,11 @@ export default function AgendaPage() {
   const clientById = useMemo(() => Object.fromEntries(clients.map((client) => [client.id, client.name])), [clients]);
   const opportunityById = useMemo(() => Object.fromEntries(opportunities.map((opportunity) => [opportunity.id, opportunity.title])), [opportunities]);
 
+  const markAsCompleted = (eventId: string) => {
+    setEvents((current) => current.map((event) => (event.id === eventId ? { ...event, status: "realizado" } : event)));
+    setSelectedEvent((current) => (current && current.id === eventId ? { ...current, status: "realizado" } : current));
+  };
+
   return (
     <section className="space-y-4">
       <header className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -215,6 +258,12 @@ export default function AgendaPage() {
           Nova agenda
         </button>
       </header>
+
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 shadow-sm">
+        <p className="font-semibold">Roteiro de visitas</p>
+        <p className="mt-1">Estrutura pronta para múltiplas paradas no dia, com ordenação por horário, campo de cidade e observação.</p>
+        <p className="mt-1 text-emerald-800">Base preparada para integração futura com Google Maps (waypoints por evento).</p>
+      </div>
 
       <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
         <div>
@@ -260,26 +309,50 @@ export default function AgendaPage() {
                 <div className="space-y-2">
                   {groupEvents.map((event) => {
                     const overdue = isPast(event);
+                    const isRouteVisit = event.type === "roteiro_visita";
                     return (
-                      <button
-                        key={event.id}
-                        type="button"
-                        onClick={() => setSelectedEvent(event)}
-                        className="flex w-full flex-col gap-2 rounded-lg border border-slate-200 p-3 text-left transition hover:border-brand-300 hover:bg-brand-50/40 md:flex-row md:items-center md:justify-between"
-                      >
-                        <div>
-                          <p className="font-medium text-slate-900">{event.title}</p>
-                          <p className="text-xs text-slate-500">
-                            {formatDateTime(event.startDateTime)} - {new Date(event.endDateTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
-                          </p>
-                        </div>
+                      <div key={event.id} className="relative">
+                        {isRouteVisit ? <div className="absolute bottom-0 left-[15px] top-0 w-px bg-emerald-200" /> : null}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEvent(event)}
+                          className={`relative z-10 flex w-full flex-col gap-2 rounded-lg border p-3 text-left transition hover:border-brand-300 hover:bg-brand-50/40 md:flex-row md:items-center md:justify-between ${
+                            isRouteVisit ? "border-emerald-200 pl-10" : "border-slate-200"
+                          }`}
+                        >
+                          {isRouteVisit ? <span className="absolute left-[8px] top-5 h-4 w-4 rounded-full border-2 border-emerald-600 bg-white" /> : null}
+                          <div>
+                            <p className="font-medium text-slate-900">{event.title}</p>
+                            <p className="text-xs text-slate-500">
+                              {formatDateTime(event.startDateTime)} - {formatHour(event.endDateTime)}
+                            </p>
+                            {isRouteVisit ? (
+                              <p className="mt-1 text-xs text-slate-600">
+                                Cidade: <span className="font-medium">{event.city || "Não informada"}</span> • Cliente: {event.clientId ? clientById[event.clientId] || "Não informado" : "Não informado"}
+                              </p>
+                            ) : null}
+                            {event.observation ? <p className="mt-1 text-xs text-slate-600">Obs.: {event.observation}</p> : null}
+                          </div>
 
-                        <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
-                          <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
-                          {overdue ? <span className="rounded-full border border-rose-200 bg-rose-100 px-2 py-1 text-rose-800">Vencido</span> : null}
-                          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">{sellerById[event.userId] || "Vendedor"}</span>
-                        </div>
-                      </button>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
+                            <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                            {overdue ? <span className="rounded-full border border-rose-200 bg-rose-100 px-2 py-1 text-rose-800">Vencido</span> : null}
+                            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">{sellerById[event.userId] || "Vendedor"}</span>
+                            {event.status === "realizado" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Realizado</span> : null}
+                          </div>
+                        </button>
+                        {isRouteVisit && event.status !== "realizado" ? (
+                          <div className="mt-2 pl-10">
+                            <button
+                              type="button"
+                              onClick={() => markAsCompleted(event.id)}
+                              className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                            >
+                              Marcar como realizado
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -319,9 +392,17 @@ export default function AgendaPage() {
                 <dt className="font-medium text-slate-500">Local</dt>
                 <dd>{selectedEvent.location || "Não informado"}</dd>
               </div>
+              <div>
+                <dt className="font-medium text-slate-500">Cidade</dt>
+                <dd>{selectedEvent.city || "Não informada"}</dd>
+              </div>
               <div className="md:col-span-2">
                 <dt className="font-medium text-slate-500">Descrição</dt>
                 <dd>{selectedEvent.description}</dd>
+              </div>
+              <div className="md:col-span-2">
+                <dt className="font-medium text-slate-500">Observação</dt>
+                <dd>{selectedEvent.observation || "—"}</dd>
               </div>
               <div>
                 <dt className="font-medium text-slate-500">Cliente</dt>
@@ -348,6 +429,18 @@ export default function AgendaPage() {
                 </dd>
               </div>
             </dl>
+
+            {selectedEvent.type === "roteiro_visita" && selectedEvent.status !== "realizado" ? (
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => markAsCompleted(selectedEvent.id)}
+                  className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                >
+                  Marcar como realizado
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

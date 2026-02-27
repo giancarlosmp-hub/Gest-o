@@ -9,9 +9,16 @@ export type AgendaEvent = {
   opportunityId?: string;
   title: string;
   description: string;
+  observation?: string;
   type: AgendaEventType;
   startDateTime: string;
   endDateTime: string;
   location?: string;
+  city?: string;
+  mapsIntegration?: {
+    placeId?: string;
+    waypointOrder?: number;
+    routeLegId?: string;
+  };
   status: AgendaEventStatus;
 };
