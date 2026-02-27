@@ -8,7 +8,13 @@ import { useAuth } from "../context/AuthContext";
 type CrudSimplePageProps = {
   endpoint: string;
   title: string;
-  fields: { key: string; label: string; type?: string }[];
+  fields: {
+    key: string;
+    label: string;
+    type?: string;
+    placeholder?: string;
+    options?: Array<{ value: string; label: string }>;
+  }[];
   readOnly?: boolean;
   detailsPath?: string;
   createInModal?: boolean;
@@ -322,17 +328,38 @@ export default function CrudSimplePage({
 
       {!readOnly && !createInModal && (
         <form onSubmit={submit} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
-          {fields.map((f) => (
-            <input
-              key={f.key}
-              required
-              className="rounded-lg border p-2"
-              type={f.type || "text"}
-              placeholder={f.label}
-              value={form[f.key] ?? ""}
-              onChange={(e) => setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) })}
-            />
-          ))}
+          {fields.map((f) => {
+            const fieldPlaceholder = f.placeholder ?? `Informe ${f.label.toLowerCase()}`;
+
+            if (f.type === "select") {
+              return (
+                <select
+                  key={f.key}
+                  required
+                  className="rounded-lg border p-2"
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                >
+                  <option value="">Selecione {f.label.toLowerCase()}</option>
+                  {(f.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              );
+            }
+
+            return (
+              <input
+                key={f.key}
+                required
+                className="rounded-lg border p-2"
+                type={f.type || "text"}
+                placeholder={fieldPlaceholder}
+                value={form[f.key] ?? ""}
+                onChange={(e) => setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) })}
+              />
+            );
+          })}
           <button disabled={saving} className="rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">{saving ? "Salvando..." : editing ? "Atualizar" : "Criar"}</button>
         </form>
       )}
@@ -571,18 +598,36 @@ export default function CrudSimplePage({
                   return (
                     <div key={f.key} className="space-y-1">
                       <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>{f.label}</label>
-                      <input
-                        id={`modal-${f.key}`}
-                        required={isRequired}
-                        className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                        type={f.type || "text"}
-                        placeholder={f.label}
-                        value={form[f.key] ?? ""}
-                        onChange={(e) => {
-                          setFormError(null);
-                          setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
-                        }}
-                      />
+                      {f.type === "select" ? (
+                        <select
+                          id={`modal-${f.key}`}
+                          required={isRequired}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                          value={form[f.key] ?? ""}
+                          onChange={(e) => {
+                            setFormError(null);
+                            setForm({ ...form, [f.key]: e.target.value });
+                          }}
+                        >
+                          <option value="">Selecione {f.label.toLowerCase()}</option>
+                          {(f.options ?? []).map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          id={`modal-${f.key}`}
+                          required={isRequired}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                          type={f.type || "text"}
+                          placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
+                          value={form[f.key] ?? ""}
+                          onChange={(e) => {
+                            setFormError(null);
+                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                          }}
+                        />
+                      )}
                     </div>
                   );
                 })}
