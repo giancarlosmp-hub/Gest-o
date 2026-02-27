@@ -152,6 +152,13 @@ const clampFiniteNonNegative = (value: number) => {
   return Math.max(value, 0);
 };
 
+const formatKpiValue = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "number" && !Number.isFinite(value)) return "—";
+  if (typeof value === "string" && value.trim() === "") return "—";
+  return String(value);
+};
+
 type RealizedTrendDirection = "up" | "down" | "flat";
 
 const getMonthDayFromLabel = (label: string): number | null => {
@@ -402,6 +409,44 @@ export default function DashboardPage() {
     ],
     [abcData]
   );
+
+  const walletQuickKpi = useMemo(() => {
+    const activeClients = portfolio?.walletStatus.active;
+    const totalClients = portfolio?.totalClients;
+    const activePercent =
+      typeof activeClients === "number" && typeof totalClients === "number" && totalClients > 0
+        ? (activeClients / totalClients) * 100
+        : null;
+
+    return {
+      primary: formatKpiValue(typeof activeClients === "number" ? formatNumberBR(activeClients) : null),
+      secondary: `Ativos • ${formatKpiValue(activePercent === null ? null : formatPercentBR(activePercent))}`,
+    };
+  }, [portfolio?.totalClients, portfolio?.walletStatus.active]);
+
+  const abcQuickKpi = useMemo(() => {
+    const classAClients = portfolio?.abcCurve.A.clients;
+    const totalClients = portfolio?.totalClients;
+    const classAPercent =
+      typeof classAClients === "number" && typeof totalClients === "number" && totalClients > 0
+        ? (classAClients / totalClients) * 100
+        : null;
+
+    return {
+      primary: formatKpiValue(typeof classAClients === "number" ? `${formatNumberBR(classAClients)} clientes` : null),
+      secondary: `Classe A • ${formatKpiValue(classAPercent === null ? null : formatPercentBR(classAPercent))}`,
+    };
+  }, [portfolio?.abcCurve.A.clients, portfolio?.totalClients]);
+
+  const teamQuickKpi = useMemo(() => {
+    const topSeller = summary?.performance[0];
+    return {
+      primary: formatKpiValue(topSeller?.seller),
+      secondary: `Faturamento • ${formatKpiValue(
+        typeof topSeller?.revenue === "number" ? formatCurrencyBRL(topSeller.revenue) : null
+      )}`,
+    };
+  }, [summary?.performance]);
 
   const walletDoughnutOptions = useMemo<ChartOptions<"doughnut">>(
     () => ({
@@ -876,7 +921,16 @@ export default function DashboardPage() {
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <div className={cardClass}>
-          <h3 className="mb-2 font-semibold text-slate-800">Carteira de clientes</h3>
+          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <h3 className="font-semibold text-slate-800">Carteira de clientes</h3>
+            <div className="sm:text-right">
+              <div className="flex items-center gap-2 sm:justify-end">
+                <span className="text-lg font-semibold text-slate-900">{walletQuickKpi.primary}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
+              </div>
+              <div className="text-xs text-slate-500">{walletQuickKpi.secondary}</div>
+            </div>
+          </div>
           <div className="mb-3 text-sm text-slate-600">Total de clientes: <span className="font-semibold text-slate-900">{formatNumberBR(portfolio.totalClients)}</span></div>
           <div className={doughnutContainerClass}>
             <Doughnut
@@ -908,7 +962,16 @@ export default function DashboardPage() {
         </div>
 
         <div className={cardClass}>
-          <h3 className="mb-2 font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
+          <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <h3 className="font-semibold text-slate-800">Curva ABC de clientes (últimos 90 dias)</h3>
+            <div className="sm:text-right">
+              <div className="flex items-center gap-2 sm:justify-end">
+                <span className="text-lg font-semibold text-slate-900">{abcQuickKpi.primary}</span>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-brand-700">%</span>
+              </div>
+              <div className="text-xs text-slate-500">{abcQuickKpi.secondary}</div>
+            </div>
+          </div>
           <div className={doughnutContainerClass}>
             <Doughnut
               plugins={[doughnutCenterTextPlugin]}
@@ -939,7 +1002,13 @@ export default function DashboardPage() {
         </div>
 
         <div className={`${cardClass} flex min-h-[260px] flex-col p-5`}>
-          <h3 className="mb-3 font-semibold text-slate-800">Performance da equipe</h3>
+          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+            <h3 className="font-semibold text-slate-800">Performance da equipe</h3>
+            <div className="sm:text-right">
+              <div className="text-lg font-semibold text-slate-900">{teamQuickKpi.primary}</div>
+              <div className="text-xs text-slate-500">{teamQuickKpi.secondary}</div>
+            </div>
+          </div>
           <div className="flex flex-1 items-center overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
