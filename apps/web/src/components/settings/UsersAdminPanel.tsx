@@ -13,11 +13,20 @@ export default function UsersAdminPanel() {
       endpoint="/users"
       title="Usuários"
       fields={[
-        { key: "name", label: "Nome" },
-        { key: "email", label: "Email" },
-        { key: "role", label: "Papel" },
-        { key: "region", label: "Região" },
-        { key: "password", label: "Senha" }
+        { key: "name", label: "Nome completo", placeholder: "Informe o nome completo" },
+        { key: "email", label: "E-mail corporativo", placeholder: "Informe o e-mail corporativo" },
+        {
+          key: "role",
+          label: "Perfil de acesso",
+          type: "select",
+          options: [
+            { value: "diretor", label: "Diretor" },
+            { value: "gerente", label: "Gerente" },
+            { value: "vendedor", label: "Vendedor" }
+          ]
+        },
+        { key: "region", label: "Região de atuação", placeholder: "Informe a região de atuação" },
+        { key: "password", label: "Senha de acesso", placeholder: "Defina uma senha de acesso" }
       ]}
       readOnly={user?.role !== "diretor"}
     />
