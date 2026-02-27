@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const RoleEnum = z.enum(["diretor", "gerente", "vendedor"]);
+const INVALID_ROLE_MESSAGE = "Papel inválido. Use diretor, gerente ou vendedor.";
+const roleValues = ["diretor", "gerente", "vendedor"] as const;
+
+export const RoleEnum = z.enum(roleValues);
+export const roleSchema = z
+  .string()
+  .refine((value): value is Role => roleValues.includes(value as Role), { message: INVALID_ROLE_MESSAGE });
 export type Role = z.infer<typeof RoleEnum>;
 
 export const OpportunityStageEnum = z.enum([
@@ -132,7 +138,15 @@ export const userActivationSchema = z.object({
 });
 
 export const userRoleUpdateSchema = z.object({
-  role: RoleEnum
+  role: roleSchema
+});
+
+export const userCreateSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(6),
+  role: roleSchema,
+  region: z.string().min(2).optional()
 });
 
 export const userResetPasswordSchema = z.object({
@@ -195,6 +209,7 @@ export type ObjectiveUpsertInput = z.infer<typeof objectiveUpsertSchema>;
 export type ActivityKpiUpsertInput = z.infer<typeof activityKpiUpsertSchema>;
 export type UserActivationInput = z.infer<typeof userActivationSchema>;
 export type UserRoleUpdateInput = z.infer<typeof userRoleUpdateSchema>;
+export type UserCreateInput = z.infer<typeof userCreateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;

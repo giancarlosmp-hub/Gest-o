@@ -14,6 +14,7 @@ import {
   objectiveUpsertSchema,
   opportunitySchema,
   userActivationSchema,
+  userCreateSchema,
   userResetPasswordSchema,
   userRoleUpdateSchema
 } from "@salesforce-pro/shared";
@@ -1329,7 +1330,7 @@ router.get("/users", authorize("diretor", "gerente"), async (_req, res) =>
   res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } }))
 );
 
-router.post("/users", authorize("diretor"), async (req, res) => {
+router.post("/users", authorize("diretor"), validateBody(userCreateSchema), async (req, res) => {
   const { name, email, password, role, region } = req.body;
   const bcrypt = await import("bcryptjs");
   const passwordHash = await bcrypt.default.hash(password, 10);
