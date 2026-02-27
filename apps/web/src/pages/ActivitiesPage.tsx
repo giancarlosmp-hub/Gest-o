@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
+import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
 
 type Client = { id: string; name: string };
 type Opportunity = { id: string; title: string; clientId: string };
@@ -198,10 +199,11 @@ export default function ActivitiesPage() {
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo</label>
             <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.type} onChange={(event) => setFilters((previous) => ({ ...previous, type: event.target.value }))}>
               <option value="">Todos</option>
-              <option value="ligacao">Ligação</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="visita">Visita</option>
-              <option value="reuniao">Reunião</option>
+              {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                <option key={activityType.value} value={activityType.value}>
+                  {activityType.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -277,7 +279,7 @@ export default function ActivitiesPage() {
             <tbody>
               {activities.map((item) => (
                 <tr key={item.id} className="border-t border-slate-100">
-                  <td className="p-2 capitalize">{item.type}</td>
+                  <td className="p-2">{toLabel(item.type)}</td>
                   <td className="p-2">{item.opportunity?.client?.name || "—"}</td>
                   <td className="p-2">{item.opportunity?.title || "—"}</td>
                   <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
@@ -318,10 +320,11 @@ export default function ActivitiesPage() {
                 <div>
                   <label className="text-sm">Tipo</label>
                   <select className="w-full rounded-lg border border-slate-300 p-2" value={form.type} onChange={(event) => setForm((previous) => ({ ...previous, type: event.target.value }))}>
-                    <option value="ligacao">Ligação</option>
-                    <option value="whatsapp">WhatsApp</option>
-                    <option value="visita">Visita</option>
-                    <option value="reuniao">Reunião</option>
+                    {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                      <option key={activityType.value} value={activityType.value}>
+                        {activityType.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>

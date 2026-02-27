@@ -26,6 +26,9 @@ enum ActivityType {
   whatsapp
   visita
   reuniao
+  envio_proposta
+  visita_tecnica
+  cliente_novo
 }
 
 enum EventType {

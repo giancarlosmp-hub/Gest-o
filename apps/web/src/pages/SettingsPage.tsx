@@ -30,7 +30,7 @@ export default function SettingsPage() {
             <h3 className="text-lg font-semibold text-slate-900">KPIs de Atividades</h3>
           </div>
           <p className="mt-3 text-sm text-slate-600">
-            Defina metas mensais por vendedor para ligações, mensagens, visitas e demais atividades do funil.
+            Defina metas mensais por vendedor para ligações, WhatsApp, reuniões, envio de proposta, visita técnica e cliente novo (prospecção).
           </p>
           <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-700">
             <Settings2 size={16} />

@@ -27,6 +27,7 @@ import {
 } from "../lib/formatters";
 import { useAuth } from "../context/AuthContext";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
+import { normalizeActivityType, toLabel } from "../constants/activityTypes";
 
 ChartJS.register(
   CategoryScale,
@@ -79,11 +80,6 @@ const palette = {
 const cardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
-
-const getTypeLabel = (type: string) =>
-  type
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
 
 const getBusinessDaysRemaining = (month: string) => {
   const [year, monthN] = month.split("-").map(Number);
@@ -375,11 +371,13 @@ export default function DashboardPage() {
     const realizedByDay = new Map<string, number>();
 
     for (const item of activityKpis) {
-      targetByType.set(item.type, (targetByType.get(item.type) ?? 0) + Number(item.targetValue || 0));
+      const normalizedType = normalizeActivityType(item.type);
+      targetByType.set(normalizedType, (targetByType.get(normalizedType) ?? 0) + Number(item.targetValue || 0));
     }
 
     for (const item of activities) {
-      realizedByType.set(item.type, (realizedByType.get(item.type) ?? 0) + 1);
+      const normalizedType = normalizeActivityType(item.type);
+      realizedByType.set(normalizedType, (realizedByType.get(normalizedType) ?? 0) + 1);
       const day = item.createdAt.slice(0, 10);
       realizedByDay.set(day, (realizedByDay.get(day) ?? 0) + 1);
     }
@@ -670,7 +668,7 @@ export default function DashboardPage() {
                 <tbody>
                   {activityPerformance.summaryByType.map((item) => (
                     <tr key={item.type} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-700">{getTypeLabel(item.type)}</td>
+                      <td className="px-3 py-2 text-slate-700">{toLabel(item.type)}</td>
                       <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.target)}</td>
                       <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.realized)}</td>
                       <td className="px-3 py-2 text-slate-700">{formatPercentBR(item.reachedPercent)}</td>
