@@ -921,11 +921,15 @@ router.delete("/opportunities/:id", async (req, res) => {
  */
 router.get("/activities", async (req, res) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
-  const type = typeof req.query.type === "string" ? req.query.type.trim() : "";
+  const typeQuery = typeof req.query.type === "string" ? req.query.type.trim() : "";
   const doneQuery = typeof req.query.done === "string" ? req.query.done.trim().toLowerCase() : "";
   const month = req.query.month as string | undefined;
   const clientId = typeof req.query.clientId === "string" ? req.query.clientId.trim() : "";
-  const sellerIdQuery = req.query.sellerId as string | undefined;
+  const sellerIdQuery = typeof req.query.sellerId === "string" ? req.query.sellerId.trim() : "";
+
+  if (typeQuery && !Object.values(ActivityType).includes(typeQuery as ActivityType)) {
+    return res.status(400).json({ message: "type inválido" });
+  }
 
   if (month && !/^\d{4}-\d{2}$/.test(month)) {
     return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
@@ -933,6 +937,10 @@ router.get("/activities", async (req, res) => {
 
   if (doneQuery && doneQuery !== "true" && doneQuery !== "false") {
     return res.status(400).json({ message: "done deve ser true ou false" });
+  }
+
+  if (sellerIdQuery && req.user!.role !== "gerente" && req.user!.role !== "diretor") {
+    return res.status(403).json({ message: "Sem permissão" });
   }
 
   const sellerFilter: Prisma.ActivityWhereInput =
@@ -955,7 +963,7 @@ router.get("/activities", async (req, res) => {
       ? { done: doneQuery === "true" }
       : {};
 
-  const typeFilter: Prisma.ActivityWhereInput = type ? { type: type as any } : {};
+  const typeFilter: Prisma.ActivityWhereInput = typeQuery ? { type: typeQuery as ActivityType } : {};
 
   const searchFilter: Prisma.ActivityWhereInput = q
     ? {
