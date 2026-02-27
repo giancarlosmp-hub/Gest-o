@@ -16,6 +16,7 @@ import { canAccessRoute } from "./lib/authorization";
 import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
+import AgendaPage from "./pages/AgendaPage";
 
 export default function App() {
   const { user } = useAuth();
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="clientes/:id" element={<ClientDetailsPage />} />
 
         <Route path="atividades" element={<ActivitiesPage />} />
+        <Route path="agenda" element={<AgendaPage />} />
 
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
