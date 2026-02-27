@@ -13,8 +13,9 @@ import RoleRoute from "./components/RoleRoute";
 import { useAuth } from "./context/AuthContext";
 import { canAccessRoute } from "./lib/authorization";
 import TeamPage from "./pages/TeamPage";
+import SettingsPage from "./pages/SettingsPage";
+import ActivityKpisPage from "./pages/ActivityKpisPage";
 
-const Placeholder = ({ title }: { title: string }) => <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm"><h2 className="text-2xl font-bold text-slate-900">{title}</h2><p className="text-slate-500">Em breve.</p></div>;
 
 export default function App() {
   const { user } = useAuth();
@@ -37,7 +38,8 @@ export default function App() {
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
         <Route path="usuários" element={canAccessRoute("usuarios", user?.role) ? <CrudSimplePage endpoint="/users" title="Usuários" fields={[{ key: "name", label: "Nome" }, { key: "email", label: "Email" }, { key: "role", label: "Papel" }, { key: "region", label: "Região" }, { key: "password", label: "Senha" }]} readOnly={user?.role !== "diretor"} /> : <Navigate to="/" replace />} />
-        <Route path="configurações" element={canAccessRoute("configuracoes", user?.role) ? <Placeholder title="Configurações" /> : <Navigate to="/" replace />} />
+        <Route path="configurações" element={canAccessRoute("configuracoes", user?.role) ? <SettingsPage /> : <Navigate to="/" replace />} />
+        <Route path="configurações/kpis-atividades" element={<RoleRoute route="configuracoes"><ActivityKpisPage /></RoleRoute>} />
       </Route>
     </Routes>
   );
