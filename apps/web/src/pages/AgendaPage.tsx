@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import type { AgendaEvent, AgendaEventType } from "../models/agenda";
 
@@ -9,6 +10,13 @@ type Opportunity = { id: string; title: string };
 
 type Visualizacao = "diaria" | "semanal";
 type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias";
+type CreateAgendaForm = {
+  title: string;
+  type: AgendaEventType;
+  startDateTime: string;
+  endDateTime: string;
+  sellerId: string;
+};
 
 const TYPE_LABEL: Record<AgendaEventType, string> = {
   reuniao_online: "Reunião online",
@@ -164,6 +172,14 @@ export default function AgendaPage() {
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
   const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateAgendaForm>({
+    title: "",
+    type: "reuniao_online",
+    startDateTime: "",
+    endDateTime: "",
+    sellerId: ""
+  });
 
   const sellers = useMemo<Seller[]>(() => {
     const all = [
@@ -246,6 +262,63 @@ export default function AgendaPage() {
     setSelectedEvent((current) => (current && current.id === eventId ? { ...current, status: "realizado" } : current));
   };
 
+  const refreshEvents = (newEvent?: AgendaEvent) => {
+    setEvents((current) => {
+      if (!newEvent) return [...current];
+      return [...current, newEvent].sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
+    });
+  };
+
+  const openCreate = () => {
+    setCreateForm({
+      title: "",
+      type: "reuniao_online",
+      startDateTime: "",
+      endDateTime: "",
+      sellerId: canFilterBySeller ? selectedSellerId : user?.id || ""
+    });
+    setIsCreateOpen(true);
+  };
+
+  const closeCreate = () => {
+    setIsCreateOpen(false);
+  };
+
+  const onCreateAgenda = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!createForm.title.trim() || !createForm.startDateTime || !createForm.endDateTime) {
+      toast.error("Preencha título, início e fim da agenda.");
+      return;
+    }
+
+    if (new Date(createForm.startDateTime).getTime() >= new Date(createForm.endDateTime).getTime()) {
+      toast.error("A data de fim deve ser maior que a data de início.");
+      return;
+    }
+
+    const ownerId = canFilterBySeller ? createForm.sellerId : user?.id;
+    if (!ownerId) {
+      toast.error("Selecione um vendedor para criar a agenda.");
+      return;
+    }
+
+    const createdEvent: AgendaEvent = {
+      id: `event-${Date.now()}`,
+      userId: ownerId,
+      title: createForm.title.trim(),
+      description: "Compromisso criado manualmente.",
+      type: createForm.type,
+      startDateTime: new Date(createForm.startDateTime).toISOString(),
+      endDateTime: new Date(createForm.endDateTime).toISOString(),
+      status: "agendado"
+    };
+
+    refreshEvents(createdEvent);
+    closeCreate();
+    toast.success("Agenda criada com sucesso.");
+  };
+
   return (
     <section className="space-y-4">
       <header className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
@@ -254,7 +327,12 @@ export default function AgendaPage() {
           <p className="text-sm text-slate-500">Planeje compromissos comerciais e acompanhe execuções da equipe.</p>
         </div>
 
-        <button type="button" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
+        <button
+          type="button"
+          onClick={openCreate}
+          aria-label="Abrir modal de criação de agenda"
+          className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800"
+        >
           Nova agenda
         </button>
       </header>
@@ -441,6 +519,105 @@ export default function AgendaPage() {
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {isCreateOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCreate}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Modal de criação de agenda"
+            className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-semibold text-slate-900">Nova agenda</h3>
+                <p className="text-sm text-slate-500">Informe os dados básicos para criar um compromisso.</p>
+              </div>
+              <button type="button" onClick={closeCreate} aria-label="Fechar modal de criação de agenda" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
+                ✕
+              </button>
+            </div>
+
+            <form className="space-y-3" onSubmit={onCreateAgenda}>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Título</label>
+                <input
+                  value={createForm.title}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, title: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  placeholder="Ex: Reunião de planejamento"
+                />
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
+                  <select
+                    value={createForm.type}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    {Object.entries(TYPE_LABEL).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {canFilterBySeller ? (
+                  <div>
+                    <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vendedor</label>
+                    <select
+                      value={createForm.sellerId}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, sellerId: event.target.value }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      <option value="">Selecione</option>
+                      {sellers.map((seller) => (
+                        <option key={seller.id} value={seller.id}>
+                          {seller.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
+                  <input
+                    type="datetime-local"
+                    value={createForm.startDateTime}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, startDateTime: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
+                  <input
+                    type="datetime-local"
+                    value={createForm.endDateTime}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, endDateTime: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeCreate} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                  Cancelar
+                </button>
+                <button type="submit" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
+                  Salvar agenda
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}
