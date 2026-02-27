@@ -1,16 +1,28 @@
 import { Settings2, Target, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import CrudSimplePage from "./CrudSimplePage";
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
+
+  // Mantém compatibilidade com as duas abordagens:
+  // - ?section=users (rota/redirect que já usamos)
+  // - ?secao=usuarios#usuarios (tentativa anterior do main)
+  const [searchParams] = useSearchParams();
   const location = useLocation();
+
   const usersSectionRef = useRef<HTMLDivElement | null>(null);
   const [showUsersSection, setShowUsersSection] = useState(false);
 
-  const shouldOpenUsersSection = location.hash === "#usuarios" || new URLSearchParams(location.search).get("secao") === "usuarios";
+  const section = (searchParams.get("section") || "").toLowerCase();
+  const secao = (searchParams.get("secao") || "").toLowerCase();
+  const shouldOpenUsersSection =
+    location.hash === "#usuarios" ||
+    section === "users" ||
+    section === "usuarios" ||
+    secao === "usuarios";
 
   useEffect(() => {
     if (!shouldOpenUsersSection) return;
@@ -37,6 +49,23 @@ export default function SettingsPage() {
 
       <div className="grid gap-4 md:grid-cols-2">
         <Link
+          to="/configurações?section=users#usuarios"
+          className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow"
+        >
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
+              <Users size={20} />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-900">Usuários</h3>
+          </div>
+          <p className="mt-3 text-sm text-slate-600">Gerencie cadastro, permissões e manutenção de contas da operação comercial.</p>
+          <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-700">
+            <Settings2 size={16} />
+            Gerenciar usuários
+          </div>
+        </Link>
+
+        <Link
           to="/configurações/kpis-atividades"
           className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow"
         >
@@ -55,6 +84,7 @@ export default function SettingsPage() {
           </div>
         </Link>
 
+        {/* Card “Usuários” embutido na página (sem depender de componente externo) */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
