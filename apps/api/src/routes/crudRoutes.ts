@@ -2,7 +2,21 @@ import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
-import { activityKpiUpsertSchema, activitySchema, clientContactSchema, clientSchema, companySchema, contactSchema, eventSchema, goalSchema, objectiveUpsertSchema, opportunitySchema, userActivationSchema, userResetPasswordSchema, userRoleUpdateSchema } from "@salesforce-pro/shared";
+import {
+  activityKpiUpsertSchema,
+  activitySchema,
+  clientContactSchema,
+  clientSchema,
+  companySchema,
+  contactSchema,
+  eventSchema,
+  goalSchema,
+  objectiveUpsertSchema,
+  opportunitySchema,
+  userActivationSchema,
+  userResetPasswordSchema,
+  userRoleUpdateSchema
+} from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { randomBytes } from "node:crypto";
@@ -82,7 +96,6 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   daysOverdue: getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart),
   weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
 });
-
 
 const parseObjectivePeriod = (monthQuery?: string, yearQuery?: string) => {
   const now = new Date();
@@ -178,7 +191,6 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
 
   return { [field]: direction };
 };
-
 
 const createEvent = async ({
   type = "comentario",
@@ -443,6 +455,7 @@ router.get("/clients", async (req, res) => {
     pageSize
   });
 });
+
 router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
     where: {
@@ -454,16 +467,19 @@ router.get("/clients/:id", async (req, res) => {
   if (!data) return res.status(404).json({ message: "Não encontrado" });
   res.json(data);
 });
+
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
-  const ownerSellerId = req.user!.role === "vendedor"
-    ? req.user!.id
-    : (req.user!.role === "gerente" || req.user!.role === "diretor")
-      ? resolveOwnerId(req, req.body.ownerSellerId)
-      : resolveOwnerId(req);
+  const ownerSellerId =
+    req.user!.role === "vendedor"
+      ? req.user!.id
+      : req.user!.role === "gerente" || req.user!.role === "diretor"
+        ? resolveOwnerId(req, req.body.ownerSellerId)
+        : resolveOwnerId(req);
 
   const data = await prisma.client.create({ data: { ...req.body, ownerSellerId } });
   res.status(201).json(data);
 });
+
 router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
@@ -471,6 +487,7 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
   const data = await prisma.client.update({ where: { id: req.params.id }, data: req.body });
   res.json(data);
 });
+
 router.delete("/clients/:id", async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
@@ -579,14 +596,16 @@ router.get("/companies", async (req, res) => {
     orderBy: { createdAt: "desc" }
   });
 
-  res.json(data.map((client) => ({
-    id: client.id,
-    name: client.name,
-    cnpj: client.cnpj,
-    segment: client.segment,
-    ownerSellerId: client.ownerSellerId,
-    createdAt: client.createdAt
-  })));
+  res.json(
+    data.map((client) => ({
+      id: client.id,
+      name: client.name,
+      cnpj: client.cnpj,
+      segment: client.segment,
+      ownerSellerId: client.ownerSellerId,
+      createdAt: client.createdAt
+    }))
+  );
 });
 
 router.post("/companies", validateBody(companySchema), async (req, res) => {
@@ -625,10 +644,19 @@ router.delete("/companies/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/contacts", async (req, res) => res.json(await prisma.contact.findMany({ where: sellerWhere(req), include: { client: true }, orderBy: { createdAt: "desc" } })));
-router.post("/contacts", validateBody(contactSchema), async (req, res) => res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } })));
-router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => res.json(await prisma.contact.update({ where: { id: req.params.id }, data: req.body })));
-router.delete("/contacts/:id", async (req, res) => { await prisma.contact.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+router.get("/contacts", async (req, res) =>
+  res.json(await prisma.contact.findMany({ where: sellerWhere(req), include: { client: true }, orderBy: { createdAt: "desc" } }))
+);
+router.post("/contacts", validateBody(contactSchema), async (req, res) =>
+  res.status(201).json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }))
+);
+router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) =>
+  res.json(await prisma.contact.update({ where: { id: req.params.id }, data: req.body }))
+);
+router.delete("/contacts/:id", async (req, res) => {
+  await prisma.contact.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
 
 router.get("/opportunities", async (req, res) => {
   const stage = getStageFilter(req.query.stage as string | undefined);
@@ -817,6 +845,7 @@ router.post("/opportunities", validateBody(opportunitySchema), async (req, res) 
 
   return res.status(201).json(data);
 });
+
 router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
 
@@ -877,22 +906,63 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 
   return res.json(data);
 });
-router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({
-  where: sellerWhere(req),
-  include: {
-    ownerSeller: { select: { id: true, name: true } },
-    opportunity: {
-      select: {
-        id: true,
-        title: true,
-        client: { select: { id: true, name: true } }
+router.delete("/opportunities/:id", async (req, res) => {
+  await prisma.opportunity.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
+
+/**
+ * ✅ CONFLITO RESOLVIDO AQUI:
+ * - suporta filtro por month (YYYY-MM)
+ * - suporta filtro por sellerId para gerente/diretor
+ * - vendedor sempre vê só dele
+ * - inclui ownerSeller (nome) e opportunity + client (para UI ficar profissional)
+ */
+router.get("/activities", async (req, res) => {
+  const month = req.query.month as string | undefined;
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (month && !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerFilter: Prisma.ActivityWhereInput =
+    req.user!.role === "vendedor"
+      ? { ownerSellerId: req.user!.id }
+      : sellerIdQuery
+        ? { ownerSellerId: sellerIdQuery }
+        : sellerWhere(req);
+
+  const monthFilter: Prisma.ActivityWhereInput =
+    month
+      ? (() => {
+          const { start, end } = getMonthRangeFromKey(month);
+          return { createdAt: { gte: start, lte: end } };
+        })()
+      : {};
+
+  const activities = await prisma.activity.findMany({
+    where: {
+      ...sellerFilter,
+      ...monthFilter
+    },
+    include: {
+      ownerSeller: { select: { id: true, name: true } },
+      opportunity: {
+        select: {
+          id: true,
+          title: true,
+          client: { select: { id: true, name: true } }
+        }
       }
-    }
-  },
-  orderBy: { createdAt: "desc" }
-})));
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  return res.json(activities);
+});
+
 router.get("/activities/monthly-counts", async (req, res) => {
   const month = (req.query.month as string | undefined) || getMonthKey(new Date());
   const sellerIdQuery = req.query.sellerId as string | undefined;
@@ -922,16 +992,17 @@ router.get("/activities/monthly-counts", async (req, res) => {
     }))
   );
 });
+
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
   const relatedOpportunity = req.body.opportunityId
     ? await prisma.opportunity.findFirst({
-      where: {
-        id: req.body.opportunityId,
-        ...sellerWhere(req)
-      },
-      select: { id: true, clientId: true }
-    })
+        where: {
+          id: req.body.opportunityId,
+          ...sellerWhere(req)
+        },
+        select: { id: true, clientId: true }
+      })
     : null;
 
   if (req.body.opportunityId && !relatedOpportunity) {
@@ -975,15 +1046,24 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
     }
   });
 });
+
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
   const { clientId: _clientId, ...payload } = req.body;
-  return res.json(await prisma.activity.update({
-    where: { id: req.params.id },
-    data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
-  }));
+  return res.json(
+    await prisma.activity.update({
+      where: { id: req.params.id },
+      data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
+    })
+  );
 });
-router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
-router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+router.patch("/activities/:id/done", async (req, res) =>
+  res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } }))
+);
+router.delete("/activities/:id", async (req, res) => {
+  await prisma.activity.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
 
 router.get("/events", async (req, res) => {
   const opportunityId = req.query.opportunityId as string | undefined;
@@ -1016,6 +1096,7 @@ router.get("/events", async (req, res) => {
     nextCursor
   });
 });
+
 router.post("/events", validateBody(eventSchema), async (req, res) => {
   const opportunity = await prisma.opportunity.findFirst({
     where: {
@@ -1042,7 +1123,6 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
 
   return res.status(201).json(created);
 });
-
 
 router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
   const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);
@@ -1100,8 +1180,15 @@ router.put("/objectives/:userId", authorize("diretor", "gerente"), validateBody(
 
 router.get("/goals", async (req, res) => {
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : (req.query.sellerId as string | undefined);
-  res.json(await prisma.goal.findMany({ where: sellerId ? { sellerId } : {}, include: { seller: { select: { name: true, email: true } } }, orderBy: [{ month: "desc" }] }));
+  res.json(
+    await prisma.goal.findMany({
+      where: sellerId ? { sellerId } : {},
+      include: { seller: { select: { name: true, email: true } } },
+      orderBy: [{ month: "desc" }]
+    })
+  );
 });
+
 router.get("/activity-kpis", async (req, res) => {
   const month = req.query.month as string | undefined;
   const sellerIdQuery = req.query.sellerId as string | undefined;
@@ -1182,11 +1269,21 @@ router.put("/activity-kpis/:sellerId", authorize("diretor", "gerente"), validate
   return res.json(activityKpi);
 });
 
-router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema), async (req, res) => res.status(201).json(await prisma.goal.create({ data: req.body })));
-router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
-router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema), async (req, res) =>
+  res.status(201).json(await prisma.goal.create({ data: req.body }))
+);
+router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) =>
+  res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body }))
+);
+router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => {
+  await prisma.goal.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
 
-router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
+router.get("/users", authorize("diretor", "gerente"), async (_req, res) =>
+  res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } }))
+);
+
 router.post("/users", authorize("diretor"), async (req, res) => {
   const { name, email, password, role, region } = req.body;
   const bcrypt = await import("bcryptjs");
@@ -1194,7 +1291,11 @@ router.post("/users", authorize("diretor"), async (req, res) => {
   const user = await prisma.user.create({ data: { name, email, passwordHash, role, region } });
   res.status(201).json({ id: user.id, email: user.email });
 });
-router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
+
+router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) =>
+  res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } }))
+);
+
 router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivationSchema), async (req, res) => {
   if (req.user!.id === req.params.id && !req.body.isActive) {
     return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });
@@ -1208,6 +1309,7 @@ router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivat
 
   return res.json(updatedUser);
 });
+
 router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdateSchema), async (req, res) => {
   if (req.user!.id === req.params.id && req.body.role !== "diretor") {
     return res.status(400).json({ message: "Você não pode remover seu próprio papel de diretor" });
@@ -1221,6 +1323,7 @@ router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdat
 
   return res.json(updatedUser);
 });
+
 router.post("/users/:id/reset-password", authorize("diretor"), validateBody(userResetPasswordSchema), async (req, res) => {
   const temporaryPasswordLength = req.body.temporaryPasswordLength ?? 12;
   const temporaryPassword = randomBytes(temporaryPasswordLength).toString("base64url").slice(0, temporaryPasswordLength);
