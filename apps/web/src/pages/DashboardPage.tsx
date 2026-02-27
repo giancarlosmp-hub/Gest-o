@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Doughnut, Line } from "react-chartjs-2";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
+  type ActiveElement,
   ArcElement,
   CategoryScale,
   Chart as ChartJS,
+  type ChartEvent,
   Legend,
   LineElement,
   LinearScale,
@@ -247,6 +249,7 @@ const getElapsedSalesDays = (labels: string[], referenceMonth: string) => {
 export default function DashboardPage() {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [month] = useState(getCurrentMonth());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [series, setSeries] = useState<DashboardSalesSeries | null>(null);
@@ -376,6 +379,45 @@ export default function DashboardPage() {
     []
   );
 
+  const getDoughnutSegmentIndex = useCallback((activeElements: ActiveElement[]) => {
+    if (!activeElements.length) return null;
+    const [firstElement] = activeElements;
+    return typeof firstElement.index === "number" ? firstElement.index : null;
+  }, []);
+
+  const buildInteractiveDoughnutOptions = useCallback(
+    (
+      indexToPathMap: Record<number, string>,
+      optionsOverride: NonNullable<ChartOptions<"doughnut">["plugins"]>
+    ): ChartOptions<"doughnut"> => ({
+      ...doughnutOptions,
+      onClick: (_event: ChartEvent, activeElements: ActiveElement[]) => {
+        const segmentIndex = getDoughnutSegmentIndex(activeElements);
+        if (segmentIndex === null) return;
+
+        const targetPath = indexToPathMap[segmentIndex];
+        if (!targetPath) return;
+
+        navigate(targetPath);
+      },
+      onHover: (event: ChartEvent, activeElements: ActiveElement[]) => {
+        const nativeEvent = event.native;
+        const canvas =
+          nativeEvent && "target" in nativeEvent && nativeEvent.target instanceof HTMLCanvasElement
+            ? nativeEvent.target
+            : null;
+        if (!canvas) return;
+
+        canvas.style.cursor = activeElements.length > 0 ? "pointer" : "default";
+      },
+      plugins: {
+        ...doughnutOptions.plugins,
+        ...optionsOverride,
+      },
+    }),
+    [doughnutOptions, getDoughnutSegmentIndex, navigate]
+  );
+
   const walletData = useMemo(
     () => [
       portfolio?.walletStatus.active ?? 0,
@@ -455,53 +497,61 @@ export default function DashboardPage() {
   }, [summary?.performance]);
 
   const walletDoughnutOptions = useMemo<ChartOptions<"doughnut">>(
-    () => ({
-      ...doughnutOptions,
-      plugins: {
-        ...doughnutOptions.plugins,
-        tooltip: {
-          callbacks: {
-            label: (context) => {
-              const value = Number(context.raw || 0);
-              const allValues = context.dataset.data.map((item) => Number(item || 0));
-              const total = allValues.reduce((acc, item) => acc + item, 0);
-              const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
-              return `${context.label}: ${formatNumberBR(value)} (${percent}%)`;
+    () =>
+      buildInteractiveDoughnutOptions(
+        {
+          0: "/clientes?status=ativos",
+          1: "/clientes?status=inativos_recentes",
+          2: "/clientes?status=inativos_antigos",
+        },
+        {
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = Number(context.raw || 0);
+                const allValues = context.dataset.data.map((item) => Number(item || 0));
+                const total = allValues.reduce((acc, item) => acc + item, 0);
+                const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+                return `${context.label}: ${formatNumberBR(value)} (${percent}%)`;
+              },
             },
           },
-        },
-        doughnutCenterText: {
-          label: "Total",
-          value: `${formatNumberBR(walletTotal)} clientes`,
-        },
-      },
-    }),
-    [doughnutOptions, walletTotal]
+          doughnutCenterText: {
+            label: "Total",
+            value: `${formatNumberBR(walletTotal)} clientes`,
+          },
+        }
+      ),
+    [buildInteractiveDoughnutOptions, walletTotal]
   );
 
   const abcDoughnutOptions = useMemo<ChartOptions<"doughnut">>(
-    () => ({
-      ...doughnutOptions,
-      plugins: {
-        ...doughnutOptions.plugins,
-        tooltip: {
-          callbacks: {
-            label: (context) => {
-              const value = Number(context.raw || 0);
-              const allValues = context.dataset.data.map((item) => Number(item || 0));
-              const total = allValues.reduce((acc, item) => acc + item, 0);
-              const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
-              return `${context.label}: ${formatPercentBR(value)} (${percent}%)`;
+    () =>
+      buildInteractiveDoughnutOptions(
+        {
+          0: "/clientes?classe=A",
+          1: "/clientes?classe=B",
+          2: "/clientes?classe=C",
+        },
+        {
+          tooltip: {
+            callbacks: {
+              label: (context) => {
+                const value = Number(context.raw || 0);
+                const allValues = context.dataset.data.map((item) => Number(item || 0));
+                const total = allValues.reduce((acc, item) => acc + item, 0);
+                const percent = total > 0 ? ((value / total) * 100).toFixed(1) : "0.0";
+                return `${context.label}: ${formatPercentBR(value)} (${percent}%)`;
+              },
             },
           },
-        },
-        doughnutCenterText: {
-          label: "Total",
-          value: formatPercentBR(abcTotal),
-        },
-      },
-    }),
-    [abcTotal, doughnutOptions]
+          doughnutCenterText: {
+            label: "Total",
+            value: formatPercentBR(abcTotal),
+          },
+        }
+      ),
+    [abcTotal, buildInteractiveDoughnutOptions]
   );
 
   const salesPace = useMemo(() => {
@@ -950,6 +1000,7 @@ export default function DashboardPage() {
                     backgroundColor: donutSegmentColors,
                     borderColor: palette.surface,
                     borderWidth: 2,
+                    hoverOffset: 8,
                   },
                 ],
               }}
@@ -981,6 +1032,7 @@ export default function DashboardPage() {
                     backgroundColor: donutSegmentColors,
                     borderColor: palette.surface,
                     borderWidth: 2,
+                    hoverOffset: 8,
                   },
                 ],
               }}
