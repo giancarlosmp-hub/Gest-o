@@ -1,38 +1,57 @@
 import { Settings2, Target, Users } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useSearchParams } from "react-router-dom";
+import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import CrudSimplePage from "./CrudSimplePage";
+import ActivityKpisPage from "./ActivityKpisPage";
+
+type SettingsSection = "kpis" | "users";
+
+const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
+  {
+    id: "kpis",
+    label: "KPIs de Atividades",
+    description: "Defina metas mensais por vendedor para acompanhar produtividade e execução comercial.",
+    icon: Target
+  },
+  {
+    id: "users",
+    label: "Usuários",
+    description: "Gerencie cadastro, permissões e manutenção de contas da operação comercial.",
+    icon: Users
+  }
+];
+
+function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsSection {
+  const normalizedSection = (sectionParam || "").toLowerCase();
+  const normalizedHash = hash.toLowerCase();
+
+  if (normalizedSection === "users" || normalizedSection === "usuarios") return "users";
+  if (normalizedSection === "kpis" || normalizedSection === "kpis-atividades") return "kpis";
+
+  if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
+  if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
+
+  return "kpis";
+}
 
 export default function SettingsPage() {
   const { user, loading } = useAuth();
-
-  // Mantém compatibilidade com as duas abordagens:
-  // - ?section=users (rota/redirect que já usamos)
-  // - ?secao=usuarios#usuarios (tentativa anterior do main)
-  const [searchParams] = useSearchParams();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const usersSectionRef = useRef<HTMLDivElement | null>(null);
-  const [showUsersSection, setShowUsersSection] = useState(false);
+  const activeSection = useMemo(
+    () => getSectionFromUrl(searchParams.get("section"), location.hash),
+    [location.hash, searchParams]
+  );
 
-  const section = (searchParams.get("section") || "").toLowerCase();
-  const secao = (searchParams.get("secao") || "").toLowerCase();
-  const shouldOpenUsersSection =
-    location.hash === "#usuarios" ||
-    section === "users" ||
-    section === "usuarios" ||
-    secao === "usuarios";
-
-  useEffect(() => {
-    if (!shouldOpenUsersSection) return;
-    setShowUsersSection(true);
-  }, [shouldOpenUsersSection]);
-
-  useEffect(() => {
-    if (!showUsersSection || !usersSectionRef.current) return;
-    usersSectionRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [showUsersSection]);
+  const setSection = (section: SettingsSection) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("section", section);
+      return next;
+    });
+  };
 
   if (loading) return <div className="p-8">Carregando...</div>;
   if (!user) return <Navigate to="/login" replace />;
@@ -47,67 +66,44 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-500">Gerencie parâmetros estratégicos e regras da operação comercial.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Link
-          to="/configurações?section=users#usuarios"
-          className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow"
-        >
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
-              <Users size={20} />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">Usuários</h3>
-          </div>
-          <p className="mt-3 text-sm text-slate-600">Gerencie cadastro, permissões e manutenção de contas da operação comercial.</p>
-          <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-700">
-            <Settings2 size={16} />
-            Gerenciar usuários
-          </div>
-        </Link>
+      <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+        <nav className="grid gap-2 md:grid-cols-2" aria-label="Seções de configurações">
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isActive = activeSection === section.id;
 
-        <Link
-          to="/configurações/kpis-atividades"
-          className="group rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow"
-        >
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
-              <Target size={20} />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">KPIs de Atividades</h3>
-          </div>
-          <p className="mt-3 text-sm text-slate-600">
-            Defina metas mensais por vendedor para ligações, WhatsApp, reuniões, envio de proposta, visita técnica e cliente novo (prospecção).
-          </p>
-          <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-brand-700">
-            <Settings2 size={16} />
-            Configurar KPIs
-          </div>
-        </Link>
-
-        {/* Card “Usuários” embutido na página (sem depender de componente externo) */}
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-brand-50 p-2 text-brand-700">
-              <Users size={20} />
-            </div>
-            <h3 className="text-lg font-semibold text-slate-900">Usuários</h3>
-          </div>
-          <p className="mt-3 text-sm text-slate-600">
-            Cadastre, edite e organize os acessos dos usuários que atuam na operação comercial.
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowUsersSection(true)}
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-800"
-          >
-            <Settings2 size={16} />
-            Gerenciar usuários
-          </button>
-        </div>
+            return (
+              <button
+                key={section.id}
+                type="button"
+                onClick={() => setSection(section.id)}
+                className={`rounded-lg border p-4 text-left transition ${
+                  isActive
+                    ? "border-brand-300 bg-brand-50/70 shadow-sm"
+                    : "border-transparent hover:border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Icon size={18} className={isActive ? "text-brand-700" : "text-slate-500"} />
+                  <h3 className="text-sm font-semibold text-slate-900">{section.label}</h3>
+                </div>
+                <p className="mt-2 text-xs text-slate-600">{section.description}</p>
+                {isActive && (
+                  <span className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-brand-700">
+                    <Settings2 size={14} />
+                    Seção ativa
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
-      {showUsersSection ? (
-        <div ref={usersSectionRef} id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      {activeSection === "kpis" ? (
+        <ActivityKpisPage embedded />
+      ) : (
+        <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage
             endpoint="/users"
             title="Usuários"
@@ -130,7 +126,7 @@ export default function SettingsPage() {
             readOnly={user.role !== "diretor"}
           />
         </div>
-      ) : null}
+      )}
     </section>
   );
 }

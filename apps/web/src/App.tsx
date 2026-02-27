@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import OpportunityDetailsPage from "./pages/OpportunityDetailsPage";
 import ClientDetailsPage from "./pages/ClientDetailsPage";
 import LoginPage from "./pages/LoginPage";
@@ -14,11 +14,11 @@ import { useAuth } from "./context/AuthContext";
 import { canAccessRoute } from "./lib/authorization";
 import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
-import ActivityKpisPage from "./pages/ActivityKpisPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
 
 export default function App() {
   const { user } = useAuth();
+  const location = useLocation();
 
   // Mantém compatibilidade: /usuarios e /usuários redirecionam para Configurações (seção Usuários)
   const usersRedirectPath = "/configurações?section=users";
@@ -92,9 +92,9 @@ export default function App() {
         />
 
         <Route path="configurações" element={canAccessRoute("configuracoes", user?.role) ? <SettingsPage /> : <Navigate to="/" replace />} />
-        <Route path="configuracoes" element={<Navigate to="/configurações" replace />} />
+        <Route path="configuracoes" element={<Navigate to={`/configurações${location.search}${location.hash}`} replace />} />
 
-        <Route path="configurações/kpis-atividades" element={<RoleRoute route="configuracoes"><ActivityKpisPage /></RoleRoute>} />
+        <Route path="configurações/kpis-atividades" element={<Navigate to="/configurações?section=kpis" replace />} />
       </Route>
     </Routes>
   );

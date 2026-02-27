@@ -33,7 +33,11 @@ const createEmptyDraft = (): Record<ActivityTypeKey, number> => ({
   cliente_novo: 0
 });
 
-export default function ActivityKpisPage() {
+type ActivityKpisPageProps = {
+  embedded?: boolean;
+};
+
+export default function ActivityKpisPage({ embedded = false }: ActivityKpisPageProps) {
   const { user, loading } = useAuth();
   const [month, setMonth] = useState(getCurrentMonth);
   const [sellers, setSellers] = useState<Seller[]>([]);
@@ -135,8 +139,17 @@ export default function ActivityKpisPage() {
     <section className="space-y-5">
       <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-end md:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">Configurações • KPIs de Atividades</h2>
-          <p className="text-sm text-slate-500">Defina as metas mensais por vendedor em um painel único e editável.</p>
+          {embedded ? (
+            <>
+              <h3 className="text-xl font-semibold text-slate-900">KPIs de Atividades</h3>
+              <p className="text-sm text-slate-500">Defina as metas mensais por vendedor em um painel único e editável.</p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-2xl font-bold text-slate-900">Configurações • KPIs de Atividades</h2>
+              <p className="text-sm text-slate-500">Defina as metas mensais por vendedor em um painel único e editável.</p>
+            </>
+          )}
         </div>
         <label className="flex flex-col gap-1 text-sm font-medium text-slate-700">
           Mês de referência
