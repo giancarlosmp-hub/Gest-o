@@ -34,6 +34,7 @@ type ClientListItem = {
 };
 
 type ClientImportRow = {
+  sourceRowNumber: number;
   name: string;
   city?: string;
   state?: string;
@@ -46,6 +47,11 @@ type ClientImportRow = {
   ownerSellerId?: string;
 };
 
+type ClientImportParsedRow = ClientImportRow & {
+  potentialHaInvalid: boolean;
+  farmSizeHaInvalid: boolean;
+};
+
 type SheetJsLibrary = {
   read: (data: ArrayBuffer, options: { type: string }) => any;
   writeFile: (workbook: any, fileName: string) => void;
@@ -53,7 +59,7 @@ type SheetJsLibrary = {
     book_new: () => any;
     aoa_to_sheet: (data: Array<Array<string | number>>) => any;
     book_append_sheet: (workbook: any, worksheet: any, title: string) => void;
-    sheet_to_json: <T>(sheet: any, options: { header: number; blankrows: boolean }) => T[];
+    sheet_to_json: <T>(sheet: any, options?: Record<string, unknown>) => T[];
   };
 };
 
@@ -319,6 +325,52 @@ export default function CrudSimplePage({
 
   const normalizeHeader = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
+  const normalizeTextValue = (value: unknown) => String(value ?? "").trim();
+
+  const parseDecimalValue = (value: unknown): { parsedValue: number | undefined; isInvalid: boolean } => {
+    if (value === null || value === undefined) {
+      return { parsedValue: undefined, isInvalid: false };
+    }
+
+    if (typeof value === "number") {
+      return Number.isFinite(value)
+        ? { parsedValue: value, isInvalid: false }
+        : { parsedValue: undefined, isInvalid: true };
+    }
+
+    const normalized = String(value).trim();
+    if (!normalized) {
+      return { parsedValue: undefined, isInvalid: false };
+    }
+
+    const sanitized = normalized.replace(/\s/g, "");
+    const lastComma = sanitized.lastIndexOf(",");
+    const lastDot = sanitized.lastIndexOf(".");
+
+    let decimalSeparator = "";
+    if (lastComma >= 0 && lastDot >= 0) {
+      decimalSeparator = lastComma > lastDot ? "," : ".";
+    } else if (lastComma >= 0) {
+      decimalSeparator = ",";
+    } else if (lastDot >= 0) {
+      decimalSeparator = ".";
+    }
+
+    let numericText = sanitized;
+    if (decimalSeparator) {
+      const thousandsSeparator = decimalSeparator === "," ? /\./g : /,/g;
+      numericText = numericText.replace(thousandsSeparator, "");
+      if (decimalSeparator === ",") {
+        numericText = numericText.replace(/,/g, ".");
+      }
+    }
+
+    const parsedValue = Number(numericText);
+    return Number.isNaN(parsedValue)
+      ? { parsedValue: undefined, isInvalid: true }
+      : { parsedValue, isInvalid: false };
+  };
+
   const parseImportFile = async (file: File) => {
     const data = await file.arrayBuffer();
     const xlsx = await loadXlsxLibrary();
@@ -330,48 +382,63 @@ export default function CrudSimplePage({
     }
 
     const sheet = workbook.Sheets[firstSheetName];
-    const sheetRows = xlsx.utils.sheet_to_json<Array<string | number | null>>(sheet, { header: 1, blankrows: false });
+    const sheetRows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
 
-    if (sheetRows.length < 2) {
+    if (sheetRows.length < 1) {
       throw new Error("A planilha precisa conter cabeçalho e pelo menos uma linha de dados.");
     }
 
-    const headers = sheetRows[0].map(normalizeHeader);
-    const rows = sheetRows.slice(1);
-
-    const headerIndexes = clientImportColumns.reduce<Record<string, number>>((acc, columnName) => {
-      acc[columnName] = headers.indexOf(columnName);
+    const headerMap = Object.keys(sheetRows[0] ?? {}).reduce<Record<string, string>>((acc, headerName) => {
+      const normalizedHeader = normalizeHeader(headerName);
+      if (normalizedHeader) {
+        acc[normalizedHeader] = headerName;
+      }
       return acc;
     }, {});
 
-    const missingColumns = clientImportColumns.filter((columnName) => headerIndexes[columnName] < 0);
+    const missingColumns = clientImportColumns.filter((columnName) => !headerMap[columnName]);
     if (missingColumns.length > 0) {
       throw new Error(`Colunas ausentes: ${missingColumns.join(", ")}.`);
     }
 
-    const parsedRows: ClientImportRow[] = rows
-      .map((row) => ({
-        name: String(row[headerIndexes.name] ?? "").trim(),
-        city: String(row[headerIndexes.city] ?? "").trim(),
-        state: String(row[headerIndexes.state] ?? "").trim().toUpperCase(),
-        region: String(row[headerIndexes.region] ?? "").trim(),
-        potentialHa: row[headerIndexes.potentialHa] === "" || row[headerIndexes.potentialHa] === null
-          ? undefined
-          : Number(row[headerIndexes.potentialHa]),
-        farmSizeHa: row[headerIndexes.farmSizeHa] === "" || row[headerIndexes.farmSizeHa] === null
-          ? undefined
-          : Number(row[headerIndexes.farmSizeHa]),
-        clientType: String(row[headerIndexes.clientType] ?? "").trim().toUpperCase(),
-        cnpj: String(row[headerIndexes.cnpj] ?? "").trim(),
-        segment: String(row[headerIndexes.segment] ?? "").trim(),
-        ownerSellerId: String(row[headerIndexes.ownerSellerId] ?? "").trim()
-      }))
-      .filter((row) => Object.values(row).some((value) => value !== "" && value !== undefined));
+    const parsedRows: ClientImportParsedRow[] = sheetRows
+      .map((row, index) => {
+        const potentialHaResult = parseDecimalValue(row[headerMap.potentialHa]);
+        const farmSizeHaResult = parseDecimalValue(row[headerMap.farmSizeHa]);
+
+        return {
+          sourceRowNumber: index + 2,
+          name: normalizeTextValue(row[headerMap.name]),
+          city: normalizeTextValue(row[headerMap.city]),
+          state: normalizeTextValue(row[headerMap.state]).toUpperCase(),
+          region: normalizeTextValue(row[headerMap.region]),
+          potentialHa: potentialHaResult.parsedValue,
+          potentialHaInvalid: potentialHaResult.isInvalid,
+          farmSizeHa: farmSizeHaResult.parsedValue,
+          farmSizeHaInvalid: farmSizeHaResult.isInvalid,
+          clientType: normalizeTextValue(row[headerMap.clientType]).toUpperCase(),
+          cnpj: String(row[headerMap.cnpj] ?? "").trim(),
+          segment: normalizeTextValue(row[headerMap.segment]),
+          ownerSellerId: normalizeTextValue(row[headerMap.ownerSellerId])
+        };
+      })
+      .filter((row) => [
+        row.name,
+        row.city,
+        row.state,
+        row.region,
+        row.potentialHa,
+        row.farmSizeHa,
+        row.clientType,
+        row.cnpj,
+        row.segment,
+        row.ownerSellerId
+      ].some((value) => value !== "" && value !== undefined));
 
     return parsedRows;
   };
 
-  const validateImportRows = (rows: ClientImportRow[]) => {
+  const validateImportRows = (rows: ClientImportParsedRow[]) => {
     const errors: string[] = [];
 
     if (rows.length === 0) {
@@ -380,9 +447,9 @@ export default function CrudSimplePage({
     }
 
     rows.forEach((row, index) => {
-      const rowNumber = index + 2;
+      const rowNumber = row.sourceRowNumber || index + 2;
       if (!row.name) {
-        errors.push(`Linha ${rowNumber}: o campo name é obrigatório.`);
+        errors.push(`Linha ${rowNumber}: name ausente.`);
       }
 
       if (row.state && !/^[A-Z]{2}$/.test(row.state)) {
@@ -393,12 +460,20 @@ export default function CrudSimplePage({
         errors.push(`Linha ${rowNumber}: clientType deve ser PF ou PJ.`);
       }
 
-      if (row.potentialHa !== undefined && Number.isNaN(row.potentialHa)) {
+      if (row.potentialHaInvalid || (row.potentialHa !== undefined && Number.isNaN(row.potentialHa))) {
         errors.push(`Linha ${rowNumber}: potentialHa deve ser numérico.`);
       }
 
-      if (row.farmSizeHa !== undefined && Number.isNaN(row.farmSizeHa)) {
+      if (row.potentialHa !== undefined && row.potentialHa < 0) {
+        errors.push(`Linha ${rowNumber}: potentialHa deve ser maior ou igual a 0.`);
+      }
+
+      if (row.farmSizeHaInvalid || (row.farmSizeHa !== undefined && Number.isNaN(row.farmSizeHa))) {
         errors.push(`Linha ${rowNumber}: farmSizeHa deve ser numérico.`);
+      }
+
+      if (row.farmSizeHa !== undefined && row.farmSizeHa < 0) {
+        errors.push(`Linha ${rowNumber}: farmSizeHa deve ser maior ou igual a 0.`);
       }
     });
 
@@ -422,16 +497,17 @@ export default function CrudSimplePage({
     try {
       const rows = await parseImportFile(selectedFile);
       const errors = validateImportRows(rows);
+      const normalizedRows = rows.map(({ potentialHaInvalid: _potentialHaInvalid, farmSizeHaInvalid: _farmSizeHaInvalid, ...row }) => row);
 
-      setImportRows(rows);
-      setImportPreviewRows(rows.slice(0, 20));
+      setImportRows(normalizedRows);
+      setImportPreviewRows(normalizedRows.slice(0, 20));
       setImportValidationErrors(errors);
       setIsImportReady(errors.length === 0);
 
       if (errors.length > 0) {
         toast.error("Foram encontrados erros de validação na planilha.");
       } else {
-        toast.success(`${rows.length} linha(s) carregada(s) com sucesso.`);
+        toast.success(`${normalizedRows.length} linha(s) carregada(s) com sucesso.`);
       }
     } catch (err: any) {
       setImportRows([]);
@@ -449,9 +525,15 @@ export default function CrudSimplePage({
     try {
       for (const row of importRows) {
         const payload: Record<string, unknown> = {
-          ...row,
+          name: row.name,
+          city: row.city || undefined,
+          state: row.state || undefined,
+          region: row.region || undefined,
           potentialHa: row.potentialHa ?? undefined,
           farmSizeHa: row.farmSizeHa ?? undefined,
+          clientType: row.clientType || undefined,
+          cnpj: row.cnpj || undefined,
+          segment: row.segment || undefined,
           ownerSellerId: row.ownerSellerId || undefined
         };
 
@@ -844,6 +926,10 @@ export default function CrudSimplePage({
                   ))}
                 </div>
               ) : null}
+
+              <p className="text-sm text-slate-600">
+                Total de linhas carregadas: <span className="font-semibold text-slate-900">{importRows.length}</span> · Preview exibindo até 20 linhas.
+              </p>
 
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full min-w-[900px] text-sm">
