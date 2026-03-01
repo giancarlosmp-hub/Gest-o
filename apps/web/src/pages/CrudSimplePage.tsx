@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
@@ -33,6 +33,47 @@ type ClientListItem = {
   [key: string]: unknown;
 };
 
+type ClientImportRow = {
+  name: string;
+  city?: string;
+  state?: string;
+  region?: string;
+  potentialHa?: number;
+  farmSizeHa?: number;
+  clientType?: string;
+  cnpj?: string;
+  segment?: string;
+};
+
+type SheetJsLibrary = {
+  read: (data: ArrayBuffer, options: { type: string }) => any;
+  writeFile: (workbook: any, fileName: string) => void;
+  utils: {
+    book_new: () => any;
+    aoa_to_sheet: (data: Array<Array<string | number>>) => any;
+    book_append_sheet: (workbook: any, worksheet: any, title: string) => void;
+    sheet_to_json: <T>(sheet: any, options: { header: number; blankrows: boolean }) => T[];
+  };
+};
+
+declare global {
+  interface Window {
+    XLSX?: SheetJsLibrary;
+  }
+}
+
+const clientImportColumns = [
+  "name",
+  "city",
+  "state",
+  "region",
+  "potentialHa",
+  "farmSizeHa",
+  "clientType",
+  "cnpj",
+  "segment"
+] as const;
+
 export default function CrudSimplePage({
   endpoint,
   title,
@@ -63,6 +104,12 @@ export default function CrudSimplePage({
   const [totalPages, setTotalPages] = useState(1);
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
   const [openActionsMenuId, setOpenActionsMenuId] = useState<string | null>(null);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importRows, setImportRows] = useState<ClientImportRow[]>([]);
+  const [importPreviewRows, setImportPreviewRows] = useState<ClientImportRow[]>([]);
+  const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isImportReady, setIsImportReady] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -227,6 +274,205 @@ export default function CrudSimplePage({
     return null;
   };
 
+  const loadXlsxLibrary = async () => {
+    if (window.XLSX) return window.XLSX;
+
+    await new Promise<void>((resolve, reject) => {
+      const existingScript = document.querySelector("script[data-sheetjs='true']") as HTMLScriptElement | null;
+      if (existingScript) {
+        existingScript.addEventListener("load", () => resolve(), { once: true });
+        existingScript.addEventListener("error", () => reject(new Error("Não foi possível carregar a biblioteca Excel.")), { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+      script.async = true;
+      script.dataset.sheetjs = "true";
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Não foi possível carregar a biblioteca Excel."));
+      document.head.appendChild(script);
+    });
+
+    if (!window.XLSX) {
+      throw new Error("Biblioteca Excel indisponível.");
+    }
+
+    return window.XLSX;
+  };
+
+  const downloadImportTemplate = async () => {
+    const xlsx = await loadXlsxLibrary();
+    const worksheetData: Array<Array<string | number>> = [
+      [...clientImportColumns],
+      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho"],
+      ["João da Silva", "Luís Eduardo Magalhães", "BA", "Nordeste", 350, 420, "PF", "123.456.789-00", "Algodão"]
+    ];
+
+    const workbook = xlsx.utils.book_new();
+    const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, "Clientes");
+    xlsx.writeFile(workbook, "modelo-importacao-clientes.xlsx");
+    toast.success("Modelo de importação baixado com sucesso.");
+  };
+
+  const normalizeHeader = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
+  const parseImportFile = async (file: File) => {
+    const xlsx = await loadXlsxLibrary();
+    const data = await file.arrayBuffer();
+    const workbook = xlsx.read(data, { type: "array" });
+    const firstSheetName = workbook.SheetNames[0];
+
+    if (!firstSheetName) {
+      throw new Error("A planilha não possui abas válidas.");
+    }
+
+    const sheet = workbook.Sheets[firstSheetName];
+    const sheetRows = xlsx.utils.sheet_to_json<Array<string | number | null>>(sheet, { header: 1, blankrows: false });
+
+    if (sheetRows.length < 2) {
+      throw new Error("A planilha precisa conter cabeçalho e pelo menos uma linha de dados.");
+    }
+
+    const headers = sheetRows[0].map(normalizeHeader);
+    const rows = sheetRows.slice(1);
+
+    const headerIndexes = clientImportColumns.reduce<Record<string, number>>((acc, columnName) => {
+      acc[columnName] = headers.indexOf(columnName);
+      return acc;
+    }, {});
+
+    const missingColumns = clientImportColumns.filter((columnName) => headerIndexes[columnName] < 0);
+    if (missingColumns.length > 0) {
+      throw new Error(`Colunas ausentes: ${missingColumns.join(", ")}.`);
+    }
+
+    const parsedRows: ClientImportRow[] = rows
+      .map((row) => ({
+        name: String(row[headerIndexes.name] ?? "").trim(),
+        city: String(row[headerIndexes.city] ?? "").trim(),
+        state: String(row[headerIndexes.state] ?? "").trim().toUpperCase(),
+        region: String(row[headerIndexes.region] ?? "").trim(),
+        potentialHa: row[headerIndexes.potentialHa] === "" || row[headerIndexes.potentialHa] === null
+          ? undefined
+          : Number(row[headerIndexes.potentialHa]),
+        farmSizeHa: row[headerIndexes.farmSizeHa] === "" || row[headerIndexes.farmSizeHa] === null
+          ? undefined
+          : Number(row[headerIndexes.farmSizeHa]),
+        clientType: String(row[headerIndexes.clientType] ?? "").trim().toUpperCase(),
+        cnpj: String(row[headerIndexes.cnpj] ?? "").trim(),
+        segment: String(row[headerIndexes.segment] ?? "").trim()
+      }))
+      .filter((row) => Object.values(row).some((value) => value !== "" && value !== undefined));
+
+    return parsedRows;
+  };
+
+  const validateImportRows = (rows: ClientImportRow[]) => {
+    const errors: string[] = [];
+
+    if (rows.length === 0) {
+      errors.push("Nenhuma linha de dados válida foi encontrada.");
+      return errors;
+    }
+
+    rows.forEach((row, index) => {
+      const rowNumber = index + 2;
+      if (!row.name) {
+        errors.push(`Linha ${rowNumber}: o campo name é obrigatório.`);
+      }
+
+      if (row.state && !/^[A-Z]{2}$/.test(row.state)) {
+        errors.push(`Linha ${rowNumber}: state deve conter 2 letras.`);
+      }
+
+      if (row.clientType && !["PF", "PJ"].includes(row.clientType)) {
+        errors.push(`Linha ${rowNumber}: clientType deve ser PF ou PJ.`);
+      }
+
+      if (row.potentialHa !== undefined && Number.isNaN(row.potentialHa)) {
+        errors.push(`Linha ${rowNumber}: potentialHa deve ser numérico.`);
+      }
+
+      if (row.farmSizeHa !== undefined && Number.isNaN(row.farmSizeHa)) {
+        errors.push(`Linha ${rowNumber}: farmSizeHa deve ser numérico.`);
+      }
+    });
+
+    return errors;
+  };
+
+  const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    setImportRows([]);
+    setImportPreviewRows([]);
+    setImportValidationErrors([]);
+    setIsImportReady(false);
+
+    if (!selectedFile) return;
+
+    if (!selectedFile.name.toLowerCase().endsWith(".xlsx")) {
+      toast.error("Selecione um arquivo no formato .xlsx.");
+      return;
+    }
+
+    try {
+      const rows = await parseImportFile(selectedFile);
+      const errors = validateImportRows(rows);
+
+      setImportRows(rows);
+      setImportPreviewRows(rows.slice(0, 20));
+      setImportValidationErrors(errors);
+      setIsImportReady(errors.length === 0);
+
+      if (errors.length > 0) {
+        toast.error("Foram encontrados erros de validação na planilha.");
+      } else {
+        toast.success(`${rows.length} linha(s) carregada(s) com sucesso.`);
+      }
+    } catch (err: any) {
+      setImportRows([]);
+      setImportPreviewRows([]);
+      setImportValidationErrors([err.message || "Erro ao ler arquivo."]);
+      setIsImportReady(false);
+      toast.error(err.message || "Não foi possível processar o arquivo.");
+    }
+  };
+
+  const handleImportClients = async () => {
+    if (!isImportReady || importRows.length === 0) return;
+
+    setIsImporting(true);
+    try {
+      for (const row of importRows) {
+        const payload: Record<string, unknown> = {
+          ...row,
+          potentialHa: row.potentialHa ?? undefined,
+          farmSizeHa: row.farmSizeHa ?? undefined
+        };
+
+        if (isSeller && user?.id) {
+          payload.ownerSellerId = user.id;
+        }
+
+        await api.post("/clients", payload);
+      }
+
+      toast.success(`Importação concluída: ${importRows.length} cliente(s) importado(s).`);
+      setIsImportModalOpen(false);
+      setImportRows([]);
+      setImportPreviewRows([]);
+      setImportValidationErrors([]);
+      setIsImportReady(false);
+      await loadClients();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Erro ao importar clientes.");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const closeCreateModal = () => {
     setIsCreateModalOpen(false);
     setEditing(null);
@@ -365,7 +611,16 @@ export default function CrudSimplePage({
       )}
 
       {!readOnly && createInModal ? (
-        <div className="flex justify-end">
+        <div className="flex flex-wrap justify-end gap-2">
+          {isClientsPage ? (
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(true)}
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Importar
+            </button>
+          ) : null}
           <button type="button" onClick={openCreateModal} className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800">
             {createButtonLabel}
           </button>
@@ -544,6 +799,105 @@ export default function CrudSimplePage({
             >
               Próximo
             </button>
+          </div>
+        </div>
+      ) : null}
+
+      {isClientsPage && isImportModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="mb-4">
+              <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
+              <p className="text-sm text-slate-500">Use um arquivo .xlsx para validar os dados e importar em lote.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void downloadImportTemplate().catch((error: Error) => toast.error(error.message || "Não foi possível baixar o modelo."))}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Baixar modelo .xlsx
+                </button>
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  onChange={handleImportFileChange}
+                  className="block w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800"
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                <p className="font-medium text-slate-900">Colunas esperadas no arquivo:</p>
+                <p>name, city, state, region, potentialHa, farmSizeHa, clientType, cnpj, segment.</p>
+                <p className="mt-1 text-xs text-slate-600">Exemplo: Fazenda Santa Rita | Sorriso | MT | Centro-Oeste | 1200 | 2500 | PJ | 12.345.678/0001-99 | Soja e milho</p>
+              </div>
+
+              {importValidationErrors.length > 0 ? (
+                <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                  {importValidationErrors.map((validationError) => (
+                    <p key={validationError}>• {validationError}</p>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[900px] text-sm">
+                  <thead className="bg-slate-100 text-left text-slate-700">
+                    <tr>
+                      {clientImportColumns.map((column) => (
+                        <th key={column} className="px-3 py-2 font-medium">{column}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importPreviewRows.length > 0 ? importPreviewRows.map((row, index) => (
+                      <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
+                        <td className="px-3 py-2">{row.name || "—"}</td>
+                        <td className="px-3 py-2">{row.city || "—"}</td>
+                        <td className="px-3 py-2">{row.state || "—"}</td>
+                        <td className="px-3 py-2">{row.region || "—"}</td>
+                        <td className="px-3 py-2">{row.potentialHa ?? "—"}</td>
+                        <td className="px-3 py-2">{row.farmSizeHa ?? "—"}</td>
+                        <td className="px-3 py-2">{row.clientType || "—"}</td>
+                        <td className="px-3 py-2">{row.cnpj || "—"}</td>
+                        <td className="px-3 py-2">{row.segment || "—"}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={9} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportRows([]);
+                  setImportPreviewRows([]);
+                  setImportValidationErrors([]);
+                  setIsImportReady(false);
+                }}
+                className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
+                disabled={isImporting}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleImportClients}
+                className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={!isImportReady || isImporting}
+              >
+                {isImporting ? "Importando..." : "Validar e importar"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
