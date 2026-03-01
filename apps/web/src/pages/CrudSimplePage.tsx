@@ -43,6 +43,7 @@ type ClientImportRow = {
   clientType?: string;
   cnpj?: string;
   segment?: string;
+  ownerSellerId?: string;
 };
 
 type SheetJsLibrary = {
@@ -71,7 +72,8 @@ const clientImportColumns = [
   "farmSizeHa",
   "clientType",
   "cnpj",
-  "segment"
+  "segment",
+  "ownerSellerId"
 ] as const;
 
 export default function CrudSimplePage({
@@ -302,16 +304,15 @@ export default function CrudSimplePage({
   };
 
   const downloadImportTemplate = async () => {
-    const xlsx = await loadXlsxLibrary();
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportColumns],
-      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho"],
-      ["João da Silva", "Luís Eduardo Magalhães", "BA", "Nordeste", 350, 420, "PF", "123.456.789-00", "Algodão"]
+      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", ""]
     ];
 
+    const xlsx = await loadXlsxLibrary();
     const workbook = xlsx.utils.book_new();
     const worksheet = xlsx.utils.aoa_to_sheet(worksheetData);
-    xlsx.utils.book_append_sheet(workbook, worksheet, "Clientes");
+    xlsx.utils.book_append_sheet(workbook, worksheet, "clientes");
     xlsx.writeFile(workbook, "modelo-importacao-clientes.xlsx");
     toast.success("Modelo de importação baixado com sucesso.");
   };
@@ -319,8 +320,8 @@ export default function CrudSimplePage({
   const normalizeHeader = (value: unknown) => String(value ?? "").trim().toLowerCase();
 
   const parseImportFile = async (file: File) => {
-    const xlsx = await loadXlsxLibrary();
     const data = await file.arrayBuffer();
+    const xlsx = await loadXlsxLibrary();
     const workbook = xlsx.read(data, { type: "array" });
     const firstSheetName = workbook.SheetNames[0];
 
@@ -362,7 +363,8 @@ export default function CrudSimplePage({
           : Number(row[headerIndexes.farmSizeHa]),
         clientType: String(row[headerIndexes.clientType] ?? "").trim().toUpperCase(),
         cnpj: String(row[headerIndexes.cnpj] ?? "").trim(),
-        segment: String(row[headerIndexes.segment] ?? "").trim()
+        segment: String(row[headerIndexes.segment] ?? "").trim(),
+        ownerSellerId: String(row[headerIndexes.ownerSellerId] ?? "").trim()
       }))
       .filter((row) => Object.values(row).some((value) => value !== "" && value !== undefined));
 
@@ -449,11 +451,12 @@ export default function CrudSimplePage({
         const payload: Record<string, unknown> = {
           ...row,
           potentialHa: row.potentialHa ?? undefined,
-          farmSizeHa: row.farmSizeHa ?? undefined
+          farmSizeHa: row.farmSizeHa ?? undefined,
+          ownerSellerId: row.ownerSellerId || undefined
         };
 
         if (isSeller && user?.id) {
-          payload.ownerSellerId = user.id;
+          payload.ownerSellerId = row.ownerSellerId || user.id;
         }
 
         await api.post("/clients", payload);
@@ -830,8 +833,8 @@ export default function CrudSimplePage({
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                 <p className="font-medium text-slate-900">Colunas esperadas no arquivo:</p>
-                <p>name, city, state, region, potentialHa, farmSizeHa, clientType, cnpj, segment.</p>
-                <p className="mt-1 text-xs text-slate-600">Exemplo: Fazenda Santa Rita | Sorriso | MT | Centro-Oeste | 1200 | 2500 | PJ | 12.345.678/0001-99 | Soja e milho</p>
+                <p>name, city, state, region, potentialHa, farmSizeHa, clientType, cnpj, segment, ownerSellerId.</p>
+                <p className="mt-1 text-xs text-slate-600">clientType aceita apenas PJ ou PF (sem diferenciar maiúsculas/minúsculas). ownerSellerId é opcional.</p>
               </div>
 
               {importValidationErrors.length > 0 ? (
@@ -863,10 +866,11 @@ export default function CrudSimplePage({
                         <td className="px-3 py-2">{row.clientType || "—"}</td>
                         <td className="px-3 py-2">{row.cnpj || "—"}</td>
                         <td className="px-3 py-2">{row.segment || "—"}</td>
+                        <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={9} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
+                        <td colSpan={10} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
                       </tr>
                     )}
                   </tbody>
