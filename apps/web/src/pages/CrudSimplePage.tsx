@@ -52,6 +52,18 @@ type ClientImportParsedRow = ClientImportRow & {
   farmSizeHaInvalid: boolean;
 };
 
+type ClientImportErrorItem = {
+  rowNumber: number;
+  clientName: string;
+  message: string;
+};
+
+type ClientImportSummary = {
+  total: number;
+  imported: number;
+  errors: ClientImportErrorItem[];
+};
+
 type SheetJsLibrary = {
   read: (data: ArrayBuffer, options: { type: string }) => any;
   writeFile: (workbook: any, fileName: string) => void;
@@ -118,6 +130,8 @@ export default function CrudSimplePage({
   const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [isImportReady, setIsImportReady] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [importSummary, setImportSummary] = useState<ClientImportSummary | null>(null);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -486,6 +500,8 @@ export default function CrudSimplePage({
     setImportPreviewRows([]);
     setImportValidationErrors([]);
     setIsImportReady(false);
+    setImportSummary(null);
+    setImportProgress({ current: 0, total: 0 });
 
     if (!selectedFile) return;
 
@@ -518,38 +534,161 @@ export default function CrudSimplePage({
     }
   };
 
+  const resetImportState = () => {
+    setIsImportModalOpen(false);
+    setImportRows([]);
+    setImportPreviewRows([]);
+    setImportValidationErrors([]);
+    setIsImportReady(false);
+    setImportProgress({ current: 0, total: 0 });
+    setImportSummary(null);
+  };
+
+  const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
+    const payload: Record<string, unknown> = {
+      name: row.name,
+      city: row.city || undefined,
+      state: row.state || undefined,
+      region: row.region || undefined,
+      potentialHa: row.potentialHa ?? undefined,
+      farmSizeHa: row.farmSizeHa ?? undefined,
+      clientType: row.clientType || undefined,
+      cnpj: row.cnpj || undefined,
+      segment: row.segment || undefined,
+      ownerSellerId: row.ownerSellerId || undefined
+    };
+
+    if (isSeller && user?.id) {
+      payload.ownerSellerId = user.id;
+    } else if (!row.ownerSellerId) {
+      delete payload.ownerSellerId;
+    }
+
+    return payload;
+  };
+
+  const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
+    const imported = Number(responseData?.imported ?? responseData?.successCount ?? responseData?.created ?? responseData?.totalImported);
+    const errorsRaw = Array.isArray(responseData?.errors) ? responseData.errors : [];
+
+    if (!Number.isFinite(imported) && errorsRaw.length === 0) return null;
+
+    const errors = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
+      rowNumber: Number(errorItem?.rowNumber ?? errorItem?.row ?? index + 1) || index + 1,
+      clientName: String(errorItem?.clientName ?? errorItem?.name ?? ""),
+      message: String(errorItem?.message ?? "Erro ao importar linha.")
+    }));
+
+    return {
+      total,
+      imported: Number.isFinite(imported) ? imported : Math.max(0, total - errors.length),
+      errors
+    };
+  };
+
+  const runFallbackImport = async (payloads: Array<Record<string, unknown>>, rows: ClientImportRow[]) => {
+    const errors: ClientImportErrorItem[] = [];
+    const total = payloads.length;
+    const chunkSize = 10;
+    let imported = 0;
+
+    for (let index = 0; index < payloads.length; index += chunkSize) {
+      const chunkPayloads = payloads.slice(index, index + chunkSize);
+      const chunkRows = rows.slice(index, index + chunkSize);
+
+      const chunkResults = await Promise.all(chunkPayloads.map(async (payload, chunkIndex) => {
+        const row = chunkRows[chunkIndex];
+        try {
+          await api.post("/clients", payload);
+          return { ok: true as const, row };
+        } catch (error: any) {
+          return {
+            ok: false as const,
+            row,
+            message: error?.response?.data?.message || "Erro ao importar cliente."
+          };
+        }
+      }));
+
+      chunkResults.forEach((result) => {
+        if (result.ok) {
+          imported += 1;
+          return;
+        }
+
+        errors.push({
+          rowNumber: result.row.sourceRowNumber,
+          clientName: result.row.name,
+          message: result.message
+        });
+      });
+
+      setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
+    }
+
+    return { total, imported, errors } satisfies ClientImportSummary;
+  };
+
+  const downloadImportErrorsReport = () => {
+    if (!importSummary || importSummary.errors.length === 0) return;
+
+    const header = "linha;cliente;erro";
+    const rows = importSummary.errors.map((errorItem) => {
+      const safeName = errorItem.clientName.replace(/\n/g, " ").replace(/;/g, ",");
+      const safeMessage = errorItem.message.replace(/\n/g, " ").replace(/;/g, ",");
+      return `${errorItem.rowNumber};${safeName};${safeMessage}`;
+    });
+
+    const csvContent = [header, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `relatorio-erros-importacao-clientes-${Date.now()}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const handleImportClients = async () => {
     if (!isImportReady || importRows.length === 0) return;
 
     setIsImporting(true);
+    setImportSummary(null);
+    setImportProgress({ current: 0, total: importRows.length });
+
     try {
-      for (const row of importRows) {
-        const payload: Record<string, unknown> = {
-          name: row.name,
-          city: row.city || undefined,
-          state: row.state || undefined,
-          region: row.region || undefined,
-          potentialHa: row.potentialHa ?? undefined,
-          farmSizeHa: row.farmSizeHa ?? undefined,
-          clientType: row.clientType || undefined,
-          cnpj: row.cnpj || undefined,
-          segment: row.segment || undefined,
-          ownerSellerId: row.ownerSellerId || undefined
-        };
+      const payloads = importRows.map(buildImportPayload);
+      let summary: ClientImportSummary | null = null;
 
-        if (isSeller && user?.id) {
-          payload.ownerSellerId = row.ownerSellerId || user.id;
-        }
+      try {
+        const bulkResponse = await api.post("/clients/import", {
+          rows: payloads,
+          clients: payloads
+        });
+        summary = parseBulkImportSummary(bulkResponse.data, payloads.length);
+        setImportProgress({ current: payloads.length, total: payloads.length });
+      } catch (bulkError: any) {
+        const status = Number(bulkError?.response?.status);
+        const shouldFallback = [404, 405, 501].includes(status);
 
-        await api.post("/clients", payload);
+        if (!shouldFallback) throw bulkError;
+
+        summary = await runFallbackImport(payloads, importRows);
       }
 
-      toast.success(`Importação concluída: ${importRows.length} cliente(s) importado(s).`);
-      setIsImportModalOpen(false);
-      setImportRows([]);
-      setImportPreviewRows([]);
-      setImportValidationErrors([]);
-      setIsImportReady(false);
+      const resolvedSummary = summary ?? { total: payloads.length, imported: payloads.length, errors: [] };
+      setImportSummary(resolvedSummary);
+
+      if (resolvedSummary.errors.length === 0) {
+        toast.success(`Importação concluída: ${resolvedSummary.imported} cliente(s) importado(s).`);
+        resetImportState();
+        await loadClients();
+        return;
+      }
+
+      toast.warning(`Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.errors.length} com erro.`);
       await loadClients();
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Erro ao importar clientes.");
@@ -917,7 +1056,31 @@ export default function CrudSimplePage({
                 <p className="font-medium text-slate-900">Colunas esperadas no arquivo:</p>
                 <p>name, city, state, region, potentialHa, farmSizeHa, clientType, cnpj, segment, ownerSellerId.</p>
                 <p className="mt-1 text-xs text-slate-600">clientType aceita apenas PJ ou PF (sem diferenciar maiúsculas/minúsculas). ownerSellerId é opcional.</p>
+                <p className="mt-1 text-xs text-slate-600">Para vendedor, o ownerSellerId da planilha é ignorado e sempre será usado o usuário logado.</p>
               </div>
+
+              {isImporting ? (
+                <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
+                  Importando {importProgress.current}/{importProgress.total}...
+                </p>
+              ) : null}
+
+              {importSummary ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                  <p className="font-medium text-slate-900">Resumo da importação</p>
+                  <p>Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span></p>
+                  <p>Total com erro: <span className="font-semibold text-slate-900">{importSummary.errors.length}</span></p>
+                  {importSummary.errors.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={downloadImportErrorsReport}
+                      className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                    >
+                      Baixar relatório de erros
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
 
               {importValidationErrors.length > 0 ? (
                 <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
@@ -968,11 +1131,7 @@ export default function CrudSimplePage({
               <button
                 type="button"
                 onClick={() => {
-                  setIsImportModalOpen(false);
-                  setImportRows([]);
-                  setImportPreviewRows([]);
-                  setImportValidationErrors([]);
-                  setIsImportReady(false);
+                  resetImportState();
                 }}
                 className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
                 disabled={isImporting}
