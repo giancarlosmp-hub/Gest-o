@@ -73,20 +73,30 @@ type ClientImportSummary = {
   updated: number;
   ignored: number;
   errors: ClientImportErrorItem[];
+  resultados: ClientImportBackendResultRow[];
+};
+
+type ClientImportBackendResultRow = {
+  rowNumber: number;
+  status: "importado" | "atualizado" | "ignorado" | "erro";
+  motivo: string;
+  idCriado?: string;
+  idAtualizado?: string;
 };
 
 type ClientImportFinalReportRow = {
   rowNumber: number;
-  clientName: string;
   status: "Importado" | "Atualizado" | "Ignorado" | "Erro";
   reason: string;
-  clientId: string;
+  idCriado: string;
+  idAtualizado: string;
 };
 
 type ImportAnalysisRow = ClientImportRow & {
   status: ClientImportStatus;
   action?: ClientImportAction;
   existingClientId?: string;
+  duplicateReason?: string;
   errorMessage?: string;
 };
 
@@ -94,7 +104,6 @@ type ClientImportSimulationStatus = "valid" | "duplicate" | "error";
 
 type ClientImportSimulationItem = {
   row: number;
-  name: string;
   status: ClientImportSimulationStatus;
   reason: string | null;
 };
@@ -228,6 +237,7 @@ export default function CrudSimplePage({
   const [importSimulationSummary, setImportSimulationSummary] =
     useState<ClientImportSimulationSummary | null>(null);
   const [isSimulatingImport, setIsSimulatingImport] = useState(false);
+  const [previewPage, setPreviewPage] = useState(1);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -731,11 +741,14 @@ export default function CrudSimplePage({
     const response = await api.post("/clients/import/preview", { rows: payloads });
 
     const duplicatesByRow = new Map<number, string>();
+    const duplicateReasonByRow = new Map<number, string>();
     const errorsByRow = new Map<number, string>();
 
     (Array.isArray(response.data?.duplicados) ? response.data.duplicados : []).forEach((item: any) => {
       const rowNumber = Number(item?.rowNumber);
-      if (Number.isFinite(rowNumber)) duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
+      if (!Number.isFinite(rowNumber)) return;
+      duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
+      duplicateReasonByRow.set(rowNumber, String(item?.reason || "Cliente já existe."));
     });
 
     (Array.isArray(response.data?.erros) ? response.data.erros : []).forEach((item: any) => {
@@ -748,8 +761,14 @@ export default function CrudSimplePage({
       const errorMessage = errorsByRow.get(row.sourceRowNumber);
 
       if (errorMessage) return { ...row, status: "error" as const, errorMessage };
-      if (existingClientId) {
-        return { ...row, status: "duplicate" as const, existingClientId, action: "skip" as const };
+      if (duplicatesByRow.has(row.sourceRowNumber)) {
+        return {
+          ...row,
+          status: "duplicate" as const,
+          existingClientId,
+          duplicateReason: duplicateReasonByRow.get(row.sourceRowNumber),
+          action: "skip" as const
+        };
       }
       return { ...row, status: "new" as const, action: "import_anyway" as const };
     });
@@ -772,7 +791,7 @@ export default function CrudSimplePage({
 
     if (validation.errors.length > 0) {
       setImportPreviewRows(
-        mappedRows.slice(0, 20).map((row) => ({
+        mappedRows.map((row) => ({
           ...row,
           status: "error",
           errorMessage: "Corrija os erros de validação para continuar."
@@ -784,12 +803,13 @@ export default function CrudSimplePage({
 
     try {
       const analyzed = await analyzeImportRows(mappedRows);
-      setImportPreviewRows(analyzed.slice(0, 20));
+      setImportPreviewRows(analyzed);
+      setPreviewPage(1);
       toast.success(`${mappedRows.length} linha(s) carregada(s) com sucesso.`);
     } catch (err: any) {
       // Se o preview falhar, ainda permite importar (sem análise de duplicidade), mas avisa.
       setImportPreviewRows(
-        mappedRows.slice(0, 20).map((row) => ({
+        mappedRows.map((row) => ({
           ...row,
           status: "new",
           action: "import_anyway"
@@ -815,6 +835,7 @@ export default function CrudSimplePage({
     setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: 0 });
     setImportStep(1);
+    setPreviewPage(1);
 
     if (!selectedFile) return;
 
@@ -960,68 +981,26 @@ export default function CrudSimplePage({
     setImportSummary(null);
     setImportFinalReportRows([]);
     setImportSimulationSummary(null);
+    setPreviewPage(1);
   };
 
-  const buildImportFinalReportRows = (
-    rows: ClientImportRow[],
-    actionsByRow: Map<number, ImportAnalysisRow>,
-    summary: ClientImportSummary
-  ): ClientImportFinalReportRow[] => {
-    const rowsWithErrors = new Set(summary.errors.map((errorItem) => errorItem.rowNumber));
-
-    const errorRows = summary.errors.map((errorItem) => ({
-      rowNumber: errorItem.rowNumber,
-      clientName: errorItem.clientName,
-      status: "Erro" as const,
-      reason: errorItem.message,
-      clientId: ""
-    }));
-
-    const successRows = rows
-      .filter((row) => !rowsWithErrors.has(row.sourceRowNumber))
-      .map((row) => {
-        const analyzed = actionsByRow.get(row.sourceRowNumber);
-
-        if (analyzed?.action === "skip") {
-          return {
-            rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Ignorado" as const,
-            reason: "Ignorado pelo usuário",
-            clientId: ""
-          };
-        }
-
-        if (analyzed?.status === "duplicate" && analyzed.action === "update") {
-          return {
-            rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Atualizado" as const,
-            reason: "Cliente duplicado - atualizado",
-            clientId: analyzed.existingClientId || ""
-          };
-        }
-
-        if (analyzed?.status === "duplicate" && analyzed.action === "import_anyway") {
-          return {
-            rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Importado" as const,
-            reason: "Cliente duplicado - importado mesmo assim",
-            clientId: ""
-          };
-        }
-
-        return {
-          rowNumber: row.sourceRowNumber,
-          clientName: row.name,
-          status: "Importado" as const,
-          reason: "Novo cliente importado",
-          clientId: ""
-        };
-      });
-
-    return [...successRows, ...errorRows].sort((a, b) => a.rowNumber - b.rowNumber);
+  const buildImportFinalReportRows = (summary: ClientImportSummary): ClientImportFinalReportRow[] => {
+    return summary.resultados
+      .map((item) => ({
+        rowNumber: item.rowNumber,
+        status:
+          item.status === "importado"
+            ? ("Importado" as const)
+            : item.status === "atualizado"
+              ? ("Atualizado" as const)
+              : item.status === "ignorado"
+                ? ("Ignorado" as const)
+                : ("Erro" as const),
+        reason: item.motivo,
+        idCriado: item.idCriado || "",
+        idAtualizado: item.idAtualizado || ""
+      }))
+      .sort((a, b) => a.rowNumber - b.rowNumber);
   };
 
   const downloadImportFinalReport = () => {
@@ -1033,9 +1012,9 @@ export default function CrudSimplePage({
       return `"${escaped}"`;
     };
 
-    const header = ["Linha do Excel", "Nome", "Status", "Motivo", "ID criado ou atualizado"];
+    const header = ["linha", "status", "motivo", "idCriado", "idAtualizado"];
     const rows = importFinalReportRows.map((row) =>
-      [row.rowNumber, row.clientName, row.status, row.reason, row.clientId].map(escapeCsvCell).join(";")
+      [row.rowNumber, row.status, row.reason, row.idCriado, row.idAtualizado].map(escapeCsvCell).join(";")
     );
 
     const csvContent = [header.map(escapeCsvCell).join(";"), ...rows].join("\n");
@@ -1078,12 +1057,15 @@ export default function CrudSimplePage({
       message: String(errorItem?.message ?? "Erro ao importar linha.")
     }));
 
+    const resultados = (Array.isArray(responseData?.resultados) ? responseData.resultados : []) as ClientImportBackendResultRow[];
+
     return {
       total,
       imported: Number.isFinite(imported) ? imported : Math.max(0, total - errors.length),
       updated: Number.isFinite(updated) ? updated : 0,
       ignored: Number.isFinite(ignored) ? ignored : 0,
-      errors
+      errors,
+      resultados
     };
   };
 
@@ -1129,7 +1111,7 @@ export default function CrudSimplePage({
       setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
     }
 
-    return { total, imported, updated: 0, ignored: 0, errors } satisfies ClientImportSummary;
+    return { total, imported, updated: 0, ignored: 0, errors, resultados: [] } satisfies ClientImportSummary;
   };
 
   const handleSimulateImport = async () => {
@@ -1204,8 +1186,8 @@ export default function CrudSimplePage({
       }
 
       const resolvedSummary =
-        summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
-      const reportRows = buildImportFinalReportRows(importRows, actionByRow, resolvedSummary);
+        summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [], resultados: [] };
+      const reportRows = buildImportFinalReportRows(resolvedSummary);
 
       setImportSummary(resolvedSummary);
       setImportFinalReportRows(reportRows);
@@ -1378,6 +1360,10 @@ export default function CrudSimplePage({
     const validCount = Math.max(0, importRows.length - errorCount);
     return { validCount, errorCount, duplicateCount, totalAnalyzed: importRows.length };
   }, [importRows.length, importValidationErrors.length, importSimulationSummary, importPreviewRows]);
+
+  const previewPageSize = 20;
+  const totalPreviewPages = Math.max(1, Math.ceil(importPreviewRows.length / previewPageSize));
+  const paginatedPreviewRows = importPreviewRows.slice((previewPage - 1) * previewPageSize, previewPage * previewPageSize);
 
   return (
     <div className="space-y-4">
@@ -1783,8 +1769,7 @@ export default function CrudSimplePage({
 
                   <p className="text-sm text-slate-600">
                     Total analisado:{" "}
-                    <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span> · Preview exibindo até 20
-                    linhas.{" "}
+                    <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span> ·
                     <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>
                     {" · "}
                     <span className="font-semibold text-amber-700">{importCounters.duplicateCount} duplicados</span>
@@ -1798,16 +1783,14 @@ export default function CrudSimplePage({
                         <thead className="bg-slate-100 text-left text-slate-700">
                           <tr>
                             <th className="px-3 py-2 font-medium">Linha</th>
-                            <th className="px-3 py-2 font-medium">Nome</th>
                             <th className="px-3 py-2 font-medium">Status</th>
                             <th className="px-3 py-2 font-medium">Motivo</th>
                           </tr>
                         </thead>
                         <tbody>
                           {importSimulationSummary.items.map((item) => (
-                            <tr key={`${item.row}-${item.name}`} className="border-t border-slate-200">
+                            <tr key={`sim-${item.row}`} className="border-t border-slate-200">
                               <td className="px-3 py-2">{item.row}</td>
-                              <td className="px-3 py-2">{item.name || "—"}</td>
                               <td className="px-3 py-2">
                                 {item.status === "valid" ? "Válido" : item.status === "duplicate" ? "Duplicado" : "Com erro"}
                               </td>
@@ -1840,8 +1823,8 @@ export default function CrudSimplePage({
                       </thead>
                       <tbody>
                         {importPreviewRows.length > 0 ? (
-                          importPreviewRows.slice(0, 20).map((row, index) => (
-                            <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
+                          paginatedPreviewRows.map((row) => (
+                            <tr key={`preview-${row.sourceRowNumber}`} className="border-t border-slate-200">
                               <td className="px-3 py-2">{row.name || "—"}</td>
                               <td className="px-3 py-2">{row.city || "—"}</td>
                               <td className="px-3 py-2">{row.state || "—"}</td>
@@ -1854,22 +1837,26 @@ export default function CrudSimplePage({
                               <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
 
                               <td className="px-3 py-2">
-                                {row.status === "new" ? "Novo" : row.status === "duplicate" ? "Duplicado" : "Com erro"}
+                                {row.status === "new" ? "NOVO" : row.status === "duplicate" ? "DUPLICADO" : "ERRO"}
                               </td>
 
                               <td className="px-3 py-2">
                                 {row.status === "duplicate" ? (
-                                  <select
-                                    className="rounded border border-slate-300 px-2 py-1"
-                                    value={row.action || "skip"}
-                                    onChange={(event) =>
-                                      updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)
-                                    }
-                                  >
-                                    <option value="update">Atualizar existente</option>
-                                    <option value="skip">Pular</option>
-                                    <option value="import_anyway">Importar mesmo assim</option>
-                                  </select>
+                                  <div>
+                                    <select
+                                      className="rounded border border-slate-300 px-2 py-1"
+                                      value={row.action || "skip"}
+                                      onChange={(event) =>
+                                        updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)
+                                      }
+                                    >
+                                      <option value="skip">Pular</option>
+                                      <option value="update" disabled={!row.existingClientId}>Atualizar existente</option>
+                                      <option value="import_anyway" disabled>Importar duplicado (bloqueado por padrão)</option>
+                                    </select>
+                                    <p className="mt-1 text-xs text-slate-500">{row.duplicateReason || "Duplicado identificado na base."}</p>
+                                    <p className="text-xs text-amber-700">Importar duplicado fica desabilitado por padrão. Se houver índices únicos ativos, a criação será bloqueada.</p>
+                                  </div>
                                 ) : row.status === "error" ? (
                                   <span className="text-rose-700">{row.errorMessage || "Erro"}</span>
                                 ) : (
@@ -1881,13 +1868,22 @@ export default function CrudSimplePage({
                         ) : (
                           <tr>
                             <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
-                              Envie um arquivo para visualizar até 20 linhas de preview.
+                              Envie um arquivo para visualizar o preview das linhas.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+                  {importPreviewRows.length > previewPageSize ? (
+                    <div className="mt-2 flex items-center justify-between text-sm text-slate-600">
+                      <span>Página {previewPage} de {totalPreviewPages}</span>
+                      <div className="flex gap-2">
+                        <button type="button" className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50" disabled={previewPage <= 1} onClick={() => setPreviewPage((prev) => Math.max(1, prev - 1))}>Anterior</button>
+                        <button type="button" className="rounded border border-slate-300 px-2 py-1 disabled:opacity-50" disabled={previewPage >= totalPreviewPages} onClick={() => setPreviewPage((prev) => Math.min(totalPreviewPages, prev + 1))}>Próxima</button>
+                      </div>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -1902,7 +1898,7 @@ export default function CrudSimplePage({
                 Cancelar
               </button>
 
-              {importStep === 2 && canChooseOwnerSeller ? (
+              {importStep === 2 ? (
                 <>
                   <button
                     type="button"
