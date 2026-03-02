@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Doughnut, Line } from "react-chartjs-2";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   type ActiveElement,
   ArcElement,
@@ -248,7 +248,6 @@ const getElapsedSalesDays = (labels: string[], referenceMonth: string) => {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const location = useLocation();
   const navigate = useNavigate();
   const [month] = useState(getCurrentMonth());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -256,6 +255,8 @@ export default function DashboardPage() {
   const [portfolio, setPortfolio] = useState<DashboardPortfolio | null>(null);
   const [sellers, setSellers] = useState<SellerOption[]>([]);
   const [sellerId, setSellerId] = useState("");
+  const [debouncedSellerId, setDebouncedSellerId] = useState("");
+  const dashboardInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
   const [animatedRealizedPercent, setAnimatedRealizedPercent] = useState(0);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -267,26 +268,53 @@ export default function DashboardPage() {
     });
   }, [user?.role]);
 
-  const fetchDashboard = useCallback(() => {
-    const querySeller = sellerId ? `&sellerId=${sellerId}` : "";
-    return Promise.all([
-      api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`),
-      api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`),
-      api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`),
-      api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`),
-      api.get<Activity[]>(`/activities?month=${month}${querySeller}`),
-    ]).then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse]) => {
-      setSummary(summaryResponse.data);
-      setSeries(seriesResponse.data);
-      setPortfolio(portfolioResponse.data);
-      setActivityKpis(activityKpisResponse.data);
-      setActivities(activitiesResponse.data);
-    });
-  }, [month, sellerId]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSellerId(sellerId), 350);
+    return () => window.clearTimeout(timer);
+  }, [sellerId]);
+
+  const dashboardQueryKey = useMemo(
+    () => JSON.stringify({ month, sellerId: debouncedSellerId }),
+    [month, debouncedSellerId]
+  );
+
+  const fetchDashboard = useCallback((signal?: AbortSignal) => {
+    const querySeller = debouncedSellerId ? `&sellerId=${debouncedSellerId}` : "";
+
+    const existingRequest = dashboardInFlightRef.current.get(dashboardQueryKey);
+    if (existingRequest) return existingRequest;
+
+    const request = Promise.all([
+      api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`, { signal }),
+      api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`, { signal }),
+      api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`, { signal }),
+      api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
+      api.get<Activity[]>(`/activities?month=${month}${querySeller}`, { signal }),
+    ])
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse]) => {
+        if (signal?.aborted) return;
+        setSummary(summaryResponse.data);
+        setSeries(seriesResponse.data);
+        setPortfolio(portfolioResponse.data);
+        setActivityKpis(activityKpisResponse.data);
+        setActivities(activitiesResponse.data);
+      })
+      .finally(() => {
+        dashboardInFlightRef.current.delete(dashboardQueryKey);
+      });
+
+    dashboardInFlightRef.current.set(dashboardQueryKey, request);
+    return request;
+  }, [dashboardQueryKey, debouncedSellerId, month]);
 
   useEffect(() => {
-    fetchDashboard();
-  }, [fetchDashboard, location.key]);
+    const controller = new AbortController();
+    void fetchDashboard(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [fetchDashboard]);
 
   useEffect(() => {
     const onRefresh = () => {

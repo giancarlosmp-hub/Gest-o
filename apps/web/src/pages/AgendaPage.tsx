@@ -192,8 +192,21 @@ export default function AgendaPage() {
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
   const highlightedEventRef = useRef<HTMLDivElement | null>(null);
-  const lastFetchKeyRef = useRef("");
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
+
+  const eventsQuery = useMemo(() => {
+    const range = getRangeFromFilter(periodFilter, customFrom, customTo);
+    const params: Record<string, string> = {
+      from: range.from.toISOString().slice(0, 10),
+      to: range.to.toISOString().slice(0, 10)
+    };
+
+    if (canFilterBySeller && selectedSellerId) params.sellerId = selectedSellerId;
+
+    return params;
+  }, [periodFilter, customFrom, customTo, canFilterBySeller, selectedSellerId]);
+
+  const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -282,29 +295,14 @@ export default function AgendaPage() {
     const loadAgendaEvents = async () => {
       setIsEventsLoading(true);
       try {
-        const range = getRangeFromFilter(periodFilter, customFrom, customTo);
-        const params: Record<string, string> = {
-          from: range.from.toISOString().slice(0, 10),
-          to: range.to.toISOString().slice(0, 10)
-        };
-
-        if (canFilterBySeller && selectedSellerId) params.sellerId = selectedSellerId;
-
-        const fetchKey = JSON.stringify(params);
-        if (lastFetchKeyRef.current === fetchKey) {
-          setIsEventsLoading(false);
-          return;
-        }
-
-        lastFetchKeyRef.current = fetchKey;
-        let request = inFlightRef.current.get(fetchKey);
+        let request = inFlightRef.current.get(eventsQueryKey);
         if (!request) {
-          request = api.get("/agenda/events", { params, signal: abortController.signal });
-          inFlightRef.current.set(fetchKey, request);
+          request = api.get("/agenda/events", { params: eventsQuery, signal: abortController.signal });
+          inFlightRef.current.set(eventsQueryKey, request);
         }
 
         const response = await request;
-        inFlightRef.current.delete(fetchKey);
+        inFlightRef.current.delete(eventsQueryKey);
         if (!active) return;
 
         const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
@@ -356,7 +354,7 @@ export default function AgendaPage() {
       abortController.abort();
       window.clearTimeout(timer);
     };
-  }, [canFilterBySeller, selectedSellerId, periodFilter, customFrom, customTo]);
+  }, [eventsQuery, eventsQueryKey]);
 
   const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
 
@@ -369,29 +367,6 @@ export default function AgendaPage() {
 
     return byRole.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
-
-  useEffect(() => {
-    let active = true;
-    const loadClients = async () => {
-      if (activityClients.length) return;
-      try {
-        const response = await api.get("/clients");
-        if (!active) return;
-        const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
-        const mappedClients = Array.isArray(payload)
-          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: String(item.id), name: String(item.name) }))
-          : [];
-        setActivityClients(mappedClients);
-      } catch {
-        // silencioso: fluxo principal da agenda não depende desta lista
-      }
-    };
-
-    void loadClients();
-    return () => {
-      active = false;
-    };
-  }, [activityClients.length]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
