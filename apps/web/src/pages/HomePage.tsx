@@ -102,6 +102,20 @@ const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 export default function HomePage() {
   const { user } = useAuth();
+  const startRouteSearch = useMemo(() => {
+    const params = new URLSearchParams({
+      date: new Date().toISOString().slice(0, 10),
+      view: "hoje",
+      highlight: "next"
+    });
+
+    if (user?.id && user.role === "vendedor") {
+      params.set("sellerId", user.id);
+    }
+
+    return params.toString();
+  }, [user?.id, user?.role]);
+
   const { alerts, reminders, refreshReminders } = useReminders({ autoLoad: false });
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
@@ -447,9 +461,18 @@ export default function HomePage() {
       </section>
 
       <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
-        <div>
-          <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
-          <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
+            <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
+          </div>
+
+          <Link
+            to={`/agenda?${startRouteSearch}`}
+            className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+          >
+            Iniciar roteiro
+          </Link>
         </div>
 
         <div className="mt-3 flex items-center gap-3 text-brand-900">

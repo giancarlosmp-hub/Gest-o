@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
+import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
+import { getApiErrorMessage } from "../lib/apiError";
 import type { AgendaEvent, AgendaEventType } from "../models/agenda";
 
 type Seller = { id: string; name: string };
@@ -16,6 +18,22 @@ type CreateAgendaForm = {
   startDateTime: string;
   endDateTime: string;
   sellerId: string;
+};
+
+type ActivityForm = {
+  type: ActivityTypeKey;
+  notes: string;
+  dueDate: string;
+  clientId: string;
+};
+
+type ClientOption = { id: string; name: string };
+
+const initialActivityForm: ActivityForm = {
+  type: "reuniao",
+  notes: "",
+  dueDate: "",
+  clientId: ""
 };
 
 const TYPE_LABEL: Record<AgendaEventType, string> = {
@@ -90,6 +108,7 @@ function getInitialEvents(): AgendaEvent[] {
 
 export default function AgendaPage() {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const canFilterBySeller = user?.role === "gerente" || user?.role === "diretor";
 
   const [view, setView] = useState<Visualizacao>("diaria");
@@ -101,6 +120,17 @@ export default function AgendaPage() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
+  const [isActivitySubmitting, setIsActivitySubmitting] = useState(false);
+  const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
+  const [activityForm, setActivityForm] = useState<ActivityForm>(initialActivityForm);
+  const [activityEvent, setActivityEvent] = useState<AgendaEvent | null>(null);
+
+  const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+  const [isRescheduleSubmitting, setIsRescheduleSubmitting] = useState(false);
+  const [rescheduleEvent, setRescheduleEvent] = useState<AgendaEvent | null>(null);
+  const [rescheduleStartDateTime, setRescheduleStartDateTime] = useState("");
+  const [rescheduleEndDateTime, setRescheduleEndDateTime] = useState("");
 
   const [isSellersLoading, setIsSellersLoading] = useState(false);
   const [sellerOptions, setSellerOptions] = useState<Seller[]>([]);
@@ -112,6 +142,8 @@ export default function AgendaPage() {
     endDateTime: "",
     sellerId: ""
   });
+  const [highlightedEventId, setHighlightedEventId] = useState<string>("");
+  const highlightedEventRef = useRef<HTMLDivElement | null>(null);
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -153,6 +185,22 @@ export default function AgendaPage() {
       active = false;
     };
   }, [canFilterBySeller]);
+
+  useEffect(() => {
+    const shouldHighlightNext = searchParams.get("highlight") === "next";
+    if (!shouldHighlightNext) return;
+
+    const nextView = searchParams.get("view");
+    if (nextView === "hoje") {
+      setPeriodFilter("hoje");
+      setView("diaria");
+    }
+
+    const sellerId = searchParams.get("sellerId");
+    if (sellerId && canFilterBySeller) {
+      setSelectedSellerId(sellerId);
+    }
+  }, [canFilterBySeller, searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -237,6 +285,26 @@ export default function AgendaPage() {
     return byPeriod.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, periodFilter]);
 
+  useEffect(() => {
+    const shouldHighlightNext = searchParams.get("highlight") === "next";
+    if (!shouldHighlightNext || !filteredEvents.length) {
+      return;
+    }
+
+    const now = Date.now();
+    const nextEvent =
+      filteredEvents.find((event) => event.status !== "realizado" && new Date(event.endDateTime).getTime() >= now) ??
+      filteredEvents.find((event) => event.status !== "realizado");
+
+    setHighlightedEventId(nextEvent?.id || "");
+  }, [filteredEvents, searchParams]);
+
+  useEffect(() => {
+    if (!highlightedEventRef.current || !highlightedEventId) return;
+
+    highlightedEventRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [highlightedEventId]);
+
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
     try {
       await api.patch(`/agenda/${agendaEvent.id}`, { status: "realizado" });
@@ -260,6 +328,128 @@ export default function AgendaPage() {
       )
     );
     toast.success("Agenda marcada como realizada.");
+  };
+
+  const toDateTimeInputValue = (value: string) => {
+    const date = new Date(value);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  };
+
+  const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
+    if (agendaType === "roteiro_visita") return "visita_tecnica";
+    return "reuniao";
+  };
+
+  const openActivityModal = async (agendaEvent: AgendaEvent) => {
+    setActivityEvent(agendaEvent);
+    setActivityForm({
+      type: getSuggestedActivityType(agendaEvent.type),
+      notes: `Registro de Visita/Reunião — ${agendaEvent.title}`,
+      dueDate: toDateTimeInputValue(agendaEvent.endDateTime),
+      clientId: agendaEvent.clientId || ""
+    });
+    setIsActivityModalOpen(true);
+
+    if (activityClients.length) return;
+
+    try {
+      const response = await api.get("/clients");
+      const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
+      const mappedClients = Array.isArray(payload)
+        ? payload
+            .filter((item: any) => item?.id && item?.name)
+            .map((item: any) => ({ id: String(item.id), name: String(item.name) }))
+        : [];
+      setActivityClients(mappedClients);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar clientes para registrar atividade."));
+    }
+  };
+
+  const closeActivityModal = () => {
+    setIsActivityModalOpen(false);
+    setActivityEvent(null);
+    setActivityForm(initialActivityForm);
+  };
+
+  const onSubmitActivity = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!activityForm.clientId || !activityForm.notes.trim() || !activityForm.dueDate) {
+      toast.error("Selecione cliente, notas e vencimento para registrar a atividade.");
+      return;
+    }
+
+    setIsActivitySubmitting(true);
+    try {
+      await api.post("/activities", {
+        type: activityForm.type,
+        notes: activityForm.notes.trim(),
+        dueDate: new Date(activityForm.dueDate).toISOString(),
+        clientId: activityForm.clientId,
+        ownerSellerId: activityEvent?.userId || (user?.role === "vendedor" ? user.id : selectedSellerId || undefined)
+      });
+      toast.success("Atividade registrada com sucesso.");
+      closeActivityModal();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível registrar atividade."));
+    } finally {
+      setIsActivitySubmitting(false);
+    }
+  };
+
+  const openRescheduleModal = (agendaEvent: AgendaEvent) => {
+    setRescheduleEvent(agendaEvent);
+    setRescheduleStartDateTime(toDateTimeInputValue(agendaEvent.startDateTime));
+    setRescheduleEndDateTime(toDateTimeInputValue(agendaEvent.endDateTime));
+    setIsRescheduleOpen(true);
+  };
+
+  const closeRescheduleModal = () => {
+    setIsRescheduleOpen(false);
+    setRescheduleEvent(null);
+    setRescheduleStartDateTime("");
+    setRescheduleEndDateTime("");
+  };
+
+  const onSubmitReschedule = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!rescheduleEvent || !rescheduleStartDateTime || !rescheduleEndDateTime) {
+      toast.error("Preencha início e fim para reagendar.");
+      return;
+    }
+
+    if (new Date(rescheduleStartDateTime).getTime() >= new Date(rescheduleEndDateTime).getTime()) {
+      toast.error("A data de fim deve ser maior que a data de início.");
+      return;
+    }
+
+    setIsRescheduleSubmitting(true);
+    try {
+      await api.patch(`/agenda/${rescheduleEvent.id}`, {
+        startDateTime: new Date(rescheduleStartDateTime).toISOString(),
+        endDateTime: new Date(rescheduleEndDateTime).toISOString()
+      });
+
+      setEvents((current) =>
+        current.map((item) =>
+          item.id === rescheduleEvent.id
+            ? {
+                ...item,
+                startDateTime: new Date(rescheduleStartDateTime).toISOString(),
+                endDateTime: new Date(rescheduleEndDateTime).toISOString()
+              }
+            : item
+        )
+      );
+      toast.success("Compromisso reagendado com sucesso.");
+      closeRescheduleModal();
+    } catch {
+      toast.error("Não foi possível reagendar este compromisso.");
+    } finally {
+      setIsRescheduleSubmitting(false);
+    }
   };
 
   const refreshEvents = (newEvent: AgendaEvent) => {
@@ -416,8 +606,13 @@ export default function AgendaPage() {
           <div className="divide-y">
             {filteredEvents.map((event) => {
               const overdue = isPast(event);
+              const isHighlighted = event.id === highlightedEventId;
               return (
-                <div key={event.id} className="flex items-center justify-between gap-3 p-4">
+                <div
+                  key={event.id}
+                  ref={isHighlighted ? highlightedEventRef : null}
+                  className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
+                >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-900">{event.title}</p>
                     <p className="text-xs text-slate-500">{formatDateTime(event.startDateTime)}</p>
@@ -429,6 +624,9 @@ export default function AgendaPage() {
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
                       </span>
+                      {isHighlighted ? (
+                        <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
+                      ) : null}
                     </div>
                   </div>
 
@@ -441,6 +639,25 @@ export default function AgendaPage() {
                       >
                         Marcar realizado
                       </button>
+                    ) : null}
+
+                    {isHighlighted ? (
+                      <>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-brand-300 px-3 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50"
+                          onClick={() => void openActivityModal(event)}
+                        >
+                          Registrar atividade
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                          onClick={() => openRescheduleModal(event)}
+                        >
+                          Reagendar
+                        </button>
+                      </>
                     ) : null}
 
                     {event.clientId ? (
@@ -551,6 +768,140 @@ export default function AgendaPage() {
                   className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : "Salvar agenda"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isActivityModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeActivityModal}>
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Registrar atividade</h3>
+                <p className="text-sm text-slate-500">Cliente e tipo sugeridos a partir do próximo compromisso.</p>
+              </div>
+              <button type="button" onClick={closeActivityModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
+                ✕
+              </button>
+            </div>
+
+            <form className="space-y-3" onSubmit={onSubmitActivity}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
+                  <select
+                    value={activityForm.type}
+                    onChange={(event) => setActivityForm((current) => ({ ...current, type: event.target.value as ActivityTypeKey }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    {ACTIVITY_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vencimento</label>
+                  <input
+                    type="datetime-local"
+                    value={activityForm.dueDate}
+                    onChange={(event) => setActivityForm((current) => ({ ...current, dueDate: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
+                <select
+                  value={activityForm.clientId}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, clientId: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                >
+                  <option value="">Selecione...</option>
+                  {activityClients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Notas</label>
+                <textarea
+                  value={activityForm.notes}
+                  onChange={(event) => setActivityForm((current) => ({ ...current, notes: event.target.value }))}
+                  className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeActivityModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isActivitySubmitting}
+                  className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isActivitySubmitting ? "Salvando..." : "Salvar atividade"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isRescheduleOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeRescheduleModal}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Reagendar compromisso</h3>
+                <p className="text-sm text-slate-500">Ajuste início e fim do evento selecionado.</p>
+              </div>
+              <button type="button" onClick={closeRescheduleModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
+                ✕
+              </button>
+            </div>
+
+            <form className="space-y-3" onSubmit={onSubmitReschedule}>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
+                <input
+                  type="datetime-local"
+                  value={rescheduleStartDateTime}
+                  onChange={(event) => setRescheduleStartDateTime(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
+                <input
+                  type="datetime-local"
+                  value={rescheduleEndDateTime}
+                  onChange={(event) => setRescheduleEndDateTime(event.target.value)}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeRescheduleModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRescheduleSubmitting}
+                  className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isRescheduleSubmitting ? "Salvando..." : "Salvar reagendamento"}
                 </button>
               </div>
             </form>
