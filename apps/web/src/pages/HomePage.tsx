@@ -106,7 +106,8 @@ export default function HomePage() {
     const params = new URLSearchParams({
       date: new Date().toISOString().slice(0, 10),
       view: "hoje",
-      highlight: "next"
+      highlight: "next",
+      execute: "1"
     });
 
     if (user?.id && user.role === "vendedor") {

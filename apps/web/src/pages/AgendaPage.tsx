@@ -46,6 +46,29 @@ type FollowUpForm = {
   clientId: string;
 };
 
+
+type VisitResultForm = {
+  status: "realizada" | "nao_realizada";
+  reason: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro";
+  summary: string;
+  nextStep: "criar_followup" | "criar_oportunidade" | "reagendar";
+  nextStepDate: string;
+};
+
+const VISIT_REASON_LABEL: Record<VisitResultForm["reason"], string> = {
+  cliente_ausente: "Cliente ausente",
+  chuva: "Chuva",
+  estrada: "Estrada",
+  reagendar: "Reagendar",
+  outro: "Outro"
+};
+
+const NEXT_STEP_LABEL: Record<VisitResultForm["nextStep"], string> = {
+  criar_followup: "Criar follow-up",
+  criar_oportunidade: "Criar oportunidade",
+  reagendar: "Reagendar"
+};
+
 const initialActivityForm: ActivityForm = {
   type: "reuniao",
   notes: "",
@@ -151,7 +174,7 @@ function getInitialEvents(): AgendaEvent[] {
 
 export default function AgendaPage() {
   const { user } = useAuth();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canFilterBySeller = user?.role === "gerente" || user?.role === "diretor";
 
   const [view, setView] = useState<Visualizacao>("diaria");
@@ -203,6 +226,17 @@ export default function AgendaPage() {
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
   const highlightedEventRef = useRef<HTMLDivElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
+  const [executionEventId, setExecutionEventId] = useState("");
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
+  const [activeStopId, setActiveStopId] = useState("");
+  const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
+  const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
+    status: "realizada",
+    reason: "cliente_ausente",
+    summary: "",
+    nextStep: "criar_followup",
+    nextStepDate: ""
+  });
 
   const eventsQuery = useMemo(() => {
     const range = getRangeFromFilter(periodFilter, customFrom, customTo);
@@ -297,6 +331,13 @@ export default function AgendaPage() {
       setSelectedSellerId(sellerId);
     }
   }, [canFilterBySeller, searchParams]);
+
+
+  useEffect(() => {
+    if (searchParams.get("execute") === "1") {
+      setExecutionEventId(searchParams.get("eventId") || "AUTO");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     let active = true;
@@ -400,6 +441,117 @@ export default function AgendaPage() {
 
     highlightedEventRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [highlightedEventId]);
+
+  const routeEvents = useMemo(() => filteredEvents.filter((event) => event.type === "roteiro_visita" && event.stops?.length), [filteredEvents]);
+  const executionEvent = useMemo(() => {
+    if (!routeEvents.length) return null;
+    if (executionEventId && executionEventId !== "AUTO") {
+      return routeEvents.find((event) => event.id === executionEventId) || routeEvents[0];
+    }
+    return routeEvents[0];
+  }, [executionEventId, routeEvents]);
+
+  const executionStops = executionEvent?.stops || [];
+  const completedStops = executionStops.filter((stop) => stop.completedAt).length;
+  const nextStop = executionStops.find((stop) => !stop.completedAt) || null;
+  const lateMinutes = nextStop?.plannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStop.plannedTime).getTime()) / 60000)) : 0;
+
+  const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
+    setEvents((current) =>
+      current.map((item) => ({
+        ...item,
+        stops: item.stops?.map((stop) => (stop.id === stopId ? { ...stop, ...patch } : stop))
+      }))
+    );
+  };
+
+  const onCheckInStop = async (stopId: string) => {
+    setIsExecutionSubmitting(true);
+    try {
+      const response = await api.patch(`/agenda-events/${stopId}/check-in`);
+      updateStopState(stopId, { arrivedAt: response.data?.arrivedAt || new Date().toISOString() });
+      toast.success("Parada iniciada.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível iniciar a parada."));
+    } finally {
+      setIsExecutionSubmitting(false);
+    }
+  };
+
+  const onCheckOutStop = async (stopId: string) => {
+    setIsExecutionSubmitting(true);
+    try {
+      const response = await api.patch(`/agenda-events/${stopId}/check-out`);
+      updateStopState(stopId, { completedAt: response.data?.completedAt || new Date().toISOString() });
+      setActiveStopId(stopId);
+      setIsResultModalOpen(true);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível finalizar a parada."));
+    } finally {
+      setIsExecutionSubmitting(false);
+    }
+  };
+
+  const onSaveVisitResult = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!activeStopId) return;
+    if (visitResultForm.status === "nao_realizada" && !visitResultForm.reason) {
+      toast.error("Selecione o motivo da não realização.");
+      return;
+    }
+
+    setIsExecutionSubmitting(true);
+    try {
+      const payload = {
+        status: visitResultForm.status,
+        reason: visitResultForm.status === "nao_realizada" ? visitResultForm.reason : undefined,
+        summary: visitResultForm.summary,
+        nextStep: visitResultForm.nextStep,
+        nextStepDate: visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate).toISOString() : undefined
+      };
+      const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
+      updateStopState(activeStopId, response.data);
+      setIsResultModalOpen(false);
+      setActiveStopId("");
+      toast.success("Resultado da visita salvo.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
+    } finally {
+      setIsExecutionSubmitting(false);
+    }
+  };
+
+  const closeExecutionMode = async () => {
+    const params = new URLSearchParams(searchParams);
+    params.delete("execute");
+    params.delete("eventId");
+    setSearchParams(params);
+    setExecutionEventId("");
+    try {
+      const response = await api.get("/agenda/events", { params: eventsQuery });
+      const payload = Array.isArray(response.data?.items) ? response.data.items : [];
+      setEvents(
+        payload.map((item: any) => ({
+          id: String(item.id),
+          userId: String(item.userId || item.ownerSellerId || item.sellerId || ""),
+          sellerId: String(item.sellerId || item.userId || ""),
+          clientId: item.clientId ? String(item.clientId) : undefined,
+          title: String(item.title || "Sem título"),
+          description: String(item.notes || "Compromisso da agenda."),
+          type: item.type === "followup" ? "followup" : ((item.type as AgendaEventType) || "follow_up"),
+          startDateTime: new Date(item.startDateTime).toISOString(),
+          endDateTime: new Date(item.endDateTime).toISOString(),
+          status: (item.status as AgendaEvent["status"]) || "agendado",
+          isOverdue: Boolean(item.isOverdue),
+          city: item.city ? String(item.city) : undefined,
+          notes: item.notes ? String(item.notes) : null,
+          stops: Array.isArray(item.stops) ? item.stops : []
+        }))
+      );
+    } catch {
+      // já existe carga automática com debounce
+    }
+  };
 
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
     const nextStatus = agendaEvent.status === "realizado" ? "agendado" : "realizado";
@@ -826,6 +978,67 @@ export default function AgendaPage() {
         </div>
       </div>
 
+      {searchParams.get("execute") === "1" && executionEvent ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-emerald-900">Modo execução · {executionEvent.title}</h3>
+              <p className="text-sm text-emerald-800">{completedStops} de {executionStops.length} paradas concluídas.</p>
+            </div>
+            <button type="button" className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-800" onClick={() => void closeExecutionMode()}>
+              Sair da execução
+            </button>
+          </div>
+
+          <div className="mb-3 h-2 rounded-full bg-emerald-100">
+            <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${executionStops.length ? (completedStops / executionStops.length) * 100 : 0}%` }} />
+          </div>
+
+          {nextStop ? (
+            <p className="mb-3 text-sm text-emerald-900">
+              Próxima parada: #{nextStop.order} {nextStop.clientName || "Cliente"}
+              {nextStop.plannedTime ? ` · ${new Date(nextStop.plannedTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              {lateMinutes > 0 ? ` · atraso de ${lateMinutes} min` : ""}
+            </p>
+          ) : (
+            <p className="mb-3 text-sm font-semibold text-emerald-900">Roteiro concluído.</p>
+          )}
+
+          <div className="space-y-2">
+            {executionStops.map((stop) => (
+              <div key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</p>
+                  <div className="flex items-center gap-2">
+                    <button type="button" disabled={Boolean(stop.arrivedAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
+                    <button type="button" disabled={!stop.arrivedAt || Boolean(stop.completedAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-slate-600">
+                  {stop.arrivedAt ? `Check-in: ${formatDateTime(stop.arrivedAt)}` : "Check-in pendente"} · {stop.completedAt ? `Check-out: ${formatDateTime(stop.completedAt)}` : "Check-out pendente"}
+                </p>
+                {stop.resultStatus ? <p className="mt-1 text-xs text-slate-600">Resultado: {stop.resultStatus === "realizada" ? "Realizada" : "Não realizada"}</p> : null}
+              </div>
+            ))}
+          </div>
+
+          {executionStops.length > 0 && completedStops === executionStops.length ? (
+            <button
+              type="button"
+              className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
+              onClick={() => {
+                const realizadas = executionStops.filter((stop) => stop.resultStatus === "realizada").length;
+                const naoRealizadas = executionStops.filter((stop) => stop.resultStatus === "nao_realizada").length;
+                const pendencias = executionStops.length - (realizadas + naoRealizadas);
+                toast.success(`Resumo do dia: ${executionStops.length} paradas, ${realizadas} realizadas, ${naoRealizadas} não realizadas e ${pendencias} pendências.`);
+              }}
+            >
+              Encerrar roteiro do dia
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* Lista de eventos */}
       <div className="rounded-xl border bg-white shadow-sm">
         {isEventsLoading ? (
@@ -917,6 +1130,21 @@ export default function AgendaPage() {
                     >
                       +1d
                     </button>
+                    {event.type === "roteiro_visita" && event.stops?.length ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                        onClick={() => {
+                          setExecutionEventId(event.id);
+                          const params = new URLSearchParams(searchParams);
+                          params.set("execute", "1");
+                          params.set("eventId", event.id);
+                          setSearchParams(params);
+                        }}
+                      >
+                        Iniciar roteiro
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -924,6 +1152,44 @@ export default function AgendaPage() {
           </div>
         )}
       </div>
+
+      {isResultModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsResultModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-slate-900">Resultado da visita</h3>
+            <form className="mt-4 space-y-3" onSubmit={onSaveVisitResult}>
+              <label className="block text-sm font-medium text-slate-700">Status
+                <select value={visitResultForm.status} onChange={(event) => setVisitResultForm((current) => ({ ...current, status: event.target.value as VisitResultForm["status"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <option value="realizada">Realizada</option>
+                  <option value="nao_realizada">Não realizada</option>
+                </select>
+              </label>
+              {visitResultForm.status === "nao_realizada" ? (
+                <label className="block text-sm font-medium text-slate-700">Motivo
+                  <select value={visitResultForm.reason} onChange={(event) => setVisitResultForm((current) => ({ ...current, reason: event.target.value as VisitResultForm["reason"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    {Object.entries(VISIT_REASON_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </label>
+              ) : null}
+              <label className="block text-sm font-medium text-slate-700">Resumo
+                <input value={visitResultForm.summary} onChange={(event) => setVisitResultForm((current) => ({ ...current, summary: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <label className="block text-sm font-medium text-slate-700">Próximo passo
+                <select value={visitResultForm.nextStep} onChange={(event) => setVisitResultForm((current) => ({ ...current, nextStep: event.target.value as VisitResultForm["nextStep"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  {Object.entries(NEXT_STEP_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-slate-700">Data do próximo passo
+                <input type="datetime-local" value={visitResultForm.nextStepDate} onChange={(event) => setVisitResultForm((current) => ({ ...current, nextStepDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm" onClick={() => setIsResultModalOpen(false)}>Cancelar</button>
+                <button type="submit" className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Salvar resultado</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {/* Modal criação */}
       {isCreateOpen ? (
