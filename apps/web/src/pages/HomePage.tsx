@@ -25,7 +25,16 @@ type Opportunity = {
   id: string;
   title: string;
   followUpDate: string;
+  expectedCloseDate: string;
+  stage: string;
+  value?: number;
+  lastContactAt?: string | null;
   client?: { id: string; name: string } | string;
+};
+
+type PipelineOpportunity = Opportunity & {
+  priorityType: "followup_overdue" | "opportunity_overdue" | "proposal_no_response";
+  daysLate: number;
 };
 
 function getGreeting() {
@@ -79,6 +88,7 @@ export default function HomePage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -86,6 +96,7 @@ export default function HomePage() {
       setLoading(true);
       void refreshReminders();
       try {
+        setPipelineError(null);
         const currentMonth = new Date().toISOString().slice(0, 7);
         const [activitiesResponse, opportunitiesResponse, activityKpisResponse] = await Promise.all([
           api.get("/activities"),
@@ -100,9 +111,7 @@ export default function HomePage() {
         setOpportunities(Array.isArray(opportunitiesPayload) ? opportunitiesPayload : []);
         setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
       } catch {
-        setActivities([]);
-        setOpportunities([]);
-        setActivityKpis([]);
+        setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
       } finally {
         setLoading(false);
       }
@@ -213,6 +222,68 @@ export default function HomePage() {
     return { metrics, shouldShowWarning };
   }, [activities, activityKpis, user?.role]);
 
+  const pipelineOfDay = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const noResponseDays = 7;
+    const msPerDay = 1000 * 60 * 60 * 24;
+
+    const getDayDiff = (dateValue?: string | null) => {
+      if (!dateValue) return 0;
+      const parsedDate = new Date(dateValue);
+      if (Number.isNaN(parsedDate.getTime())) return 0;
+      const dateOnly = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      return Math.floor((today.getTime() - dateOnly.getTime()) / msPerDay);
+    };
+
+    const prioritized: PipelineOpportunity[] = opportunities
+      .map((item) => {
+        const followUpLateDays = getDayDiff(item.followUpDate);
+        if (followUpLateDays >= 0) {
+          return { ...item, priorityType: "followup_overdue" as const, daysLate: followUpLateDays };
+        }
+
+        const expectedCloseLateDays = getDayDiff(item.expectedCloseDate);
+        if (expectedCloseLateDays > 0) {
+          return { ...item, priorityType: "opportunity_overdue" as const, daysLate: expectedCloseLateDays };
+        }
+
+        const stage = String(item.stage || "").toLowerCase();
+        const noActionDays = getDayDiff(item.lastContactAt || item.followUpDate);
+        if (stage === "proposta" && noActionDays >= noResponseDays) {
+          return { ...item, priorityType: "proposal_no_response" as const, daysLate: noActionDays };
+        }
+
+        return null;
+      })
+      .filter((item): item is PipelineOpportunity => item !== null)
+      .sort((a, b) => {
+        const priorityOrder = {
+          followup_overdue: 0,
+          opportunity_overdue: 1,
+          proposal_no_response: 2
+        } as const;
+        const byPriority = priorityOrder[a.priorityType] - priorityOrder[b.priorityType];
+        if (byPriority !== 0) return byPriority;
+
+        const byDelay = b.daysLate - a.daysLate;
+        if (byDelay !== 0) return byDelay;
+
+        return Number(b.value || 0) - Number(a.value || 0);
+      });
+
+    return {
+      total: prioritized.length,
+      topFive: prioritized.slice(0, 5)
+    };
+  }, [opportunities]);
+
+  const getPipelinePriorityLabel = (type: PipelineOpportunity["priorityType"]) => {
+    if (type === "followup_overdue") return "Follow-up vencido";
+    if (type === "opportunity_overdue") return "Oportunidade atrasada";
+    return "Proposta sem retorno";
+  };
+
   return (
     <div className="space-y-4">
       <section className="space-y-2">
@@ -291,6 +362,48 @@ export default function HomePage() {
                 </div>
               );
             })}
+          </div>
+        </article>
+
+        <article className={blockClass}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
+              <h2 className="text-lg font-semibold text-slate-900">Pipeline do Dia</h2>
+            </div>
+            <Link
+              to="/oportunidades?status=open&actionToday=true"
+              className="rounded-md border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
+            >
+              Ver todas
+            </Link>
+          </div>
+
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">Oportunidades com ação hoje</p>
+            <p className="text-2xl font-bold text-slate-900">{pipelineOfDay.total}</p>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {pipelineError ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>
+            ) : loading ? (
+              <p className="text-sm text-slate-500">Carregando pipeline do dia...</p>
+            ) : pipelineOfDay.topFive.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma oportunidade com ação pendente hoje.</p>
+            ) : (
+              pipelineOfDay.topFive.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                  <p className="text-xs text-slate-600">
+                    {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {getPipelinePriorityLabel(item.priorityType)} · {item.daysLate} dia(s)
+                  </p>
+                </div>
+              ))
+            )}
           </div>
         </article>
 
