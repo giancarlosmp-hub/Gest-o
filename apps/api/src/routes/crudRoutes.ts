@@ -379,6 +379,64 @@ const buildDuplicateFingerprint = (payload: { cnpj?: string | null; name?: strin
   return `n:${name}|c:${city}|s:${uf}`;
 };
 
+const isMeaningfulImportString = (value: unknown) => {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return trimmed !== "" && trimmed !== "-";
+};
+
+const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any, existingClient: any) => {
+  const data: Record<string, unknown> = {};
+
+  if (isMeaningfulImportString(payload.name)) data.name = payload.name.trim();
+  if (isMeaningfulImportString(payload.city)) data.city = payload.city.trim();
+  if (isMeaningfulImportString(payload.state)) data.state = payload.state.trim();
+  if (isMeaningfulImportString(payload.region)) data.region = payload.region.trim();
+  const segmentValue = payload.segment;
+  if (typeof segmentValue === "string" && isMeaningfulImportString(segmentValue)) data.segment = segmentValue.trim();
+
+  const clientTypeValue = payload.clientType;
+  if (typeof clientTypeValue === "string" && isMeaningfulImportString(clientTypeValue)) {
+    data.clientType = clientTypeValue.trim().toUpperCase();
+  }
+
+  const cnpjValue = payload.cnpj;
+  if (typeof cnpjValue === "string" && isMeaningfulImportString(cnpjValue)) data.cnpj = cnpjValue.trim();
+
+  if (typeof payload.potentialHa === "number" && Number.isFinite(payload.potentialHa) && payload.potentialHa >= 0) {
+    data.potentialHa = payload.potentialHa;
+  }
+
+  if (typeof payload.farmSizeHa === "number" && Number.isFinite(payload.farmSizeHa) && payload.farmSizeHa >= 0) {
+    data.farmSizeHa = payload.farmSizeHa;
+  }
+
+  const ownerSellerValue = payload.ownerSellerId;
+  if (req.user?.role !== "vendedor" && typeof ownerSellerValue === "string" && isMeaningfulImportString(ownerSellerValue)) {
+    data.ownerSellerId = ownerSellerValue.trim();
+  }
+
+  const mergedClientForValidation = {
+    name: (data.name as string | undefined) ?? existingClient.name,
+    city: (data.city as string | undefined) ?? existingClient.city,
+    state: (data.state as string | undefined) ?? existingClient.state,
+    cnpj: (data.cnpj as string | undefined) ?? existingClient.cnpj
+  };
+
+  const normalized = normalizeClientForComparison(mergedClientForValidation);
+
+  return {
+    data: {
+      ...data,
+      state: normalized.state,
+      nameNormalized: normalized.nameNormalized,
+      cityNormalized: normalized.cityNormalized,
+      cnpjNormalized: normalized.cnpjNormalized || null
+    },
+    mergedClientForValidation
+  };
+};
+
 const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRowSchema>[]): Promise<ImportPreviewItem[]> => {
   const scopedWhere = sellerWhere(req);
 
@@ -1012,12 +1070,11 @@ router.post("/clients/import", async (req, res) => {
           const existingClient = await prisma.client.findUnique({ where: { id: item.existingClientId } });
           if (!existingClient) throw new Error("existing_client_not_found");
 
-          const mergedClientForValidation = {
-            name: item.payload.name ?? existingClient.name,
-            city: item.payload.city ?? existingClient.city,
-            state: item.payload.state ?? existingClient.state,
-            cnpj: item.payload.cnpj ?? existingClient.cnpj
-          };
+          const { data: resolvedUpdateData, mergedClientForValidation } = resolveImportUpdateData(
+            item.payload,
+            req,
+            existingClient
+          );
 
           await ensureClientIsNotDuplicate({
             candidate: mergedClientForValidation,
@@ -1025,17 +1082,9 @@ router.post("/clients/import", async (req, res) => {
             ignoreClientId: item.existingClientId
           });
 
-          const normalized = normalizeClientForComparison(mergedClientForValidation);
-
           await prisma.client.update({
             where: { id: item.existingClientId },
-            data: {
-              ...item.payload,
-              state: normalized.state,
-              nameNormalized: normalized.nameNormalized,
-              cityNormalized: normalized.cityNormalized,
-              cnpjNormalized: normalized.cnpjNormalized || null
-            }
+            data: resolvedUpdateData
           });
           totalAtualizados += 1;
         } catch (error) {
