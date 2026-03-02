@@ -109,6 +109,7 @@ type ClientImportSimulationSummary = {
 
 type ImportValidationSummary = {
   errors: string[];
+  rowResults: ImportAnalysisRow[];
   validCount: number;
   errorCount: number;
 };
@@ -227,7 +228,7 @@ export default function CrudSimplePage({
   const [importFinalReportRows, setImportFinalReportRows] = useState<ClientImportFinalReportRow[]>([]);
   const [importSimulationSummary, setImportSimulationSummary] =
     useState<ClientImportSimulationSummary | null>(null);
-  const [isSimulatingImport, setIsSimulatingImport] = useState(false);
+  const [didRunLocalValidation, setDidRunLocalValidation] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -669,11 +670,12 @@ export default function CrudSimplePage({
 
   const validateImportRows = (rows: ClientImportRow[], defaultOwnerSellerId?: string): ImportValidationSummary => {
     const errors: string[] = [];
+    const rowResults: ImportAnalysisRow[] = [];
     let validCount = 0;
 
     if (rows.length === 0) {
       errors.push("Nenhuma linha de dados válida foi encontrada.");
-      return { errors, validCount: 0, errorCount: 0 };
+      return { errors, rowResults, validCount: 0, errorCount: 0 };
     }
 
     if (!isSeller && canChooseOwnerSeller && !defaultOwnerSellerId && !importColumnMapping.ownerSellerId) {
@@ -682,30 +684,47 @@ export default function CrudSimplePage({
 
     rows.forEach((row, index) => {
       const rowNumber = row.sourceRowNumber || index + 2;
-      const payloadToValidate = {
-        ...row,
-        ownerSellerId: row.ownerSellerId || defaultOwnerSellerId
-      };
+      const rowErrors: string[] = [];
 
-      const { fieldErrors } = validateClientPayload(payloadToValidate, {
-        isSeller,
-        canChooseOwnerSeller,
-        sellerId: user?.id
-      });
+      if (!row.name) rowErrors.push("Nome obrigatório");
+      if (!row.city) rowErrors.push("Cidade obrigatória");
+      if (!row.state || row.state.trim().length !== 2) rowErrors.push("UF obrigatória (2 letras)");
 
-      const rowErrors = Object.values(fieldErrors).filter((message): message is string => Boolean(message));
+      const normalizedClientType = String(row.clientType ?? "")
+        .trim()
+        .toUpperCase();
+      if (!["PJ", "PF"].includes(normalizedClientType)) {
+        rowErrors.push("Tipo do cliente deve ser PJ ou PF");
+      }
+
+      if (row.cnpj) {
+        const numericDocument = row.cnpj.replace(/\D/g, "");
+        if (!/^\d{11}$|^\d{14}$/.test(numericDocument)) {
+          rowErrors.push("CNPJ/CPF inválido (use 11 ou 14 dígitos)");
+        }
+      }
       if (rowErrors.length === 0) {
         validCount += 1;
+        rowResults.push({
+          ...row,
+          clientType: normalizedClientType,
+          status: "new"
+        });
         return;
       }
 
-      rowErrors.forEach((message) => {
-        errors.push(`Linha ${rowNumber}: ${message}`);
+      errors.push(`Linha ${rowNumber}: ${rowErrors.join(", ")}`);
+      rowResults.push({
+        ...row,
+        clientType: normalizedClientType,
+        status: "error",
+        errorMessage: rowErrors.join("; ")
       });
     });
 
     return {
       errors,
+      rowResults,
       validCount,
       errorCount: rows.length - validCount
     };
@@ -726,35 +745,6 @@ export default function CrudSimplePage({
     return sanitizedPayload;
   };
 
-  const analyzeImportRows = async (rows: ClientImportRow[]) => {
-    const payloads = rows.map((row) => ({ ...buildImportPayload(row), sourceRowNumber: row.sourceRowNumber }));
-    const response = await api.post("/clients/import/preview", { rows: payloads });
-
-    const duplicatesByRow = new Map<number, string>();
-    const errorsByRow = new Map<number, string>();
-
-    (Array.isArray(response.data?.duplicados) ? response.data.duplicados : []).forEach((item: any) => {
-      const rowNumber = Number(item?.rowNumber);
-      if (Number.isFinite(rowNumber)) duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
-    });
-
-    (Array.isArray(response.data?.erros) ? response.data.erros : []).forEach((item: any) => {
-      const rowNumber = Number(item?.rowNumber);
-      if (Number.isFinite(rowNumber)) errorsByRow.set(rowNumber, String(item?.message || "Erro de validação"));
-    });
-
-    return rows.map((row) => {
-      const existingClientId = duplicatesByRow.get(row.sourceRowNumber);
-      const errorMessage = errorsByRow.get(row.sourceRowNumber);
-
-      if (errorMessage) return { ...row, status: "error" as const, errorMessage };
-      if (existingClientId) {
-        return { ...row, status: "duplicate" as const, existingClientId, action: "skip" as const };
-      }
-      return { ...row, status: "new" as const, action: "import_anyway" as const };
-    });
-  };
-
   const runImportValidation = async (
     rows: Record<string, unknown>[],
     mapping: Partial<Record<ClientImportFieldKey, string>>,
@@ -769,34 +759,16 @@ export default function CrudSimplePage({
     setImportSummary(null);
     setImportFinalReportRows([]);
     setImportSimulationSummary(null);
+    setDidRunLocalValidation(false);
+
+    setImportPreviewRows(validation.rowResults);
 
     if (validation.errors.length > 0) {
-      setImportPreviewRows(
-        mappedRows.slice(0, 20).map((row) => ({
-          ...row,
-          status: "error",
-          errorMessage: "Corrija os erros de validação para continuar."
-        }))
-      );
       toast.error("Foram encontrados erros de validação na planilha.");
       return;
     }
 
-    try {
-      const analyzed = await analyzeImportRows(mappedRows);
-      setImportPreviewRows(analyzed.slice(0, 20));
-      toast.success(`${mappedRows.length} linha(s) carregada(s) com sucesso.`);
-    } catch (err: any) {
-      // Se o preview falhar, ainda permite importar (sem análise de duplicidade), mas avisa.
-      setImportPreviewRows(
-        mappedRows.slice(0, 20).map((row) => ({
-          ...row,
-          status: "new",
-          action: "import_anyway"
-        }))
-      );
-      toast.warning(err?.response?.data?.message || "Não foi possível analisar duplicidades. Você ainda pode importar.");
-    }
+    toast.success(`${mappedRows.length} linha(s) carregada(s) com sucesso.`);
   };
 
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -815,6 +787,7 @@ export default function CrudSimplePage({
     setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: 0 });
     setImportStep(1);
+    setDidRunLocalValidation(false);
 
     if (!selectedFile) return;
 
@@ -1133,37 +1106,14 @@ export default function CrudSimplePage({
     return summary;
   };
 
-  const handleSimulateImport = async () => {
-    if (!isImportReady || importRows.length === 0 || importValidationErrors.length > 0) return;
-
-    setIsSimulatingImport(true);
-    setImportSimulationSummary(null);
-
-    try {
-      const payloads = importRows.map(buildImportPayload);
-      const response = await api.post("/clients/import/simulate", {
-        rows: payloads,
-        clients: payloads
-      });
-
-      const simulationData = response.data as ClientImportSimulationSummary;
-      setImportSimulationSummary({
-        totalAnalyzed: Number(simulationData?.totalAnalyzed ?? payloads.length),
-        valid: Number(simulationData?.valid ?? 0),
-        duplicated: Number(simulationData?.duplicated ?? 0),
-        errors: Number(simulationData?.errors ?? 0),
-        items: Array.isArray(simulationData?.items) ? simulationData.items : []
-      });
-      toast.success("Simulação concluída com sucesso.");
-    } catch (e: any) {
-      toast.error(e.response?.data?.message || "Erro ao simular importação de clientes.");
-    } finally {
-      setIsSimulatingImport(false);
+  const handleSimulateImport = () => {
+    if (importRows.length === 0) return;
+    setDidRunLocalValidation(true);
+    if (importValidationErrors.length > 0) {
+      toast.warning("Validação concluída com pendências. Revise as linhas com status ERRO.");
+      return;
     }
-  };
-
-  const updateImportDuplicateAction = (sourceRowNumber: number, action: ClientImportAction) => {
-    setImportPreviewRows((prev) => prev.map((row) => (row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row)));
+    toast.success("Validação local concluída com sucesso.");
   };
 
   const handleImportClients = async () => {
@@ -1360,25 +1310,36 @@ export default function CrudSimplePage({
   };
 
   const importCounters = useMemo(() => {
-    if (importSimulationSummary) {
-      return {
-        validCount: importSimulationSummary.valid,
-        errorCount: importSimulationSummary.errors,
-        duplicateCount: importSimulationSummary.duplicated,
-        totalAnalyzed: importSimulationSummary.totalAnalyzed
-      };
-    }
-
-    const duplicateCount = importPreviewRows.filter((row) => row.status === "duplicate").length;
-
-    // Se houver erro de validação (antes do preview real), usamos o total de mensagens.
-    // Caso contrário, tentamos contar pelos status do preview.
     const previewErrorCount = importPreviewRows.filter((row) => row.status === "error").length;
-    const errorCount = importValidationErrors.length > 0 ? importValidationErrors.length : previewErrorCount;
+    const errorCount = importValidationErrors.length > 0 ? Math.max(importValidationErrors.length, previewErrorCount) : previewErrorCount;
 
     const validCount = Math.max(0, importRows.length - errorCount);
-    return { validCount, errorCount, duplicateCount, totalAnalyzed: importRows.length };
-  }, [importRows.length, importValidationErrors.length, importSimulationSummary, importPreviewRows]);
+    return { validCount, errorCount, totalAnalyzed: importRows.length };
+  }, [importRows.length, importValidationErrors.length, importPreviewRows]);
+
+  const downloadPreviewValidationReport = () => {
+    if (importPreviewRows.length === 0) return;
+
+    const escapeCsvCell = (value: string | number) => `"${String(value ?? "").replace(/\r?\n/g, " ").replace(/"/g, '""')}"`;
+    const header = ["linha", "status", "motivo"];
+    const rows = importPreviewRows.map((row) =>
+      [row.sourceRowNumber, row.status === "new" ? "NOVO" : "ERRO", row.errorMessage || "OK"]
+        .map(escapeCsvCell)
+        .join(";")
+    );
+
+    const blob = new Blob([[header.map(escapeCsvCell).join(";"), ...rows].join("\n")], {
+      type: "text/csv;charset=utf-8;"
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "relatorio-preview-importacao-clientes.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-4">
@@ -1776,47 +1737,29 @@ export default function CrudSimplePage({
 
                   {importValidationErrors.length > 0 ? (
                     <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                      {importValidationErrors.map((validationError) => (
+                      {importValidationErrors.slice(0, 20).map((validationError) => (
                         <p key={validationError}>• {validationError}</p>
                       ))}
+                      {importValidationErrors.length > 20 ? (
+                        <p className="mt-1 text-xs">+{importValidationErrors.length - 20} erro(s) adicionais.</p>
+                      ) : null}
                     </div>
                   ) : null}
 
                   <p className="text-sm text-slate-600">
-                    Total analisado:{" "}
-                    <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span> · Preview exibindo até 20
-                    linhas.{" "}
-                    <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>
+                    Total linhas: <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span>
                     {" · "}
-                    <span className="font-semibold text-amber-700">{importCounters.duplicateCount} duplicados</span>
+                    <span className="font-semibold text-emerald-700">{importCounters.validCount} válidas</span>
                     {" · "}
                     <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
                   </p>
 
-                  {importSimulationSummary ? (
-                    <div className="overflow-x-auto rounded-xl border border-slate-200">
-                      <table className="w-full min-w-[700px] text-sm">
-                        <thead className="bg-slate-100 text-left text-slate-700">
-                          <tr>
-                            <th className="px-3 py-2 font-medium">Linha</th>
-                            <th className="px-3 py-2 font-medium">Nome</th>
-                            <th className="px-3 py-2 font-medium">Status</th>
-                            <th className="px-3 py-2 font-medium">Motivo</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importSimulationSummary.items.map((item) => (
-                            <tr key={`${item.row}-${item.name}`} className="border-t border-slate-200">
-                              <td className="px-3 py-2">{item.row}</td>
-                              <td className="px-3 py-2">{item.name || "—"}</td>
-                              <td className="px-3 py-2">
-                                {item.status === "valid" ? "Válido" : item.status === "duplicate" ? "Duplicado" : "Com erro"}
-                              </td>
-                              <td className="px-3 py-2">{item.reason || "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  {didRunLocalValidation ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="font-medium text-slate-900">Resumo da validação local</p>
+                      <p>Total linhas: {importCounters.totalAnalyzed}</p>
+                      <p>Total válidas: {importCounters.validCount}</p>
+                      <p>Total com erro: {importCounters.errorCount}</p>
                     </div>
                   ) : null}
 
@@ -1836,12 +1779,12 @@ export default function CrudSimplePage({
                             </th>
                           ))}
                           <th className="px-3 py-2 font-medium">Status</th>
-                          <th className="px-3 py-2 font-medium">Ação</th>
+                          <th className="px-3 py-2 font-medium">Motivo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {importPreviewRows.length > 0 ? (
-                          importPreviewRows.slice(0, 20).map((row, index) => (
+                          importPreviewRows.slice(0, 200).map((row, index) => (
                             <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
                               <td className="px-3 py-2">{row.name || "—"}</td>
                               <td className="px-3 py-2">{row.city || "—"}</td>
@@ -1855,40 +1798,28 @@ export default function CrudSimplePage({
                               <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
 
                               <td className="px-3 py-2">
-                                {row.status === "new" ? "Novo" : row.status === "duplicate" ? "Duplicado" : "Com erro"}
+                                {row.status === "new" ? "NOVO" : "ERRO"}
                               </td>
 
                               <td className="px-3 py-2">
-                                {row.status === "duplicate" ? (
-                                  <select
-                                    className="rounded border border-slate-300 px-2 py-1"
-                                    value={row.action || "skip"}
-                                    onChange={(event) =>
-                                      updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)
-                                    }
-                                  >
-                                    <option value="update">Atualizar existente</option>
-                                    <option value="skip">Pular</option>
-                                    <option value="import_anyway">Importar mesmo assim</option>
-                                  </select>
-                                ) : row.status === "error" ? (
-                                  <span className="text-rose-700">{row.errorMessage || "Erro"}</span>
-                                ) : (
-                                  "—"
-                                )}
+                                {row.status === "error" ? <span className="text-rose-700">{row.errorMessage || "Erro"}</span> : "OK"}
                               </td>
                             </tr>
                           ))
                         ) : (
                           <tr>
                             <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
-                              Envie um arquivo para visualizar até 20 linhas de preview.
+                              Envie um arquivo para visualizar o preview.
                             </td>
                           </tr>
                         )}
                       </tbody>
                     </table>
                   </div>
+
+                  {importPreviewRows.length > 200 ? (
+                    <p className="text-xs text-slate-500">+{importPreviewRows.length - 200} linhas não exibidas no preview.</p>
+                  ) : null}
                 </>
               ) : null}
             </div>
@@ -1903,21 +1834,29 @@ export default function CrudSimplePage({
                 Cancelar
               </button>
 
-              {importStep === 2 && canChooseOwnerSeller ? (
+              {importStep === 2 ? (
                 <>
                   <button
                     type="button"
                     onClick={handleSimulateImport}
                     className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                    disabled={importRows.length === 0 || isImporting}
                   >
-                    {isSimulatingImport ? "Validando..." : "Validar sem importar"}
+                    Validar sem importar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={downloadPreviewValidationReport}
+                    className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={importPreviewRows.length === 0 || isImporting}
+                  >
+                    Baixar relatório do preview (.csv)
                   </button>
                   <button
                     type="button"
                     onClick={handleImportClients}
                     className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                    disabled={!isImportReady || isImporting}
                   >
                     {isImporting ? "Importando..." : "Validar e importar"}
                   </button>
