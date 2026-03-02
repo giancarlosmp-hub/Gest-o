@@ -65,6 +65,12 @@ npm run dev
 - Migrate: `npm run prisma:migrate`
 - Seed: `npm run prisma:seed`
 
+### Backfill de normalizados de clientes
+Para preencher `cnpjNormalized`, `nameNormalized` e `cityNormalized` em registros já existentes:
+```bash
+docker compose exec api npm run clients:backfill-normalized -w @salesforce-pro/api
+```
+
 ## Usuários seed
 - diretor@empresa.com / 123456 (diretor)
 - gerente@empresa.com / 123456 (gerente)
