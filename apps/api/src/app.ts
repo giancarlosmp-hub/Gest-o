@@ -23,6 +23,11 @@ app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/", crudRoutes);
 
+// Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
+app.use("/api/auth", authRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api", crudRoutes);
+
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err);
   res.status(500).json({ message: "Erro interno" });

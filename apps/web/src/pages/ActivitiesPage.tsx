@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
+import { getApiErrorMessage } from "../lib/apiError";
 
 type Client = { id: string; name: string };
 type Opportunity = { id: string; title: string; clientId: string };
@@ -109,8 +110,8 @@ export default function ActivitiesPage() {
       } else {
         setSellers([]);
       }
-    } catch {
-      toast.error("Não foi possível carregar listas auxiliares.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar listas auxiliares."));
     }
   };
 
@@ -127,9 +128,9 @@ export default function ActivitiesPage() {
 
       const response = await api.get(`/activities${params.toString() ? `?${params.toString()}` : ""}`);
       setActivities(Array.isArray(response.data) ? response.data : []);
-    } catch {
+    } catch (error) {
       setActivities([]);
-      toast.error("Não foi possível carregar as atividades.");
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar as atividades."));
     } finally {
       setLoading(false);
     }
@@ -180,8 +181,8 @@ export default function ActivitiesPage() {
       toast.success("Atividade criada com sucesso.");
       closeCreateModal();
       await loadActivities();
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Não foi possível criar a atividade.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível criar a atividade."));
     } finally {
       setSaving(false);
     }

@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { ACTIVITY_TYPE_OPTIONS, normalizeActivityType } from "../constants/activityTypes";
+import { getApiErrorMessage } from "../lib/apiError";
 
 type Seller = {
   id: string;
@@ -75,8 +76,8 @@ export default function ActivityKpisPage({ embedded = false }: ActivityKpisPageP
 
       setSellers(sellerList);
       setDraft(nextDraft);
-    } catch {
-      setFeedback("Não foi possível carregar os KPIs de atividades.");
+    } catch (error) {
+      setFeedback(getApiErrorMessage(error, "Não foi possível carregar os KPIs de atividades."));
       setSellers([]);
       setDraft({});
     } finally {
@@ -124,8 +125,8 @@ export default function ActivityKpisPage({ embedded = false }: ActivityKpisPageP
       );
 
       setFeedback("KPIs atualizados com sucesso.");
-    } catch {
-      setFeedback("Não foi possível salvar os KPIs. Tente novamente.");
+    } catch (error) {
+      setFeedback(getApiErrorMessage(error, "Não foi possível salvar os KPIs. Tente novamente."));
     } finally {
       setSavingSellerId(null);
     }
