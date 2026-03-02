@@ -54,10 +54,22 @@ type ClientImportErrorItem = {
   message: string;
 };
 
+type ClientImportAction = "update" | "skip" | "import_anyway";
+type ClientImportStatus = "new" | "duplicate" | "error";
+
 type ClientImportSummary = {
   total: number;
   imported: number;
+  updated: number;
+  ignored: number;
   errors: ClientImportErrorItem[];
+};
+
+type ImportAnalysisRow = ClientImportRow & {
+  status: ClientImportStatus;
+  action?: ClientImportAction;
+  existingClientId?: string;
+  errorMessage?: string;
 };
 
 type ImportValidationSummary = {
@@ -142,7 +154,7 @@ export default function CrudSimplePage({
   const [openActionsMenuId, setOpenActionsMenuId] = useState<string | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importRows, setImportRows] = useState<ClientImportRow[]>([]);
-  const [importPreviewRows, setImportPreviewRows] = useState<ClientImportRow[]>([]);
+  const [importPreviewRows, setImportPreviewRows] = useState<ImportAnalysisRow[]>([]);
   const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
   const [importDefaultOwnerSellerId, setImportDefaultOwnerSellerId] = useState("");
   const [isImporting, setIsImporting] = useState(false);
@@ -501,13 +513,15 @@ export default function CrudSimplePage({
       const normalizedRows = rows;
 
       setImportRows(normalizedRows);
-      setImportPreviewRows(normalizedRows.slice(0, 20));
       setImportValidationErrors(validationSummary.errors);
       setIsImportReady(validationSummary.errors.length === 0);
 
       if (validationSummary.errors.length > 0) {
+        setImportPreviewRows(normalizedRows.map((row) => ({ ...row, status: "error", errorMessage: "Corrija os erros de validação para continuar." })));
         toast.error("Foram encontrados erros de validação na planilha.");
       } else {
+        const analyzedRows = await analyzeImportRows(normalizedRows);
+        setImportPreviewRows(analyzedRows);
         toast.success(`${normalizedRows.length} linha(s) carregada(s) com sucesso.`);
       }
     } catch (err: any) {
@@ -561,10 +575,12 @@ export default function CrudSimplePage({
   };
 
   const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
-    const imported = Number(responseData?.imported ?? responseData?.successCount ?? responseData?.created ?? responseData?.totalImported);
+    const imported = Number(responseData?.totalImportados ?? responseData?.imported ?? responseData?.successCount ?? responseData?.created ?? responseData?.totalImported);
+    const updated = Number(responseData?.totalAtualizados ?? responseData?.updated ?? 0);
+    const ignored = Number(responseData?.totalIgnorados ?? responseData?.ignored ?? 0);
     const errorsRaw = Array.isArray(responseData?.errors) ? responseData.errors : [];
 
-    if (!Number.isFinite(imported) && errorsRaw.length === 0) return null;
+    if (!Number.isFinite(imported) && errorsRaw.length === 0 && !Number.isFinite(updated) && !Number.isFinite(ignored)) return null;
 
     const errors = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
       rowNumber: Number(errorItem?.rowNumber ?? errorItem?.row ?? index + 1) || index + 1,
@@ -575,6 +591,8 @@ export default function CrudSimplePage({
     return {
       total,
       imported: Number.isFinite(imported) ? imported : Math.max(0, total - errors.length),
+      updated: Number.isFinite(updated) ? updated : 0,
+      ignored: Number.isFinite(ignored) ? ignored : 0,
       errors
     };
   };
@@ -619,7 +637,7 @@ export default function CrudSimplePage({
       setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
     }
 
-    return { total, imported, errors } satisfies ClientImportSummary;
+    return { total, imported, updated: 0, ignored: 0, errors } satisfies ClientImportSummary;
   };
 
   const downloadImportErrorsReport = () => {
@@ -644,6 +662,35 @@ export default function CrudSimplePage({
     URL.revokeObjectURL(url);
   };
 
+  const analyzeImportRows = async (rows: ClientImportRow[]) => {
+    const payloads = rows.map((row) => ({ ...buildImportPayload(row), sourceRowNumber: row.sourceRowNumber }));
+    const response = await api.post("/clients/import/preview", { rows: payloads });
+    const duplicatesByRow = new Map<number, string>();
+    const errorsByRow = new Map<number, string>();
+
+    (Array.isArray(response.data?.duplicados) ? response.data.duplicados : []).forEach((item: any) => {
+      const rowNumber = Number(item?.rowNumber);
+      if (Number.isFinite(rowNumber)) duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
+    });
+
+    (Array.isArray(response.data?.erros) ? response.data.erros : []).forEach((item: any) => {
+      const rowNumber = Number(item?.rowNumber);
+      if (Number.isFinite(rowNumber)) errorsByRow.set(rowNumber, String(item?.message || "Erro de validação"));
+    });
+
+    return rows.map((row) => {
+      const existingClientId = duplicatesByRow.get(row.sourceRowNumber);
+      const errorMessage = errorsByRow.get(row.sourceRowNumber);
+      if (errorMessage) return { ...row, status: "error" as const, errorMessage };
+      if (existingClientId) return { ...row, status: "duplicate" as const, existingClientId, action: "skip" as const };
+      return { ...row, status: "new" as const, action: "import_anyway" as const };
+    });
+  };
+
+  const updateImportDuplicateAction = (sourceRowNumber: number, action: ClientImportAction) => {
+    setImportPreviewRows((prev) => prev.map((row) => row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row));
+  };
+
   const handleImportClients = async () => {
     if (!isImportReady || importRows.length === 0 || importValidationSummary.errors.length > 0) return;
 
@@ -652,7 +699,16 @@ export default function CrudSimplePage({
     setImportProgress({ current: 0, total: importRows.length });
 
     try {
-      const payloads = importRows.map(buildImportPayload);
+      const actionByRow = new Map(importPreviewRows.map((row) => [row.sourceRowNumber, row]));
+      const payloads = importRows.map((row) => {
+        const analyzed = actionByRow.get(row.sourceRowNumber);
+        return {
+          ...buildImportPayload(row),
+          sourceRowNumber: row.sourceRowNumber,
+          existingClientId: analyzed?.existingClientId,
+          action: analyzed?.action
+        };
+      });
       let summary: ClientImportSummary | null = null;
 
       try {
@@ -671,7 +727,7 @@ export default function CrudSimplePage({
         summary = await runFallbackImport(payloads, importRows);
       }
 
-      const resolvedSummary = summary ?? { total: payloads.length, imported: payloads.length, errors: [] };
+      const resolvedSummary = summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
       setImportSummary(resolvedSummary);
 
       if (resolvedSummary.errors.length === 0) {
@@ -1126,6 +1182,8 @@ export default function CrudSimplePage({
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                   <p className="font-medium text-slate-900">Resumo da importação</p>
                   <p>Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span></p>
+                  <p>Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span></p>
+                  <p>Total ignorado: <span className="font-semibold text-slate-900">{importSummary.ignored}</span></p>
                   <p>Total com erro: <span className="font-semibold text-slate-900">{importSummary.errors.length}</span></p>
                   {importSummary.errors.length > 0 ? (
                     <button
@@ -1158,10 +1216,12 @@ export default function CrudSimplePage({
                       {clientImportColumns.map((column) => (
                         <th key={column} className="px-3 py-2 font-medium">{clientImportColumnLabels[column]}</th>
                       ))}
+                      <th className="px-3 py-2 font-medium">Status</th>
+                      <th className="px-3 py-2 font-medium">Ação</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {importPreviewRows.length > 0 ? importPreviewRows.map((row, index) => (
+                    {importPreviewRows.length > 0 ? importPreviewRows.slice(0, 20).map((row, index) => (
                       <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
                         <td className="px-3 py-2">{row.name || "—"}</td>
                         <td className="px-3 py-2">{row.city || "—"}</td>
@@ -1173,10 +1233,26 @@ export default function CrudSimplePage({
                         <td className="px-3 py-2">{row.cnpj || "—"}</td>
                         <td className="px-3 py-2">{row.segment || "—"}</td>
                         <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
+                        <td className="px-3 py-2">
+                          {row.status === "new" ? "Novo" : row.status === "duplicate" ? "Duplicado" : "Com erro"}
+                        </td>
+                        <td className="px-3 py-2">
+                          {row.status === "duplicate" ? (
+                            <select
+                              className="rounded border border-slate-300 px-2 py-1"
+                              value={row.action || "skip"}
+                              onChange={(event) => updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)}
+                            >
+                              <option value="update">Atualizar existente</option>
+                              <option value="skip">Pular</option>
+                              <option value="import_anyway">Importar mesmo assim</option>
+                            </select>
+                          ) : row.status === "error" ? (row.errorMessage || "Erro") : "—"}
+                        </td>
                       </tr>
                     )) : (
                       <tr>
-                        <td colSpan={10} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
+                        <td colSpan={12} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
                       </tr>
                     )}
                   </tbody>
