@@ -229,9 +229,9 @@ export default function HomePage() {
       <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
         <div className="flex items-center gap-3 text-brand-900">
           <SunMoon size={22} />
-          <h1 className="text-2xl font-bold">{getGreeting()}, {user?.name ?? "Usuário"}</h1>
+          <h1 className="text-2xl font-bold">Bem-vindo, {user?.name ?? "Usuário"}</h1>
         </div>
-        <p className="mt-2 text-sm capitalize text-slate-600">{todayDateLabel}</p>
+        <p className="mt-2 text-sm text-slate-600">{getGreeting()} · Hoje: <span className="capitalize">{todayDateLabel}</span></p>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">

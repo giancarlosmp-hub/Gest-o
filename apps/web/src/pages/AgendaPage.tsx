@@ -357,6 +357,7 @@ export default function AgendaPage() {
       <header className="flex justify-between rounded-xl border bg-white p-4 shadow-sm">
         <div>
           <h2 className="text-xl font-semibold">Agenda</h2>
+          <p className="text-sm text-slate-600">Roteiro de visitas / compromissos</p>
         </div>
 
         <button type="button" onClick={openCreate} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white">
