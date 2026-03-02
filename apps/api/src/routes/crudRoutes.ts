@@ -457,6 +457,14 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
   return items;
 };
 
+type ImportResultRow = {
+  rowNumber: number;
+  status: "importado" | "atualizado" | "ignorado" | "erro";
+  motivo: string;
+  idCriado?: string;
+  idAtualizado?: string;
+};
+
 // ==============================
 // Timeline helper
 // ==============================
@@ -813,14 +821,25 @@ router.post("/clients/import/simulate", async (req, res) => {
 
   const preview = await buildImportPreview(req, rows);
 
+  const items = preview.map((item) => {
+    if (item.status === "error") {
+      return { row: item.rowNumber, status: "error", reason: item.error };
+    }
+    if (item.status === "duplicate") {
+      return { row: item.rowNumber, status: "duplicate", reason: item.reason };
+    }
+    return { row: item.rowNumber, status: "valid", reason: null };
+  });
+
   const summary = {
-    total: preview.length,
-    newCount: preview.filter((i) => i.status === "new").length,
-    duplicateCount: preview.filter((i) => i.status === "duplicate").length,
-    errorCount: preview.filter((i) => i.status === "error").length
+    totalAnalyzed: preview.length,
+    valid: items.filter((i) => i.status === "valid").length,
+    duplicated: items.filter((i) => i.status === "duplicate").length,
+    errors: items.filter((i) => i.status === "error").length,
+    items
   };
 
-  res.json({ simulated: true, summary });
+  res.json({ simulated: true, ...summary });
 });
 
 // ✅ Import (com ações por linha)
@@ -835,6 +854,7 @@ router.post("/clients/import", async (req, res) => {
   let totalIgnorados = 0;
   let totalErros = 0;
   const errors: Array<{ rowNumber: number; clientName: string; message: string }> = [];
+  const resultados: ImportResultRow[] = [];
 
   for (const item of preview) {
     const rowAction = item.row?.action;
@@ -843,6 +863,7 @@ router.post("/clients/import", async (req, res) => {
     if (item.status === "error") {
       totalErros += 1;
       errors.push({ rowNumber: item.rowNumber, clientName, message: item.error });
+      resultados.push({ rowNumber: item.rowNumber, status: "erro", motivo: item.error });
       continue;
     }
 
@@ -854,6 +875,7 @@ router.post("/clients/import", async (req, res) => {
     if (item.status === "duplicate") {
       if (rowAction === "skip") {
         totalIgnorados += 1;
+        resultados.push({ rowNumber: item.rowNumber, status: "ignorado", motivo: "Pulado pelo usuário." });
         continue;
       }
 
@@ -864,6 +886,11 @@ router.post("/clients/import", async (req, res) => {
             rowNumber: item.rowNumber,
             clientName,
             message: "Não é possível atualizar: duplicado no arquivo (sem cliente existente vinculado)."
+          });
+          resultados.push({
+            rowNumber: item.rowNumber,
+            status: "erro",
+            motivo: "Não é possível atualizar: duplicado no arquivo (sem cliente existente vinculado)."
           });
           continue;
         }
@@ -898,18 +925,54 @@ router.post("/clients/import", async (req, res) => {
             }
           });
           totalAtualizados += 1;
+          resultados.push({
+            rowNumber: item.rowNumber,
+            status: "atualizado",
+            motivo: "Cliente existente atualizado.",
+            idAtualizado: item.existingClientId
+          });
         } catch (error) {
           if (isDatabaseUniqueViolation(error)) {
             totalErros += 1;
-            errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+
+            errors.push({
+              rowNumber: item.rowNumber,
+              clientName,
+              message: DUPLICATE_CLIENT_MESSAGE
+            });
+
+            resultados.push({
+              rowNumber: item.rowNumber,
+              status: "erro",
+              motivo: DUPLICATE_CLIENT_MESSAGE,
+              idAtualizado: undefined
+            });
+
             continue;
           }
+
+          totalErros += 1;
+
+          errors.push({
+            rowNumber: item.rowNumber,
+            clientName,
+            message: "Erro inesperado ao importar cliente."
+          });
+
+          resultados.push({
+            rowNumber: item.rowNumber,
+            status: "erro",
+            motivo: "Erro inesperado ao importar cliente.",
+            idAtualizado: undefined
+          });
+        }
           totalErros += 1;
           errors.push({
             rowNumber: item.rowNumber,
             clientName,
             message: "Não foi possível atualizar cliente existente."
           });
+          resultados.push({ rowNumber: item.rowNumber, status: "erro", motivo: "Não foi possível atualizar cliente existente." });
         }
         continue;
       }
@@ -918,6 +981,7 @@ router.post("/clients/import", async (req, res) => {
       if (!rowAction) {
         totalErros += 1;
         errors.push({ rowNumber: item.rowNumber, clientName, message: "Cliente duplicado sem ação definida." });
+        resultados.push({ rowNumber: item.rowNumber, status: "erro", motivo: "Cliente duplicado sem ação definida." });
         continue;
       }
     }
@@ -925,26 +989,63 @@ router.post("/clients/import", async (req, res) => {
     // New ou Duplicate com import_anyway
     if (rowAction === "skip") {
       totalIgnorados += 1;
+      resultados.push({ rowNumber: item.rowNumber, status: "ignorado", motivo: "Pulado pelo usuário." });
       continue;
     }
 
     try {
       const payload = withClientNormalizedFields(item.payload);
       await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
-      await prisma.client.create({ data: payload });
+      const created = await prisma.client.create({ data: payload, select: { id: true } });
       totalImportados += 1;
+      resultados.push({
+        rowNumber: item.rowNumber,
+        status: "importado",
+        motivo: "Cliente importado com sucesso.",
+        idCriado: created.id
+      });
     } catch (error) {
       if (isDatabaseUniqueViolation(error)) {
         totalErros += 1;
-        errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+
+        errors.push({
+          rowNumber: item.rowNumber,
+          clientName,
+          message: DUPLICATE_CLIENT_MESSAGE
+        });
+
+        resultados.push({
+          rowNumber: item.rowNumber,
+          status: "erro",
+          motivo: DUPLICATE_CLIENT_MESSAGE,
+          idCriado: undefined
+        });
+
         continue;
       }
+
+      totalErros += 1;
+
+      errors.push({
+        rowNumber: item.rowNumber,
+        clientName,
+        message: "Erro inesperado ao importar cliente."
+      });
+
+      resultados.push({
+        rowNumber: item.rowNumber,
+        status: "erro",
+        motivo: "Erro inesperado ao importar cliente.",
+        idCriado: undefined
+      });
+    }
       totalErros += 1;
       errors.push({ rowNumber: item.rowNumber, clientName, message: "Não foi possível importar cliente." });
+      resultados.push({ rowNumber: item.rowNumber, status: "erro", motivo: "Não foi possível importar cliente." });
     }
   }
 
-  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors });
+  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors, resultados });
 });
 
 router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()), async (req, res) => {
