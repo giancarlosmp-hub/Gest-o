@@ -18,7 +18,7 @@ const items: SidebarItem[] = [
   { id: "home", label: "Central do Dia", path: "/" },
   { id: "dashboard", label: "Dashboard", path: "/dashboard" },
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
-  { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
+  { id: "clientes", label: "Clientes", path: "/clientes" },
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
   { id: "agenda", label: "Agenda", path: "/agenda" },
