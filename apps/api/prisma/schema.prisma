@@ -29,6 +29,7 @@ enum ActivityType {
   envio_proposta
   visita_tecnica
   cliente_novo
+  follow_up
 }
 
 enum EventType {
@@ -110,6 +111,8 @@ model AgendaEvent {
   city          String?
   clientId      String?
   client        Client?           @relation(fields: [clientId], references: [id])
+  opportunityId String?
+  opportunity   Opportunity?      @relation(fields: [opportunityId], references: [id])
   sellerId      String
   seller        User              @relation(fields: [sellerId], references: [id])
   stops         AgendaStop[]
@@ -118,6 +121,7 @@ model AgendaEvent {
 
   @@index([sellerId, startDateTime])
   @@index([startDateTime, endDateTime])
+  @@index([opportunityId])
 }
 
 model AgendaStop {
@@ -190,6 +194,7 @@ model Opportunity {
   ownerSellerId     String
   ownerSeller       User             @relation(fields: [ownerSellerId], references: [id])
   activities        Activity[]
+  agendaEvents      AgendaEvent[]
   timelineEvents    TimelineEvent[]
   createdAt         DateTime         @default(now())
 }

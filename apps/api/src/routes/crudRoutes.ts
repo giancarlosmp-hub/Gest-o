@@ -210,7 +210,8 @@ const agendaEventCreateSchema = z.object({
   sellerId: z.string().optional(),
   clientId: z.string().optional(),
   city: z.string().optional(),
-  notes: z.string().optional()
+  notes: z.string().optional(),
+  opportunityId: z.string().optional()
 });
 
 const agendaEventUpdateSchema = z.object({
@@ -219,7 +220,8 @@ const agendaEventUpdateSchema = z.object({
   endDateTime: z.string().optional(),
   notes: z.string().optional(),
   city: z.string().optional(),
-  status: agendaEventStatusSchema.optional()
+  status: agendaEventStatusSchema.optional(),
+  opportunityId: z.string().optional()
 });
 
 const agendaStopCreateSchema = z.object({
@@ -1949,6 +1951,7 @@ const mapAgendaEvent = (agendaEvent: any) => ({
   startDateTime: agendaEvent.startDateTime.toISOString(),
   endDateTime: agendaEvent.endDateTime.toISOString(),
   clientId: agendaEvent.clientId,
+  opportunityId: agendaEvent.opportunityId,
   sellerId: agendaEvent.sellerId,
   status: resolveAgendaEventStatus(agendaEvent),
   isOverdue: resolveAgendaEventStatus(agendaEvent) === "vencido",
@@ -2037,7 +2040,8 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
       sellerId,
       clientId: req.body.clientId,
       city: req.body.city,
-      notes: req.body.notes
+      notes: req.body.notes,
+      opportunityId: req.body.opportunityId
     },
     include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
   });
@@ -2060,7 +2064,8 @@ router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpda
       ...(req.body.endDateTime ? { endDateTime: new Date(req.body.endDateTime) } : {}),
       ...(req.body.status ? { status: req.body.status } : {}),
       ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
-      ...(req.body.city !== undefined ? { city: req.body.city } : {})
+      ...(req.body.city !== undefined ? { city: req.body.city } : {}),
+      ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {})
     },
     include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
   });

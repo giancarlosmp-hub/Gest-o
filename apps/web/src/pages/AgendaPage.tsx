@@ -44,6 +44,14 @@ type FollowUpForm = {
   dueDate: string;
   notes: string;
   clientId: string;
+  opportunityId: string;
+};
+
+type QuickOpportunityForm = {
+  title: string;
+  value: string;
+  stage: "prospeccao" | "negociacao" | "proposta";
+  followUpDate: string;
 };
 
 
@@ -238,7 +246,17 @@ export default function AgendaPage() {
     type: "followup",
     dueDate: "",
     notes: "",
-    clientId: ""
+    clientId: "",
+    opportunityId: ""
+  });
+  const [isQuickOpportunityModalOpen, setIsQuickOpportunityModalOpen] = useState(false);
+  const [isQuickOpportunitySubmitting, setIsQuickOpportunitySubmitting] = useState(false);
+  const [quickOpportunityAgendaEventId, setQuickOpportunityAgendaEventId] = useState("");
+  const [quickOpportunityForm, setQuickOpportunityForm] = useState<QuickOpportunityForm>({
+    title: "",
+    value: "10000",
+    stage: "negociacao",
+    followUpDate: ""
   });
 
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
@@ -563,9 +581,27 @@ export default function AgendaPage() {
       };
       const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
       updateStopState(activeStopId, response.data);
+      const activeStop = executionStops.find((stop) => stop.id === activeStopId);
       setIsResultModalOpen(false);
       setActiveStopId("");
       toast.success("Resultado da visita salvo.");
+
+      if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
+        const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
+        await api.post("/activities", {
+          type: "follow_up",
+          dueDate: nextStepDate.toISOString(),
+          notes: `Follow-up da visita: ${activeStop?.clientName || executionEvent.title} — ${visitResultForm.summary || "Sem resumo informado"}`,
+          clientId: activeStop?.clientId || executionEvent.clientId,
+          opportunityId: executionEvent.opportunityId || undefined,
+          ownerSellerId: executionEvent.userId
+        });
+        toast.success("Follow-up criado na lista de atividades.");
+      }
+
+      if (visitResultForm.nextStep === "criar_oportunidade" && executionEvent) {
+        openQuickOpportunityModal(executionEvent, activeStop?.clientName);
+      }
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
     } finally {
@@ -643,7 +679,8 @@ export default function AgendaPage() {
       type: "followup",
       dueDate: toDateTimeInputValue(dueDate.toISOString()),
       notes: `Follow-up do evento: ${agendaEvent.title}`,
-      clientId: agendaEvent.clientId || ""
+      clientId: agendaEvent.clientId || "",
+      opportunityId: agendaEvent.opportunityId || ""
     });
     setIsFollowUpModalOpen(true);
   };
@@ -672,6 +709,7 @@ export default function AgendaPage() {
         endDateTime: end.toISOString(),
         sellerId: followUpSourceEvent.userId,
         clientId: followUpForm.clientId || undefined,
+        opportunityId: followUpForm.opportunityId || undefined,
         notes: followUpForm.notes
       });
       const created = response.data;
@@ -686,6 +724,59 @@ export default function AgendaPage() {
       toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
     } finally {
       setIsFollowUpSubmitting(false);
+    }
+  };
+
+  const openQuickOpportunityModal = (agendaEvent: AgendaEvent, stopClientName?: string | null) => {
+    const due = new Date();
+    due.setDate(due.getDate() + 2);
+    const clientLabel = stopClientName || agendaEvent.title;
+    setQuickOpportunityAgendaEventId(agendaEvent.id);
+    setQuickOpportunityForm({
+      title: `Negociação pós-visita — ${clientLabel}`,
+      value: "10000",
+      stage: "negociacao",
+      followUpDate: due.toISOString().slice(0, 10)
+    });
+    setIsQuickOpportunityModalOpen(true);
+  };
+
+  const onSubmitQuickOpportunity = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!executionEvent?.clientId || !quickOpportunityForm.title.trim() || !quickOpportunityForm.followUpDate) {
+      toast.error("Preencha os dados mínimos da oportunidade.");
+      return;
+    }
+
+    setIsQuickOpportunitySubmitting(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const opportunityResponse = await api.post("/opportunities", {
+        title: quickOpportunityForm.title.trim(),
+        value: Number(quickOpportunityForm.value || "0"),
+        stage: quickOpportunityForm.stage,
+        proposalDate: today,
+        followUpDate: quickOpportunityForm.followUpDate,
+        expectedCloseDate: quickOpportunityForm.followUpDate,
+        probability: quickOpportunityForm.stage === "prospeccao" ? 20 : quickOpportunityForm.stage === "negociacao" ? 40 : 70,
+        clientId: executionEvent.clientId,
+        ownerSellerId: executionEvent.userId
+      });
+
+      const opportunityId = String(opportunityResponse.data?.id || "");
+      if (quickOpportunityAgendaEventId && opportunityId) {
+        await api.patch(`/agenda/${quickOpportunityAgendaEventId}`, { opportunityId });
+        setEvents((current) =>
+          current.map((item) => (item.id === quickOpportunityAgendaEventId ? { ...item, opportunityId } : item))
+        );
+      }
+
+      toast.success("Oportunidade criada e vinculada ao roteiro.");
+      setIsQuickOpportunityModalOpen(false);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível criar oportunidade."));
+    } finally {
+      setIsQuickOpportunitySubmitting(false);
     }
   };
 
@@ -1432,6 +1523,16 @@ export default function AgendaPage() {
               </div>
 
               <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Oportunidade (opcional)</label>
+                <input
+                  value={followUpForm.opportunityId}
+                  onChange={(event) => setFollowUpForm((current) => ({ ...current, opportunityId: event.target.value }))}
+                  placeholder="ID da oportunidade"
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Notas</label>
                 <textarea
                   value={followUpForm.notes}
@@ -1444,6 +1545,41 @@ export default function AgendaPage() {
                 <button type="button" onClick={closeFollowUpModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
                 <button type="submit" disabled={isFollowUpSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
                   {isFollowUpSubmitting ? "Criando..." : "Criar follow-up"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isQuickOpportunityModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsQuickOpportunityModalOpen(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-slate-900">Criar oportunidade pós-visita</h3>
+            <p className="mt-1 text-sm text-slate-500">Pré-preenchida para salvar em poucos segundos.</p>
+            <form className="mt-4 space-y-3" onSubmit={onSubmitQuickOpportunity}>
+              <label className="block text-sm font-medium text-slate-700">Título
+                <input value={quickOpportunityForm.title} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+              </label>
+              <div className="grid gap-3 md:grid-cols-3">
+                <label className="block text-sm font-medium text-slate-700">Valor
+                  <input inputMode="decimal" value={quickOpportunityForm.value} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, value: event.target.value.replace(/,/g, ".").replace(/[^\d.]/g, "") }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+                <label className="block text-sm font-medium text-slate-700">Etapa
+                  <select value={quickOpportunityForm.stage} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, stage: event.target.value as QuickOpportunityForm["stage"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <option value="prospeccao">Prospecção</option>
+                    <option value="negociacao">Negociação</option>
+                    <option value="proposta">Proposta</option>
+                  </select>
+                </label>
+                <label className="block text-sm font-medium text-slate-700">Follow-up
+                  <input type="date" value={quickOpportunityForm.followUpDate} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setIsQuickOpportunityModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={isQuickOpportunitySubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+                  {isQuickOpportunitySubmitting ? "Salvando..." : "Salvar oportunidade"}
                 </button>
               </div>
             </form>
