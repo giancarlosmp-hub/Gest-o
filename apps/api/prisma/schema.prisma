@@ -64,13 +64,16 @@ model User {
 model Client {
   id             String        @id @default(cuid())
   name           String
+  nameNormalized String?
   city           String
+  cityNormalized String?
   state          String
   region         String
   potentialHa    Float?        @default(0)
   farmSizeHa     Float?        @default(0)
   clientType     ClientType    @default(PJ)
   cnpj           String?
+  cnpjNormalized String?
   segment        String?
   ownerSellerId  String
   ownerSeller    User          @relation(fields: [ownerSellerId], references: [id])

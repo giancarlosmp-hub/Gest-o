@@ -1,0 +1,4 @@
+ALTER TABLE "Client"
+  ADD COLUMN IF NOT EXISTS "nameNormalized" TEXT,
+  ADD COLUMN IF NOT EXISTS "cityNormalized" TEXT,
+  ADD COLUMN IF NOT EXISTS "cnpjNormalized" TEXT;
