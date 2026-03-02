@@ -65,7 +65,7 @@ type ClientImportErrorItem = {
 };
 
 type ClientImportAction = "update" | "skip" | "import_anyway";
-type ClientImportStatus = "new" | "duplicate" | "error";
+type ClientImportStatus = "new" | "duplicate_in_file" | "duplicate" | "error";
 
 type ClientImportSummary = {
   total: number;
@@ -110,6 +110,7 @@ type ImportValidationSummary = {
   rowResults: ImportAnalysisRow[];
   validCount: number;
   errorCount: number;
+  duplicateInFileCount: number;
 };
 
 type SheetJsLibrary = {
@@ -670,10 +671,12 @@ export default function CrudSimplePage({
     const errors: string[] = [];
     const rowResults: ImportAnalysisRow[] = [];
     let validCount = 0;
+    let duplicateInFileCount = 0;
+    const duplicateKeyToRows = new Map<string, number[]>();
 
     if (rows.length === 0) {
       errors.push("Nenhuma linha de dados válida foi encontrada.");
-      return { errors, rowResults, validCount: 0, errorCount: 0 };
+      return { errors, rowResults, validCount: 0, errorCount: 0, duplicateInFileCount: 0 };
     }
 
     if (!isSeller && canChooseOwnerSeller && !defaultOwnerSellerId && !importColumnMapping.ownerSellerId) {
@@ -702,6 +705,22 @@ export default function CrudSimplePage({
         }
       }
       if (rowErrors.length === 0) {
+        const normalizedDocument = String(row.cnpj ?? "").replace(/\D/g, "");
+        const normalizePreviewText = (value: string | undefined) =>
+          String(value ?? "")
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, " ");
+        const duplicateKey = normalizedDocument
+          ? `doc:${normalizedDocument}`
+          : `name_city_uf:${normalizePreviewText(row.name)}|${normalizePreviewText(row.city)}|${normalizePreviewText(row.state)}`;
+
+        if (!duplicateKeyToRows.has(duplicateKey)) {
+          duplicateKeyToRows.set(duplicateKey, []);
+        }
+
+        duplicateKeyToRows.get(duplicateKey)?.push(rowNumber);
+
         validCount += 1;
         rowResults.push({
           ...row,
@@ -720,11 +739,30 @@ export default function CrudSimplePage({
       });
     });
 
+    const duplicateRowNumbers = new Set<number>();
+    duplicateKeyToRows.forEach((rowNumbers) => {
+      if (rowNumbers.length > 1) {
+        rowNumbers.forEach((rowNumber) => duplicateRowNumbers.add(rowNumber));
+      }
+    });
+
+    rowResults.forEach((row) => {
+      if (row.status !== "new") return;
+      if (!duplicateRowNumbers.has(row.sourceRowNumber)) return;
+
+      row.status = "duplicate_in_file";
+      row.errorMessage = "Duplicado no arquivo: mesma chave local (CNPJ/CPF ou Nome + Cidade + UF).";
+      validCount -= 1;
+      duplicateInFileCount += 1;
+      errors.push(`Linha ${row.sourceRowNumber}: duplicado no arquivo (mesma chave local).`);
+    });
+
     return {
       errors,
       rowResults,
       validCount,
-      errorCount: rows.length - validCount
+      errorCount: rows.length - validCount,
+      duplicateInFileCount
     };
   };
 
@@ -1069,7 +1107,7 @@ export default function CrudSimplePage({
   const handleImportClients = async () => {
     if (!isImportReady || importRows.length === 0) return;
 
-    const validRows = importPreviewRows.filter((row) => row.status !== "error");
+    const validRows = importPreviewRows.filter((row) => row.status === "new");
     const ignoredByError = importPreviewRows.length - validRows.length;
 
     if (validRows.length === 0) {
@@ -1243,8 +1281,9 @@ export default function CrudSimplePage({
 
   const importCounters = useMemo(() => {
     const errorCount = importPreviewRows.filter((row) => row.status === "error").length;
-    const validCount = importPreviewRows.length - errorCount;
-    return { validCount, errorCount, totalAnalyzed: importPreviewRows.length };
+    const duplicateInFileCount = importPreviewRows.filter((row) => row.status === "duplicate_in_file").length;
+    const validCount = importPreviewRows.length - errorCount - duplicateInFileCount;
+    return { validCount, errorCount, duplicateInFileCount, totalAnalyzed: importPreviewRows.length };
   }, [importPreviewRows]);
 
   const downloadPreviewValidationReport = () => {
@@ -1253,7 +1292,11 @@ export default function CrudSimplePage({
     const escapeCsvCell = (value: string | number) => `"${String(value ?? "").replace(/\r?\n/g, " ").replace(/"/g, '""')}"`;
     const header = ["linha", "status", "motivo"];
     const rows = importPreviewRows.map((row) =>
-      [row.sourceRowNumber, row.status === "new" ? "NOVO" : "ERRO", row.errorMessage || "OK"]
+      [
+        row.sourceRowNumber,
+        row.status === "new" ? "NOVO" : row.status === "duplicate_in_file" ? "DUPLICADO NO ARQUIVO" : "ERRO",
+        row.errorMessage || "OK"
+      ]
         .map(escapeCsvCell)
         .join(";")
     );
@@ -1677,6 +1720,8 @@ export default function CrudSimplePage({
                     {" · "}
                     <span className="font-semibold text-emerald-700">{importCounters.validCount} válidas</span>
                     {" · "}
+                    <span className="font-semibold text-amber-700">{importCounters.duplicateInFileCount} duplicadas no arquivo</span>
+                    {" · "}
                     <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
                   </p>
 
@@ -1685,6 +1730,7 @@ export default function CrudSimplePage({
                       <p className="font-medium text-slate-900">Resumo da validação local</p>
                       <p>Total linhas: {importCounters.totalAnalyzed}</p>
                       <p>Total válidas: {importCounters.validCount}</p>
+                      <p>Total duplicadas no arquivo: {importCounters.duplicateInFileCount}</p>
                       <p>Total com erro: {importCounters.errorCount}</p>
                     </div>
                   ) : null}
@@ -1724,11 +1770,15 @@ export default function CrudSimplePage({
                               <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
 
                               <td className="px-3 py-2">
-                                {row.status === "new" ? "NOVO" : "ERRO"}
+                                {row.status === "new"
+                                  ? "NOVO"
+                                  : row.status === "duplicate_in_file"
+                                    ? "DUPLICADO NO ARQUIVO"
+                                    : "ERRO"}
                               </td>
 
                               <td className="px-3 py-2">
-                                {row.status === "error" ? <span className="text-rose-700">{row.errorMessage || "Erro"}</span> : "OK"}
+                                {row.status !== "new" ? <span className="text-rose-700">{row.errorMessage || "Erro"}</span> : "OK"}
                               </td>
                             </tr>
                           ))
