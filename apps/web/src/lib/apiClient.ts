@@ -1,6 +1,14 @@
 import axios from "axios";
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || "http://localhost:4000", withCredentials: true });
+const resolveApiBaseUrl = () => {
+  const configuredBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
+  if (!configuredBaseUrl) return "http://localhost:4000/api";
+
+  const normalizedBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
+  return normalizedBaseUrl.endsWith("/api") ? normalizedBaseUrl : `${normalizedBaseUrl}/api`;
+};
+
+const api = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true });
 
 let accessToken = localStorage.getItem("accessToken") || "";
 export const setAccessToken = (t: string) => { accessToken = t; localStorage.setItem("accessToken", t); };
