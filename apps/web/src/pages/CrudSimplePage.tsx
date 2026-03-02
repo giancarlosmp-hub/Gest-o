@@ -105,6 +105,13 @@ type ClientImportSimulationSummary = {
   items: ClientImportSimulationItem[];
 };
 
+type ExistsBulkResponseItem = {
+  cnpjDigits: string | null;
+  fallbackKey: string | null;
+  exists: boolean;
+  clientId: string | null;
+};
+
 type ImportValidationSummary = {
   errors: string[];
   rowResults: ImportAnalysisRow[];
@@ -781,6 +788,69 @@ export default function CrudSimplePage({
     return sanitizedPayload;
   };
 
+  const buildFallbackDuplicateKey = (row: Pick<ClientImportRow, "name" | "city" | "state">) => {
+    const normalizeText = (value?: string) =>
+      String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+
+    return `${normalizeText(row.name)}|${normalizeText(row.city)}|${String(row.state ?? "").trim().toUpperCase()}`;
+  };
+
+  const applyBackendDuplicateCheck = async (rows: ImportAnalysisRow[]) => {
+    const candidates = rows.filter((row) => row.status === "new");
+    if (candidates.length === 0) return rows;
+
+    const keys = candidates.map((row) => ({
+      cnpjDigits: String(row.cnpj ?? "").replace(/\D/g, "") || undefined,
+      fallbackKey: buildFallbackDuplicateKey(row)
+    }));
+
+    const pageSize = 500;
+    const totalPages = Math.max(1, Math.ceil(keys.length / pageSize));
+    const foundByKey = new Map<string, string>();
+
+    for (let page = 1; page <= totalPages; page += 1) {
+      const response = await api.post<{ data: ExistsBulkResponseItem[] }>("/clients/exists-bulk", {
+        keys,
+        page,
+        pageSize
+      });
+
+      const responseItems = response.data?.data ?? [];
+      responseItems.forEach((item) => {
+        if (!item.exists || !item.clientId) return;
+
+        if (item.cnpjDigits) {
+          foundByKey.set(`doc:${item.cnpjDigits}`, item.clientId);
+        }
+        if (item.fallbackKey) {
+          foundByKey.set(`fallback:${item.fallbackKey}`, item.clientId);
+        }
+      });
+    }
+
+    return rows.map((row) => {
+      if (row.status !== "new") return row;
+
+      const cnpjDigits = String(row.cnpj ?? "").replace(/\D/g, "");
+      const fallbackKey = buildFallbackDuplicateKey(row);
+      const existingClientId =
+        (cnpjDigits ? foundByKey.get(`doc:${cnpjDigits}`) : undefined) ?? foundByKey.get(`fallback:${fallbackKey}`);
+
+      if (!existingClientId) return row;
+
+      return {
+        ...row,
+        status: "duplicate" as const,
+        existingClientId,
+        action: row.action ?? "skip",
+        errorMessage: "JÁ EXISTE NO SISTEMA"
+      };
+    });
+  };
+
   const runImportValidation = async (
     rows: Record<string, unknown>[],
     mapping: Partial<Record<ClientImportFieldKey, string>>,
@@ -797,7 +867,17 @@ export default function CrudSimplePage({
     setImportSimulationSummary(null);
     setDidRunLocalValidation(false);
 
-    setImportPreviewRows(validation.rowResults);
+    let previewRows = validation.rowResults;
+
+    if (validation.rowResults.some((row) => row.status === "new")) {
+      try {
+        previewRows = await applyBackendDuplicateCheck(validation.rowResults);
+      } catch {
+        toast.warning("Não foi possível checar duplicados no sistema. O preview exibirá apenas validação local.");
+      }
+    }
+
+    setImportPreviewRows(previewRows);
 
     if (validation.errors.length > 0) {
       toast.error("Foram encontrados erros de validação na planilha.");
@@ -1107,7 +1187,9 @@ export default function CrudSimplePage({
   const handleImportClients = async () => {
     if (!isImportReady || importRows.length === 0) return;
 
-    const validRows = importPreviewRows.filter((row) => row.status === "new");
+    const validRows = importPreviewRows.filter(
+      (row) => row.status === "new" || (row.status === "duplicate" && row.action === "import_anyway")
+    );
     const ignoredByError = importPreviewRows.length - validRows.length;
 
     if (validRows.length === 0) {
@@ -1282,9 +1364,18 @@ export default function CrudSimplePage({
   const importCounters = useMemo(() => {
     const errorCount = importPreviewRows.filter((row) => row.status === "error").length;
     const duplicateInFileCount = importPreviewRows.filter((row) => row.status === "duplicate_in_file").length;
-    const validCount = importPreviewRows.length - errorCount - duplicateInFileCount;
-    return { validCount, errorCount, duplicateInFileCount, totalAnalyzed: importPreviewRows.length };
+    const duplicateInSystemCount = importPreviewRows.filter((row) => row.status === "duplicate").length;
+    const validCount = importPreviewRows.filter(
+      (row) => row.status === "new" || (row.status === "duplicate" && row.action === "import_anyway")
+    ).length;
+    return { validCount, errorCount, duplicateInFileCount, duplicateInSystemCount, totalAnalyzed: importPreviewRows.length };
   }, [importPreviewRows]);
+
+  const handleDuplicateActionChange = (rowNumber: number, action: ClientImportAction) => {
+    setImportPreviewRows((previous) =>
+      previous.map((row) => (row.sourceRowNumber === rowNumber && row.status === "duplicate" ? { ...row, action } : row))
+    );
+  };
 
   const downloadPreviewValidationReport = () => {
     if (importPreviewRows.length === 0) return;
@@ -1294,7 +1385,13 @@ export default function CrudSimplePage({
     const rows = importPreviewRows.map((row) =>
       [
         row.sourceRowNumber,
-        row.status === "new" ? "NOVO" : row.status === "duplicate_in_file" ? "DUPLICADO NO ARQUIVO" : "ERRO",
+        row.status === "new"
+          ? "NOVO"
+          : row.status === "duplicate_in_file"
+            ? "DUPLICADO NO ARQUIVO"
+            : row.status === "duplicate"
+              ? "JÁ EXISTE NO SISTEMA"
+              : "ERRO",
         row.errorMessage || "OK"
       ]
         .map(escapeCsvCell)
@@ -1722,6 +1819,8 @@ export default function CrudSimplePage({
                     {" · "}
                     <span className="font-semibold text-amber-700">{importCounters.duplicateInFileCount} duplicadas no arquivo</span>
                     {" · "}
+                    <span className="font-semibold text-orange-700">{importCounters.duplicateInSystemCount} já existentes no sistema</span>
+                    {" · "}
                     <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
                   </p>
 
@@ -1731,6 +1830,7 @@ export default function CrudSimplePage({
                       <p>Total linhas: {importCounters.totalAnalyzed}</p>
                       <p>Total válidas: {importCounters.validCount}</p>
                       <p>Total duplicadas no arquivo: {importCounters.duplicateInFileCount}</p>
+                      <p>Total já existentes no sistema: {importCounters.duplicateInSystemCount}</p>
                       <p>Total com erro: {importCounters.errorCount}</p>
                     </div>
                   ) : null}
@@ -1774,11 +1874,31 @@ export default function CrudSimplePage({
                                   ? "NOVO"
                                   : row.status === "duplicate_in_file"
                                     ? "DUPLICADO NO ARQUIVO"
-                                    : "ERRO"}
+                                    : row.status === "duplicate"
+                                      ? "JÁ EXISTE NO SISTEMA"
+                                      : "ERRO"}
                               </td>
 
                               <td className="px-3 py-2">
-                                {row.status !== "new" ? <span className="text-rose-700">{row.errorMessage || "Erro"}</span> : "OK"}
+                                {row.status === "duplicate" ? (
+                                  <div className="flex flex-col gap-2">
+                                    <span className="text-orange-700">{row.errorMessage || "JÁ EXISTE NO SISTEMA"}</span>
+                                    <select
+                                      value={row.action || "skip"}
+                                      onChange={(event) =>
+                                        handleDuplicateActionChange(row.sourceRowNumber, event.target.value as ClientImportAction)
+                                      }
+                                      className="w-full rounded-md border border-slate-300 p-1 text-xs text-slate-800"
+                                    >
+                                      <option value="skip">PULAR</option>
+                                      <option value="import_anyway">IMPORTAR MESMO ASSIM</option>
+                                    </select>
+                                  </div>
+                                ) : row.status !== "new" ? (
+                                  <span className="text-rose-700">{row.errorMessage || "Erro"}</span>
+                                ) : (
+                                  "OK"
+                                )}
                               </td>
                             </tr>
                           ))

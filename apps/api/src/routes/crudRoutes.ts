@@ -198,6 +198,41 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
   return { [field]: direction };
 };
 
+const clientExistsBulkItemSchema = z
+  .object({
+    cnpjDigits: z.string().trim().optional(),
+    fallbackKey: z.string().trim().optional()
+  })
+  .refine((value) => Boolean(value.cnpjDigits || value.fallbackKey), {
+    message: "Informe cnpjDigits ou fallbackKey."
+  });
+
+const clientExistsBulkRequestSchema = z.object({
+  keys: z.array(clientExistsBulkItemSchema).max(5000),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().positive().max(500).optional()
+});
+
+const buildFallbackKey = (name?: string | null, city?: string | null, state?: string | null) => {
+  const nameNormalized = normalizeText(name);
+  const cityNormalized = normalizeText(city);
+  const stateNormalized = normalizeState(state);
+  return `${nameNormalized}|${cityNormalized}|${stateNormalized}`;
+};
+
+const paginateArray = <T>(items: T[], page: number, pageSize: number) => {
+  const total = items.length;
+  const start = (page - 1) * pageSize;
+  const end = start + pageSize;
+  return {
+    data: items.slice(start, end),
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
+};
+
 // ==============================
 // ✅ IMPORTAÇÃO DE CLIENTES (dedup + preview + ações)
 // ==============================
@@ -752,6 +787,111 @@ router.get("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
 
   if (!data) return res.status(404).json({ message: "Não encontrado" });
   res.json(data);
+});
+
+router.post("/clients/exists-bulk", async (req, res) => {
+  const parsed = clientExistsBulkRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido para verificação em lote." });
+  }
+
+  const page = parsed.data.page ?? 1;
+  const pageSize = parsed.data.pageSize ?? 500;
+
+  const normalizedKeys = parsed.data.keys.map((key) => ({
+    cnpjDigits: normalizeCnpj(key.cnpjDigits),
+    fallbackKey: key.fallbackKey ? normalizeText(key.fallbackKey).replace(/\s*\|\s*/g, "|") : ""
+  }));
+
+  const paginated = paginateArray(normalizedKeys, page, pageSize);
+  const pageKeys = paginated.data;
+
+  if (pageKeys.length === 0) {
+    return res.json({ ...paginated, data: [] });
+  }
+
+  const cnpjSet = new Set<string>();
+  const fallbackSet = new Set<string>();
+
+  pageKeys.forEach((key) => {
+    if (key.cnpjDigits) cnpjSet.add(key.cnpjDigits);
+    if (key.fallbackKey) fallbackSet.add(key.fallbackKey);
+  });
+
+  const fallbackTuples = Array.from(fallbackSet).map((key) => {
+    const [nameNormalized = "", cityNormalized = "", state = ""] = key.split("|");
+    return { nameNormalized, cityNormalized, state: normalizeState(state) };
+  });
+
+  const fallbackOrChunks: Prisma.ClientWhereInput[] = [];
+  const fallbackChunkSize = 100;
+  for (let index = 0; index < fallbackTuples.length; index += fallbackChunkSize) {
+    const chunk = fallbackTuples.slice(index, index + fallbackChunkSize);
+    fallbackOrChunks.push({
+      OR: chunk.map((tuple) => ({
+        nameNormalized: tuple.nameNormalized,
+        cityNormalized: tuple.cityNormalized,
+        state: tuple.state
+      }))
+    });
+  }
+
+  const whereOr: Prisma.ClientWhereInput[] = [];
+  if (cnpjSet.size > 0) {
+    whereOr.push({
+      OR: [{ cnpjNormalized: { in: Array.from(cnpjSet) } }, { cnpj: { in: Array.from(cnpjSet) } }]
+    });
+  }
+  whereOr.push(...fallbackOrChunks);
+
+  const existingClients = whereOr.length
+    ? await prisma.client.findMany({
+        where: {
+          ...sellerWhere(req),
+          OR: whereOr
+        },
+        select: {
+          id: true,
+          cnpj: true,
+          cnpjNormalized: true,
+          name: true,
+          city: true,
+          state: true,
+          nameNormalized: true,
+          cityNormalized: true
+        }
+      })
+    : [];
+
+  const byCnpj = new Map<string, string>();
+  const byFallback = new Map<string, string>();
+
+  existingClients.forEach((client) => {
+    const normalizedCnpj = client.cnpjNormalized || normalizeCnpj(client.cnpj);
+    if (normalizedCnpj) byCnpj.set(normalizedCnpj, client.id);
+
+    const fallbackKey = buildFallbackKey(
+      client.nameNormalized || client.name,
+      client.cityNormalized || client.city,
+      client.state
+    );
+    byFallback.set(fallbackKey, client.id);
+  });
+
+  const data = pageKeys.map((key) => {
+    const matchedByCnpj = key.cnpjDigits ? byCnpj.get(key.cnpjDigits) : undefined;
+    const matchedByFallback = key.fallbackKey ? byFallback.get(key.fallbackKey) : undefined;
+    const clientId = matchedByCnpj || matchedByFallback || null;
+
+    return {
+      cnpjDigits: key.cnpjDigits || null,
+      fallbackKey: key.fallbackKey || null,
+      exists: Boolean(clientId),
+      clientId
+    };
+  });
+
+  res.json({ ...paginated, data });
 });
 
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
