@@ -206,6 +206,93 @@ const normalizeDocumentDigits = (value?: string | null) => String(value ?? "").r
 const normalizeLooseText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
 const normalizeState = (value?: string | null) => String(value ?? "").trim().toUpperCase();
 
+const DUPLICATE_CLIENT_MESSAGE = "Cliente já cadastrado no sistema.";
+
+class DuplicateClientError extends Error {
+  statusCode: number;
+
+  constructor(message = DUPLICATE_CLIENT_MESSAGE) {
+    super(message);
+    this.name = "DuplicateClientError";
+    this.statusCode = 409;
+  }
+}
+
+const normalizeClientForComparison = (client: {
+  name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  cnpj?: string | null;
+}) => ({
+  nameNormalized: normalizeLooseText(client.name),
+  cityNormalized: normalizeLooseText(client.city),
+  state: normalizeState(client.state),
+  cnpjNormalized: normalizeDocumentDigits(client.cnpj)
+});
+
+const ensureClientIsNotDuplicate = async ({
+  candidate,
+  scope,
+  ignoreClientId
+}: {
+  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null };
+  scope: Prisma.ClientWhereInput;
+  ignoreClientId?: string;
+}) => {
+  const normalized = normalizeClientForComparison(candidate);
+  const existingClients = await prisma.client.findMany({
+    where: {
+      ...scope,
+      ...(ignoreClientId ? { id: { not: ignoreClientId } } : {})
+    },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      state: true,
+      cnpj: true,
+      nameNormalized: true,
+      cityNormalized: true,
+      cnpjNormalized: true
+    }
+  });
+
+  if (normalized.cnpjNormalized) {
+    const existingByCnpj = existingClients.find((existing) => {
+      const existingCnpjNormalized = existing.cnpjNormalized || normalizeDocumentDigits(existing.cnpj);
+      return existingCnpjNormalized === normalized.cnpjNormalized;
+    });
+
+    if (existingByCnpj) throw new DuplicateClientError();
+    return;
+  }
+
+  const existingByIdentity = existingClients.find((existing) => {
+    const existingNameNormalized = existing.nameNormalized || normalizeLooseText(existing.name);
+    const existingCityNormalized = existing.cityNormalized || normalizeLooseText(existing.city);
+    const existingStateNormalized = normalizeState(existing.state);
+
+    return (
+      existingNameNormalized === normalized.nameNormalized &&
+      existingCityNormalized === normalized.cityNormalized &&
+      existingStateNormalized === normalized.state
+    );
+  });
+
+  if (existingByIdentity) throw new DuplicateClientError();
+};
+
+const withClientNormalizedFields = <T extends { name?: string; city?: string; state?: string; cnpj?: string | null }>(payload: T) => {
+  const normalized = normalizeClientForComparison(payload);
+  return {
+    ...payload,
+    state: normalized.state,
+    nameNormalized: normalized.nameNormalized,
+    cityNormalized: normalized.cityNormalized,
+    cnpjNormalized: normalized.cnpjNormalized || null
+  };
+};
+
 const clientImportActionSchema = z.enum(["update", "skip", "import_anyway"]).optional();
 
 const clientImportRowSchema = clientSchema.extend({
@@ -668,15 +755,25 @@ router.get("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
 });
 
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
-  const ownerSellerId =
-    req.user!.role === "vendedor"
-      ? req.user!.id
-      : req.user!.role === "gerente" || req.user!.role === "diretor"
-        ? resolveOwnerId(req, req.body.ownerSellerId)
-        : resolveOwnerId(req);
+  try {
+    const ownerSellerId =
+      req.user!.role === "vendedor"
+        ? req.user!.id
+        : req.user!.role === "gerente" || req.user!.role === "diretor"
+          ? resolveOwnerId(req, req.body.ownerSellerId)
+          : resolveOwnerId(req);
 
-  const data = await prisma.client.create({ data: { ...req.body, ownerSellerId } });
-  res.status(201).json(data);
+    const payload = withClientNormalizedFields({ ...req.body, ownerSellerId });
+    await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
+
+    const data = await prisma.client.create({ data: payload });
+    res.status(201).json(data);
+  } catch (error) {
+    if (error instanceof DuplicateClientError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    throw error;
+  }
 });
 
 // ✅ Preview (para UI: novos/duplicados/erros)
@@ -769,7 +866,34 @@ router.post("/clients/import", async (req, res) => {
         }
 
         try {
-          await prisma.client.update({ where: { id: item.existingClientId }, data: item.payload });
+          const existingClient = await prisma.client.findUnique({ where: { id: item.existingClientId } });
+          if (!existingClient) throw new Error("existing_client_not_found");
+
+          const mergedClientForValidation = {
+            name: item.payload.name ?? existingClient.name,
+            city: item.payload.city ?? existingClient.city,
+            state: item.payload.state ?? existingClient.state,
+            cnpj: item.payload.cnpj ?? existingClient.cnpj
+          };
+
+          await ensureClientIsNotDuplicate({
+            candidate: mergedClientForValidation,
+            scope: sellerWhere(req),
+            ignoreClientId: item.existingClientId
+          });
+
+          const normalized = normalizeClientForComparison(mergedClientForValidation);
+
+          await prisma.client.update({
+            where: { id: item.existingClientId },
+            data: {
+              ...item.payload,
+              state: normalized.state,
+              nameNormalized: normalized.nameNormalized,
+              cityNormalized: normalized.cityNormalized,
+              cnpjNormalized: normalized.cnpjNormalized || null
+            }
+          });
           totalAtualizados += 1;
         } catch {
           totalErros += 1;
@@ -797,7 +921,9 @@ router.post("/clients/import", async (req, res) => {
     }
 
     try {
-      await prisma.client.create({ data: item.payload });
+      const payload = withClientNormalizedFields(item.payload);
+      await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
+      await prisma.client.create({ data: payload });
       totalImportados += 1;
     } catch {
       totalErros += 1;
@@ -814,8 +940,40 @@ router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
     return res.status(403).json({ message: "Sem permissão" });
   }
-  const data = await prisma.client.update({ where: { id: req.params.id }, data: req.body });
-  res.json(data);
+
+  try {
+    const mergedClientForValidation = {
+      name: req.body.name ?? old.name,
+      city: req.body.city ?? old.city,
+      state: req.body.state ?? old.state,
+      cnpj: req.body.cnpj ?? old.cnpj
+    };
+
+    const normalized = normalizeClientForComparison(mergedClientForValidation);
+
+    await ensureClientIsNotDuplicate({
+      candidate: mergedClientForValidation,
+      scope: sellerWhere(req),
+      ignoreClientId: old.id
+    });
+
+    const data = await prisma.client.update({
+      where: { id: req.params.id },
+      data: {
+        ...req.body,
+        state: normalized.state,
+        nameNormalized: normalized.nameNormalized,
+        cityNormalized: normalized.cityNormalized,
+        cnpjNormalized: normalized.cnpjNormalized || null
+      }
+    });
+    res.json(data);
+  } catch (error) {
+    if (error instanceof DuplicateClientError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    throw error;
+  }
 });
 
 router.delete("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
@@ -945,34 +1103,72 @@ router.get("/companies", async (req, res) => {
 });
 
 router.post("/companies", validateBody(companySchema), async (req, res) => {
-  const data = await prisma.client.create({
-    data: {
+  try {
+    const payload = withClientNormalizedFields({
       name: req.body.name,
       city: "Não informado",
       state: "NI",
       region: req.user?.region || "Nacional",
-      clientType: "PJ",
+      clientType: ClientType.PJ,
       cnpj: req.body.cnpj,
       segment: req.body.segment,
       ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId)
-    }
-  });
+    });
 
-  res.status(201).json(data);
+    await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
+
+    const data = await prisma.client.create({ data: payload });
+
+    res.status(201).json(data);
+  } catch (error) {
+    if (error instanceof DuplicateClientError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    throw error;
+  }
 });
 
 router.put("/companies/:id", validateBody(companySchema.partial()), async (req, res) => {
-  const data = await prisma.client.update({
-    where: { id: req.params.id },
-    data: {
-      ...(req.body.name ? { name: req.body.name } : {}),
-      ...(req.body.cnpj !== undefined ? { cnpj: req.body.cnpj } : {}),
-      ...(req.body.segment !== undefined ? { segment: req.body.segment } : {}),
-      clientType: "PJ"
-    }
-  });
+  const old = await prisma.client.findUnique({ where: { id: req.params.id } });
+  if (!old) return res.status(404).json({ message: "Não encontrado" });
 
-  res.json(data);
+  try {
+    const mergedClientForValidation = {
+      name: req.body.name ?? old.name,
+      city: old.city,
+      state: old.state,
+      cnpj: req.body.cnpj ?? old.cnpj
+    };
+
+    await ensureClientIsNotDuplicate({
+      candidate: mergedClientForValidation,
+      scope: sellerWhere(req),
+      ignoreClientId: old.id
+    });
+
+    const normalized = normalizeClientForComparison(mergedClientForValidation);
+
+    const data = await prisma.client.update({
+      where: { id: req.params.id },
+      data: {
+        ...(req.body.name ? { name: req.body.name } : {}),
+        ...(req.body.cnpj !== undefined ? { cnpj: req.body.cnpj } : {}),
+        ...(req.body.segment !== undefined ? { segment: req.body.segment } : {}),
+        clientType: ClientType.PJ,
+        state: normalized.state,
+        nameNormalized: normalized.nameNormalized,
+        cityNormalized: normalized.cityNormalized,
+        cnpjNormalized: normalized.cnpjNormalized || null
+      }
+    });
+
+    res.json(data);
+  } catch (error) {
+    if (error instanceof DuplicateClientError) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    throw error;
+  }
 });
 
 router.delete("/companies/:id", async (req, res) => {
