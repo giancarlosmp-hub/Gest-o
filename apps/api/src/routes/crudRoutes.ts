@@ -234,6 +234,14 @@ const agendaStopReorderSchema = z.object({
   stopIds: z.array(z.string()).min(1)
 });
 
+const agendaStopResultSchema = z.object({
+  status: z.enum(["realizada", "nao_realizada"]),
+  reason: z.enum(["cliente_ausente", "chuva", "estrada", "reagendar", "outro"]).optional(),
+  summary: z.string().max(240).optional(),
+  nextStep: z.enum(["criar_followup", "criar_oportunidade", "reagendar"]).optional(),
+  nextStepDate: z.string().optional()
+});
+
 const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationInput => {
   if (!sortValue) return { createdAt: "desc" };
 
@@ -1949,7 +1957,12 @@ const mapAgendaEvent = (agendaEvent: any) => ({
     plannedTime: stop.plannedTime ? stop.plannedTime.toISOString() : null,
     notes: stop.notes,
     arrivedAt: stop.arrivedAt ? stop.arrivedAt.toISOString() : null,
-    completedAt: stop.completedAt ? stop.completedAt.toISOString() : null
+    completedAt: stop.completedAt ? stop.completedAt.toISOString() : null,
+    resultStatus: stop.resultStatus,
+    resultReason: stop.resultReason,
+    resultSummary: stop.resultSummary,
+    nextStep: stop.nextStep,
+    nextStepDate: stop.nextStepDate ? stop.nextStepDate.toISOString() : null
   }))
 });
 
@@ -2105,6 +2118,60 @@ router.patch("/agenda/events/:id/stops/reorder", validateBody(agendaStopReorderS
       notes: stop.notes
     }))
   );
+});
+
+router.patch(["/agenda-events/:id/check-in", "/agenda/events/:id/check-in"], async (req, res) => {
+  const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
+  if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
+  if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  const updated = await prisma.agendaStop.update({ where: { id: req.params.id }, data: { arrivedAt: new Date() } });
+  return res.json({ id: updated.id, arrivedAt: updated.arrivedAt?.toISOString() || null });
+});
+
+router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], async (req, res) => {
+  const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
+  if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
+  if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  const updated = await prisma.agendaStop.update({ where: { id: req.params.id }, data: { completedAt: new Date() } });
+  return res.json({ id: updated.id, completedAt: updated.completedAt?.toISOString() || null });
+});
+
+router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validateBody(agendaStopResultSchema), async (req, res) => {
+  const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
+  if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
+  if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  if (req.body.status === "nao_realizada" && !req.body.reason) {
+    return res.status(400).json({ message: "Motivo é obrigatório quando a visita não é realizada." });
+  }
+
+  const updated = await prisma.agendaStop.update({
+    where: { id: req.params.id },
+    data: {
+      resultStatus: req.body.status,
+      resultReason: req.body.reason,
+      resultSummary: req.body.summary,
+      nextStep: req.body.nextStep,
+      nextStepDate: req.body.nextStepDate ? new Date(req.body.nextStepDate) : null
+    }
+  });
+
+  return res.json({
+    id: updated.id,
+    resultStatus: updated.resultStatus,
+    resultReason: updated.resultReason,
+    resultSummary: updated.resultSummary,
+    nextStep: updated.nextStep,
+    nextStepDate: updated.nextStepDate ? updated.nextStepDate.toISOString() : null
+  });
 });
 
 

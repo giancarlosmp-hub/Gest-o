@@ -39,4 +39,9 @@ export type AgendaStop = {
   notes?: string | null;
   arrivedAt?: string | null;
   completedAt?: string | null;
+  resultStatus?: "realizada" | "nao_realizada" | null;
+  resultReason?: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro" | null;
+  resultSummary?: string | null;
+  nextStep?: "criar_followup" | "criar_oportunidade" | "reagendar" | null;
+  nextStepDate?: string | null;
 };

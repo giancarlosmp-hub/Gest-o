@@ -133,6 +133,11 @@ model AgendaStop {
   notes         String?
   arrivedAt     DateTime?
   completedAt   DateTime?
+  resultStatus  String?
+  resultReason  String?
+  resultSummary String?
+  nextStep      String?
+  nextStepDate  DateTime?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
