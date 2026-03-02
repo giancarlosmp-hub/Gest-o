@@ -131,8 +131,14 @@ model AgendaStop {
   address       String?
   plannedTime   DateTime?
   notes         String?
-  arrivedAt     DateTime?
-  completedAt   DateTime?
+  checkInAt       DateTime?
+  checkInLat      Float?
+  checkInLng      Float?
+  checkInAccuracy Float?
+  checkOutAt       DateTime?
+  checkOutLat      Float?
+  checkOutLng      Float?
+  checkOutAccuracy Float?
   resultStatus  String?
   resultReason  String?
   resultSummary String?

@@ -1,0 +1,13 @@
+ALTER TABLE "AgendaStop"
+  RENAME COLUMN "arrivedAt" TO "checkInAt";
+
+ALTER TABLE "AgendaStop"
+  RENAME COLUMN "completedAt" TO "checkOutAt";
+
+ALTER TABLE "AgendaStop"
+  ADD COLUMN "checkInLat" DOUBLE PRECISION,
+  ADD COLUMN "checkInLng" DOUBLE PRECISION,
+  ADD COLUMN "checkInAccuracy" DOUBLE PRECISION,
+  ADD COLUMN "checkOutLat" DOUBLE PRECISION,
+  ADD COLUMN "checkOutLng" DOUBLE PRECISION,
+  ADD COLUMN "checkOutAccuracy" DOUBLE PRECISION;

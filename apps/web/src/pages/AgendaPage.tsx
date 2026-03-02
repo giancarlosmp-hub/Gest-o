@@ -154,6 +154,42 @@ function formatDateTime(value: string) {
   });
 }
 
+
+function formatTime(value: string) {
+  return new Date(value).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+type StopGeolocationPayload = {
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
+  timestamp?: string;
+};
+
+function getCurrentPositionOptional(timeoutMs = 5000): Promise<StopGeolocationPayload> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return Promise.resolve({});
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: new Date(position.timestamp).toISOString()
+        });
+      },
+      () => resolve({}),
+      { timeout: timeoutMs, maximumAge: 0, enableHighAccuracy: true }
+    );
+  });
+}
+
 function getInitialEvents(): AgendaEvent[] {
   const now = new Date();
   return [
@@ -373,7 +409,11 @@ export default function AgendaPage() {
             isOverdue: Boolean(item.isOverdue),
             city: item.city ? String(item.city) : undefined,
             notes: item.notes ? String(item.notes) : null,
-            stops: Array.isArray(item.stops) ? item.stops : []
+            stops: Array.isArray(item.stops) ? item.stops.map((stop: any) => ({
+            ...stop,
+            checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
+            checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
+          })) : []
           }))
           .filter((item: AgendaEvent) => item.userId);
 
@@ -452,8 +492,8 @@ export default function AgendaPage() {
   }, [executionEventId, routeEvents]);
 
   const executionStops = executionEvent?.stops || [];
-  const completedStops = executionStops.filter((stop) => stop.completedAt).length;
-  const nextStop = executionStops.find((stop) => !stop.completedAt) || null;
+  const completedStops = executionStops.filter((stop) => stop.checkOutAt).length;
+  const nextStop = executionStops.find((stop) => !stop.checkOutAt) || null;
   const lateMinutes = nextStop?.plannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStop.plannedTime).getTime()) / 60000)) : 0;
 
   const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
@@ -468,8 +508,14 @@ export default function AgendaPage() {
   const onCheckInStop = async (stopId: string) => {
     setIsExecutionSubmitting(true);
     try {
-      const response = await api.patch(`/agenda-events/${stopId}/check-in`);
-      updateStopState(stopId, { arrivedAt: response.data?.arrivedAt || new Date().toISOString() });
+      const geolocation = await getCurrentPositionOptional(5000);
+      const response = await api.patch(`/agenda-events/${stopId}/check-in`, geolocation);
+      updateStopState(stopId, {
+        checkInAt: response.data?.checkInAt || new Date().toISOString(),
+        checkInLat: response.data?.checkInLat ?? null,
+        checkInLng: response.data?.checkInLng ?? null,
+        checkInAccuracy: response.data?.checkInAccuracy ?? null
+      });
       toast.success("Parada iniciada.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível iniciar a parada."));
@@ -481,8 +527,14 @@ export default function AgendaPage() {
   const onCheckOutStop = async (stopId: string) => {
     setIsExecutionSubmitting(true);
     try {
-      const response = await api.patch(`/agenda-events/${stopId}/check-out`);
-      updateStopState(stopId, { completedAt: response.data?.completedAt || new Date().toISOString() });
+      const geolocation = await getCurrentPositionOptional(5000);
+      const response = await api.patch(`/agenda-events/${stopId}/check-out`, geolocation);
+      updateStopState(stopId, {
+        checkOutAt: response.data?.checkOutAt || new Date().toISOString(),
+        checkOutLat: response.data?.checkOutLat ?? null,
+        checkOutLng: response.data?.checkOutLng ?? null,
+        checkOutAccuracy: response.data?.checkOutAccuracy ?? null
+      });
       setActiveStopId(stopId);
       setIsResultModalOpen(true);
     } catch (error) {
@@ -545,7 +597,11 @@ export default function AgendaPage() {
           isOverdue: Boolean(item.isOverdue),
           city: item.city ? String(item.city) : undefined,
           notes: item.notes ? String(item.notes) : null,
-          stops: Array.isArray(item.stops) ? item.stops : []
+          stops: Array.isArray(item.stops) ? item.stops.map((stop: any) => ({
+            ...stop,
+            checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
+            checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
+          })) : []
         }))
       );
     } catch {
@@ -1010,12 +1066,20 @@ export default function AgendaPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-900">#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</p>
                   <div className="flex items-center gap-2">
-                    <button type="button" disabled={Boolean(stop.arrivedAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
-                    <button type="button" disabled={!stop.arrivedAt || Boolean(stop.completedAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
+                    <button type="button" disabled={Boolean(stop.checkInAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
+                    <button type="button" disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
                   </div>
                 </div>
                 <p className="mt-1 text-xs text-slate-600">
-                  {stop.arrivedAt ? `Check-in: ${formatDateTime(stop.arrivedAt)}` : "Check-in pendente"} · {stop.completedAt ? `Check-out: ${formatDateTime(stop.completedAt)}` : "Check-out pendente"}
+                  <span className="inline-flex items-center gap-1">
+                    {stop.checkInAt ? `Check-in ${formatTime(stop.checkInAt)}` : "Check-in pendente"}
+                    {stop.checkInLat != null && stop.checkInLng != null ? <span title="Local registrado">📍</span> : null}
+                  </span>{" "}
+                  ·{" "}
+                  <span className="inline-flex items-center gap-1">
+                    {stop.checkOutAt ? `Check-out ${formatTime(stop.checkOutAt)}` : "Check-out pendente"}
+                    {stop.checkOutLat != null && stop.checkOutLng != null ? <span title="Local registrado">📍</span> : null}
+                  </span>
                 </p>
                 {stop.resultStatus ? <p className="mt-1 text-xs text-slate-600">Resultado: {stop.resultStatus === "realizada" ? "Realizada" : "Não realizada"}</p> : null}
               </div>
