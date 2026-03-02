@@ -21,7 +21,6 @@ const items: SidebarItem[] = [
   { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
-  { id: "agenda", label: "Agenda", path: "/agenda" },
   { id: "relatorios", label: "Relatórios", path: "/relatórios" },
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
