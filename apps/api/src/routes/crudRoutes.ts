@@ -1042,8 +1042,8 @@ router.post(
       data: {
         ...req.body,
         clientId: req.params.id,
-        ownerSellerId: resolveOwnerId(req)
-      }
+        ownerSellerId: resolveOwnerId(req),
+      },
     });
 
     res.status(201).json(data);
