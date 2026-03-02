@@ -20,6 +20,7 @@ import {
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
+import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType } from "@prisma/client";
@@ -202,10 +203,6 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
 // ✅ IMPORTAÇÃO DE CLIENTES (dedup + preview + ações)
 // ==============================
 
-const normalizeDocumentDigits = (value?: string | null) => String(value ?? "").replace(/\D/g, "");
-const normalizeLooseText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
-const normalizeState = (value?: string | null) => String(value ?? "").trim().toUpperCase();
-
 const DUPLICATE_CLIENT_MESSAGE = "Cliente já cadastrado no sistema.";
 
 class DuplicateClientError extends Error {
@@ -224,10 +221,10 @@ const normalizeClientForComparison = (client: {
   state?: string | null;
   cnpj?: string | null;
 }) => ({
-  nameNormalized: normalizeLooseText(client.name),
-  cityNormalized: normalizeLooseText(client.city),
+  nameNormalized: normalizeText(client.name),
+  cityNormalized: normalizeText(client.city),
   state: normalizeState(client.state),
-  cnpjNormalized: normalizeDocumentDigits(client.cnpj)
+  cnpjNormalized: normalizeCnpj(client.cnpj)
 });
 
 const ensureClientIsNotDuplicate = async ({
@@ -259,7 +256,7 @@ const ensureClientIsNotDuplicate = async ({
 
   if (normalized.cnpjNormalized) {
     const existingByCnpj = existingClients.find((existing) => {
-      const existingCnpjNormalized = existing.cnpjNormalized || normalizeDocumentDigits(existing.cnpj);
+      const existingCnpjNormalized = existing.cnpjNormalized || normalizeCnpj(existing.cnpj);
       return existingCnpjNormalized === normalized.cnpjNormalized;
     });
 
@@ -268,8 +265,8 @@ const ensureClientIsNotDuplicate = async ({
   }
 
   const existingByIdentity = existingClients.find((existing) => {
-    const existingNameNormalized = existing.nameNormalized || normalizeLooseText(existing.name);
-    const existingCityNormalized = existing.cityNormalized || normalizeLooseText(existing.city);
+    const existingNameNormalized = existing.nameNormalized || normalizeText(existing.name);
+    const existingCityNormalized = existing.cityNormalized || normalizeText(existing.city);
     const existingStateNormalized = normalizeState(existing.state);
 
     return (
@@ -336,10 +333,10 @@ type ImportPreviewItem =
     };
 
 const buildDuplicateFingerprint = (payload: { cnpj?: string | null; name?: string | null; city?: string | null; state?: string | null }) => {
-  const doc = normalizeDocumentDigits(payload.cnpj);
+  const doc = normalizeCnpj(payload.cnpj);
   if (doc) return `doc:${doc}`;
-  const name = normalizeLooseText(payload.name);
-  const city = normalizeLooseText(payload.city);
+  const name = normalizeText(payload.name);
+  const city = normalizeText(payload.city);
   const uf = normalizeState(payload.state);
   return `n:${name}|c:${city}|s:${uf}`;
 };
@@ -358,7 +355,7 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
   const existingByFingerprint = new Map<string, string>();
 
   existingClients.forEach((c) => {
-    const doc = normalizeDocumentDigits(c.cnpj);
+    const doc = normalizeCnpj(c.cnpj);
     if (doc) existingByDoc.set(doc, c.id);
 
     const fp = buildDuplicateFingerprint({
@@ -416,7 +413,7 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
       };
     }
 
-    const doc = normalizeDocumentDigits(p.payload.cnpj);
+    const doc = normalizeCnpj(p.payload.cnpj);
     if (doc) {
       const existingId = existingByDoc.get(doc);
       if (existingId) {
