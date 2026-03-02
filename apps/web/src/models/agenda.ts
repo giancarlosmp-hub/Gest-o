@@ -37,8 +37,14 @@ export type AgendaStop = {
   address?: string | null;
   plannedTime?: string | null;
   notes?: string | null;
-  arrivedAt?: string | null;
-  completedAt?: string | null;
+  checkInAt?: string | null;
+  checkInLat?: number | null;
+  checkInLng?: number | null;
+  checkInAccuracy?: number | null;
+  checkOutAt?: string | null;
+  checkOutLat?: number | null;
+  checkOutLng?: number | null;
+  checkOutAccuracy?: number | null;
   resultStatus?: "realizada" | "nao_realizada" | null;
   resultReason?: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro" | null;
   resultSummary?: string | null;

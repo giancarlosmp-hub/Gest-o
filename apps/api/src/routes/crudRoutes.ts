@@ -234,6 +234,13 @@ const agendaStopReorderSchema = z.object({
   stopIds: z.array(z.string()).min(1)
 });
 
+const agendaStopGeoSchema = z.object({
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  accuracy: z.number().positive().optional(),
+  timestamp: z.string().datetime().optional()
+});
+
 const agendaStopResultSchema = z.object({
   status: z.enum(["realizada", "nao_realizada"]),
   reason: z.enum(["cliente_ausente", "chuva", "estrada", "reagendar", "outro"]).optional(),
@@ -1956,8 +1963,14 @@ const mapAgendaEvent = (agendaEvent: any) => ({
     address: stop.address,
     plannedTime: stop.plannedTime ? stop.plannedTime.toISOString() : null,
     notes: stop.notes,
-    arrivedAt: stop.arrivedAt ? stop.arrivedAt.toISOString() : null,
-    completedAt: stop.completedAt ? stop.completedAt.toISOString() : null,
+    checkInAt: stop.checkInAt ? stop.checkInAt.toISOString() : null,
+    checkInLat: stop.checkInLat,
+    checkInLng: stop.checkInLng,
+    checkInAccuracy: stop.checkInAccuracy,
+    checkOutAt: stop.checkOutAt ? stop.checkOutAt.toISOString() : null,
+    checkOutLat: stop.checkOutLat,
+    checkOutLng: stop.checkOutLng,
+    checkOutAccuracy: stop.checkOutAccuracy,
     resultStatus: stop.resultStatus,
     resultReason: stop.resultReason,
     resultSummary: stop.resultSummary,
@@ -2120,26 +2133,56 @@ router.patch("/agenda/events/:id/stops/reorder", validateBody(agendaStopReorderS
   );
 });
 
-router.patch(["/agenda-events/:id/check-in", "/agenda/events/:id/check-in"], async (req, res) => {
+router.patch(["/agenda-events/:id/check-in", "/agenda/events/:id/check-in"], validateBody(agendaStopGeoSchema), async (req, res) => {
   const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
   if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
   if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
   }
 
-  const updated = await prisma.agendaStop.update({ where: { id: req.params.id }, data: { arrivedAt: new Date() } });
-  return res.json({ id: updated.id, arrivedAt: updated.arrivedAt?.toISOString() || null });
+  const checkInAt = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
+  const updated = await prisma.agendaStop.update({
+    where: { id: req.params.id },
+    data: {
+      checkInAt,
+      checkInLat: req.body.lat ?? null,
+      checkInLng: req.body.lng ?? null,
+      checkInAccuracy: req.body.accuracy ?? null
+    }
+  });
+  return res.json({
+    id: updated.id,
+    checkInAt: updated.checkInAt?.toISOString() || null,
+    checkInLat: updated.checkInLat,
+    checkInLng: updated.checkInLng,
+    checkInAccuracy: updated.checkInAccuracy
+  });
 });
 
-router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], async (req, res) => {
+router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], validateBody(agendaStopGeoSchema), async (req, res) => {
   const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
   if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
   if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
   }
 
-  const updated = await prisma.agendaStop.update({ where: { id: req.params.id }, data: { completedAt: new Date() } });
-  return res.json({ id: updated.id, completedAt: updated.completedAt?.toISOString() || null });
+  const checkOutAt = req.body.timestamp ? new Date(req.body.timestamp) : new Date();
+  const updated = await prisma.agendaStop.update({
+    where: { id: req.params.id },
+    data: {
+      checkOutAt,
+      checkOutLat: req.body.lat ?? null,
+      checkOutLng: req.body.lng ?? null,
+      checkOutAccuracy: req.body.accuracy ?? null
+    }
+  });
+  return res.json({
+    id: updated.id,
+    checkOutAt: updated.checkOutAt?.toISOString() || null,
+    checkOutLat: updated.checkOutLat,
+    checkOutLng: updated.checkOutLng,
+    checkOutAccuracy: updated.checkOutAccuracy
+  });
 });
 
 router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validateBody(agendaStopResultSchema), async (req, res) => {
