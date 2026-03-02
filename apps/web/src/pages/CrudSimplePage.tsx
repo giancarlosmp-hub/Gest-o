@@ -60,6 +60,12 @@ type ClientImportSummary = {
   errors: ClientImportErrorItem[];
 };
 
+type ImportValidationSummary = {
+  errors: string[];
+  validCount: number;
+  errorCount: number;
+};
+
 type SheetJsLibrary = {
   read: (data: ArrayBuffer, options: { type: string }) => any;
   writeFile: (workbook: any, fileName: string) => void;
@@ -89,6 +95,19 @@ const clientImportColumns = [
   "segment",
   "ownerSellerId"
 ] as const;
+
+const clientImportColumnLabels: Record<(typeof clientImportColumns)[number], string> = {
+  name: "Nome",
+  city: "Cidade",
+  state: "UF",
+  region: "Região",
+  potentialHa: "Potencial (ha)",
+  farmSizeHa: "Área total (ha)",
+  clientType: "Tipo (PJ/PF)",
+  cnpj: "CNPJ/CPF",
+  segment: "Segmento",
+  ownerSellerId: "Vendedor responsável"
+};
 
 export default function CrudSimplePage({
   endpoint,
@@ -125,6 +144,7 @@ export default function CrudSimplePage({
   const [importRows, setImportRows] = useState<ClientImportRow[]>([]);
   const [importPreviewRows, setImportPreviewRows] = useState<ClientImportRow[]>([]);
   const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
+  const [importDefaultOwnerSellerId, setImportDefaultOwnerSellerId] = useState("");
   const [isImporting, setIsImporting] = useState(false);
   const [isImportReady, setIsImportReady] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
@@ -419,28 +439,43 @@ export default function CrudSimplePage({
     return parsedRows;
   };
 
-  const validateImportRows = (rows: ClientImportRow[]) => {
+  const validateImportRows = (rows: ClientImportRow[], defaultOwnerSellerId?: string): ImportValidationSummary => {
     const errors: string[] = [];
+    let validCount = 0;
 
     if (rows.length === 0) {
       errors.push("Nenhuma linha de dados válida foi encontrada.");
-      return errors;
+      return { errors, validCount: 0, errorCount: 0 };
     }
 
     rows.forEach((row, index) => {
       const rowNumber = row.sourceRowNumber || index + 2;
-      const { fieldErrors } = validateClientPayload(row, {
+      const payloadToValidate = {
+        ...row,
+        ownerSellerId: row.ownerSellerId || defaultOwnerSellerId
+      };
+      const { fieldErrors } = validateClientPayload(payloadToValidate, {
         isSeller,
         canChooseOwnerSeller,
         sellerId: user?.id
       });
 
-      Object.values(fieldErrors).forEach((message) => {
-        if (message) errors.push(`Linha ${rowNumber}: ${message}`);
+      const rowErrors = Object.values(fieldErrors).filter((message): message is string => Boolean(message));
+      if (rowErrors.length === 0) {
+        validCount += 1;
+        return;
+      }
+
+      rowErrors.forEach((message) => {
+        errors.push(`Linha ${rowNumber}: ${message}`);
       });
     });
 
-    return errors;
+    return {
+      errors,
+      validCount,
+      errorCount: rows.length - validCount
+    };
   };
 
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -448,6 +483,7 @@ export default function CrudSimplePage({
     setImportRows([]);
     setImportPreviewRows([]);
     setImportValidationErrors([]);
+    setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
     setImportSummary(null);
     setImportProgress({ current: 0, total: 0 });
@@ -461,15 +497,15 @@ export default function CrudSimplePage({
 
     try {
       const rows = await parseImportFile(selectedFile);
-      const errors = validateImportRows(rows);
+      const validationSummary = validateImportRows(rows, importDefaultOwnerSellerId);
       const normalizedRows = rows;
 
       setImportRows(normalizedRows);
       setImportPreviewRows(normalizedRows.slice(0, 20));
-      setImportValidationErrors(errors);
-      setIsImportReady(errors.length === 0);
+      setImportValidationErrors(validationSummary.errors);
+      setIsImportReady(validationSummary.errors.length === 0);
 
-      if (errors.length > 0) {
+      if (validationSummary.errors.length > 0) {
         toast.error("Foram encontrados erros de validação na planilha.");
       } else {
         toast.success(`${normalizedRows.length} linha(s) carregada(s) com sucesso.`);
@@ -483,18 +519,39 @@ export default function CrudSimplePage({
     }
   };
 
+  const importValidationSummary = useMemo(
+    () => validateImportRows(importRows, importDefaultOwnerSellerId),
+    [importRows, importDefaultOwnerSellerId, isSeller, canChooseOwnerSeller, user?.id]
+  );
+
+  useEffect(() => {
+    if (importRows.length === 0) {
+      setImportValidationErrors([]);
+      setIsImportReady(false);
+      return;
+    }
+
+    setImportValidationErrors(importValidationSummary.errors);
+    setIsImportReady(importValidationSummary.errors.length === 0);
+  }, [importRows.length, importValidationSummary]);
+
   const resetImportState = () => {
     setIsImportModalOpen(false);
     setImportRows([]);
     setImportPreviewRows([]);
     setImportValidationErrors([]);
+    setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
     setImportProgress({ current: 0, total: 0 });
     setImportSummary(null);
   };
 
   const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
-    const { sanitizedPayload } = validateClientPayload(row, {
+    const payload = {
+      ...row,
+      ownerSellerId: row.ownerSellerId || importDefaultOwnerSellerId
+    };
+    const { sanitizedPayload } = validateClientPayload(payload, {
       isSeller,
       canChooseOwnerSeller,
       sellerId: user?.id
@@ -588,7 +645,7 @@ export default function CrudSimplePage({
   };
 
   const handleImportClients = async () => {
-    if (!isImportReady || importRows.length === 0) return;
+    if (!isImportReady || importRows.length === 0 || importValidationSummary.errors.length > 0) return;
 
     setIsImporting(true);
     setImportSummary(null);
@@ -1024,11 +1081,40 @@ export default function CrudSimplePage({
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <p className="font-medium text-slate-900">Colunas esperadas no arquivo:</p>
-                <p>name, city, state, region, potentialHa, farmSizeHa, clientType, cnpj, segment, ownerSellerId.</p>
-                <p className="mt-1 text-xs text-slate-600">clientType aceita apenas PJ ou PF (sem diferenciar maiúsculas/minúsculas). ownerSellerId é opcional.</p>
-                <p className="mt-1 text-xs text-slate-600">Para vendedor, o ownerSellerId da planilha é ignorado e sempre será usado o usuário logado.</p>
+                <p className="font-medium text-slate-900">Colunas obrigatórias no arquivo:</p>
+                <p>Nome, Cidade, UF, Tipo (PJ/PF)</p>
+                <p className="mt-2 font-medium text-slate-900">Regras:</p>
+                <p className="mt-1 text-xs text-slate-600">UF deve conter 2 letras (ex: PR)</p>
+                <p className="mt-1 text-xs text-slate-600">Tipo deve ser PJ ou PF</p>
+                <p className="mt-1 text-xs text-slate-600">Para usuário vendedor, o vendedor da planilha será ignorado</p>
+                <p className="mt-1 text-xs text-slate-600">Diretor/Gerente pode informar vendedor responsável</p>
+                <p className="mt-1 text-xs text-slate-600">Potencial e Área total devem ser números positivos</p>
               </div>
+
+              {canChooseOwnerSeller ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="import-default-owner-seller">
+                    Vendedor padrão para linhas sem vendedor informado
+                  </label>
+                  <select
+                    id="import-default-owner-seller"
+                    className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                    value={importDefaultOwnerSellerId}
+                    onChange={(event) => setImportDefaultOwnerSellerId(event.target.value)}
+                  >
+                    <option value="">Selecione um vendedor</option>
+                    {users.map((seller) => (
+                      <option key={seller.id} value={seller.id}>{seller.name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
+
+              <p className="text-sm text-slate-600">
+                <span className="font-semibold text-emerald-700">{importValidationSummary.validCount} válidos</span>
+                {" · "}
+                <span className="font-semibold text-rose-700">{importValidationSummary.errorCount} com erro</span>
+              </p>
 
               {isImporting ? (
                 <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
@@ -1070,7 +1156,7 @@ export default function CrudSimplePage({
                   <thead className="bg-slate-100 text-left text-slate-700">
                     <tr>
                       {clientImportColumns.map((column) => (
-                        <th key={column} className="px-3 py-2 font-medium">{column}</th>
+                        <th key={column} className="px-3 py-2 font-medium">{clientImportColumnLabels[column]}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1112,7 +1198,7 @@ export default function CrudSimplePage({
               <button
                 type="button"
                 onClick={handleImportClients}
-                className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100 bg-emerald-600 hover:bg-emerald-700"
                 disabled={!isImportReady || isImporting}
               >
                 {isImporting ? "Importando..." : "Validar e importar"}
@@ -1220,7 +1306,7 @@ export default function CrudSimplePage({
                 <button type="button" onClick={closeCreateModal} className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100" disabled={saving}>
                   Cancelar
                 </button>
-                <button type="submit" className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60" disabled={saving}>
+                <button type="submit" className="rounded-lg px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100 bg-emerald-600 hover:bg-emerald-700" disabled={saving}>
                   {saving ? "Salvando..." : "Salvar"}
                 </button>
               </div>

@@ -79,14 +79,14 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
 
   if (potentialHa === "invalid") {
     fieldErrors.potentialHa = "Potencial (ha) deve ser um número válido.";
-  } else if (typeof potentialHa === "number" && potentialHa < 0) {
-    fieldErrors.potentialHa = "Potencial (ha) deve ser maior ou igual a 0.";
+  } else if (typeof potentialHa === "number" && potentialHa <= 0) {
+    fieldErrors.potentialHa = "Potencial (ha) deve ser maior que 0.";
   }
 
   if (farmSizeHa === "invalid") {
     fieldErrors.farmSizeHa = "Área total (ha) deve ser um número válido.";
-  } else if (typeof farmSizeHa === "number" && farmSizeHa < 0) {
-    fieldErrors.farmSizeHa = "Área total (ha) deve ser maior ou igual a 0.";
+  } else if (typeof farmSizeHa === "number" && farmSizeHa <= 0) {
+    fieldErrors.farmSizeHa = "Área total (ha) deve ser maior que 0.";
   }
 
   if (!options.isSeller && options.canChooseOwnerSeller && !resolvedOwnerSellerId) {
