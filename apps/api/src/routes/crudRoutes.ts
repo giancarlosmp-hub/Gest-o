@@ -24,6 +24,7 @@ import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
+import { z } from "zod";
 
 const router = Router();
 router.use(authMiddleware);
@@ -191,6 +192,85 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
   if (!CLIENT_SORT_FIELDS.has(field)) return { createdAt: "desc" };
 
   return { [field]: direction };
+};
+
+const normalizeDocumentDigits = (value?: string | null) => String(value ?? "").replace(/\D/g, "");
+const normalizeLooseText = (value?: string | null) => String(value ?? "").trim().toLowerCase();
+const normalizeState = (value?: string | null) => String(value ?? "").trim().toUpperCase();
+
+const clientImportActionSchema = z.enum(["update", "skip", "import_anyway"]).optional();
+const clientImportRowSchema = clientSchema.extend({
+  sourceRowNumber: z.number().int().positive().optional(),
+  existingClientId: z.string().optional(),
+  action: clientImportActionSchema
+});
+const clientImportRequestSchema = z.object({
+  rows: z.array(clientImportRowSchema).optional(),
+  clients: z.array(clientImportRowSchema).optional()
+});
+
+const resolveImportRows = (body: unknown) => {
+  const parsed = clientImportRequestSchema.safeParse(body);
+  if (!parsed.success) return { rows: [] as z.infer<typeof clientImportRowSchema>[], isValid: false };
+  const rows = parsed.data.rows ?? parsed.data.clients ?? [];
+  return { rows, isValid: true };
+};
+
+const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRowSchema>[]) => {
+  const scopedWhere = sellerWhere(req);
+  const existingClients = await prisma.client.findMany({
+    where: scopedWhere,
+    select: { id: true, cnpj: true, name: true, city: true, state: true }
+  });
+
+  const items = rows.map((row, index) => {
+    const parsedRow = clientSchema.safeParse(row);
+    const rowNumber = Number(row.sourceRowNumber ?? index + 2);
+
+    if (!parsedRow.success) {
+      const message = parsedRow.error.issues[0]?.message ?? "Dados inválidos para importação.";
+      return { rowNumber, row, status: "error" as const, error: message };
+    }
+
+    const ownerSellerId =
+      req.user!.role === "vendedor"
+        ? req.user!.id
+        : req.user!.role === "gerente" || req.user!.role === "diretor"
+          ? resolveOwnerId(req, parsedRow.data.ownerSellerId)
+          : resolveOwnerId(req);
+
+    const payload = { ...parsedRow.data, ownerSellerId };
+    const normalizedDocument = normalizeDocumentDigits(payload.cnpj);
+    let matchedClient = null as null | { id: string };
+
+    if (normalizedDocument) {
+      matchedClient = existingClients.find((client) => normalizeDocumentDigits(client.cnpj) === normalizedDocument) ?? null;
+    } else {
+      const normalizedName = normalizeLooseText(payload.name);
+      const normalizedCity = normalizeLooseText(payload.city);
+      const normalizedUf = normalizeState(payload.state);
+
+      matchedClient = existingClients.find((client) => (
+        normalizeLooseText(client.name) === normalizedName
+        && normalizeLooseText(client.city) === normalizedCity
+        && normalizeState(client.state) === normalizedUf
+      )) ?? null;
+    }
+
+    if (matchedClient) {
+      return {
+        rowNumber,
+        row,
+        status: "duplicate" as const,
+        existingClientId: matchedClient.id,
+        payload
+      };
+    }
+
+    return { rowNumber, row, status: "new" as const, payload };
+  });
+
+  return items;
 };
 
 const createEvent = async ({
@@ -457,7 +537,7 @@ router.get("/clients", async (req, res) => {
   });
 });
 
-router.get("/clients/:id", async (req, res) => {
+router.get("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
   const data = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -481,7 +561,85 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
   res.status(201).json(data);
 });
 
-router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
+router.post("/clients/import/preview", async (req, res) => {
+  const { rows, isValid } = resolveImportRows(req.body);
+  if (!isValid) return res.status(400).json({ message: "Payload de importação inválido." });
+
+  const preview = await buildImportPreview(req, rows);
+  const novos = preview.filter((item) => item.status === "new").map((item) => ({ rowNumber: item.rowNumber, row: item.row }));
+  const duplicados = preview
+    .filter((item) => item.status === "duplicate")
+    .map((item) => ({ rowNumber: item.rowNumber, row: item.row, existingClientId: item.existingClientId }));
+  const erros = preview
+    .filter((item) => item.status === "error")
+    .map((item) => ({ rowNumber: item.rowNumber, row: item.row, message: item.error }));
+
+  res.json({ novos, duplicados, erros });
+});
+
+router.post("/clients/import", async (req, res) => {
+  const { rows, isValid } = resolveImportRows(req.body);
+  if (!isValid) return res.status(400).json({ message: "Payload de importação inválido." });
+
+  const preview = await buildImportPreview(req, rows);
+  let totalImportados = 0;
+  let totalAtualizados = 0;
+  let totalIgnorados = 0;
+  let totalErros = 0;
+  const errors: Array<{ rowNumber: number; clientName: string; message: string }> = [];
+
+  for (const item of preview) {
+    const rowAction = item.row.action;
+    const clientName = String(item.row.name ?? "");
+
+    if (item.status === "error") {
+      totalErros += 1;
+      errors.push({ rowNumber: item.rowNumber, clientName, message: item.error });
+      continue;
+    }
+
+    if (item.status === "duplicate") {
+      if (!rowAction) {
+        totalErros += 1;
+        errors.push({ rowNumber: item.rowNumber, clientName, message: "Cliente duplicado sem ação definida." });
+        continue;
+      }
+
+      if (rowAction === "skip") {
+        totalIgnorados += 1;
+        continue;
+      }
+
+      if (rowAction === "update") {
+        try {
+          await prisma.client.update({ where: { id: item.existingClientId }, data: item.payload });
+          totalAtualizados += 1;
+        } catch {
+          totalErros += 1;
+          errors.push({ rowNumber: item.rowNumber, clientName, message: "Não foi possível atualizar cliente existente." });
+        }
+        continue;
+      }
+    }
+
+    if (rowAction === "skip") {
+      totalIgnorados += 1;
+      continue;
+    }
+
+    try {
+      await prisma.client.create({ data: item.payload });
+      totalImportados += 1;
+    } catch {
+      totalErros += 1;
+      errors.push({ rowNumber: item.rowNumber, clientName, message: "Não foi possível importar cliente." });
+    }
+  }
+
+  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors });
+});
+
+router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()), async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) return res.status(403).json({ message: "Sem permissão" });
@@ -489,7 +647,7 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
   res.json(data);
 });
 
-router.delete("/clients/:id", async (req, res) => {
+router.delete("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) return res.status(403).json({ message: "Sem permissão" });
@@ -497,7 +655,7 @@ router.delete("/clients/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/clients/:id/contacts", async (req, res) => {
+router.get("/clients/:id([0-9a-fA-F-]{36})/contacts", async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -519,7 +677,7 @@ router.get("/clients/:id/contacts", async (req, res) => {
   res.json(contacts);
 });
 
-router.post("/clients/:id/contacts", validateBody(clientContactSchema), async (req, res) => {
+router.post("/clients/:id([0-9a-fA-F-]{36})/contacts", validateBody(clientContactSchema), async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -541,7 +699,7 @@ router.post("/clients/:id/contacts", validateBody(clientContactSchema), async (r
   res.status(201).json(data);
 });
 
-router.put("/clients/:id/contacts/:contactId", validateBody(clientContactSchema.partial()), async (req, res) => {
+router.put("/clients/:id([0-9a-fA-F-]{36})/contacts/:contactId", validateBody(clientContactSchema.partial()), async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -571,7 +729,7 @@ router.put("/clients/:id/contacts/:contactId", validateBody(clientContactSchema.
   res.json(data);
 });
 
-router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
+router.delete("/clients/:id([0-9a-fA-F-]{36})/contacts/:contactId", async (req, res) => {
   const existingContact = await prisma.contact.findFirst({
     where: {
       id: req.params.contactId,
