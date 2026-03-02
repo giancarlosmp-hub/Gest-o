@@ -1125,27 +1125,31 @@ router.get("/clients/:id([0-9a-fA-F-]{36})/contacts", async (req, res) => {
   res.json(contacts);
 });
 
-router.post("/clients/:id([0-9a-fA-F-]{36})/contacts", validateBody(clientContactSchema), async (req, res) => {
-  const client = await prisma.client.findFirst({
-    where: {
-      id: req.params.id,
-      ...sellerWhere(req)
-    },
-    select: { id: true }
-  });
+router.post(
+  "/clients/:id([0-9a-fA-F-]{36})/contacts",
+  validateBody(clientContactSchema),
+  async (req, res) => {
+    const client = await prisma.client.findFirst({
+      where: {
+        id: req.params.id,
+        ...sellerWhere(req)
+      },
+      select: { id: true }
+    });
 
-  if (!client) return res.status(404).json({ message: "Não encontrado" });
+    if (!client) return res.status(404).json({ message: "Não encontrado" });
 
-  const data = await prisma.contact.create({
-    data: {
-      ...req.body,
-      clientId: req.params.id,
-      ownerSellerId: resolveOwnerId(req)
-    }
-  });
+    const data = await prisma.contact.create({
+      data: {
+        ...req.body,
+        clientId: req.params.id,
+        ownerSellerId: resolveOwnerId(req)
+      }
+    });
 
-  res.status(201).json(data);
-});
+    res.status(201).json(data);
+  }
+);
 
 router.put(
   "/clients/:id([0-9a-fA-F-]{36})/contacts/:contactId",
