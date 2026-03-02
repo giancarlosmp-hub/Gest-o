@@ -822,6 +822,153 @@ router.get("/reports/agro-crm", async (req, res) => {
   });
 });
 
+router.get("/reports/planned-vs-realized", async (req, res) => {
+  const fromRaw = req.query.from as string | undefined;
+  const toRaw = req.query.to as string | undefined;
+  const sellerIdRaw = req.query.sellerId as string | undefined;
+
+  if (!fromRaw || !toRaw) {
+    return res.status(400).json({ message: "Parâmetros from e to são obrigatórios." });
+  }
+
+  const from = normalizeDateToUtc(fromRaw);
+  const to = normalizeDateToUtc(toRaw, true);
+
+  if (!from || !to) {
+    return res.status(400).json({ message: "Parâmetros from/to inválidos." });
+  }
+
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw;
+
+  const plannedEvents = await prisma.agendaEvent.findMany({
+    where: {
+      type: "roteiro_visita",
+      startDateTime: { gte: from, lte: to },
+      ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+    },
+    select: {
+      id: true,
+      sellerId: true,
+      startDateTime: true,
+      opportunityId: true,
+      seller: { select: { name: true } },
+      stops: {
+        select: {
+          plannedTime: true,
+          checkInAt: true,
+          checkOutAt: true
+        },
+        orderBy: { order: "asc" }
+      }
+    }
+  });
+
+  const followUpWhere: Prisma.ActivityWhereInput = {
+    type: "follow_up",
+    createdAt: { gte: from, lte: to },
+    ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
+  };
+
+  const followUps = await prisma.activity.findMany({
+    where: followUpWhere,
+    select: { ownerSellerId: true }
+  });
+
+  const followUpsBySeller = followUps.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
+    return acc;
+  }, {});
+
+  const opportunitiesBySeller = plannedEvents.reduce<Record<string, Set<string>>>((acc, event) => {
+    if (!event.opportunityId) return acc;
+    if (!acc[event.sellerId]) acc[event.sellerId] = new Set<string>();
+    acc[event.sellerId].add(event.opportunityId);
+    return acc;
+  }, {});
+
+  const punctualToleranceMs = 10 * 60 * 1000;
+
+  const sellerStatsMap = plannedEvents.reduce<
+    Record<
+      string,
+      {
+        sellerId: string;
+        sellerName: string;
+        planned: number;
+        executed: number;
+        punctualCount: number;
+      }
+    >
+  >((acc, event) => {
+    const sellerStat =
+      acc[event.sellerId] ||
+      (acc[event.sellerId] = {
+        sellerId: event.sellerId,
+        sellerName: event.seller.name,
+        planned: 0,
+        executed: 0,
+        punctualCount: 0
+      });
+
+    sellerStat.planned += 1;
+
+    const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
+    const hasCheckout = event.stops.some((stop) => Boolean(stop.checkOutAt));
+
+    if (hasCheckout) {
+      sellerStat.executed += 1;
+    }
+
+    if (firstStopWithCheckIn) {
+      const plannedReference = firstStopWithCheckIn.plannedTime || event.startDateTime;
+      const checkInAt = firstStopWithCheckIn.checkInAt!;
+      if (checkInAt.getTime() <= plannedReference.getTime() + punctualToleranceMs) {
+        sellerStat.punctualCount += 1;
+      }
+    }
+
+    return acc;
+  }, {});
+
+  const sellers = Object.values(sellerStatsMap).map((stats) => {
+    const notExecuted = Math.max(stats.planned - stats.executed, 0);
+    const followUpsCount = followUpsBySeller[stats.sellerId] || 0;
+    const opportunitiesCount = opportunitiesBySeller[stats.sellerId]?.size || 0;
+    const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : 0;
+    const punctualRate = stats.executed ? (stats.punctualCount / stats.executed) * 100 : 0;
+
+    return {
+      sellerId: stats.sellerId,
+      sellerName: stats.sellerName,
+      planned: stats.planned,
+      executed: stats.executed,
+      notExecuted,
+      executionRate,
+      punctualRate,
+      followUps: followUpsCount,
+      opportunities: opportunitiesCount
+    };
+  });
+
+  const totalPlanned = sellers.reduce((sum, item) => sum + item.planned, 0);
+  const totalExecuted = sellers.reduce((sum, item) => sum + item.executed, 0);
+  const totalNotExecuted = sellers.reduce((sum, item) => sum + item.notExecuted, 0);
+  const totalPunctual = sellers.reduce((sum, item) => sum + (item.punctualRate / 100) * item.executed, 0);
+  const followUpGenerated = sellers.reduce((sum, item) => sum + item.followUps, 0);
+  const opportunitiesGenerated = sellers.reduce((sum, item) => sum + item.opportunities, 0);
+
+  return res.json({
+    totalPlanned,
+    totalExecuted,
+    totalNotExecuted,
+    executionRate: totalPlanned ? (totalExecuted / totalPlanned) * 100 : 0,
+    punctualRate: totalExecuted ? (totalPunctual / totalExecuted) * 100 : 0,
+    followUpGenerated,
+    opportunitiesGenerated,
+    sellers: sellers.sort((a, b) => b.executionRate - a.executionRate)
+  });
+});
+
 router.get("/clients", async (req, res) => {
   const search = String(req.query.q || "").trim();
   const state = String(req.query.uf || "").trim();

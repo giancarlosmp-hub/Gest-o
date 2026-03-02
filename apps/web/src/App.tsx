@@ -17,6 +17,7 @@ import TeamPage from "./pages/TeamPage";
 import SettingsPage from "./pages/SettingsPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
 import AgendaPage from "./pages/AgendaPage";
+import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
 
 export default function App() {
   const { user } = useAuth();
@@ -83,6 +84,8 @@ export default function App() {
 
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
+        <Route path="relatórios/execução-comercial" element={<CommercialExecutionReportPage />} />
+        <Route path="relatorios/execucao-comercial" element={<CommercialExecutionReportPage />} />
 
         {/* Compatibilidade: rota antiga de Usuários redireciona para Configurações */}
         <Route
