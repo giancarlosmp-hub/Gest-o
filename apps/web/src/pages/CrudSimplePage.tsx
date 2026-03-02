@@ -136,6 +136,7 @@ const clientImportColumns = [
 ] as const;
 
 const importMappingStorageKey = "clientsImport.columnMapping.v1";
+const importTemplatesStorageKey = "clientsImport.templates.v1";
 
 const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
   { key: "name", label: "Nome", required: true },
@@ -204,6 +205,10 @@ export default function CrudSimplePage({
   const [importColumnMapping, setImportColumnMapping] = useState<
     Partial<Record<ClientImportFieldKey, string>>
   >({});
+  const [importTemplates, setImportTemplates] = useState<
+    Record<string, Partial<Record<ClientImportFieldKey, string>>>
+  >({});
+  const [selectedImportTemplateName, setSelectedImportTemplateName] = useState("");
   const [importRawRows, setImportRawRows] = useState<Record<string, unknown>[]>([]);
   const [importDefaultOwnerSellerId, setImportDefaultOwnerSellerId] = useState("");
   const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
@@ -563,6 +568,21 @@ export default function CrudSimplePage({
     }
   };
 
+  const loadTemplatesFromLocalStorage = () => {
+    try {
+      const rawValue = localStorage.getItem(importTemplatesStorageKey);
+      if (!rawValue) return {};
+      const parsed = JSON.parse(rawValue) as Record<string, Partial<Record<ClientImportFieldKey, string>>>;
+      return parsed ?? {};
+    } catch {
+      return {};
+    }
+  };
+
+  const saveTemplatesToLocalStorage = (templates: Record<string, Partial<Record<ClientImportFieldKey, string>>>) => {
+    localStorage.setItem(importTemplatesStorageKey, JSON.stringify(templates));
+  };
+
   const saveMappingToLocalStorage = (mapping: Partial<Record<ClientImportFieldKey, string>>) => {
     localStorage.setItem(importMappingStorageKey, JSON.stringify(mapping));
   };
@@ -580,6 +600,10 @@ export default function CrudSimplePage({
     const requiredFields: ClientImportFieldKey[] = ["name", "city", "state", "clientType"];
     return requiredFields.every((field) => Boolean(mapping[field]));
   };
+
+  useEffect(() => {
+    setImportTemplates(loadTemplatesFromLocalStorage());
+  }, []);
 
   const applyMappingToRow = (
     row: Record<string, unknown>,
@@ -773,6 +797,7 @@ export default function CrudSimplePage({
     setImportExcelHeaders([]);
     setImportRawRows([]);
     setImportColumnMapping({});
+    setSelectedImportTemplateName("");
     setImportValidationErrors([]);
     setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
@@ -824,9 +849,79 @@ export default function CrudSimplePage({
     toast.info("Mapeamento automático aplicado com base no modelo.");
   };
 
+  const handleImportTemplateChange = (templateName: string) => {
+    setSelectedImportTemplateName(templateName);
+
+    if (!templateName) return;
+
+    const templateMapping = importTemplates[templateName];
+    if (!templateMapping) return;
+
+    const appliedTemplate = applySavedMapping(templateMapping, importExcelHeaders);
+    const fallbackMapping = autoMapColumns(importExcelHeaders);
+    setImportColumnMapping({ ...fallbackMapping, ...appliedTemplate });
+    toast.success(`Template "${templateName}" aplicado.`);
+  };
+
   const handleSaveMapping = () => {
     saveMappingToLocalStorage(importColumnMapping);
-    toast.success("Mapeamento salvo para próximos uploads.");
+    const suggestedName = selectedImportTemplateName || "";
+    const templateName = window.prompt("Nome do template", suggestedName)?.trim();
+
+    if (!templateName) {
+      toast.warning("Informe um nome válido para o template.");
+      return;
+    }
+
+    const nextTemplates = {
+      ...importTemplates,
+      [templateName]: importColumnMapping
+    };
+
+    setImportTemplates(nextTemplates);
+    setSelectedImportTemplateName(templateName);
+    saveTemplatesToLocalStorage(nextTemplates);
+    toast.success(`Template "${templateName}" salvo com sucesso.`);
+  };
+
+  const handleEditTemplate = () => {
+    if (!selectedImportTemplateName) {
+      toast.warning("Selecione um template para editar.");
+      return;
+    }
+
+    const updatedName = window.prompt("Editar nome do template", selectedImportTemplateName)?.trim();
+    if (!updatedName) {
+      toast.warning("Informe um nome válido para o template.");
+      return;
+    }
+
+    const nextTemplates = { ...importTemplates };
+    delete nextTemplates[selectedImportTemplateName];
+    nextTemplates[updatedName] = importColumnMapping;
+
+    setImportTemplates(nextTemplates);
+    setSelectedImportTemplateName(updatedName);
+    saveTemplatesToLocalStorage(nextTemplates);
+    toast.success(`Template "${updatedName}" atualizado.`);
+  };
+
+  const handleDeleteTemplate = () => {
+    if (!selectedImportTemplateName) {
+      toast.warning("Selecione um template para excluir.");
+      return;
+    }
+
+    const shouldDelete = window.confirm(`Excluir template "${selectedImportTemplateName}"?`);
+    if (!shouldDelete) return;
+
+    const nextTemplates = { ...importTemplates };
+    delete nextTemplates[selectedImportTemplateName];
+
+    setImportTemplates(nextTemplates);
+    setSelectedImportTemplateName("");
+    saveTemplatesToLocalStorage(nextTemplates);
+    toast.success("Template excluído.");
   };
 
   const handleContinueAfterMapping = async () => {
@@ -846,6 +941,7 @@ export default function CrudSimplePage({
     setImportPreviewRows([]);
     setImportExcelHeaders([]);
     setImportColumnMapping({});
+    setSelectedImportTemplateName("");
     setImportRawRows([]);
     setImportDefaultOwnerSellerId("");
     setImportValidationErrors([]);
@@ -1525,9 +1621,14 @@ export default function CrudSimplePage({
                   excelHeaders={importExcelHeaders}
                   mapping={importColumnMapping}
                   canMapOwnerSeller={canChooseOwnerSeller}
+                  templateNames={Object.keys(importTemplates).sort((a, b) => a.localeCompare(b))}
+                  selectedTemplateName={selectedImportTemplateName}
                   onChangeMapping={handleImportMappingChange}
+                  onChangeTemplate={handleImportTemplateChange}
+                  onSaveTemplate={handleSaveMapping}
+                  onEditTemplate={handleEditTemplate}
+                  onDeleteTemplate={handleDeleteTemplate}
                   onUseModelHeaders={handleUseModelHeaders}
-                  onSaveMapping={handleSaveMapping}
                   onContinue={handleContinueAfterMapping}
                 />
               ) : null}
