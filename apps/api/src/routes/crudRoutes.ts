@@ -1865,6 +1865,11 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   return res.status(201).json(created);
 });
 
+const resolveAgendaEventStatus = (agendaEvent: { status: string; endDateTime: Date }) => {
+  if (agendaEvent.status === "realizado") return "realizado";
+  return agendaEvent.endDateTime.getTime() < Date.now() ? "vencido" : "agendado";
+};
+
 const mapAgendaEvent = (agendaEvent: any) => ({
   id: agendaEvent.id,
   title: agendaEvent.title,
@@ -1873,7 +1878,7 @@ const mapAgendaEvent = (agendaEvent: any) => ({
   endDateTime: agendaEvent.endDateTime.toISOString(),
   clientId: agendaEvent.clientId,
   sellerId: agendaEvent.sellerId,
-  status: agendaEvent.status,
+  status: resolveAgendaEventStatus(agendaEvent),
   city: agendaEvent.city,
   notes: agendaEvent.notes,
   stops: (agendaEvent.stops || []).map((stop: any) => ({
@@ -1913,7 +1918,28 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
     orderBy: { startDateTime: "asc" }
   });
 
-  return res.json(events.map(mapAgendaEvent));
+  const mappedEvents = events.map(mapAgendaEvent);
+  const summary = mappedEvents.reduce(
+    (acc, event) => {
+      if (event.type === "roteiro_visita") acc.roteiros += 1;
+      if (event.type === "followup") acc.followUps += 1;
+      else if (event.type === "follow_up") acc.followUps += 1;
+      else acc.reunioes += 1;
+
+      if (event.status === "vencido") acc.vencidos += 1;
+      return acc;
+    },
+    { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 }
+  );
+
+  return res.json({
+    items: mappedEvents,
+    summary,
+    period: {
+      from: from.toISOString(),
+      to: to.toISOString()
+    }
+  });
 });
 
 router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema), async (req, res) => {

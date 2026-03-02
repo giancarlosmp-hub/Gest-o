@@ -8,9 +8,10 @@ import { getApiErrorMessage } from "../lib/apiError";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 
 type Seller = { id: string; name: string };
+type AgendaSummary = { reunioes: number; roteiros: number; followUps: number; vencidos: number };
 
 type Visualizacao = "diaria" | "semanal";
-type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias";
+type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias" | "personalizado";
 
 type CreateAgendaForm = {
   title: string;
@@ -87,6 +88,35 @@ function endOfDay(date: Date) {
   return next;
 }
 
+function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string) {
+  const today = new Date();
+  const dayStart = startOfDay(today);
+
+  if (periodFilter === "hoje") {
+    return { from: startOfDay(today), to: endOfDay(today) };
+  }
+
+  if (periodFilter === "esta_semana") {
+    const weekStart = startOfDay(today);
+    const dayOfWeek = weekStart.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    weekStart.setDate(weekStart.getDate() + diffToMonday);
+    const weekEnd = endOfDay(new Date(weekStart));
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return { from: weekStart, to: weekEnd };
+  }
+
+  if (periodFilter === "proximos_7_dias") {
+    const next7Days = endOfDay(new Date(dayStart));
+    next7Days.setDate(next7Days.getDate() + 7);
+    return { from: dayStart, to: next7Days };
+  }
+
+  const from = customFrom ? startOfDay(new Date(`${customFrom}T00:00:00`)) : dayStart;
+  const to = customTo ? endOfDay(new Date(`${customTo}T00:00:00`)) : endOfDay(dayStart);
+  return { from, to };
+}
+
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString("pt-BR", {
     dateStyle: "short",
@@ -127,9 +157,12 @@ export default function AgendaPage() {
   const [view, setView] = useState<Visualizacao>("diaria");
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("hoje");
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
   const [isEventsLoading, setIsEventsLoading] = useState(false);
+  const [summary, setSummary] = useState<AgendaSummary>({ reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 });
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -159,6 +192,8 @@ export default function AgendaPage() {
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
   const highlightedEventRef = useRef<HTMLDivElement | null>(null);
+  const lastFetchKeyRef = useRef("");
+  const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -242,16 +277,34 @@ export default function AgendaPage() {
 
   useEffect(() => {
     let active = true;
+    const abortController = new AbortController();
 
     const loadAgendaEvents = async () => {
       setIsEventsLoading(true);
       try {
-        const today = new Date();
-        const from = startOfDay(today).toISOString().slice(0, 10);
-        const to = endOfDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7)).toISOString().slice(0, 10);
-        const params: Record<string, string> = { from, to };
+        const range = getRangeFromFilter(periodFilter, customFrom, customTo);
+        const params: Record<string, string> = {
+          from: range.from.toISOString().slice(0, 10),
+          to: range.to.toISOString().slice(0, 10)
+        };
+
         if (canFilterBySeller && selectedSellerId) params.sellerId = selectedSellerId;
-        const response = await api.get("/agenda/events", { params });
+
+        const fetchKey = JSON.stringify(params);
+        if (lastFetchKeyRef.current === fetchKey) {
+          setIsEventsLoading(false);
+          return;
+        }
+
+        lastFetchKeyRef.current = fetchKey;
+        let request = inFlightRef.current.get(fetchKey);
+        if (!request) {
+          request = api.get("/agenda/events", { params, signal: abortController.signal });
+          inFlightRef.current.set(fetchKey, request);
+        }
+
+        const response = await request;
+        inFlightRef.current.delete(fetchKey);
         if (!active) return;
 
         const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
@@ -275,8 +328,9 @@ export default function AgendaPage() {
           .filter((item: AgendaEvent) => item.userId);
 
         setEvents(mappedEvents);
+        setSummary(response.data?.summary || { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 });
       } catch (error: any) {
-        if (!active) return;
+        if (!active || error?.name === "CanceledError" || error?.code === "ERR_CANCELED") return;
         const status = error?.response?.status ?? "sem_status";
         const message = error?.response?.data?.message || error?.message || "erro desconhecido";
         if (import.meta.env.DEV) {
@@ -293,48 +347,28 @@ export default function AgendaPage() {
       }
     };
 
-    void loadAgendaEvents();
+    const timer = window.setTimeout(() => {
+      void loadAgendaEvents();
+    }, 350);
 
     return () => {
       active = false;
+      abortController.abort();
+      window.clearTimeout(timer);
     };
-  }, [canFilterBySeller, selectedSellerId]);
+  }, [canFilterBySeller, selectedSellerId, periodFilter, customFrom, customTo]);
 
   const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
 
   const filteredEvents = useMemo(() => {
-    const today = new Date();
-    const dayStart = startOfDay(today);
-    const dayEnd = endOfDay(today);
-
     const byRole = events.filter((event) => {
       if (user?.role === "vendedor") return event.userId === user.id;
       if (canFilterBySeller && selectedSellerId) return event.userId === selectedSellerId;
       return true;
     });
 
-    const byPeriod = byRole.filter((event) => {
-      const start = new Date(event.startDateTime);
-      if (periodFilter === "hoje") return start >= dayStart && start <= dayEnd;
-
-      if (periodFilter === "esta_semana") {
-        const weekStart = startOfDay(today);
-        const dayOfWeek = weekStart.getDay();
-        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-        weekStart.setDate(weekStart.getDate() + diffToMonday);
-
-        const weekEnd = endOfDay(new Date(weekStart));
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        return start >= weekStart && start <= weekEnd;
-      }
-
-      const next7Days = endOfDay(new Date(dayStart));
-      next7Days.setDate(next7Days.getDate() + 7);
-      return start >= dayStart && start <= next7Days;
-    });
-
-    return byPeriod.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
-  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, periodFilter]);
+    return byRole.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
+  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
 
   useEffect(() => {
     let active = true;
@@ -402,6 +436,51 @@ export default function AgendaPage() {
       )
     );
     toast.success("Agenda marcada como realizada.");
+  };
+
+  const onCreateFollowUpFromEvent = async (agendaEvent: AgendaEvent) => {
+    const start = new Date(agendaEvent.endDateTime);
+    const end = new Date(start.getTime() + 30 * 60000);
+    try {
+      const response = await api.post("/agenda/events", {
+        title: `Follow-up: ${agendaEvent.title}`,
+        type: "followup",
+        startDateTime: start.toISOString(),
+        endDateTime: end.toISOString(),
+        sellerId: agendaEvent.userId,
+        clientId: agendaEvent.clientId,
+        notes: `Criado a partir do evento ${agendaEvent.title}`
+      });
+      const created = response.data;
+      setEvents((current) => [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }]);
+      toast.success("Follow-up criado com sucesso.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
+    }
+  };
+
+  const onDuplicateForNextDay = async (agendaEvent: AgendaEvent) => {
+    const start = new Date(agendaEvent.startDateTime);
+    const end = new Date(agendaEvent.endDateTime);
+    start.setDate(start.getDate() + 1);
+    end.setDate(end.getDate() + 1);
+
+    try {
+      const response = await api.post("/agenda/events", {
+        title: `${agendaEvent.title} (cópia)`,
+        type: agendaEvent.type === "follow_up" ? "followup" : agendaEvent.type,
+        startDateTime: start.toISOString(),
+        endDateTime: end.toISOString(),
+        sellerId: agendaEvent.userId,
+        clientId: agendaEvent.clientId,
+        notes: agendaEvent.notes || agendaEvent.description
+      });
+      const created = response.data;
+      setEvents((current) => [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }]);
+      toast.success("Evento duplicado para o dia seguinte.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível duplicar evento."));
+    }
   };
 
   const toDateTimeInputValue = (value: string) => {
@@ -660,6 +739,7 @@ export default function AgendaPage() {
             <option value="hoje">Hoje</option>
             <option value="esta_semana">Esta semana</option>
             <option value="proximos_7_dias">Próximos 7 dias</option>
+            <option value="personalizado">Personalizado</option>
           </select>
         </label>
 
@@ -682,6 +762,20 @@ export default function AgendaPage() {
         ) : null}
       </div>
 
+      {periodFilter === "personalizado" ? (
+        <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-2">
+          <label className="text-sm font-medium text-slate-700">De
+            <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+          <label className="text-sm font-medium text-slate-700">Até
+            <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+          </label>
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm">
+        <span className="font-semibold">Reuniões:</span> {summary.reunioes} | <span className="font-semibold">Roteiros:</span> {summary.roteiros} | <span className="font-semibold">Follow-ups:</span> {summary.followUps} | <span className="font-semibold">Vencidos:</span> {summary.vencidos}
+      </div>
 
       <div className="rounded-xl border bg-white p-4 shadow-sm">
         <div className="flex items-center justify-between">
@@ -765,9 +859,15 @@ export default function AgendaPage() {
                     {event.type === "roteiro_visita" && event.stops?.length ? (<div className="mt-2 text-xs text-slate-600">{event.stops.map((stop) => (<div key={stop.id}>#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</div>))}</div>) : null}
                     {event.clientId ? (
                       <Link to={`/clientes/${event.clientId}`} className="text-sm font-medium text-brand-700 underline">
-                        Ver cliente
+                        Abrir cliente
                       </Link>
                     ) : null}
+                    <button type="button" className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => void onCreateFollowUpFromEvent(event)}>
+                      Criar follow-up
+                    </button>
+                    <button type="button" className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => void onDuplicateForNextDay(event)}>
+                      Duplicar +1 dia
+                    </button>
                   </div>
                 </div>
               );
