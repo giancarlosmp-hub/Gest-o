@@ -186,6 +186,42 @@ const parsePositiveInt = (value: unknown, fallback: number) => {
   return parsed;
 };
 
+const agendaEventTypeSchema = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
+const agendaEventStatusSchema = z.enum(["agendado", "realizado", "vencido"]);
+
+const agendaEventCreateSchema = z.object({
+  title: z.string().min(2),
+  type: agendaEventTypeSchema,
+  startDateTime: z.string(),
+  endDateTime: z.string(),
+  ownerSellerId: z.string().optional(),
+  sellerId: z.string().optional(),
+  clientId: z.string().optional(),
+  city: z.string().optional(),
+  notes: z.string().optional()
+});
+
+const agendaEventUpdateSchema = z.object({
+  title: z.string().min(2).optional(),
+  startDateTime: z.string().optional(),
+  endDateTime: z.string().optional(),
+  notes: z.string().optional(),
+  city: z.string().optional(),
+  status: agendaEventStatusSchema.optional()
+});
+
+const agendaStopCreateSchema = z.object({
+  clientId: z.string().optional(),
+  city: z.string().optional(),
+  address: z.string().optional(),
+  plannedTime: z.string().optional(),
+  notes: z.string().optional()
+});
+
+const agendaStopReorderSchema = z.object({
+  stopIds: z.array(z.string()).min(1)
+});
+
 const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationInput => {
   if (!sortValue) return { createdAt: "desc" };
 
@@ -1827,6 +1863,164 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   });
 
   return res.status(201).json(created);
+});
+
+const mapAgendaEvent = (agendaEvent: any) => ({
+  id: agendaEvent.id,
+  title: agendaEvent.title,
+  type: agendaEvent.type,
+  startDateTime: agendaEvent.startDateTime.toISOString(),
+  endDateTime: agendaEvent.endDateTime.toISOString(),
+  clientId: agendaEvent.clientId,
+  sellerId: agendaEvent.sellerId,
+  status: agendaEvent.status,
+  city: agendaEvent.city,
+  notes: agendaEvent.notes,
+  stops: (agendaEvent.stops || []).map((stop: any) => ({
+    id: stop.id,
+    order: stop.order,
+    clientId: stop.clientId,
+    clientName: stop.client?.name || null,
+    city: stop.city,
+    address: stop.address,
+    plannedTime: stop.plannedTime ? stop.plannedTime.toISOString() : null,
+    notes: stop.notes,
+    arrivedAt: stop.arrivedAt ? stop.arrivedAt.toISOString() : null,
+    completedAt: stop.completedAt ? stop.completedAt.toISOString() : null
+  }))
+});
+
+router.get(["/agenda", "/agenda/events"], async (req, res) => {
+  const fromInput = req.query.from as string | undefined;
+  const toInput = req.query.to as string | undefined;
+
+  const from = fromInput ? normalizeDateToUtc(fromInput) : new Date(Date.now() - 86400000 * 7);
+  const to = toInput ? normalizeDateToUtc(toInput, true) : new Date(Date.now() + 86400000 * 30);
+
+  if (!from || !to) {
+    return res.status(400).json({ message: "Parâmetros from/to inválidos." });
+  }
+
+  const where: Prisma.AgendaEventWhereInput = {
+    ...sellerWhere(req),
+    startDateTime: { gte: from },
+    endDateTime: { lte: to }
+  };
+
+  const events = await prisma.agendaEvent.findMany({
+    where,
+    include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } }, client: true },
+    orderBy: { startDateTime: "asc" }
+  });
+
+  return res.json(events.map(mapAgendaEvent));
+});
+
+router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema), async (req, res) => {
+  const sellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.sellerId);
+  const event = await prisma.agendaEvent.create({
+    data: {
+      title: req.body.title,
+      type: req.body.type,
+      startDateTime: new Date(req.body.startDateTime),
+      endDateTime: new Date(req.body.endDateTime),
+      sellerId,
+      clientId: req.body.clientId,
+      city: req.body.city,
+      notes: req.body.notes
+    },
+    include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
+  });
+
+  return res.status(201).json(mapAgendaEvent(event));
+});
+
+router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpdateSchema), async (req, res) => {
+  const event = await prisma.agendaEvent.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  const updated = await prisma.agendaEvent.update({
+    where: { id: req.params.id },
+    data: {
+      ...(req.body.title ? { title: req.body.title } : {}),
+      ...(req.body.startDateTime ? { startDateTime: new Date(req.body.startDateTime) } : {}),
+      ...(req.body.endDateTime ? { endDateTime: new Date(req.body.endDateTime) } : {}),
+      ...(req.body.status ? { status: req.body.status } : {}),
+      ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
+      ...(req.body.city !== undefined ? { city: req.body.city } : {})
+    },
+    include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
+  });
+
+  return res.json(mapAgendaEvent(updated));
+});
+
+router.post("/agenda/events/:id/stops", validateBody(agendaStopCreateSchema), async (req, res) => {
+  const event = await prisma.agendaEvent.findUnique({ where: { id: req.params.id }, include: { stops: true } });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  const stop = await prisma.agendaStop.create({
+    data: {
+      agendaEventId: req.params.id,
+      order: event.stops.length + 1,
+      clientId: req.body.clientId,
+      city: req.body.city,
+      address: req.body.address,
+      plannedTime: req.body.plannedTime ? new Date(req.body.plannedTime) : undefined,
+      notes: req.body.notes
+    },
+    include: { client: { select: { name: true } } }
+  });
+
+  return res.status(201).json({
+    id: stop.id,
+    order: stop.order,
+    clientId: stop.clientId,
+    clientName: stop.client?.name || null,
+    city: stop.city,
+    address: stop.address,
+    plannedTime: stop.plannedTime ? stop.plannedTime.toISOString() : null,
+    notes: stop.notes
+  });
+});
+
+router.patch("/agenda/events/:id/stops/reorder", validateBody(agendaStopReorderSchema), async (req, res) => {
+  const event = await prisma.agendaEvent.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+  if (!event) return res.status(404).json({ message: "Evento não encontrado." });
+  if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  await prisma.$transaction(
+    req.body.stopIds.map((stopId: string, index: number) =>
+      prisma.agendaStop.update({ where: { id: stopId }, data: { order: index + 1 } })
+    )
+  );
+
+  const stops = await prisma.agendaStop.findMany({
+    where: { agendaEventId: req.params.id },
+    include: { client: { select: { name: true } } },
+    orderBy: { order: "asc" }
+  });
+
+  return res.json(
+    stops.map((stop) => ({
+      id: stop.id,
+      order: stop.order,
+      clientId: stop.clientId,
+      clientName: stop.client?.name || null,
+      city: stop.city,
+      address: stop.address,
+      plannedTime: stop.plannedTime ? stop.plannedTime.toISOString() : null,
+      notes: stop.notes
+    }))
+  );
 });
 
 
