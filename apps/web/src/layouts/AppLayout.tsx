@@ -16,6 +16,7 @@ type SidebarItem = {
 
 const items: SidebarItem[] = [
   { id: "home", label: "Home", path: "/" },
+  { id: "agenda", label: "Agenda", path: "/agenda" },
   { id: "dashboard", label: "Dashboard", path: "/dashboard" },
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
   { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
@@ -32,13 +33,13 @@ export default function AppLayout() {
   const { reminders } = useReminders();
 
   const getSidebarBadgeCount = (item: SidebarItem) => {
-    if (item.id === "home") return reminders.agendaBadgeCount;
+    if (item.id === "agenda") return reminders.agendaBadgeCount;
     if (item.id === "atividades") return reminders.activitiesBadgeCount;
     return 0;
   };
 
   const getSidebarTooltipText = (item: SidebarItem) => {
-    if (item.id === "home" && reminders.agendaBadgeCount > 0) {
+    if (item.id === "agenda" && reminders.agendaBadgeCount > 0) {
       return `${reminders.tasksDueCount} tarefas • ${reminders.followUpsDueCount} follow-ups • ${reminders.overdueOppsCount} atrasadas`;
     }
 
@@ -65,7 +66,6 @@ export default function AppLayout() {
         .map((item) => {
           const active = isActiveItem(item);
           const badgeCount = getSidebarBadgeCount(item);
-          const itemLabel = item.id === "home" ? "Agenda" : item.label;
           const tooltipText = getSidebarTooltipText(item);
 
           return (
@@ -73,7 +73,7 @@ export default function AppLayout() {
               key={item.id}
               to={item.path}
               active={active}
-              label={itemLabel}
+              label={item.label}
               badgeCount={badgeCount}
               tooltipText={tooltipText}
               onClick={() => setOpen(false)}
