@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
+import { getApiErrorMessage } from "../lib/apiError";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -262,7 +263,7 @@ export default function OpportunitiesPage() {
   };
 
   useEffect(() => {
-    load().catch(() => toast.error("Erro ao carregar oportunidades"));
+    load().catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar oportunidades")));
   }, [filters, debouncedSearch]);
 
   const sellers = useMemo(() => {
@@ -375,10 +376,10 @@ export default function OpportunitiesPage() {
     try {
       await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
       triggerDashboardRefresh();
-    } catch {
+    } catch (error) {
       setItems(previousItems);
-      toast.error("Não foi possível mover a oportunidade de etapa");
-      load().catch(() => toast.error("Erro ao atualizar pipeline"));
+      toast.error(getApiErrorMessage(error, "Não foi possível mover a oportunidade de etapa"));
+      load().catch((loadError) => toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline")));
     }
   };
 
@@ -570,7 +571,7 @@ export default function OpportunitiesPage() {
     if (!isPipelineDrawerOpen || !selectedOpportunity) return;
 
     setPipelineFollowUpDate(toDateInput(selectedOpportunity.followUpDate || selectedOpportunity.expectedCloseDate));
-    loadPipelineEvents(selectedOpportunity.id).catch(() => toast.error("Erro ao carregar timeline da oportunidade"));
+    loadPipelineEvents(selectedOpportunity.id).catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar timeline da oportunidade")));
   }, [isPipelineDrawerOpen, selectedOpportunity?.id]);
 
   const updateOpportunityInState = (nextOpportunity: Opportunity) => {

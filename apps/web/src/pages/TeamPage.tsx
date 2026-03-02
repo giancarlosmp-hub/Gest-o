@@ -18,6 +18,8 @@ import {
   buildSellerMetrics,
   getCurrentMonthKey
 } from "../lib/sellerMetrics";
+import { getApiErrorMessage } from "../lib/apiError";
+import { toast } from "sonner";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -141,7 +143,8 @@ export default function TeamPage() {
     const run = async () => {
       try {
         await loadTeamData(getCurrentMonthKey());
-      } catch {
+      } catch (error) {
+        toast.error(getApiErrorMessage(error, "Não foi possível carregar os dados da equipe."));
         const fallbackUsers: TeamUser[] = [
           { id: "seed-1", name: "Vendedor 1", role: "vendedor", status: "ativo", isActive: true },
           { id: "seed-2", name: "Vendedora 2", role: "vendedor", status: "ativo", isActive: true },
