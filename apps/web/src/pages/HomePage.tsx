@@ -227,9 +227,13 @@ export default function HomePage() {
       </section>
 
       <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
+          <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
+        </div>
         <div className="flex items-center gap-3 text-brand-900">
           <SunMoon size={22} />
-          <h1 className="text-2xl font-bold">{getGreeting()}, {user?.name ?? "Usuário"}</h1>
+          <h2 className="text-xl font-bold">{getGreeting()}, {user?.name ?? "Usuário"}</h2>
         </div>
         <p className="mt-2 text-sm capitalize text-slate-600">{todayDateLabel}</p>
       </section>

@@ -15,14 +15,13 @@ type SidebarItem = {
 };
 
 const items: SidebarItem[] = [
-  { id: "home", label: "Home", path: "/" },
-  { id: "agenda", label: "Agenda", path: "/agenda" },
+  { id: "home", label: "Central do Dia", path: "/" },
   { id: "dashboard", label: "Dashboard", path: "/dashboard" },
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
   { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
-  { id: "agenda", label: "Agenda", path: "/agenda" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
+  { id: "agenda", label: "Agenda", path: "/agenda" },
   { id: "relatorios", label: "Relatórios", path: "/relatórios" },
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
