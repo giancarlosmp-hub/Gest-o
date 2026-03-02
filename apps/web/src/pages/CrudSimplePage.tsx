@@ -72,7 +72,19 @@ type ClientImportSummary = {
   imported: number;
   updated: number;
   ignored: number;
+  errorCount: number;
   errors: ClientImportErrorItem[];
+  reportRows: ClientImportReportRow[];
+};
+
+type ClientImportReportStatus = "Importado" | "Atualizado" | "Ignorado" | "Erro";
+
+type ClientImportReportRow = {
+  rowNumber: number;
+  clientName: string;
+  status: ClientImportReportStatus;
+  reason: string;
+  clientId: string;
 };
 
 type ImportAnalysisRow = ClientImportRow & {
@@ -827,7 +839,11 @@ export default function CrudSimplePage({
     setImportSummary(null);
   };
 
-  const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
+  const parseBulkImportSummary = (
+    responseData: any,
+    total: number,
+    analyzedRows: ImportAnalysisRow[]
+  ): ClientImportSummary | null => {
     const imported = Number(
       responseData?.totalImportados ??
         responseData?.imported ??
@@ -840,22 +856,97 @@ export default function CrudSimplePage({
 
     const errorsRaw = Array.isArray(responseData?.errors) ? responseData.errors : [];
 
-    if (!Number.isFinite(imported) && errorsRaw.length === 0 && !Number.isFinite(updated) && !Number.isFinite(ignored)) {
+    if (
+      !Number.isFinite(imported) &&
+      errorsRaw.length === 0 &&
+      !Number.isFinite(updated) &&
+      !Number.isFinite(ignored)
+    ) {
       return null;
     }
 
-    const errors = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
+    const errors: ClientImportErrorItem[] = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
       rowNumber: Number(errorItem?.rowNumber ?? errorItem?.row ?? index + 1) || index + 1,
       clientName: String(errorItem?.clientName ?? errorItem?.name ?? ""),
       message: String(errorItem?.message ?? "Erro ao importar linha.")
     }));
+
+    const errorsByRowNumber = new Map<number, ClientImportErrorItem>(
+      errors.map((item): [number, ClientImportErrorItem] => [item.rowNumber, item])
+    );
+
+    const reportRows: ClientImportReportRow[] = analyzedRows.map((row) => {
+      const rowError = errorsByRowNumber.get(row.sourceRowNumber);
+
+      if (rowError) {
+        return {
+          rowNumber: row.sourceRowNumber,
+          clientName: row.name || rowError.clientName || "—",
+          status: "Erro",
+          reason: rowError.message,
+          clientId: "—"
+        };
+      }
+
+      if (row.status === "duplicate") {
+        if (row.action === "skip") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name || "—",
+            status: "Ignorado",
+            reason: "Cliente duplicado ignorado por regra de importação.",
+            clientId: row.existingClientId || "—"
+          };
+        }
+
+        if (row.action === "update") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name || "—",
+            status: "Atualizado",
+            reason: "Cliente duplicado atualizado com os dados da planilha.",
+            clientId: row.existingClientId || "—"
+          };
+        }
+
+        if (row.action === "import_anyway") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name || "—",
+            status: "Importado",
+            reason: "Importado como novo registro apesar de possível duplicidade.",
+            clientId: "—"
+          };
+        }
+      }
+
+      if (row.action === "skip") {
+        return {
+          rowNumber: row.sourceRowNumber,
+          clientName: row.name || "—",
+          status: "Ignorado",
+          reason: "Linha ignorada por ação selecionada.",
+          clientId: row.existingClientId || "—"
+        };
+      }
+
+      return {
+        rowNumber: row.sourceRowNumber,
+        clientName: row.name || "—",
+        status: "Importado",
+        reason: "Cliente importado com sucesso.",
+        clientId: "—"
+      };
+    });
 
     return {
       total,
       imported: Number.isFinite(imported) ? imported : Math.max(0, total - errors.length),
       updated: Number.isFinite(updated) ? updated : 0,
       ignored: Number.isFinite(ignored) ? ignored : 0,
-      errors
+      errorCount: Number(responseData?.totalErros ?? errors.length) || errors.length,
+      errors,
+      reportRows
     };
   };
 
@@ -864,6 +955,7 @@ export default function CrudSimplePage({
     const total = payloads.length;
     const chunkSize = 10;
     let imported = 0;
+    const reportRows: ClientImportReportRow[] = [];
 
     for (let index = 0; index < payloads.length; index += chunkSize) {
       const chunkPayloads = payloads.slice(index, index + chunkSize);
@@ -873,8 +965,8 @@ export default function CrudSimplePage({
         chunkPayloads.map(async (payload, chunkIndex) => {
           const row = chunkRows[chunkIndex];
           try {
-            await api.post("/clients", payload);
-            return { ok: true as const, row };
+            const response = await api.post("/clients", payload);
+            return { ok: true as const, row, createdId: String(response?.data?.id ?? "") };
           } catch (error: any) {
             return {
               ok: false as const,
@@ -888,6 +980,13 @@ export default function CrudSimplePage({
       chunkResults.forEach((result) => {
         if (result.ok) {
           imported += 1;
+          reportRows.push({
+            rowNumber: result.row.sourceRowNumber,
+            clientName: result.row.name || "—",
+            status: "Importado",
+            reason: "Cliente importado com sucesso.",
+            clientId: result.createdId || "—"
+          });
           return;
         }
 
@@ -896,22 +995,37 @@ export default function CrudSimplePage({
           clientName: result.row.name,
           message: result.message
         });
+
+        reportRows.push({
+          rowNumber: result.row.sourceRowNumber,
+          clientName: result.row.name || "—",
+          status: "Erro",
+          reason: result.message,
+          clientId: "—"
+        });
       });
 
       setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
     }
 
-    return { total, imported, updated: 0, ignored: 0, errors } satisfies ClientImportSummary;
+    return { total, imported, updated: 0, ignored: 0, errorCount: errors.length, errors, reportRows } satisfies ClientImportSummary;
   };
 
-  const downloadImportErrorsReport = () => {
-    if (!importSummary || importSummary.errors.length === 0) return;
+  const sanitizeCsvCell = (value: string | number) => {
+    const sanitized = String(value ?? "").replace(/\r?\n|\r/g, " ").trim();
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  };
 
-    const header = "linha;cliente;erro";
-    const rows = importSummary.errors.map((errorItem) => {
-      const safeName = errorItem.clientName.replace(/\n/g, " ").replace(/;/g, ",");
-      const safeMessage = errorItem.message.replace(/\n/g, " ").replace(/;/g, ",");
-      return `${errorItem.rowNumber};${safeName};${safeMessage}`;
+  const downloadImportFinalReport = () => {
+    if (!importSummary || importSummary.reportRows.length === 0) return;
+
+    const header = ["Linha do Excel", "Nome", "Status", "Motivo", "ID criado ou atualizado"]
+      .map(sanitizeCsvCell)
+      .join(";");
+    const rows = importSummary.reportRows.map((item) => {
+      return [item.rowNumber, item.clientName, item.status, item.reason, item.clientId]
+        .map(sanitizeCsvCell)
+        .join(";");
     });
 
     const csvContent = [header, ...rows].join("\n");
@@ -919,7 +1033,8 @@ export default function CrudSimplePage({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `relatorio-erros-importacao-clientes-${Date.now()}.csv`;
+    const date = new Date().toISOString().slice(0, 10);
+    link.download = `relatorio-importacao-clientes-${date}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -958,7 +1073,7 @@ export default function CrudSimplePage({
           rows: payloads,
           clients: payloads
         });
-        summary = parseBulkImportSummary(bulkResponse.data, payloads.length);
+        summary = parseBulkImportSummary(bulkResponse.data, payloads.length, importPreviewRows);
         setImportProgress({ current: payloads.length, total: payloads.length });
       } catch (bulkError: any) {
         const status = Number(bulkError?.response?.status);
@@ -969,11 +1084,26 @@ export default function CrudSimplePage({
       }
 
       const resolvedSummary =
-        summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
+        summary ??
+        {
+          total: payloads.length,
+          imported: payloads.length,
+          updated: 0,
+          ignored: 0,
+          errorCount: 0,
+          errors: [],
+          reportRows: importPreviewRows.map((row) => ({
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name || "—",
+            status: "Importado",
+            reason: "Cliente importado com sucesso.",
+            clientId: "—"
+          }))
+        };
 
       setImportSummary(resolvedSummary);
 
-      if (resolvedSummary.errors.length === 0) {
+      if (resolvedSummary.errorCount === 0) {
         toast.success(
           `Importação concluída: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s).`
         );
@@ -982,9 +1112,7 @@ export default function CrudSimplePage({
         return;
       }
 
-      toast.warning(
-        `Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s), ${resolvedSummary.errors.length} com erro.`
-      );
+      toast.warning(`Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s), ${resolvedSummary.errorCount} com erro.`);
       await loadClients();
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Erro ao importar clientes.");
@@ -1510,17 +1638,15 @@ export default function CrudSimplePage({
                       </p>
                       <p>
                         Total com erro:{" "}
-                        <span className="font-semibold text-slate-900">{importSummary.errors.length}</span>
+                        <span className="font-semibold text-slate-900">{importSummary.errorCount}</span>
                       </p>
-                      {importSummary.errors.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={downloadImportErrorsReport}
-                          className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                        >
-                          Baixar relatório de erros
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={downloadImportFinalReport}
+                        className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      >
+                        Baixar relatório (.csv)
+                      </button>
                     </div>
                   ) : null}
 
