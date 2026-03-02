@@ -70,17 +70,15 @@ type ClientImportStatus = "new" | "duplicate" | "error";
 type ClientImportSummary = {
   total: number;
   imported: number;
-  updated: number;
-  ignored: number;
-  errors: ClientImportErrorItem[];
+  ignoredByError: number;
+  apiFailures: number;
 };
 
 type ClientImportFinalReportRow = {
   rowNumber: number;
-  clientName: string;
-  status: "Importado" | "Atualizado" | "Ignorado" | "Erro";
+  status: "IMPORTADO" | "ERRO" | "FALHA_API";
   reason: string;
-  clientId: string;
+  createdId: string;
 };
 
 type ImportAnalysisRow = ClientImportRow & {
@@ -755,7 +753,7 @@ export default function CrudSimplePage({
 
     setImportRows(mappedRows);
     setImportValidationErrors(validation.errors);
-    setIsImportReady(validation.errors.length === 0);
+    setIsImportReady(validation.validCount > 0);
     setImportSummary(null);
     setImportFinalReportRows([]);
     setImportSimulationSummary(null);
@@ -936,65 +934,48 @@ export default function CrudSimplePage({
   };
 
   const buildImportFinalReportRows = (
-    rows: ClientImportRow[],
-    actionsByRow: Map<number, ImportAnalysisRow>,
-    summary: ClientImportSummary
+    previewRows: ImportAnalysisRow[],
+    importResultsByRow: Map<number, { success: boolean; reason: string; createdId: string }>
   ): ClientImportFinalReportRow[] => {
-    const rowsWithErrors = new Set(summary.errors.map((errorItem) => errorItem.rowNumber));
-
-    const errorRows = summary.errors.map((errorItem) => ({
-      rowNumber: errorItem.rowNumber,
-      clientName: errorItem.clientName,
-      status: "Erro" as const,
-      reason: errorItem.message,
-      clientId: ""
-    }));
-
-    const successRows = rows
-      .filter((row) => !rowsWithErrors.has(row.sourceRowNumber))
+    return previewRows
       .map((row) => {
-        const analyzed = actionsByRow.get(row.sourceRowNumber);
-
-        if (analyzed?.action === "skip") {
+        if (row.status === "error") {
           return {
             rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Ignorado" as const,
-            reason: "Ignorado pelo usuário",
-            clientId: ""
+            status: "ERRO" as const,
+            reason: row.errorMessage || "Linha inválida no preview.",
+            createdId: ""
           };
         }
 
-        if (analyzed?.status === "duplicate" && analyzed.action === "update") {
+        const importResult = importResultsByRow.get(row.sourceRowNumber);
+
+        if (!importResult) {
           return {
             rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Atualizado" as const,
-            reason: "Cliente duplicado - atualizado",
-            clientId: analyzed.existingClientId || ""
+            status: "FALHA_API" as const,
+            reason: "Linha válida não processada pela API.",
+            createdId: ""
           };
         }
 
-        if (analyzed?.status === "duplicate" && analyzed.action === "import_anyway") {
+        if (!importResult.success) {
           return {
             rowNumber: row.sourceRowNumber,
-            clientName: row.name,
-            status: "Importado" as const,
-            reason: "Cliente duplicado - importado mesmo assim",
-            clientId: ""
+            status: "FALHA_API" as const,
+            reason: importResult.reason,
+            createdId: ""
           };
         }
 
         return {
           rowNumber: row.sourceRowNumber,
-          clientName: row.name,
-          status: "Importado" as const,
-          reason: "Novo cliente importado",
-          clientId: ""
+          status: "IMPORTADO" as const,
+          reason: importResult.reason,
+          createdId: importResult.createdId
         };
-      });
-
-    return [...successRows, ...errorRows].sort((a, b) => a.rowNumber - b.rowNumber);
+      })
+      .sort((a, b) => a.rowNumber - b.rowNumber);
   };
 
   const downloadImportFinalReport = () => {
@@ -1006,9 +987,9 @@ export default function CrudSimplePage({
       return `"${escaped}"`;
     };
 
-    const header = ["Linha do Excel", "Nome", "Status", "Motivo", "ID criado ou atualizado"];
+    const header = ["linha", "status", "motivo", "idCriado"];
     const rows = importFinalReportRows.map((row) =>
-      [row.rowNumber, row.clientName, row.status, row.reason, row.clientId].map(escapeCsvCell).join(";")
+      [row.rowNumber, row.status, row.reason, row.createdId].map(escapeCsvCell).join(";")
     );
 
     const csvContent = [header.map(escapeCsvCell).join(";"), ...rows].join("\n");
@@ -1028,82 +1009,51 @@ export default function CrudSimplePage({
     URL.revokeObjectURL(url);
   };
 
-  const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
-    const imported = Number(
-      responseData?.totalImportados ??
-        responseData?.imported ??
-        responseData?.successCount ??
-        responseData?.created ??
-        responseData?.totalImported
-    );
-    const updated = Number(responseData?.totalAtualizados ?? responseData?.updated ?? 0);
-    const ignored = Number(responseData?.totalIgnorados ?? responseData?.ignored ?? 0);
-
-    const errorsRaw = Array.isArray(responseData?.errors) ? responseData.errors : [];
-
-    if (!Number.isFinite(imported) && errorsRaw.length === 0 && !Number.isFinite(updated) && !Number.isFinite(ignored)) {
-      return null;
-    }
-
-    const errors = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
-      rowNumber: Number(errorItem?.rowNumber ?? errorItem?.row ?? index + 1) || index + 1,
-      clientName: String(errorItem?.clientName ?? errorItem?.name ?? ""),
-      message: String(errorItem?.message ?? "Erro ao importar linha.")
-    }));
-
-    return {
-      total,
-      imported: Number.isFinite(imported) ? imported : Math.max(0, total - errors.length),
-      updated: Number.isFinite(updated) ? updated : 0,
-      ignored: Number.isFinite(ignored) ? ignored : 0,
-      errors
-    };
-  };
-
-  const runFallbackImport = async (payloads: Array<Record<string, unknown>>, rows: ClientImportRow[]) => {
-    const errors: ClientImportErrorItem[] = [];
-    const total = payloads.length;
-    const chunkSize = 10;
+  const importValidRowsInBatches = async (validRows: ImportAnalysisRow[]) => {
+    const batchSize = 50;
     let imported = 0;
+    let apiFailures = 0;
+    const resultsByRow = new Map<number, { success: boolean; reason: string; createdId: string }>();
 
-    for (let index = 0; index < payloads.length; index += chunkSize) {
-      const chunkPayloads = payloads.slice(index, index + chunkSize);
-      const chunkRows = rows.slice(index, index + chunkSize);
+    for (let index = 0; index < validRows.length; index += batchSize) {
+      const batchRows = validRows.slice(index, index + batchSize);
 
-      const chunkResults = await Promise.all(
-        chunkPayloads.map(async (payload, chunkIndex) => {
-          const row = chunkRows[chunkIndex];
+      const batchResults = await Promise.all(
+        batchRows.map(async (row) => {
           try {
-            await api.post("/clients", payload);
-            return { ok: true as const, row };
+            const response = await api.post("/clients", buildImportPayload(row));
+            const createdId = String(response?.data?.id ?? response?.data?.client?.id ?? "");
+            return {
+              rowNumber: row.sourceRowNumber,
+              success: true as const,
+              reason: "Cliente importado com sucesso.",
+              createdId
+            };
           } catch (error: any) {
             return {
-              ok: false as const,
-              row,
-              message: error?.response?.data?.message || "Erro ao importar cliente."
+              rowNumber: row.sourceRowNumber,
+              success: false as const,
+              reason: error?.response?.data?.message || "Falha ao importar cliente na API.",
+              createdId: ""
             };
           }
         })
       );
 
-      chunkResults.forEach((result) => {
-        if (result.ok) {
-          imported += 1;
-          return;
-        }
-
-        errors.push({
-          rowNumber: result.row.sourceRowNumber,
-          clientName: result.row.name,
-          message: result.message
-        });
+      batchResults.forEach((result) => {
+        resultsByRow.set(result.rowNumber, result);
+        if (result.success) imported += 1;
+        else apiFailures += 1;
       });
 
-      setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
+      setImportProgress({ current: Math.min(index + batchRows.length, validRows.length), total: validRows.length });
     }
 
-    const summary: ClientImportSummary = { total, imported, updated: 0, ignored: 0, errors };
-    return summary;
+    return {
+      imported,
+      apiFailures,
+      resultsByRow
+    };
   };
 
   const handleSimulateImport = () => {
@@ -1117,62 +1067,44 @@ export default function CrudSimplePage({
   };
 
   const handleImportClients = async () => {
-    if (!isImportReady || importRows.length === 0 || importValidationErrors.length > 0) return;
+    if (!isImportReady || importRows.length === 0) return;
+
+    const validRows = importPreviewRows.filter((row) => row.status !== "error");
+    const ignoredByError = importPreviewRows.length - validRows.length;
+
+    if (validRows.length === 0) {
+      toast.warning("Não há linhas válidas para importar.");
+      return;
+    }
 
     setIsImporting(true);
     setImportSummary(null);
     setImportFinalReportRows([]);
     setImportSimulationSummary(null);
-    setImportProgress({ current: 0, total: importRows.length });
+    setImportProgress({ current: 0, total: validRows.length });
 
     try {
-      const actionByRow = new Map(importPreviewRows.map((row) => [row.sourceRowNumber, row]));
-      const payloads = importRows.map((row) => {
-        const analyzed = actionByRow.get(row.sourceRowNumber);
-        return {
-          ...buildImportPayload(row),
-          sourceRowNumber: row.sourceRowNumber,
-          existingClientId: analyzed?.existingClientId,
-          action: analyzed?.action
-        };
-      });
+      const { imported, apiFailures, resultsByRow } = await importValidRowsInBatches(validRows);
+      const resolvedSummary: ClientImportSummary = {
+        total: importPreviewRows.length,
+        imported,
+        ignoredByError,
+        apiFailures
+      };
 
-      let summary: ClientImportSummary | null = null;
-
-      try {
-        const bulkResponse = await api.post("/clients/import", {
-          rows: payloads,
-          clients: payloads
-        });
-        summary = parseBulkImportSummary(bulkResponse.data, payloads.length);
-        setImportProgress({ current: payloads.length, total: payloads.length });
-      } catch (bulkError: any) {
-        const status = Number(bulkError?.response?.status);
-        const shouldFallback = [404, 405, 501].includes(status);
-        if (!shouldFallback) throw bulkError;
-
-        summary = await runFallbackImport(payloads, importRows);
-      }
-
-      const resolvedSummary =
-        summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
-      const reportRows = buildImportFinalReportRows(importRows, actionByRow, resolvedSummary);
+      const reportRows = buildImportFinalReportRows(importPreviewRows, resultsByRow);
 
       setImportSummary(resolvedSummary);
       setImportFinalReportRows(reportRows);
 
-      if (resolvedSummary.errors.length === 0) {
-        toast.success(
-          `Importação concluída: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s).`
+      if (apiFailures > 0) {
+        toast.warning(
+          `Importação finalizada: ${imported} importado(s), ${ignoredByError} ignorado(s) por erro e ${apiFailures} falha(s) da API.`
         );
-        resetImportState();
-        await loadClients();
-        return;
+      } else {
+        toast.success(`Importação concluída: ${imported} importado(s), ${ignoredByError} ignorado(s) por erro.`);
       }
 
-      toast.warning(
-        `Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s), ${resolvedSummary.errors.length} com erro.`
-      );
       await loadClients();
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Erro ao importar clientes.");
@@ -1310,12 +1242,10 @@ export default function CrudSimplePage({
   };
 
   const importCounters = useMemo(() => {
-    const previewErrorCount = importPreviewRows.filter((row) => row.status === "error").length;
-    const errorCount = importValidationErrors.length > 0 ? Math.max(importValidationErrors.length, previewErrorCount) : previewErrorCount;
-
-    const validCount = Math.max(0, importRows.length - errorCount);
-    return { validCount, errorCount, totalAnalyzed: importRows.length };
-  }, [importRows.length, importValidationErrors.length, importPreviewRows]);
+    const errorCount = importPreviewRows.filter((row) => row.status === "error").length;
+    const validCount = importPreviewRows.length - errorCount;
+    return { validCount, errorCount, totalAnalyzed: importPreviewRows.length };
+  }, [importPreviewRows]);
 
   const downloadPreviewValidationReport = () => {
     if (importPreviewRows.length === 0) return;
@@ -1716,21 +1646,17 @@ export default function CrudSimplePage({
                         Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span>
                       </p>
                       <p>
-                        Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span>
+                        Ignorados por erro: <span className="font-semibold text-slate-900">{importSummary.ignoredByError}</span>
                       </p>
                       <p>
-                        Total ignorado: <span className="font-semibold text-slate-900">{importSummary.ignored}</span>
-                      </p>
-                      <p>
-                        Total com erro:{" "}
-                        <span className="font-semibold text-slate-900">{importSummary.errors.length}</span>
+                        Falhas da API: <span className="font-semibold text-slate-900">{importSummary.apiFailures}</span>
                       </p>
                       <button
                         type="button"
                         onClick={downloadImportFinalReport}
                         className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
                       >
-                        Baixar relatório (.csv)
+                        Baixar CSV final
                       </button>
                     </div>
                   ) : null}
@@ -1765,7 +1691,7 @@ export default function CrudSimplePage({
 
                   {isImporting ? (
                     <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
-                      Importando {importProgress.current}/{importProgress.total}...
+                      Importando {importProgress.current}/{importProgress.total}
                     </p>
                   ) : null}
 
@@ -1856,9 +1782,9 @@ export default function CrudSimplePage({
                     type="button"
                     onClick={handleImportClients}
                     className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={!isImportReady || isImporting}
+                    disabled={!isImportReady || isImporting || importCounters.validCount === 0}
                   >
-                    {isImporting ? "Importando..." : "Validar e importar"}
+                    {isImporting ? `Importando ${importProgress.current}/${importProgress.total}` : `Importar ${importCounters.validCount} clientes válidos`}
                   </button>
                 </>
               ) : null}
