@@ -32,6 +32,18 @@ const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
   follow_up: "bg-amber-100 text-amber-800 border-amber-200"
 };
 
+const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
+  agendado: "Agendado",
+  realizado: "Realizado",
+  cancelado: "Cancelado"
+};
+
+const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
+  agendado: "border-sky-200 bg-sky-100 text-sky-700",
+  realizado: "border-green-200 bg-green-100 text-green-700",
+  cancelado: "border-slate-200 bg-slate-100 text-slate-700"
+};
+
 function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -85,6 +97,7 @@ export default function AgendaPage() {
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
 
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
+  const [isEventsLoading, setIsEventsLoading] = useState(false);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -141,6 +154,53 @@ export default function AgendaPage() {
     };
   }, [canFilterBySeller]);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadAgendaEvents = async () => {
+      setIsEventsLoading(true);
+      try {
+        const response = await api.get("/agenda");
+        if (!active) return;
+
+        const payload = Array.isArray(response.data?.items)
+          ? response.data.items
+          : Array.isArray(response.data)
+            ? response.data
+            : [];
+
+        const mappedEvents = payload
+          .filter((item: any) => item?.id && item?.startDateTime && item?.endDateTime)
+          .map((item: any): AgendaEvent => ({
+            id: String(item.id),
+            userId: String(item.userId || item.ownerSellerId || item.sellerId || ""),
+            clientId: item.clientId ? String(item.clientId) : undefined,
+            opportunityId: item.opportunityId ? String(item.opportunityId) : undefined,
+            title: String(item.title || "Sem título"),
+            description: String(item.description || "Compromisso da agenda."),
+            type: (item.type as AgendaEventType) || "follow_up",
+            startDateTime: new Date(item.startDateTime).toISOString(),
+            endDateTime: new Date(item.endDateTime).toISOString(),
+            status: (item.status as AgendaEvent["status"]) || "agendado"
+          }))
+          .filter((item: AgendaEvent) => item.userId);
+
+        setEvents(mappedEvents.length ? mappedEvents : getInitialEvents());
+      } catch {
+        if (!active) return;
+        toast.error("Não foi possível carregar eventos da agenda.");
+      } finally {
+        if (active) setIsEventsLoading(false);
+      }
+    };
+
+    void loadAgendaEvents();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
 
   const filteredEvents = useMemo(() => {
@@ -154,17 +214,53 @@ export default function AgendaPage() {
       return true;
     });
 
-    // OBS: seu UI atual mostra apenas eventos do dia.
-    // Se quiser aplicar periodFilter e view, eu integro no próximo passo.
     const byPeriod = byRole.filter((event) => {
       const start = new Date(event.startDateTime);
       if (periodFilter === "hoje") return start >= dayStart && start <= dayEnd;
-      // fallback simples para não quebrar (mantém comportamento atual)
-      return start >= dayStart && start <= dayEnd;
+
+      if (periodFilter === "esta_semana") {
+        const weekStart = startOfDay(today);
+        const dayOfWeek = weekStart.getDay();
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        weekStart.setDate(weekStart.getDate() + diffToMonday);
+
+        const weekEnd = endOfDay(new Date(weekStart));
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        return start >= weekStart && start <= weekEnd;
+      }
+
+      const next7Days = endOfDay(new Date(dayStart));
+      next7Days.setDate(next7Days.getDate() + 7);
+      return start >= dayStart && start <= next7Days;
     });
 
     return byPeriod.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, periodFilter]);
+
+  const onSetAsDone = async (agendaEvent: AgendaEvent) => {
+    try {
+      await api.patch(`/agenda/${agendaEvent.id}`, { status: "realizado" });
+    } catch {
+      try {
+        await api.patch(`/agenda/${agendaEvent.id}/status`, { status: "realizado" });
+      } catch {
+        toast.error("Não foi possível atualizar o status no momento.");
+        return;
+      }
+    }
+
+    setEvents((current) =>
+      current.map((item) =>
+        item.id === agendaEvent.id
+          ? {
+              ...item,
+              status: "realizado"
+            }
+          : item
+      )
+    );
+    toast.success("Agenda marcada como realizada.");
+  };
 
   const refreshEvents = (newEvent: AgendaEvent) => {
     setEvents((current) =>
@@ -268,9 +364,52 @@ export default function AgendaPage() {
         </button>
       </header>
 
+      <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-3">
+        <label className="text-sm font-medium text-slate-700">
+          Visualização
+          <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <option value="diaria">Diária</option>
+            <option value="semanal">Semanal</option>
+          </select>
+        </label>
+
+        <label className="text-sm font-medium text-slate-700">
+          Período
+          <select
+            value={periodFilter}
+            onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          >
+            <option value="hoje">Hoje</option>
+            <option value="esta_semana">Esta semana</option>
+            <option value="proximos_7_dias">Próximos 7 dias</option>
+          </select>
+        </label>
+
+        {canFilterBySeller ? (
+          <label className="text-sm font-medium text-slate-700">
+            Vendedor
+            <select
+              value={selectedSellerId}
+              onChange={(event) => setSelectedSellerId(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            >
+              <option value="">Todos</option>
+              {sellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>
+                  {seller.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+      </div>
+
       {/* Lista de eventos */}
       <div className="rounded-xl border bg-white shadow-sm">
-        {!filteredEvents.length ? (
+        {isEventsLoading ? (
+          <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
+        ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
         ) : (
           <div className="divide-y">
@@ -285,18 +424,30 @@ export default function AgendaPage() {
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                       <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
                       {overdue ? <span className="rounded-full border border-rose-200 bg-rose-100 px-2 py-1 text-rose-800">Vencido</span> : null}
+                      <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
                       </span>
                     </div>
                   </div>
 
-                  {/* Exemplo de link (caso tenha clientId) - mantém import do Link útil */}
-                  {event.clientId ? (
-                    <Link to={`/clientes/${event.clientId}`} className="shrink-0 text-sm font-medium text-brand-700 underline">
-                      Ver cliente
-                    </Link>
-                  ) : null}
+                  <div className="flex shrink-0 items-center gap-3">
+                    {event.status === "agendado" ? (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-green-300 px-3 py-1 text-sm font-medium text-green-700 hover:bg-green-50"
+                        onClick={() => void onSetAsDone(event)}
+                      >
+                        Marcar realizado
+                      </button>
+                    ) : null}
+
+                    {event.clientId ? (
+                      <Link to={`/clientes/${event.clientId}`} className="text-sm font-medium text-brand-700 underline">
+                        Ver cliente
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
