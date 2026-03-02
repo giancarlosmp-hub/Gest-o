@@ -145,15 +145,9 @@ export default function TeamPage() {
         await loadTeamData(getCurrentMonthKey());
       } catch (error) {
         toast.error(getApiErrorMessage(error, "Não foi possível carregar os dados da equipe."));
-        const fallbackUsers: TeamUser[] = [
-          { id: "seed-1", name: "Vendedor 1", role: "vendedor", status: "ativo", isActive: true },
-          { id: "seed-2", name: "Vendedora 2", role: "vendedor", status: "ativo", isActive: true },
-          { id: "seed-3", name: "Vendedor 3", role: "vendedor", status: "inativo", isActive: false }
-        ];
-
-        setUsers(fallbackUsers);
+        setUsers([]);
         setTeamActivitiesInMonth(null);
-        setMetricsBySeller(buildSellerMetrics(fallbackUsers, [], [], {}, getCurrentMonthKey()));
+        setMetricsBySeller({});
       } finally {
         setLoading(false);
       }
