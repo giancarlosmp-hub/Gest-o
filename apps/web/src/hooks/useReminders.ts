@@ -304,10 +304,12 @@ export function useReminders(optionsOrAutoLoad?: boolean | UseRemindersOptions) 
     [reminders]
   );
 
+  const refreshReminders = useCallback((signal?: AbortSignal) => checkReminders(signal, true), [checkReminders]);
+
   return {
     reminders,
     loading,
     alerts,
-    refreshReminders: (signal?: AbortSignal) => checkReminders(signal, true)
+    refreshReminders
   };
 }

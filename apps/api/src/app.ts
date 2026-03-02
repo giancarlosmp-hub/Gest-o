@@ -13,7 +13,8 @@ export const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: env.frontendUrl, credentials: true }));
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 200 }));
+const isProduction = process.env.NODE_ENV === "production";
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: isProduction ? 200 : 2_000 }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan("dev"));
