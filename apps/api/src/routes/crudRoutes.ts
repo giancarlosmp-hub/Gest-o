@@ -1416,8 +1416,614 @@ router.delete("/contacts/:id", async (req, res) => {
   res.status(204).send();
 });
 
-// ... (restante do arquivo continua igual ao seu original, sem conflitos)
-// Eu mantive o conteúdo que você colou a partir daqui (opportunities, activities, events, objectives, goals, users etc)
-// — não há marcadores de conflito nessa parte, então não alterei.
+router.get("/opportunities", async (req, res) => {
+  const stage = getStageFilter(req.query.stage as string | undefined);
+  if (req.query.stage && !stage) return res.status(400).json({ message: "stage inválido" });
+  const status = getOpportunityStatusFilter(req.query.status as string | undefined);
+  if (req.query.status && !status) return res.status(400).json({ message: "status inválido" });
+
+  const ownerSellerId = (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined);
+  const clientId = req.query.clientId as string | undefined;
+  const search = req.query.search as string | undefined;
+  const crop = req.query.crop as string | undefined;
+  const season = req.query.season as string | undefined;
+  const dateFrom = req.query.dateFrom as string | undefined;
+  const dateTo = req.query.dateTo as string | undefined;
+  const overdue = req.query.overdue === "true";
+  const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
+  const page = parsePositiveInt(req.query.page, 1);
+  const pageSize = parsePositiveInt(req.query.pageSize, 20);
+  const todayStart = getUtcTodayStart();
+
+  const proposalDateWhere: Record<string, Date> = {};
+  if (dateFrom) {
+    const parsed = normalizeDateToUtc(dateFrom, false);
+    if (!parsed) return res.status(400).json({ message: "dateFrom inválido" });
+    proposalDateWhere.gte = parsed;
+  }
+  if (dateTo) {
+    const parsed = normalizeDateToUtc(dateTo, true);
+    if (!parsed) return res.status(400).json({ message: "dateTo inválido" });
+    proposalDateWhere.lte = parsed;
+  }
+
+  const where: any = {
+    ...sellerWhere(req),
+    ...(status === "open" ? { NOT: { stage: { in: [...CLOSED_STAGE_VALUES] } } } : {}),
+    ...(status === "closed" ? { stage: { in: [...CLOSED_STAGE_VALUES] } } : {}),
+    ...(stage ? { stage } : {}),
+    ...(ownerSellerId ? { ownerSellerId } : {}),
+    ...(clientId ? { clientId } : {}),
+    ...(crop ? { crop } : {}),
+    ...(season ? { season } : {}),
+    ...(dateFrom || dateTo ? { proposalDate: proposalDateWhere } : {}),
+    ...(overdue ? { expectedCloseDate: { lt: todayStart }, NOT: { stage: { in: [...CLOSED_STAGE_VALUES] } } } : {}),
+    ...(search ? { OR: [{ title: { contains: search, mode: "insensitive" } }, { client: { name: { contains: search, mode: "insensitive" } } }] } : {})
+  };
+
+  const baseQuery = {
+    where,
+    include: {
+      client: { select: { id: true, name: true, city: true, state: true } },
+      ownerSeller: { select: { id: true, name: true } }
+    },
+    orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }] as Prisma.Enumerable<Prisma.OpportunityOrderByWithRelationInput>
+  };
+
+  if (!hasPagination) {
+    const opportunities: any[] = await prisma.opportunity.findMany(baseQuery);
+    return res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
+  }
+
+  const [total, opportunities] = await Promise.all([
+    prisma.opportunity.count({ where }),
+    prisma.opportunity.findMany({
+      ...baseQuery,
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    })
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  return res.json({
+    items: opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)),
+    total,
+    page,
+    pageSize,
+    totalPages
+  });
+});
+
+router.get("/opportunities/summary", async (req, res) => {
+  const todayStart = getUtcTodayStart();
+  const opportunities: any[] = await prisma.opportunity.findMany({
+    where: sellerWhere(req),
+    select: { value: true, stage: true, crop: true, season: true, probability: true, expectedCloseDate: true }
+  });
+
+  const totalsByStage: Record<string, { value: number; weighted: number }> = {};
+  const breakdownByCrop: Record<string, { value: number; weighted: number; count: number }> = {};
+  const breakdownBySeason: Record<string, { value: number; weighted: number; count: number }> = {};
+
+  let totalPipelineValue = 0;
+  let totalWeightedValue = 0;
+  let overdueCount = 0;
+  let overdueValue = 0;
+
+  for (const opportunity of opportunities) {
+    const weighted = getWeightedValue(opportunity.value, opportunity.probability);
+    totalPipelineValue += opportunity.value;
+    totalWeightedValue += weighted;
+
+    if (!totalsByStage[opportunity.stage]) totalsByStage[opportunity.stage] = { value: 0, weighted: 0 };
+    totalsByStage[opportunity.stage].value += opportunity.value;
+    totalsByStage[opportunity.stage].weighted += weighted;
+
+    const cropKey = opportunity.crop || "não informado";
+    if (!breakdownByCrop[cropKey]) breakdownByCrop[cropKey] = { value: 0, weighted: 0, count: 0 };
+    breakdownByCrop[cropKey].value += opportunity.value;
+    breakdownByCrop[cropKey].weighted += weighted;
+    breakdownByCrop[cropKey].count += 1;
+
+    const seasonKey = opportunity.season || "não informado";
+    if (!breakdownBySeason[seasonKey]) breakdownBySeason[seasonKey] = { value: 0, weighted: 0, count: 0 };
+    breakdownBySeason[seasonKey].value += opportunity.value;
+    breakdownBySeason[seasonKey].weighted += weighted;
+    breakdownBySeason[seasonKey].count += 1;
+
+    const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+    if (isOverdue) {
+      overdueCount += 1;
+      overdueValue += opportunity.value;
+    }
+  }
+
+  res.json({ totalPipelineValue, totalWeightedValue, totalsByStage, overdueCount, overdueValue, breakdownByCrop, breakdownBySeason });
+});
+
+router.get("/opportunities/:id", async (req, res) => {
+  const todayStart = getUtcTodayStart();
+  const opportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    include: {
+      client: {
+        select: {
+          id: true,
+          name: true,
+          city: true,
+          state: true
+        }
+      },
+      ownerSeller: true
+    }
+  });
+
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  return res.json(serializeOpportunity(opportunity, todayStart));
+});
+
+router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
+  if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
+
+  const proposalDate = (req.body.proposalDate || req.body.proposalEntryDate) as string | undefined;
+  const expectedCloseDate = (req.body.expectedCloseDate || req.body.expectedReturnDate) as string | undefined;
+  if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+    return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
+  }
+
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const data = await prisma.opportunity.create({
+    data: {
+      ...(normalizeOpportunityDates(req.body) as any),
+      ownerSellerId
+    }
+  });
+
+  await createEvent({
+    type: "status",
+    description: `Oportunidade criada: ${data.title}`,
+    opportunityId: data.id,
+    clientId: data.clientId,
+    ownerSellerId
+  });
+
+  if (req.body.notes?.trim()) {
+    await createEvent({
+      type: "comentario",
+      description: req.body.notes,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId
+    });
+  }
+
+  return res.status(201).json(data);
+});
+router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), async (req, res) => {
+  if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });
+
+  const proposalDate = (req.body.proposalDate || req.body.proposalEntryDate) as string | undefined;
+  const expectedCloseDate = (req.body.expectedCloseDate || req.body.expectedReturnDate) as string | undefined;
+  if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+    return res.status(400).json({ message: "expectedReturnDate não pode ser anterior a proposalEntryDate" });
+  }
+
+  const previous = await prisma.opportunity.findUnique({
+    where: { id: req.params.id },
+    select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true }
+  });
+
+  const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
+
+  if (req.body.stage && previous && req.body.stage !== previous.stage) {
+    const fromStage = STAGE_ALIASES[previous.stage] || "prospeccao";
+    const toStage = STAGE_ALIASES[req.body.stage] || "prospeccao";
+    await createEvent({
+      type: "mudanca_etapa",
+      description: `Etapa alterada de ${STAGE_LABELS[fromStage]} para ${STAGE_LABELS[toStage]}`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.followUpDate && previous && previous.followUpDate.getTime() !== data.followUpDate.getTime()) {
+    await createEvent({
+      type: "status",
+      description: `Follow-up alterado de ${previous.followUpDate.toISOString().slice(0, 10)} para ${data.followUpDate.toISOString().slice(0, 10)}`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.probability !== undefined && previous && previous.probability !== data.probability) {
+    await createEvent({
+      type: "status",
+      description: `Probabilidade alterada de ${previous.probability ?? 0}% para ${data.probability ?? 0}%`,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  if (req.body.notes && previous && req.body.notes !== previous.notes) {
+    await createEvent({
+      type: "comentario",
+      description: req.body.notes,
+      opportunityId: data.id,
+      clientId: data.clientId,
+      ownerSellerId: data.ownerSellerId
+    });
+  }
+
+  return res.json(data);
+});
+router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({
+  where: sellerWhere(req),
+  include: {
+    ownerSeller: { select: { id: true, name: true } },
+    opportunity: {
+      select: {
+        id: true,
+        title: true,
+        client: { select: { id: true, name: true } }
+      }
+    }
+  },
+  orderBy: { createdAt: "desc" }
+})));
+router.get("/activities/monthly-counts", async (req, res) => {
+  const month = (req.query.month as string | undefined) || getMonthKey(new Date());
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
+  const { start, end } = getMonthRangeFromKey(month);
+
+  const groupedCounts = await prisma.activity.groupBy({
+    by: ["ownerSellerId", "type"],
+    where: {
+      ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+      createdAt: { gte: start, lte: end }
+    },
+    _count: { _all: true }
+  });
+
+  return res.json(
+    groupedCounts.map((countEntry) => ({
+      sellerId: countEntry.ownerSellerId,
+      type: countEntry.type,
+      month,
+      logicalCount: countEntry._count._all
+    }))
+  );
+});
+router.post("/activities", validateBody(activitySchema), async (req, res) => {
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const relatedOpportunity = req.body.opportunityId
+    ? await prisma.opportunity.findFirst({
+      where: {
+        id: req.body.opportunityId,
+        ...sellerWhere(req)
+      },
+      select: { id: true, clientId: true }
+    })
+    : null;
+
+  if (req.body.opportunityId && !relatedOpportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const providedClientId = req.body.clientId || undefined;
+  const resolvedClientId = relatedOpportunity?.clientId || providedClientId;
+
+  if (providedClientId && relatedOpportunity && providedClientId !== relatedOpportunity.clientId) {
+    return res.status(400).json({ message: "Cliente informado é diferente do cliente da oportunidade" });
+  }
+
+  const createdActivity = await prisma.activity.create({
+    data: {
+      type: req.body.type,
+      notes: req.body.notes,
+      dueDate: new Date(req.body.dueDate),
+      done: req.body.done,
+      opportunityId: req.body.opportunityId,
+      ownerSellerId
+    }
+  });
+
+  await createEvent({
+    type: "status",
+    description: `Atividade criada: ${createdActivity.type}`,
+    opportunityId: createdActivity.opportunityId || undefined,
+    clientId: resolvedClientId,
+    ownerSellerId
+  });
+
+  const month = getMonthKey(createdActivity.createdAt);
+  const logicalCount = await getActivityCountByTypeInMonth(ownerSellerId, createdActivity.type, month);
+
+  return res.status(201).json({
+    ...createdActivity,
+    metrics: {
+      month,
+      logicalCount
+    }
+  });
+});
+router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
+  const { clientId: _clientId, ...payload } = req.body;
+  return res.json(await prisma.activity.update({
+    where: { id: req.params.id },
+    data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
+  }));
+});
+router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
+router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+router.get("/events", async (req, res) => {
+  const opportunityId = req.query.opportunityId as string | undefined;
+  const clientId = req.query.clientId as string | undefined;
+  const takeRaw = Number(req.query.take ?? 20);
+  const take = Number.isFinite(takeRaw) ? Math.min(Math.max(Math.trunc(takeRaw), 1), 100) : 20;
+  const cursor = req.query.cursor as string | undefined;
+
+  const events = await prisma.timelineEvent.findMany({
+    where: buildTimelineEventWhere({
+      baseWhere: sellerWhere(req),
+      opportunityId,
+      clientId
+    }),
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    take,
+    include: {
+      ownerSeller: { select: { id: true, name: true } },
+      opportunity: { select: { id: true, title: true } },
+      client: { select: { id: true, name: true } }
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+  });
+
+  const hasMore = events.length === take;
+  const nextCursor = hasMore ? events[events.length - 1]?.id ?? null : null;
+
+  res.json({
+    items: events,
+    nextCursor
+  });
+});
+router.post("/events", validateBody(eventSchema), async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.body.opportunityId,
+      ...sellerWhere(req)
+    },
+    select: {
+      clientId: true
+    }
+  });
+
+  if (!opportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const created = await createEvent({
+    type: req.body.type,
+    description: req.body.description,
+    opportunityId: req.body.opportunityId,
+    clientId: opportunity.clientId,
+    ownerSellerId
+  });
+
+  return res.status(201).json(created);
+});
+
+
+router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
+  const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);
+
+  if (!parsedPeriod) {
+    return res.status(400).json({ message: "Mês/ano inválidos" });
+  }
+
+  const goals = await prisma.goal.findMany({
+    where: { month: parsedPeriod.monthKey },
+    orderBy: { createdAt: "desc" }
+  });
+
+  return res.json(
+    goals.map((goal) => ({
+      id: goal.id,
+      userId: goal.sellerId,
+      month: parsedPeriod.month,
+      year: parsedPeriod.year,
+      amount: goal.targetValue,
+      createdAt: goal.createdAt
+    }))
+  );
+});
+
+router.put("/objectives/:userId", authorize("diretor", "gerente"), validateBody(objectiveUpsertSchema), async (req, res) => {
+  const { month, year, amount } = req.body;
+  const monthKey = `${year}-${String(month).padStart(2, "0")}`;
+  const seller = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true, role: true } });
+
+  if (!seller || seller.role !== "vendedor") {
+    return res.status(404).json({ message: "Vendedor não encontrado" });
+  }
+
+  const existing = await prisma.goal.findFirst({
+    where: {
+      sellerId: req.params.userId,
+      month: monthKey
+    }
+  });
+
+  const goal = existing
+    ? await prisma.goal.update({ where: { id: existing.id }, data: { targetValue: amount } })
+    : await prisma.goal.create({ data: { sellerId: req.params.userId, month: monthKey, targetValue: amount } });
+
+  return res.json({
+    id: goal.id,
+    userId: goal.sellerId,
+    month,
+    year,
+    amount: goal.targetValue,
+    createdAt: goal.createdAt
+  });
+});
+
+router.get("/goals", async (req, res) => {
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : (req.query.sellerId as string | undefined);
+  res.json(await prisma.goal.findMany({ where: sellerId ? { sellerId } : {}, include: { seller: { select: { name: true, email: true } } }, orderBy: [{ month: "desc" }] }));
+});
+router.get("/activity-kpis", async (req, res) => {
+  const month = req.query.month as string | undefined;
+  const sellerIdQuery = req.query.sellerId as string | undefined;
+
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
+  const { start, end } = getMonthRangeFromKey(month);
+
+  const [activityKpis, monthActivityCounts] = await Promise.all([
+    prisma.activityKPI.findMany({
+      where: {
+        month,
+        ...(sellerId ? { sellerId } : {})
+      },
+      include: {
+        seller: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: [{ sellerId: "asc" }, { type: "asc" }]
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId", "type"],
+      where: {
+        ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+        createdAt: { gte: start, lte: end }
+      },
+      _count: { _all: true }
+    })
+  ]);
+
+  const logicalCountBySellerAndType = new Map(
+    monthActivityCounts.map((countEntry) => [`${countEntry.ownerSellerId}:${countEntry.type}`, countEntry._count._all])
+  );
+
+  return res.json(
+    activityKpis.map((activityKpi) => ({
+      ...activityKpi,
+      logicalCount: logicalCountBySellerAndType.get(`${activityKpi.sellerId}:${activityKpi.type}`) ?? 0
+    }))
+  );
+});
+
+router.put("/activity-kpis/:sellerId", authorize("diretor", "gerente"), validateBody(activityKpiUpsertSchema), async (req, res) => {
+  const seller = await prisma.user.findUnique({ where: { id: req.params.sellerId }, select: { id: true, role: true } });
+
+  if (!seller || seller.role !== "vendedor") {
+    return res.status(404).json({ message: "Vendedor não encontrado" });
+  }
+
+  const activityKpi = await prisma.activityKPI.upsert({
+    where: {
+      sellerId_month_type: {
+        sellerId: req.params.sellerId,
+        month: req.body.month,
+        type: req.body.type
+      }
+    },
+    update: {
+      targetValue: req.body.targetValue
+    },
+    create: {
+      sellerId: req.params.sellerId,
+      month: req.body.month,
+      type: req.body.type,
+      targetValue: req.body.targetValue
+    },
+    include: {
+      seller: {
+        select: { id: true, name: true, email: true }
+      }
+    }
+  });
+
+  return res.json(activityKpi);
+});
+
+router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema), async (req, res) => res.status(201).json(await prisma.goal.create({ data: req.body })));
+router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
+router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
+router.post("/users", authorize("diretor"), async (req, res) => {
+  const { name, email, password, role, region } = req.body;
+  const bcrypt = await import("bcryptjs");
+  const passwordHash = await bcrypt.default.hash(password, 10);
+  const user = await prisma.user.create({ data: { name, email, passwordHash, role, region } });
+  res.status(201).json({ id: user.id, email: user.email });
+});
+router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
+router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivationSchema), async (req, res) => {
+  if (req.user!.id === req.params.id && !req.body.isActive) {
+    return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { isActive: req.body.isActive },
+    select: { id: true, name: true, role: true, isActive: true }
+  });
+
+  return res.json(updatedUser);
+});
+router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdateSchema), async (req, res) => {
+  if (req.user!.id === req.params.id && req.body.role !== "diretor") {
+    return res.status(400).json({ message: "Você não pode remover seu próprio papel de diretor" });
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { role: req.body.role },
+    select: { id: true, name: true, role: true, isActive: true }
+  });
+
+  return res.json(updatedUser);
+});
+router.post("/users/:id/reset-password", authorize("diretor"), validateBody(userResetPasswordSchema), async (req, res) => {
+  const temporaryPasswordLength = req.body.temporaryPasswordLength ?? 12;
+  const temporaryPassword = randomBytes(temporaryPasswordLength).toString("base64url").slice(0, temporaryPasswordLength);
+  const bcrypt = await import("bcryptjs");
+  const passwordHash = await bcrypt.default.hash(temporaryPassword, 10);
+
+  const updatedUser = await prisma.user.update({
+    where: { id: req.params.id },
+    data: { passwordHash },
+    select: { id: true, name: true, email: true }
+  });
+
+  return res.json({
+    message: "Senha resetada com sucesso",
+    user: updatedUser,
+    temporaryPassword
+  });
+});
 
 export default router;
