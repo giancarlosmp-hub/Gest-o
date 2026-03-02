@@ -1129,7 +1129,8 @@ export default function CrudSimplePage({
       setImportProgress({ current: Math.min(index + chunkResults.length, total), total });
     }
 
-    return { total, imported, updated: 0, ignored: 0, errors } satisfies ClientImportSummary;
+    const summary: ClientImportSummary = { total, imported, updated: 0, ignored: 0, errors };
+    return summary;
   };
 
   const handleSimulateImport = async () => {
