@@ -21,6 +21,7 @@ const items: SidebarItem[] = [
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
   { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
+  { id: "agenda", label: "Agenda", path: "/agenda" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
   { id: "relatorios", label: "Relatórios", path: "/relatórios" },
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
@@ -41,10 +42,6 @@ export default function AppLayout() {
   const getSidebarTooltipText = (item: SidebarItem) => {
     if (item.id === "agenda" && reminders.agendaBadgeCount > 0) {
       return `${reminders.tasksDueCount} tarefas • ${reminders.followUpsDueCount} follow-ups • ${reminders.overdueOppsCount} atrasadas`;
-    }
-
-    if (item.id === "atividades" && reminders.activitiesBadgeCount > 0) {
-      return `${reminders.activitiesBadgeCount} tarefas pendentes`;
     }
 
     return undefined;
