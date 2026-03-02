@@ -75,6 +75,14 @@ type ClientImportSummary = {
   errors: ClientImportErrorItem[];
 };
 
+type ClientImportFinalReportRow = {
+  rowNumber: number;
+  clientName: string;
+  status: "Importado" | "Atualizado" | "Ignorado" | "Erro";
+  reason: string;
+  clientId: string;
+};
+
 type ImportAnalysisRow = ClientImportRow & {
   status: ClientImportStatus;
   action?: ClientImportAction;
@@ -211,6 +219,7 @@ export default function CrudSimplePage({
   const [isImportReady, setIsImportReady] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importSummary, setImportSummary] = useState<ClientImportSummary | null>(null);
+  const [importFinalReportRows, setImportFinalReportRows] = useState<ClientImportFinalReportRow[]>([]);
   const [importSimulationSummary, setImportSimulationSummary] =
     useState<ClientImportSimulationSummary | null>(null);
   const [isSimulatingImport, setIsSimulatingImport] = useState(false);
@@ -734,6 +743,7 @@ export default function CrudSimplePage({
     setImportValidationErrors(validation.errors);
     setIsImportReady(validation.errors.length === 0);
     setImportSummary(null);
+    setImportFinalReportRows([]);
     setImportSimulationSummary(null);
 
     if (validation.errors.length > 0) {
@@ -852,7 +862,101 @@ export default function CrudSimplePage({
     setIsImportReady(false);
     setImportProgress({ current: 0, total: 0 });
     setImportSummary(null);
+    setImportFinalReportRows([]);
     setImportSimulationSummary(null);
+  };
+
+  const buildImportFinalReportRows = (
+    rows: ClientImportRow[],
+    actionsByRow: Map<number, ImportAnalysisRow>,
+    summary: ClientImportSummary
+  ): ClientImportFinalReportRow[] => {
+    const rowsWithErrors = new Set(summary.errors.map((errorItem) => errorItem.rowNumber));
+
+    const errorRows = summary.errors.map((errorItem) => ({
+      rowNumber: errorItem.rowNumber,
+      clientName: errorItem.clientName,
+      status: "Erro" as const,
+      reason: errorItem.message,
+      clientId: ""
+    }));
+
+    const successRows = rows
+      .filter((row) => !rowsWithErrors.has(row.sourceRowNumber))
+      .map((row) => {
+        const analyzed = actionsByRow.get(row.sourceRowNumber);
+
+        if (analyzed?.action === "skip") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name,
+            status: "Ignorado" as const,
+            reason: "Ignorado pelo usuário",
+            clientId: ""
+          };
+        }
+
+        if (analyzed?.status === "duplicate" && analyzed.action === "update") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name,
+            status: "Atualizado" as const,
+            reason: "Cliente duplicado - atualizado",
+            clientId: analyzed.existingClientId || ""
+          };
+        }
+
+        if (analyzed?.status === "duplicate" && analyzed.action === "import_anyway") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name,
+            status: "Importado" as const,
+            reason: "Cliente duplicado - importado mesmo assim",
+            clientId: ""
+          };
+        }
+
+        return {
+          rowNumber: row.sourceRowNumber,
+          clientName: row.name,
+          status: "Importado" as const,
+          reason: "Novo cliente importado",
+          clientId: ""
+        };
+      });
+
+    return [...successRows, ...errorRows].sort((a, b) => a.rowNumber - b.rowNumber);
+  };
+
+  const downloadImportFinalReport = () => {
+    if (!importSummary || importFinalReportRows.length === 0) return;
+
+    const escapeCsvCell = (value: string | number) => {
+      const stringValue = String(value ?? "").replace(/\r?\n/g, " ");
+      const escaped = stringValue.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
+
+    const header = ["Linha do Excel", "Nome", "Status", "Motivo", "ID criado ou atualizado"];
+    const rows = importFinalReportRows.map((row) =>
+      [row.rowNumber, row.clientName, row.status, row.reason, row.clientId].map(escapeCsvCell).join(";")
+    );
+
+    const csvContent = [header.map(escapeCsvCell).join(";"), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const today = new Date();
+    const dateLabel = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(
+      today.getDate()
+    ).padStart(2, "0")}`;
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `relatorio-importacao-clientes-${dateLabel}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
   const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
@@ -961,28 +1065,6 @@ export default function CrudSimplePage({
     }
   };
 
-  const downloadImportErrorsReport = () => {
-    if (!importSummary || importSummary.errors.length === 0) return;
-
-    const header = "linha;cliente;erro";
-    const rows = importSummary.errors.map((errorItem) => {
-      const safeName = errorItem.clientName.replace(/\n/g, " ").replace(/;/g, ",");
-      const safeMessage = errorItem.message.replace(/\n/g, " ").replace(/;/g, ",");
-      return `${errorItem.rowNumber};${safeName};${safeMessage}`;
-    });
-
-    const csvContent = [header, ...rows].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `relatorio-erros-importacao-clientes-${Date.now()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  };
-
   const updateImportDuplicateAction = (sourceRowNumber: number, action: ClientImportAction) => {
     setImportPreviewRows((prev) => prev.map((row) => (row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row)));
   };
@@ -992,6 +1074,7 @@ export default function CrudSimplePage({
 
     setIsImporting(true);
     setImportSummary(null);
+    setImportFinalReportRows([]);
     setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: importRows.length });
 
@@ -1026,8 +1109,10 @@ export default function CrudSimplePage({
 
       const resolvedSummary =
         summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
+      const reportRows = buildImportFinalReportRows(importRows, actionByRow, resolvedSummary);
 
       setImportSummary(resolvedSummary);
+      setImportFinalReportRows(reportRows);
 
       if (resolvedSummary.errors.length === 0) {
         toast.success(
@@ -1577,15 +1662,13 @@ export default function CrudSimplePage({
                         Total com erro:{" "}
                         <span className="font-semibold text-slate-900">{importSummary.errors.length}</span>
                       </p>
-                      {importSummary.errors.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={downloadImportErrorsReport}
-                          className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                        >
-                          Baixar relatório de erros
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={downloadImportFinalReport}
+                        className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      >
+                        Baixar relatório (.csv)
+                      </button>
                     </div>
                   ) : null}
 
