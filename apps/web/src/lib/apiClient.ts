@@ -2,10 +2,9 @@ import axios from "axios";
 
 const resolveApiBaseUrl = () => {
   const configuredBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
-  if (!configuredBaseUrl) return "http://localhost:4000/api";
+  if (!configuredBaseUrl) return "http://localhost:4000";
 
-  const normalizedBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
-  return normalizedBaseUrl.endsWith("/api") ? normalizedBaseUrl : `${normalizedBaseUrl}/api`;
+  return configuredBaseUrl.replace(/\/+$/, "");
 };
 
 const api = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true });
