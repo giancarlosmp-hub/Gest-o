@@ -5,6 +5,11 @@ import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import { validateClientPayload, type ClientPayloadInput } from "../lib/validateClientPayload";
+import {
+  ClientImportColumnMappingStep,
+  type ClientImportFieldDefinition,
+  type ClientImportFieldKey
+} from "../components/ClientImportColumnMappingStep";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -46,6 +51,11 @@ type ClientImportRow = {
   cnpj?: string;
   segment?: string;
   ownerSellerId?: string;
+};
+
+type ImportParsedSheet = {
+  headers: string[];
+  rows: Record<string, unknown>[];
 };
 
 type ClientImportErrorItem = {
@@ -108,18 +118,23 @@ const clientImportColumns = [
   "ownerSellerId"
 ] as const;
 
-const clientImportColumnLabels: Record<(typeof clientImportColumns)[number], string> = {
-  name: "Nome",
-  city: "Cidade",
-  state: "UF",
-  region: "Região",
-  potentialHa: "Potencial (ha)",
-  farmSizeHa: "Área total (ha)",
-  clientType: "Tipo (PJ/PF)",
-  cnpj: "CNPJ/CPF",
-  segment: "Segmento",
-  ownerSellerId: "Vendedor responsável"
-};
+const importMappingStorageKey = "clientsImport.columnMapping.v1";
+
+const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
+  { key: "name", label: "Nome", required: true },
+  { key: "city", label: "Cidade", required: true },
+  { key: "state", label: "UF", required: true },
+  { key: "clientType", label: "Tipo PJ/PF", required: true },
+  { key: "region", label: "Região", required: false },
+  { key: "potentialHa", label: "Potencial (ha)", required: false },
+  { key: "farmSizeHa", label: "Área total (ha)", required: false },
+  { key: "cnpj", label: "CNPJ/CPF", required: false },
+  { key: "segment", label: "Segmento", required: false },
+  { key: "ownerSellerId", label: "Vendedor responsável", required: false }
+];
+
+const getImportColumnLabel = (key: (typeof clientImportColumns)[number]) =>
+  clientImportFieldDefinitions.find((f) => f.key === key)?.label ?? key;
 
 export default function CrudSimplePage({
   endpoint,
@@ -133,6 +148,7 @@ export default function CrudSimplePage({
 }: CrudSimplePageProps) {
   const navigate = useNavigate();
   const { user } = useAuth();
+
   const [items, setItems] = useState<ClientListItem[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
   const [form, setForm] = useState<any>({});
@@ -142,21 +158,38 @@ export default function CrudSimplePage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [formFieldErrors, setFormFieldErrors] = useState<Partial<Record<keyof ClientPayloadInput, string>>>({});
+  const [formFieldErrors, setFormFieldErrors] = useState<
+    Partial<Record<keyof ClientPayloadInput, string>>
+  >({});
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [quickFilters, setQuickFilters] = useState({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+  const [quickFilters, setQuickFilters] = useState({
+    uf: "",
+    region: "",
+    clientType: "",
+    ownerSellerId: ""
+  });
+
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
+
   const [openActionsMenuId, setOpenActionsMenuId] = useState<string | null>(null);
+
+  // Import
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importStep, setImportStep] = useState<1 | 2>(1);
   const [importRows, setImportRows] = useState<ClientImportRow[]>([]);
   const [importPreviewRows, setImportPreviewRows] = useState<ImportAnalysisRow[]>([]);
-  const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
+  const [importExcelHeaders, setImportExcelHeaders] = useState<string[]>([]);
+  const [importColumnMapping, setImportColumnMapping] = useState<
+    Partial<Record<ClientImportFieldKey, string>>
+  >({});
+  const [importRawRows, setImportRawRows] = useState<Record<string, unknown>[]>([]);
   const [importDefaultOwnerSellerId, setImportDefaultOwnerSellerId] = useState("");
+  const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [isImportReady, setIsImportReady] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
@@ -210,6 +243,7 @@ export default function CrudSimplePage({
 
       const parsedTotal = Number(payload?.total);
       const resolvedTotal = Number.isFinite(parsedTotal) ? parsedTotal : resolvedItems.length;
+
       const parsedTotalPages = Number(payload?.totalPages);
       const resolvedTotalPages = Number.isFinite(parsedTotalPages)
         ? parsedTotalPages
@@ -235,9 +269,19 @@ export default function CrudSimplePage({
       void loadClients();
       return;
     }
-
     void load();
-  }, [endpoint, isClientsPage, page, pageSize, debouncedSearch, quickFilters.uf, quickFilters.region, quickFilters.clientType, quickFilters.ownerSellerId, canFilterBySeller]);
+  }, [
+    endpoint,
+    isClientsPage,
+    page,
+    pageSize,
+    debouncedSearch,
+    quickFilters.uf,
+    quickFilters.region,
+    quickFilters.clientType,
+    quickFilters.ownerSellerId,
+    canFilterBySeller
+  ]);
 
   useEffect(() => {
     if (!isClientsPage || !canFilterBySeller) {
@@ -245,10 +289,13 @@ export default function CrudSimplePage({
       return;
     }
 
-    api.get("/users")
+    api
+      .get("/users")
       .then((response) => {
         const allUsers = Array.isArray(response.data) ? response.data : [];
-        const sellers = allUsers.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
+        const sellers = allUsers.filter(
+          (item: any) => item?.role === "vendedor" && item?.id && item?.name
+        );
         setUsers(sellers);
       })
       .catch(() => {
@@ -261,11 +308,17 @@ export default function CrudSimplePage({
     return () => clearTimeout(timer);
   }, [search]);
 
-  const filterOptions = useMemo(() => ({
-    ufs: ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"],
-    regions: ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"],
-    clientTypes: ["PJ", "PF"]
-  }), []);
+  const filterOptions = useMemo(
+    () => ({
+      ufs: [
+        "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+        "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+      ],
+      regions: ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"],
+      clientTypes: ["PJ", "PF"]
+    }),
+    []
+  );
 
   const visibleItems = items;
 
@@ -273,7 +326,6 @@ export default function CrudSimplePage({
     if (isClientsPage && fieldKey === "ownerSellerId") {
       return item.ownerSeller?.name || item.ownerSellerName || "—";
     }
-
     const value = item[fieldKey];
     if (value === null || value === undefined || value === "") return "—";
     return String(value);
@@ -289,7 +341,14 @@ export default function CrudSimplePage({
   useEffect(() => {
     if (!isClientsPage) return;
     setPage(1);
-  }, [debouncedSearch, quickFilters.uf, quickFilters.region, quickFilters.clientType, quickFilters.ownerSellerId, isClientsPage]);
+  }, [
+    debouncedSearch,
+    quickFilters.uf,
+    quickFilters.region,
+    quickFilters.clientType,
+    quickFilters.ownerSellerId,
+    isClientsPage
+  ]);
 
   const parseFormValue = (fieldKey: string, fieldType: string | undefined, rawValue: string) => {
     if (fieldType === "number") return rawValue === "" ? "" : Number(rawValue);
@@ -327,7 +386,18 @@ export default function CrudSimplePage({
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportColumns],
-      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", ""]
+      [
+        "Fazenda Santa Rita",
+        "Sorriso",
+        "MT",
+        "Centro-Oeste",
+        1200,
+        2500,
+        "PJ",
+        "12.345.678/0001-99",
+        "Soja e milho",
+        ""
+      ]
     ];
 
     const xlsx = await loadXlsxLibrary();
@@ -338,7 +408,13 @@ export default function CrudSimplePage({
     toast.success("Modelo de importação baixado com sucesso.");
   };
 
-  const normalizeHeader = (value: unknown) => String(value ?? "").trim().toLowerCase();
+  const normalizeHeader = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]/g, "");
 
   const normalizeTextValue = (value: unknown) => String(value ?? "").trim();
 
@@ -386,7 +462,7 @@ export default function CrudSimplePage({
       : { parsedValue, isInvalid: false };
   };
 
-  const parseImportFile = async (file: File) => {
+  const parseImportFile = async (file: File): Promise<ImportParsedSheet> => {
     const data = await file.arrayBuffer();
     const xlsx = await loadXlsxLibrary();
     const workbook = xlsx.read(data, { type: "array" });
@@ -403,55 +479,133 @@ export default function CrudSimplePage({
       throw new Error("A planilha precisa conter cabeçalho e pelo menos uma linha de dados.");
     }
 
-    const headerMap = Object.keys(sheetRows[0] ?? {}).reduce<Record<string, string>>((acc, headerName) => {
-      const normalizedHeader = normalizeHeader(headerName);
-      if (normalizedHeader) {
-        acc[normalizedHeader] = headerName;
-      }
-      return acc;
-    }, {});
-
-    const missingColumns = clientImportColumns.filter((columnName) => !headerMap[columnName]);
-    if (missingColumns.length > 0) {
-      throw new Error(`Colunas ausentes: ${missingColumns.join(", ")}.`);
-    }
-
-    const parsedRows: ClientImportRow[] = sheetRows
-      .map((row, index) => {
-        const potentialHaResult = parseDecimalValue(row[headerMap.potentialHa]);
-        const farmSizeHaResult = parseDecimalValue(row[headerMap.farmSizeHa]);
-
-        return {
-          sourceRowNumber: index + 2,
-          name: normalizeTextValue(row[headerMap.name]),
-          city: normalizeTextValue(row[headerMap.city]),
-          state: normalizeTextValue(row[headerMap.state]),
-          region: normalizeTextValue(row[headerMap.region]),
-          potentialHa: potentialHaResult.isInvalid ? Number.NaN : potentialHaResult.parsedValue,
-          farmSizeHa: farmSizeHaResult.isInvalid ? Number.NaN : farmSizeHaResult.parsedValue,
-          clientType: normalizeTextValue(row[headerMap.clientType]),
-          cnpj: String(row[headerMap.cnpj] ?? "").trim(),
-          segment: normalizeTextValue(row[headerMap.segment]),
-          ownerSellerId: normalizeTextValue(row[headerMap.ownerSellerId])
-        };
-      })
-      .filter((row) => [
-        row.name,
-        row.city,
-        row.state,
-        row.region,
-        row.potentialHa,
-        row.farmSizeHa,
-        row.clientType,
-        row.cnpj,
-        row.segment,
-        row.ownerSellerId
-      ].some((value) => value !== "" && value !== undefined));
-
-    return parsedRows;
+    return {
+      headers: Object.keys(sheetRows[0] ?? {}).filter((header) => String(header).trim() !== ""),
+      rows: sheetRows
+    };
   };
 
-  const validateImportRows = (rows: ClientImportRow[], defaultOwnerSellerId?: string): ImportValidationSummary => {
+  const autoMapColumns = (headers: string[]) => {
+    const synonyms: Record<ClientImportFieldKey, string[]> = {
+      name: ["name", "nome", "cliente", "razaosocial", "produtor", "nomedocliente"],
+      city: ["city", "cidade", "municipio"],
+      state: ["state", "uf", "estado"],
+      clientType: ["clienttype", "tipo", "pjpf", "pessoa", "tipocliente"],
+      region: ["region", "regiao"],
+      potentialHa: ["potentialha", "potencial", "hapotencial", "potencialha"],
+      farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal"],
+      cnpj: ["cnpj", "cpf", "cnpjcpf", "documento"],
+      segment: ["segment", "segmento", "atividade", "perfil"],
+      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller"]
+    };
+
+    const normalizedHeaders = headers.map((header) => ({ header, normalized: normalizeHeader(header) }));
+    const mapping: Partial<Record<ClientImportFieldKey, string>> = {};
+
+    clientImportFieldDefinitions.forEach((field) => {
+      const expected = normalizeHeader(field.key);
+      const candidates = normalizedHeaders.filter((item) => {
+        if (!item.normalized) return false;
+        if (item.normalized === expected) return true;
+        return synonyms[field.key].some(
+          (synonym) => item.normalized.includes(synonym) || synonym.includes(item.normalized)
+        );
+      });
+
+      if (candidates.length === 1) {
+        mapping[field.key] = candidates[0].header;
+      }
+    });
+
+    return mapping;
+  };
+
+  const loadMappingFromLocalStorage = () => {
+    try {
+      const rawValue = localStorage.getItem(importMappingStorageKey);
+      if (!rawValue) return {};
+      const parsed = JSON.parse(rawValue) as Partial<Record<ClientImportFieldKey, string>>;
+      return parsed ?? {};
+    } catch {
+      return {};
+    }
+  };
+
+  const saveMappingToLocalStorage = (mapping: Partial<Record<ClientImportFieldKey, string>>) => {
+    localStorage.setItem(importMappingStorageKey, JSON.stringify(mapping));
+  };
+
+  const applySavedMapping = (mapping: Partial<Record<ClientImportFieldKey, string>>, headers: string[]) => {
+    const headersSet = new Set(headers);
+    return Object.entries(mapping).reduce<Partial<Record<ClientImportFieldKey, string>>>((acc, [key, value]) => {
+      if (!value || !headersSet.has(value)) return acc;
+      acc[key as ClientImportFieldKey] = value;
+      return acc;
+    }, {});
+  };
+
+  const hasAllRequiredMappings = (mapping: Partial<Record<ClientImportFieldKey, string>>) => {
+    const requiredFields: ClientImportFieldKey[] = ["name", "city", "state", "clientType"];
+    return requiredFields.every((field) => Boolean(mapping[field]));
+  };
+
+  const applyMappingToRow = (
+    row: Record<string, unknown>,
+    rowIndex: number,
+    mapping: Partial<Record<ClientImportFieldKey, string>>,
+    defaultOwnerSellerId?: string
+  ): ClientImportRow => {
+    const potentialValue = mapping.potentialHa ? row[mapping.potentialHa] : undefined;
+    const farmValue = mapping.farmSizeHa ? row[mapping.farmSizeHa] : undefined;
+
+    const potentialHaResult = parseDecimalValue(potentialValue);
+    const farmSizeHaResult = parseDecimalValue(farmValue);
+
+    const resolvedOwnerSeller = isSeller
+      ? user?.id
+      : (mapping.ownerSellerId ? normalizeTextValue(row[mapping.ownerSellerId]) : "") || defaultOwnerSellerId;
+
+    return {
+      sourceRowNumber: rowIndex + 2,
+      name: mapping.name ? normalizeTextValue(row[mapping.name]) : "",
+      city: mapping.city ? normalizeTextValue(row[mapping.city]) : "",
+      state: mapping.state ? normalizeTextValue(row[mapping.state]) : "",
+      region: mapping.region ? normalizeTextValue(row[mapping.region]) : "",
+      potentialHa: potentialHaResult.isInvalid ? Number.NaN : potentialHaResult.parsedValue,
+      farmSizeHa: farmSizeHaResult.isInvalid ? Number.NaN : farmSizeHaResult.parsedValue,
+      clientType: mapping.clientType ? normalizeTextValue(row[mapping.clientType]) : "",
+      cnpj: mapping.cnpj ? normalizeTextValue(row[mapping.cnpj]) : "",
+      segment: mapping.segment ? normalizeTextValue(row[mapping.segment]) : "",
+      ownerSellerId: resolvedOwnerSeller ? normalizeTextValue(resolvedOwnerSeller) : ""
+    };
+  };
+
+  const buildRowsFromCurrentMapping = (
+    rows: Record<string, unknown>[],
+    mapping: Partial<Record<ClientImportFieldKey, string>>,
+    defaultOwnerSellerId?: string
+  ) =>
+    rows
+      .map((row, index) => applyMappingToRow(row, index, mapping, defaultOwnerSellerId))
+      .filter((row) =>
+        [
+          row.name,
+          row.city,
+          row.state,
+          row.region,
+          row.potentialHa,
+          row.farmSizeHa,
+          row.clientType,
+          row.cnpj,
+          row.segment,
+          row.ownerSellerId
+        ].some((value) => value !== "" && value !== undefined)
+      );
+
+  const validateImportRows = (
+    rows: ClientImportRow[],
+    defaultOwnerSellerId?: string
+  ): ImportValidationSummary => {
     const errors: string[] = [];
     let validCount = 0;
 
@@ -460,12 +614,17 @@ export default function CrudSimplePage({
       return { errors, validCount: 0, errorCount: 0 };
     }
 
+    if (!isSeller && canChooseOwnerSeller && !defaultOwnerSellerId && !importColumnMapping.ownerSellerId) {
+      errors.push("Selecione um vendedor padrão para este lote ou mapeie a coluna de vendedor responsável.");
+    }
+
     rows.forEach((row, index) => {
       const rowNumber = row.sourceRowNumber || index + 2;
       const payloadToValidate = {
         ...row,
         ownerSellerId: row.ownerSellerId || defaultOwnerSellerId
       };
+
       const { fieldErrors } = validateClientPayload(payloadToValidate, {
         isSeller,
         canChooseOwnerSeller,
@@ -490,15 +649,110 @@ export default function CrudSimplePage({
     };
   };
 
+  const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
+    const rowWithResolvedOwner = {
+      ...row,
+      ownerSellerId: isSeller ? user?.id : row.ownerSellerId || importDefaultOwnerSellerId
+    };
+
+    const { sanitizedPayload } = validateClientPayload(rowWithResolvedOwner, {
+      isSeller,
+      canChooseOwnerSeller,
+      sellerId: user?.id
+    });
+
+    return sanitizedPayload;
+  };
+
+  const analyzeImportRows = async (rows: ClientImportRow[]) => {
+    const payloads = rows.map((row) => ({ ...buildImportPayload(row), sourceRowNumber: row.sourceRowNumber }));
+    const response = await api.post("/clients/import/preview", { rows: payloads });
+
+    const duplicatesByRow = new Map<number, string>();
+    const errorsByRow = new Map<number, string>();
+
+    (Array.isArray(response.data?.duplicados) ? response.data.duplicados : []).forEach((item: any) => {
+      const rowNumber = Number(item?.rowNumber);
+      if (Number.isFinite(rowNumber)) duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
+    });
+
+    (Array.isArray(response.data?.erros) ? response.data.erros : []).forEach((item: any) => {
+      const rowNumber = Number(item?.rowNumber);
+      if (Number.isFinite(rowNumber)) errorsByRow.set(rowNumber, String(item?.message || "Erro de validação"));
+    });
+
+    return rows.map((row) => {
+      const existingClientId = duplicatesByRow.get(row.sourceRowNumber);
+      const errorMessage = errorsByRow.get(row.sourceRowNumber);
+
+      if (errorMessage) return { ...row, status: "error" as const, errorMessage };
+      if (existingClientId) {
+        return {
+          ...row,
+          status: "duplicate" as const,
+          existingClientId,
+          action: "skip" as const
+        };
+      }
+      return { ...row, status: "new" as const, action: "import_anyway" as const };
+    });
+  };
+
+  const runImportValidation = async (
+    rows: Record<string, unknown>[],
+    mapping: Partial<Record<ClientImportFieldKey, string>>,
+    defaultOwnerSellerId?: string
+  ) => {
+    const mappedRows = buildRowsFromCurrentMapping(rows, mapping, defaultOwnerSellerId);
+    const validation = validateImportRows(mappedRows, defaultOwnerSellerId);
+
+    setImportRows(mappedRows);
+    setImportValidationErrors(validation.errors);
+    setIsImportReady(validation.errors.length === 0);
+
+    if (validation.errors.length > 0) {
+      setImportPreviewRows(
+        mappedRows.slice(0, 20).map((row) => ({
+          ...row,
+          status: "error",
+          errorMessage: "Corrija os erros de validação para continuar."
+        }))
+      );
+      toast.error("Foram encontrados erros de validação na planilha.");
+      return;
+    }
+
+    try {
+      const analyzed = await analyzeImportRows(mappedRows);
+      setImportPreviewRows(analyzed.slice(0, 20));
+      toast.success(`${mappedRows.length} linha(s) carregada(s) com sucesso.`);
+    } catch (err: any) {
+      // Se o preview falhar, ainda permite importar (sem análise de duplicidade), mas avisa.
+      setImportPreviewRows(
+        mappedRows.slice(0, 20).map((row) => ({
+          ...row,
+          status: "new",
+          action: "import_anyway"
+        }))
+      );
+      toast.warning(err?.response?.data?.message || "Não foi possível analisar duplicidades. Você ainda pode importar.");
+    }
+  };
+
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
+
     setImportRows([]);
     setImportPreviewRows([]);
+    setImportExcelHeaders([]);
+    setImportRawRows([]);
+    setImportColumnMapping({});
     setImportValidationErrors([]);
     setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
     setImportSummary(null);
     setImportProgress({ current: 0, total: 0 });
+    setImportStep(1);
 
     if (!selectedFile) return;
 
@@ -508,21 +762,21 @@ export default function CrudSimplePage({
     }
 
     try {
-      const rows = await parseImportFile(selectedFile);
-      const validationSummary = validateImportRows(rows, importDefaultOwnerSellerId);
-      const normalizedRows = rows;
+      const parsedSheet = await parseImportFile(selectedFile);
+      const autoMapping = autoMapColumns(parsedSheet.headers);
+      const savedMapping = applySavedMapping(loadMappingFromLocalStorage(), parsedSheet.headers);
+      const mergedMapping = { ...autoMapping, ...savedMapping };
 
-      setImportRows(normalizedRows);
-      setImportValidationErrors(validationSummary.errors);
-      setIsImportReady(validationSummary.errors.length === 0);
+      setImportExcelHeaders(parsedSheet.headers);
+      setImportRawRows(parsedSheet.rows);
+      setImportColumnMapping(mergedMapping);
 
-      if (validationSummary.errors.length > 0) {
-        setImportPreviewRows(normalizedRows.map((row) => ({ ...row, status: "error", errorMessage: "Corrija os erros de validação para continuar." })));
-        toast.error("Foram encontrados erros de validação na planilha.");
+      if (hasAllRequiredMappings(mergedMapping)) {
+        setImportStep(2);
+        await runImportValidation(parsedSheet.rows, mergedMapping, "");
       } else {
-        const analyzedRows = await analyzeImportRows(normalizedRows);
-        setImportPreviewRows(analyzedRows);
-        toast.success(`${normalizedRows.length} linha(s) carregada(s) com sucesso.`);
+        setImportStep(1);
+        toast.warning("Mapeie as colunas obrigatórias para continuar.");
       }
     } catch (err: any) {
       setImportRows([]);
@@ -533,54 +787,62 @@ export default function CrudSimplePage({
     }
   };
 
-  const importValidationSummary = useMemo(
-    () => validateImportRows(importRows, importDefaultOwnerSellerId),
-    [importRows, importDefaultOwnerSellerId, isSeller, canChooseOwnerSeller, user?.id]
-  );
+  const handleImportMappingChange = (field: ClientImportFieldKey, header: string) => {
+    setImportColumnMapping((previous) => ({ ...previous, [field]: header || undefined }));
+  };
 
-  useEffect(() => {
-    if (importRows.length === 0) {
-      setImportValidationErrors([]);
-      setIsImportReady(false);
+  const handleUseModelHeaders = () => {
+    const fallbackMapping = autoMapColumns(importExcelHeaders);
+    setImportColumnMapping(fallbackMapping);
+    toast.info("Mapeamento automático aplicado com base no modelo.");
+  };
+
+  const handleSaveMapping = () => {
+    saveMappingToLocalStorage(importColumnMapping);
+    toast.success("Mapeamento salvo para próximos uploads.");
+  };
+
+  const handleContinueAfterMapping = async () => {
+    if (!hasAllRequiredMappings(importColumnMapping)) {
+      toast.error("Preencha os campos obrigatórios para continuar.");
       return;
     }
 
-    setImportValidationErrors(importValidationSummary.errors);
-    setIsImportReady(importValidationSummary.errors.length === 0);
-  }, [importRows.length, importValidationSummary]);
+    setImportStep(2);
+    await runImportValidation(importRawRows, importColumnMapping, importDefaultOwnerSellerId || undefined);
+  };
 
   const resetImportState = () => {
     setIsImportModalOpen(false);
+    setImportStep(1);
     setImportRows([]);
     setImportPreviewRows([]);
-    setImportValidationErrors([]);
+    setImportExcelHeaders([]);
+    setImportColumnMapping({});
+    setImportRawRows([]);
     setImportDefaultOwnerSellerId("");
+    setImportValidationErrors([]);
     setIsImportReady(false);
     setImportProgress({ current: 0, total: 0 });
     setImportSummary(null);
   };
 
-  const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
-    const payload = {
-      ...row,
-      ownerSellerId: row.ownerSellerId || importDefaultOwnerSellerId
-    };
-    const { sanitizedPayload } = validateClientPayload(payload, {
-      isSeller,
-      canChooseOwnerSeller,
-      sellerId: user?.id
-    });
-
-    return sanitizedPayload;
-  };
-
   const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
-    const imported = Number(responseData?.totalImportados ?? responseData?.imported ?? responseData?.successCount ?? responseData?.created ?? responseData?.totalImported);
+    const imported = Number(
+      responseData?.totalImportados ??
+        responseData?.imported ??
+        responseData?.successCount ??
+        responseData?.created ??
+        responseData?.totalImported
+    );
     const updated = Number(responseData?.totalAtualizados ?? responseData?.updated ?? 0);
     const ignored = Number(responseData?.totalIgnorados ?? responseData?.ignored ?? 0);
+
     const errorsRaw = Array.isArray(responseData?.errors) ? responseData.errors : [];
 
-    if (!Number.isFinite(imported) && errorsRaw.length === 0 && !Number.isFinite(updated) && !Number.isFinite(ignored)) return null;
+    if (!Number.isFinite(imported) && errorsRaw.length === 0 && !Number.isFinite(updated) && !Number.isFinite(ignored)) {
+      return null;
+    }
 
     const errors = errorsRaw.map((errorItem: any, index: number): ClientImportErrorItem => ({
       rowNumber: Number(errorItem?.rowNumber ?? errorItem?.row ?? index + 1) || index + 1,
@@ -607,19 +869,21 @@ export default function CrudSimplePage({
       const chunkPayloads = payloads.slice(index, index + chunkSize);
       const chunkRows = rows.slice(index, index + chunkSize);
 
-      const chunkResults = await Promise.all(chunkPayloads.map(async (payload, chunkIndex) => {
-        const row = chunkRows[chunkIndex];
-        try {
-          await api.post("/clients", payload);
-          return { ok: true as const, row };
-        } catch (error: any) {
-          return {
-            ok: false as const,
-            row,
-            message: error?.response?.data?.message || "Erro ao importar cliente."
-          };
-        }
-      }));
+      const chunkResults = await Promise.all(
+        chunkPayloads.map(async (payload, chunkIndex) => {
+          const row = chunkRows[chunkIndex];
+          try {
+            await api.post("/clients", payload);
+            return { ok: true as const, row };
+          } catch (error: any) {
+            return {
+              ok: false as const,
+              row,
+              message: error?.response?.data?.message || "Erro ao importar cliente."
+            };
+          }
+        })
+      );
 
       chunkResults.forEach((result) => {
         if (result.ok) {
@@ -662,37 +926,14 @@ export default function CrudSimplePage({
     URL.revokeObjectURL(url);
   };
 
-  const analyzeImportRows = async (rows: ClientImportRow[]) => {
-    const payloads = rows.map((row) => ({ ...buildImportPayload(row), sourceRowNumber: row.sourceRowNumber }));
-    const response = await api.post("/clients/import/preview", { rows: payloads });
-    const duplicatesByRow = new Map<number, string>();
-    const errorsByRow = new Map<number, string>();
-
-    (Array.isArray(response.data?.duplicados) ? response.data.duplicados : []).forEach((item: any) => {
-      const rowNumber = Number(item?.rowNumber);
-      if (Number.isFinite(rowNumber)) duplicatesByRow.set(rowNumber, String(item?.existingClientId || ""));
-    });
-
-    (Array.isArray(response.data?.erros) ? response.data.erros : []).forEach((item: any) => {
-      const rowNumber = Number(item?.rowNumber);
-      if (Number.isFinite(rowNumber)) errorsByRow.set(rowNumber, String(item?.message || "Erro de validação"));
-    });
-
-    return rows.map((row) => {
-      const existingClientId = duplicatesByRow.get(row.sourceRowNumber);
-      const errorMessage = errorsByRow.get(row.sourceRowNumber);
-      if (errorMessage) return { ...row, status: "error" as const, errorMessage };
-      if (existingClientId) return { ...row, status: "duplicate" as const, existingClientId, action: "skip" as const };
-      return { ...row, status: "new" as const, action: "import_anyway" as const };
-    });
-  };
-
   const updateImportDuplicateAction = (sourceRowNumber: number, action: ClientImportAction) => {
-    setImportPreviewRows((prev) => prev.map((row) => row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row));
+    setImportPreviewRows((prev) =>
+      prev.map((row) => (row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row))
+    );
   };
 
   const handleImportClients = async () => {
-    if (!isImportReady || importRows.length === 0 || importValidationSummary.errors.length > 0) return;
+    if (!isImportReady || importRows.length === 0 || importValidationErrors.length > 0) return;
 
     setIsImporting(true);
     setImportSummary(null);
@@ -709,6 +950,7 @@ export default function CrudSimplePage({
           action: analyzed?.action
         };
       });
+
       let summary: ClientImportSummary | null = null;
 
       try {
@@ -721,23 +963,28 @@ export default function CrudSimplePage({
       } catch (bulkError: any) {
         const status = Number(bulkError?.response?.status);
         const shouldFallback = [404, 405, 501].includes(status);
-
         if (!shouldFallback) throw bulkError;
 
         summary = await runFallbackImport(payloads, importRows);
       }
 
-      const resolvedSummary = summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
+      const resolvedSummary =
+        summary ?? { total: payloads.length, imported: payloads.length, updated: 0, ignored: 0, errors: [] };
+
       setImportSummary(resolvedSummary);
 
       if (resolvedSummary.errors.length === 0) {
-        toast.success(`Importação concluída: ${resolvedSummary.imported} cliente(s) importado(s).`);
+        toast.success(
+          `Importação concluída: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s).`
+        );
         resetImportState();
         await loadClients();
         return;
       }
 
-      toast.warning(`Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.errors.length} com erro.`);
+      toast.warning(
+        `Importação finalizada com pendências: ${resolvedSummary.imported} importado(s), ${resolvedSummary.updated} atualizado(s), ${resolvedSummary.ignored} ignorado(s), ${resolvedSummary.errors.length} com erro.`
+      );
       await loadClients();
     } catch (e: any) {
       toast.error(e.response?.data?.message || "Erro ao importar clientes.");
@@ -768,6 +1015,7 @@ export default function CrudSimplePage({
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+
     if (endpoint === "/clients") {
       const { sanitizedPayload, fieldErrors } = validateClientPayload(form, {
         isSeller,
@@ -798,8 +1046,8 @@ export default function CrudSimplePage({
         if (isClientsPage) await loadClients();
         else await load();
         if (createInModal) closeCreateModal();
-      } catch (e: any) {
-        toast.error(e.response?.data?.message || "Erro ao salvar");
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || "Erro ao salvar");
       } finally {
         setSaving(false);
       }
@@ -814,9 +1062,7 @@ export default function CrudSimplePage({
         if (isSeller && user?.id) {
           payload.ownerSellerId = user.id;
         } else if (canChooseOwnerSeller) {
-          if (!payload.ownerSellerId) {
-            delete payload.ownerSellerId;
-          }
+          if (!payload.ownerSellerId) delete payload.ownerSellerId;
         }
       }
 
@@ -831,8 +1077,8 @@ export default function CrudSimplePage({
       if (isClientsPage) await loadClients();
       else await load();
       if (createInModal) closeCreateModal();
-    } catch (e: any) {
-      toast.error(e.response?.data?.message || "Erro ao salvar");
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Erro ao salvar");
     } finally {
       setSaving(false);
     }
@@ -847,7 +1093,6 @@ export default function CrudSimplePage({
       setIsCreateModalOpen(true);
       return;
     }
-
     setEditing(item.id);
     setForm(item);
   };
@@ -876,12 +1121,21 @@ export default function CrudSimplePage({
     onOpenDetails(id);
   };
 
+  const importCounters = useMemo(() => {
+    const errorCount = importValidationErrors.length;
+    const validCount = Math.max(0, importRows.length - errorCount);
+    return { validCount, errorCount };
+  }, [importRows.length, importValidationErrors.length]);
+
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
 
       {!readOnly && !createInModal && (
-        <form onSubmit={submit} className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3">
+        <form
+          onSubmit={submit}
+          className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3"
+        >
           {fields.map((f) => {
             const fieldPlaceholder = f.placeholder ?? `Informe ${f.label.toLowerCase()}`;
 
@@ -896,7 +1150,9 @@ export default function CrudSimplePage({
                 >
                   <option value="">Selecione {f.label.toLowerCase()}</option>
                   {(f.options ?? []).map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
                 </select>
               );
@@ -914,7 +1170,12 @@ export default function CrudSimplePage({
               />
             );
           })}
-          <button disabled={saving} className="rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60">{saving ? "Salvando..." : editing ? "Atualizar" : "Criar"}</button>
+          <button
+            disabled={saving}
+            className="rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Salvando..." : editing ? "Atualizar" : "Criar"}
+          </button>
         </form>
       )}
 
@@ -929,7 +1190,11 @@ export default function CrudSimplePage({
               Importar
             </button>
           ) : null}
-          <button type="button" onClick={openCreateModal} className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800">
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800"
+          >
             {createButtonLabel}
           </button>
         </div>
@@ -950,7 +1215,11 @@ export default function CrudSimplePage({
               onChange={(e) => setQuickFilters((prev) => ({ ...prev, uf: e.target.value }))}
             >
               <option value="">UF (todas)</option>
-              {filterOptions.ufs.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+              {filterOptions.ufs.map((uf) => (
+                <option key={uf} value={uf}>
+                  {uf}
+                </option>
+              ))}
             </select>
             <select
               className="rounded-lg border border-slate-300 px-3 py-2"
@@ -958,7 +1227,11 @@ export default function CrudSimplePage({
               onChange={(e) => setQuickFilters((prev) => ({ ...prev, region: e.target.value }))}
             >
               <option value="">Região (todas)</option>
-              {filterOptions.regions.map((region) => <option key={region} value={region}>{region}</option>)}
+              {filterOptions.regions.map((region) => (
+                <option key={region} value={region}>
+                  {region}
+                </option>
+              ))}
             </select>
             <select
               className="rounded-lg border border-slate-300 px-3 py-2"
@@ -966,8 +1239,13 @@ export default function CrudSimplePage({
               onChange={(e) => setQuickFilters((prev) => ({ ...prev, clientType: e.target.value }))}
             >
               <option value="">Tipo (todos)</option>
-              {filterOptions.clientTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+              {filterOptions.clientTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
             </select>
+
             {canFilterBySeller ? (
               <select
                 className="rounded-lg border border-slate-300 px-3 py-2"
@@ -975,10 +1253,15 @@ export default function CrudSimplePage({
                 onChange={(e) => setQuickFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}
               >
                 <option value="">Vendedor (todos)</option>
-                {users.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                {users.map((seller) => (
+                  <option key={seller.id} value={seller.id}>
+                    {seller.name}
+                  </option>
+                ))}
               </select>
             ) : null}
           </div>
+
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-sm text-slate-600">{totalItems} clientes encontrados</span>
             <button
@@ -994,18 +1277,28 @@ export default function CrudSimplePage({
 
       <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? <div className="p-4 text-slate-500">Carregando...</div> : null}
+
         {error ? (
           <div className="space-y-3 p-4 text-amber-700">
             <p>{error}</p>
-            <button type="button" className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm font-medium" onClick={() => (isClientsPage ? void loadClients() : void load())}>Tentar novamente</button>
+            <button
+              type="button"
+              className="rounded-lg border border-amber-300 px-3 py-1.5 text-sm font-medium"
+              onClick={() => (isClientsPage ? void loadClients() : void load())}
+            >
+              Tentar novamente
+            </button>
           </div>
         ) : null}
+
         {!loading && !error ? (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
                 {fields.map((f) => (
-                  <th className="p-2 text-left" key={f.key}>{f.label}</th>
+                  <th className="p-2 text-left" key={f.key}>
+                    {f.label}
+                  </th>
                 ))}
                 {detailsPath || !readOnly ? <th className="p-2 text-left">Ações</th> : null}
               </tr>
@@ -1017,7 +1310,11 @@ export default function CrudSimplePage({
                   className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
                   onClick={(event) => onRowClick(event, it.id)}
                 >
-                  {fields.map((f) => <td key={f.key} className="p-2 text-slate-700">{getCellValue(it, f.key)}</td>)}
+                  {fields.map((f) => (
+                    <td key={f.key} className="p-2 text-slate-700">
+                      {getCellValue(it, f.key)}
+                    </td>
+                  ))}
                   {detailsPath || !readOnly ? (
                     <td className="p-2">
                       <div className="flex items-center justify-end gap-2" data-row-action-menu="true">
@@ -1030,13 +1327,14 @@ export default function CrudSimplePage({
                             Abrir
                           </button>
                         ) : null}
+
                         {!readOnly ? (
                           <div className="relative">
                             <button
                               type="button"
                               className="rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
                               aria-label="Abrir ações"
-                              onClick={() => setOpenActionsMenuId((current) => current === it.id ? null : it.id)}
+                              onClick={() => setOpenActionsMenuId((current) => (current === it.id ? null : it.id))}
                             >
                               <MoreHorizontal size={16} />
                             </button>
@@ -1072,9 +1370,13 @@ export default function CrudSimplePage({
                   ) : null}
                 </tr>
               ))}
+
               {visibleItems.length === 0 ? (
                 <tr>
-                  <td colSpan={fields.length + (detailsPath || !readOnly ? 1 : 0)} className="p-8 text-center text-slate-500">
+                  <td
+                    colSpan={fields.length + (detailsPath || !readOnly ? 1 : 0)}
+                    className="p-8 text-center text-slate-500"
+                  >
                     Nenhum registro encontrado com os filtros atuais.
                   </td>
                 </tr>
@@ -1087,9 +1389,12 @@ export default function CrudSimplePage({
       {isClientsPage && !loading && !error ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="text-sm text-slate-600">
-            Página <span className="font-semibold text-slate-900">{page}</span> de <span className="font-semibold text-slate-900">{totalPages}</span> · Total de <span className="font-semibold text-slate-900">{totalItems}</span> clientes
+            Página <span className="font-semibold text-slate-900">{page}</span> de{" "}
+            <span className="font-semibold text-slate-900">{totalPages}</span> · Total de{" "}
+            <span className="font-semibold text-slate-900">{totalItems}</span> clientes
             {isApplyingFilters ? <span className="ml-2 text-slate-500">Atualizando...</span> : null}
           </div>
+
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1112,18 +1417,31 @@ export default function CrudSimplePage({
       ) : null}
 
       {isClientsPage && isImportModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div className="mb-4">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
-              <p className="text-sm text-slate-500">Use um arquivo .xlsx para validar os dados e importar em lote.</p>
+              <p className="text-sm text-slate-500">
+                Use um arquivo .xlsx para mapear, validar os dados e importar em lote.
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Passo {importStep} de 2 · {importStep === 1 ? "Mapear colunas" : "Preview e validação"}
+              </p>
             </div>
 
             <div className="space-y-4">
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  onClick={() => void downloadImportTemplate().catch((error: Error) => toast.error(error.message || "Não foi possível baixar o modelo."))}
+                  onClick={() =>
+                    void downloadImportTemplate().catch((error: Error) =>
+                      toast.error(error.message || "Não foi possível baixar o modelo.")
+                    )
+                  }
                   className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
                 >
                   Baixar modelo .xlsx
@@ -1136,156 +1454,204 @@ export default function CrudSimplePage({
                 />
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <p className="font-medium text-slate-900">Colunas obrigatórias no arquivo:</p>
-                <p>Nome, Cidade, UF, Tipo (PJ/PF)</p>
-                <p className="mt-2 font-medium text-slate-900">Regras:</p>
-                <p className="mt-1 text-xs text-slate-600">UF deve conter 2 letras (ex: PR)</p>
-                <p className="mt-1 text-xs text-slate-600">Tipo deve ser PJ ou PF</p>
-                <p className="mt-1 text-xs text-slate-600">Para usuário vendedor, o vendedor da planilha será ignorado</p>
-                <p className="mt-1 text-xs text-slate-600">Diretor/Gerente pode informar vendedor responsável</p>
-                <p className="mt-1 text-xs text-slate-600">Potencial e Área total devem ser números positivos</p>
-              </div>
-
-              {canChooseOwnerSeller ? (
-                <div className="rounded-xl border border-slate-200 bg-white p-3">
-                  <label className="mb-1 block text-sm font-medium text-slate-700" htmlFor="import-default-owner-seller">
-                    Vendedor padrão para linhas sem vendedor informado
-                  </label>
-                  <select
-                    id="import-default-owner-seller"
-                    className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                    value={importDefaultOwnerSellerId}
-                    onChange={(event) => setImportDefaultOwnerSellerId(event.target.value)}
-                  >
-                    <option value="">Selecione um vendedor</option>
-                    {users.map((seller) => (
-                      <option key={seller.id} value={seller.id}>{seller.name}</option>
-                    ))}
-                  </select>
-                </div>
+              {importExcelHeaders.length > 0 && importStep === 1 ? (
+                <ClientImportColumnMappingStep
+                  fields={clientImportFieldDefinitions}
+                  excelHeaders={importExcelHeaders}
+                  mapping={importColumnMapping}
+                  canMapOwnerSeller={canChooseOwnerSeller}
+                  onChangeMapping={handleImportMappingChange}
+                  onUseModelHeaders={handleUseModelHeaders}
+                  onSaveMapping={handleSaveMapping}
+                  onContinue={handleContinueAfterMapping}
+                />
               ) : null}
 
-              <p className="text-sm text-slate-600">
-                <span className="font-semibold text-emerald-700">{importValidationSummary.validCount} válidos</span>
-                {" · "}
-                <span className="font-semibold text-rose-700">{importValidationSummary.errorCount} com erro</span>
-              </p>
-
-              {isImporting ? (
-                <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
-                  Importando {importProgress.current}/{importProgress.total}...
-                </p>
-              ) : null}
-
-              {importSummary ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                  <p className="font-medium text-slate-900">Resumo da importação</p>
-                  <p>Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span></p>
-                  <p>Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span></p>
-                  <p>Total ignorado: <span className="font-semibold text-slate-900">{importSummary.ignored}</span></p>
-                  <p>Total com erro: <span className="font-semibold text-slate-900">{importSummary.errors.length}</span></p>
-                  {importSummary.errors.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={downloadImportErrorsReport}
-                      className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                    >
-                      Baixar relatório de erros
-                    </button>
+              {importStep === 2 ? (
+                <>
+                  {!isSeller && canChooseOwnerSeller && !importColumnMapping.ownerSellerId ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <label className="block text-sm font-medium text-slate-700" htmlFor="import-default-owner">
+                        Vendedor padrão para este lote *
+                      </label>
+                      <select
+                        id="import-default-owner"
+                        className="mt-1 w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                        value={importDefaultOwnerSellerId}
+                        onChange={(event) => {
+                          const selectedOwner = event.target.value;
+                          setImportDefaultOwnerSellerId(selectedOwner);
+                          if (importRawRows.length > 0) {
+                            void runImportValidation(importRawRows, importColumnMapping, selectedOwner || undefined);
+                          }
+                        }}
+                      >
+                        <option value="">— Selecione —</option>
+                        {users.map((seller) => (
+                          <option key={seller.id} value={seller.id}>
+                            {seller.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   ) : null}
-                </div>
-              ) : null}
 
-              {importValidationErrors.length > 0 ? (
-                <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-                  {importValidationErrors.map((validationError) => (
-                    <p key={validationError}>• {validationError}</p>
-                  ))}
-                </div>
-              ) : null}
+                  {importSummary ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                      <p className="font-medium text-slate-900">Resumo da importação</p>
+                      <p>
+                        Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span>
+                      </p>
+                      <p>
+                        Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span>
+                      </p>
+                      <p>
+                        Total ignorado: <span className="font-semibold text-slate-900">{importSummary.ignored}</span>
+                      </p>
+                      <p>
+                        Total com erro:{" "}
+                        <span className="font-semibold text-slate-900">{importSummary.errors.length}</span>
+                      </p>
+                      {importSummary.errors.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={downloadImportErrorsReport}
+                          className="mt-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                        >
+                          Baixar relatório de erros
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
 
-              <p className="text-sm text-slate-600">
-                Total de linhas carregadas: <span className="font-semibold text-slate-900">{importRows.length}</span> · Preview exibindo até 20 linhas.
-              </p>
-
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full min-w-[900px] text-sm">
-                  <thead className="bg-slate-100 text-left text-slate-700">
-                    <tr>
-                      {clientImportColumns.map((column) => (
-                        <th key={column} className="px-3 py-2 font-medium">{clientImportColumnLabels[column]}</th>
+                  {importValidationErrors.length > 0 ? (
+                    <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                      {importValidationErrors.map((validationError) => (
+                        <p key={validationError}>• {validationError}</p>
                       ))}
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Ação</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {importPreviewRows.length > 0 ? importPreviewRows.slice(0, 20).map((row, index) => (
-                      <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
-                        <td className="px-3 py-2">{row.name || "—"}</td>
-                        <td className="px-3 py-2">{row.city || "—"}</td>
-                        <td className="px-3 py-2">{row.state || "—"}</td>
-                        <td className="px-3 py-2">{row.region || "—"}</td>
-                        <td className="px-3 py-2">{row.potentialHa ?? "—"}</td>
-                        <td className="px-3 py-2">{row.farmSizeHa ?? "—"}</td>
-                        <td className="px-3 py-2">{row.clientType || "—"}</td>
-                        <td className="px-3 py-2">{row.cnpj || "—"}</td>
-                        <td className="px-3 py-2">{row.segment || "—"}</td>
-                        <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
-                        <td className="px-3 py-2">
-                          {row.status === "new" ? "Novo" : row.status === "duplicate" ? "Duplicado" : "Com erro"}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.status === "duplicate" ? (
-                            <select
-                              className="rounded border border-slate-300 px-2 py-1"
-                              value={row.action || "skip"}
-                              onChange={(event) => updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)}
-                            >
-                              <option value="update">Atualizar existente</option>
-                              <option value="skip">Pular</option>
-                              <option value="import_anyway">Importar mesmo assim</option>
-                            </select>
-                          ) : row.status === "error" ? (row.errorMessage || "Erro") : "—"}
-                        </td>
-                      </tr>
-                    )) : (
-                      <tr>
-                        <td colSpan={12} className="px-3 py-6 text-center text-slate-500">Envie um arquivo para visualizar até 20 linhas de preview.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </div>
+                  ) : null}
+
+                  <p className="text-sm text-slate-600">
+                    Total de linhas carregadas:{" "}
+                    <span className="font-semibold text-slate-900">{importRows.length}</span> · Preview exibindo até 20
+                    linhas.{" "}
+                    <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>{" "}
+                    {" · "}
+                    <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
+                  </p>
+
+                  {isImporting ? (
+                    <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
+                      Importando {importProgress.current}/{importProgress.total}...
+                    </p>
+                  ) : null}
+
+                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                    <table className="w-full min-w-[980px] text-sm">
+                      <thead className="bg-slate-100 text-left text-slate-700">
+                        <tr>
+                          {clientImportColumns.map((column) => (
+                            <th key={column} className="px-3 py-2 font-medium">
+                              {getImportColumnLabel(column)}
+                            </th>
+                          ))}
+                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 font-medium">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreviewRows.length > 0 ? (
+                          importPreviewRows.slice(0, 20).map((row, index) => (
+                            <tr key={`${row.name}-${index}`} className="border-t border-slate-200">
+                              <td className="px-3 py-2">{row.name || "—"}</td>
+                              <td className="px-3 py-2">{row.city || "—"}</td>
+                              <td className="px-3 py-2">{row.state || "—"}</td>
+                              <td className="px-3 py-2">{row.region || "—"}</td>
+                              <td className="px-3 py-2">{row.potentialHa ?? "—"}</td>
+                              <td className="px-3 py-2">{row.farmSizeHa ?? "—"}</td>
+                              <td className="px-3 py-2">{row.clientType || "—"}</td>
+                              <td className="px-3 py-2">{row.cnpj || "—"}</td>
+                              <td className="px-3 py-2">{row.segment || "—"}</td>
+                              <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
+
+                              <td className="px-3 py-2">
+                                {row.status === "new"
+                                  ? "Novo"
+                                  : row.status === "duplicate"
+                                    ? "Duplicado"
+                                    : "Com erro"}
+                              </td>
+
+                              <td className="px-3 py-2">
+                                {row.status === "duplicate" ? (
+                                  <select
+                                    className="rounded border border-slate-300 px-2 py-1"
+                                    value={row.action || "skip"}
+                                    onChange={(event) =>
+                                      updateImportDuplicateAction(
+                                        row.sourceRowNumber,
+                                        event.target.value as ClientImportAction
+                                      )
+                                    }
+                                  >
+                                    <option value="update">Atualizar existente</option>
+                                    <option value="skip">Pular</option>
+                                    <option value="import_anyway">Importar mesmo assim</option>
+                                  </select>
+                                ) : row.status === "error" ? (
+                                  <span className="text-rose-700">{row.errorMessage || "Erro"}</span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
+                              Envie um arquivo para visualizar até 20 linhas de preview.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-4">
               <button
                 type="button"
-                onClick={() => {
-                  resetImportState();
-                }}
+                onClick={resetImportState}
                 className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
                 disabled={isImporting}
               >
                 Cancelar
               </button>
-              <button
-                type="button"
-                onClick={handleImportClients}
-                className="rounded-lg px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100 bg-emerald-600 hover:bg-emerald-700"
-                disabled={!isImportReady || isImporting}
-              >
-                {isImporting ? "Importando..." : "Validar e importar"}
-              </button>
+
+              {importStep === 2 ? (
+                <button
+                  type="button"
+                  onClick={handleImportClients}
+                  className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!isImportReady || isImporting}
+                >
+                  {isImporting ? "Importando..." : "Validar e importar"}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
       ) : null}
 
       {createInModal && isCreateModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div className="mb-4">
               <h3 className="text-xl font-semibold text-slate-900">{createModalTitle}</h3>
@@ -1298,6 +1664,7 @@ export default function CrudSimplePage({
                   const isRequired = endpoint === "/clients"
                     ? ["name", "city", "state", "clientType"].includes(f.key)
                     : true;
+
                   const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
 
                   if (isOwnerSellerField) {
@@ -1306,11 +1673,14 @@ export default function CrudSimplePage({
                       : user?.id && user?.name
                         ? [{ id: user.id, name: user.name }]
                         : [];
+
                     const selectedOwnerSellerId = form.ownerSellerId ?? (isSeller && user?.id ? user.id : "");
 
                     return (
                       <div key={f.key} className="space-y-1 md:col-span-2">
-                        <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>{f.label}</label>
+                        <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                          {f.label}
+                        </label>
                         <select
                           id={`modal-${f.key}`}
                           className="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
@@ -1323,21 +1693,30 @@ export default function CrudSimplePage({
                           }}
                         >
                           {canChooseOwnerSeller ? <option value="">Selecione o vendedor responsável</option> : null}
-                          {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                          {sellerOptions.map((seller) => (
+                            <option key={seller.id} value={seller.id}>
+                              {seller.name}
+                            </option>
+                          ))}
                         </select>
                         <p className="text-xs text-slate-500">
                           {isSeller
                             ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
                             : "Defina o vendedor responsável para acompanhar este cliente."}
                         </p>
-                        {formFieldErrors.ownerSellerId ? <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p> : null}
+                        {formFieldErrors.ownerSellerId ? (
+                          <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p>
+                        ) : null}
                       </div>
                     );
                   }
 
                   return (
                     <div key={f.key} className="space-y-1">
-                      <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>{f.label}</label>
+                      <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                        {f.label}
+                      </label>
+
                       {f.type === "select" ? (
                         <select
                           id={`modal-${f.key}`}
@@ -1352,7 +1731,9 @@ export default function CrudSimplePage({
                         >
                           <option value="">Selecione {f.label.toLowerCase()}</option>
                           {(f.options ?? []).map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
                           ))}
                         </select>
                       ) : (
@@ -1370,7 +1751,10 @@ export default function CrudSimplePage({
                           }}
                         />
                       )}
-                      {formFieldErrors[f.key as keyof ClientPayloadInput] ? <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p> : null}
+
+                      {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
+                        <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -1379,10 +1763,19 @@ export default function CrudSimplePage({
               {formError ? <p className="text-sm text-rose-600">{formError}</p> : null}
 
               <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                <button type="button" onClick={closeCreateModal} className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100" disabled={saving}>
+                <button
+                  type="button"
+                  onClick={closeCreateModal}
+                  className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
+                  disabled={saving}
+                >
                   Cancelar
                 </button>
-                <button type="submit" className="rounded-lg px-4 py-2 font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100 bg-emerald-600 hover:bg-emerald-700" disabled={saving}>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100"
+                  disabled={saving}
+                >
                   {saving ? "Salvando..." : "Salvar"}
                 </button>
               </div>
