@@ -193,6 +193,150 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
   return { [field]: direction };
 };
 
+type ImportAnalysisStatus = "valid" | "duplicate" | "error";
+
+type ImportAnalysisItem = {
+  row: number;
+  name: string;
+  status: ImportAnalysisStatus;
+  reason?: string;
+  payload?: Prisma.ClientCreateInput;
+};
+
+const normalizeDuplicateValue = (value?: string | null) => (value || "").trim().toLowerCase();
+
+const buildDuplicateFingerprint = (payload: Partial<Prisma.ClientCreateInput>) => {
+  const cnpj = normalizeDuplicateValue(payload.cnpj as string | undefined);
+  if (cnpj) return `cnpj:${cnpj}`;
+
+  const name = normalizeDuplicateValue(payload.name as string | undefined);
+  const city = normalizeDuplicateValue(payload.city as string | undefined);
+  const state = normalizeDuplicateValue(payload.state as string | undefined);
+  return `name:${name}|city:${city}|state:${state}`;
+};
+
+const analyzeClientImportRows = async (
+  req: Parameters<typeof sellerWhere>[0],
+  rawRows: unknown[]
+) => {
+  const analysis: ImportAnalysisItem[] = [];
+  const fingerprintCount = new Map<string, number>();
+
+  const parsedRows = rawRows.map((rawRow, index) => {
+    const rowNumber = index + 1;
+    const input = rawRow && typeof rawRow === "object" ? (rawRow as Record<string, unknown>) : {};
+    const ownerSellerId =
+      req.user!.role === "vendedor"
+        ? req.user!.id
+        : req.user!.role === "gerente" || req.user!.role === "diretor"
+          ? resolveOwnerId(req, typeof input.ownerSellerId === "string" ? input.ownerSellerId : undefined)
+          : resolveOwnerId(req);
+
+    const parsed = clientSchema.safeParse({ ...input, ownerSellerId });
+    if (!parsed.success) {
+      analysis.push({
+        row: rowNumber,
+        name: String(input.name || ""),
+        status: "error",
+        reason: parsed.error.issues[0]?.message || "Dados inválidos"
+      });
+      return null;
+    }
+
+    const fingerprint = buildDuplicateFingerprint(parsed.data);
+    fingerprintCount.set(fingerprint, (fingerprintCount.get(fingerprint) || 0) + 1);
+
+    return {
+      rowNumber,
+      payload: {
+        ...parsed.data,
+        ownerSeller: {
+          connect: { id: ownerSellerId }
+        }
+      } satisfies Prisma.ClientCreateInput,
+      fingerprint
+    };
+  });
+
+  const validParsedRows = parsedRows.filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  const cnpjValues = validParsedRows
+    .map((item) => normalizeDuplicateValue(item.payload.cnpj))
+    .filter(Boolean);
+  const nameCityStatePairs = validParsedRows
+    .map((item) => ({
+      name: normalizeDuplicateValue(item.payload.name),
+      city: normalizeDuplicateValue(item.payload.city),
+      state: normalizeDuplicateValue(item.payload.state)
+    }))
+    .filter((item) => item.name && item.city && item.state);
+
+  const existingClients = await prisma.client.findMany({
+    where: {
+      ...sellerWhere(req),
+      OR: [
+        ...(cnpjValues.length > 0 ? [{ cnpj: { in: cnpjValues } }] : []),
+        ...(nameCityStatePairs.length > 0
+          ? nameCityStatePairs.map((pair) => ({
+              name: { equals: pair.name, mode: "insensitive" as const },
+              city: { equals: pair.city, mode: "insensitive" as const },
+              state: { equals: pair.state, mode: "insensitive" as const }
+            }))
+          : [])
+      ]
+    },
+    select: { cnpj: true, name: true, city: true, state: true }
+  });
+
+  const existingFingerprints = new Set(existingClients.map((client) => buildDuplicateFingerprint(client)));
+
+  validParsedRows.forEach(({ rowNumber, payload, fingerprint }) => {
+    if ((fingerprintCount.get(fingerprint) || 0) > 1) {
+      analysis.push({
+        row: rowNumber,
+        name: payload.name,
+        status: "duplicate",
+        reason: "Duplicado dentro do arquivo"
+      });
+      return;
+    }
+
+    if (existingFingerprints.has(fingerprint)) {
+      analysis.push({
+        row: rowNumber,
+        name: payload.name,
+        status: "duplicate",
+        reason: "Cliente já existe na base"
+      });
+      return;
+    }
+
+    analysis.push({
+      row: rowNumber,
+      name: payload.name,
+      status: "valid",
+      payload
+    });
+  });
+
+  analysis.sort((a, b) => a.row - b.row);
+
+  const validItems = analysis.filter((item) => item.status === "valid");
+  const duplicateItems = analysis.filter((item) => item.status === "duplicate");
+  const errorItems = analysis.filter((item) => item.status === "error");
+
+  return {
+    summary: {
+      totalAnalyzed: analysis.length,
+      valid: validItems.length,
+      duplicated: duplicateItems.length,
+      errors: errorItems.length
+    },
+    analysis,
+    validPayloads: validItems.map((item) => item.payload as Prisma.ClientCreateInput)
+  };
+};
+
 const createEvent = async ({
   type = "comentario",
   description,
@@ -479,6 +623,73 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
 
   const data = await prisma.client.create({ data: { ...req.body, ownerSellerId } });
   res.status(201).json(data);
+});
+
+router.post("/clients/import/simulate", async (req, res) => {
+  const rows = Array.isArray(req.body?.rows)
+    ? req.body.rows
+    : Array.isArray(req.body?.clients)
+      ? req.body.clients
+      : [];
+
+  if (rows.length === 0) {
+    return res.status(400).json({ message: "Envie rows (ou clients) com pelo menos um item." });
+  }
+
+  const simulation = await analyzeClientImportRows(req, rows);
+
+  return res.json({
+    simulated: true,
+    ...simulation.summary,
+    items: simulation.analysis.map((item) => ({
+      row: item.row,
+      name: item.name,
+      status: item.status,
+      reason: item.reason || null
+    }))
+  });
+});
+
+router.post("/clients/import", async (req, res) => {
+  const rows = Array.isArray(req.body?.rows)
+    ? req.body.rows
+    : Array.isArray(req.body?.clients)
+      ? req.body.clients
+      : [];
+
+  if (rows.length === 0) {
+    return res.status(400).json({ message: "Envie rows (ou clients) com pelo menos um item." });
+  }
+
+  const simulation = await analyzeClientImportRows(req, rows);
+
+  if (simulation.validPayloads.length > 0) {
+    await prisma.client.createMany({
+      data: simulation.validPayloads.map((payload) => ({
+        name: payload.name,
+        city: payload.city,
+        state: payload.state,
+        region: payload.region,
+        potentialHa: payload.potentialHa ?? 0,
+        farmSizeHa: payload.farmSizeHa ?? 0,
+        clientType: (payload.clientType as ClientType | undefined) ?? ClientType.PJ,
+        cnpj: payload.cnpj,
+        segment: payload.segment,
+        ownerSellerId: payload.ownerSeller.connect?.id as string
+      }))
+    });
+  }
+
+  return res.status(201).json({
+    imported: simulation.validPayloads.length,
+    errors: simulation.analysis
+      .filter((item) => item.status !== "valid")
+      .map((item) => ({
+        rowNumber: item.row,
+        clientName: item.name,
+        message: item.reason || "Não importado"
+      }))
+  });
 });
 
 router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {

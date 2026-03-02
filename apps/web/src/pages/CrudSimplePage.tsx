@@ -70,6 +70,23 @@ type ClientImportSummary = {
   errors: ClientImportErrorItem[];
 };
 
+type ClientImportSimulationStatus = "valid" | "duplicate" | "error";
+
+type ClientImportSimulationItem = {
+  row: number;
+  name: string;
+  status: ClientImportSimulationStatus;
+  reason: string | null;
+};
+
+type ClientImportSimulationSummary = {
+  totalAnalyzed: number;
+  valid: number;
+  duplicated: number;
+  errors: number;
+  items: ClientImportSimulationItem[];
+};
+
 type ImportValidationSummary = {
   errors: string[];
   validCount: number;
@@ -178,6 +195,8 @@ export default function CrudSimplePage({
   const [isImportReady, setIsImportReady] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importSummary, setImportSummary] = useState<ClientImportSummary | null>(null);
+  const [importSimulationSummary, setImportSimulationSummary] = useState<ClientImportSimulationSummary | null>(null);
+  const [isSimulatingImport, setIsSimulatingImport] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -645,6 +664,8 @@ export default function CrudSimplePage({
     setImportPreviewRows(mappedRows.slice(0, 20));
     setImportValidationErrors(validation.errors);
     setIsImportReady(validation.errors.length === 0);
+    setImportSummary(null);
+    setImportSimulationSummary(null);
 
     if (validation.errors.length > 0) {
       toast.error("Foram encontrados erros de validação na planilha.");
@@ -665,6 +686,7 @@ export default function CrudSimplePage({
     setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
     setImportSummary(null);
+    setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: 0 });
     setImportStep(1);
 
@@ -739,6 +761,7 @@ export default function CrudSimplePage({
     setIsImportReady(false);
     setImportProgress({ current: 0, total: 0 });
     setImportSummary(null);
+    setImportSimulationSummary(null);
   };
 
   const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
@@ -825,6 +848,35 @@ export default function CrudSimplePage({
     return { total, imported, errors } satisfies ClientImportSummary;
   };
 
+  const handleSimulateImport = async () => {
+    if (!isImportReady || importRows.length === 0 || importValidationErrors.length > 0) return;
+
+    setIsSimulatingImport(true);
+    setImportSimulationSummary(null);
+
+    try {
+      const payloads = importRows.map(buildImportPayload);
+      const response = await api.post("/clients/import/simulate", {
+        rows: payloads,
+        clients: payloads
+      });
+
+      const simulationData = response.data as ClientImportSimulationSummary;
+      setImportSimulationSummary({
+        totalAnalyzed: Number(simulationData?.totalAnalyzed ?? payloads.length),
+        valid: Number(simulationData?.valid ?? 0),
+        duplicated: Number(simulationData?.duplicated ?? 0),
+        errors: Number(simulationData?.errors ?? 0),
+        items: Array.isArray(simulationData?.items) ? simulationData.items : []
+      });
+      toast.success("Simulação concluída com sucesso.");
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Erro ao simular importação de clientes.");
+    } finally {
+      setIsSimulatingImport(false);
+    }
+  };
+
   const downloadImportErrorsReport = () => {
     if (!importSummary || importSummary.errors.length === 0) return;
 
@@ -852,6 +904,7 @@ export default function CrudSimplePage({
 
     setIsImporting(true);
     setImportSummary(null);
+    setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: importRows.length });
 
     try {
@@ -1024,10 +1077,19 @@ export default function CrudSimplePage({
   };
 
   const importCounters = useMemo(() => {
+    if (importSimulationSummary) {
+      return {
+        validCount: importSimulationSummary.valid,
+        errorCount: importSimulationSummary.errors,
+        duplicateCount: importSimulationSummary.duplicated,
+        totalAnalyzed: importSimulationSummary.totalAnalyzed
+      };
+    }
+
     const errorCount = importValidationErrors.length > 0 ? importValidationErrors.length : 0;
     const validCount = Math.max(0, importRows.length - Math.max(0, Math.min(importRows.length, errorCount)));
-    return { validCount, errorCount };
-  }, [importRows.length, importValidationErrors.length]);
+    return { validCount, errorCount, duplicateCount: 0, totalAnalyzed: importRows.length };
+  }, [importRows.length, importValidationErrors.length, importSimulationSummary]);
 
   return (
     <div className="space-y-4">
@@ -1423,14 +1485,47 @@ export default function CrudSimplePage({
                   ) : null}
 
                   <p className="text-sm text-slate-600">
-                    Total de linhas carregadas:{" "}
-                    <span className="font-semibold text-slate-900">{importRows.length}</span> · Preview exibindo até 20
+                    Total analisado:{" "}
+                    <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span> · Preview exibindo até 20
                     linhas.
                     {" "}
                     <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>
                     {" · "}
+                    <span className="font-semibold text-amber-700">{importCounters.duplicateCount} duplicados</span>
+                    {" · "}
                     <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
                   </p>
+
+                  {importSimulationSummary ? (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[700px] text-sm">
+                        <thead className="bg-slate-100 text-left text-slate-700">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Linha</th>
+                            <th className="px-3 py-2 font-medium">Nome</th>
+                            <th className="px-3 py-2 font-medium">Status</th>
+                            <th className="px-3 py-2 font-medium">Motivo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importSimulationSummary.items.map((item) => (
+                            <tr key={`${item.row}-${item.name}`} className="border-t border-slate-200">
+                              <td className="px-3 py-2">{item.row}</td>
+                              <td className="px-3 py-2">{item.name || "—"}</td>
+                              <td className="px-3 py-2">
+                                {item.status === "valid"
+                                  ? "Válido"
+                                  : item.status === "duplicate"
+                                    ? "Duplicado"
+                                    : "Com erro"}
+                              </td>
+                              <td className="px-3 py-2">{item.reason || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
 
                   {isImporting ? (
                     <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
@@ -1489,15 +1584,25 @@ export default function CrudSimplePage({
                 Cancelar
               </button>
 
-              {importStep === 2 ? (
-                <button
-                  type="button"
-                  onClick={handleImportClients}
-                  className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={!isImportReady || isImporting}
-                >
-                  {isImporting ? "Importando..." : "Validar e importar"}
-                </button>
+              {importStep === 2 && canChooseOwnerSeller ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSimulateImport}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                  >
+                    {isSimulatingImport ? "Validando..." : "Validar sem importar"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportClients}
+                    className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                  >
+                    {isImporting ? "Importando..." : "Validar e importar"}
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
