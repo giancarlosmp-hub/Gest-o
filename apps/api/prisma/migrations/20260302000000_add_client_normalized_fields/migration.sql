@@ -1,4 +1,9 @@
 ALTER TABLE "Client"
-  ADD COLUMN IF NOT EXISTS "nameNormalized" TEXT,
-  ADD COLUMN IF NOT EXISTS "cityNormalized" TEXT,
-  ADD COLUMN IF NOT EXISTS "cnpjNormalized" TEXT;
+  ADD COLUMN IF NOT EXISTS "nameNormalized" VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS "cityNormalized" VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS "cnpjNormalized" VARCHAR(32);
+
+ALTER TABLE "Client"
+  ALTER COLUMN "nameNormalized" TYPE VARCHAR(255),
+  ALTER COLUMN "cityNormalized" TYPE VARCHAR(255),
+  ALTER COLUMN "cnpjNormalized" TYPE VARCHAR(32);
