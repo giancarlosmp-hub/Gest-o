@@ -39,6 +39,13 @@ type ActivityForm = {
 
 type ClientOption = { id: string; name: string };
 
+type FollowUpForm = {
+  type: "followup";
+  dueDate: string;
+  notes: string;
+  clientId: string;
+};
+
 const initialActivityForm: ActivityForm = {
   type: "reuniao",
   notes: "",
@@ -171,6 +178,15 @@ export default function AgendaPage() {
   const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
   const [activityForm, setActivityForm] = useState<ActivityForm>(initialActivityForm);
   const [activityEvent, setActivityEvent] = useState<AgendaEvent | null>(null);
+  const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
+  const [isFollowUpSubmitting, setIsFollowUpSubmitting] = useState(false);
+  const [followUpSourceEvent, setFollowUpSourceEvent] = useState<AgendaEvent | null>(null);
+  const [followUpForm, setFollowUpForm] = useState<FollowUpForm>({
+    type: "followup",
+    dueDate: "",
+    notes: "",
+    clientId: ""
+  });
 
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
   const [isRescheduleSubmitting, setIsRescheduleSubmitting] = useState(false);
@@ -389,11 +405,12 @@ export default function AgendaPage() {
   }, [highlightedEventId]);
 
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
+    const nextStatus = agendaEvent.status === "realizado" ? "agendado" : "realizado";
     try {
-      await api.patch(`/agenda/${agendaEvent.id}`, { status: "realizado" });
+      await api.patch(`/agenda/${agendaEvent.id}`, { status: nextStatus });
     } catch {
       try {
-        await api.patch(`/agenda/${agendaEvent.id}/status`, { status: "realizado" });
+        await api.patch(`/agenda/${agendaEvent.id}/status`, { status: nextStatus });
       } catch {
         toast.error("Não foi possível atualizar o status no momento.");
         return;
@@ -405,32 +422,65 @@ export default function AgendaPage() {
         item.id === agendaEvent.id
           ? {
               ...item,
-              status: "realizado"
+              status: nextStatus
             }
           : item
       )
     );
-    toast.success("Agenda marcada como realizada.");
+    toast.success(nextStatus === "realizado" ? "Agenda marcada como realizada." : "Agenda reaberta com sucesso.");
   };
 
-  const onCreateFollowUpFromEvent = async (agendaEvent: AgendaEvent) => {
-    const start = new Date(agendaEvent.endDateTime);
+  const openFollowUpModal = (agendaEvent: AgendaEvent) => {
+    const dueDate = new Date(agendaEvent.endDateTime);
+    dueDate.setDate(dueDate.getDate() + 2);
+    setFollowUpSourceEvent(agendaEvent);
+    setFollowUpForm({
+      type: "followup",
+      dueDate: toDateTimeInputValue(dueDate.toISOString()),
+      notes: `Follow-up do evento: ${agendaEvent.title}`,
+      clientId: agendaEvent.clientId || ""
+    });
+    setIsFollowUpModalOpen(true);
+  };
+
+  const closeFollowUpModal = () => {
+    setIsFollowUpModalOpen(false);
+    setFollowUpSourceEvent(null);
+  };
+
+  const onSubmitFollowUp = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!followUpSourceEvent || !followUpForm.dueDate) {
+      toast.error("Defina a data do follow-up.");
+      return;
+    }
+
+    const start = new Date(followUpForm.dueDate);
     const end = new Date(start.getTime() + 30 * 60000);
+
+    setIsFollowUpSubmitting(true);
     try {
       const response = await api.post("/agenda/events", {
-        title: `Follow-up: ${agendaEvent.title}`,
-        type: "followup",
+        title: `Follow-up: ${followUpSourceEvent.title}`,
+        type: followUpForm.type,
         startDateTime: start.toISOString(),
         endDateTime: end.toISOString(),
-        sellerId: agendaEvent.userId,
-        clientId: agendaEvent.clientId,
-        notes: `Criado a partir do evento ${agendaEvent.title}`
+        sellerId: followUpSourceEvent.userId,
+        clientId: followUpForm.clientId || undefined,
+        notes: followUpForm.notes
       });
       const created = response.data;
-      setEvents((current) => [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }]);
-      toast.success("Follow-up criado com sucesso.");
+      setEvents((current) =>
+        [...current, { ...followUpSourceEvent, ...created, id: created.id, title: created.title }].sort(
+          (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+        )
+      );
+      toast.success(response.data?.message || "Follow-up criado com sucesso.");
+      closeFollowUpModal();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
+    } finally {
+      setIsFollowUpSubmitting(false);
     }
   };
 
@@ -451,8 +501,12 @@ export default function AgendaPage() {
         notes: agendaEvent.notes || agendaEvent.description
       });
       const created = response.data;
-      setEvents((current) => [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }]);
-      toast.success("Evento duplicado para o dia seguinte.");
+      setEvents((current) =>
+        [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }].sort(
+          (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+        )
+      );
+      toast.success(response.data?.message || "Evento duplicado para o dia seguinte.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível duplicar evento."));
     }
@@ -801,16 +855,16 @@ export default function AgendaPage() {
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 items-center gap-3">
-                    {event.status === "agendado" ? (
-                      <button
-                        type="button"
-                        className="rounded-lg border border-green-300 px-3 py-1 text-sm font-medium text-green-700 hover:bg-green-50"
-                        onClick={() => void onSetAsDone(event)}
-                      >
-                        Marcar realizado
-                      </button>
-                    ) : null}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      title={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
+                      aria-label={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
+                      className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+                      onClick={() => void onSetAsDone(event)}
+                    >
+                      ✓
+                    </button>
 
                     {isHighlighted ? (
                       <>
@@ -833,15 +887,32 @@ export default function AgendaPage() {
 
                     {event.type === "roteiro_visita" && event.stops?.length ? (<div className="mt-2 text-xs text-slate-600">{event.stops.map((stop) => (<div key={stop.id}>#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</div>))}</div>) : null}
                     {event.clientId ? (
-                      <Link to={`/clientes/${event.clientId}`} className="text-sm font-medium text-brand-700 underline">
-                        Abrir cliente
+                      <Link
+                        to={`/clientes/${event.clientId}`}
+                        title="Abrir cliente 360"
+                        aria-label="Abrir cliente 360"
+                        className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                      >
+                        Cliente
                       </Link>
                     ) : null}
-                    <button type="button" className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => void onCreateFollowUpFromEvent(event)}>
-                      Criar follow-up
+                    <button
+                      type="button"
+                      title="Criar follow-up"
+                      aria-label="Criar follow-up"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => openFollowUpModal(event)}
+                    >
+                      F-up
                     </button>
-                    <button type="button" className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => void onDuplicateForNextDay(event)}>
-                      Duplicar +1 dia
+                    <button
+                      type="button"
+                      title="Duplicar para amanhã"
+                      aria-label="Duplicar para amanhã"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                      onClick={() => void onDuplicateForNextDay(event)}
+                    >
+                      +1d
                     </button>
                   </div>
                 </div>
@@ -979,6 +1050,67 @@ export default function AgendaPage() {
                   className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : "Salvar agenda"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isFollowUpModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeFollowUpModal}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Criar follow-up</h3>
+                <p className="text-sm text-slate-500">Dados pré-preenchidos a partir do evento selecionado.</p>
+              </div>
+              <button type="button" onClick={closeFollowUpModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">✕</button>
+            </div>
+
+            <form className="space-y-3" onSubmit={onSubmitFollowUp}>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
+                <input value="Follow-up" readOnly className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vencimento</label>
+                <input
+                  type="datetime-local"
+                  value={followUpForm.dueDate}
+                  onChange={(event) => setFollowUpForm((current) => ({ ...current, dueDate: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
+                <select
+                  value={followUpForm.clientId}
+                  onChange={(event) => setFollowUpForm((current) => ({ ...current, clientId: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                >
+                  <option value="">Selecione...</option>
+                  {activityClients.map((client) => (
+                    <option key={client.id} value={client.id}>{client.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Notas</label>
+                <textarea
+                  value={followUpForm.notes}
+                  onChange={(event) => setFollowUpForm((current) => ({ ...current, notes: event.target.value }))}
+                  className="min-h-20 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={closeFollowUpModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={isFollowUpSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+                  {isFollowUpSubmitting ? "Criando..." : "Criar follow-up"}
                 </button>
               </div>
             </form>
