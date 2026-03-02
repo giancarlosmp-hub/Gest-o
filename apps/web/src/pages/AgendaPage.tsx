@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
-import type { AgendaEvent, AgendaEventType } from "../models/agenda";
+import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 
 type Seller = { id: string; name: string };
 
@@ -18,6 +18,15 @@ type CreateAgendaForm = {
   startDateTime: string;
   endDateTime: string;
   sellerId: string;
+  notes: string;
+};
+
+type DraftStop = {
+  id: string;
+  clientId: string;
+  city: string;
+  plannedTime: string;
+  notes: string;
 };
 
 type ActivityForm = {
@@ -40,26 +49,30 @@ const TYPE_LABEL: Record<AgendaEventType, string> = {
   reuniao_online: "Reunião online",
   reuniao_presencial: "Reunião presencial",
   roteiro_visita: "Roteiro de visita",
-  follow_up: "Follow-up"
+  follow_up: "Follow-up",
+  followup: "Follow-up"
 };
 
 const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
   reuniao_online: "bg-blue-100 text-blue-800 border-blue-200",
   reuniao_presencial: "bg-green-100 text-green-800 border-green-200",
   roteiro_visita: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  follow_up: "bg-amber-100 text-amber-800 border-amber-200"
+  follow_up: "bg-amber-100 text-amber-800 border-amber-200",
+  followup: "bg-amber-100 text-amber-800 border-amber-200"
 };
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   agendado: "Agendado",
   realizado: "Realizado",
-  cancelado: "Cancelado"
+  cancelado: "Cancelado",
+  vencido: "Vencido"
 };
 
 const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   agendado: "border-sky-200 bg-sky-100 text-sky-700",
   realizado: "border-green-200 bg-green-100 text-green-700",
-  cancelado: "border-slate-200 bg-slate-100 text-slate-700"
+  cancelado: "border-slate-200 bg-slate-100 text-slate-700",
+  vencido: "border-rose-200 bg-rose-100 text-rose-700"
 };
 
 function startOfDay(date: Date) {
@@ -140,8 +153,10 @@ export default function AgendaPage() {
     type: "reuniao_online",
     startDateTime: "",
     endDateTime: "",
-    sellerId: ""
+    sellerId: "",
+    notes: ""
   });
+  const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
   const highlightedEventRef = useRef<HTMLDivElement | null>(null);
 
@@ -187,6 +202,29 @@ export default function AgendaPage() {
   }, [canFilterBySeller]);
 
   useEffect(() => {
+    let active = true;
+    const loadClients = async () => {
+      if (activityClients.length) return;
+      try {
+        const response = await api.get("/clients");
+        if (!active) return;
+        const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
+        const mappedClients = Array.isArray(payload)
+          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: String(item.id), name: String(item.name) }))
+          : [];
+        setActivityClients(mappedClients);
+      } catch {
+        // silencioso: fluxo principal da agenda não depende desta lista
+      }
+    };
+
+    void loadClients();
+    return () => {
+      active = false;
+    };
+  }, [activityClients.length]);
+
+  useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
     if (!shouldHighlightNext) return;
 
@@ -208,35 +246,48 @@ export default function AgendaPage() {
     const loadAgendaEvents = async () => {
       setIsEventsLoading(true);
       try {
-        const response = await api.get("/agenda");
+        const today = new Date();
+        const from = startOfDay(today).toISOString().slice(0, 10);
+        const to = endOfDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7)).toISOString().slice(0, 10);
+        const params: Record<string, string> = { from, to };
+        if (canFilterBySeller && selectedSellerId) params.sellerId = selectedSellerId;
+        const response = await api.get("/agenda/events", { params });
         if (!active) return;
 
-        const payload = Array.isArray(response.data?.items)
-          ? response.data.items
-          : Array.isArray(response.data)
-            ? response.data
-            : [];
-
+        const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
         const mappedEvents = payload
           .filter((item: any) => item?.id && item?.startDateTime && item?.endDateTime)
           .map((item: any): AgendaEvent => ({
             id: String(item.id),
             userId: String(item.userId || item.ownerSellerId || item.sellerId || ""),
+            sellerId: String(item.sellerId || item.userId || ""),
             clientId: item.clientId ? String(item.clientId) : undefined,
-            opportunityId: item.opportunityId ? String(item.opportunityId) : undefined,
             title: String(item.title || "Sem título"),
-            description: String(item.description || "Compromisso da agenda."),
-            type: (item.type as AgendaEventType) || "follow_up",
+            description: String(item.notes || "Compromisso da agenda."),
+            type: item.type === "followup" ? "followup" : ((item.type as AgendaEventType) || "follow_up"),
             startDateTime: new Date(item.startDateTime).toISOString(),
             endDateTime: new Date(item.endDateTime).toISOString(),
-            status: (item.status as AgendaEvent["status"]) || "agendado"
+            status: (item.status as AgendaEvent["status"]) || "agendado",
+            city: item.city ? String(item.city) : undefined,
+            notes: item.notes ? String(item.notes) : null,
+            stops: Array.isArray(item.stops) ? item.stops : []
           }))
           .filter((item: AgendaEvent) => item.userId);
 
-        setEvents(mappedEvents.length ? mappedEvents : getInitialEvents());
-      } catch {
+        setEvents(mappedEvents);
+      } catch (error: any) {
         if (!active) return;
-        toast.error("Não foi possível carregar eventos da agenda.");
+        const status = error?.response?.status ?? "sem_status";
+        const message = error?.response?.data?.message || error?.message || "erro desconhecido";
+        if (import.meta.env.DEV) {
+          console.error("Falha ao carregar agenda", {
+            url: error?.config?.url,
+            params: error?.config?.params,
+            status,
+            message
+          });
+        }
+        toast.error(`Falha ao carregar agenda: ${status} - ${message}`);
       } finally {
         if (active) setIsEventsLoading(false);
       }
@@ -247,7 +298,7 @@ export default function AgendaPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [canFilterBySeller, selectedSellerId]);
 
   const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
 
@@ -284,6 +335,29 @@ export default function AgendaPage() {
 
     return byPeriod.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, periodFilter]);
+
+  useEffect(() => {
+    let active = true;
+    const loadClients = async () => {
+      if (activityClients.length) return;
+      try {
+        const response = await api.get("/clients");
+        if (!active) return;
+        const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
+        const mappedClients = Array.isArray(payload)
+          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: String(item.id), name: String(item.name) }))
+          : [];
+        setActivityClients(mappedClients);
+      } catch {
+        // silencioso: fluxo principal da agenda não depende desta lista
+      }
+    };
+
+    void loadClients();
+    return () => {
+      active = false;
+    };
+  }, [activityClients.length]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
@@ -464,16 +538,17 @@ export default function AgendaPage() {
       type: "reuniao_online",
       startDateTime: "",
       endDateTime: "",
-      // gerente/diretor: sugere o vendedor do filtro (se tiver)
-      // vendedor: fixa no próprio id
-      sellerId: user?.role === "vendedor" ? user.id : selectedSellerId
+      sellerId: user?.role === "vendedor" ? user.id : selectedSellerId,
+      notes: ""
     });
+    setDraftStops([]);
 
     setIsCreateOpen(true);
   };
 
   const closeCreate = () => {
     setIsCreateOpen(false);
+    setDraftStops([]);
   };
 
   const resolveAgendaOwnerId = () => {
@@ -530,7 +605,18 @@ export default function AgendaPage() {
         payload.ownerSellerId = createForm.sellerId;
       }
 
-      const response = await api.post("/agenda", payload);
+      const response = await api.post("/agenda/events", { ...payload, notes: createForm.notes.trim() || undefined });
+
+      if (createForm.type === "roteiro_visita" && draftStops.length) {
+        for (const stop of draftStops) {
+          await api.post(`/agenda/events/${response.data.id}/stops`, {
+            clientId: stop.clientId || undefined,
+            city: stop.city || undefined,
+            plannedTime: stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined,
+            notes: stop.notes || undefined
+          });
+        }
+      }
 
       refreshEvents(mapCreatedAgendaEvent(response.data));
       closeCreate();
@@ -594,6 +680,22 @@ export default function AgendaPage() {
             </select>
           </label>
         ) : null}
+      </div>
+
+
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">Roteiro de Visitas (dia)</h3>
+            <p className="text-sm text-slate-500">Planeje múltiplas paradas e acompanhe execução no dia.</p>
+          </div>
+          <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white" onClick={() => {
+            openCreate();
+            setCreateForm((current) => ({ ...current, type: "roteiro_visita", title: "Roteiro do dia" }));
+          }}>
+            Criar roteiro
+          </button>
+        </div>
       </div>
 
       {/* Lista de eventos */}
@@ -660,6 +762,7 @@ export default function AgendaPage() {
                       </>
                     ) : null}
 
+                    {event.type === "roteiro_visita" && event.stops?.length ? (<div className="mt-2 text-xs text-slate-600">{event.stops.map((stop) => (<div key={stop.id}>#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</div>))}</div>) : null}
                     {event.clientId ? (
                       <Link to={`/clientes/${event.clientId}`} className="text-sm font-medium text-brand-700 underline">
                         Ver cliente
@@ -757,6 +860,39 @@ export default function AgendaPage() {
                   />
                 </div>
               </div>
+
+
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Observações</label>
+                <textarea
+                  value={createForm.notes}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
+                  className="min-h-20 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              {createForm.type === "roteiro_visita" ? (
+                <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-emerald-800">Paradas</p>
+                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", city: "", plannedTime: "", notes: "" }])}>Adicionar parada</button>
+                  </div>
+                  {draftStops.map((stop, index) => (
+                    <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-4">
+                      <select value={stop.clientId} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId: event.target.value } : item))} className="rounded border px-2 py-1 text-xs">
+                        <option value="">Cliente</option>
+                        {activityClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                      </select>
+                      <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-1 text-xs" />
+                      <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-1 text-xs" />
+                      <div className="flex gap-1">
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={closeCreate} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">

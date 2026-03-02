@@ -42,6 +42,19 @@ enum ClientType {
   PF
 }
 
+enum AgendaEventType {
+  reuniao_online
+  reuniao_presencial
+  roteiro_visita
+  followup
+}
+
+enum AgendaEventStatus {
+  agendado
+  realizado
+  vencido
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -59,6 +72,7 @@ model User {
   goals        Goal[]
   activityKpis ActivityKPI[]
   sales        Sale[]
+  agendaEvents AgendaEvent[]
 }
 
 model Client {
@@ -81,6 +95,48 @@ model Client {
   opportunities  Opportunity[]
   timelineEvents TimelineEvent[]
   createdAt      DateTime      @default(now())
+  agendaEvents   AgendaEvent[]
+  agendaStops    AgendaStop[]
+}
+
+model AgendaEvent {
+  id            String            @id @default(cuid())
+  title         String
+  type          AgendaEventType
+  startDateTime DateTime
+  endDateTime   DateTime
+  status        AgendaEventStatus @default(agendado)
+  notes         String?
+  city          String?
+  clientId      String?
+  client        Client?           @relation(fields: [clientId], references: [id])
+  sellerId      String
+  seller        User              @relation(fields: [sellerId], references: [id])
+  stops         AgendaStop[]
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([sellerId, startDateTime])
+  @@index([startDateTime, endDateTime])
+}
+
+model AgendaStop {
+  id            String      @id @default(cuid())
+  agendaEventId String
+  agendaEvent   AgendaEvent @relation(fields: [agendaEventId], references: [id], onDelete: Cascade)
+  order         Int
+  clientId      String?
+  client        Client?     @relation(fields: [clientId], references: [id])
+  city          String?
+  address       String?
+  plannedTime   DateTime?
+  notes         String?
+  arrivedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([agendaEventId, order])
 }
 
 
