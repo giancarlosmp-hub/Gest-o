@@ -23,8 +23,7 @@ import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
+import { ActivityType, ClientType, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 const router = Router();
@@ -204,6 +203,10 @@ const parseClientSort = (sortValue?: string): Prisma.ClientOrderByWithRelationIn
 // ==============================
 
 const DUPLICATE_CLIENT_MESSAGE = "Cliente já cadastrado no sistema.";
+
+const isDatabaseUniqueViolation = (error: unknown) => {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+};
 
 class DuplicateClientError extends Error {
   statusCode: number;
@@ -769,6 +772,9 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
+    if (isDatabaseUniqueViolation(error)) {
+      return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
+    }
     throw error;
   }
 });
@@ -892,7 +898,12 @@ router.post("/clients/import", async (req, res) => {
             }
           });
           totalAtualizados += 1;
-        } catch {
+        } catch (error) {
+          if (isDatabaseUniqueViolation(error)) {
+            totalErros += 1;
+            errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+            continue;
+          }
           totalErros += 1;
           errors.push({
             rowNumber: item.rowNumber,
@@ -922,7 +933,12 @@ router.post("/clients/import", async (req, res) => {
       await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
       await prisma.client.create({ data: payload });
       totalImportados += 1;
-    } catch {
+    } catch (error) {
+      if (isDatabaseUniqueViolation(error)) {
+        totalErros += 1;
+        errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+        continue;
+      }
       totalErros += 1;
       errors.push({ rowNumber: item.rowNumber, clientName, message: "Não foi possível importar cliente." });
     }
@@ -968,6 +984,9 @@ router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (isDatabaseUniqueViolation(error)) {
+      return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
     }
     throw error;
   }
@@ -1121,6 +1140,9 @@ router.post("/companies", validateBody(companySchema), async (req, res) => {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message });
     }
+    if (isDatabaseUniqueViolation(error)) {
+      return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
+    }
     throw error;
   }
 });
@@ -1163,6 +1185,9 @@ router.put("/companies/:id", validateBody(companySchema.partial()), async (req, 
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message });
+    }
+    if (isDatabaseUniqueViolation(error)) {
+      return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
     }
     throw error;
   }
