@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
+import { getApiErrorMessage } from "../lib/apiError";
 
 type Activity = {
   id: string;
@@ -24,12 +25,29 @@ type ActivityKpi = {
 type Opportunity = {
   id: string;
   title: string;
-  followUpDate: string;
-  expectedCloseDate: string;
+  followUpDate?: string | null;
+  expectedCloseDate?: string | null;
   stage: string;
   value?: number;
   lastContactAt?: string | null;
+  updatedAt?: string | null;
+  lastActivityAt?: string | null;
   client?: { id: string; name: string } | string;
+};
+
+type SmartAlertItem = {
+  id: "followups_overdue" | "opportunities_without_followup" | "proposals_no_response" | "cooling_clients";
+  label: string;
+  helper: string;
+  count: number;
+  to?: string;
+  unavailable?: boolean;
+};
+
+type CoolingClientsState = {
+  count: number;
+  unavailable: boolean;
+  message?: string;
 };
 
 type PipelineOpportunity = Opportunity & {
@@ -89,6 +107,7 @@ export default function HomePage() {
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -110,6 +129,27 @@ export default function HomePage() {
           : opportunitiesResponse.data;
         setOpportunities(Array.isArray(opportunitiesPayload) ? opportunitiesPayload : []);
         setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
+
+        try {
+          const coolingResponse = await api.get("/clients/alerts/cooling");
+          const count = Number(coolingResponse.data?.count ?? 0);
+          setCoolingClients({ count: Number.isFinite(count) ? count : 0, unavailable: false });
+        } catch (coolingError: unknown) {
+          const status = (coolingError as { response?: { status?: number } })?.response?.status;
+          if (status === 404) {
+            setCoolingClients({
+              count: 0,
+              unavailable: true,
+              message: "Alerta de clientes esfriando indisponível no momento."
+            });
+          } else {
+            setCoolingClients({
+              count: 0,
+              unavailable: true,
+              message: getApiErrorMessage(coolingError, "Não foi possível carregar clientes esfriando.")
+            });
+          }
+        }
       } catch {
         setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
       } finally {
@@ -143,17 +183,39 @@ export default function HomePage() {
       .filter((item) => !item.done && isSameDay(item.dueDate, start, end))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
+    const toFollowUpDate = (value?: string | null) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
     const pending = opportunities
-      .filter((item) => new Date(item.followUpDate) >= start)
-      .sort((a, b) => new Date(a.followUpDate).getTime() - new Date(b.followUpDate).getTime());
+      .filter((item) => {
+        const followUpDate = toFollowUpDate(item.followUpDate);
+        return followUpDate !== null && followUpDate >= start;
+      })
+      .sort((a, b) => {
+        const aDate = toFollowUpDate(a.followUpDate);
+        const bDate = toFollowUpDate(b.followUpDate);
+        if (!aDate || !bDate) return 0;
+        return aDate.getTime() - bDate.getTime();
+      });
 
     const urgent = opportunities
       .filter((item) => {
-        const followUp = new Date(item.followUpDate);
-        return followUp <= end;
+        const followUpDate = toFollowUpDate(item.followUpDate);
+        return followUpDate !== null && followUpDate <= end;
       })
-      .map((item) => ({ ...item, overdue: new Date(item.followUpDate) < now }))
-      .sort((a, b) => new Date(a.followUpDate).getTime() - new Date(b.followUpDate).getTime());
+      .map((item) => {
+        const followUpDate = toFollowUpDate(item.followUpDate);
+        return { ...item, overdue: followUpDate !== null && followUpDate < now };
+      })
+      .sort((a, b) => {
+        const aDate = toFollowUpDate(a.followUpDate);
+        const bDate = toFollowUpDate(b.followUpDate);
+        if (!aDate || !bDate) return 0;
+        return aDate.getTime() - bDate.getTime();
+      });
 
     return {
       meetingsToday: meetings,
@@ -277,6 +339,81 @@ export default function HomePage() {
       topFive: prioritized.slice(0, 5)
     };
   }, [opportunities]);
+
+  const smartAlerts = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+    const toValidDate = (value?: string | null) => {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
+    const followUpsOverdue = opportunities.filter((item) => {
+      const followUpDate = toValidDate(item.followUpDate);
+      return followUpDate !== null && followUpDate < tomorrow;
+    }).length;
+
+    const opportunitiesWithoutFollowUp = opportunities.filter((item) => {
+      const expectedCloseDate = toValidDate(item.expectedCloseDate);
+      const followUpDate = toValidDate(item.followUpDate);
+      const closeIsLate = expectedCloseDate !== null && expectedCloseDate < today;
+      const noFollowUp = followUpDate === null;
+      const followUpAfterToday = followUpDate !== null && followUpDate >= tomorrow;
+      return closeIsLate && (noFollowUp || followUpAfterToday);
+    }).length;
+
+    const proposalsNoResponse = opportunities.filter((item) => {
+      const stage = String(item.stage || "").toLowerCase();
+      if (stage !== "proposta") return false;
+      const lastActivityDate = toValidDate(item.lastActivityAt || item.updatedAt || item.lastContactAt || item.followUpDate);
+      if (!lastActivityDate) return false;
+      return now.getTime() - lastActivityDate.getTime() > sevenDaysMs;
+    }).length;
+
+    const items: SmartAlertItem[] = [
+      {
+        id: "followups_overdue",
+        label: "Follow-ups vencidos hoje/atrasados",
+        helper: "Existem follow-ups que já deveriam ter sido tratados.",
+        count: followUpsOverdue,
+        to: "/oportunidades?status=open&actionToday=true"
+      },
+      {
+        id: "opportunities_without_followup",
+        label: "Oportunidades atrasadas sem follow-up",
+        helper: "Negócios com previsão vencida sem acompanhamento adequado.",
+        count: opportunitiesWithoutFollowUp,
+        to: "/oportunidades?status=open&overdue=true"
+      },
+      {
+        id: "proposals_no_response",
+        label: "Propostas sem retorno",
+        helper: "Propostas sem interação há mais de 7 dias.",
+        count: proposalsNoResponse,
+        to: "/oportunidades?status=open&stage=proposta"
+      },
+      {
+        id: "cooling_clients",
+        label: "Clientes esfriando",
+        helper: coolingClients.unavailable
+          ? "Alerta indisponível no momento."
+          : "Clientes A/B sem atividade relevante há 21+ dias.",
+        count: coolingClients.count,
+        to: "/clientes?classe=A",
+        unavailable: coolingClients.unavailable
+      }
+    ];
+
+    return {
+      items,
+      hasActionableAlerts: items.some((item) => !item.unavailable && item.count > 0)
+    };
+  }, [coolingClients.count, coolingClients.unavailable, opportunities]);
 
   const getPipelinePriorityLabel = (type: PipelineOpportunity["priorityType"]) => {
     if (type === "followup_overdue") return "Follow-up vencido";
@@ -410,6 +547,48 @@ export default function HomePage() {
         <article className={blockClass}>
           <div className="mb-4 flex items-center justify-between">
             <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Prioridades</p>
+              <h2 className="text-lg font-semibold text-slate-900">Alertas Inteligentes</h2>
+            </div>
+          </div>
+
+          {coolingClients.message && (
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">{coolingClients.message}</p>
+          )}
+
+          <div className="space-y-2">
+            {smartAlerts.items.map((alert) => (
+              <div key={alert.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <div>
+                  <p className="text-base font-semibold text-slate-900">{alert.count.toLocaleString("pt-BR")}</p>
+                  <p className="text-sm text-slate-700">{alert.label}</p>
+                  <p className="text-xs text-slate-500">{alert.helper}</p>
+                </div>
+
+                {alert.unavailable ? (
+                  <span className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500">Indisponível</span>
+                ) : (
+                  <Link
+                    to={alert.to || "/"}
+                    className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800"
+                  >
+                    Abrir
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {!loading && !smartAlerts.hasActionableAlerts && (
+            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+              Tudo em dia ✅
+            </p>
+          )}
+        </article>
+
+        <article className={blockClass}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
               <h2 className="text-lg font-semibold text-slate-900">Resumo do Dia</h2>
             </div>
@@ -499,7 +678,7 @@ export default function HomePage() {
                       {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
                     </p>
                     <p className="text-xs text-slate-500">
-                      Follow-up: {new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate))}
+                      Follow-up: {item.followUpDate ? new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate)) : "Sem data"}
                     </p>
                   </div>
                   {(item as any).overdue && <span className="h-3 w-3 rounded-full bg-red-500" title="Vencido" />}
