@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
+import { validateClientPayload, type ClientPayloadInput } from "../lib/validateClientPayload";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -45,11 +46,6 @@ type ClientImportRow = {
   cnpj?: string;
   segment?: string;
   ownerSellerId?: string;
-};
-
-type ClientImportParsedRow = ClientImportRow & {
-  potentialHaInvalid: boolean;
-  farmSizeHaInvalid: boolean;
 };
 
 type ClientImportErrorItem = {
@@ -115,6 +111,7 @@ export default function CrudSimplePage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [formFieldErrors, setFormFieldErrors] = useState<Partial<Record<keyof ClientPayloadInput, string>>>({});
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [quickFilters, setQuickFilters] = useState({ uf: "", region: "", clientType: "", ownerSellerId: "" });
@@ -268,34 +265,6 @@ export default function CrudSimplePage({
     return rawValue;
   };
 
-  const validateForm = () => {
-    if (endpoint !== "/clients") return null;
-
-    const name = String(form.name ?? "").trim();
-    const state = String(form.state ?? "").trim();
-    const clientType = String(form.clientType ?? "").trim().toUpperCase();
-    const cnpjOrCpfDigits = String(form.cnpj ?? "").replace(/\D/g, "");
-
-    if (!name) return "Nome é obrigatório.";
-    if (state && !/^[A-Za-z]{2}$/.test(state)) return "UF deve conter exatamente 2 letras.";
-
-    if (cnpjOrCpfDigits) {
-      if (clientType === "PF" && cnpjOrCpfDigits.length !== 11) {
-        return "Para cliente PF, informe um CPF com 11 dígitos.";
-      }
-
-      if (clientType === "PJ" && cnpjOrCpfDigits.length !== 14) {
-        return "Para cliente PJ, informe um CNPJ com 14 dígitos.";
-      }
-
-      if (clientType !== "PF" && clientType !== "PJ" && ![11, 14].includes(cnpjOrCpfDigits.length)) {
-        return "CNPJ/CPF deve conter 11 (CPF) ou 14 (CNPJ) dígitos.";
-      }
-    }
-
-    return null;
-  };
-
   const loadXlsxLibrary = async () => {
     if (window.XLSX) return window.XLSX;
 
@@ -415,7 +384,7 @@ export default function CrudSimplePage({
       throw new Error(`Colunas ausentes: ${missingColumns.join(", ")}.`);
     }
 
-    const parsedRows: ClientImportParsedRow[] = sheetRows
+    const parsedRows: ClientImportRow[] = sheetRows
       .map((row, index) => {
         const potentialHaResult = parseDecimalValue(row[headerMap.potentialHa]);
         const farmSizeHaResult = parseDecimalValue(row[headerMap.farmSizeHa]);
@@ -424,13 +393,11 @@ export default function CrudSimplePage({
           sourceRowNumber: index + 2,
           name: normalizeTextValue(row[headerMap.name]),
           city: normalizeTextValue(row[headerMap.city]),
-          state: normalizeTextValue(row[headerMap.state]).toUpperCase(),
+          state: normalizeTextValue(row[headerMap.state]),
           region: normalizeTextValue(row[headerMap.region]),
-          potentialHa: potentialHaResult.parsedValue,
-          potentialHaInvalid: potentialHaResult.isInvalid,
-          farmSizeHa: farmSizeHaResult.parsedValue,
-          farmSizeHaInvalid: farmSizeHaResult.isInvalid,
-          clientType: normalizeTextValue(row[headerMap.clientType]).toUpperCase(),
+          potentialHa: potentialHaResult.isInvalid ? Number.NaN : potentialHaResult.parsedValue,
+          farmSizeHa: farmSizeHaResult.isInvalid ? Number.NaN : farmSizeHaResult.parsedValue,
+          clientType: normalizeTextValue(row[headerMap.clientType]),
           cnpj: String(row[headerMap.cnpj] ?? "").trim(),
           segment: normalizeTextValue(row[headerMap.segment]),
           ownerSellerId: normalizeTextValue(row[headerMap.ownerSellerId])
@@ -452,7 +419,7 @@ export default function CrudSimplePage({
     return parsedRows;
   };
 
-  const validateImportRows = (rows: ClientImportParsedRow[]) => {
+  const validateImportRows = (rows: ClientImportRow[]) => {
     const errors: string[] = [];
 
     if (rows.length === 0) {
@@ -462,33 +429,15 @@ export default function CrudSimplePage({
 
     rows.forEach((row, index) => {
       const rowNumber = row.sourceRowNumber || index + 2;
-      if (!row.name) {
-        errors.push(`Linha ${rowNumber}: name ausente.`);
-      }
+      const { fieldErrors } = validateClientPayload(row, {
+        isSeller,
+        canChooseOwnerSeller,
+        sellerId: user?.id
+      });
 
-      if (row.state && !/^[A-Z]{2}$/.test(row.state)) {
-        errors.push(`Linha ${rowNumber}: state deve conter 2 letras.`);
-      }
-
-      if (row.clientType && !["PF", "PJ"].includes(row.clientType)) {
-        errors.push(`Linha ${rowNumber}: clientType deve ser PF ou PJ.`);
-      }
-
-      if (row.potentialHaInvalid || (row.potentialHa !== undefined && Number.isNaN(row.potentialHa))) {
-        errors.push(`Linha ${rowNumber}: potentialHa deve ser numérico.`);
-      }
-
-      if (row.potentialHa !== undefined && row.potentialHa < 0) {
-        errors.push(`Linha ${rowNumber}: potentialHa deve ser maior ou igual a 0.`);
-      }
-
-      if (row.farmSizeHaInvalid || (row.farmSizeHa !== undefined && Number.isNaN(row.farmSizeHa))) {
-        errors.push(`Linha ${rowNumber}: farmSizeHa deve ser numérico.`);
-      }
-
-      if (row.farmSizeHa !== undefined && row.farmSizeHa < 0) {
-        errors.push(`Linha ${rowNumber}: farmSizeHa deve ser maior ou igual a 0.`);
-      }
+      Object.values(fieldErrors).forEach((message) => {
+        if (message) errors.push(`Linha ${rowNumber}: ${message}`);
+      });
     });
 
     return errors;
@@ -513,7 +462,7 @@ export default function CrudSimplePage({
     try {
       const rows = await parseImportFile(selectedFile);
       const errors = validateImportRows(rows);
-      const normalizedRows = rows.map(({ potentialHaInvalid: _potentialHaInvalid, farmSizeHaInvalid: _farmSizeHaInvalid, ...row }) => row);
+      const normalizedRows = rows;
 
       setImportRows(normalizedRows);
       setImportPreviewRows(normalizedRows.slice(0, 20));
@@ -545,26 +494,13 @@ export default function CrudSimplePage({
   };
 
   const buildImportPayload = (row: ClientImportRow): Record<string, unknown> => {
-    const payload: Record<string, unknown> = {
-      name: row.name,
-      city: row.city || undefined,
-      state: row.state || undefined,
-      region: row.region || undefined,
-      potentialHa: row.potentialHa ?? undefined,
-      farmSizeHa: row.farmSizeHa ?? undefined,
-      clientType: row.clientType || undefined,
-      cnpj: row.cnpj || undefined,
-      segment: row.segment || undefined,
-      ownerSellerId: row.ownerSellerId || undefined
-    };
+    const { sanitizedPayload } = validateClientPayload(row, {
+      isSeller,
+      canChooseOwnerSeller,
+      sellerId: user?.id
+    });
 
-    if (isSeller && user?.id) {
-      payload.ownerSellerId = user.id;
-    } else if (!row.ownerSellerId) {
-      delete payload.ownerSellerId;
-    }
-
-    return payload;
+    return sanitizedPayload;
   };
 
   const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
@@ -702,6 +638,7 @@ export default function CrudSimplePage({
     setEditing(null);
     setForm({});
     setFormError(null);
+    setFormFieldErrors({});
   };
 
   const openCreateModal = () => {
@@ -712,15 +649,47 @@ export default function CrudSimplePage({
       setForm({});
     }
     setFormError(null);
+    setFormFieldErrors({});
     setIsCreateModalOpen(true);
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const validationError = validateForm();
-    if (validationError) {
-      setFormError(validationError);
-      toast.error(validationError);
+    if (endpoint === "/clients") {
+      const { sanitizedPayload, fieldErrors } = validateClientPayload(form, {
+        isSeller,
+        canChooseOwnerSeller,
+        sellerId: user?.id
+      });
+
+      setFormFieldErrors(fieldErrors);
+
+      const firstError = Object.values(fieldErrors).find(Boolean);
+      if (firstError) {
+        setFormError("Corrija os campos obrigatórios destacados.");
+        toast.error(firstError);
+        return;
+      }
+
+      setFormError(null);
+      setSaving(true);
+      try {
+        if (editing) await api.put(`${endpoint}/${editing}`, sanitizedPayload);
+        else await api.post(endpoint, sanitizedPayload);
+
+        toast.success(editing ? "Registro atualizado com sucesso." : "Registro criado com sucesso.");
+
+        setForm({});
+        setEditing(null);
+        setFormFieldErrors({});
+        if (isClientsPage) await loadClients();
+        else await load();
+        if (createInModal) closeCreateModal();
+      } catch (e: any) {
+        toast.error(e.response?.data?.message || "Erro ao salvar");
+      } finally {
+        setSaving(false);
+      }
       return;
     }
 
@@ -745,6 +714,7 @@ export default function CrudSimplePage({
 
       setForm({});
       setEditing(null);
+      setFormFieldErrors({});
       if (isClientsPage) await loadClients();
       else await load();
       if (createInModal) closeCreateModal();
@@ -757,6 +727,7 @@ export default function CrudSimplePage({
 
   const onEdit = (item: any) => {
     setFormError(null);
+    setFormFieldErrors({});
     if (createInModal) {
       setEditing(item.id);
       setForm(item);
@@ -1162,7 +1133,9 @@ export default function CrudSimplePage({
             <form onSubmit={submit} className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 {fields.map((f) => {
-                  const isRequired = endpoint === "/clients" ? f.key === "name" : true;
+                  const isRequired = endpoint === "/clients"
+                    ? ["name", "city", "state", "clientType"].includes(f.key)
+                    : true;
                   const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
 
                   if (isOwnerSellerField) {
@@ -1183,6 +1156,7 @@ export default function CrudSimplePage({
                           disabled={isSeller}
                           onChange={(e) => {
                             setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, ownerSellerId: undefined }));
                             setForm({ ...form, ownerSellerId: e.target.value });
                           }}
                         >
@@ -1194,6 +1168,7 @@ export default function CrudSimplePage({
                             ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
                             : "Defina o vendedor responsável para acompanhar este cliente."}
                         </p>
+                        {formFieldErrors.ownerSellerId ? <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p> : null}
                       </div>
                     );
                   }
@@ -1209,6 +1184,7 @@ export default function CrudSimplePage({
                           value={form[f.key] ?? ""}
                           onChange={(e) => {
                             setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
                             setForm({ ...form, [f.key]: e.target.value });
                           }}
                         >
@@ -1227,10 +1203,12 @@ export default function CrudSimplePage({
                           value={form[f.key] ?? ""}
                           onChange={(e) => {
                             setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
                             setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
                           }}
                         />
                       )}
+                      {formFieldErrors[f.key as keyof ClientPayloadInput] ? <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p> : null}
                     </div>
                   );
                 })}
