@@ -15,7 +15,7 @@ type SidebarItem = {
 };
 
 const items: SidebarItem[] = [
-  { id: "home", label: "Home", path: "/" },
+  { id: "home", label: "Central do Dia", path: "/" },
   { id: "dashboard", label: "Dashboard", path: "/dashboard" },
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe" },
   { id: "clientes", label: "Clientes (Cliente 360)", path: "/clientes" },

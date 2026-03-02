@@ -109,10 +109,16 @@ export default function HomePage() {
     };
 
     void loadData();
-  }, []);
+  }, [refreshReminders]);
 
   const todayDateLabel = useMemo(
-    () => new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date()),
+    () =>
+      new Intl.DateTimeFormat("pt-BR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }).format(new Date()),
     []
   );
 
@@ -144,7 +150,7 @@ export default function HomePage() {
       meetingsToday: meetings,
       activitiesToday: dayActivities,
       pendingFollowUps: pending,
-      urgentFollowUps: urgent,
+      urgentFollowUps: urgent
     };
   }, [activities, opportunities]);
 
@@ -152,10 +158,11 @@ export default function HomePage() {
     const now = new Date();
     const monthBusinessDays = getMonthBusinessDays(now);
     const { start, end } = getTodayBoundaries();
+
     const targetKeys = {
       ligacao: ["ligacao"],
       visita: ["visita", "visita_tecnica", "visita_presencial"],
-      proposta: ["envio_proposta"],
+      proposta: ["envio_proposta"]
     };
 
     const monthlyTargetByType = activityKpis.reduce<Record<string, number>>((accumulator, item) => {
@@ -184,19 +191,24 @@ export default function HomePage() {
         dailyTarget,
         realized,
         progressPercent,
-        achieved: realized >= dailyTarget && dailyTarget > 0,
+        achieved: realized >= dailyTarget && dailyTarget > 0
       };
     };
 
     const metrics = [
       buildMetric("Meta de ligações hoje", targetKeys.ligacao),
       buildMetric("Meta de visitas hoje", targetKeys.visita),
-      buildMetric("Meta de propostas hoje", targetKeys.proposta),
+      buildMetric("Meta de propostas hoje", targetKeys.proposta)
     ];
 
     const totalTarget = metrics.reduce((sum, item) => sum + item.dailyTarget, 0);
     const totalRealized = metrics.reduce((sum, item) => sum + item.realized, 0);
-    const shouldShowWarning = user?.role === "vendedor" && now.getHours() >= 15 && totalTarget > 0 && totalRealized / totalTarget < 0.5;
+
+    const shouldShowWarning =
+      user?.role === "vendedor" &&
+      now.getHours() >= 15 &&
+      totalTarget > 0 &&
+      totalRealized / totalTarget < 0.5;
 
     return { metrics, shouldShowWarning };
   }, [activities, activityKpis, user?.role]);
@@ -227,11 +239,21 @@ export default function HomePage() {
       </section>
 
       <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
-        <div className="flex items-center gap-3 text-brand-900">
-          <SunMoon size={22} />
-          <h1 className="text-2xl font-bold">Bem-vindo, {user?.name ?? "Usuário"}</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
+          <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
         </div>
-        <p className="mt-2 text-sm text-slate-600">{getGreeting()} · Hoje: <span className="capitalize">{todayDateLabel}</span></p>
+
+        <div className="mt-3 flex items-center gap-3 text-brand-900">
+          <SunMoon size={22} />
+          <h2 className="text-xl font-bold">
+            {getGreeting()}, {user?.name ?? "Usuário"}
+          </h2>
+        </div>
+
+        <p className="mt-2 text-sm text-slate-600">
+          {getGreeting()} · Hoje: <span className="capitalize">{todayDateLabel}</span>
+        </p>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
@@ -253,11 +275,18 @@ export default function HomePage() {
                   <div className="mb-1 flex items-center justify-between gap-2 text-sm">
                     <p className="font-medium text-slate-900">{metric.label}</p>
                     <p className="text-slate-600">
-                      {metric.realized} / {metric.dailyTarget.toLocaleString("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}
+                      {metric.realized} /{" "}
+                      {metric.dailyTarget.toLocaleString("pt-BR", {
+                        maximumFractionDigits: 1,
+                        minimumFractionDigits: 1
+                      })}
                     </p>
                   </div>
                   <div className="h-2 rounded-full bg-slate-100">
-                    <div className={`h-2 rounded-full transition-all ${barColorClass}`} style={{ width: `${clampedProgress}%` }} />
+                    <div
+                      className={`h-2 rounded-full transition-all ${barColorClass}`}
+                      style={{ width: `${clampedProgress}%` }}
+                    />
                   </div>
                 </div>
               );
@@ -305,12 +334,24 @@ export default function HomePage() {
               <p className="text-sm text-slate-500">Nenhuma reunião para hoje.</p>
             ) : (
               meetingsToday.map((meeting) => (
-                <div key={meeting.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                <div
+                  key={meeting.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
+                >
                   <div>
-                    <p className="text-sm font-medium text-slate-900">{new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(meeting.dueDate))}</p>
-                    <p className="text-xs text-slate-600">{meeting.opportunity?.client?.name ?? "Cliente não informado"} · {getMeetingType(meeting.notes)}</p>
+                    <p className="text-sm font-medium text-slate-900">
+                      {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
+                        new Date(meeting.dueDate)
+                      )}
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      {meeting.opportunity?.client?.name ?? "Cliente não informado"} · {getMeetingType(meeting.notes)}
+                    </p>
                   </div>
-                  <Link to={meeting.opportunity?.client?.id ? `/clientes/${meeting.opportunity.client.id}` : "/clientes"} className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800">
+                  <Link
+                    to={meeting.opportunity?.client?.id ? `/clientes/${meeting.opportunity.client.id}` : "/clientes"}
+                    className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800"
+                  >
                     Abrir cliente
                   </Link>
                 </div>
@@ -335,13 +376,20 @@ export default function HomePage() {
               <p className="text-sm text-slate-500">Nenhum follow-up urgente.</p>
             ) : (
               urgentFollowUps.map((item) => (
-                <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+                >
                   <div>
                     <p className="text-sm font-medium text-slate-900">{item.title}</p>
-                    <p className="text-xs text-slate-600">{typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}</p>
-                    <p className="text-xs text-slate-500">Follow-up: {new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate))}</p>
+                    <p className="text-xs text-slate-600">
+                      {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Follow-up: {new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate))}
+                    </p>
                   </div>
-                  {item.overdue && <span className="h-3 w-3 rounded-full bg-red-500" title="Vencido" />}
+                  {(item as any).overdue && <span className="h-3 w-3 rounded-full bg-red-500" title="Vencido" />}
                 </div>
               ))
             )}
@@ -364,14 +412,19 @@ export default function HomePage() {
               <p className="text-sm text-slate-500">Sem atividades com vencimento hoje.</p>
             ) : (
               activitiesToday.map((activity) => (
-                <div key={activity.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                <div
+                  key={activity.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+                >
                   <div>
                     <p className="text-sm font-medium text-slate-900">{activity.notes || "Atividade"}</p>
                     <p className="text-xs text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
                   </div>
                   <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                     <Clock3 size={14} />
-                    {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.dueDate))}
+                    {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
+                      new Date(activity.dueDate)
+                    )}
                   </span>
                 </div>
               ))
