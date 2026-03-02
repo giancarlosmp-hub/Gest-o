@@ -134,7 +134,14 @@ api.interceptors.response.use((r) => r, async (error) => {
 
   if (status === 429) {
     cooldownUntil = Math.max(cooldownUntil, Date.now() + RATE_LIMIT_COOLDOWN_MS);
-    toast.error("Muitas requisições. Aguarde alguns segundos e tente novamente.", { id: RATE_LIMIT_TOAST_ID });
+    if (import.meta.env.DEV) {
+      console.warn("[api] 429 rate limit", {
+        url: error?.config?.url,
+        method: error?.config?.method,
+        params: error?.config?.params
+      });
+    }
+    toast.error("Muitas requisições. Aguarde alguns segundos.", { id: RATE_LIMIT_TOAST_ID });
   }
 
   return Promise.reject(withApiErrorDetails(error));

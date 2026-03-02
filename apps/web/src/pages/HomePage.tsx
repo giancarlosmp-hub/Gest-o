@@ -124,19 +124,24 @@ export default function HomePage() {
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   const [loading, setLoading] = useState(true);
 
+  const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
+
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+
     const loadData = async () => {
       setLoading(true);
-      void refreshReminders();
+      void refreshReminders(controller.signal);
       try {
         setPipelineError(null);
-        const currentMonth = new Date().toISOString().slice(0, 7);
         const [activitiesResponse, opportunitiesResponse, activityKpisResponse] = await Promise.all([
-          api.get("/activities"),
-          api.get("/opportunities?status=open"),
-          api.get(`/activity-kpis?month=${currentMonth}`)
+          api.get("/activities", { signal: controller.signal }),
+          api.get("/opportunities?status=open", { signal: controller.signal }),
+          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal: controller.signal })
         ]);
 
+        if (!active) return;
         setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
         const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
           ? opportunitiesResponse.data.items
@@ -145,10 +150,12 @@ export default function HomePage() {
         setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
 
         try {
-          const coolingResponse = await api.get("/clients/alerts/cooling");
+          const coolingResponse = await api.get("/clients/alerts/cooling", { signal: controller.signal });
+          if (!active) return;
           const count = Number(coolingResponse.data?.count ?? 0);
           setCoolingClients({ count: Number.isFinite(count) ? count : 0, unavailable: false });
         } catch (coolingError: unknown) {
+          if (!active || (coolingError as { code?: string })?.code === "ERR_CANCELED") return;
           const status = (coolingError as { response?: { status?: number } })?.response?.status;
           if (status === 404) {
             setCoolingClients({
@@ -164,15 +171,20 @@ export default function HomePage() {
             });
           }
         }
-      } catch {
+      } catch (error) {
+        if (!active || (error as { code?: string })?.code === "ERR_CANCELED") return;
         setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     void loadData();
-  }, [refreshReminders]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [dashboardQueryKey, refreshReminders]);
 
   const todayDateLabel = useMemo(
     () =>

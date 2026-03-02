@@ -10,6 +10,12 @@ declare global {
     }
     interface Request {
       user?: UserPayload;
+      rateLimit?: {
+        limit: number;
+        used: number;
+        remaining: number;
+        resetTime?: Date;
+      };
     }
   }
 }
