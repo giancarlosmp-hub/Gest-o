@@ -8,12 +8,16 @@ import { getApiErrorMessage } from "../lib/apiError";
 type Client = { id: string; name: string };
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
+type ActivityStatus = "agendado" | "vencido" | "realizado";
+
 type Activity = {
   id: string;
   type: string;
   notes: string;
   dueDate: string;
   done: boolean;
+  status?: ActivityStatus;
+  isOverdue?: boolean;
   ownerSellerId: string;
   ownerSeller?: { id: string; name: string };
   opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null;
@@ -26,10 +30,23 @@ type ActivityFilters = {
   month: string;
   clientId: string;
   sellerId: string;
+  overdueOnly: boolean;
 };
 
 const initialForm = { type: "ligacao", notes: "", dueDate: "", clientId: "", opportunityId: "", ownerSellerId: "" };
-const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "" };
+const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
+
+const STATUS_LABEL: Record<ActivityStatus, string> = {
+  agendado: "Agendado",
+  vencido: "Vencido",
+  realizado: "Realizado"
+};
+
+const STATUS_CLASS: Record<ActivityStatus, string> = {
+  agendado: "border-sky-200 bg-sky-100 text-sky-700",
+  vencido: "border-rose-200 bg-rose-100 text-rose-700",
+  realizado: "border-emerald-200 bg-emerald-100 text-emerald-700"
+};
 
 export default function ActivitiesPage() {
   const { user } = useAuth();
@@ -125,6 +142,7 @@ export default function ActivitiesPage() {
       if (filters.month) params.set("month", filters.month);
       if (filters.clientId) params.set("clientId", filters.clientId);
       if (canChooseSeller && filters.sellerId) params.set("sellerId", filters.sellerId);
+      if (filters.overdueOnly) params.set("overdueOnly", "true");
 
       const response = await api.get(`/activities${params.toString() ? `?${params.toString()}` : ""}`);
       setActivities(Array.isArray(response.data) ? response.data : []);
@@ -142,7 +160,7 @@ export default function ActivitiesPage() {
 
   useEffect(() => {
     void loadActivities();
-  }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, canChooseSeller]);
+  }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, filters.overdueOnly, canChooseSeller]);
 
   const clearFilters = () => {
     setFilters(initialFilters);
@@ -198,7 +216,7 @@ export default function ActivitiesPage() {
       </div>
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <div className="md:col-span-2 xl:col-span-2">
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Busca</label>
             <input
@@ -252,6 +270,13 @@ export default function ActivitiesPage() {
             </select>
           </div>
 
+          <div className="flex items-end">
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <input type="checkbox" checked={filters.overdueOnly} onChange={(event) => setFilters((previous) => ({ ...previous, overdueOnly: event.target.checked }))} />
+              Somente vencidos
+            </label>
+          </div>
+
           {canChooseSeller ? (
             <div>
               <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Vendedor</label>
@@ -287,7 +312,7 @@ export default function ActivitiesPage() {
                 <th className="p-2">Cliente</th>
                 <th className="p-2">Oportunidade</th>
                 <th className="p-2">Vencimento</th>
-                <th className="p-2">Concluída</th>
+                <th className="p-2">Status</th>
                 <th className="p-2">Notas</th>
                 <th className="p-2">Ações</th>
               </tr>
@@ -299,7 +324,11 @@ export default function ActivitiesPage() {
                   <td className="p-2">{item.opportunity?.client?.name || "—"}</td>
                   <td className="p-2">{item.opportunity?.title || "—"}</td>
                   <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
-                  <td className="p-2">{item.done ? "Sim" : "Não"}</td>
+                  <td className="p-2">
+                    {item.status ? (
+                      <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[item.status]}`}>{STATUS_LABEL[item.status]}</span>
+                    ) : (item.done ? "Realizado" : "Agendado")}
+                  </td>
                   <td className="p-2">{item.notes}</td>
                   <td className="p-2">
                     <button

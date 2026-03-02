@@ -54,9 +54,13 @@ const normalizeDateToUtc = (value: string, endOfDay = false) => {
   const plainDateMatch = /^\d{4}-\d{2}-\d{2}$/.test(value);
   if (plainDateMatch) {
     const [year, month, day] = value.split("-").map(Number);
+    const utcHour = endOfDay ? 26 : 3;
+    const utcMinute = endOfDay ? 59 : 0;
+    const utcSecond = endOfDay ? 59 : 0;
+    const utcMs = endOfDay ? 999 : 0;
     return endOfDay
-      ? new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999))
-      : new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+      ? new Date(Date.UTC(year, month - 1, day, utcHour, utcMinute, utcSecond, utcMs))
+      : new Date(Date.UTC(year, month - 1, day, utcHour, utcMinute, utcSecond, utcMs));
   }
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -122,6 +126,14 @@ const parseObjectivePeriod = (monthQuery?: string, yearQuery?: string) => {
 };
 
 const getMonthKey = (date: Date) => date.toISOString().slice(0, 7);
+
+const BRAZIL_TIMEZONE = "America/Sao_Paulo";
+
+const getBrazilNow = () => {
+  const now = new Date();
+  const formatted = now.toLocaleString("sv-SE", { timeZone: BRAZIL_TIMEZONE });
+  return new Date(`${formatted}Z`);
+};
 
 const getMonthRangeFromKey = (monthKey: string) => {
   const [year, month] = monthKey.split("-").map(Number);
@@ -1701,20 +1713,64 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 });
 router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/activities", async (req, res) => res.json(await prisma.activity.findMany({
-  where: sellerWhere(req),
-  include: {
-    ownerSeller: { select: { id: true, name: true } },
-    opportunity: {
-      select: {
-        id: true,
-        title: true,
-        client: { select: { id: true, name: true } }
+const resolveStatus = (payload: { done: boolean; endAt: Date }) => {
+  if (payload.done) return "realizado";
+  return payload.endAt.getTime() < getBrazilNow().getTime() ? "vencido" : "agendado";
+};
+
+const mapActivity = (activity: any) => {
+  const status = resolveStatus({ done: activity.done, endAt: activity.dueDate });
+  return {
+    ...activity,
+    status,
+    isOverdue: status === "vencido"
+  };
+};
+
+router.get("/activities", async (req, res) => {
+  const q = String(req.query.q || "").trim();
+  const month = req.query.month ? String(req.query.month) : "";
+  const doneQuery = req.query.done === "true" ? true : req.query.done === "false" ? false : undefined;
+  const type = req.query.type ? String(req.query.type) : "";
+  const clientId = req.query.clientId ? String(req.query.clientId) : "";
+  const overdueOnly = req.query.overdueOnly === "true";
+  const sellerId = req.user!.role === "vendedor" ? req.user!.id : (req.query.sellerId as string | undefined);
+
+  const monthRange = month && /^\d{4}-\d{2}$/.test(month) ? getMonthRangeFromKey(month) : null;
+
+  const activities = await prisma.activity.findMany({
+    where: {
+      ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+      ...(type ? { type: type as ActivityType } : {}),
+      ...(doneQuery !== undefined ? { done: doneQuery } : {}),
+      ...(monthRange ? { dueDate: { gte: monthRange.start, lte: monthRange.end } } : {}),
+      ...(clientId ? { opportunity: { clientId } } : {}),
+      ...(q
+        ? {
+            OR: [
+              { notes: { contains: q, mode: "insensitive" } },
+              { opportunity: { title: { contains: q, mode: "insensitive" } } },
+              { opportunity: { client: { name: { contains: q, mode: "insensitive" } } } }
+            ]
+          }
+        : {})
+    },
+    include: {
+      ownerSeller: { select: { id: true, name: true } },
+      opportunity: {
+        select: {
+          id: true,
+          title: true,
+          client: { select: { id: true, name: true } }
+        }
       }
-    }
-  },
-  orderBy: { createdAt: "desc" }
-})));
+    },
+    orderBy: { createdAt: "desc" }
+  });
+
+  const mapped = activities.map(mapActivity);
+  return res.json(overdueOnly ? mapped.filter((item) => item.isOverdue) : mapped);
+});
 router.get("/activities/monthly-counts", async (req, res) => {
   const month = (req.query.month as string | undefined) || getMonthKey(new Date());
   const sellerIdQuery = req.query.sellerId as string | undefined;
@@ -1790,7 +1846,7 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const logicalCount = await getActivityCountByTypeInMonth(ownerSellerId, createdActivity.type, month);
 
   return res.status(201).json({
-    ...createdActivity,
+    ...mapActivity(createdActivity),
     metrics: {
       month,
       logicalCount
@@ -1799,12 +1855,16 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
 });
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
   const { clientId: _clientId, ...payload } = req.body;
-  return res.json(await prisma.activity.update({
+  const updatedActivity = await prisma.activity.update({
     where: { id: req.params.id },
     data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
-  }));
+  });
+  return res.json(mapActivity(updatedActivity));
 });
-router.patch("/activities/:id/done", async (req, res) => res.json(await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } })));
+router.patch("/activities/:id/done", async (req, res) => {
+  const updatedActivity = await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } });
+  return res.json(mapActivity(updatedActivity));
+});
 router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 router.get("/events", async (req, res) => {
@@ -1865,10 +1925,7 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   return res.status(201).json(created);
 });
 
-const resolveAgendaEventStatus = (agendaEvent: { status: string; endDateTime: Date }) => {
-  if (agendaEvent.status === "realizado") return "realizado";
-  return agendaEvent.endDateTime.getTime() < Date.now() ? "vencido" : "agendado";
-};
+const resolveAgendaEventStatus = (agendaEvent: { status: string; endDateTime: Date }) => resolveStatus({ done: agendaEvent.status === "realizado", endAt: agendaEvent.endDateTime });
 
 const mapAgendaEvent = (agendaEvent: any) => ({
   id: agendaEvent.id,
@@ -1879,6 +1936,7 @@ const mapAgendaEvent = (agendaEvent: any) => ({
   clientId: agendaEvent.clientId,
   sellerId: agendaEvent.sellerId,
   status: resolveAgendaEventStatus(agendaEvent),
+  isOverdue: resolveAgendaEventStatus(agendaEvent) === "vencido",
   city: agendaEvent.city,
   notes: agendaEvent.notes,
   stops: (agendaEvent.stops || []).map((stop: any) => ({

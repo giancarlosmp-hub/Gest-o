@@ -31,6 +31,8 @@ async function main() {
     upsertUser("Vendedor 4", "vendedor4@empresa.com", "vendedor", "Centro-Oeste")
   ]);
 
+  await prisma.agendaStop.deleteMany();
+  await prisma.agendaEvent.deleteMany();
   await prisma.goal.deleteMany();
   await prisma.sale.deleteMany();
   await prisma.activity.deleteMany();
@@ -40,8 +42,11 @@ async function main() {
 
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  let firstSellerId = "";
+  let firstClientId = "";
 
   for (const seller of vendedores) {
+    if (!firstSellerId) firstSellerId = seller.id;
     await prisma.goal.create({ data: { month, targetValue: 100000, sellerId: seller.id } });
 
     const cities = cityByRegion[seller.region] || ["São Paulo"];
@@ -63,6 +68,8 @@ async function main() {
           ownerSellerId: seller.id
         }
       });
+
+      if (!firstClientId) firstClientId = client.id;
 
       await prisma.contact.create({
         data: {
@@ -128,6 +135,35 @@ async function main() {
         value: 15000 + Math.floor(Math.random() * 5000),
         sellerId: seller.id
       }
+    });
+  }
+
+
+  if (firstSellerId) {
+    const pastStart = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+    const pastEnd = new Date(now.getTime() - 2 * 60 * 60 * 1000);
+    const futureStart = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const futureEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
+
+    await prisma.agendaEvent.createMany({
+      data: [
+        {
+          title: "Evento Seed Vencido",
+          type: "reuniao_online",
+          startDateTime: pastStart,
+          endDateTime: pastEnd,
+          sellerId: firstSellerId,
+          clientId: firstClientId || null
+        },
+        {
+          title: "Evento Seed Agendado",
+          type: "reuniao_online",
+          startDateTime: futureStart,
+          endDateTime: futureEnd,
+          sellerId: firstSellerId,
+          clientId: firstClientId || null
+        }
+      ]
     });
   }
 
