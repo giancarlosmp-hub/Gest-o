@@ -21,6 +21,7 @@ export type AgendaEvent = {
     routeLegId?: string;
   };
   status: AgendaEventStatus;
+  isOverdue?: boolean;
   sellerId?: string;
   notes?: string | null;
   stops?: AgendaStop[];

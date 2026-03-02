@@ -65,7 +65,7 @@ const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   agendado: "Agendado",
   realizado: "Realizado",
-  cancelado: "Cancelado",
+  cancelado: "Agendado",
   vencido: "Vencido"
 };
 
@@ -124,13 +124,6 @@ function formatDateTime(value: string) {
   });
 }
 
-function isPast(event: AgendaEvent) {
-  return (
-    event.status === "agendado" &&
-    new Date(event.endDateTime).getTime() < Date.now()
-  );
-}
-
 function getInitialEvents(): AgendaEvent[] {
   const now = new Date();
   return [
@@ -159,6 +152,7 @@ export default function AgendaPage() {
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
   const [isEventsLoading, setIsEventsLoading] = useState(false);
@@ -319,6 +313,7 @@ export default function AgendaPage() {
             startDateTime: new Date(item.startDateTime).toISOString(),
             endDateTime: new Date(item.endDateTime).toISOString(),
             status: (item.status as AgendaEvent["status"]) || "agendado",
+            isOverdue: Boolean(item.isOverdue),
             city: item.city ? String(item.city) : undefined,
             notes: item.notes ? String(item.notes) : null,
             stops: Array.isArray(item.stops) ? item.stops : []
@@ -365,8 +360,10 @@ export default function AgendaPage() {
       return true;
     });
 
-    return byRole.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
-  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
+    const byOverdue = overdueOnly ? byRole.filter((event) => event.status === "vencido") : byRole;
+
+    return byOverdue.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
+  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, overdueOnly]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
@@ -718,6 +715,14 @@ export default function AgendaPage() {
           </select>
         </label>
 
+        <label className="text-sm font-medium text-slate-700">
+          <span className="block">Status</span>
+          <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700">
+            <input type="checkbox" checked={overdueOnly} onChange={(event) => setOverdueOnly(event.target.checked)} />
+            Somente vencidos
+          </div>
+        </label>
+
         {canFilterBySeller ? (
           <label className="text-sm font-medium text-slate-700">
             Vendedor
@@ -776,7 +781,6 @@ export default function AgendaPage() {
         ) : (
           <div className="divide-y">
             {filteredEvents.map((event) => {
-              const overdue = isPast(event);
               const isHighlighted = event.id === highlightedEventId;
               return (
                 <div
@@ -790,7 +794,6 @@ export default function AgendaPage() {
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                       <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
-                      {overdue ? <span className="rounded-full border border-rose-200 bg-rose-100 px-2 py-1 text-rose-800">Vencido</span> : null}
                       <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
