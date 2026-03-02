@@ -1,5 +1,5 @@
 import { DragEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MoreHorizontal, Search } from "lucide-react";
 import api from "../lib/apiClient";
@@ -184,6 +184,7 @@ export default function OpportunitiesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("pipeline");
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<Filters>({
     status: "open",
     stage: "",
@@ -209,6 +210,7 @@ export default function OpportunitiesPage() {
   const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
+  const actionTodayFilter = searchParams.get("actionToday") === "true";
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
 
@@ -221,6 +223,27 @@ export default function OpportunitiesPage() {
     const savedMode = localStorage.getItem(PIPELINE_VIEW_STORAGE_KEY);
     if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
   }, []);
+
+  useEffect(() => {
+    const urlStatus = searchParams.get("status");
+    const urlStage = searchParams.get("stage");
+    const urlOverdue = searchParams.get("overdue");
+    const urlOwnerSellerId = searchParams.get("ownerSellerId");
+    const urlSearch = searchParams.get("search");
+
+    setFilters((prev) => ({
+      ...prev,
+      status: urlStatus === "open" || urlStatus === "closed" || urlStatus === "all" ? urlStatus : prev.status,
+      stage: urlStage || prev.stage,
+      overdue: urlOverdue === "true" ? true : prev.overdue,
+      ownerSellerId: urlOwnerSellerId || prev.ownerSellerId
+    }));
+
+    if (urlSearch) {
+      setSearch(urlSearch);
+      setDebouncedSearch(urlSearch);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!isSeller || !user?.id) return;
@@ -303,7 +326,28 @@ export default function OpportunitiesPage() {
     return Number(b.value || 0) - Number(a.value || 0);
   };
 
-  const sortedItems = useMemo(() => [...items].sort(sortByPipelinePriority), [items]);
+  const sortedItems = useMemo(() => {
+    const itemsToSort = actionTodayFilter
+      ? items.filter((item) => {
+        const todayStart = toDayStart(new Date().toISOString());
+        const followUpDay = toDayStart(item.followUpDate);
+        const expectedCloseDay = toDayStart(item.expectedCloseDate);
+        const lastActionDay = toDayStart(item.lastContactAt || item.followUpDate);
+        const stage = String(item.stage || "").toLowerCase();
+
+        if (!todayStart) return false;
+        if (followUpDay && followUpDay <= todayStart) return true;
+        if (expectedCloseDay && expectedCloseDay < todayStart) return true;
+        if (stage === "proposta" && lastActionDay) {
+          const elapsed = Math.floor((todayStart.getTime() - lastActionDay.getTime()) / (1000 * 60 * 60 * 24));
+          return elapsed >= 7;
+        }
+        return false;
+      })
+      : items;
+
+    return [...itemsToSort].sort(sortByPipelinePriority);
+  }, [actionTodayFilter, items]);
 
   const conversionRate = useMemo(() => {
     if (!items.length) return 0;
