@@ -82,6 +82,23 @@ type ImportAnalysisRow = ClientImportRow & {
   errorMessage?: string;
 };
 
+type ClientImportSimulationStatus = "valid" | "duplicate" | "error";
+
+type ClientImportSimulationItem = {
+  row: number;
+  name: string;
+  status: ClientImportSimulationStatus;
+  reason: string | null;
+};
+
+type ClientImportSimulationSummary = {
+  totalAnalyzed: number;
+  valid: number;
+  duplicated: number;
+  errors: number;
+  items: ClientImportSimulationItem[];
+};
+
 type ImportValidationSummary = {
   errors: string[];
   validCount: number;
@@ -194,6 +211,9 @@ export default function CrudSimplePage({
   const [isImportReady, setIsImportReady] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [importSummary, setImportSummary] = useState<ClientImportSummary | null>(null);
+  const [importSimulationSummary, setImportSimulationSummary] =
+    useState<ClientImportSimulationSummary | null>(null);
+  const [isSimulatingImport, setIsSimulatingImport] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
@@ -293,9 +313,7 @@ export default function CrudSimplePage({
       .get("/users")
       .then((response) => {
         const allUsers = Array.isArray(response.data) ? response.data : [];
-        const sellers = allUsers.filter(
-          (item: any) => item?.role === "vendedor" && item?.id && item?.name
-        );
+        const sellers = allUsers.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
         setUsers(sellers);
       })
       .catch(() => {
@@ -311,8 +329,33 @@ export default function CrudSimplePage({
   const filterOptions = useMemo(
     () => ({
       ufs: [
-        "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
-        "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
+        "AC",
+        "AL",
+        "AP",
+        "AM",
+        "BA",
+        "CE",
+        "DF",
+        "ES",
+        "GO",
+        "MA",
+        "MT",
+        "MS",
+        "MG",
+        "PA",
+        "PB",
+        "PR",
+        "PE",
+        "PI",
+        "RJ",
+        "RN",
+        "RS",
+        "RO",
+        "RR",
+        "SC",
+        "SP",
+        "SE",
+        "TO"
       ],
       regions: ["Norte", "Nordeste", "Centro-Oeste", "Sudeste", "Sul"],
       clientTypes: ["PJ", "PF"]
@@ -363,7 +406,11 @@ export default function CrudSimplePage({
       const existingScript = document.querySelector("script[data-sheetjs='true']") as HTMLScriptElement | null;
       if (existingScript) {
         existingScript.addEventListener("load", () => resolve(), { once: true });
-        existingScript.addEventListener("error", () => reject(new Error("Não foi possível carregar a biblioteca Excel.")), { once: true });
+        existingScript.addEventListener(
+          "error",
+          () => reject(new Error("Não foi possível carregar a biblioteca Excel.")),
+          { once: true }
+        );
         return;
       }
 
@@ -386,18 +433,7 @@ export default function CrudSimplePage({
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportColumns],
-      [
-        "Fazenda Santa Rita",
-        "Sorriso",
-        "MT",
-        "Centro-Oeste",
-        1200,
-        2500,
-        "PJ",
-        "12.345.678/0001-99",
-        "Soja e milho",
-        ""
-      ]
+      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", ""]
     ];
 
     const xlsx = await loadXlsxLibrary();
@@ -424,9 +460,7 @@ export default function CrudSimplePage({
     }
 
     if (typeof value === "number") {
-      return Number.isFinite(value)
-        ? { parsedValue: value, isInvalid: false }
-        : { parsedValue: undefined, isInvalid: true };
+      return Number.isFinite(value) ? { parsedValue: value, isInvalid: false } : { parsedValue: undefined, isInvalid: true };
     }
 
     const normalized = String(value).trim();
@@ -457,9 +491,7 @@ export default function CrudSimplePage({
     }
 
     const parsedValue = Number(numericText);
-    return Number.isNaN(parsedValue)
-      ? { parsedValue: undefined, isInvalid: true }
-      : { parsedValue, isInvalid: false };
+    return Number.isNaN(parsedValue) ? { parsedValue: undefined, isInvalid: true } : { parsedValue, isInvalid: false };
   };
 
   const parseImportFile = async (file: File): Promise<ImportParsedSheet> => {
@@ -602,10 +634,7 @@ export default function CrudSimplePage({
         ].some((value) => value !== "" && value !== undefined)
       );
 
-  const validateImportRows = (
-    rows: ClientImportRow[],
-    defaultOwnerSellerId?: string
-  ): ImportValidationSummary => {
+  const validateImportRows = (rows: ClientImportRow[], defaultOwnerSellerId?: string): ImportValidationSummary => {
     const errors: string[] = [];
     let validCount = 0;
 
@@ -687,12 +716,7 @@ export default function CrudSimplePage({
 
       if (errorMessage) return { ...row, status: "error" as const, errorMessage };
       if (existingClientId) {
-        return {
-          ...row,
-          status: "duplicate" as const,
-          existingClientId,
-          action: "skip" as const
-        };
+        return { ...row, status: "duplicate" as const, existingClientId, action: "skip" as const };
       }
       return { ...row, status: "new" as const, action: "import_anyway" as const };
     });
@@ -709,6 +733,8 @@ export default function CrudSimplePage({
     setImportRows(mappedRows);
     setImportValidationErrors(validation.errors);
     setIsImportReady(validation.errors.length === 0);
+    setImportSummary(null);
+    setImportSimulationSummary(null);
 
     if (validation.errors.length > 0) {
       setImportPreviewRows(
@@ -751,6 +777,7 @@ export default function CrudSimplePage({
     setImportDefaultOwnerSellerId("");
     setIsImportReady(false);
     setImportSummary(null);
+    setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: 0 });
     setImportStep(1);
 
@@ -825,6 +852,7 @@ export default function CrudSimplePage({
     setIsImportReady(false);
     setImportProgress({ current: 0, total: 0 });
     setImportSummary(null);
+    setImportSimulationSummary(null);
   };
 
   const parseBulkImportSummary = (responseData: any, total: number): ClientImportSummary | null => {
@@ -904,6 +932,35 @@ export default function CrudSimplePage({
     return { total, imported, updated: 0, ignored: 0, errors } satisfies ClientImportSummary;
   };
 
+  const handleSimulateImport = async () => {
+    if (!isImportReady || importRows.length === 0 || importValidationErrors.length > 0) return;
+
+    setIsSimulatingImport(true);
+    setImportSimulationSummary(null);
+
+    try {
+      const payloads = importRows.map(buildImportPayload);
+      const response = await api.post("/clients/import/simulate", {
+        rows: payloads,
+        clients: payloads
+      });
+
+      const simulationData = response.data as ClientImportSimulationSummary;
+      setImportSimulationSummary({
+        totalAnalyzed: Number(simulationData?.totalAnalyzed ?? payloads.length),
+        valid: Number(simulationData?.valid ?? 0),
+        duplicated: Number(simulationData?.duplicated ?? 0),
+        errors: Number(simulationData?.errors ?? 0),
+        items: Array.isArray(simulationData?.items) ? simulationData.items : []
+      });
+      toast.success("Simulação concluída com sucesso.");
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || "Erro ao simular importação de clientes.");
+    } finally {
+      setIsSimulatingImport(false);
+    }
+  };
+
   const downloadImportErrorsReport = () => {
     if (!importSummary || importSummary.errors.length === 0) return;
 
@@ -927,9 +984,7 @@ export default function CrudSimplePage({
   };
 
   const updateImportDuplicateAction = (sourceRowNumber: number, action: ClientImportAction) => {
-    setImportPreviewRows((prev) =>
-      prev.map((row) => (row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row))
-    );
+    setImportPreviewRows((prev) => prev.map((row) => (row.sourceRowNumber === sourceRowNumber ? { ...row, action } : row)));
   };
 
   const handleImportClients = async () => {
@@ -937,6 +992,7 @@ export default function CrudSimplePage({
 
     setIsImporting(true);
     setImportSummary(null);
+    setImportSimulationSummary(null);
     setImportProgress({ current: 0, total: importRows.length });
 
     try {
@@ -1122,10 +1178,25 @@ export default function CrudSimplePage({
   };
 
   const importCounters = useMemo(() => {
-    const errorCount = importValidationErrors.length;
+    if (importSimulationSummary) {
+      return {
+        validCount: importSimulationSummary.valid,
+        errorCount: importSimulationSummary.errors,
+        duplicateCount: importSimulationSummary.duplicated,
+        totalAnalyzed: importSimulationSummary.totalAnalyzed
+      };
+    }
+
+    const duplicateCount = importPreviewRows.filter((row) => row.status === "duplicate").length;
+
+    // Se houver erro de validação (antes do preview real), usamos o total de mensagens.
+    // Caso contrário, tentamos contar pelos status do preview.
+    const previewErrorCount = importPreviewRows.filter((row) => row.status === "error").length;
+    const errorCount = importValidationErrors.length > 0 ? importValidationErrors.length : previewErrorCount;
+
     const validCount = Math.max(0, importRows.length - errorCount);
-    return { validCount, errorCount };
-  }, [importRows.length, importValidationErrors.length]);
+    return { validCount, errorCount, duplicateCount, totalAnalyzed: importRows.length };
+  }, [importRows.length, importValidationErrors.length, importSimulationSummary, importPreviewRows]);
 
   return (
     <div className="space-y-4">
@@ -1417,17 +1488,11 @@ export default function CrudSimplePage({
       ) : null}
 
       {isClientsPage && isImportModalOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div className="mb-4">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
-              <p className="text-sm text-slate-500">
-                Use um arquivo .xlsx para mapear, validar os dados e importar em lote.
-              </p>
+              <p className="text-sm text-slate-500">Use um arquivo .xlsx para mapear, validar os dados e importar em lote.</p>
               <p className="mt-1 text-xs text-slate-500">
                 Passo {importStep} de 2 · {importStep === 1 ? "Mapear colunas" : "Preview e validação"}
               </p>
@@ -1533,13 +1598,42 @@ export default function CrudSimplePage({
                   ) : null}
 
                   <p className="text-sm text-slate-600">
-                    Total de linhas carregadas:{" "}
-                    <span className="font-semibold text-slate-900">{importRows.length}</span> · Preview exibindo até 20
+                    Total analisado:{" "}
+                    <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span> · Preview exibindo até 20
                     linhas.{" "}
-                    <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>{" "}
+                    <span className="ml-2 font-semibold text-emerald-700">{importCounters.validCount} válidos</span>
+                    {" · "}
+                    <span className="font-semibold text-amber-700">{importCounters.duplicateCount} duplicados</span>
                     {" · "}
                     <span className="font-semibold text-rose-700">{importCounters.errorCount} com erro</span>
                   </p>
+
+                  {importSimulationSummary ? (
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[700px] text-sm">
+                        <thead className="bg-slate-100 text-left text-slate-700">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Linha</th>
+                            <th className="px-3 py-2 font-medium">Nome</th>
+                            <th className="px-3 py-2 font-medium">Status</th>
+                            <th className="px-3 py-2 font-medium">Motivo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importSimulationSummary.items.map((item) => (
+                            <tr key={`${item.row}-${item.name}`} className="border-t border-slate-200">
+                              <td className="px-3 py-2">{item.row}</td>
+                              <td className="px-3 py-2">{item.name || "—"}</td>
+                              <td className="px-3 py-2">
+                                {item.status === "valid" ? "Válido" : item.status === "duplicate" ? "Duplicado" : "Com erro"}
+                              </td>
+                              <td className="px-3 py-2">{item.reason || "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
 
                   {isImporting ? (
                     <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
@@ -1576,11 +1670,7 @@ export default function CrudSimplePage({
                               <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
 
                               <td className="px-3 py-2">
-                                {row.status === "new"
-                                  ? "Novo"
-                                  : row.status === "duplicate"
-                                    ? "Duplicado"
-                                    : "Com erro"}
+                                {row.status === "new" ? "Novo" : row.status === "duplicate" ? "Duplicado" : "Com erro"}
                               </td>
 
                               <td className="px-3 py-2">
@@ -1589,10 +1679,7 @@ export default function CrudSimplePage({
                                     className="rounded border border-slate-300 px-2 py-1"
                                     value={row.action || "skip"}
                                     onChange={(event) =>
-                                      updateImportDuplicateAction(
-                                        row.sourceRowNumber,
-                                        event.target.value as ClientImportAction
-                                      )
+                                      updateImportDuplicateAction(row.sourceRowNumber, event.target.value as ClientImportAction)
                                     }
                                   >
                                     <option value="update">Atualizar existente</option>
@@ -1631,15 +1718,25 @@ export default function CrudSimplePage({
                 Cancelar
               </button>
 
-              {importStep === 2 ? (
-                <button
-                  type="button"
-                  onClick={handleImportClients}
-                  className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={!isImportReady || isImporting}
-                >
-                  {isImporting ? "Importando..." : "Validar e importar"}
-                </button>
+              {importStep === 2 && canChooseOwnerSeller ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSimulateImport}
+                    className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                  >
+                    {isSimulatingImport ? "Validando..." : "Validar sem importar"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportClients}
+                    className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!isImportReady || isImporting || isSimulatingImport}
+                  >
+                    {isImporting ? "Importando..." : "Validar e importar"}
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
@@ -1647,11 +1744,7 @@ export default function CrudSimplePage({
       ) : null}
 
       {createInModal && isCreateModalOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
-          role="dialog"
-          aria-modal="true"
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div className="mb-4">
               <h3 className="text-xl font-semibold text-slate-900">{createModalTitle}</h3>
@@ -1661,9 +1754,7 @@ export default function CrudSimplePage({
             <form onSubmit={submit} className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2">
                 {fields.map((f) => {
-                  const isRequired = endpoint === "/clients"
-                    ? ["name", "city", "state", "clientType"].includes(f.key)
-                    : true;
+                  const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
 
                   const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
 
@@ -1704,9 +1795,7 @@ export default function CrudSimplePage({
                             ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
                             : "Defina o vendedor responsável para acompanhar este cliente."}
                         </p>
-                        {formFieldErrors.ownerSellerId ? (
-                          <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p>
-                        ) : null}
+                        {formFieldErrors.ownerSellerId ? <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p> : null}
                       </div>
                     );
                   }
