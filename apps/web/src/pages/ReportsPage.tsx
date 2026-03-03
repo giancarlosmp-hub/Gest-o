@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Bar, Doughnut } from "react-chartjs-2";
 import {
   ArcElement,
@@ -238,9 +239,16 @@ export default function ReportsPage() {
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-brand-200 bg-gradient-to-r from-brand-50 via-white to-brand-100 p-6 shadow-sm">
-        <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Relatórios</div>
-        <h2 className="mt-1 text-2xl font-bold text-slate-900">Agro CRM</h2>
-        <p className="mt-1 text-sm text-slate-600">Insights de carteira e pipeline para decisões comerciais de campo.</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Relatórios</div>
+            <h2 className="mt-1 text-2xl font-bold text-slate-900">Agro CRM</h2>
+            <p className="mt-1 text-sm text-slate-600">Insights de carteira e pipeline para decisões comerciais de campo.</p>
+          </div>
+          <Link to="/relatórios/execução-comercial" className="rounded-lg border border-brand-300 bg-white px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50">
+            Ver Execução Comercial
+          </Link>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
