@@ -2,6 +2,15 @@ import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[process] Promise rejeitada sem tratamento", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[process] Exceção não capturada", error);
+});
+
 async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
