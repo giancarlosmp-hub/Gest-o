@@ -1,8 +1,9 @@
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { normalizeTextValue, parseDecimalValue, parseImportFile } from "../../lib/import/parsers";
+import { normalizeHeader, normalizeTextValue, parseDecimalValue, parseImportFile } from "../../lib/import/parsers";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
+import { useAuth } from "../../context/AuthContext";
 
 type OpportunityPreviewRow = {
   line: number;
@@ -13,6 +14,24 @@ type OpportunityPreviewRow = {
   payload: Record<string, unknown>;
   status: "valid" | "error";
   errorMessage?: string;
+};
+
+type OpportunityImportFieldKey =
+  | "title"
+  | "clientNameOrId"
+  | "value"
+  | "stage"
+  | "status"
+  | "ownerEmail"
+  | "followUpDate"
+  | "probability"
+  | "notes";
+
+type OpportunityImportField = {
+  key: OpportunityImportFieldKey;
+  label: string;
+  required: boolean;
+  aliases: string[];
 };
 
 type ImportErrorItem = {
@@ -31,73 +50,34 @@ type OpportunityImportResponse = {
   errors?: ImportErrorItem[];
 };
 
-const TEMPLATE_HEADERS = ["title", "clientId", "value", "stage", "proposalDate", "expectedCloseDate", "crop", "season"];
+const TEMPLATE_HEADERS = ["title", "clientNameOrId", "value", "stage", "status", "ownerEmail", "followUpDate", "probability", "notes"];
 const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho", "perdido"]);
+const VALID_STATUS = new Set(["open", "closed"]);
 
-const parseCsvLine = (line: string) => {
-  const values: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-
-    if (char === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      values.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += char;
-  }
-
-  values.push(current.trim());
-  return values;
-};
-
-const parseCsvFile = async (file: File) => {
-  const text = await file.text();
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  if (lines.length < 2) {
-    throw new Error("O arquivo CSV deve conter cabeçalho e pelo menos uma linha de dados.");
-  }
-
-  const headers = parseCsvLine(lines[0]).map((header) => normalizeTextValue(header));
-  const rows = lines.slice(1).map<Record<string, unknown>>((line) => {
-    const values = parseCsvLine(line);
-    return headers.reduce<Record<string, unknown>>((acc, header, index) => {
-      acc[header] = values[index] ?? "";
-      return acc;
-    }, {});
-  });
-
-  return { headers, rows };
-};
+const IMPORT_FIELDS: OpportunityImportField[] = [
+  { key: "title", label: "Título", required: true, aliases: ["title", "titulo", "nome da oportunidade", "oportunidade", "opportunity"] },
+  { key: "clientNameOrId", label: "Cliente", required: true, aliases: ["clientnameorid", "cliente", "clienteid", "clientid", "nome do cliente", "cliente nome"] },
+  { key: "value", label: "Valor", required: true, aliases: ["value", "valor", "valor total", "amount"] },
+  { key: "stage", label: "Etapa", required: true, aliases: ["stage", "etapa", "fase"] },
+  { key: "status", label: "Status", required: false, aliases: ["status", "situacao"] },
+  { key: "ownerEmail", label: "E-mail do responsável", required: false, aliases: ["owneremail", "email", "responsavel", "vendedor"] },
+  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
+  { key: "probability", label: "Probabilidade (%)", required: false, aliases: ["probability", "probabilidade"] },
+  { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] }
+];
+const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
 
 const downloadTemplate = () => {
   const example = [
     "Oportunidade exemplo",
-    "CLI-001",
+    "Fazenda São Pedro",
     "15000",
     "prospeccao",
+    "open",
+    "vendedor@empresa.com",
     "2026-01-10",
-    "2026-01-25",
-    "Soja",
-    "2026"
+    "60",
+    "Primeiro contato"
   ].join(",");
 
   const csvContent = `${TEMPLATE_HEADERS.join(",")}\n${example}`;
@@ -114,40 +94,97 @@ const downloadTemplate = () => {
   URL.revokeObjectURL(url);
 };
 
-const buildPreviewRows = (rows: Record<string, unknown>[]) => {
+const getSavedMappingForUser = (userId?: string | null): Partial<Record<OpportunityImportFieldKey, string>> => {
+  if (!userId) return {};
+
+  try {
+    const rawValue = localStorage.getItem(`${LOCAL_STORAGE_MAPPING_KEY}:${userId}`);
+    if (!rawValue) return {};
+    return JSON.parse(rawValue) as Partial<Record<OpportunityImportFieldKey, string>>;
+  } catch {
+    return {};
+  }
+};
+
+const saveMappingForUser = (userId: string | undefined, mapping: Partial<Record<OpportunityImportFieldKey, string>>) => {
+  if (!userId) return;
+  localStorage.setItem(`${LOCAL_STORAGE_MAPPING_KEY}:${userId}`, JSON.stringify(mapping));
+};
+
+const suggestColumnMapping = (
+  headers: string[],
+  savedMapping: Partial<Record<OpportunityImportFieldKey, string>>
+): Partial<Record<OpportunityImportFieldKey, string>> => {
+  const headersByNormalized = new Map(headers.map((header) => [normalizeHeader(header), header]));
+
+  return IMPORT_FIELDS.reduce<Partial<Record<OpportunityImportFieldKey, string>>>((acc, field) => {
+    const savedHeader = savedMapping[field.key];
+    if (savedHeader && headers.includes(savedHeader)) {
+      acc[field.key] = savedHeader;
+      return acc;
+    }
+
+    for (const alias of field.aliases) {
+      const foundHeader = headersByNormalized.get(normalizeHeader(alias));
+      if (foundHeader) {
+        acc[field.key] = foundHeader;
+        break;
+      }
+    }
+
+    return acc;
+  }, {});
+};
+
+const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Record<OpportunityImportFieldKey, string>>) => {
+  const getMappedValue = (row: Record<string, unknown>, field: OpportunityImportFieldKey) => {
+    const mappedHeader = mapping[field];
+    if (!mappedHeader) return "";
+    return row[mappedHeader];
+  };
+
   return rows.map<OpportunityPreviewRow>((row, index) => {
-    const valueResult = parseDecimalValue((row as any).value);
-    const stage = normalizeTextValue((row as any).stage).toLowerCase();
+    const valueResult = parseDecimalValue(getMappedValue(row, "value"));
+    const stage = normalizeTextValue(getMappedValue(row, "stage")).toLowerCase();
+    const status = normalizeTextValue(getMappedValue(row, "status")).toLowerCase();
+    const probabilityResult = parseDecimalValue(getMappedValue(row, "probability"));
+    const probability = probabilityResult.isInvalid ? Number.NaN : probabilityResult.parsedValue;
+    const title = normalizeTextValue(getMappedValue(row, "title"));
+    const clientNameOrId = normalizeTextValue(getMappedValue(row, "clientNameOrId"));
 
     const previewRow: OpportunityPreviewRow = {
       line: index + 2, // linha 1 é cabeçalho
-      title: normalizeTextValue((row as any).title),
-      clientId: normalizeTextValue((row as any).clientId),
+      title,
+      clientId: clientNameOrId,
       value: valueResult.isInvalid ? Number.NaN : valueResult.parsedValue,
       stage,
       payload: {
-        ...row,
-        title: normalizeTextValue((row as any).title),
-        clientId: normalizeTextValue((row as any).clientId),
+        title,
+        clientNameOrId,
         value: valueResult.isInvalid ? undefined : valueResult.parsedValue,
         stage: stage || "prospeccao",
-        proposalDate: normalizeTextValue((row as any).proposalDate),
-        expectedCloseDate: normalizeTextValue((row as any).expectedCloseDate),
-        crop: normalizeTextValue((row as any).crop),
-        season: normalizeTextValue((row as any).season)
+        status: status || undefined,
+        ownerEmail: normalizeTextValue(getMappedValue(row, "ownerEmail")) || undefined,
+        followUpDate: normalizeTextValue(getMappedValue(row, "followUpDate")) || undefined,
+        probability: probability === undefined || Number.isNaN(probability) ? undefined : Number(probability),
+        notes: normalizeTextValue(getMappedValue(row, "notes")) || undefined
       },
       status: "valid"
     };
 
     const errors: string[] = [];
     if (!previewRow.title) errors.push("Título obrigatório");
-    if (!previewRow.clientId) errors.push("Cliente (ID) obrigatório");
+    if (!previewRow.clientId) errors.push("Cliente obrigatório");
 
     if (previewRow.value === undefined || Number.isNaN(previewRow.value) || previewRow.value <= 0) {
       errors.push("Valor deve ser numérico e maior que zero");
     }
 
     if (stage && !VALID_STAGES.has(stage)) errors.push("Estágio inválido");
+    if (status && !VALID_STATUS.has(status)) errors.push("Status deve ser open ou closed");
+    if (probability !== undefined && (Number.isNaN(probability) || probability < 0 || probability > 100)) {
+      errors.push("Probabilidade deve estar entre 0 e 100");
+    }
 
     if (errors.length) {
       previewRow.status = "error";
@@ -167,7 +204,11 @@ export default function OpportunityImportModal({
   onClose: () => void;
   onImported?: () => Promise<void> | void;
 }) {
+  const { user } = useAuth();
   const [fileName, setFileName] = useState("");
+  const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
+  const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
+  const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
 
@@ -182,10 +223,22 @@ export default function OpportunityImportModal({
 
   const reset = () => {
     setFileName("");
+    setDetectedHeaders([]);
+    setRawRows([]);
+    setMapping({});
     setPreviewRows([]);
     setIsImporting(false);
     onClose();
   };
+
+  useEffect(() => {
+    if (!detectedHeaders.length) return;
+    const savedMapping = getSavedMappingForUser(user?.id);
+    setMapping((current) => {
+      if (Object.keys(current).length) return current;
+      return suggestColumnMapping(detectedHeaders, savedMapping);
+    });
+  }, [detectedHeaders, user?.id]);
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
@@ -207,12 +260,25 @@ export default function OpportunityImportModal({
     setFileName(selectedFile.name);
 
     try {
-      const parsed = lowerName.endsWith(".csv") ? await parseCsvFile(selectedFile) : await parseImportFile(selectedFile);
-      setPreviewRows(buildPreviewRows(parsed.rows));
+      const parsed = await parseImportFile(selectedFile);
+      setDetectedHeaders(parsed.headers);
+      setRawRows(parsed.rows);
+      const resolvedMapping = suggestColumnMapping(parsed.headers, getSavedMappingForUser(user?.id));
+      setMapping(resolvedMapping);
+      setPreviewRows(buildPreviewRows(parsed.rows, resolvedMapping));
     } catch (error: any) {
       toast.error(error.message || "Não foi possível processar o arquivo selecionado.");
+      setDetectedHeaders([]);
+      setRawRows([]);
+      setMapping({});
       setPreviewRows([]);
     }
+  };
+
+  const handleApplyMapping = () => {
+    setPreviewRows(buildPreviewRows(rawRows, mapping));
+    saveMappingForUser(user?.id, mapping);
+    toast.success("Mapeamento aplicado ao preview.");
   };
 
   const handleImport = async () => {
@@ -295,6 +361,41 @@ export default function OpportunityImportModal({
             <span className="font-semibold text-emerald-700">{counters.valid} válidas</span> ·{" "}
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
+
+          {detectedHeaders.length ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-800">Mapeamento de colunas</p>
+                <button
+                  type="button"
+                  onClick={handleApplyMapping}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                >
+                  Aplicar mapeamento
+                </button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {IMPORT_FIELDS.map((field) => (
+                  <div key={field.key} className="space-y-1">
+                    <label className="block text-sm font-medium text-slate-700" htmlFor={`map-${field.key}`}>
+                      {field.label} {field.required ? "*" : "(opcional)"}
+                    </label>
+                    <select
+                      id={`map-${field.key}`}
+                      className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                      value={mapping[field.key] ?? ""}
+                      onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                    >
+                      <option value="">{field.required ? "— Selecione —" : "— Não informar —"}</option>
+                      {detectedHeaders.map((header) => (
+                        <option key={`${field.key}-${header}`} value={header}>{header}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[780px] text-sm">
