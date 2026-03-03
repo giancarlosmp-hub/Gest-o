@@ -95,6 +95,25 @@ type DisciplineRankingItem = {
   hasInactivityFlag: boolean;
 };
 
+type ConsistencyLevel = "alta" | "media" | "baixa";
+
+type ConsistencyRankingItem = {
+  position: number;
+  sellerId: string;
+  sellerName: string;
+  averageScore: number;
+  metaHitRate: number;
+  stdDevResult: number;
+  stability: number;
+  consistencyScore: number;
+  consistencyLevel: ConsistencyLevel;
+};
+
+type ConsistencyResponse = {
+  period: { months: string[] };
+  ranking: ConsistencyRankingItem[];
+};
+
 const palette = {
   primary: "#0B3C1D",
   success: "#2f9e44",
@@ -299,6 +318,7 @@ export default function DashboardPage() {
   const [disciplineRanking, setDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
   const [weeklyDisciplineRanking, setWeeklyDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
   const [weeklyHighlights, setWeeklyHighlights] = useState<WeeklyHighlights | null>(null);
+  const [consistencyReport, setConsistencyReport] = useState<ConsistencyResponse | null>(null);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -335,8 +355,9 @@ export default function DashboardPage() {
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
       api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}`, { signal }),
+      api.get<ConsistencyResponse>("/reports/consistency", { signal }),
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
@@ -346,6 +367,7 @@ export default function DashboardPage() {
         setDisciplineRanking(disciplineRankingResponse.data);
         setWeeklyDisciplineRanking(weeklyDisciplineRankingResponse.data);
         setWeeklyHighlights(weeklyHighlightsResponse.data);
+        setConsistencyReport(consistencyResponse.data);
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -842,6 +864,21 @@ export default function DashboardPage() {
     return [...topThree, myRow];
   }, [disciplineRanking, user?.id, user?.role]);
 
+  const consistencyRankingVisible = useMemo(() => {
+    if (!consistencyReport) return [];
+    if (user?.role === "vendedor") {
+      return consistencyReport.ranking.filter((item) => item.sellerId === user.id);
+    }
+
+    return consistencyReport.ranking;
+  }, [consistencyReport, user?.id, user?.role]);
+
+  const consistencyBadge = (level: ConsistencyLevel) => {
+    if (level === "alta") return { label: "🟢 Alta", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    if (level === "media") return { label: "🟡 Média", className: "bg-amber-50 text-amber-700 border-amber-200" };
+    return { label: "🔴 Baixa", className: "bg-rose-50 text-rose-700 border-rose-200" };
+  };
+
   if (!summary || !series || !portfolio || !salesPace) {
     return <div className={cardClass}>Carregando dashboard...</div>;
   }
@@ -1233,6 +1270,56 @@ export default function DashboardPage() {
                 <tr>
                   <td colSpan={5} className="py-4 text-center text-slate-500">
                     Sem dados de disciplina para o período.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className={cardClass}>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-800">Consistência</h3>
+            <p className="text-xs text-slate-500">Média de ScoreFinal, meses com meta batida e estabilidade (últimos 3 meses).</p>
+          </div>
+          <span className="text-xs text-slate-500">Dashboard &gt; Consistência</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2.5 pr-3">Posição</th>
+                <th className="py-2.5 pr-3">Vendedor</th>
+                <th className="py-2.5 pr-3">Índice</th>
+                <th className="py-2.5 pr-3">Média Score</th>
+                <th className="py-2.5 pr-3">% Meta</th>
+                <th className="py-2.5 pr-3">Desvio padrão</th>
+                <th className="py-2.5 pr-3">Indicador</th>
+              </tr>
+            </thead>
+            <tbody>
+              {consistencyRankingVisible.map((row) => {
+                const badge = consistencyBadge(row.consistencyLevel);
+                return (
+                  <tr key={row.sellerId} className="border-b border-slate-100">
+                    <td className="py-2.5 pr-3">#{row.position}</td>
+                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.sellerName}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.consistencyScore)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.averageScore)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.metaHitRate)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.stdDevResult)}</td>
+                    <td className="py-2.5 pr-3">
+                      <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-semibold ${badge.className}`}>{badge.label}</span>
+                    </td>
+                  </tr>
+                );
+              })}
+              {consistencyRankingVisible.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-4 text-center text-slate-500">
+                    Sem dados de consistência para o período.
                   </td>
                 </tr>
               )}

@@ -221,6 +221,22 @@ const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: Activi
   });
 };
 
+const getLastNMonthKeys = (count: number, referenceDate = new Date()) => {
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(Date.UTC(referenceDate.getUTCFullYear(), referenceDate.getUTCMonth() - index, 1));
+    return date.toISOString().slice(0, 7);
+  }).reverse();
+};
+
+const calculateMean = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0);
+
+const calculateStandardDeviation = (values: number[]) => {
+  if (values.length === 0) return 0;
+  const mean = calculateMean(values);
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+};
+
 const assertProbability = (probability: number | null | undefined) => {
   if (probability === null || probability === undefined) return true;
   return probability >= 0 && probability <= 100;
@@ -1775,6 +1791,115 @@ router.get("/reports/commercial-score", async (req, res) => {
   });
 
   return res.json({ sellers: scoreRows });
+});
+
+router.get("/reports/consistency", async (req, res) => {
+  const monthKeys = getLastNMonthKeys(3);
+
+  const scopedSellerFilter = req.user?.role === "vendedor" ? { id: req.user.id } : { role: "vendedor" as const };
+  const sellers = await prisma.user.findMany({
+    where: scopedSellerFilter,
+    select: { id: true, name: true },
+    orderBy: { name: "asc" }
+  });
+
+  const monthlyStats = await Promise.all(
+    monthKeys.map(async (month) => {
+      const { start, end } = getMonthRangeFromKey(month);
+      const [sales, goals] = await Promise.all([
+        prisma.sale.groupBy({
+          by: ["sellerId"],
+          where: {
+            date: { gte: start, lte: end },
+            sellerId: { in: sellers.map((seller) => seller.id) }
+          },
+          _sum: { value: true }
+        }),
+        prisma.goal.findMany({
+          where: {
+            month,
+            sellerId: { in: sellers.map((seller) => seller.id) }
+          },
+          select: {
+            sellerId: true,
+            targetValue: true
+          }
+        })
+      ]);
+
+      const salesBySeller = sales.reduce<Record<string, number>>((acc, item) => {
+        acc[item.sellerId] = item._sum.value ?? 0;
+        return acc;
+      }, {});
+
+      const goalsBySeller = goals.reduce<Record<string, number>>((acc, item) => {
+        acc[item.sellerId] = item.targetValue;
+        return acc;
+      }, {});
+
+      return { month, salesBySeller, goalsBySeller };
+    })
+  );
+
+  const ranking = sellers
+    .map((seller) => {
+      const monthlyPerformance = monthKeys.map((month, index) => {
+        const soldValue = monthlyStats[index]?.salesBySeller[seller.id] || 0;
+        const targetValue = monthlyStats[index]?.goalsBySeller[seller.id] || 0;
+        const resultScore = targetValue > 0 ? (soldValue / targetValue) * 100 : 0;
+        const finalScore = Math.min(Math.max(resultScore, 0), 110);
+
+        return {
+          month,
+          soldValue,
+          targetValue,
+          resultScore,
+          finalScore,
+          metaHit: targetValue > 0 && soldValue >= targetValue
+        };
+      });
+
+      const finalScores = monthlyPerformance.map((item) => item.finalScore);
+      const resultScores = monthlyPerformance.map((item) => item.resultScore);
+      const averageScore = calculateMean(finalScores);
+      const metaHitRate = (monthlyPerformance.filter((item) => item.metaHit).length / monthKeys.length) * 100;
+      const stdDevResult = calculateStandardDeviation(resultScores);
+      const stability = Math.max(0, 100 - stdDevResult);
+      const consistencyScore = averageScore * 0.6 + metaHitRate * 0.3 + stability * 0.1;
+
+      const consistencyLevel = consistencyScore >= 80 ? "alta" : consistencyScore >= 60 ? "media" : "baixa";
+
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        averageScore: Number(averageScore.toFixed(2)),
+        metaHitRate: Number(metaHitRate.toFixed(2)),
+        stdDevResult: Number(stdDevResult.toFixed(2)),
+        stability: Number(stability.toFixed(2)),
+        consistencyScore: Number(consistencyScore.toFixed(2)),
+        consistencyLevel,
+        monthlyPerformance: monthlyPerformance.map((item) => ({
+          month: item.month,
+          soldValue: Number(item.soldValue.toFixed(2)),
+          targetValue: Number(item.targetValue.toFixed(2)),
+          resultScore: Number(item.resultScore.toFixed(2)),
+          finalScore: Number(item.finalScore.toFixed(2)),
+          metaHit: item.metaHit
+        }))
+      };
+    })
+    .sort((a, b) => b.consistencyScore - a.consistencyScore)
+    .map((item, index) => ({
+      ...item,
+      position: index + 1
+    }));
+
+  return res.json({
+    period: {
+      months: monthKeys
+    },
+    ranking
+  });
 });
 
 router.get("/clients", async (req, res) => {
