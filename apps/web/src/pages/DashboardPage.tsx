@@ -20,6 +20,8 @@ import type {
   DashboardPortfolio,
   DashboardSalesSeries,
   DashboardSummary,
+  WeeklyHighlightItem,
+  WeeklyHighlights,
 } from "@salesforce-pro/shared";
 
 import api from "../lib/apiClient";
@@ -69,6 +71,13 @@ type ActivityTypeSummary = {
   requiredDailyAverage: number;
 };
 
+
+type WeeklyHighlightCard = {
+  key: string;
+  title: string;
+  highlight: WeeklyHighlightItem | null;
+  formatter: (value: number) => string;
+};
 
 type DisciplineRankingItem = {
   sellerId: string;
@@ -289,6 +298,7 @@ export default function DashboardPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [disciplineRanking, setDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
   const [weeklyDisciplineRanking, setWeeklyDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
+  const [weeklyHighlights, setWeeklyHighlights] = useState<WeeklyHighlights | null>(null);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -324,8 +334,9 @@ export default function DashboardPage() {
       api.get<Activity[]>(`/activities?month=${month}${querySeller}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
+      api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}`, { signal }),
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
@@ -334,6 +345,7 @@ export default function DashboardPage() {
         setActivities(activitiesResponse.data);
         setDisciplineRanking(disciplineRankingResponse.data);
         setWeeklyDisciplineRanking(weeklyDisciplineRankingResponse.data);
+        setWeeklyHighlights(weeklyHighlightsResponse.data);
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -784,6 +796,33 @@ export default function DashboardPage() {
     };
   }, [user, weeklyDisciplineRanking]);
 
+  const weeklyHighlightCards = useMemo<WeeklyHighlightCard[]>(() => [
+    {
+      key: "bestResult",
+      title: "Maior Resultado",
+      highlight: weeklyHighlights?.bestResult ?? null,
+      formatter: (value) => formatCurrencyBRL(value),
+    },
+    {
+      key: "bestEvolution",
+      title: "Maior Evolução",
+      highlight: weeklyHighlights?.bestEvolution ?? null,
+      formatter: (value) => formatPercentBR(value),
+    },
+    {
+      key: "bestExecutor",
+      title: "Executor da Semana",
+      highlight: weeklyHighlights?.bestExecutor ?? null,
+      formatter: (value) => formatPercentBR(value),
+    },
+    {
+      key: "bestConversion",
+      title: "Melhor Conversão",
+      highlight: weeklyHighlights?.bestConversion ?? null,
+      formatter: (value) => formatPercentBR(value),
+    },
+  ], [weeklyHighlights]);
+
   const disciplineRankingVisible = useMemo(() => {
     const rankingWithPosition = disciplineRanking.map((item, index) => ({
       ...item,
@@ -840,6 +879,47 @@ export default function DashboardPage() {
           </select>
         </div>
       )}
+
+      <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">Destaques da Semana</h3>
+        <p className="mt-1 text-sm text-slate-500">Reconhecimento coletivo atualizado automaticamente a cada segunda-feira.</p>
+
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {weeklyHighlightCards.map((item) => (
+            <div key={item.key} className={cardClass}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">{item.title}</p>
+                  <p className="mt-1 text-xs text-slate-500">{item.highlight?.metricLabel ?? "Sem dados na semana"}</p>
+                </div>
+                <span className="text-xl" aria-hidden>{item.highlight?.medal ?? "🏅"}</span>
+              </div>
+
+              {item.highlight ? (
+                <div className="mt-4 flex items-center gap-3">
+                  {item.highlight.avatarUrl ? (
+                    <img
+                      src={item.highlight.avatarUrl}
+                      alt={`Avatar de ${item.highlight.sellerName}`}
+                      className="h-10 w-10 rounded-full border border-slate-200 object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-sm font-semibold text-brand-700">
+                      {item.highlight.sellerName.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{item.highlight.sellerName}</p>
+                    <p className="text-sm text-slate-600">{item.formatter(item.highlight.metricValue)}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-slate-500">Aguardando movimentações da semana.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {[

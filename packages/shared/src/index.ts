@@ -201,6 +201,22 @@ export const dashboardPortfolioSchema = z.object({
   soldToday: z.number()
 });
 
+export const weeklyHighlightItemSchema = z.object({
+  sellerId: z.string(),
+  sellerName: z.string(),
+  metricLabel: z.string(),
+  metricValue: z.number(),
+  medal: z.string(),
+  avatarUrl: z.string().nullable().optional()
+});
+
+export const weeklyHighlightsSchema = z.object({
+  bestResult: weeklyHighlightItemSchema.nullable(),
+  bestEvolution: weeklyHighlightItemSchema.nullable(),
+  bestExecutor: weeklyHighlightItemSchema.nullable(),
+  bestConversion: weeklyHighlightItemSchema.nullable()
+});
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ClientInput = z.infer<typeof clientSchema>;
 export type CompanyInput = z.infer<typeof companySchema>;
@@ -221,6 +237,8 @@ export type EventInput = z.infer<typeof eventSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardSalesSeries = z.infer<typeof dashboardSalesSeriesSchema>;
 export type DashboardPortfolio = z.infer<typeof dashboardPortfolioSchema>;
+export type WeeklyHighlightItem = z.infer<typeof weeklyHighlightItemSchema>;
+export type WeeklyHighlights = z.infer<typeof weeklyHighlightsSchema>;
 
 export interface AuthUser {
   id: string;
