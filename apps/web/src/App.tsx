@@ -18,6 +18,7 @@ import SettingsPage from "./pages/SettingsPage";
 import ActivitiesPage from "./pages/ActivitiesPage";
 import AgendaPage from "./pages/AgendaPage";
 import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
+import CommercialScorePage from "./pages/CommercialScorePage";
 
 export default function App() {
   const { user } = useAuth();
@@ -40,6 +41,7 @@ export default function App() {
       >
         <Route index element={<HomePage />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="dashboard/score-comercial" element={<CommercialScorePage />} />
 
         <Route path="equipe" element={<RoleRoute route="equipe"><TeamPage /></RoleRoute>} />
         <Route path="objetivos" element={<RoleRoute route="objetivos"><ObjectivesPage /></RoleRoute>} />

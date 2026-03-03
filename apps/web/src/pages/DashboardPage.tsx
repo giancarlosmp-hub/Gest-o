@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Doughnut, Line } from "react-chartjs-2";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   type ActiveElement,
   ArcElement,
@@ -780,6 +780,14 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Link
+          to="/dashboard/score-comercial"
+          className="rounded-lg border border-brand-300 bg-white px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50"
+        >
+          Ver Score Comercial
+        </Link>
+      </div>
       {user?.role !== "vendedor" && (
         <div className={cardClass}>
           <label className="text-sm font-medium text-slate-600">Filtrar vendedor</label>

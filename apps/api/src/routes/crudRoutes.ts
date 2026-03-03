@@ -1110,6 +1110,243 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   return res.json(ranking);
 });
 
+router.get("/reports/commercial-score", async (req, res) => {
+  const month = String(req.query.month || "");
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const { start, end } = getMonthRangeFromKey(month);
+  const punctualToleranceMs = 10 * 60 * 1000;
+  const stageOrder: Record<string, number> = {
+    prospeccao: 0,
+    negociacao: 1,
+    proposta: 2,
+    ganho: 3,
+    perdido: 3
+  };
+
+  const [sellers, plannedEvents, openOpportunities, stageChanges, monthSales, monthGoals] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        role: "vendedor",
+        ...(scopedSellerId ? { id: scopedSellerId } : {})
+      },
+      select: { id: true, name: true }
+    }),
+    prisma.agendaEvent.findMany({
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: start, lte: end },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      select: {
+        sellerId: true,
+        opportunityId: true,
+        stops: {
+          select: {
+            plannedTime: true,
+            checkInAt: true,
+            checkOutAt: true
+          },
+          orderBy: { order: "asc" }
+        }
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        stage: { notIn: ["ganho", "perdido"] },
+        createdAt: { lte: end },
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
+      },
+      select: {
+        id: true,
+        ownerSellerId: true,
+        followUpDate: true
+      }
+    }),
+    prisma.timelineEvent.findMany({
+      where: {
+        type: "mudanca_etapa",
+        createdAt: { gte: start, lte: end },
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
+      },
+      select: {
+        ownerSellerId: true,
+        description: true
+      }
+    }),
+    prisma.sale.groupBy({
+      by: ["sellerId"],
+      where: {
+        date: { gte: start, lte: end },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      _sum: { value: true }
+    }),
+    prisma.goal.findMany({
+      where: {
+        month,
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      select: {
+        sellerId: true,
+        targetValue: true
+      }
+    })
+  ]);
+
+  const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
+  const followUps = opportunities.length
+    ? await prisma.activity.findMany({
+        where: {
+          type: "follow_up",
+          createdAt: { gte: start, lte: end },
+          ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
+          opportunityId: { in: opportunities }
+        },
+        select: {
+          ownerSellerId: true,
+          opportunityId: true,
+          createdAt: true
+        }
+      })
+    : [];
+
+  const followUpsIndex = followUps.reduce<Record<string, Date[]>>((acc, followUp) => {
+    if (!followUp.opportunityId) return acc;
+    const key = `${followUp.ownerSellerId}:${followUp.opportunityId}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(followUp.createdAt);
+    return acc;
+  }, {});
+
+  const disciplineBySeller = plannedEvents.reduce<Record<string, { planned: number; executed: number; punctual: number; followUpAfterVisit: number }>>(
+    (acc, event) => {
+      if (!acc[event.sellerId]) {
+        acc[event.sellerId] = { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+      }
+
+      const sellerStats = acc[event.sellerId];
+      sellerStats.planned += 1;
+
+      const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
+      const firstCheckout = event.stops.find((stop) => Boolean(stop.checkOutAt))?.checkOutAt;
+
+      if (firstCheckout) {
+        sellerStats.executed += 1;
+        if (event.opportunityId) {
+          const key = `${event.sellerId}:${event.opportunityId}`;
+          const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= firstCheckout.getTime());
+          if (hasFollowUpAfterVisit) sellerStats.followUpAfterVisit += 1;
+        }
+      }
+
+      if (firstStopWithCheckIn?.plannedTime && firstStopWithCheckIn.checkInAt) {
+        if (firstStopWithCheckIn.checkInAt.getTime() <= firstStopWithCheckIn.plannedTime.getTime() + punctualToleranceMs) {
+          sellerStats.punctual += 1;
+        }
+      }
+
+      return acc;
+    },
+    {}
+  );
+
+  const referenceDate = end.getTime() > Date.now() ? new Date() : end;
+
+  const openOppCountBySeller = openOpportunities.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
+    return acc;
+  }, {});
+
+  const followUpOnTimeBySeller = openOpportunities.reduce<Record<string, number>>((acc, item) => {
+    if (item.followUpDate.getTime() >= referenceDate.getTime()) {
+      acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const stageAdvanceBySeller = stageChanges.reduce<Record<string, { total: number; advanced: number }>>((acc, item) => {
+    const match = item.description.match(/de\s+(.+?)\s+para\s+(.+)$/i);
+    const fromLabel = match?.[1]?.trim() || "";
+    const toLabel = match?.[2]?.trim() || "";
+    const labelToStage: Record<string, keyof typeof stageOrder> = {
+      Prospecção: "prospeccao",
+      Negociação: "negociacao",
+      Proposta: "proposta",
+      Ganho: "ganho",
+      Perdido: "perdido"
+    };
+    const fromStage = labelToStage[fromLabel];
+    const toStage = labelToStage[toLabel];
+
+    if (!fromStage || !toStage) return acc;
+    if (!acc[item.ownerSellerId]) {
+      acc[item.ownerSellerId] = { total: 0, advanced: 0 };
+    }
+
+    acc[item.ownerSellerId].total += 1;
+    if (stageOrder[toStage] > stageOrder[fromStage]) {
+      acc[item.ownerSellerId].advanced += 1;
+    }
+
+    return acc;
+  }, {});
+
+  const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._sum.value ?? 0;
+    return acc;
+  }, {});
+  const goalsBySeller = monthGoals.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item.targetValue;
+    return acc;
+  }, {});
+
+  const maxOpenOpp = Math.max(...Object.values(openOppCountBySeller), 1);
+  const maxSales = Math.max(...Object.values(salesBySeller), 1);
+
+  const scoreRows = sellers
+    .map((seller) => {
+      const discipline = disciplineBySeller[seller.id] || { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+      const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
+      const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
+      const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
+      const disciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+
+      const openOpp = openOppCountBySeller[seller.id] || 0;
+      const followUpsOnTime = followUpOnTimeBySeller[seller.id] || 0;
+      const stageAdvance = stageAdvanceBySeller[seller.id] || { total: 0, advanced: 0 };
+
+      const openOppScore = (openOpp / maxOpenOpp) * 100;
+      const followUpOnTimeRate = openOpp ? (followUpsOnTime / openOpp) * 100 : 0;
+      const stageAdvanceRate = stageAdvance.total ? (stageAdvance.advanced / stageAdvance.total) * 100 : 0;
+      const pipelineScore = openOppScore * 0.4 + followUpOnTimeRate * 0.35 + stageAdvanceRate * 0.25;
+
+      const soldValue = salesBySeller[seller.id] || 0;
+      const soldValueScore = (soldValue / maxSales) * 100;
+      const monthGoal = goalsBySeller[seller.id] || 0;
+      const goalAchievementPercent = monthGoal > 0 ? (soldValue / monthGoal) * 100 : 0;
+      const clampedGoalAchievement = Math.min(Math.max(goalAchievementPercent, 0), 100);
+      const resultScore = soldValueScore * 0.5 + clampedGoalAchievement * 0.5;
+
+      const finalScore = disciplineScore * 0.4 + pipelineScore * 0.3 + resultScore * 0.3;
+
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        disciplineScore: Number(disciplineScore.toFixed(2)),
+        pipelineScore: Number(pipelineScore.toFixed(2)),
+        resultScore: Number(resultScore.toFixed(2)),
+        finalScore: Number(finalScore.toFixed(2))
+      };
+    })
+    .sort((a, b) => b.finalScore - a.finalScore);
+
+  return res.json({ sellers: scoreRows });
+});
+
 router.get("/clients", async (req, res) => {
   const search = String(req.query.q || "").trim();
   const state = String(req.query.uf || "").trim();
