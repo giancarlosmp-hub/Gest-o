@@ -547,6 +547,52 @@ const resolveImportRows = (body: unknown) => {
   return { rows, isValid: true };
 };
 
+const opportunityImportStageSchema = z
+  .string()
+  .transform((value) => value.trim().toLowerCase())
+  .refine((value) => ["prospeccao", "negociacao", "proposta", "ganho", "perdido", "prospecting", "negotiation", "proposal", "won", "lost"].includes(value), {
+    message: "Etapa inválida para importação."
+  });
+
+const opportunityImportStatusSchema = z.enum(["open", "closed"]).optional();
+
+const opportunityImportRowSchema = z.object({
+  title: z.string().min(2),
+  clientNameOrId: z.string().min(1),
+  value: z.number().nonnegative(),
+  stage: opportunityImportStageSchema,
+  status: opportunityImportStatusSchema,
+  ownerEmail: z.string().email().optional(),
+  followUpDate: z.string().optional(),
+  probability: z.number().int().min(0).max(100).optional(),
+  notes: z.string().max(2000).optional()
+});
+
+const opportunityImportPayloadSchema = z.object({
+  rows: z.array(z.unknown()).default([]),
+  options: z
+    .object({
+      createClientIfMissing: z.boolean().optional(),
+      dryRun: z.boolean().optional()
+    })
+    .optional()
+});
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const IMPORT_STAGE_MAP: Record<string, "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido"> = {
+  prospeccao: "prospeccao",
+  prospecting: "prospeccao",
+  negociacao: "negociacao",
+  negotiation: "negociacao",
+  proposta: "proposta",
+  proposal: "proposta",
+  ganho: "ganho",
+  won: "ganho",
+  perdido: "perdido",
+  lost: "perdido"
+};
+
 type ImportPreviewItem =
   | {
       rowNumber: number;
@@ -3050,6 +3096,139 @@ router.get("/opportunities/summary", async (req, res) => {
   }
 
   res.json({ totalPipelineValue, totalWeightedValue, totalsByStage, overdueCount, overdueValue, breakdownByCrop, breakdownBySeason });
+});
+
+router.post("/opportunities/import", async (req, res) => {
+  const payload = opportunityImportPayloadSchema.safeParse(req.body);
+  if (!payload.success) return res.status(400).json({ message: "Payload inválido para importação." });
+
+  const rows = payload.data.rows;
+  const createClientIfMissing = Boolean(payload.data.options?.createClientIfMissing);
+  const dryRun = Boolean(payload.data.options?.dryRun);
+
+  const errors: Array<{ row: number; message: string }> = [];
+  let created = 0;
+  let skipped = 0;
+
+  for (const [index, rawRow] of rows.entries()) {
+    const rowNumber = index + 1;
+    const parsedRow = opportunityImportRowSchema.safeParse(rawRow);
+
+    if (!parsedRow.success) {
+      skipped += 1;
+      const message = parsedRow.error.issues[0]?.message ?? "Linha inválida para importação.";
+      errors.push({ row: rowNumber, message });
+      continue;
+    }
+
+    const row = parsedRow.data;
+
+    try {
+      const ownerEmail = row.ownerEmail?.trim().toLowerCase();
+
+      if (req.user?.role === "vendedor" && ownerEmail && ownerEmail !== req.user.email.toLowerCase()) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Vendedor só pode importar para o próprio e-mail ou sem ownerEmail." });
+        continue;
+      }
+
+      let ownerSellerId = req.user!.id;
+      if (ownerEmail) {
+        const owner = await prisma.user.findFirst({
+          where: { email: { equals: ownerEmail, mode: "insensitive" } },
+          select: { id: true }
+        });
+        if (owner?.id) ownerSellerId = owner.id;
+      }
+
+      const clientLookup = row.clientNameOrId.trim();
+      const isUuid = UUID_V4_REGEX.test(clientLookup);
+      let client = await prisma.client.findFirst({
+        where: {
+          ...(isUuid ? { id: clientLookup } : { name: { equals: clientLookup, mode: "insensitive" } }),
+          ...sellerWhere(req)
+        },
+        select: { id: true }
+      });
+
+      if (!client && createClientIfMissing) {
+        if (dryRun) {
+          client = { id: "dry-run-client" };
+        } else {
+          client = await prisma.client.create({
+            data: {
+              name: clientLookup,
+              city: "N/A",
+              state: "NA",
+              region: "Importação",
+              ownerSellerId
+            },
+            select: { id: true }
+          });
+        }
+      }
+
+      if (!client) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Cliente não encontrado" });
+        continue;
+      }
+
+      const stage = IMPORT_STAGE_MAP[row.stage];
+      if (!stage) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Etapa inválida para importação." });
+        continue;
+      }
+
+      if (row.status === "closed" && !CLOSED_STAGES.has(stage)) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Status closed requer etapa ganho ou perdido." });
+        continue;
+      }
+
+      const followUpDate = row.followUpDate || new Date().toISOString().slice(0, 10);
+      const proposalDate = followUpDate;
+      const expectedCloseDate = followUpDate;
+
+      if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Datas inválidas para importação." });
+        continue;
+      }
+
+      if (dryRun) {
+        created += 1;
+        continue;
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.opportunity.create({
+          data: {
+            title: row.title,
+            value: row.value,
+            stage,
+            probability: row.probability,
+            notes: row.notes,
+            proposalDate: new Date(new Date(String(proposalDate)).toISOString()),
+            followUpDate: new Date(new Date(String(followUpDate)).toISOString()),
+            expectedCloseDate: new Date(new Date(String(expectedCloseDate)).toISOString()),
+            clientId: client.id,
+            ownerSellerId
+          }
+        });
+      });
+
+      created += 1;
+    } catch (error) {
+      skipped += 1;
+      const message = error instanceof Error ? error.message : "Erro inesperado na linha";
+      errors.push({ row: rowNumber, message });
+      console.warn(`[opportunities/import] linha ${rowNumber}: ${message}`);
+    }
+  }
+
+  return res.status(200).json({ created, skipped, errors });
 });
 
 router.get("/opportunities/:id", async (req, res) => {
