@@ -1,6 +1,8 @@
 import { ChangeEvent, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { normalizeTextValue, parseDecimalValue, parseImportFile } from "../../lib/import/parsers";
+import api from "../../lib/apiClient";
+import { getApiErrorMessage } from "../../lib/apiError";
 
 type OpportunityPreviewRow = {
   line: number;
@@ -8,8 +10,25 @@ type OpportunityPreviewRow = {
   clientId: string;
   value?: number;
   stage: string;
+  payload: Record<string, unknown>;
   status: "valid" | "error";
   errorMessage?: string;
+};
+
+type ImportErrorItem = {
+  row?: number;
+  rowNumber?: number;
+  message?: string;
+};
+
+type OpportunityImportResponse = {
+  created?: number;
+  ignored?: number;
+  totalCreated?: number;
+  totalIgnored?: number;
+  totalImportados?: number;
+  totalIgnorados?: number;
+  errors?: ImportErrorItem[];
 };
 
 const TEMPLATE_HEADERS = ["title", "clientId", "value", "stage", "proposalDate", "expectedCloseDate", "crop", "season"];
@@ -106,6 +125,17 @@ const buildPreviewRows = (rows: Record<string, unknown>[]) => {
       clientId: normalizeTextValue((row as any).clientId),
       value: valueResult.isInvalid ? Number.NaN : valueResult.parsedValue,
       stage,
+      payload: {
+        ...row,
+        title: normalizeTextValue((row as any).title),
+        clientId: normalizeTextValue((row as any).clientId),
+        value: valueResult.isInvalid ? undefined : valueResult.parsedValue,
+        stage: stage || "prospeccao",
+        proposalDate: normalizeTextValue((row as any).proposalDate),
+        expectedCloseDate: normalizeTextValue((row as any).expectedCloseDate),
+        crop: normalizeTextValue((row as any).crop),
+        season: normalizeTextValue((row as any).season)
+      },
       status: "valid"
     };
 
@@ -128,7 +158,15 @@ const buildPreviewRows = (rows: Record<string, unknown>[]) => {
   });
 };
 
-export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+export default function OpportunityImportModal({
+  isOpen,
+  onClose,
+  onImported
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onImported?: () => Promise<void> | void;
+}) {
   const [fileName, setFileName] = useState("");
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
@@ -180,14 +218,43 @@ export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: bo
   const handleImport = async () => {
     if (!previewRows.length || counters.error > 0) return;
 
-    // IMPORT REAL será adicionado depois (chamar endpoint de import)
     setIsImporting(true);
     try {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      toast.success("Importação simulada com sucesso. A persistência será adicionada em breve.");
+      const validRows = previewRows.filter((row) => row.status === "valid").map((row) => row.payload);
+      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", { rows: validRows });
+      const created = data?.created ?? data?.totalCreated ?? data?.totalImportados ?? 0;
+      const ignored = data?.ignored ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
+      const errors = data?.errors ?? [];
+
+      toast.success(`Importação concluída: ${created} criadas, ${ignored} ignoradas`, {
+        action: errors.length
+          ? {
+            label: "Ver detalhes",
+            onClick: () => {
+              toast.message(
+                <div className="space-y-1">
+                  <p className="font-semibold">Erros da importação</p>
+                  <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-4 text-xs">
+                    {errors.map((item, index) => {
+                      const row = item.row ?? item.rowNumber ?? "-";
+                      return <li key={`${row}-${index}`}>Linha {row}: {item.message || "Erro não especificado"}</li>;
+                    })}
+                  </ul>
+                </div>
+              );
+            }
+          }
+          : undefined
+      });
+
+      if (errors.length) {
+        toast.message(`${errors.length} linha(s) com erro na importação.`);
+      }
+
+      await onImported?.();
       reset();
-    } catch {
-      toast.error("Erro ao importar oportunidades.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Erro ao importar oportunidades."));
     } finally {
       setIsImporting(false);
     }
