@@ -153,6 +153,10 @@ export const userResetPasswordSchema = z.object({
   temporaryPasswordLength: z.number().int().min(8).max(32).optional()
 });
 
+export const weeklyVisitMinimumSchema = z.object({
+  minimumWeeklyVisits: z.number().int().min(1).max(200)
+});
+
 export const dashboardPerformanceSchema = z.object({
   sellerId: z.string(),
   seller: z.string(),
@@ -211,6 +215,7 @@ export type UserActivationInput = z.infer<typeof userActivationSchema>;
 export type UserRoleUpdateInput = z.infer<typeof userRoleUpdateSchema>;
 export type UserCreateInput = z.infer<typeof userCreateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
+export type WeeklyVisitMinimumInput = z.infer<typeof weeklyVisitMinimumSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
