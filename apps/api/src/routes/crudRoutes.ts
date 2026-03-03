@@ -1104,6 +1104,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
   const punctualToleranceMs = 10 * 60 * 1000;
   const inactivityWindow = getLastBusinessDaysWindow(3);
+  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
 
   const plannedEvents = await prisma.agendaEvent.findMany({
     where: {
@@ -1229,7 +1230,9 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       const baseDisciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
       const isUnderExecutionThreshold = executionRate < 60;
       const hasInactivityFlag = !activeSellersInWindow.has(stats.sellerId);
-      const disciplineScore = isUnderExecutionThreshold ? baseDisciplineScore * 0.9 : baseDisciplineScore;
+      const disciplineScoreBase = isUnderExecutionThreshold ? baseDisciplineScore * 0.9 : baseDisciplineScore;
+      const volumeFactor = stats.planned < minimumWeeklyVisits ? stats.planned / minimumWeeklyVisits : 1;
+      const disciplineScoreFinal = disciplineScoreBase * volumeFactor;
 
       return {
         sellerId: stats.sellerId,
@@ -1239,12 +1242,15 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         executionRate,
         punctualRate,
         followUpRate,
-        disciplineScore,
+        disciplineScoreBase,
+        volumeFactor,
+        disciplineScoreFinal,
+        disciplineScore: disciplineScoreFinal,
         isUnderExecutionThreshold,
         hasInactivityFlag
       };
     })
-    .sort((a, b) => b.disciplineScore - a.disciplineScore);
+    .sort((a, b) => b.disciplineScoreFinal - a.disciplineScoreFinal);
 
   return res.json(ranking);
 });
