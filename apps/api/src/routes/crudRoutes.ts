@@ -1236,6 +1236,140 @@ router.get("/reports/weekly-visits", async (req, res) => {
   return res.json(Array.from(sellerView.values()));
 });
 
+router.get("/reports/weekly-missions", async (req, res) => {
+  const weekStart = String(req.query.weekStart || "").trim();
+  const range = getWeekRangeFromMonday(weekStart);
+
+  if (!range) {
+    return res.status(400).json({ message: "weekStart deve estar no formato YYYY-MM-DD e ser uma segunda-feira." });
+  }
+
+  const isManagerView = req.user!.role === "diretor" || req.user!.role === "gerente";
+  const [visitGoal, sellers, visitsBySeller, followUpsBySeller, proposalsBySeller, overdueOpportunitiesBySeller] = await Promise.all([
+    getWeeklyVisitGoal(),
+    prisma.user.findMany({
+      where: { role: "vendedor", isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        type: "visita",
+        done: true,
+        dueDate: { gte: range.start, lte: range.end }
+      },
+      _count: { _all: true }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        type: "follow_up",
+        done: true,
+        dueDate: { gte: range.start, lte: range.end }
+      },
+      _count: { _all: true }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        type: "envio_proposta",
+        done: true,
+        dueDate: { gte: range.start, lte: range.end }
+      },
+      _count: { _all: true }
+    }),
+    prisma.opportunity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        stage: { notIn: ["ganho", "perdido"] },
+        expectedCloseDate: { lt: new Date() }
+      },
+      _count: { _all: true }
+    })
+  ]);
+
+  const toCountMap = <T extends string>(rows: { _count: { _all: number } }[], key: T) =>
+    rows.reduce<Record<string, number>>((acc, item) => {
+      const ownerId = (item as Record<T, string>)[key];
+      acc[ownerId] = item._count._all;
+      return acc;
+    }, {});
+
+  const visitsMap = toCountMap(visitsBySeller, "ownerSellerId");
+  const followUpsMap = toCountMap(followUpsBySeller, "ownerSellerId");
+  const proposalsMap = toCountMap(proposalsBySeller, "ownerSellerId");
+  const overdueMap = toCountMap(overdueOpportunitiesBySeller, "ownerSellerId");
+
+  const ranking = sellers
+    .map((seller) => {
+      const visitsDone = visitsMap[seller.id] || 0;
+      const followUpsDone = followUpsMap[seller.id] || 0;
+      const proposalsDone = proposalsMap[seller.id] || 0;
+      const overdueCount = overdueMap[seller.id] || 0;
+
+      return {
+        userId: seller.id,
+        name: seller.name,
+        missions: [
+          {
+            key: "visits_25",
+            title: "25 visitas na semana",
+            progress: visitsDone,
+            target: visitGoal,
+            done: visitsDone >= visitGoal,
+            medal: getWeeklyVisitMedal(visitsDone)
+          },
+          {
+            key: "followups_5",
+            title: "5 follow-ups concluídos",
+            progress: followUpsDone,
+            target: 5,
+            done: followUpsDone >= 5
+          },
+          {
+            key: "proposals_2",
+            title: "2 propostas enviadas",
+            progress: proposalsDone,
+            target: 2,
+            done: proposalsDone >= 2
+          },
+          {
+            key: "overdue_0",
+            title: "0 oportunidades atrasadas",
+            progress: overdueCount,
+            target: 0,
+            done: overdueCount === 0
+          }
+        ]
+      };
+    })
+    .sort((a, b) => {
+      const visitsA = a.missions[0]?.progress ?? 0;
+      const visitsB = b.missions[0]?.progress ?? 0;
+      return visitsB - visitsA || a.name.localeCompare(b.name, "pt-BR");
+    });
+
+  if (isManagerView) {
+    return res.json(ranking);
+  }
+
+  const own = ranking.find((item) => item.userId === req.user!.id);
+  const top3MainMissionOnly = ranking.slice(0, 3).map((item) => ({
+    userId: item.userId,
+    name: item.name,
+    missions: [item.missions[0]]
+  }));
+
+  if (!own) {
+    return res.json(top3MainMissionOnly);
+  }
+
+  const sellerView = new Map(top3MainMissionOnly.map((item) => [item.userId, item]));
+  sellerView.set(own.userId, own);
+  return res.json(Array.from(sellerView.values()));
+});
+
 router.get("/reports/discipline-ranking", async (req, res) => {
   const fromRaw = req.query.from as string | undefined;
   const toRaw = req.query.to as string | undefined;
