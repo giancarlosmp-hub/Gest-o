@@ -82,7 +82,26 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", crudRoutes);
 
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
-  res.status(500).json({ message: "Erro interno" });
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
+  const status = typeof err === "object" && err !== null && "status" in err && Number.isInteger((err as { status?: number }).status)
+    ? Math.max(400, Math.min(599, Number((err as { status?: number }).status)))
+    : 500;
+
+  const message =
+    typeof err === "object" && err !== null && "message" in err && typeof (err as { message?: unknown }).message === "string"
+      ? (err as { message: string }).message
+      : "Erro interno";
+
+  if (status >= 500) {
+    console.error(`[error] ${req.method} ${req.originalUrl}`, err);
+  } else {
+    console.warn(`[error] ${req.method} ${req.originalUrl} -> ${status}: ${message}`);
+  }
+
+  res.status(status).json({ message: status >= 500 ? "Erro interno" : message });
 });

@@ -201,6 +201,17 @@ const getWeekRangeFromMonday = (weekStartRaw: string) => {
 
 const DEFAULT_MINIMUM_WEEKLY_VISITS = 25;
 const MINIMUM_WEEKLY_VISITS_KEY = "minimumWeeklyVisits";
+const APP_CONFIG_CACHE_TTL_MS = 60_000;
+
+const minimumWeeklyVisitsCache: {
+  value: number;
+  expiresAt: number;
+  pending: Promise<number> | null;
+} = {
+  value: DEFAULT_MINIMUM_WEEKLY_VISITS,
+  expiresAt: 0,
+  pending: null
+};
 
 const parseMinimumWeeklyVisits = (value: string | null | undefined) => {
   const parsed = Number.parseInt(value ?? "", 10);
@@ -208,19 +219,39 @@ const parseMinimumWeeklyVisits = (value: string | null | undefined) => {
 };
 
 const getMinimumWeeklyVisits = async () => {
-  try {
-    const config = await prisma.appConfig.upsert({
-      where: { key: MINIMUM_WEEKLY_VISITS_KEY },
-      update: {},
-      create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(DEFAULT_MINIMUM_WEEKLY_VISITS) },
-      select: { value: true }
-    });
-
-    return parseMinimumWeeklyVisits(config.value);
-  } catch (error) {
-    console.error("[appConfig] Falha ao obter minimumWeeklyVisits. Usando fallback padrão.", error);
-    return DEFAULT_MINIMUM_WEEKLY_VISITS;
+  const now = Date.now();
+  if (minimumWeeklyVisitsCache.expiresAt > now) {
+    return minimumWeeklyVisitsCache.value;
   }
+
+  if (minimumWeeklyVisitsCache.pending) {
+    return minimumWeeklyVisitsCache.pending;
+  }
+
+  minimumWeeklyVisitsCache.pending = (async () => {
+    try {
+      const config = await prisma.appConfig.upsert({
+        where: { key: MINIMUM_WEEKLY_VISITS_KEY },
+        update: {},
+        create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(DEFAULT_MINIMUM_WEEKLY_VISITS) },
+        select: { value: true }
+      });
+
+      const parsedValue = parseMinimumWeeklyVisits(config.value);
+      minimumWeeklyVisitsCache.value = parsedValue;
+      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      return parsedValue;
+    } catch (error) {
+      console.error("[appConfig] Falha ao obter minimumWeeklyVisits. Usando fallback padrão.", error);
+      minimumWeeklyVisitsCache.value = DEFAULT_MINIMUM_WEEKLY_VISITS;
+      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      return DEFAULT_MINIMUM_WEEKLY_VISITS;
+    } finally {
+      minimumWeeklyVisitsCache.pending = null;
+    }
+  })();
+
+  return minimumWeeklyVisitsCache.pending;
 };
 
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
@@ -3334,7 +3365,10 @@ router.put(
         select: { value: true }
       });
 
-      return res.json({ minimumWeeklyVisits: parseMinimumWeeklyVisits(config.value) });
+      const parsedValue = parseMinimumWeeklyVisits(config.value);
+      minimumWeeklyVisitsCache.value = parsedValue;
+      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      return res.json({ minimumWeeklyVisits: parsedValue });
     } catch (error) {
       console.error("[appConfig] Falha ao atualizar minimumWeeklyVisits.", error);
       return res.status(200).json({ minimumWeeklyVisits: DEFAULT_MINIMUM_WEEKLY_VISITS });
