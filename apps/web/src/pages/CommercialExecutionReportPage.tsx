@@ -32,13 +32,13 @@ type PlannedVsRealizedResponse = {
 
 type SelectOption = { id: string; name: string };
 
-type WeeklyDisciplineItem = {
-  sellerId: string;
-  sellerName: string;
-  planned: number;
-  executed: number;
-  minimumRequired: number;
-  belowMinimum: boolean;
+type WeeklyVisitsItem = {
+  userId: string;
+  name: string;
+  visitsDone: number;
+  goal: number;
+  medal: "gold" | "silver" | "bronze" | "none";
+  missing: number;
 };
 
 const toDateInput = (date: Date) => {
@@ -68,7 +68,7 @@ export default function CommercialExecutionReportPage() {
   const [report, setReport] = useState<PlannedVsRealizedResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [sellerOptions, setSellerOptions] = useState<SelectOption[]>([]);
-  const [weeklyDiscipline, setWeeklyDiscipline] = useState<WeeklyDisciplineItem[]>([]);
+  const [weeklyVisits, setWeeklyVisits] = useState<WeeklyVisitsItem[]>([]);
   const [filters, setFilters] = useState(() => {
     const today = new Date();
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -103,8 +103,8 @@ export default function CommercialExecutionReportPage() {
 
   useEffect(() => {
     const params = new URLSearchParams({ weekStart: getCurrentWeekStart() });
-    api.get<WeeklyDisciplineItem[]>(`/reports/weekly-discipline?${params.toString()}`).then((response) => {
-      setWeeklyDiscipline(Array.isArray(response.data) ? response.data : []);
+    api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?${params.toString()}`).then((response) => {
+      setWeeklyVisits(Array.isArray(response.data) ? response.data : []);
     });
   }, []);
 
@@ -227,42 +227,27 @@ export default function CommercialExecutionReportPage() {
       </section>
 
       <section className={cardClass}>
-        <h3 className="mb-4 text-base font-semibold text-slate-900">Disciplina semanal (semana atual)</h3>
+        <h3 className="mb-4 text-base font-semibold text-slate-900">Ranking semanal de visitas (semana atual)</h3>
         <div className="space-y-3">
-          {weeklyDiscipline.map((seller) => {
-            const ratio = seller.minimumRequired > 0 ? seller.planned / seller.minimumRequired : 0;
-            const isCritical = ratio < 0.7;
-
-            return (
-              <div
-                key={seller.sellerId}
-                className={`rounded-lg border px-4 py-3 ${
-                  isCritical
-                    ? "border-rose-300 bg-rose-50"
-                    : seller.belowMinimum
-                      ? "border-amber-300 bg-amber-50"
-                      : "border-emerald-200 bg-emerald-50"
-                }`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-slate-900">{seller.sellerName}</p>
-                    <p className="text-sm text-slate-700">
-                      Planejadas: {formatNumberBR(seller.planned)} · Executadas: {formatNumberBR(seller.executed)} · Meta mínima: {formatNumberBR(seller.minimumRequired)}
-                    </p>
-                  </div>
-                  {isCritical ? (
-                    <span className="rounded-full bg-rose-600 px-2 py-1 text-xs font-semibold text-white">Muito abaixo (&lt;70%)</span>
-                  ) : seller.belowMinimum ? (
-                    <span className="rounded-full bg-amber-400 px-2 py-1 text-xs font-semibold text-slate-900">Abaixo do mínimo</span>
-                  ) : (
-                    <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">No mínimo esperado</span>
-                  )}
+          {weeklyVisits.map((seller, index) => (
+            <div key={seller.userId} className="rounded-lg border border-slate-200 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-semibold text-slate-900">{index + 1}º · {seller.name}</p>
+                  <p className="text-sm text-slate-700">
+                    Visitas concluídas: {formatNumberBR(seller.visitsDone)} / Meta: {formatNumberBR(seller.goal)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {seller.missing > 0 ? `Faltam ${formatNumberBR(seller.missing)} para a meta semanal.` : "Meta da semana atingida. Excelente ritmo!"}
+                  </p>
                 </div>
+                <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+                  {seller.medal === "gold" ? "🥇 Ouro" : seller.medal === "silver" ? "🥈 Prata" : seller.medal === "bronze" ? "🥉 Bronze" : "Sem medalha"}
+                </span>
               </div>
-            );
-          })}
-          {weeklyDiscipline.length === 0 ? <p className="text-sm text-slate-500">Nenhum vendedor encontrado para esta semana.</p> : null}
+            </div>
+          ))}
+          {weeklyVisits.length === 0 ? <p className="text-sm text-slate-500">Nenhum vendedor encontrado para esta semana.</p> : null}
         </div>
       </section>
     </div>
