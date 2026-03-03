@@ -12,7 +12,25 @@ import { env } from "./config/env.js";
 export const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: env.frontendUrl, credentials: true }));
+
+const allowedOrigins = env.frontendUrl
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin not allowed by CORS"));
+    },
+    credentials: true,
+  })
+);
 const isProduction = process.env.NODE_ENV === "production";
 
 const apiRateLimit = rateLimit({

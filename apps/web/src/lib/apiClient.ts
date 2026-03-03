@@ -14,6 +14,7 @@ const api = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true }
 const MAX_CONCURRENT_REQUESTS = 6;
 const RATE_LIMIT_COOLDOWN_MS = 3_000;
 const RATE_LIMIT_TOAST_ID = "global-rate-limit-warning";
+const NETWORK_ERROR_TOAST_ID = "global-network-error";
 
 const inFlightRequests = new Map<string, Promise<AxiosResponse>>();
 const waitingQueue: Array<() => void> = [];
@@ -114,6 +115,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use((r) => r, async (error) => {
   withApiErrorDetails(error);
   const status = error.response?.status;
+  const isNetworkError = !error.response;
   const requestUrl = String(error.config?.url || "");
   const isAuthRoute = requestUrl.includes("/auth/login") || requestUrl.includes("/auth/refresh");
 
@@ -142,6 +144,10 @@ api.interceptors.response.use((r) => r, async (error) => {
       });
     }
     toast.error("Muitas requisições. Aguarde alguns segundos.", { id: RATE_LIMIT_TOAST_ID });
+  }
+
+  if (isNetworkError) {
+    toast.error("Servidor indisponível. Verifique conexão.", { id: NETWORK_ERROR_TOAST_ID });
   }
 
   return Promise.reject(withApiErrorDetails(error));
