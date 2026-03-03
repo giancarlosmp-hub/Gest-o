@@ -73,6 +73,26 @@ const getUtcTodayStart = () => {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
 };
 
+const getLastBusinessDaysWindow = (businessDays: number, referenceDate = new Date()) => {
+  const end = new Date(referenceDate);
+  end.setHours(23, 59, 59, 999);
+
+  const start = new Date(end);
+  let counted = 0;
+
+  while (counted < businessDays) {
+    const weekDay = start.getDay();
+    if (weekDay >= 1 && weekDay <= 5) {
+      counted += 1;
+      if (counted === businessDays) break;
+    }
+    start.setDate(start.getDate() - 1);
+  }
+
+  start.setHours(0, 0, 0, 0);
+  return { start, end };
+};
+
 const getStageFilter = (stage?: string) => (stage ? STAGE_ALIASES[stage] : undefined);
 type OpportunityStatusFilter = "open" | "closed" | "all";
 const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
@@ -1083,6 +1103,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
 
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
   const punctualToleranceMs = 10 * 60 * 1000;
+  const inactivityWindow = getLastBusinessDaysWindow(3);
 
   const plannedEvents = await prisma.agendaEvent.findMany({
     where: {
@@ -1105,6 +1126,22 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       }
     }
   });
+
+  const sellersWithRecentVisits = await prisma.agendaEvent.groupBy({
+    by: ["sellerId"],
+    where: {
+      type: "roteiro_visita",
+      startDateTime: { gte: inactivityWindow.start, lte: inactivityWindow.end },
+      stops: {
+        some: {
+          checkOutAt: { not: null }
+        }
+      },
+      ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+    }
+  });
+
+  const activeSellersInWindow = new Set(sellersWithRecentVisits.map((item) => item.sellerId));
 
   const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
 
@@ -1189,7 +1226,10 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : 0;
       const punctualRate = stats.executed ? (stats.punctual / stats.executed) * 100 : 0;
       const followUpRate = stats.executed ? (stats.followUpAfterVisit / stats.executed) * 100 : 0;
-      const disciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+      const baseDisciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+      const isUnderExecutionThreshold = executionRate < 60;
+      const hasInactivityFlag = !activeSellersInWindow.has(stats.sellerId);
+      const disciplineScore = isUnderExecutionThreshold ? baseDisciplineScore * 0.9 : baseDisciplineScore;
 
       return {
         sellerId: stats.sellerId,
@@ -1199,7 +1239,9 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         executionRate,
         punctualRate,
         followUpRate,
-        disciplineScore
+        disciplineScore,
+        isUnderExecutionThreshold,
+        hasInactivityFlag
       };
     })
     .sort((a, b) => b.disciplineScore - a.disciplineScore);
