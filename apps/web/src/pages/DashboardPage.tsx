@@ -114,6 +114,23 @@ type ConsistencyResponse = {
   ranking: ConsistencyRankingItem[];
 };
 
+type MonthlyScoreItem = {
+  userId: string;
+  name: string;
+  role: string;
+  faturadoMes: number;
+  objetivoMes: number;
+  atingimentoPercent: number;
+  pipelinePonderado: number;
+  score: number;
+  rank: number;
+};
+
+type MonthlyScoreResponse = {
+  month: string;
+  items: MonthlyScoreItem[];
+};
+
 const palette = {
   primary: "#0B3C1D",
   success: "#2f9e44",
@@ -319,6 +336,9 @@ export default function DashboardPage() {
   const [weeklyDisciplineRanking, setWeeklyDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
   const [weeklyHighlights, setWeeklyHighlights] = useState<WeeklyHighlights | null>(null);
   const [consistencyReport, setConsistencyReport] = useState<ConsistencyResponse | null>(null);
+  const [monthlyScore, setMonthlyScore] = useState<MonthlyScoreResponse | null>(null);
+  const [scoreSellerId, setScoreSellerId] = useState("");
+  const [scoreSearch, setScoreSearch] = useState("");
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -333,8 +353,8 @@ export default function DashboardPage() {
   }, [sellerId]);
 
   const dashboardQueryKey = useMemo(
-    () => JSON.stringify({ month, sellerId: debouncedSellerId }),
-    [month, debouncedSellerId]
+    () => JSON.stringify({ month, sellerId: debouncedSellerId, scoreSellerId }),
+    [month, debouncedSellerId, scoreSellerId]
   );
 
   const fetchDashboard = useCallback((signal?: AbortSignal) => {
@@ -346,6 +366,8 @@ export default function DashboardPage() {
     const existingRequest = dashboardInFlightRef.current.get(dashboardQueryKey);
     if (existingRequest) return existingRequest;
 
+    const scoreQuery = user?.role !== "vendedor" && scoreSellerId ? `&userId=${scoreSellerId}` : "";
+
     const request = Promise.all([
       api.get<DashboardSummary>(`/dashboard/summary?month=${month}${querySeller}`, { signal }),
       api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`, { signal }),
@@ -356,8 +378,9 @@ export default function DashboardPage() {
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
       api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}`, { signal }),
       api.get<ConsistencyResponse>("/reports/consistency", { signal }),
+      api.get<MonthlyScoreResponse>(`/reports/score-monthly?month=${month}${scoreQuery}`, { signal }),
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse, monthlyScoreResponse]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
@@ -368,6 +391,7 @@ export default function DashboardPage() {
         setWeeklyDisciplineRanking(weeklyDisciplineRankingResponse.data);
         setWeeklyHighlights(weeklyHighlightsResponse.data);
         setConsistencyReport(consistencyResponse.data);
+        setMonthlyScore(monthlyScoreResponse.data);
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -375,7 +399,7 @@ export default function DashboardPage() {
 
     dashboardInFlightRef.current.set(dashboardQueryKey, request);
     return request;
-  }, [dashboardQueryKey, debouncedSellerId, month]);
+  }, [dashboardQueryKey, debouncedSellerId, month, scoreSellerId, user?.role]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -873,6 +897,26 @@ export default function DashboardPage() {
     return consistencyReport.ranking;
   }, [consistencyReport, user?.id, user?.role]);
 
+  const monthlyScoreVisible = useMemo(() => {
+    if (!monthlyScore) return [];
+
+    if (user?.role === "vendedor") {
+      return monthlyScore.items;
+    }
+
+    const search = scoreSearch.trim().toLowerCase();
+    if (!search) return monthlyScore.items;
+
+    return monthlyScore.items.filter((item) => item.name.toLowerCase().includes(search));
+  }, [monthlyScore, scoreSearch, user?.role]);
+
+  const monthlyScoreTopThree = useMemo(() => monthlyScoreVisible.filter((item) => item.rank <= 3), [monthlyScoreVisible]);
+
+  const monthlyScoreMe = useMemo(() => {
+    if (user?.role !== "vendedor") return null;
+    return monthlyScoreVisible.find((item) => item.userId === user.id) || null;
+  }, [monthlyScoreVisible, user?.id, user?.role]);
+
   const consistencyBadge = (level: ConsistencyLevel) => {
     if (level === "alta") return { label: "🟢 Alta", className: "bg-emerald-50 text-emerald-700 border-emerald-200" };
     if (level === "media") return { label: "🟡 Média", className: "bg-amber-50 text-amber-700 border-amber-200" };
@@ -1276,6 +1320,84 @@ export default function DashboardPage() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className={cardClass}>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-800">Score Comercial do Mês</h3>
+            <p className="text-xs text-slate-500">Resultado mensal (faturado + atingimento + pipeline ponderado).</p>
+          </div>
+          <span className="text-xs text-slate-500">{monthlyScore?.month ?? month}</span>
+        </div>
+
+        {user?.role !== "vendedor" ? (
+          <div className="mb-3 grid gap-2 sm:grid-cols-2">
+            <select
+              value={scoreSellerId}
+              onChange={(event) => setScoreSellerId(event.target.value)}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+            >
+              <option value="">Todos vendedores</option>
+              {sellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>{seller.name}</option>
+              ))}
+            </select>
+            <input
+              value={scoreSearch}
+              onChange={(event) => setScoreSearch(event.target.value)}
+              placeholder="Buscar vendedor"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-500"
+            />
+          </div>
+        ) : null}
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2.5 pr-3">Posição</th>
+                <th className="py-2.5 pr-3">Vendedor</th>
+                <th className="py-2.5 pr-3">Faturado</th>
+                <th className="py-2.5 pr-3">Objetivo</th>
+                <th className="py-2.5 pr-3">Atingimento</th>
+                <th className="py-2.5 pr-3">Pipeline pond.</th>
+                <th className="py-2.5 pr-3">Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthlyScoreVisible.map((row) => {
+                const medal = row.rank === 1 ? "🥇" : row.rank === 2 ? "🥈" : row.rank === 3 ? "🥉" : "";
+                return (
+                  <tr key={`${row.userId}-${row.rank}`} className="border-b border-slate-100">
+                    <td className="py-2.5 pr-3">{medal || `#${row.rank}`}</td>
+                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.name}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.faturadoMes)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{row.objetivoMes > 0 ? formatCurrencyBRL(row.objetivoMes) : "—"}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.atingimentoPercent)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatCurrencyBRL(row.pipelinePonderado)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatNumberBR(row.score)}</td>
+                  </tr>
+                );
+              })}
+              {monthlyScoreVisible.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="py-4 text-center text-slate-500">Sem dados de score mensal no período.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {user?.role === "vendedor" ? (
+          <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-900">
+            <p className="font-semibold">Seu destaque</p>
+            <p>
+              Top 3 do mês: {monthlyScoreTopThree.map((item) => `${item.rank}º ${item.name}`).join(" • ") || "sem dados"}.
+            </p>
+            {monthlyScoreMe ? <p>Sua posição: #{monthlyScoreMe.rank} com score {formatNumberBR(monthlyScoreMe.score)}.</p> : null}
+          </div>
+        ) : null}
       </div>
 
       <div className={cardClass}>

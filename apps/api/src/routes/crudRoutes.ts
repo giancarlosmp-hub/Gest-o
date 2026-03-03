@@ -1335,6 +1335,124 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   return res.json(ranking);
 });
 
+router.get("/reports/score-monthly", async (req, res) => {
+  const month = String(req.query.month || "").trim();
+  const userIdFilter = typeof req.query.userId === "string" ? req.query.userId.trim() : "";
+
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  }
+
+  const role = req.user?.role;
+  if (role !== "diretor" && role !== "gerente" && role !== "vendedor") {
+    return res.status(403).json({ message: "Perfil sem permissão para consultar score mensal." });
+  }
+
+  if (role === "vendedor" && userIdFilter) {
+    return res.status(403).json({ message: "Filtro userId não permitido para perfil vendedor." });
+  }
+
+  const { start, end } = getMonthRangeFromKey(month);
+
+  const [sellers, monthSales, monthGoals, monthPipeline] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: "vendedor", isActive: true },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: "asc" }
+    }),
+    prisma.sale.groupBy({
+      by: ["sellerId"],
+      where: {
+        date: { gte: start, lte: end }
+      },
+      _sum: { value: true }
+    }),
+    prisma.goal.findMany({
+      where: { month },
+      select: { sellerId: true, targetValue: true }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        createdAt: { gte: start, lte: end }
+      },
+      select: {
+        ownerSellerId: true,
+        value: true,
+        probability: true
+      }
+    })
+  ]);
+
+  const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._sum.value ?? 0;
+    return acc;
+  }, {});
+
+  const goalsBySeller = monthGoals.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item.targetValue ?? 0;
+    return acc;
+  }, {});
+
+  const weightedPipelineBySeller = monthPipeline.reduce<Record<string, number>>((acc, item) => {
+    const weightedValue = item.value * ((item.probability ?? 0) / 100);
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + weightedValue;
+    return acc;
+  }, {});
+
+  const maxFaturado = Math.max(...sellers.map((seller) => salesBySeller[seller.id] || 0), 1);
+  const maxPipeline = Math.max(...sellers.map((seller) => weightedPipelineBySeller[seller.id] || 0), 1);
+
+  const rankedItems = sellers
+    .map((seller) => {
+      const faturadoMes = salesBySeller[seller.id] || 0;
+      const objetivoMes = goalsBySeller[seller.id] || 0;
+      const pipelinePonderado = weightedPipelineBySeller[seller.id] || 0;
+      const atingimentoPercent = objetivoMes > 0 ? (faturadoMes / objetivoMes) * 100 : 0;
+
+      const faturadoNormalizado = (faturadoMes / maxFaturado) * 1000;
+      const pipelineNormalizado = (pipelinePonderado / maxPipeline) * 1000;
+      const atingimentoRatio = Math.max(atingimentoPercent, 0) / 100;
+
+      const score = faturadoNormalizado * 1.0 + atingimentoRatio * 1000 + pipelineNormalizado * 0.1;
+
+      return {
+        userId: seller.id,
+        name: seller.name,
+        role: seller.role,
+        faturadoMes: Number(faturadoMes.toFixed(2)),
+        objetivoMes: Number(objetivoMes.toFixed(2)),
+        atingimentoPercent: Number(atingimentoPercent.toFixed(2)),
+        pipelinePonderado: Number(pipelinePonderado.toFixed(2)),
+        score: Number(score.toFixed(2))
+      };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.pipelinePonderado !== a.pipelinePonderado) return b.pipelinePonderado - a.pipelinePonderado;
+      if (b.faturadoMes !== a.faturadoMes) return b.faturadoMes - a.faturadoMes;
+      return a.name.localeCompare(b.name, "pt-BR");
+    })
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1
+    }));
+
+  if (role === "vendedor") {
+    const me = rankedItems.find((item) => item.userId === req.user!.id);
+    const topThree = rankedItems.slice(0, 3);
+
+    const items = me && !topThree.some((item) => item.userId === me.userId) ? [...topThree, me] : topThree;
+
+    return res.json({ month, items });
+  }
+
+  if (userIdFilter) {
+    return res.json({ month, items: rankedItems.filter((item) => item.userId === userIdFilter) });
+  }
+
+  return res.json({ month, items: rankedItems });
+});
+
 router.get("/reports/weekly-highlights", async (req, res) => {
   const weekStartRaw = String(req.query.weekStart || "").trim();
   const range = getWeekRangeFromStart(weekStartRaw);
