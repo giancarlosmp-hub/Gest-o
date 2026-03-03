@@ -69,6 +69,18 @@ type ActivityTypeSummary = {
   requiredDailyAverage: number;
 };
 
+
+type DisciplineRankingItem = {
+  sellerId: string;
+  sellerName: string;
+  planned: number;
+  executed: number;
+  executionRate: number;
+  punctualRate: number;
+  followUpRate: number;
+  disciplineScore: number;
+};
+
 const palette = {
   primary: "#0B3C1D",
   success: "#2f9e44",
@@ -260,6 +272,7 @@ export default function DashboardPage() {
   const [animatedRealizedPercent, setAnimatedRealizedPercent] = useState(0);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [disciplineRanking, setDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -280,6 +293,9 @@ export default function DashboardPage() {
 
   const fetchDashboard = useCallback((signal?: AbortSignal) => {
     const querySeller = debouncedSellerId ? `&sellerId=${debouncedSellerId}` : "";
+    const [year, monthN] = month.split("-").map(Number);
+    const from = `${month}-01`;
+    const to = `${month}-${String(new Date(year, monthN, 0).getDate()).padStart(2, "0")}`;
 
     const existingRequest = dashboardInFlightRef.current.get(dashboardQueryKey);
     if (existingRequest) return existingRequest;
@@ -290,14 +306,16 @@ export default function DashboardPage() {
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`, { signal }),
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
       api.get<Activity[]>(`/activities?month=${month}${querySeller}`, { signal }),
+      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
         setPortfolio(portfolioResponse.data);
         setActivityKpis(activityKpisResponse.data);
         setActivities(activitiesResponse.data);
+        setDisciplineRanking(disciplineRankingResponse.data);
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -737,6 +755,25 @@ export default function DashboardPage() {
     };
   }, [activityKpis, activities, month, sellers, user?.role]);
 
+  const disciplineRankingVisible = useMemo(() => {
+    const rankingWithPosition = disciplineRanking.map((item, index) => ({
+      ...item,
+      position: index + 1,
+    }));
+
+    if (user?.role !== "vendedor") {
+      return rankingWithPosition.slice(0, 5);
+    }
+
+    const topThree = rankingWithPosition.slice(0, 3);
+    const myRow = rankingWithPosition.find((item) => item.sellerId === user.id);
+
+    if (!myRow) return topThree;
+    if (topThree.some((item) => item.sellerId === myRow.sellerId)) return topThree;
+
+    return [...topThree, myRow];
+  }, [disciplineRanking, user?.id, user?.role]);
+
   if (!summary || !series || !portfolio || !salesPace) {
     return <div className={cardClass}>Carregando dashboard...</div>;
   }
@@ -1001,6 +1038,47 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className={cardClass}>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="font-semibold text-slate-800">Ranking Disciplina</h3>
+          <span className="text-xs text-slate-500">Agenda + Roteiro</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2.5 pr-3">Posição</th>
+                <th className="py-2.5 pr-3">Vendedor</th>
+                <th className="py-2.5 pr-3">Execução</th>
+                <th className="py-2.5 pr-3">Pontualidade</th>
+                <th className="py-2.5 pr-3">Score</th>
+              </tr>
+            </thead>
+            <tbody>
+              {disciplineRankingVisible.map((row) => {
+                const medal = row.position === 1 ? "🥇" : row.position === 2 ? "🥈" : row.position === 3 ? "🥉" : "";
+                return (
+                  <tr key={row.sellerId} className="border-b border-slate-100">
+                    <td className="py-2.5 pr-3">{medal || `#${row.position}`}</td>
+                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.sellerName}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
+                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.disciplineScore)}</td>
+                  </tr>
+                );
+              })}
+              {disciplineRankingVisible.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-4 text-center text-slate-500">
+                    Sem dados de disciplina para o período.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
