@@ -93,6 +93,26 @@ const getLastBusinessDaysWindow = (businessDays: number, referenceDate = new Dat
   return { start, end };
 };
 
+const getWeekRangeFromStart = (weekStart: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
+
+  const start = normalizeDateToUtc(weekStart);
+  if (!start) return null;
+
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  end.setUTCHours(23, 59, 59, 999);
+
+  const previousStart = new Date(start);
+  previousStart.setUTCDate(start.getUTCDate() - 7);
+
+  const previousEnd = new Date(start);
+  previousEnd.setUTCDate(start.getUTCDate() - 1);
+  previousEnd.setUTCHours(23, 59, 59, 999);
+
+  return { start, end, previousStart, previousEnd };
+};
+
 const getStageFilter = (stage?: string) => (stage ? STAGE_ALIASES[stage] : undefined);
 type OpportunityStatusFilter = "open" | "closed" | "all";
 const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
@@ -1253,6 +1273,225 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     .sort((a, b) => b.disciplineScoreFinal - a.disciplineScoreFinal);
 
   return res.json(ranking);
+});
+
+router.get("/reports/weekly-highlights", async (req, res) => {
+  const weekStartRaw = String(req.query.weekStart || "").trim();
+  const range = getWeekRangeFromStart(weekStartRaw);
+
+  if (!range) {
+    return res.status(400).json({ message: "Parâmetro weekStart inválido. Use YYYY-MM-DD." });
+  }
+
+  const punctualToleranceMs = 10 * 60 * 1000;
+  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
+
+  const [sellers, currentSales, previousSales, plannedEvents, opportunitiesCreated] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: "vendedor" },
+      select: { id: true, name: true }
+    }),
+    prisma.sale.groupBy({
+      by: ["sellerId"],
+      where: { date: { gte: range.start, lte: range.end } },
+      _sum: { value: true }
+    }),
+    prisma.sale.groupBy({
+      by: ["sellerId"],
+      where: { date: { gte: range.previousStart, lte: range.previousEnd } },
+      _sum: { value: true }
+    }),
+    prisma.agendaEvent.findMany({
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: range.start, lte: range.end }
+      },
+      select: {
+        id: true,
+        sellerId: true,
+        opportunityId: true,
+        stops: {
+          select: {
+            plannedTime: true,
+            checkInAt: true,
+            checkOutAt: true
+          },
+          orderBy: { order: "asc" }
+        }
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: { createdAt: { gte: range.start, lte: range.end } },
+      select: { ownerSellerId: true }
+    })
+  ]);
+
+  const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
+
+  const followUps = opportunities.length
+    ? await prisma.activity.findMany({
+        where: {
+          type: "follow_up",
+          createdAt: { gte: range.start, lte: range.end },
+          opportunityId: { in: opportunities }
+        },
+        select: {
+          ownerSellerId: true,
+          opportunityId: true,
+          createdAt: true
+        }
+      })
+    : [];
+
+  const currentSalesMap = currentSales.reduce<Record<string, number>>((acc, row) => {
+    acc[row.sellerId] = row._sum.value ?? 0;
+    return acc;
+  }, {});
+
+  const previousSalesMap = previousSales.reduce<Record<string, number>>((acc, row) => {
+    acc[row.sellerId] = row._sum.value ?? 0;
+    return acc;
+  }, {});
+
+  const opportunitiesCreatedMap = opportunitiesCreated.reduce<Record<string, number>>((acc, row) => {
+    acc[row.ownerSellerId] = (acc[row.ownerSellerId] || 0) + 1;
+    return acc;
+  }, {});
+
+  const followUpsIndex = followUps.reduce<Record<string, Date[]>>((acc, followUp) => {
+    if (!followUp.opportunityId) return acc;
+    const key = `${followUp.ownerSellerId}:${followUp.opportunityId}`;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(followUp.createdAt);
+    return acc;
+  }, {});
+
+  const disciplineBySeller = plannedEvents.reduce<
+    Record<
+      string,
+      {
+        planned: number;
+        executed: number;
+        punctual: number;
+        followUpAfterVisit: number;
+      }
+    >
+  >((acc, event) => {
+    const row =
+      acc[event.sellerId] ||
+      (acc[event.sellerId] = {
+        planned: 0,
+        executed: 0,
+        punctual: 0,
+        followUpAfterVisit: 0
+      });
+
+    row.planned += 1;
+
+    const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
+    const firstCheckout = event.stops.find((stop) => Boolean(stop.checkOutAt))?.checkOutAt;
+
+    if (firstCheckout) {
+      row.executed += 1;
+
+      if (event.opportunityId) {
+        const key = `${event.sellerId}:${event.opportunityId}`;
+        const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some(
+          (createdAt) => createdAt.getTime() >= firstCheckout.getTime()
+        );
+        if (hasFollowUpAfterVisit) row.followUpAfterVisit += 1;
+      }
+    }
+
+    if (firstStopWithCheckIn?.plannedTime && firstStopWithCheckIn.checkInAt) {
+      if (firstStopWithCheckIn.checkInAt.getTime() <= firstStopWithCheckIn.plannedTime.getTime() + punctualToleranceMs) {
+        row.punctual += 1;
+      }
+    }
+
+    return acc;
+  }, {});
+
+  const topByMetric = <T extends { metricValue: number }>(rows: T[]) => {
+    if (rows.length === 0) return null;
+    return rows.reduce((best, row) => (row.metricValue > best.metricValue ? row : best));
+  };
+
+  const bestResult = topByMetric(
+    sellers.map((seller) => ({
+      sellerId: seller.id,
+      sellerName: seller.name,
+      metricLabel: "Valor vendido na semana",
+      metricValue: currentSalesMap[seller.id] || 0,
+      medal: "🏆"
+    }))
+  );
+
+  const bestEvolution = topByMetric(
+    sellers.map((seller) => {
+      const current = currentSalesMap[seller.id] || 0;
+      const previous = previousSalesMap[seller.id] || 0;
+      const growthPercent = previous > 0 ? ((current - previous) / previous) * 100 : current > 0 ? 100 : 0;
+
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        metricLabel: "Crescimento vs semana anterior (%)",
+        metricValue: growthPercent,
+        medal: "📈"
+      };
+    })
+  );
+
+  const bestExecutor = topByMetric(
+    sellers.map((seller) => {
+      const discipline = disciplineBySeller[seller.id] || { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+      const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
+      const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
+      const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
+      const disciplineScoreBase = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+      const volumeFactor = discipline.planned < minimumWeeklyVisits ? discipline.planned / minimumWeeklyVisits : 1;
+      const metricValue = disciplineScoreBase * volumeFactor;
+
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        metricLabel: "Discipline score da semana",
+        metricValue,
+        medal: "🥇"
+      };
+    })
+  );
+
+  const executedVisitsMap = plannedEvents.reduce<Record<string, number>>((acc, event) => {
+    const hasCheckout = event.stops.some((stop) => Boolean(stop.checkOutAt));
+    if (!hasCheckout) return acc;
+    acc[event.sellerId] = (acc[event.sellerId] || 0) + 1;
+    return acc;
+  }, {});
+
+  const bestConversion = topByMetric(
+    sellers.map((seller) => {
+      const created = opportunitiesCreatedMap[seller.id] || 0;
+      const executedVisits = executedVisitsMap[seller.id] || 0;
+      const conversionRate = executedVisits > 0 ? (created / executedVisits) * 100 : 0;
+
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        metricLabel: "Oportunidades criadas / visitas realizadas (%)",
+        metricValue: conversionRate,
+        medal: "🎯"
+      };
+    })
+  );
+
+  return res.json({
+    bestResult: bestResult ? { ...bestResult, avatarUrl: null } : null,
+    bestEvolution: bestEvolution ? { ...bestEvolution, avatarUrl: null } : null,
+    bestExecutor: bestExecutor ? { ...bestExecutor, avatarUrl: null } : null,
+    bestConversion: bestConversion ? { ...bestConversion, avatarUrl: null } : null
+  });
 });
 
 router.get("/reports/commercial-score", async (req, res) => {
