@@ -1266,7 +1266,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     perdido: 3
   };
 
-  const [sellers, plannedEvents, openOpportunities, stageChanges, monthSales, monthGoals] = await Promise.all([
+  const [sellers, plannedEvents, openOpportunities, createdOpportunitiesInMonth, stageChanges, monthSales, monthGoals] = await Promise.all([
     prisma.user.findMany({
       where: {
         role: "vendedor",
@@ -1303,6 +1303,15 @@ router.get("/reports/commercial-score", async (req, res) => {
         id: true,
         ownerSellerId: true,
         followUpDate: true
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        createdAt: { gte: start, lte: end },
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
+      },
+      select: {
+        ownerSellerId: true
       }
     }),
     prisma.timelineEvent.findMany({
@@ -1445,8 +1454,12 @@ router.get("/reports/commercial-score", async (req, res) => {
 
   const maxOpenOpp = Math.max(...Object.values(openOppCountBySeller), 1);
   const maxSales = Math.max(...Object.values(salesBySeller), 1);
+  const createdOpportunitiesBySeller = createdOpportunitiesInMonth.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
+    return acc;
+  }, {});
 
-  const scoreRows = sellers
+  const baseRows = sellers
     .map((seller) => {
       const discipline = disciplineBySeller[seller.id] || { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
       const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
@@ -1471,6 +1484,7 @@ router.get("/reports/commercial-score", async (req, res) => {
       const resultScore = soldValueScore * 0.5 + clampedGoalAchievement * 0.5;
 
       const finalScore = disciplineScore * 0.4 + pipelineScore * 0.3 + resultScore * 0.3;
+      const punctualityPerfect = discipline.executed > 0 && punctualRate === 100;
 
       return {
         sellerId: seller.id,
@@ -1478,10 +1492,36 @@ router.get("/reports/commercial-score", async (req, res) => {
         disciplineScore: Number(disciplineScore.toFixed(2)),
         pipelineScore: Number(pipelineScore.toFixed(2)),
         resultScore: Number(resultScore.toFixed(2)),
-        finalScore: Number(finalScore.toFixed(2))
+        finalScore: Number(finalScore.toFixed(2)),
+        punctualityPerfect,
+        createdOpportunities: createdOpportunitiesBySeller[seller.id] || 0
       };
     })
     .sort((a, b) => b.finalScore - a.finalScore);
+
+  const topDisciplineScore = Math.max(...baseRows.map((item) => item.disciplineScore), 0);
+  const topCreatedOpportunities = Math.max(...baseRows.map((item) => item.createdOpportunities), 0);
+
+  const scoreRows = baseRows.map((row) => {
+    const level = row.finalScore >= 95 ? "Diamante" : row.finalScore >= 85 ? "Ouro" : row.finalScore >= 75 ? "Prata" : row.finalScore >= 60 ? "Bronze" : null;
+    const medals: string[] = [];
+
+    if (level) medals.push(level);
+    if (row.punctualityPerfect) medals.push("Pontualidade Perfeita");
+    if (row.disciplineScore === topDisciplineScore && topDisciplineScore > 0) medals.push("Executor da Semana");
+    if (row.createdOpportunities === topCreatedOpportunities && topCreatedOpportunities > 0) medals.push("Gerador de Oportunidades");
+
+    return {
+      sellerId: row.sellerId,
+      sellerName: row.sellerName,
+      disciplineScore: row.disciplineScore,
+      pipelineScore: row.pipelineScore,
+      resultScore: row.resultScore,
+      finalScore: row.finalScore,
+      level,
+      medals
+    };
+  });
 
   return res.json({ sellers: scoreRows });
 });
