@@ -23,6 +23,8 @@ type CommercialScoreSeller = {
   pipelineScore: number;
   resultScore: number;
   finalScore: number;
+  level: "Bronze" | "Prata" | "Ouro" | "Diamante" | null;
+  medals: string[];
 };
 
 type CommercialScoreResponse = {
@@ -39,11 +41,24 @@ const getScoreColorClass = (score: number) => {
   return "bg-rose-100 text-rose-700";
 };
 
+const medalClassByLabel: Record<string, string> = {
+  Bronze: "bg-amber-100 text-amber-800 border-amber-200",
+  Prata: "bg-slate-100 text-slate-700 border-slate-200",
+  Ouro: "bg-yellow-100 text-yellow-800 border-yellow-200",
+  Diamante: "bg-cyan-100 text-cyan-800 border-cyan-200",
+  "Pontualidade Perfeita": "bg-emerald-100 text-emerald-800 border-emerald-200",
+  "Executor da Semana": "bg-indigo-100 text-indigo-800 border-indigo-200",
+  "Gerador de Oportunidades": "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200"
+};
+
+const getMedalClass = (medal: string) => medalClassByLabel[medal] || "bg-slate-100 text-slate-700 border-slate-200";
+
 export default function CommercialScorePage() {
   const [month, setMonth] = useState(getCurrentMonth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<CommercialScoreSeller[]>([]);
+  const [newMedalsBySeller, setNewMedalsBySeller] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     const controller = new AbortController();
@@ -55,7 +70,23 @@ export default function CommercialScorePage() {
         const response = await api.get<CommercialScoreResponse>(`/reports/commercial-score?month=${month}`, {
           signal: controller.signal
         });
-        setRows(response.data.sellers || []);
+        const nextRows = response.data.sellers || [];
+        setRows((currentRows) => {
+          const previousBySeller = currentRows.reduce<Record<string, Set<string>>>((acc, item) => {
+            acc[item.sellerId] = new Set(item.medals);
+            return acc;
+          }, {});
+
+          const discovered = nextRows.reduce<Record<string, string[]>>((acc, item) => {
+            const previousMedals = previousBySeller[item.sellerId] || new Set<string>();
+            const gained = item.medals.filter((medal) => !previousMedals.has(medal));
+            if (gained.length) acc[item.sellerId] = gained;
+            return acc;
+          }, {});
+
+          setNewMedalsBySeller(discovered);
+          return nextRows;
+        });
       } catch {
         setError("Não foi possível carregar o score comercial.");
       } finally {
@@ -186,7 +217,22 @@ export default function CommercialScorePage() {
                     {rows.map((row, index) => (
                       <tr key={row.sellerId} className="border-b border-slate-100 text-slate-700">
                         <td className="py-2.5 pr-3 font-semibold text-slate-900">#{index + 1}</td>
-                        <td className="py-2.5 pr-3">{row.sellerName}</td>
+                        <td className="py-2.5 pr-3">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span>{row.sellerName}</span>
+                            {row.medals.map((medal) => {
+                              const hasJustWon = (newMedalsBySeller[row.sellerId] || []).includes(medal);
+                              return (
+                                <span
+                                  key={`${row.sellerId}-${medal}`}
+                                  className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getMedalClass(medal)} ${hasJustWon ? "animate-pulse" : ""}`}
+                                >
+                                  {medal}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
                         <td className="py-2.5 pr-3">{formatPercentBR(row.disciplineScore)}</td>
                         <td className="py-2.5 pr-3">{formatPercentBR(row.pipelineScore)}</td>
                         <td className="py-2.5 pr-3">{formatPercentBR(row.resultScore)}</td>
@@ -199,6 +245,40 @@ export default function CommercialScorePage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+
+          <div className={cardClass}>
+            <h3 className="text-base font-semibold text-slate-900">Hall da Performance</h3>
+            <p className="mt-1 text-sm text-slate-500">Destaques de reconhecimento por nível e medalhas especiais.</p>
+            {rows.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">Sem destaques no período.</p>
+            ) : (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {rows.map((row) => (
+                  <article key={`hall-${row.sellerId}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-sm font-semibold text-slate-900">{row.sellerName}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {row.medals.length === 0 ? (
+                        <span className="text-xs text-slate-500">Sem medalhas no momento</span>
+                      ) : (
+                        row.medals.map((medal) => {
+                          const hasJustWon = (newMedalsBySeller[row.sellerId] || []).includes(medal);
+                          return (
+                            <span
+                              key={`hall-${row.sellerId}-${medal}`}
+                              className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getMedalClass(medal)} ${hasJustWon ? "animate-pulse" : ""}`}
+                            >
+                              {medal}
+                            </span>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="mt-3 text-xs text-slate-500">Score final: {formatPercentBR(row.finalScore)}</div>
+                  </article>
+                ))}
               </div>
             )}
           </div>
