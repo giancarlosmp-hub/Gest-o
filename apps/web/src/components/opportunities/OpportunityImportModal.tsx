@@ -70,26 +70,40 @@ const parseCsvFile = async (file: File) => {
 };
 
 const downloadTemplate = () => {
-  const csvContent = `${TEMPLATE_HEADERS.join(",")}\nOportunidade exemplo,CLI-001,15000,prospeccao,2026-01-10,2026-01-25,Soja,2026`;
+  const example = [
+    "Oportunidade exemplo",
+    "CLI-001",
+    "15000",
+    "prospeccao",
+    "2026-01-10",
+    "2026-01-25",
+    "Soja",
+    "2026"
+  ].join(",");
+
+  const csvContent = `${TEMPLATE_HEADERS.join(",")}\n${example}`;
   const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
+
   const link = document.createElement("a");
   link.href = url;
   link.setAttribute("download", "modelo-importacao-oportunidades.csv");
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+
   URL.revokeObjectURL(url);
 };
 
 const buildPreviewRows = (rows: Record<string, unknown>[]) => {
   return rows.map<OpportunityPreviewRow>((row, index) => {
-    const valueResult = parseDecimalValue(row.value);
-    const stage = normalizeTextValue(row.stage).toLowerCase();
+    const valueResult = parseDecimalValue((row as any).value);
+    const stage = normalizeTextValue((row as any).stage).toLowerCase();
+
     const previewRow: OpportunityPreviewRow = {
-      line: index + 2,
-      title: normalizeTextValue(row.title),
-      clientId: normalizeTextValue(row.clientId),
+      line: index + 2, // linha 1 é cabeçalho
+      title: normalizeTextValue((row as any).title),
+      clientId: normalizeTextValue((row as any).clientId),
       value: valueResult.isInvalid ? Number.NaN : valueResult.parsedValue,
       stage,
       status: "valid"
@@ -98,9 +112,11 @@ const buildPreviewRows = (rows: Record<string, unknown>[]) => {
     const errors: string[] = [];
     if (!previewRow.title) errors.push("Título obrigatório");
     if (!previewRow.clientId) errors.push("Cliente (ID) obrigatório");
+
     if (previewRow.value === undefined || Number.isNaN(previewRow.value) || previewRow.value <= 0) {
       errors.push("Valor deve ser numérico e maior que zero");
     }
+
     if (stage && !VALID_STAGES.has(stage)) errors.push("Estágio inválido");
 
     if (errors.length) {
@@ -117,11 +133,14 @@ export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: bo
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
 
-  const counters = useMemo(() => ({
-    totalRead: previewRows.length,
-    valid: previewRows.filter((row) => row.status === "valid").length,
-    error: previewRows.filter((row) => row.status === "error").length
-  }), [previewRows]);
+  const counters = useMemo(
+    () => ({
+      totalRead: previewRows.length,
+      valid: previewRows.filter((row) => row.status === "valid").length,
+      error: previewRows.filter((row) => row.status === "error").length
+    }),
+    [previewRows]
+  );
 
   const reset = () => {
     setFileName("");
@@ -161,11 +180,17 @@ export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: bo
   const handleImport = async () => {
     if (!previewRows.length || counters.error > 0) return;
 
+    // IMPORT REAL será adicionado depois (chamar endpoint de import)
     setIsImporting(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setIsImporting(false);
-    toast.success("Importação simulada com sucesso. A persistência será adicionada em breve.");
-    reset();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      toast.success("Importação simulada com sucesso. A persistência será adicionada em breve.");
+      reset();
+    } catch {
+      toast.error("Erro ao importar oportunidades.");
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -187,12 +212,14 @@ export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: bo
             >
               Baixar modelo
             </button>
+
             <input
               type="file"
               accept=".csv,.xlsx"
               onChange={handleFileChange}
               className="block w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800"
             />
+
             {fileName ? <span className="text-xs text-slate-500">Arquivo: {fileName}</span> : null}
           </div>
 
@@ -253,6 +280,7 @@ export default function OpportunityImportModal({ isOpen, onClose }: { isOpen: bo
           >
             Cancelar
           </button>
+
           <button
             type="button"
             onClick={handleImport}

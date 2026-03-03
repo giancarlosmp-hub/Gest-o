@@ -39,7 +39,10 @@ export const parseDecimalValue = (value: unknown): { parsedValue: number | undef
   const normalized = String(value).trim();
   if (!normalized) return { parsedValue: undefined, isInvalid: false };
 
-  const sanitized = normalized.replace(/\s/g, "");
+  const sanitized = normalized
+    .replace(/r\$/gi, "")
+    .replace(/\s/g, "")
+    .replace(/[^\d,.-]/g, "");
   const lastComma = sanitized.lastIndexOf(",");
   const lastDot = sanitized.lastIndexOf(".");
 
@@ -57,6 +60,66 @@ export const parseDecimalValue = (value: unknown): { parsedValue: number | undef
 
   const parsedValue = Number(numericText);
   return Number.isNaN(parsedValue) ? { parsedValue: undefined, isInvalid: true } : { parsedValue, isInvalid: false };
+};
+
+const parseCsvLine = (line: string, separator: "," | ";") => {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === separator && !inQuotes) {
+      result.push(current);
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  result.push(current);
+  return result;
+};
+
+const parseCsvFile = async (file: File): Promise<ImportParsedSheet> => {
+  const content = await file.text();
+  const lines = content
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "");
+
+  if (lines.length < 2) {
+    throw new Error("O arquivo CSV precisa conter cabeçalho e pelo menos uma linha de dados.");
+  }
+
+  const commaCount = (lines[0].match(/,/g) || []).length;
+  const semicolonCount = (lines[0].match(/;/g) || []).length;
+  const separator: "," | ";" = semicolonCount > commaCount ? ";" : ",";
+
+  const rawHeaders = parseCsvLine(lines[0], separator).map((header) => String(header ?? "").trim());
+  const headers = rawHeaders.filter((header) => header !== "");
+
+  const rows = lines.slice(1).map((line) => {
+    const values = parseCsvLine(line, separator);
+    return rawHeaders.reduce<Record<string, unknown>>((acc, header, index) => {
+      if (!header) return acc;
+      acc[header] = String(values[index] ?? "").trim();
+      return acc;
+    }, {});
+  });
+
+  return { headers, rows };
 };
 
 export const loadXlsxLibrary = async (): Promise<SheetJsLibrary> => {
@@ -86,7 +149,7 @@ export const loadXlsxLibrary = async (): Promise<SheetJsLibrary> => {
   return window.XLSX;
 };
 
-export const parseImportFile = async (file: File): Promise<ImportParsedSheet> => {
+const parseXlsxFile = async (file: File): Promise<ImportParsedSheet> => {
   const data = await file.arrayBuffer();
   const xlsx = await loadXlsxLibrary();
   const workbook = xlsx.read(data, { type: "array" });
@@ -105,4 +168,11 @@ export const parseImportFile = async (file: File): Promise<ImportParsedSheet> =>
     headers: Object.keys(sheetRows[0] ?? {}).filter((header) => String(header).trim() !== ""),
     rows: sheetRows
   };
+};
+
+export const parseImportFile = async (file: File): Promise<ImportParsedSheet> => {
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".csv")) return parseCsvFile(file);
+  if (lowerName.endsWith(".xlsx")) return parseXlsxFile(file);
+  throw new Error("Formato inválido. Envie um arquivo CSV ou XLSX.");
 };
