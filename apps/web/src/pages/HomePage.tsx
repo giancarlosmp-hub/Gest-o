@@ -59,8 +59,23 @@ type WeeklyVisitItem = {
   missing: number;
 };
 
-const WEEKLY_VISITS_CACHE_TTL_MS = 45_000;
-let weeklyVisitsCache: { key: string; expiresAt: number; payload: WeeklyVisitItem[] } | null = null;
+type WeeklyMission = {
+  key: "visits_25" | "followups_5" | "proposals_2" | "overdue_0" | string;
+  title: string;
+  progress: number;
+  target: number;
+  done: boolean;
+  medal?: WeeklyVisitItem["medal"];
+};
+
+type WeeklyMissionSeller = {
+  userId: string;
+  name: string;
+  missions: WeeklyMission[];
+};
+
+const WEEKLY_MISSIONS_CACHE_TTL_MS = 45_000;
+let weeklyMissionsCache: { key: string; expiresAt: number; payload: WeeklyMissionSeller[] } | null = null;
 
 type PipelineOpportunity = Opportunity & {
   priorityType: "followup_overdue" | "opportunity_overdue" | "proposal_no_response";
@@ -145,7 +160,7 @@ export default function HomePage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
-  const [weeklyVisits, setWeeklyVisits] = useState<WeeklyVisitItem[]>([]);
+  const [weeklyMissions, setWeeklyMissions] = useState<WeeklyMissionSeller[]>([]);
   const [loading, setLoading] = useState(true);
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
@@ -216,29 +231,29 @@ export default function HomePage() {
     const weekStart = getCurrentWeekStartDate();
     const cacheKey = `${user?.role || "anon"}:${user?.id || "anon"}:${weekStart}`;
 
-    const loadWeeklyVisits = async () => {
-      if (weeklyVisitsCache && weeklyVisitsCache.key === cacheKey && weeklyVisitsCache.expiresAt > Date.now()) {
-        setWeeklyVisits(weeklyVisitsCache.payload);
+    const loadWeeklyMissions = async () => {
+      if (weeklyMissionsCache && weeklyMissionsCache.key === cacheKey && weeklyMissionsCache.expiresAt > Date.now()) {
+        setWeeklyMissions(weeklyMissionsCache.payload);
         return;
       }
 
       try {
-        const response = await api.get<WeeklyVisitItem[]>(`/reports/weekly-visits?weekStart=${weekStart}`);
+        const response = await api.get<WeeklyMissionSeller[]>(`/reports/weekly-missions?weekStart=${weekStart}`);
         if (!active) return;
         const payload = Array.isArray(response.data) ? response.data : [];
-        setWeeklyVisits(payload);
-        weeklyVisitsCache = {
+        setWeeklyMissions(payload);
+        weeklyMissionsCache = {
           key: cacheKey,
           payload,
-          expiresAt: Date.now() + WEEKLY_VISITS_CACHE_TTL_MS
+          expiresAt: Date.now() + WEEKLY_MISSIONS_CACHE_TTL_MS
         };
       } catch {
         if (!active) return;
-        setWeeklyVisits([]);
+        setWeeklyMissions([]);
       }
     };
 
-    void loadWeeklyVisits();
+    void loadWeeklyMissions();
     return () => {
       active = false;
     };
@@ -498,11 +513,32 @@ export default function HomePage() {
     };
   }, [coolingClients.count, coolingClients.unavailable, opportunities]);
 
-  const weeklyVisitSummary = useMemo(() => {
-    const sorted = [...weeklyVisits].sort((a, b) => b.visitsDone - a.visitsDone || a.name.localeCompare(b.name, "pt-BR"));
-    const own = sorted.find((item) => item.userId === user?.id) ?? sorted[0] ?? null;
-    return { own, top3: sorted.slice(0, 3) };
-  }, [weeklyVisits, user?.id]);
+  const weeklyMissionSummary = useMemo(() => {
+    const getMissionByKey = (seller: WeeklyMissionSeller, key: WeeklyMission["key"]) =>
+      seller.missions.find((mission) => mission.key === key) ?? null;
+
+    const ranking = [...weeklyMissions]
+      .map((seller) => {
+        const mainMission = getMissionByKey(seller, "visits_25");
+        return {
+          ...seller,
+          mainMission,
+          mainMissionProgress: Number(mainMission?.progress ?? 0)
+        };
+      })
+      .sort((a, b) => b.mainMissionProgress - a.mainMissionProgress || a.name.localeCompare(b.name, "pt-BR"));
+
+    const own = ranking.find((seller) => seller.userId === user?.id) ?? ranking[0] ?? null;
+    return {
+      own,
+      top3: ranking.slice(0, 3)
+    };
+  }, [weeklyMissions, user?.id]);
+
+  const ownWeeklyMissions = useMemo(() => {
+    const fallback = weeklyMissionSummary.own;
+    return fallback?.missions ?? [];
+  }, [weeklyMissionSummary.own]);
 
   const getMedalLabel = (medal: WeeklyVisitItem["medal"]) => {
     if (medal === "gold") return "🥇 Ouro";
@@ -617,34 +653,48 @@ export default function HomePage() {
         <article className={blockClass}>
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Disciplina semanal</p>
-              <h2 className="text-lg font-semibold text-slate-900">Meta semanal de visitas</h2>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Gamificação</p>
+              <h2 className="text-lg font-semibold text-slate-900">Missões da Semana</h2>
             </div>
           </div>
 
-          {weeklyVisitSummary.own ? (
+          {weeklyMissionSummary.own ? (
             <>
-              <div className="rounded-lg bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Seu progresso na semana (seg-dom)</p>
-                <p className="mt-1 text-2xl font-bold text-slate-900">
-                  {weeklyVisitSummary.own.visitsDone}/{weeklyVisitSummary.own.goal}
-                </p>
-                <p className={`text-sm font-medium ${getMedalTone(weeklyVisitSummary.own.medal)}`}>{getMedalLabel(weeklyVisitSummary.own.medal)}</p>
-                <p className="mt-1 text-xs text-slate-600">
-                  {weeklyVisitSummary.own.missing > 0
-                    ? `Faltam ${weeklyVisitSummary.own.missing} visita(s) para bater a meta. Você está no caminho!`
-                    : "Meta atingida! Continue nesse ritmo incrível. 🚀"}
-                </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {ownWeeklyMissions.map((mission) => {
+                  const progress = Number(mission.progress || 0);
+                  const target = Number(mission.target || 0);
+                  const safePercent = target > 0 ? Math.max(0, Math.min((progress / target) * 100, 100)) : mission.done ? 100 : 0;
+                  const motivational = mission.done
+                    ? "Concluída! Excelente consistência. 🚀"
+                    : `Falta ${Math.max(target - progress, 0)} para completar.`;
+
+                  return (
+                    <div key={mission.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium text-slate-700">{mission.title}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900">
+                        {progress}/{target}
+                      </p>
+                      <div className="mt-1 h-1.5 rounded-full bg-slate-200">
+                        <div className="h-1.5 rounded-full bg-brand-600" style={{ width: `${safePercent}%` }} />
+                      </div>
+                      {mission.key === "visits_25" && mission.medal && (
+                        <p className={`mt-1 text-xs font-medium ${getMedalTone(mission.medal)}`}>{getMedalLabel(mission.medal)}</p>
+                      )}
+                      <p className={`mt-1 text-xs ${mission.done ? "text-emerald-700" : "text-slate-600"}`}>{motivational}</p>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="mt-3 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top 3 da semana</p>
-                {weeklyVisitSummary.top3.map((item, index) => (
+                {weeklyMissionSummary.top3.map((item, index) => (
                   <div key={item.userId} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
                     <p className="text-sm text-slate-700">
                       {index + 1}º · <span className="font-medium text-slate-900">{item.name}</span>
                     </p>
-                    <p className="text-sm font-semibold text-slate-900">{item.visitsDone} visitas</p>
+                    <p className="text-sm font-semibold text-slate-900">{item.mainMissionProgress} visitas</p>
                   </div>
                 ))}
               </div>
