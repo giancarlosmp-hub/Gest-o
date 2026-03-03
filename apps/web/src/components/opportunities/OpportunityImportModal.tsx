@@ -211,6 +211,7 @@ export default function OpportunityImportModal({
   const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [createClientIfMissing, setCreateClientIfMissing] = useState(false);
 
   const counters = useMemo(
     () => ({
@@ -228,6 +229,7 @@ export default function OpportunityImportModal({
     setMapping({});
     setPreviewRows([]);
     setIsImporting(false);
+    setCreateClientIfMissing(false);
     onClose();
   };
 
@@ -287,7 +289,10 @@ export default function OpportunityImportModal({
     setIsImporting(true);
     try {
       const validRows = previewRows.filter((row) => row.status === "valid").map((row) => row.payload);
-      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", { rows: validRows });
+      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
+        rows: validRows,
+        options: { createClientIfMissing }
+      });
       const created = data?.created ?? data?.totalCreated ?? data?.totalImportados ?? 0;
       const ignored = data?.ignored ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
       const errors = data?.errors ?? [];
@@ -361,6 +366,16 @@ export default function OpportunityImportModal({
             <span className="font-semibold text-emerald-700">{counters.valid} válidas</span> ·{" "}
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
+
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={createClientIfMissing}
+              onChange={(event) => setCreateClientIfMissing(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-500"
+            />
+            Criar cliente automaticamente quando não encontrado
+          </label>
 
           {detectedHeaders.length ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
