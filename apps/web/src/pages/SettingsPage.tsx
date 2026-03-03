@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import CrudSimplePage from "./CrudSimplePage";
 import ActivityKpisPage from "./ActivityKpisPage";
+import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPanel";
 
-type SettingsSection = "kpis" | "users";
+type SettingsSection = "kpis" | "discipline" | "users";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -13,6 +14,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     label: "KPIs de Atividades",
     description: "Defina metas mensais por vendedor para acompanhar produtividade e execução comercial.",
     icon: Target
+  },
+  {
+    id: "discipline",
+    label: "Disciplina Semanal",
+    description: "Configure a meta mínima de visitas por semana para monitorar a execução de campo.",
+    icon: Settings2
   },
   {
     id: "users",
@@ -28,9 +35,11 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
 
   if (normalizedSection === "users" || normalizedSection === "usuarios") return "users";
   if (normalizedSection === "kpis" || normalizedSection === "kpis-atividades") return "kpis";
+  if (normalizedSection === "discipline" || normalizedSection === "disciplina") return "discipline";
 
   if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
+  if (normalizedHash === "#disciplina" || normalizedHash === "#discipline") return "discipline";
 
   return "kpis";
 }
@@ -67,7 +76,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-2" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-3" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -102,6 +111,8 @@ export default function SettingsPage() {
 
       {activeSection === "kpis" ? (
         <ActivityKpisPage embedded />
+      ) : activeSection === "discipline" ? (
+        <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage

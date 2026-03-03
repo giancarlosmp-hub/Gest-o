@@ -16,7 +16,8 @@ import {
   userActivationSchema,
   userCreateSchema,
   userResetPasswordSchema,
-  userRoleUpdateSchema
+  userRoleUpdateSchema,
+  weeklyVisitMinimumSchema
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -141,6 +142,32 @@ const getMonthRangeFromKey = (monthKey: string) => {
     start: new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0)),
     end: new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
   };
+};
+
+const getWeekRangeFromMonday = (weekStartRaw: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartRaw)) return null;
+  const start = normalizeDateToUtc(weekStartRaw);
+  if (!start) return null;
+
+  const day = start.getUTCDay();
+  if (day !== 1) return null;
+
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  end.setUTCHours(26, 59, 59, 999);
+
+  return { start, end };
+};
+
+const getMinimumWeeklyVisits = async () => {
+  const config = await prisma.appConfig.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { id: 1, minimumWeeklyVisits: 15 },
+    select: { minimumWeeklyVisits: true }
+  });
+
+  return config.minimumWeeklyVisits;
 };
 
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
@@ -967,6 +994,76 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     opportunitiesGenerated,
     sellers: sellers.sort((a, b) => b.executionRate - a.executionRate)
   });
+});
+
+router.get("/reports/weekly-discipline", async (req, res) => {
+  const weekStart = String(req.query.weekStart || "").trim();
+  const range = getWeekRangeFromMonday(weekStart);
+
+  if (!range) {
+    return res.status(400).json({ message: "weekStart deve estar no formato YYYY-MM-DD e ser uma segunda-feira." });
+  }
+
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const [minimumRequired, sellers, plannedBySeller, executedBySeller] = await Promise.all([
+    getMinimumWeeklyVisits(),
+    prisma.user.findMany({
+      where: {
+        role: "vendedor",
+        isActive: true,
+        ...(scopedSellerId ? { id: scopedSellerId } : {})
+      },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" }
+    }),
+    prisma.agendaEvent.groupBy({
+      by: ["sellerId"],
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: range.start, lte: range.end },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      _count: { _all: true }
+    }),
+    prisma.agendaEvent.groupBy({
+      by: ["sellerId"],
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: range.start, lte: range.end },
+        stops: {
+          some: {
+            checkOutAt: { not: null }
+          }
+        },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      _count: { _all: true }
+    })
+  ]);
+
+  const plannedMap = plannedBySeller.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._count._all;
+    return acc;
+  }, {});
+
+  const executedMap = executedBySeller.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._count._all;
+    return acc;
+  }, {});
+
+  return res.json(
+    sellers.map((seller) => {
+      const planned = plannedMap[seller.id] || 0;
+      return {
+        sellerId: seller.id,
+        sellerName: seller.name,
+        planned,
+        executed: executedMap[seller.id] || 0,
+        minimumRequired,
+        belowMinimum: planned < minimumRequired
+      };
+    })
+  );
 });
 
 router.get("/reports/discipline-ranking", async (req, res) => {
@@ -2746,6 +2843,28 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     nextStepDate: updated.nextStepDate ? updated.nextStepDate.toISOString() : null
   });
 });
+
+
+router.get("/settings/weekly-visit-minimum", async (_req, res) => {
+  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
+  return res.json({ minimumWeeklyVisits });
+});
+
+router.put(
+  "/settings/weekly-visit-minimum",
+  authorize("diretor"),
+  validateBody(weeklyVisitMinimumSchema),
+  async (req, res) => {
+    const config = await prisma.appConfig.upsert({
+      where: { id: 1 },
+      update: { minimumWeeklyVisits: req.body.minimumWeeklyVisits },
+      create: { id: 1, minimumWeeklyVisits: req.body.minimumWeeklyVisits },
+      select: { minimumWeeklyVisits: true }
+    });
+
+    return res.json(config);
+  }
+);
 
 
 router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
