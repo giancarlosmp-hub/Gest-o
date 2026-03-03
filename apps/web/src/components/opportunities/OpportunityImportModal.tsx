@@ -65,6 +65,7 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
   { key: "probability", label: "Probabilidade (%)", required: false, aliases: ["probability", "probabilidade"] },
   { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] }
 ];
+
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
 
 const downloadTemplate = () => {
@@ -149,11 +150,12 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     const status = normalizeTextValue(getMappedValue(row, "status")).toLowerCase();
     const probabilityResult = parseDecimalValue(getMappedValue(row, "probability"));
     const probability = probabilityResult.isInvalid ? Number.NaN : probabilityResult.parsedValue;
+
     const title = normalizeTextValue(getMappedValue(row, "title"));
     const clientNameOrId = normalizeTextValue(getMappedValue(row, "clientNameOrId"));
 
     const previewRow: OpportunityPreviewRow = {
-      line: index + 2, // linha 1 é cabeçalho
+      line: index + 2,
       title,
       clientId: clientNameOrId,
       value: valueResult.isInvalid ? Number.NaN : valueResult.parsedValue,
@@ -211,7 +213,10 @@ export default function OpportunityImportModal({
   const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+
+  // ✅ Mantém as duas opções (resolve o conflito)
   const [isDryRun, setIsDryRun] = useState(false);
+  const [createClientIfMissing, setCreateClientIfMissing] = useState(false);
 
   const counters = useMemo(
     () => ({
@@ -230,6 +235,7 @@ export default function OpportunityImportModal({
     setPreviewRows([]);
     setIsImporting(false);
     setIsDryRun(false);
+    setCreateClientIfMissing(false);
     onClose();
   };
 
@@ -289,12 +295,15 @@ export default function OpportunityImportModal({
     setIsImporting(true);
     try {
       const validRows = previewRows.filter((row) => row.status === "valid").map((row) => row.payload);
+
       const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
         rows: validRows,
         options: {
-          dryRun: isDryRun
+          dryRun: isDryRun,
+          createClientIfMissing
         }
       });
+
       const created = data?.created ?? data?.totalCreated ?? data?.totalImportados ?? 0;
       const ignored = data?.ignored ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
       const errors = data?.errors ?? [];
@@ -302,21 +311,21 @@ export default function OpportunityImportModal({
       toast.success(`${isDryRun ? "Simulação concluída" : "Importação concluída"}: ${created} criadas, ${ignored} ignoradas`, {
         action: errors.length
           ? {
-            label: "Ver detalhes",
-            onClick: () => {
-              toast.message(
-                <div className="space-y-1">
-                  <p className="font-semibold">Erros da importação</p>
-                  <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-4 text-xs">
-                    {errors.map((item, index) => {
-                      const row = item.row ?? item.rowNumber ?? "-";
-                      return <li key={`${row}-${index}`}>Linha {row}: {item.message || "Erro não especificado"}</li>;
-                    })}
-                  </ul>
-                </div>
-              );
+              label: "Ver detalhes",
+              onClick: () => {
+                toast.message(
+                  <div className="space-y-1">
+                    <p className="font-semibold">Erros da importação</p>
+                    <ul className="max-h-40 list-disc space-y-1 overflow-y-auto pl-4 text-xs">
+                      {errors.map((item, index) => {
+                        const row = item.row ?? item.rowNumber ?? "-";
+                        return <li key={`${row}-${index}`}>Linha {row}: {item.message || "Erro não especificado"}</li>;
+                      })}
+                    </ul>
+                  </div>
+                );
+              }
             }
-          }
           : undefined
       });
 
@@ -369,16 +378,29 @@ export default function OpportunityImportModal({
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
 
-          <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-slate-300"
-              checked={isDryRun}
-              onChange={(event) => setIsDryRun(event.target.checked)}
-              disabled={isImporting}
-            />
-            Validar primeiro (simulação)
-          </label>
+          <div className="flex flex-wrap gap-4">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300"
+                checked={isDryRun}
+                onChange={(event) => setIsDryRun(event.target.checked)}
+                disabled={isImporting}
+              />
+              Validar primeiro (simulação)
+            </label>
+
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={createClientIfMissing}
+                onChange={(event) => setCreateClientIfMissing(event.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-500"
+                disabled={isImporting}
+              />
+              Criar cliente automaticamente quando não encontrado
+            </label>
+          </div>
 
           {detectedHeaders.length ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -392,6 +414,7 @@ export default function OpportunityImportModal({
                   Aplicar mapeamento
                 </button>
               </div>
+
               <div className="grid gap-3 md:grid-cols-2">
                 {IMPORT_FIELDS.map((field) => (
                   <div key={field.key} className="space-y-1">
@@ -403,10 +426,13 @@ export default function OpportunityImportModal({
                       className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
                       value={mapping[field.key] ?? ""}
                       onChange={(event) => setMapping((current) => ({ ...current, [field.key]: event.target.value }))}
+                      disabled={isImporting}
                     >
                       <option value="">{field.required ? "— Selecione —" : "— Não informar —"}</option>
                       {detectedHeaders.map((header) => (
-                        <option key={`${field.key}-${header}`} value={header}>{header}</option>
+                        <option key={`${field.key}-${header}`} value={header}>
+                          {header}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -473,7 +499,7 @@ export default function OpportunityImportModal({
             className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isImporting || counters.totalRead === 0 || counters.error > 0}
           >
-            {isImporting ? (isDryRun ? "Simulando..." : "Importando...") : (isDryRun ? "Simular" : "Importar")}
+            {isImporting ? (isDryRun ? "Simulando..." : "Importando...") : isDryRun ? "Simular" : "Importar"}
           </button>
         </div>
       </div>
