@@ -876,7 +876,13 @@ export default function OpportunitiesPage() {
         onQuickCreateClient={onQuickCreateClient}
       />
 
-      <OpportunityImportModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />
+      <OpportunityImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImported={async () => {
+          await load();
+        }}
+      />
 
       {viewMode === "list" ? (
 
