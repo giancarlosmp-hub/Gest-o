@@ -78,6 +78,9 @@ type DisciplineRankingItem = {
   executionRate: number;
   punctualRate: number;
   followUpRate: number;
+  disciplineScoreBase: number;
+  volumeFactor: number;
+  disciplineScoreFinal: number;
   disciplineScore: number;
   isUnderExecutionThreshold: boolean;
   hasInactivityFlag: boolean;
@@ -1105,18 +1108,20 @@ export default function DashboardPage() {
                     <td className="py-2.5 pr-3 font-medium text-slate-800">
                       <div className="inline-flex items-center gap-2">
                         <span>{row.sellerName}</span>
-                        {row.hasInactivityFlag || row.isUnderExecutionThreshold ? (
+                        {row.hasInactivityFlag || row.isUnderExecutionThreshold || row.volumeFactor < 1 ? (
                           <span
                             className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-600"
                             title={[
                               row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
                               row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                              row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
                             ]
                               .filter(Boolean)
                               .join(" ")}
                             aria-label={[
                               row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
                               row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                              row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : null,
                             ]
                               .filter(Boolean)
                               .join(" ")}
@@ -1126,7 +1131,21 @@ export default function DashboardPage() {
                     </td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
-                    <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.disciplineScore)}</td>
+                    <td
+                      className="py-2.5 pr-3 text-slate-700"
+                      title={row.volumeFactor < 1 ? "Score ajustado pelo volume mínimo semanal" : undefined}
+                    >
+                      <span className="inline-flex items-center gap-1.5">
+                        <span>{formatPercentBR(row.disciplineScoreFinal)}</span>
+                        {row.volumeFactor < 1 ? (
+                          <span
+                            className="inline-flex h-2 w-2 rounded-full bg-amber-500"
+                            title="Score ajustado pelo volume mínimo semanal"
+                            aria-label="Score ajustado pelo volume mínimo semanal"
+                          />
+                        ) : null}
+                      </span>
+                    </td>
                   </tr>
                 );
               })}
