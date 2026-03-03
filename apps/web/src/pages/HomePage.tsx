@@ -50,6 +50,18 @@ type CoolingClientsState = {
   message?: string;
 };
 
+type WeeklyVisitItem = {
+  userId: string;
+  name: string;
+  visitsDone: number;
+  goal: number;
+  medal: "gold" | "silver" | "bronze" | "none";
+  missing: number;
+};
+
+const WEEKLY_VISITS_CACHE_TTL_MS = 45_000;
+let weeklyVisitsCache: { key: string; expiresAt: number; payload: WeeklyVisitItem[] } | null = null;
+
 type PipelineOpportunity = Opportunity & {
   priorityType: "followup_overdue" | "opportunity_overdue" | "proposal_no_response";
   daysLate: number;
@@ -68,6 +80,16 @@ function getTodayBoundaries() {
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   return { start, end };
+}
+
+function getCurrentWeekStartDate() {
+  const today = new Date();
+  const day = today.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday);
+  const local = new Date(monday.getTime() - monday.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function getMonthBusinessDays(date: Date) {
@@ -123,6 +145,7 @@ export default function HomePage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
+  const [weeklyVisits, setWeeklyVisits] = useState<WeeklyVisitItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
@@ -187,6 +210,39 @@ export default function HomePage() {
     };
   }, [dashboardQueryKey, refreshReminders]);
 
+
+  useEffect(() => {
+    let active = true;
+    const weekStart = getCurrentWeekStartDate();
+    const cacheKey = `${user?.role || "anon"}:${user?.id || "anon"}:${weekStart}`;
+
+    const loadWeeklyVisits = async () => {
+      if (weeklyVisitsCache && weeklyVisitsCache.key === cacheKey && weeklyVisitsCache.expiresAt > Date.now()) {
+        setWeeklyVisits(weeklyVisitsCache.payload);
+        return;
+      }
+
+      try {
+        const response = await api.get<WeeklyVisitItem[]>(`/reports/weekly-visits?weekStart=${weekStart}`);
+        if (!active) return;
+        const payload = Array.isArray(response.data) ? response.data : [];
+        setWeeklyVisits(payload);
+        weeklyVisitsCache = {
+          key: cacheKey,
+          payload,
+          expiresAt: Date.now() + WEEKLY_VISITS_CACHE_TTL_MS
+        };
+      } catch {
+        if (!active) return;
+        setWeeklyVisits([]);
+      }
+    };
+
+    void loadWeeklyVisits();
+    return () => {
+      active = false;
+    };
+  }, [user?.id, user?.role]);
   const todayDateLabel = useMemo(
     () =>
       new Intl.DateTimeFormat("pt-BR", {
@@ -442,6 +498,26 @@ export default function HomePage() {
     };
   }, [coolingClients.count, coolingClients.unavailable, opportunities]);
 
+  const weeklyVisitSummary = useMemo(() => {
+    const sorted = [...weeklyVisits].sort((a, b) => b.visitsDone - a.visitsDone || a.name.localeCompare(b.name, "pt-BR"));
+    const own = sorted.find((item) => item.userId === user?.id) ?? sorted[0] ?? null;
+    return { own, top3: sorted.slice(0, 3) };
+  }, [weeklyVisits, user?.id]);
+
+  const getMedalLabel = (medal: WeeklyVisitItem["medal"]) => {
+    if (medal === "gold") return "🥇 Ouro";
+    if (medal === "silver") return "🥈 Prata";
+    if (medal === "bronze") return "🥉 Bronze";
+    return "Sem medalha";
+  };
+
+  const getMedalTone = (medal: WeeklyVisitItem["medal"]) => {
+    if (medal === "gold") return "text-amber-600";
+    if (medal === "silver") return "text-slate-600";
+    if (medal === "bronze") return "text-orange-700";
+    return "text-slate-500";
+  };
+
   const getPipelinePriorityLabel = (type: PipelineOpportunity["priorityType"]) => {
     if (type === "followup_overdue") return "Follow-up vencido";
     if (type === "opportunity_overdue") return "Oportunidade atrasada";
@@ -536,6 +612,46 @@ export default function HomePage() {
               );
             })}
           </div>
+        </article>
+
+        <article className={blockClass}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Disciplina semanal</p>
+              <h2 className="text-lg font-semibold text-slate-900">Meta semanal de visitas</h2>
+            </div>
+          </div>
+
+          {weeklyVisitSummary.own ? (
+            <>
+              <div className="rounded-lg bg-slate-50 p-3">
+                <p className="text-xs text-slate-500">Seu progresso na semana (seg-dom)</p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {weeklyVisitSummary.own.visitsDone}/{weeklyVisitSummary.own.goal}
+                </p>
+                <p className={`text-sm font-medium ${getMedalTone(weeklyVisitSummary.own.medal)}`}>{getMedalLabel(weeklyVisitSummary.own.medal)}</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  {weeklyVisitSummary.own.missing > 0
+                    ? `Faltam ${weeklyVisitSummary.own.missing} visita(s) para bater a meta. Você está no caminho!`
+                    : "Meta atingida! Continue nesse ritmo incrível. 🚀"}
+                </p>
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top 3 da semana</p>
+                {weeklyVisitSummary.top3.map((item, index) => (
+                  <div key={item.userId} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <p className="text-sm text-slate-700">
+                      {index + 1}º · <span className="font-medium text-slate-900">{item.name}</span>
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">{item.visitsDone} visitas</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">Ainda não há visitas concluídas nesta semana. Bora começar com tudo!</p>
+          )}
         </article>
 
         <article className={blockClass}>

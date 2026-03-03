@@ -199,59 +199,66 @@ const getWeekRangeFromMonday = (weekStartRaw: string) => {
   return { start, end };
 };
 
-const DEFAULT_MINIMUM_WEEKLY_VISITS = 25;
-const MINIMUM_WEEKLY_VISITS_KEY = "minimumWeeklyVisits";
+const DEFAULT_WEEKLY_VISIT_GOAL = 25;
+const WEEKLY_VISIT_GOAL_KEY = "weeklyVisitGoal";
 const APP_CONFIG_CACHE_TTL_MS = 60_000;
 
-const minimumWeeklyVisitsCache: {
+const weeklyVisitGoalCache: {
   value: number;
   expiresAt: number;
   pending: Promise<number> | null;
 } = {
-  value: DEFAULT_MINIMUM_WEEKLY_VISITS,
+  value: DEFAULT_WEEKLY_VISIT_GOAL,
   expiresAt: 0,
   pending: null
 };
 
-const parseMinimumWeeklyVisits = (value: string | null | undefined) => {
+const parseWeeklyVisitGoal = (value: string | null | undefined) => {
   const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MINIMUM_WEEKLY_VISITS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_WEEKLY_VISIT_GOAL;
 };
 
-const getMinimumWeeklyVisits = async () => {
+const getWeeklyVisitGoal = async () => {
   const now = Date.now();
-  if (minimumWeeklyVisitsCache.expiresAt > now) {
-    return minimumWeeklyVisitsCache.value;
+  if (weeklyVisitGoalCache.expiresAt > now) {
+    return weeklyVisitGoalCache.value;
   }
 
-  if (minimumWeeklyVisitsCache.pending) {
-    return minimumWeeklyVisitsCache.pending;
+  if (weeklyVisitGoalCache.pending) {
+    return weeklyVisitGoalCache.pending;
   }
 
-  minimumWeeklyVisitsCache.pending = (async () => {
+  weeklyVisitGoalCache.pending = (async () => {
     try {
       const config = await prisma.appConfig.upsert({
-        where: { key: MINIMUM_WEEKLY_VISITS_KEY },
+        where: { key: WEEKLY_VISIT_GOAL_KEY },
         update: {},
-        create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(DEFAULT_MINIMUM_WEEKLY_VISITS) },
+        create: { key: WEEKLY_VISIT_GOAL_KEY, value: String(DEFAULT_WEEKLY_VISIT_GOAL) },
         select: { value: true }
       });
 
-      const parsedValue = parseMinimumWeeklyVisits(config.value);
-      minimumWeeklyVisitsCache.value = parsedValue;
-      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      const parsedValue = parseWeeklyVisitGoal(config.value);
+      weeklyVisitGoalCache.value = parsedValue;
+      weeklyVisitGoalCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
       return parsedValue;
     } catch (error) {
-      console.error("[appConfig] Falha ao obter minimumWeeklyVisits. Usando fallback padrão.", error);
-      minimumWeeklyVisitsCache.value = DEFAULT_MINIMUM_WEEKLY_VISITS;
-      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
-      return DEFAULT_MINIMUM_WEEKLY_VISITS;
+      console.error("[appConfig] Falha ao obter weeklyVisitGoal. Usando fallback padrão.", error);
+      weeklyVisitGoalCache.value = DEFAULT_WEEKLY_VISIT_GOAL;
+      weeklyVisitGoalCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      return DEFAULT_WEEKLY_VISIT_GOAL;
     } finally {
-      minimumWeeklyVisitsCache.pending = null;
+      weeklyVisitGoalCache.pending = null;
     }
   })();
 
-  return minimumWeeklyVisitsCache.pending;
+  return weeklyVisitGoalCache.pending;
+};
+
+const getWeeklyVisitMedal = (visitsDone: number) => {
+  if (visitsDone >= 25) return "gold" as const;
+  if (visitsDone >= 18) return "silver" as const;
+  if (visitsDone >= 12) return "bronze" as const;
+  return "none" as const;
 };
 
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
@@ -1106,7 +1113,7 @@ router.get("/reports/weekly-discipline", async (req, res) => {
 
   const scopedSellerId = undefined;
   const [minimumRequired, sellers, plannedBySeller, executedBySeller] = await Promise.all([
-    getMinimumWeeklyVisits(),
+    getWeeklyVisitGoal(),
     prisma.user.findMany({
       where: {
         role: "vendedor",
@@ -1166,6 +1173,69 @@ router.get("/reports/weekly-discipline", async (req, res) => {
   );
 });
 
+
+router.get("/reports/weekly-visits", async (req, res) => {
+  const weekStart = String(req.query.weekStart || "").trim();
+  const range = getWeekRangeFromMonday(weekStart);
+
+  if (!range) {
+    return res.status(400).json({ message: "weekStart deve estar no formato YYYY-MM-DD e ser uma segunda-feira." });
+  }
+
+  const canViewAll = req.user!.role === "diretor" || req.user!.role === "gerente";
+  const [goal, sellers, visitsBySeller] = await Promise.all([
+    getWeeklyVisitGoal(),
+    prisma.user.findMany({
+      where: { role: "vendedor", isActive: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        type: "visita",
+        done: true,
+        dueDate: { gte: range.start, lte: range.end }
+      },
+      _count: { _all: true }
+    })
+  ]);
+
+  const visitsMap = visitsBySeller.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = item._count._all;
+    return acc;
+  }, {});
+
+  const ranking = sellers
+    .map((seller) => {
+      const visitsDone = visitsMap[seller.id] || 0;
+      return {
+        userId: seller.id,
+        name: seller.name,
+        visitsDone,
+        goal,
+        medal: getWeeklyVisitMedal(visitsDone),
+        missing: Math.max(goal - visitsDone, 0)
+      };
+    })
+    .sort((a, b) => b.visitsDone - a.visitsDone || a.name.localeCompare(b.name, "pt-BR"));
+
+  if (canViewAll) {
+    return res.json(ranking);
+  }
+
+  const top3 = ranking.slice(0, 3);
+  const own = ranking.find((item) => item.userId === req.user!.id);
+
+  if (!own) {
+    return res.json(top3);
+  }
+
+  const sellerView = new Map(top3.map((item) => [item.userId, item]));
+  sellerView.set(own.userId, own);
+  return res.json(Array.from(sellerView.values()));
+});
+
 router.get("/reports/discipline-ranking", async (req, res) => {
   const fromRaw = req.query.from as string | undefined;
   const toRaw = req.query.to as string | undefined;
@@ -1184,7 +1254,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   const scopedSellerId = undefined;
   const punctualToleranceMs = 10 * 60 * 1000;
   const inactivityWindow = getLastBusinessDaysWindow(3);
-  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
+  const weeklyVisitGoal = await getWeeklyVisitGoal();
 
   const plannedEvents = await prisma.agendaEvent.findMany({
     where: {
@@ -1311,7 +1381,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       const isUnderExecutionThreshold = executionRate < 60;
       const hasInactivityFlag = !activeSellersInWindow.has(stats.sellerId);
       const disciplineScoreBase = isUnderExecutionThreshold ? baseDisciplineScore * 0.9 : baseDisciplineScore;
-      const volumeFactor = stats.planned < minimumWeeklyVisits ? stats.planned / minimumWeeklyVisits : 1;
+      const volumeFactor = stats.planned < weeklyVisitGoal ? stats.planned / weeklyVisitGoal : 1;
       const disciplineScoreFinal = disciplineScoreBase * volumeFactor;
 
       return {
@@ -1462,7 +1532,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
   }
 
   const punctualToleranceMs = 10 * 60 * 1000;
-  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
+  const weeklyVisitGoal = await getWeeklyVisitGoal();
 
   const [sellers, currentSales, previousSales, plannedEvents, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
@@ -1628,7 +1698,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
       const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
       const disciplineScoreBase = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
-      const volumeFactor = discipline.planned < minimumWeeklyVisits ? discipline.planned / minimumWeeklyVisits : 1;
+      const volumeFactor = discipline.planned < weeklyVisitGoal ? discipline.planned / weeklyVisitGoal : 1;
       const metricValue = disciplineScoreBase * volumeFactor;
 
       return {
@@ -3466,8 +3536,8 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
 
 
 router.get("/settings/weekly-visit-minimum", async (_req, res) => {
-  const minimumWeeklyVisits = await getMinimumWeeklyVisits();
-  return res.json({ minimumWeeklyVisits });
+  const weeklyVisitGoal = await getWeeklyVisitGoal();
+  return res.json({ minimumWeeklyVisits: weeklyVisitGoal });
 });
 
 router.put(
@@ -3477,19 +3547,19 @@ router.put(
   async (req, res) => {
     try {
       const config = await prisma.appConfig.upsert({
-        where: { key: MINIMUM_WEEKLY_VISITS_KEY },
+        where: { key: WEEKLY_VISIT_GOAL_KEY },
         update: { value: String(req.body.minimumWeeklyVisits) },
-        create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(req.body.minimumWeeklyVisits) },
+        create: { key: WEEKLY_VISIT_GOAL_KEY, value: String(req.body.minimumWeeklyVisits) },
         select: { value: true }
       });
 
-      const parsedValue = parseMinimumWeeklyVisits(config.value);
-      minimumWeeklyVisitsCache.value = parsedValue;
-      minimumWeeklyVisitsCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
+      const parsedValue = parseWeeklyVisitGoal(config.value);
+      weeklyVisitGoalCache.value = parsedValue;
+      weeklyVisitGoalCache.expiresAt = Date.now() + APP_CONFIG_CACHE_TTL_MS;
       return res.json({ minimumWeeklyVisits: parsedValue });
     } catch (error) {
-      console.error("[appConfig] Falha ao atualizar minimumWeeklyVisits.", error);
-      return res.status(200).json({ minimumWeeklyVisits: DEFAULT_MINIMUM_WEEKLY_VISITS });
+      console.error("[appConfig] Falha ao atualizar weeklyVisitGoal.", error);
+      return res.status(200).json({ minimumWeeklyVisits: DEFAULT_WEEKLY_VISIT_GOAL });
     }
   }
 );

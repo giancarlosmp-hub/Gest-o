@@ -23,9 +23,9 @@ const cityByRegion = {
 
 async function main() {
   await prisma.appConfig.upsert({
-    where: { key: "minimumWeeklyVisits" },
+    where: { key: "weeklyVisitGoal" },
     update: { value: "25" },
-    create: { key: "minimumWeeklyVisits", value: "25" }
+    create: { key: "weeklyVisitGoal", value: "25" }
   });
 
   const diretor = await upsertUser("Diretor Comercial", "diretor@empresa.com", "diretor", "Nacional");
