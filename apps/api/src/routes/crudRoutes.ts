@@ -1024,7 +1024,7 @@ router.get("/reports/weekly-discipline", async (req, res) => {
     return res.status(400).json({ message: "weekStart deve estar no formato YYYY-MM-DD e ser uma segunda-feira." });
   }
 
-  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const scopedSellerId = undefined;
   const [minimumRequired, sellers, plannedBySeller, executedBySeller] = await Promise.all([
     getMinimumWeeklyVisits(),
     prisma.user.findMany({
@@ -1101,7 +1101,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     return res.status(400).json({ message: "Parâmetros from/to inválidos." });
   }
 
-  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const scopedSellerId = undefined;
   const punctualToleranceMs = 10 * 60 * 1000;
   const inactivityWindow = getLastBusinessDaysWindow(3);
   const minimumWeeklyVisits = await getMinimumWeeklyVisits();
@@ -1261,7 +1261,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
   }
 
-  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const scopedSellerId = undefined;
   const { start, end } = getMonthRangeFromKey(month);
   const punctualToleranceMs = 10 * 60 * 1000;
   const stageOrder: Record<string, number> = {
@@ -1459,7 +1459,6 @@ router.get("/reports/commercial-score", async (req, res) => {
   }, {});
 
   const maxOpenOpp = Math.max(...Object.values(openOppCountBySeller), 1);
-  const maxSales = Math.max(...Object.values(salesBySeller), 1);
   const createdOpportunitiesBySeller = createdOpportunitiesInMonth.reduce<Record<string, number>>((acc, item) => {
     acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
@@ -1471,7 +1470,9 @@ router.get("/reports/commercial-score", async (req, res) => {
       const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
       const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
       const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
-      const disciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+      const disciplineScoreBase = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
+      const volumeFactor = discipline.planned >= 25 ? 1 : 0.7 + (discipline.planned / 25) * 0.3;
+      const disciplineScore = disciplineScoreBase * volumeFactor;
 
       const openOpp = openOppCountBySeller[seller.id] || 0;
       const followUpsOnTime = followUpOnTimeBySeller[seller.id] || 0;
@@ -1483,13 +1484,11 @@ router.get("/reports/commercial-score", async (req, res) => {
       const pipelineScore = openOppScore * 0.4 + followUpOnTimeRate * 0.35 + stageAdvanceRate * 0.25;
 
       const soldValue = salesBySeller[seller.id] || 0;
-      const soldValueScore = (soldValue / maxSales) * 100;
       const monthGoal = goalsBySeller[seller.id] || 0;
       const goalAchievementPercent = monthGoal > 0 ? (soldValue / monthGoal) * 100 : 0;
-      const clampedGoalAchievement = Math.min(Math.max(goalAchievementPercent, 0), 100);
-      const resultScore = soldValueScore * 0.5 + clampedGoalAchievement * 0.5;
+      const resultScore = Math.min(Math.max(goalAchievementPercent, 0), 110);
 
-      const finalScore = disciplineScore * 0.4 + pipelineScore * 0.3 + resultScore * 0.3;
+      const finalScore = resultScore * 0.5 + disciplineScore * 0.3 + pipelineScore * 0.2;
       const punctualityPerfect = discipline.executed > 0 && punctualRate === 100;
 
       return {
@@ -1499,6 +1498,12 @@ router.get("/reports/commercial-score", async (req, res) => {
         pipelineScore: Number(pipelineScore.toFixed(2)),
         resultScore: Number(resultScore.toFixed(2)),
         finalScore: Number(finalScore.toFixed(2)),
+        breakdown: {
+          resultadoScore: Number(resultScore.toFixed(2)),
+          disciplinaScore: Number(disciplineScore.toFixed(2)),
+          pipelineScore: Number(pipelineScore.toFixed(2)),
+          finalScore: Number(finalScore.toFixed(2))
+        },
         punctualityPerfect,
         createdOpportunities: createdOpportunitiesBySeller[seller.id] || 0
       };
@@ -1524,6 +1529,7 @@ router.get("/reports/commercial-score", async (req, res) => {
       pipelineScore: row.pipelineScore,
       resultScore: row.resultScore,
       finalScore: row.finalScore,
+      breakdown: row.breakdown,
       level,
       medals
     };
