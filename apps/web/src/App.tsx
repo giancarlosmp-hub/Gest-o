@@ -19,6 +19,7 @@ import ActivitiesPage from "./pages/ActivitiesPage";
 import AgendaPage from "./pages/AgendaPage";
 import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
 import CommercialScorePage from "./pages/CommercialScorePage";
+import AssistenteTecnicoPage from "./pages/AssistenteTecnico";
 
 export default function App() {
   const { user } = useAuth();
@@ -83,6 +84,8 @@ export default function App() {
 
         <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
+
+        <Route path="assistente-tecnico" element={<RoleRoute route="assistenteTecnico"><AssistenteTecnicoPage /></RoleRoute>} />
 
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />

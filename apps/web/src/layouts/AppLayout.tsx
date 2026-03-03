@@ -1,4 +1,4 @@
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, Ruler } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -12,6 +12,7 @@ type SidebarItem = {
   label: string;
   path: string;
   route?: AppRoute;
+  icon?: typeof Ruler;
 };
 
 const items: SidebarItem[] = [
@@ -22,6 +23,13 @@ const items: SidebarItem[] = [
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
   { id: "agenda", label: "Agenda", path: "/agenda" },
+  {
+    id: "assistente-tecnico",
+    label: "Assistente Técnico",
+    path: "/assistente-tecnico",
+    route: "assistenteTecnico",
+    icon: Ruler
+  },
   { id: "relatorios", label: "Relatórios", path: "/relatórios" },
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
@@ -72,6 +80,7 @@ export default function AppLayout() {
               label={item.label}
               badgeCount={badgeCount}
               tooltipText={tooltipText}
+              icon={item.icon}
               onClick={() => setOpen(false)}
             />
           );

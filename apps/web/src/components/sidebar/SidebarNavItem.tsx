@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -5,6 +6,7 @@ type SidebarNavItemProps = {
   to: string;
   active: boolean;
   label: string;
+  icon?: LucideIcon;
   badgeCount?: number;
   tooltipText?: string;
   onClick?: () => void;
@@ -14,6 +16,7 @@ export default function SidebarNavItem({
   to,
   active,
   label,
+  icon: Icon,
   badgeCount = 0,
   tooltipText,
   onClick,
@@ -67,7 +70,10 @@ export default function SidebarNavItem({
           active ? "bg-white text-brand-700" : "hover:bg-brand-600"
         }`}
       >
-        <span>{label}</span>
+        <span className="flex items-center gap-2">
+          {Icon && <Icon size={16} aria-hidden="true" />}
+          <span>{label}</span>
+        </span>
         {shouldShowBadge && (
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-semibold leading-none ${
