@@ -12,8 +12,9 @@ type OpportunityPreviewRow = {
   value?: number;
   stage: string;
   payload: Record<string, unknown>;
-  status: "valid" | "error";
+  status: "valid" | "error" | "duplicate";
   errorMessage?: string;
+  duplicateMessage?: string;
 };
 
 type OpportunityImportFieldKey =
@@ -42,12 +43,22 @@ type ImportErrorItem = {
 
 type OpportunityImportResponse = {
   created?: number;
+  updated?: number;
   ignored?: number;
+  skipped?: number;
   totalCreated?: number;
   totalIgnored?: number;
   totalImportados?: number;
   totalIgnorados?: number;
   errors?: ImportErrorItem[];
+  skippedDetails?: Array<{
+    row: number;
+    reason: string;
+    matchedId?: string;
+    matchedTitle?: string;
+    matchedClientName?: string;
+    matchedCreatedAt?: string;
+  }>;
 };
 
 const TEMPLATE_HEADERS = ["title", "clientNameOrId", "value", "stage", "status", "ownerEmail", "followUpDate", "probability", "notes"];
@@ -217,11 +228,16 @@ export default function OpportunityImportModal({
   // ✅ Mantém as duas opções (resolve o conflito)
   const [isDryRun, setIsDryRun] = useState(false);
   const [createClientIfMissing, setCreateClientIfMissing] = useState(false);
+  const [dedupeEnabled, setDedupeEnabled] = useState(true);
+  const [dedupeWindowDays, setDedupeWindowDays] = useState(30);
+  const [dedupeCompareStatuses, setDedupeCompareStatuses] = useState<"open_only" | "open_and_closed">("open_only");
+  const [dedupeMode, setDedupeMode] = useState<"skip" | "upsert">("skip");
 
   const counters = useMemo(
     () => ({
       totalRead: previewRows.length,
       valid: previewRows.filter((row) => row.status === "valid").length,
+      duplicate: previewRows.filter((row) => row.status === "duplicate").length,
       error: previewRows.filter((row) => row.status === "error").length
     }),
     [previewRows]
@@ -236,6 +252,10 @@ export default function OpportunityImportModal({
     setIsImporting(false);
     setIsDryRun(false);
     setCreateClientIfMissing(false);
+    setDedupeEnabled(true);
+    setDedupeWindowDays(30);
+    setDedupeCompareStatuses("open_only");
+    setDedupeMode("skip");
     onClose();
   };
 
@@ -273,7 +293,8 @@ export default function OpportunityImportModal({
       setRawRows(parsed.rows);
       const resolvedMapping = suggestColumnMapping(parsed.headers, getSavedMappingForUser(user?.id));
       setMapping(resolvedMapping);
-      setPreviewRows(buildPreviewRows(parsed.rows, resolvedMapping));
+      const nextPreviewRows = buildPreviewRows(parsed.rows, resolvedMapping);
+      setPreviewRows(await runDedupePreview(nextPreviewRows));
     } catch (error: any) {
       toast.error(error.message || "Não foi possível processar o arquivo selecionado.");
       setDetectedHeaders([]);
@@ -283,8 +304,51 @@ export default function OpportunityImportModal({
     }
   };
 
-  const handleApplyMapping = () => {
-    setPreviewRows(buildPreviewRows(rawRows, mapping));
+  const runDedupePreview = async (rows: OpportunityPreviewRow[]) => {
+    if (!dedupeEnabled) return rows;
+
+    const validRows = rows.filter((row) => row.status === "valid");
+    if (!validRows.length) return rows;
+
+    try {
+      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
+        rows: validRows.map((row) => row.payload),
+        options: {
+          dryRun: true,
+          createClientIfMissing,
+          dedupe: {
+            enabled: dedupeEnabled,
+            windowDays: dedupeWindowDays,
+            compareStatuses: dedupeCompareStatuses,
+            mode: "skip"
+          }
+        }
+      });
+
+      const duplicatesByRow = new Map((data.skippedDetails || [])
+        .filter((item) => item.reason === "duplicate")
+        .map((item) => [item.row + 1, item]));
+
+      return rows.map((row) => {
+        const duplicate = duplicatesByRow.get(row.line);
+        if (!duplicate) return row;
+
+        const formattedDate = duplicate.matchedCreatedAt ? new Date(duplicate.matchedCreatedAt).toLocaleDateString("pt-BR") : "data desconhecida";
+        return {
+          ...row,
+          status: "duplicate" as const,
+          duplicateMessage: `Possível duplicado de '${duplicate.matchedTitle || "Oportunidade"}' (cliente ${duplicate.matchedClientName || "N/A"}) criada em ${formattedDate}`
+        };
+      });
+    } catch {
+      return rows;
+    }
+  };
+
+  const handleApplyMapping = async () => {
+    const rows = buildPreviewRows(rawRows, mapping);
+    const rowsWithDedupe = await runDedupePreview(rows);
+    setPreviewRows(rowsWithDedupe);
     saveMappingForUser(user?.id, mapping);
     toast.success("Mapeamento aplicado ao preview.");
   };
@@ -300,15 +364,22 @@ export default function OpportunityImportModal({
         rows: validRows,
         options: {
           dryRun: isDryRun,
-          createClientIfMissing
+          createClientIfMissing,
+          dedupe: {
+            enabled: dedupeEnabled,
+            windowDays: dedupeWindowDays,
+            compareStatuses: dedupeCompareStatuses,
+            mode: dedupeMode
+          }
         }
       });
 
       const created = data?.created ?? data?.totalCreated ?? data?.totalImportados ?? 0;
-      const ignored = data?.ignored ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
+      const updated = data?.updated ?? 0;
+      const ignored = data?.ignored ?? data?.skipped ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
       const errors = data?.errors ?? [];
 
-      toast.success(`${isDryRun ? "Simulação concluída" : "Importação concluída"}: ${created} criadas, ${ignored} ignoradas`, {
+      toast.success(`${isDryRun ? "Simulação concluída" : "Concluído"}: ${created} criadas, ${updated} atualizadas, ${ignored} ignoradas (duplicadas)`, {
         action: errors.length
           ? {
               label: "Ver detalhes",
@@ -375,6 +446,7 @@ export default function OpportunityImportModal({
           <p className="text-sm text-slate-600">
             Linhas lidas: <span className="font-semibold text-slate-900">{counters.totalRead}</span> ·{" "}
             <span className="font-semibold text-emerald-700">{counters.valid} válidas</span> ·{" "}
+            <span className="font-semibold text-amber-700">{counters.duplicate} duplicadas</span> ·{" "}
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
 
@@ -400,6 +472,30 @@ export default function OpportunityImportModal({
               />
               Criar cliente automaticamente quando não encontrado
             </label>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-slate-800">Proteção anti-duplicados</p>
+            <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={dedupeEnabled} onChange={(event) => setDedupeEnabled(event.target.checked)} disabled={isImporting} />
+              Evitar duplicados automaticamente
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="text-sm text-slate-700">
+                Janela de comparação (dias)
+                <input type="number" min={7} max={180} value={dedupeWindowDays} onChange={(event) => setDedupeWindowDays(Math.max(7, Math.min(180, Number(event.target.value) || 30)))} className="mt-1 w-full rounded-lg border border-slate-300 p-2" disabled={isImporting || !dedupeEnabled} />
+              </label>
+              <div className="text-sm text-slate-700">
+                <p className="mb-1">Comparar com status</p>
+                <label className="mr-4 inline-flex items-center gap-2"><input type="radio" name="dedupe-status" checked={dedupeCompareStatuses === "open_only"} onChange={() => setDedupeCompareStatuses("open_only")} disabled={isImporting || !dedupeEnabled} />Somente abertas</label>
+                <label className="inline-flex items-center gap-2"><input type="radio" name="dedupe-status" checked={dedupeCompareStatuses === "open_and_closed"} onChange={() => setDedupeCompareStatuses("open_and_closed")} disabled={isImporting || !dedupeEnabled} />Abertas e fechadas</label>
+              </div>
+              <div className="text-sm text-slate-700 md:col-span-2">
+                <p className="mb-1">Ação em duplicado</p>
+                <label className="mr-4 inline-flex items-center gap-2"><input type="radio" name="dedupe-mode" checked={dedupeMode === "skip"} onChange={() => setDedupeMode("skip")} disabled={isImporting || !dedupeEnabled} />Ignorar linha</label>
+                <label className="inline-flex items-center gap-2"><input type="radio" name="dedupe-mode" checked={dedupeMode === "upsert"} onChange={() => setDedupeMode("upsert")} disabled={isImporting || !dedupeEnabled} />Atualizar oportunidade existente (merge)</label>
+              </div>
+            </div>
           </div>
 
           {detectedHeaders.length ? (
@@ -463,8 +559,8 @@ export default function OpportunityImportModal({
                       <td className="px-3 py-2">{row.clientId || "—"}</td>
                       <td className="px-3 py-2">{row.value ?? "—"}</td>
                       <td className="px-3 py-2">{row.stage || "—"}</td>
-                      <td className="px-3 py-2">{row.status === "valid" ? "VÁLIDO" : "ERRO"}</td>
-                      <td className="px-3 py-2">{row.errorMessage || "OK"}</td>
+                      <td className="px-3 py-2">{row.status === "valid" ? "VÁLIDO" : row.status === "duplicate" ? "DUPLICADO" : "ERRO"}</td>
+                      <td className="px-3 py-2">{row.errorMessage || row.duplicateMessage || "OK"}</td>
                     </tr>
                   ))
                 ) : (
