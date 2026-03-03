@@ -1,21 +1,19 @@
 import type { ChangeEvent } from "react";
 
-export type ClientImportFieldKey = "name" | "city" | "state" | "clientType" | "region" | "potentialHa" | "farmSizeHa" | "cnpj" | "segment" | "ownerSellerId";
-
-export type ClientImportFieldDefinition = {
-  key: ClientImportFieldKey;
+export type ImportFieldDefinition<FieldKey extends string> = {
+  key: FieldKey;
   label: string;
   required: boolean;
 };
 
-type ClientImportColumnMappingStepProps = {
-  fields: ClientImportFieldDefinition[];
+type ImportColumnMappingStepProps<FieldKey extends string> = {
+  fields: ImportFieldDefinition<FieldKey>[];
   excelHeaders: string[];
-  mapping: Partial<Record<ClientImportFieldKey, string>>;
-  canMapOwnerSeller: boolean;
+  mapping: Partial<Record<FieldKey, string>>;
+  hiddenFieldKeys?: FieldKey[];
   templateNames: string[];
   selectedTemplateName: string;
-  onChangeMapping: (field: ClientImportFieldKey, value: string) => void;
+  onChangeMapping: (field: FieldKey, value: string) => void;
   onChangeTemplate: (templateName: string) => void;
   onSaveTemplate: () => void;
   onEditTemplate: () => void;
@@ -24,11 +22,11 @@ type ClientImportColumnMappingStepProps = {
   onContinue: () => void;
 };
 
-export function ClientImportColumnMappingStep({
+export function ImportColumnMappingStep<FieldKey extends string>({
   fields,
   excelHeaders,
   mapping,
-  canMapOwnerSeller,
+  hiddenFieldKeys = [],
   templateNames,
   selectedTemplateName,
   onChangeMapping,
@@ -38,14 +36,15 @@ export function ClientImportColumnMappingStep({
   onDeleteTemplate,
   onUseModelHeaders,
   onContinue
-}: ClientImportColumnMappingStepProps) {
-  const visibleFields = canMapOwnerSeller ? fields : fields.filter((field) => field.key !== "ownerSellerId");
+}: ImportColumnMappingStepProps<FieldKey>) {
+  const hiddenKeys = new Set(hiddenFieldKeys);
+  const visibleFields = fields.filter((field) => !hiddenKeys.has(field.key));
 
   const isRequiredFilled = visibleFields
     .filter((field) => field.required)
     .every((field) => Boolean(mapping[field.key]));
 
-  const handleSelectChange = (fieldKey: ClientImportFieldKey) => (event: ChangeEvent<HTMLSelectElement>) => {
+  const handleSelectChange = (fieldKey: FieldKey) => (event: ChangeEvent<HTMLSelectElement>) => {
     onChangeMapping(fieldKey, event.target.value);
   };
 
@@ -122,3 +121,17 @@ export function ClientImportColumnMappingStep({
     </div>
   );
 }
+
+export type ClientImportFieldKey =
+  | "name"
+  | "city"
+  | "state"
+  | "clientType"
+  | "region"
+  | "potentialHa"
+  | "farmSizeHa"
+  | "cnpj"
+  | "segment"
+  | "ownerSellerId";
+export type ClientImportFieldDefinition = ImportFieldDefinition<ClientImportFieldKey>;
+export const ClientImportColumnMappingStep = ImportColumnMappingStep<ClientImportFieldKey>;

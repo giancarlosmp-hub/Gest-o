@@ -8,6 +8,7 @@ import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
+import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -176,6 +177,7 @@ export default function OpportunitiesPage() {
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [opportunityModalMode, setOpportunityModalMode] = useState<OpportunityModalMode>("create");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -765,6 +767,13 @@ export default function OpportunitiesPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            onClick={() => setIsImportModalOpen(true)}
+          >
+            Importar
+          </button>
+          <button
+            type="button"
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
             onClick={openCreateModal}
           >
@@ -866,6 +875,8 @@ export default function OpportunitiesPage() {
         sanitizeNumericInput={sanitizeNumericInput}
         onQuickCreateClient={onQuickCreateClient}
       />
+
+      <OpportunityImportModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} />
 
       {viewMode === "list" ? (
 
