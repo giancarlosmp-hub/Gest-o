@@ -199,15 +199,28 @@ const getWeekRangeFromMonday = (weekStartRaw: string) => {
   return { start, end };
 };
 
-const getMinimumWeeklyVisits = async () => {
-  const config = await prisma.appConfig.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1, minimumWeeklyVisits: 15 },
-    select: { minimumWeeklyVisits: true }
-  });
+const DEFAULT_MINIMUM_WEEKLY_VISITS = 25;
+const MINIMUM_WEEKLY_VISITS_KEY = "minimumWeeklyVisits";
 
-  return config.minimumWeeklyVisits;
+const parseMinimumWeeklyVisits = (value: string | null | undefined) => {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MINIMUM_WEEKLY_VISITS;
+};
+
+const getMinimumWeeklyVisits = async () => {
+  try {
+    const config = await prisma.appConfig.upsert({
+      where: { key: MINIMUM_WEEKLY_VISITS_KEY },
+      update: {},
+      create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(DEFAULT_MINIMUM_WEEKLY_VISITS) },
+      select: { value: true }
+    });
+
+    return parseMinimumWeeklyVisits(config.value);
+  } catch (error) {
+    console.error("[appConfig] Falha ao obter minimumWeeklyVisits. Usando fallback padrão.", error);
+    return DEFAULT_MINIMUM_WEEKLY_VISITS;
+  }
 };
 
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
@@ -3313,14 +3326,19 @@ router.put(
   authorize("diretor"),
   validateBody(weeklyVisitMinimumSchema),
   async (req, res) => {
-    const config = await prisma.appConfig.upsert({
-      where: { id: 1 },
-      update: { minimumWeeklyVisits: req.body.minimumWeeklyVisits },
-      create: { id: 1, minimumWeeklyVisits: req.body.minimumWeeklyVisits },
-      select: { minimumWeeklyVisits: true }
-    });
+    try {
+      const config = await prisma.appConfig.upsert({
+        where: { key: MINIMUM_WEEKLY_VISITS_KEY },
+        update: { value: String(req.body.minimumWeeklyVisits) },
+        create: { key: MINIMUM_WEEKLY_VISITS_KEY, value: String(req.body.minimumWeeklyVisits) },
+        select: { value: true }
+      });
 
-    return res.json(config);
+      return res.json({ minimumWeeklyVisits: parseMinimumWeeklyVisits(config.value) });
+    } catch (error) {
+      console.error("[appConfig] Falha ao atualizar minimumWeeklyVisits.", error);
+      return res.status(200).json({ minimumWeeklyVisits: DEFAULT_MINIMUM_WEEKLY_VISITS });
+    }
   }
 );
 

@@ -261,8 +261,9 @@ model Sale {
 }
 
 model AppConfig {
-  id                    Int      @id
-  minimumWeeklyVisits   Int      @default(15)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
