@@ -211,6 +211,7 @@ export default function OpportunityImportModal({
   const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [isDryRun, setIsDryRun] = useState(false);
 
   const counters = useMemo(
     () => ({
@@ -228,6 +229,7 @@ export default function OpportunityImportModal({
     setMapping({});
     setPreviewRows([]);
     setIsImporting(false);
+    setIsDryRun(false);
     onClose();
   };
 
@@ -287,12 +289,17 @@ export default function OpportunityImportModal({
     setIsImporting(true);
     try {
       const validRows = previewRows.filter((row) => row.status === "valid").map((row) => row.payload);
-      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", { rows: validRows });
+      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
+        rows: validRows,
+        options: {
+          dryRun: isDryRun
+        }
+      });
       const created = data?.created ?? data?.totalCreated ?? data?.totalImportados ?? 0;
       const ignored = data?.ignored ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
       const errors = data?.errors ?? [];
 
-      toast.success(`Importação concluída: ${created} criadas, ${ignored} ignoradas`, {
+      toast.success(`${isDryRun ? "Simulação concluída" : "Importação concluída"}: ${created} criadas, ${ignored} ignoradas`, {
         action: errors.length
           ? {
             label: "Ver detalhes",
@@ -361,6 +368,17 @@ export default function OpportunityImportModal({
             <span className="font-semibold text-emerald-700">{counters.valid} válidas</span> ·{" "}
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
+
+          <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-300"
+              checked={isDryRun}
+              onChange={(event) => setIsDryRun(event.target.checked)}
+              disabled={isImporting}
+            />
+            Validar primeiro (simulação)
+          </label>
 
           {detectedHeaders.length ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -455,7 +473,7 @@ export default function OpportunityImportModal({
             className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isImporting || counters.totalRead === 0 || counters.error > 0}
           >
-            {isImporting ? "Importando..." : "Importar"}
+            {isImporting ? (isDryRun ? "Simulando..." : "Importando...") : (isDryRun ? "Simular" : "Importar")}
           </button>
         </div>
       </div>
