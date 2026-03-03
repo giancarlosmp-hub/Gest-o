@@ -79,6 +79,8 @@ type DisciplineRankingItem = {
   punctualRate: number;
   followUpRate: number;
   disciplineScore: number;
+  isUnderExecutionThreshold: boolean;
+  hasInactivityFlag: boolean;
 };
 
 const palette = {
@@ -150,6 +152,16 @@ const doughnutCenterTextPlugin: Plugin<"doughnut"> = {
 };
 
 const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
+
+const getCurrentWeekStart = () => {
+  const now = new Date();
+  const day = now.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + diffToMonday);
+  const local = new Date(monday.getTime() - monday.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+};
 
 const getBusinessDaysRemaining = (month: string) => {
   const [year, monthN] = month.split("-").map(Number);
@@ -273,6 +285,7 @@ export default function DashboardPage() {
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [disciplineRanking, setDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
+  const [weeklyDisciplineRanking, setWeeklyDisciplineRanking] = useState<DisciplineRankingItem[]>([]);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -307,8 +320,9 @@ export default function DashboardPage() {
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
       api.get<Activity[]>(`/activities?month=${month}${querySeller}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
+      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
     ])
-      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse]) => {
+      .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse]) => {
         if (signal?.aborted) return;
         setSummary(summaryResponse.data);
         setSeries(seriesResponse.data);
@@ -316,6 +330,7 @@ export default function DashboardPage() {
         setActivityKpis(activityKpisResponse.data);
         setActivities(activitiesResponse.data);
         setDisciplineRanking(disciplineRankingResponse.data);
+        setWeeklyDisciplineRanking(weeklyDisciplineRankingResponse.data);
       })
       .finally(() => {
         dashboardInFlightRef.current.delete(dashboardQueryKey);
@@ -755,6 +770,17 @@ export default function DashboardPage() {
     };
   }, [activityKpis, activities, month, sellers, user?.role]);
 
+  const currentSellerDisciplineStatus = useMemo(() => {
+    if (!user) return null;
+    const row = weeklyDisciplineRanking.find((item) => item.sellerId === user.id);
+    if (!row) return null;
+
+    return {
+      isBelowMinimum: row.executionRate < 60,
+      hasInactivityFlag: row.hasInactivityFlag,
+    };
+  }, [user, weeklyDisciplineRanking]);
+
   const disciplineRankingVisible = useMemo(() => {
     const rankingWithPosition = disciplineRanking.map((item, index) => ({
       ...item,
@@ -788,6 +814,12 @@ export default function DashboardPage() {
           Ver Score Comercial
         </Link>
       </div>
+
+      {currentSellerDisciplineStatus?.isBelowMinimum ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Você está abaixo da disciplina mínima esta semana.
+        </div>
+      ) : null}
       {user?.role !== "vendedor" && (
         <div className={cardClass}>
           <label className="text-sm font-medium text-slate-600">Filtrar vendedor</label>
@@ -1070,7 +1102,28 @@ export default function DashboardPage() {
                 return (
                   <tr key={row.sellerId} className="border-b border-slate-100">
                     <td className="py-2.5 pr-3">{medal || `#${row.position}`}</td>
-                    <td className="py-2.5 pr-3 font-medium text-slate-800">{row.sellerName}</td>
+                    <td className="py-2.5 pr-3 font-medium text-slate-800">
+                      <div className="inline-flex items-center gap-2">
+                        <span>{row.sellerName}</span>
+                        {row.hasInactivityFlag || row.isUnderExecutionThreshold ? (
+                          <span
+                            className="inline-flex h-2.5 w-2.5 rounded-full bg-rose-600"
+                            title={[
+                              row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
+                              row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                            aria-label={[
+                              row.isUnderExecutionThreshold ? "Execução semanal abaixo de 60% (penalidade de 10% no score aplicada)." : null,
+                              row.hasInactivityFlag ? "Inatividade: vendedor sem registro de visita nos últimos 3 dias úteis." : null,
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          />
+                        ) : null}
+                      </div>
+                    </td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.executionRate)}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.punctualRate)}</td>
                     <td className="py-2.5 pr-3 text-slate-700">{formatPercentBR(row.disciplineScore)}</td>
