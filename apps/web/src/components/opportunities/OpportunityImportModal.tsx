@@ -15,6 +15,7 @@ type OpportunityPreviewRow = {
   status: "valid" | "error" | "duplicate";
   errorMessage?: string;
   duplicateMessage?: string;
+  invalidFields?: string[];
 };
 
 type OpportunityImportFieldKey =
@@ -41,6 +42,21 @@ type ImportErrorItem = {
   message?: string;
 };
 
+
+
+type ImportDictionaryColumn = {
+  key: string;
+  required: boolean;
+  example?: string;
+  accepted?: string[];
+  notes?: string;
+};
+
+type OpportunityImportDictionary = {
+  columns: ImportDictionaryColumn[];
+  tips: string[];
+};
+
 type OpportunityImportResponse = {
   created?: number;
   updated?: number;
@@ -61,50 +77,43 @@ type OpportunityImportResponse = {
   }>;
 };
 
-const TEMPLATE_HEADERS = ["title", "clientNameOrId", "value", "stage", "status", "ownerEmail", "followUpDate", "probability", "notes"];
-const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho", "perdido"]);
+const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId", "ownerEmail"];
+const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho"]);
 const VALID_STATUS = new Set(["open", "closed"]);
+
+const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
+  columns: [
+    { key: "titulo", required: true, example: "Algodão Safra 25/26" },
+    { key: "cliente", required: true, example: "Coop X" },
+    { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
+    { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
+    { key: "status", required: false, accepted: ["open", "closed"] },
+    { key: "responsavelEmail", required: true, notes: "precisa existir no sistema" },
+    { key: "followUp", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "probabilidade", required: false, notes: "0 a 100" },
+    { key: "observacoes", required: false }
+  ],
+  tips: [
+    "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",
+    "Etapa inválida vira erro na linha (não bloqueia o arquivo todo).",
+    "Datas inválidas viram erro na linha."
+  ]
+};
 
 const IMPORT_FIELDS: OpportunityImportField[] = [
   { key: "title", label: "Título", required: true, aliases: ["title", "titulo", "nome da oportunidade", "oportunidade", "opportunity"] },
   { key: "clientNameOrId", label: "Cliente", required: true, aliases: ["clientnameorid", "cliente", "clienteid", "clientid", "nome do cliente", "cliente nome"] },
-  { key: "value", label: "Valor", required: true, aliases: ["value", "valor", "valor total", "amount"] },
-  { key: "stage", label: "Etapa", required: true, aliases: ["stage", "etapa", "fase"] },
+  { key: "value", label: "Valor", required: false, aliases: ["value", "valor", "valor total", "amount"] },
+  { key: "stage", label: "Etapa", required: false, aliases: ["stage", "etapa", "fase"] },
   { key: "status", label: "Status", required: false, aliases: ["status", "situacao"] },
-  { key: "ownerEmail", label: "E-mail do responsável", required: false, aliases: ["owneremail", "email", "responsavel", "vendedor"] },
-  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
+  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "email", "responsavel", "vendedor"] },
+  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
   { key: "probability", label: "Probabilidade (%)", required: false, aliases: ["probability", "probabilidade"] },
   { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] }
 ];
 
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
 
-const downloadTemplate = () => {
-  const example = [
-    "Oportunidade exemplo",
-    "Fazenda São Pedro",
-    "15000",
-    "prospeccao",
-    "open",
-    "vendedor@empresa.com",
-    "2026-01-10",
-    "60",
-    "Primeiro contato"
-  ].join(",");
-
-  const csvContent = `${TEMPLATE_HEADERS.join(",")}\n${example}`;
-  const blob = new Blob([`\uFEFF${csvContent}`], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement("a");
-  link.href = url;
-  link.setAttribute("download", "modelo-importacao-oportunidades.csv");
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-
-  URL.revokeObjectURL(url);
-};
 
 const getSavedMappingForUser = (userId?: string | null): Partial<Record<OpportunityImportFieldKey, string>> => {
   if (!userId) return {};
@@ -161,9 +170,11 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     const status = normalizeTextValue(getMappedValue(row, "status")).toLowerCase();
     const probabilityResult = parseDecimalValue(getMappedValue(row, "probability"));
     const probability = probabilityResult.isInvalid ? Number.NaN : probabilityResult.parsedValue;
+    const followUpDate = normalizeTextValue(getMappedValue(row, "followUpDate"));
 
     const title = normalizeTextValue(getMappedValue(row, "title"));
     const clientNameOrId = normalizeTextValue(getMappedValue(row, "clientNameOrId"));
+    const ownerEmail = normalizeTextValue(getMappedValue(row, "ownerEmail"));
 
     const previewRow: OpportunityPreviewRow = {
       line: index + 2,
@@ -177,31 +188,57 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
         value: valueResult.isInvalid ? undefined : valueResult.parsedValue,
         stage: stage || "prospeccao",
         status: status || undefined,
-        ownerEmail: normalizeTextValue(getMappedValue(row, "ownerEmail")) || undefined,
-        followUpDate: normalizeTextValue(getMappedValue(row, "followUpDate")) || undefined,
+        ownerEmail: ownerEmail || undefined,
+        followUpDate: followUpDate || undefined,
         probability: probability === undefined || Number.isNaN(probability) ? undefined : Number(probability),
         notes: normalizeTextValue(getMappedValue(row, "notes")) || undefined
       },
-      status: "valid"
+      status: "valid",
+      invalidFields: []
     };
 
     const errors: string[] = [];
-    if (!previewRow.title) errors.push("Título obrigatório");
-    if (!previewRow.clientId) errors.push("Cliente obrigatório");
+    const invalidFields = new Set<string>();
 
-    if (previewRow.value === undefined || Number.isNaN(previewRow.value) || previewRow.value <= 0) {
-      errors.push("Valor deve ser numérico e maior que zero");
+    if (!previewRow.title) {
+      errors.push("Título obrigatório");
+      invalidFields.add("title");
+    }
+    if (!previewRow.clientId) {
+      errors.push("Cliente obrigatório");
+      invalidFields.add("clientNameOrId");
+    }
+    if (!ownerEmail) {
+      errors.push("E-mail do responsável obrigatório");
+      invalidFields.add("ownerEmail");
     }
 
-    if (stage && !VALID_STAGES.has(stage)) errors.push("Estágio inválido");
-    if (status && !VALID_STATUS.has(status)) errors.push("Status deve ser open ou closed");
+    if (valueResult.isInvalid) {
+      errors.push("Valor inválido");
+      invalidFields.add("value");
+    }
+
+    if (stage && !VALID_STAGES.has(stage)) {
+      errors.push("Etapa inválida");
+      invalidFields.add("stage");
+    }
+    if (status && !VALID_STATUS.has(status)) {
+      errors.push("Status deve ser open ou closed");
+      invalidFields.add("status");
+    }
+    if (followUpDate && !/^\d{4}-\d{2}-\d{2}$/.test(followUpDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(followUpDate)) {
+      errors.push("Follow-up deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      invalidFields.add("followUpDate");
+    }
     if (probability !== undefined && (Number.isNaN(probability) || probability < 0 || probability > 100)) {
       errors.push("Probabilidade deve estar entre 0 e 100");
+      invalidFields.add("probability");
     }
 
     if (errors.length) {
       previewRow.status = "error";
       previewRow.errorMessage = errors.join(" · ");
+      previewRow.invalidFields = Array.from(invalidFields);
     }
 
     return previewRow;
@@ -224,6 +261,7 @@ export default function OpportunityImportModal({
   const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [dictionary, setDictionary] = useState<OpportunityImportDictionary>(FALLBACK_DICTIONARY);
 
   // ✅ Mantém as duas opções (resolve o conflito)
   const [isDryRun, setIsDryRun] = useState(false);
@@ -259,6 +297,20 @@ export default function OpportunityImportModal({
     onClose();
   };
 
+
+  useEffect(() => {
+    const loadDictionary = async () => {
+      try {
+        const { data } = await api.get<OpportunityImportDictionary>("/opportunities/import/dictionary");
+        if (data?.columns?.length) setDictionary(data);
+      } catch {
+        setDictionary(FALLBACK_DICTIONARY);
+      }
+    };
+
+    loadDictionary();
+  }, []);
+
   useEffect(() => {
     if (!detectedHeaders.length) return;
     const savedMapping = getSavedMappingForUser(user?.id);
@@ -293,6 +345,10 @@ export default function OpportunityImportModal({
       setRawRows(parsed.rows);
       const resolvedMapping = suggestColumnMapping(parsed.headers, getSavedMappingForUser(user?.id));
       setMapping(resolvedMapping);
+      const missingRequired = REQUIRED_FIELDS.filter((field) => !resolvedMapping[field]);
+      if (missingRequired.length) {
+        toast.warning("Faltam colunas obrigatórias no arquivo: titulo, cliente e/ou responsavelEmail.");
+      }
       const nextPreviewRows = buildPreviewRows(parsed.rows, resolvedMapping);
       setPreviewRows(await runDedupePreview(nextPreviewRows));
     } catch (error: any) {
@@ -346,6 +402,12 @@ export default function OpportunityImportModal({
   };
 
   const handleApplyMapping = async () => {
+    const missingRequired = REQUIRED_FIELDS.filter((field) => !mapping[field]);
+    if (missingRequired.length) {
+      toast.warning("Mapeie as colunas obrigatórias: Título, Cliente e E-mail do responsável.");
+      return;
+    }
+
     const rows = buildPreviewRows(rawRows, mapping);
     const rowsWithDedupe = await runDedupePreview(rows);
     setPreviewRows(rowsWithDedupe);
@@ -425,13 +487,20 @@ export default function OpportunityImportModal({
 
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={downloadTemplate}
+            <a
+              href="/templates/opportunities-import-template.csv"
+              download
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
-              Baixar modelo
-            </button>
+              ⬇️ Baixar template
+            </a>
+            <a
+              href="/templates/opportunities-import-example.csv"
+              download
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              ⬇️ Baixar exemplo preenchido
+            </a>
 
             <input
               type="file"
@@ -441,6 +510,13 @@ export default function OpportunityImportModal({
             />
 
             {fileName ? <span className="text-xs text-slate-500">Arquivo: {fileName}</span> : null}
+          </div>
+
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">
+            <p className="mb-2 font-semibold text-slate-900">Ajuda rápida</p>
+            <p>Etapas aceitas: {dictionary.columns.find((item) => item.key === "etapa")?.accepted?.join(", ") || "prospeccao, negociacao, proposta, ganho"}</p>
+            <p>Status aceitos: {dictionary.columns.find((item) => item.key === "status")?.accepted?.join(", ") || "open, closed"}</p>
+            <p>Data de follow-up: {dictionary.columns.find((item) => item.key === "followUp")?.notes || "aceita yyyy-mm-dd ou dd/mm/aaaa"}</p>
           </div>
 
           <p className="text-sm text-slate-600">
@@ -555,11 +631,11 @@ export default function OpportunityImportModal({
                   previewRows.slice(0, 20).map((row) => (
                     <tr key={row.line} className="border-t border-slate-200">
                       <td className="px-3 py-2">{row.line}</td>
-                      <td className="px-3 py-2">{row.title || "—"}</td>
-                      <td className="px-3 py-2">{row.clientId || "—"}</td>
-                      <td className="px-3 py-2">{row.value ?? "—"}</td>
-                      <td className="px-3 py-2">{row.stage || "—"}</td>
-                      <td className="px-3 py-2">{row.status === "valid" ? "VÁLIDO" : row.status === "duplicate" ? "DUPLICADO" : "ERRO"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "valid" ? "VÁLIDO" : row.status === "duplicate" ? "DUPLICADO" : "ERRO"}</td>
                       <td className="px-3 py-2">{row.errorMessage || row.duplicateMessage || "OK"}</td>
                     </tr>
                   ))

@@ -556,13 +556,35 @@ const opportunityImportStageSchema = z
 
 const opportunityImportStatusSchema = z.enum(["open", "closed"]).optional();
 
+const parseOpportunityImportDate = (value?: string) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (isoMatch) {
+    const normalized = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}T00:00:00.000Z`;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const brMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (brMatch) {
+    const normalized = `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}T00:00:00.000Z`;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  return null;
+};
+
 const opportunityImportRowSchema = z.object({
-  title: z.string().min(2),
+  title: z.string().min(1),
   clientNameOrId: z.string().min(1),
-  value: z.number().nonnegative(),
-  stage: opportunityImportStageSchema,
+  value: z.number().nonnegative().optional(),
+  stage: opportunityImportStageSchema.optional(),
   status: opportunityImportStatusSchema,
-  ownerEmail: z.string().email().optional(),
+  ownerEmail: z.string().email(),
   followUpDate: z.string().optional(),
   probability: z.number().int().min(0).max(100).optional(),
   notes: z.string().max(2000).optional()
@@ -3218,7 +3240,8 @@ router.post("/opportunities/import", async (req, res) => {
         continue;
       }
 
-      const stage = IMPORT_STAGE_MAP[row.stage];
+      const stageValue = row.stage ?? "prospeccao";
+      const stage = IMPORT_STAGE_MAP[stageValue];
       if (!stage) {
         skipped += 1;
         errors.push({ row: rowNumber, message: "Etapa inválida para importação." });
@@ -3226,18 +3249,19 @@ router.post("/opportunities/import", async (req, res) => {
         continue;
       }
 
-      if (row.status === "closed" && !CLOSED_STAGES.has(stage)) {
+      const parsedFollowUpDate = parseOpportunityImportDate(row.followUpDate);
+      if (row.followUpDate && !parsedFollowUpDate) {
         skipped += 1;
-        errors.push({ row: rowNumber, message: "Status closed requer etapa ganho ou perdido." });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_status" });
+        errors.push({ row: rowNumber, message: "Data de follow-up inválida. Use yyyy-mm-dd ou dd/mm/aaaa." });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
         continue;
       }
 
-      const followUpDate = row.followUpDate || new Date().toISOString().slice(0, 10);
+      const followUpDate = parsedFollowUpDate ?? new Date();
       const proposalDate = followUpDate;
       const expectedCloseDate = followUpDate;
 
-      if (!validateDateOrder(proposalDate, expectedCloseDate)) {
+      if (!validateDateOrder(proposalDate.toISOString(), expectedCloseDate.toISOString())) {
         skipped += 1;
         errors.push({ row: rowNumber, message: "Datas inválidas para importação." });
         skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
@@ -3292,7 +3316,7 @@ router.post("/opportunities/import", async (req, res) => {
       }
 
       if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "upsert") {
-        const followUpDateValue = row.followUpDate ? new Date(new Date(String(row.followUpDate)).toISOString()) : undefined;
+        const followUpDateValue = parseOpportunityImportDate(row.followUpDate) ?? undefined;
         if (dryRun) {
           updated += 1;
           continue;
@@ -3316,7 +3340,7 @@ router.post("/opportunities/import", async (req, res) => {
           await tx.opportunity.update({
             where: { id: existingOpportunity.id },
             data: {
-              ...(row.value > 0 ? { value: row.value } : {}),
+              ...(typeof row.value === "number" ? { value: row.value } : {}),
               ...(stage ? { stage } : {}),
               ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
               ...(followUpDateValue ? { followUpDate: followUpDateValue } : {}),
@@ -3339,13 +3363,13 @@ router.post("/opportunities/import", async (req, res) => {
         await tx.opportunity.create({
           data: {
             title: row.title,
-            value: row.value,
+            value: row.value ?? 0,
             stage,
             probability: row.probability,
             notes: row.notes,
-            proposalDate: new Date(new Date(String(proposalDate)).toISOString()),
-            followUpDate: new Date(new Date(String(followUpDate)).toISOString()),
-            expectedCloseDate: new Date(new Date(String(expectedCloseDate)).toISOString()),
+            proposalDate,
+            followUpDate,
+            expectedCloseDate,
             clientId: client.id,
             ownerSellerId
           }
@@ -3363,6 +3387,27 @@ router.post("/opportunities/import", async (req, res) => {
   }
 
   return res.status(200).json({ created, updated, skipped, errors, skippedDetails });
+});
+
+router.get("/opportunities/import/dictionary", async (_req, res) => {
+  return res.status(200).json({
+    columns: [
+      { key: "titulo", required: true, example: "Algodão Safra 25/26" },
+      { key: "cliente", required: true, example: "Coop X" },
+      { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
+      { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
+      { key: "status", required: false, accepted: ["open", "closed"] },
+      { key: "responsavelEmail", required: true, notes: "precisa existir no sistema" },
+      { key: "followUp", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "probabilidade", required: false, notes: "0 a 100" },
+      { key: "observacoes", required: false }
+    ],
+    tips: [
+      "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",
+      "Etapa inválida vira erro na linha (não bloqueia o arquivo todo).",
+      "Datas inválidas viram erro na linha."
+    ]
+  });
 });
 
 router.get("/opportunities/:id", async (req, res) => {
