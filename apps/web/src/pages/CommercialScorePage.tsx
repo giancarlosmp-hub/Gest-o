@@ -12,6 +12,7 @@ import {
 } from "chart.js";
 
 import api from "../lib/apiClient";
+import { useAuth } from "../context/AuthContext";
 import { formatPercentBR } from "../lib/formatters";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
@@ -23,6 +24,12 @@ type CommercialScoreSeller = {
   pipelineScore: number;
   resultScore: number;
   finalScore: number;
+  breakdown: {
+    resultadoScore: number;
+    disciplinaScore: number;
+    pipelineScore: number;
+    finalScore: number;
+  };
   level: "Bronze" | "Prata" | "Ouro" | "Diamante" | null;
   medals: string[];
 };
@@ -54,6 +61,7 @@ const medalClassByLabel: Record<string, string> = {
 const getMedalClass = (medal: string) => medalClassByLabel[medal] || "bg-slate-100 text-slate-700 border-slate-200";
 
 export default function CommercialScorePage() {
+  const { user } = useAuth();
   const [month, setMonth] = useState(getCurrentMonth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,28 +107,40 @@ export default function CommercialScorePage() {
     return () => controller.abort();
   }, [month]);
 
+  const visibleRows = useMemo(() => {
+    if (user?.role !== "vendedor") return rows;
+
+    const topThree = rows.slice(0, 3);
+    const ownRow = rows.find((row) => row.sellerId === user.id);
+
+    if (!ownRow) return topThree;
+    if (topThree.some((row) => row.sellerId === ownRow.sellerId)) return topThree;
+
+    return [...topThree, ownRow];
+  }, [rows, user]);
+
   const chartData = useMemo(
     () => ({
-      labels: rows.map((item) => item.sellerName),
+      labels: visibleRows.map((item) => item.sellerName),
       datasets: [
         {
           label: "Execução",
-          data: rows.map((item) => Number((item.disciplineScore * 0.4).toFixed(2))),
+          data: visibleRows.map((item) => Number((item.disciplineScore * 0.3).toFixed(2))),
           backgroundColor: "#0f766e"
         },
         {
           label: "Pipeline",
-          data: rows.map((item) => Number((item.pipelineScore * 0.3).toFixed(2))),
+          data: visibleRows.map((item) => Number((item.pipelineScore * 0.2).toFixed(2))),
           backgroundColor: "#2563eb"
         },
         {
           label: "Resultado",
-          data: rows.map((item) => Number((item.resultScore * 0.3).toFixed(2))),
+          data: visibleRows.map((item) => Number((item.resultScore * 0.5).toFixed(2))),
           backgroundColor: "#f59e0b"
         }
       ]
     }),
-    [rows]
+    [visibleRows]
   );
 
   const chartOptions: ChartOptions<"bar"> = {
@@ -198,7 +218,7 @@ export default function CommercialScorePage() {
 
           <div className={cardClass}>
             <h3 className="text-base font-semibold text-slate-900">Ranking geral</h3>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">Sem dados para o mês selecionado.</p>
             ) : (
               <div className="mt-4 overflow-x-auto">
@@ -214,9 +234,11 @@ export default function CommercialScorePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row, index) => (
+                    {visibleRows.map((row) => {
+                      const position = rows.findIndex((item) => item.sellerId === row.sellerId) + 1;
+                      return (
                       <tr key={row.sellerId} className="border-b border-slate-100 text-slate-700">
-                        <td className="py-2.5 pr-3 font-semibold text-slate-900">#{index + 1}</td>
+                        <td className="py-2.5 pr-3 font-semibold text-slate-900">#{position}</td>
                         <td className="py-2.5 pr-3">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span>{row.sellerName}</span>
@@ -237,12 +259,16 @@ export default function CommercialScorePage() {
                         <td className="py-2.5 pr-3">{formatPercentBR(row.pipelineScore)}</td>
                         <td className="py-2.5 pr-3">{formatPercentBR(row.resultScore)}</td>
                         <td className="py-2.5 pr-0">
-                          <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getScoreColorClass(row.finalScore)}`}>
+                          <span
+                            title={`Resultado: ${formatPercentBR(row.breakdown.resultadoScore)} | Disciplina: ${formatPercentBR(row.breakdown.disciplinaScore)} | Pipeline: ${formatPercentBR(row.breakdown.pipelineScore)} | Final: ${formatPercentBR(row.breakdown.finalScore)}`}
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getScoreColorClass(row.finalScore)}`}
+                          >
                             {formatPercentBR(row.finalScore)}
                           </span>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -252,11 +278,11 @@ export default function CommercialScorePage() {
           <div className={cardClass}>
             <h3 className="text-base font-semibold text-slate-900">Hall da Performance</h3>
             <p className="mt-1 text-sm text-slate-500">Destaques de reconhecimento por nível e medalhas especiais.</p>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <p className="mt-3 text-sm text-slate-500">Sem destaques no período.</p>
             ) : (
               <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {rows.map((row) => (
+                {visibleRows.map((row) => (
                   <article key={`hall-${row.sellerId}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div className="text-sm font-semibold text-slate-900">{row.sellerName}</div>
                     <div className="mt-2 flex flex-wrap gap-1.5">
