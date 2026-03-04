@@ -16,7 +16,7 @@ RUN npm run build -w @salesforce-pro/shared \
 FROM node:20-alpine AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache openssl ca-certificates tini
+RUN apk add --no-cache openssl ca-certificates tini curl
 
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules

@@ -18,7 +18,7 @@ jobs:
 
       - name: Wait for API health
         run: |
-          for i in {1..60}; do
+          for i in {1..90}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:4000/health || true)
             if [ "$STATUS" = "200" ]; then
               echo "API healthy"
@@ -33,6 +33,10 @@ jobs:
       - name: Smoke test health endpoint
         run: |
           curl -f http://localhost:4000/health
+
+      - name: Smoke test technical cultures endpoint
+        run: |
+          curl -sf http://localhost:4000/technical-cultures
 
       - name: Smoke test auth login
         run: |

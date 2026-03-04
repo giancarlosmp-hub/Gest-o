@@ -96,90 +96,83 @@ const cultureQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-type TechnicalCultureCatalogItem = {
+const TECHNICAL_CULTURES_CACHE_TTL_MS = 60_000;
+type TechnicalCultureCatalogSerializedItem = {
   id: string;
-  name: string;
+  slug: string;
+  label: string;
   category: string;
-  kgHaMin: number | null;
-  kgHaMax: number | null;
+  isActive: boolean;
+  defaultKgHaMin: number | null;
+  defaultKgHaMax: number | null;
+  goalsJson: Prisma.JsonValue;
+  notes: string | null;
   pmsDefault: number | null;
-  populationDefaultHa: number | null;
-  spacingDefaultCm: number | null;
   germinationDefault: number | null;
   purityDefault: number | null;
-  notes?: string;
+  populationTargetDefault: number | null;
+  rowSpacingCmDefault: number | null;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
 };
 
-const TECHNICAL_CULTURES_STATIC_SEED: TechnicalCultureCatalogItem[] = [
+type TechnicalCulturesPayload = {
+  data: TechnicalCultureCatalogSerializedItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+type TechnicalCulturesCacheEntry = {
+  expiresAt: number;
+  payload: TechnicalCulturesPayload;
+};
+
+const technicalCulturesCache = new Map<string, TechnicalCulturesCacheEntry>();
+const clearTechnicalCulturesCache = () => technicalCulturesCache.clear();
+
+const TECHNICAL_CULTURES_STATIC_SEED: TechnicalCultureCatalogSerializedItem[] = [
   {
-    id: "sorgo",
-    name: "Sorgo",
+    id: "seed-soja",
+    slug: "soja",
+    label: "Soja",
     category: "Grãos",
-    kgHaMin: 8,
-    kgHaMax: 18,
-    pmsDefault: 28,
-    populationDefaultHa: 180000,
-    spacingDefaultCm: 45,
-    germinationDefault: 85,
-    purityDefault: 98,
-    notes: "Catálogo técnico seed padrão.",
-  },
-  {
-    id: "milho",
-    name: "Milho",
-    category: "Grãos",
-    kgHaMin: 14,
-    kgHaMax: 24,
-    pmsDefault: 32,
-    populationDefaultHa: 65000,
-    spacingDefaultCm: 50,
-    germinationDefault: 90,
-    purityDefault: 98,
-    notes: "Catálogo técnico seed padrão.",
-  },
-  {
-    id: "milheto",
-    name: "Milheto",
-    category: "Cobertura",
-    kgHaMin: 10,
-    kgHaMax: 20,
-    pmsDefault: 8,
-    populationDefaultHa: 250000,
-    spacingDefaultCm: 34,
-    germinationDefault: 80,
-    purityDefault: 95,
-    notes: "Catálogo técnico seed padrão.",
+    isActive: true,
+    defaultKgHaMin: null,
+    defaultKgHaMax: null,
+    goalsJson: {},
+    notes: "Catálogo técnico temporário (fallback)",
+    pmsDefault: null,
+    germinationDefault: null,
+    purityDefault: null,
+    populationTargetDefault: null,
+    rowSpacingCmDefault: null,
+    tags: ["grãos"],
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
   },
 ];
 
-const serializeTechnicalCultureCatalogItem = (
-  item: {
-    slug: string;
-    label: string;
-    category: string;
-    defaultKgHaMin: number | null;
-    defaultKgHaMax: number | null;
-    pmsDefault: number | null;
-    populationTargetDefault: number | null;
-    rowSpacingCmDefault: number | null;
-    germinationDefault: number | null;
-    purityDefault: number | null;
-    notes: string | null;
-  }
-): TechnicalCultureCatalogItem => ({
-  id: item.slug,
-  name: item.label,
+const serializeTechnicalCultureCatalogItem = (item: Awaited<ReturnType<typeof prisma.cultureCatalog.findMany>>[number]): TechnicalCultureCatalogSerializedItem => ({
+  id: item.id,
+  slug: item.slug,
+  label: item.label,
   category: item.category,
-  kgHaMin: item.defaultKgHaMin,
-  kgHaMax: item.defaultKgHaMax,
+  isActive: item.isActive,
+  defaultKgHaMin: item.defaultKgHaMin,
+  defaultKgHaMax: item.defaultKgHaMax,
+  goalsJson: item.goalsJson,
+  notes: item.notes,
   pmsDefault: item.pmsDefault,
-  populationDefaultHa: item.populationTargetDefault,
-  spacingDefaultCm: item.rowSpacingCmDefault,
   germinationDefault: item.germinationDefault,
   purityDefault: item.purityDefault,
-  ...(item.notes ? { notes: item.notes } : {}),
+  populationTargetDefault: item.populationTargetDefault,
+  rowSpacingCmDefault: item.rowSpacingCmDefault,
+  tags: item.tags,
+  createdAt: item.createdAt.toISOString(),
+  updatedAt: item.updatedAt.toISOString(),
 });
-
 
 const CLOSED_STAGE_VALUES = ["ganho", "perdido"] as const;
 const CLOSED_STAGES = new Set<string>(CLOSED_STAGE_VALUES);
@@ -2809,11 +2802,6 @@ router.post("/clients/import", async (req, res) => {
       continue;
     }
 
-    // Se for duplicado dentro do arquivo, existingClientId pode vir vazio.
-    // Regra:
-    // - update exige existingClientId válido
-    // - skip ignora
-    // - import_anyway cria novo
     if (item.status === "duplicate") {
       if (rowAction === "skip") {
         totalIgnorados += 1;
@@ -2868,7 +2856,6 @@ router.post("/clients/import", async (req, res) => {
         continue;
       }
 
-      // import_anyway ou ação vazia -> cria novo (ação vazia é erro, para forçar decisão)
       if (!rowAction) {
         totalErros += 1;
         errors.push({ rowNumber: item.rowNumber, clientName, message: "Cliente duplicado sem ação definida." });
@@ -2876,7 +2863,6 @@ router.post("/clients/import", async (req, res) => {
       }
     }
 
-    // New ou Duplicate com import_anyway
     if (rowAction === "skip") {
       totalIgnorados += 1;
       continue;
@@ -4432,56 +4418,74 @@ const listCulturesHandler = async (req: express.Request, res: express.Response) 
       : {}),
   };
 
-  const [items, total] = await Promise.all([
-    prisma.cultureCatalog.findMany({
-      where,
-      orderBy: [{ isActive: "desc" }, { label: "asc" }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.cultureCatalog.count({ where }),
-  ]);
+  const isTechnicalCulturesRoute = req.path === "/technical-cultures" || req.path === "/technical/cultures";
+  const cacheKey = req.originalUrl;
 
-  return res.status(200).json({ data: items, total, page, pageSize });
+  if (isTechnicalCulturesRoute) {
+    const cached = technicalCulturesCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
+    }
+  }
+
+  try {
+    const [items, total] = await Promise.all([
+      prisma.cultureCatalog.findMany({
+        where,
+        orderBy: [{ isActive: "desc" }, { label: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.cultureCatalog.count({ where }),
+    ]);
+
+    const payload: TechnicalCulturesPayload = {
+      data: items.map(serializeTechnicalCultureCatalogItem),
+      total,
+      page,
+      pageSize,
+    };
+
+    if (isTechnicalCulturesRoute) {
+      technicalCulturesCache.set(cacheKey, {
+        payload,
+        expiresAt: Date.now() + TECHNICAL_CULTURES_CACHE_TTL_MS,
+      });
+    }
+
+    return res.status(200).json(payload);
+  } catch (error) {
+    if (!isTechnicalCulturesRoute) {
+      console.error("[cultures] erro ao listar catálogo", error);
+      return res.status(500).json({ message: "Erro interno" });
+    }
+
+    console.error("[technical-cultures] fallback para seed estático", error);
+    const fallbackPayload: TechnicalCulturesPayload = {
+      data: TECHNICAL_CULTURES_STATIC_SEED,
+      total: TECHNICAL_CULTURES_STATIC_SEED.length,
+      page,
+      pageSize,
+    };
+
+    technicalCulturesCache.set(cacheKey, {
+      payload: fallbackPayload,
+      expiresAt: Date.now() + TECHNICAL_CULTURES_CACHE_TTL_MS,
+    });
+
+    return res.status(200).json(fallbackPayload);
+  }
 };
 
 router.get("/cultures", listCulturesHandler);
+router.get("/technical-cultures", listCulturesHandler);
 router.get("/technical/cultures", listCulturesHandler);
-router.get("/technical-cultures", async (_req, res) => {
-  try {
-    const dbCultures = await prisma.cultureCatalog.findMany({
-      where: { isActive: true },
-      orderBy: [{ label: "asc" }],
-      select: {
-        slug: true,
-        label: true,
-        category: true,
-        defaultKgHaMin: true,
-        defaultKgHaMax: true,
-        pmsDefault: true,
-        populationTargetDefault: true,
-        rowSpacingCmDefault: true,
-        germinationDefault: true,
-        purityDefault: true,
-        notes: true,
-      },
-    });
-
-    if (!dbCultures.length) {
-      return res.status(200).json({ items: TECHNICAL_CULTURES_STATIC_SEED, source: "seed" });
-    }
-
-    return res.status(200).json({ items: dbCultures.map(serializeTechnicalCultureCatalogItem), source: "db" });
-  } catch (error) {
-    console.error("[technical-cultures] Falha ao carregar do banco. Usando catálogo static.", error);
-    return res.status(200).json({ items: TECHNICAL_CULTURES_STATIC_SEED, source: "static" });
-  }
-});
 
 router.post("/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
   try {
     const payload = normalizeCulturePayload(req.body);
     const created = await prisma.cultureCatalog.create({ data: payload });
+    clearTechnicalCulturesCache();
     res.status(201).json(created);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4495,6 +4499,7 @@ router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultur
   try {
     const payload = normalizeCulturePayload(req.body);
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4510,6 +4515,7 @@ router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultur
 router.delete("/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
   try {
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2025") {
@@ -4524,6 +4530,7 @@ router.post("/technical/cultures", authorize("diretor", "gerente"), validateBody
   try {
     const payload = normalizeCulturePayload(req.body);
     const created = await prisma.cultureCatalog.create({ data: payload });
+    clearTechnicalCulturesCache();
     res.status(201).json(created);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4537,6 +4544,7 @@ router.put("/technical/cultures/:id", authorize("diretor", "gerente"), validateB
   try {
     const payload = normalizeCulturePayload(req.body);
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4552,6 +4560,7 @@ router.put("/technical/cultures/:id", authorize("diretor", "gerente"), validateB
 router.delete("/technical/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
   try {
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2025") {
