@@ -34,6 +34,10 @@ jobs:
         run: |
           curl -f http://localhost:4000/health
 
+      - name: Smoke test technical cultures endpoint
+        run: |
+          curl -sf http://localhost:4000/technical-cultures
+
       - name: Smoke test auth login
         run: |
           curl -f -X POST http://localhost:4000/auth/login \

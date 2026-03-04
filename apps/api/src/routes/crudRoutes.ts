@@ -96,6 +96,19 @@ const cultureQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+const TECHNICAL_CULTURES_CACHE_TTL_MS = 60_000;
+type TechnicalCulturesCacheEntry = {
+  expiresAt: number;
+  payload: {
+    data: Awaited<ReturnType<typeof prisma.cultureCatalog.findMany>>;
+    total: number;
+    page: number;
+    pageSize: number;
+  };
+};
+const technicalCulturesCache = new Map<string, TechnicalCulturesCacheEntry>();
+const clearTechnicalCulturesCache = () => technicalCulturesCache.clear();
+
 
 const CLOSED_STAGE_VALUES = ["ganho", "perdido"] as const;
 const CLOSED_STAGES = new Set<string>(CLOSED_STAGE_VALUES);
@@ -4348,6 +4361,16 @@ const listCulturesHandler = async (req: express.Request, res: express.Response) 
       : {}),
   };
 
+  const isTechnicalCulturesRoute = req.path === "/technical-cultures" || req.path === "/technical/cultures";
+  const cacheKey = req.originalUrl;
+
+  if (isTechnicalCulturesRoute) {
+    const cached = technicalCulturesCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
+    }
+  }
+
   const [items, total] = await Promise.all([
     prisma.cultureCatalog.findMany({
       where,
@@ -4358,16 +4381,27 @@ const listCulturesHandler = async (req: express.Request, res: express.Response) 
     prisma.cultureCatalog.count({ where }),
   ]);
 
-  return res.status(200).json({ data: items, total, page, pageSize });
+  const payload = { data: items, total, page, pageSize };
+
+  if (isTechnicalCulturesRoute) {
+    technicalCulturesCache.set(cacheKey, {
+      payload,
+      expiresAt: Date.now() + TECHNICAL_CULTURES_CACHE_TTL_MS,
+    });
+  }
+
+  return res.status(200).json(payload);
 };
 
 router.get("/cultures", listCulturesHandler);
+router.get("/technical-cultures", listCulturesHandler);
 router.get("/technical/cultures", listCulturesHandler);
 
 router.post("/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
   try {
     const payload = normalizeCulturePayload(req.body);
     const created = await prisma.cultureCatalog.create({ data: payload });
+    clearTechnicalCulturesCache();
     res.status(201).json(created);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4381,6 +4415,7 @@ router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultur
   try {
     const payload = normalizeCulturePayload(req.body);
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4396,6 +4431,7 @@ router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultur
 router.delete("/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
   try {
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2025") {
@@ -4410,6 +4446,7 @@ router.post("/technical/cultures", authorize("diretor", "gerente"), validateBody
   try {
     const payload = normalizeCulturePayload(req.body);
     const created = await prisma.cultureCatalog.create({ data: payload });
+    clearTechnicalCulturesCache();
     res.status(201).json(created);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4423,6 +4460,7 @@ router.put("/technical/cultures/:id", authorize("diretor", "gerente"), validateB
   try {
     const payload = normalizeCulturePayload(req.body);
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2002") {
@@ -4438,6 +4476,7 @@ router.put("/technical/cultures/:id", authorize("diretor", "gerente"), validateB
 router.delete("/technical/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
   try {
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    clearTechnicalCulturesCache();
     res.status(200).json(updated);
   } catch (error) {
     if ((error as { code?: string }).code === "P2025") {
