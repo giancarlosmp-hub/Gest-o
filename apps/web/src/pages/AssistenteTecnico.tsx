@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useCulturesCatalog } from "../hooks/useCulturesCatalog";
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
 
@@ -98,12 +99,16 @@ function formatValue(value: number, digits = 2) {
 
 /** Indicação rápida (kg/ha) */
 type Recommendation = {
-  range: string;
+  rangeMin: number;
+  rangeMax: number;
+  unit: string;
   notes: string[];
 };
 
 type CultureRecommendation = {
+  key: string;
   label: string;
+  notes: string[];
   goals: Record<string, Recommendation>;
 };
 
@@ -114,73 +119,20 @@ type TechnicalAlert = {
   severity: AlertSeverity;
 };
 
-const parseRangeAverage = (range: string) => {
-  const matches = range.match(/\d+[\.,]?\d*/g);
-  if (!matches || matches.length < 2) return null;
-
-  const [min, max] = matches.slice(0, 2).map((value) => Number(value.replace(",", ".")));
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-
-  return (min + max) / 2;
+const parseRangeAverage = (recommendation?: Recommendation) => {
+  if (!recommendation) return null;
+  if (!Number.isFinite(recommendation.rangeMin) || !Number.isFinite(recommendation.rangeMax)) return null;
+  return (recommendation.rangeMin + recommendation.rangeMax) / 2;
 };
 
-const SORGO_NOTES = [
-  "Ajustar conforme PMS (peso de mil sementes) do lote.",
-  "Considerar a germinação real e o vigor do lote.",
-  "Atenção à profundidade de plantio e umidade do solo."
+const GENERAL_RECOMMENDATION_RULES = [
+  "Ajustar a dose conforme PMS (peso de mil sementes) do lote.",
+  "Corrigir pela germinação real e pureza para estimar sementes viáveis.",
+  "Validar profundidade, umidade e regulagem da plantadeira antes de fechar a dose."
 ];
 
-const CULTURE_RECOMMENDATIONS: Record<string, CultureRecommendation> = {
-  sorgo: {
-    label: "Sorgo",
-    goals: {
-      silagem: {
-        range: "12–18 kg/ha",
-        notes: SORGO_NOTES
-      },
-      grao: {
-        range: "8–12 kg/ha",
-        notes: SORGO_NOTES
-      }
-    }
-  },
-  milheto: {
-    label: "Milheto",
-    goals: {
-      cobertura: {
-        range: "15–20 kg/ha",
-        notes: ["Priorizar boa cobertura inicial para proteção do solo e supressão de plantas daninhas."]
-      }
-    }
-  },
-  brachiaria: {
-    label: "Brachiaria",
-    goals: {
-      padrao: {
-        range: "8–15 kg/ha",
-        notes: ["Ajustar a taxa conforme vigor da semente, sistema de implantação e pressão de competição."]
-      }
-    }
-  },
-  trigo: {
-    label: "Trigo",
-    goals: {
-      padrao: {
-        range: "100–140 kg/ha",
-        notes: ["Refinar a dose pela população-alvo (plantas/m²), PMS e condições de semeadura."]
-      }
-    }
-  },
-  aveia: {
-    label: "Aveia",
-    goals: {
-      padrao: {
-        range: "60–100 kg/ha",
-        notes: ["Ajustar conforme janela de plantio, finalidade (cobertura/pastejo) e fertilidade."]
-      }
-    }
-  }
-};
+const formatRange = (recommendation: Recommendation) =>
+  `${formatValue(recommendation.rangeMin, 0)}–${formatValue(recommendation.rangeMax, 0)} ${recommendation.unit}`;
 
 const getGoalLabel = (goalKey: string) => {
   if (goalKey === "padrao") return "Padrão";
@@ -194,6 +146,21 @@ export default function AssistenteTecnico() {
   /** Calculadora */
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
   const [pdfStatus, setPdfStatus] = useState("");
+  const { catalog, isFallback } = useCulturesCatalog();
+
+  const cultureRecommendations = useMemo<Record<string, CultureRecommendation>>(
+    () =>
+      catalog.reduce<Record<string, CultureRecommendation>>((acc, culture) => {
+        acc[culture.key] = {
+          key: culture.key,
+          label: culture.label,
+          notes: culture.notes,
+          goals: culture.goalsJson
+        };
+        return acc;
+      }, {}),
+    [catalog]
+  );
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -268,12 +235,11 @@ export default function AssistenteTecnico() {
     }
 
     const cultureKey = form.cultura.toLowerCase();
-    const cultureData = CULTURE_RECOMMENDATIONS[cultureKey];
+    const cultureData = cultureRecommendations[cultureKey];
     if (cultureData) {
       const objectiveKey = form.objetivo.trim().toLowerCase();
       const goalKey = objectiveKey && cultureData.goals[objectiveKey] ? objectiveKey : Object.keys(cultureData.goals)[0];
-      const recommendationRange = cultureData.goals[goalKey]?.range;
-      const averageKgHa = recommendationRange ? parseRangeAverage(recommendationRange) : null;
+      const averageKgHa = parseRangeAverage(cultureData.goals[goalKey]);
 
       if (averageKgHa && results.kgHaFinal > averageKgHa * 1.2) {
         alertsList.push({
@@ -284,7 +250,7 @@ export default function AssistenteTecnico() {
     }
 
     return alertsList;
-  }, [form, results.kgHaFinal, results.sementesMetro]);
+  }, [cultureRecommendations, form, results.kgHaFinal, results.sementesMetro]);
 
   const updateField = (key: keyof SemeaduraForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -416,8 +382,16 @@ export default function AssistenteTecnico() {
   const [selectedGoal, setSelectedGoal] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
 
-  const selectedCultureData = selectedCulture ? CULTURE_RECOMMENDATIONS[selectedCulture] : undefined;
+  const selectedCultureData = selectedCulture ? cultureRecommendations[selectedCulture] : undefined;
   const goalKeys = selectedCultureData ? Object.keys(selectedCultureData.goals) : [];
+
+  useEffect(() => {
+    if (!selectedCulture) return;
+    if (cultureRecommendations[selectedCulture]) return;
+
+    setSelectedCulture("");
+    setSelectedGoal("");
+  }, [cultureRecommendations, selectedCulture]);
 
   const effectiveGoal = useMemo(() => {
     if (!selectedCultureData) return "";
@@ -426,6 +400,9 @@ export default function AssistenteTecnico() {
   }, [goalKeys, selectedCultureData, selectedGoal]);
 
   const recommendation = selectedCultureData && effectiveGoal ? selectedCultureData.goals[effectiveGoal] : undefined;
+  const recommendationNotes = recommendation
+    ? [...(selectedCultureData?.notes ?? []), ...recommendation.notes, ...GENERAL_RECOMMENDATION_RULES]
+    : [];
 
   const handleCopyRecommendation = async () => {
     if (!selectedCultureData || !recommendation) return;
@@ -434,9 +411,9 @@ export default function AssistenteTecnico() {
     const text = [
       `Cultura: ${selectedCultureData.label}`,
       `Objetivo: ${goalLabel}`,
-      `Faixa recomendada: ${recommendation.range}`,
+      `Faixa recomendada: ${formatRange(recommendation)}`,
       "Observações:",
-      ...recommendation.notes.map((note) => `- ${note}`)
+      ...recommendationNotes.map((note) => `- ${note}`)
     ].join("\n");
 
     try {
@@ -673,6 +650,7 @@ export default function AssistenteTecnico() {
         <article className={cardClass}>
           <h2 className="text-base font-semibold text-slate-800">Indicação rápida de kg/ha</h2>
           <p className="mt-1 text-sm text-slate-500">Selecione cultura e objetivo para obter uma faixa de referência.</p>
+          {isFallback ? <p className="mt-1 text-xs text-amber-600">Catálogo offline — usando recomendações locais</p> : null}
 
           <div className="mt-4 grid gap-4">
             <label className="space-y-1 text-sm">
@@ -687,7 +665,7 @@ export default function AssistenteTecnico() {
                 }}
               >
                 <option value="">Selecione</option>
-                {Object.entries(CULTURE_RECOMMENDATIONS).map(([key, value]) => (
+                {Object.entries(cultureRecommendations).map(([key, value]) => (
                   <option key={key} value={key}>
                     {value.label}
                   </option>
@@ -719,14 +697,14 @@ export default function AssistenteTecnico() {
             {recommendation ? (
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm text-slate-700">
-                  <span className="font-semibold">Faixa recomendada:</span> {recommendation.range}
+                  <span className="font-semibold">Faixa recomendada:</span> {formatRange(recommendation)}
                 </p>
 
                 <div className="text-sm text-slate-700">
                   <p className="font-semibold">Observações técnicas:</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {recommendation.notes.map((note) => (
-                      <li key={note}>{note}</li>
+                    {recommendationNotes.map((note, index) => (
+                      <li key={`${note}-${index}`}>{note}</li>
                     ))}
                   </ul>
                 </div>
