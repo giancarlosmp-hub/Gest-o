@@ -2802,11 +2802,6 @@ router.post("/clients/import", async (req, res) => {
       continue;
     }
 
-    // Se for duplicado dentro do arquivo, existingClientId pode vir vazio.
-    // Regra:
-    // - update exige existingClientId válido
-    // - skip ignora
-    // - import_anyway cria novo
     if (item.status === "duplicate") {
       if (rowAction === "skip") {
         totalIgnorados += 1;
@@ -2861,7 +2856,6 @@ router.post("/clients/import", async (req, res) => {
         continue;
       }
 
-      // import_anyway ou ação vazia -> cria novo (ação vazia é erro, para forçar decisão)
       if (!rowAction) {
         totalErros += 1;
         errors.push({ rowNumber: item.rowNumber, clientName, message: "Cliente duplicado sem ação definida." });
@@ -2869,7 +2863,6 @@ router.post("/clients/import", async (req, res) => {
       }
     }
 
-    // New ou Duplicate com import_anyway
     if (rowAction === "skip") {
       totalIgnorados += 1;
       continue;
