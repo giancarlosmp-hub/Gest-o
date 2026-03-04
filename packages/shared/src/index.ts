@@ -157,6 +157,27 @@ export const weeklyVisitMinimumSchema = z.object({
   minimumWeeklyVisits: z.number().int().min(1).max(200)
 });
 
+
+const cultureGoalRangeSchema = z.object({
+  min: z.number().nonnegative(),
+  max: z.number().nonnegative()
+}).refine((value) => value.max >= value.min, { message: "Faixa por objetivo inválida." });
+
+export const cultureCatalogSchema = z.object({
+  slug: z.string().min(2, "Slug é obrigatório.").regex(/^[a-z0-9-]+$/, "Slug deve conter apenas letras minúsculas, números e hífen."),
+  label: z.string().min(2, "Nome da cultura é obrigatório."),
+  isActive: z.boolean().optional(),
+  defaultKgHaMin: z.number().nonnegative().optional().nullable(),
+  defaultKgHaMax: z.number().nonnegative().optional().nullable(),
+  goalsJson: z.record(cultureGoalRangeSchema).default({}),
+  notes: z.string().max(2000).optional().nullable(),
+  pmsDefault: z.number().positive().optional().nullable(),
+  germinationDefault: z.number().positive().max(100).optional().nullable(),
+  purityDefault: z.number().positive().max(100).optional().nullable(),
+  populationTargetDefault: z.number().positive().optional().nullable(),
+  tags: z.array(z.string().min(1)).max(20).optional().default([])
+});
+
 export const dashboardPerformanceSchema = z.object({
   sellerId: z.string(),
   seller: z.string(),
@@ -234,6 +255,7 @@ export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type WeeklyVisitMinimumInput = z.infer<typeof weeklyVisitMinimumSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
+export type CultureCatalogInput = z.infer<typeof cultureCatalogSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type DashboardSalesSeries = z.infer<typeof dashboardSalesSeriesSchema>;
 export type DashboardPortfolio = z.infer<typeof dashboardPortfolioSchema>;
