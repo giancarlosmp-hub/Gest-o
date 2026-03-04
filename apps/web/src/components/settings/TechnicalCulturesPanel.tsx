@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { CULTURE_FALLBACKS, type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } from "../../lib/technicalCultures";
+import { getApiErrorMessage } from "../../lib/apiError";
 
 const emptyForm: CultureFormInput = {
   slug: "",
@@ -36,9 +37,13 @@ export default function TechnicalCulturesPanel() {
     try {
       const data = await fetchTechnicalCultures();
       setCultures(data);
-    } catch {
+    } catch (error) {
+      console.error("Falha ao carregar catálogo técnico em configurações", {
+        reason: getApiErrorMessage(error, "Erro ao carregar catálogo técnico."),
+        error,
+      });
       setCultures(CULTURE_FALLBACKS);
-      toast.warning("Não foi possível carregar da API. Exibindo fallback local.");
+      toast.warning("Catálogo temporário ativo. Verifique conexão com a API.");
     }
   };
 
