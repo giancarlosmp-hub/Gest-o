@@ -1,4 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import api from "../lib/apiClient";
+import { getApiErrorMessage } from "../lib/apiError";
+import { toast } from "sonner";
+import { useAuth } from "../context/AuthContext";
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
 
@@ -78,7 +82,6 @@ const initialForm: SemeaduraForm = {
   correcaoCampo: "0"
 };
 
-const culturas = ["Sorgo", "Milho", "Milheto", "Trigo", "Aveia", "Brachiaria"];
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
@@ -107,6 +110,22 @@ type CultureRecommendation = {
   goals: Record<string, Recommendation>;
 };
 
+type CultureCatalog = {
+  id: string;
+  slug: string;
+  label: string;
+  isActive: boolean;
+  defaultKgHaMin: number | null;
+  defaultKgHaMax: number | null;
+  goalsJson: Record<string, { min: number; max: number }>;
+  notes?: string | null;
+  pmsDefault?: number | null;
+  germinationDefault?: number | null;
+  purityDefault?: number | null;
+  populationTargetDefault?: number | null;
+  tags: string[];
+};
+
 type AlertSeverity = "warning" | "critical";
 
 type TechnicalAlert = {
@@ -124,63 +143,30 @@ const parseRangeAverage = (range: string) => {
   return (min + max) / 2;
 };
 
-const SORGO_NOTES = [
-  "Ajustar conforme PMS (peso de mil sementes) do lote.",
-  "Considerar a germinação real e o vigor do lote.",
-  "Atenção à profundidade de plantio e umidade do solo."
-];
+const buildCultureRecommendations = (items: CultureCatalog[]) =>
+  items.reduce<Record<string, CultureRecommendation>>((acc, culture) => {
+    const goals = Object.entries(culture.goalsJson || {}).reduce<Record<string, Recommendation>>((goalAcc, [goal, range]) => {
+      if (!Number.isFinite(range?.min) || !Number.isFinite(range?.max)) return goalAcc;
+      goalAcc[goal] = {
+        range: `${formatValue(range.min, 0)}–${formatValue(range.max, 0)} kg/ha`,
+        notes: [culture.notes || "Ajuste a dose conforme qualidade do lote e objetivo de uso."]
+      };
+      return goalAcc;
+    }, {});
 
-const CULTURE_RECOMMENDATIONS: Record<string, CultureRecommendation> = {
-  sorgo: {
-    label: "Sorgo",
-    goals: {
-      silagem: {
-        range: "12–18 kg/ha",
-        notes: SORGO_NOTES
-      },
-      grao: {
-        range: "8–12 kg/ha",
-        notes: SORGO_NOTES
-      }
+    if (Object.keys(goals).length === 0 && culture.defaultKgHaMin != null && culture.defaultKgHaMax != null) {
+      goals.padrao = {
+        range: `${formatValue(culture.defaultKgHaMin, 0)}–${formatValue(culture.defaultKgHaMax, 0)} kg/ha`,
+        notes: [culture.notes || "Ajuste técnico recomendado conforme campo."]
+      };
     }
-  },
-  milheto: {
-    label: "Milheto",
-    goals: {
-      cobertura: {
-        range: "15–20 kg/ha",
-        notes: ["Priorizar boa cobertura inicial para proteção do solo e supressão de plantas daninhas."]
-      }
+
+    if (Object.keys(goals).length > 0) {
+      acc[culture.slug] = { label: culture.label, goals };
     }
-  },
-  brachiaria: {
-    label: "Brachiaria",
-    goals: {
-      padrao: {
-        range: "8–15 kg/ha",
-        notes: ["Ajustar a taxa conforme vigor da semente, sistema de implantação e pressão de competição."]
-      }
-    }
-  },
-  trigo: {
-    label: "Trigo",
-    goals: {
-      padrao: {
-        range: "100–140 kg/ha",
-        notes: ["Refinar a dose pela população-alvo (plantas/m²), PMS e condições de semeadura."]
-      }
-    }
-  },
-  aveia: {
-    label: "Aveia",
-    goals: {
-      padrao: {
-        range: "60–100 kg/ha",
-        notes: ["Ajustar conforme janela de plantio, finalidade (cobertura/pastejo) e fertilidade."]
-      }
-    }
-  }
-};
+
+    return acc;
+  }, {});
 
 const getGoalLabel = (goalKey: string) => {
   if (goalKey === "padrao") return "Padrão";
@@ -191,9 +177,19 @@ const getGoalLabel = (goalKey: string) => {
 };
 
 export default function AssistenteTecnico() {
+  const { user } = useAuth();
+  const canManageCatalog = user?.role === "diretor" || user?.role === "gerente";
   /** Calculadora */
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
   const [pdfStatus, setPdfStatus] = useState("");
+  const [catalogItems, setCatalogItems] = useState<CultureCatalog[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
+  const [tagFilter, setTagFilter] = useState("");
+  const [showModal, setShowModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<CultureCatalog | null>(null);
+  const [catalogForm, setCatalogForm] = useState({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -268,7 +264,7 @@ export default function AssistenteTecnico() {
     }
 
     const cultureKey = form.cultura.toLowerCase();
-    const cultureData = CULTURE_RECOMMENDATIONS[cultureKey];
+    const cultureData = cultureRecommendations[cultureKey];
     if (cultureData) {
       const objectiveKey = form.objetivo.trim().toLowerCase();
       const goalKey = objectiveKey && cultureData.goals[objectiveKey] ? objectiveKey : Object.keys(cultureData.goals)[0];
@@ -285,6 +281,83 @@ export default function AssistenteTecnico() {
 
     return alertsList;
   }, [form, results.kgHaFinal, results.sementesMetro]);
+
+  const loadCatalog = async () => {
+    try {
+      setCatalogLoading(true);
+      const activeParam = statusFilter === "all" ? "" : `&active=${statusFilter === "active" ? "true" : "false"}`;
+      const tagParam = tagFilter ? `&tags=${encodeURIComponent(tagFilter)}` : "";
+      const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
+      const response = await api.get(`/cultures?page=1&pageSize=200${activeParam}${tagParam}${searchParam}`);
+      const items = Array.isArray(response.data?.data) ? response.data.data : [];
+      setCatalogItems(items);
+      if (!form.cultura && items[0]?.label) {
+        setForm((prev) => ({ ...prev, cultura: items[0].label }));
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar o catálogo de culturas."));
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCatalog().catch(() => undefined);
+  }, [statusFilter, tagFilter]);
+
+  const cultureRecommendations = useMemo(() => buildCultureRecommendations(catalogItems.filter((item) => item.isActive)), [catalogItems]);
+  const culturas = useMemo(() => catalogItems.filter((item) => item.isActive).map((item) => item.label), [catalogItems]);
+
+  const saveCatalog = async () => {
+    try {
+      const goalsSource = catalogForm.goals
+        .split(";")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .reduce<Record<string, { min: number; max: number }>>((acc, row) => {
+          const [goal, range] = row.split(":");
+          const [min, max] = (range || "").split("-").map((value) => Number(value.trim()));
+          if (goal && Number.isFinite(min) && Number.isFinite(max)) {
+            acc[goal.trim().toLowerCase()] = { min, max };
+          }
+          return acc;
+        }, {});
+
+      const payload = {
+        slug: catalogForm.slug.trim().toLowerCase(),
+        label: catalogForm.label.trim(),
+        defaultKgHaMin: catalogForm.defaultKgHaMin ? Number(catalogForm.defaultKgHaMin) : null,
+        defaultKgHaMax: catalogForm.defaultKgHaMax ? Number(catalogForm.defaultKgHaMax) : null,
+        notes: catalogForm.notes || null,
+        goalsJson: goalsSource,
+        tags: catalogForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      };
+
+      if (editingItem) {
+        await api.put(`/cultures/${editingItem.id}`, payload);
+        toast.success("Cultura atualizada com sucesso.");
+      } else {
+        await api.post("/cultures", payload);
+        toast.success("Cultura criada com sucesso.");
+      }
+      setShowModal(false);
+      setEditingItem(null);
+      setCatalogForm({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
+      await loadCatalog();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível salvar a cultura."));
+    }
+  };
+
+  const inactivateCatalog = async (id: string) => {
+    try {
+      await api.delete(`/cultures/${id}`);
+      toast.success("Cultura inativada.");
+      await loadCatalog();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível inativar a cultura."));
+    }
+  };
 
   const updateField = (key: keyof SemeaduraForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -416,7 +489,7 @@ export default function AssistenteTecnico() {
   const [selectedGoal, setSelectedGoal] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
 
-  const selectedCultureData = selectedCulture ? CULTURE_RECOMMENDATIONS[selectedCulture] : undefined;
+  const selectedCultureData = selectedCulture ? cultureRecommendations[selectedCulture] : undefined;
   const goalKeys = selectedCultureData ? Object.keys(selectedCultureData.goals) : [];
 
   const effectiveGoal = useMemo(() => {
@@ -687,7 +760,7 @@ export default function AssistenteTecnico() {
                 }}
               >
                 <option value="">Selecione</option>
-                {Object.entries(CULTURE_RECOMMENDATIONS).map(([key, value]) => (
+                {Object.entries(cultureRecommendations).map(([key, value]) => (
                   <option key={key} value={key}>
                     {value.label}
                   </option>
@@ -745,6 +818,107 @@ export default function AssistenteTecnico() {
           </div>
         </article>
       </div>
+
+      <article className={cardClass}>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">Catálogo de Culturas</h2>
+            <p className="text-sm text-slate-500">Base única para recomendações de kg/ha e parâmetros da calculadora.</p>
+          </div>
+          {canManageCatalog ? (
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500"
+              onClick={() => {
+                setEditingItem(null);
+                setCatalogForm({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
+                setShowModal(true);
+              }}
+            >
+              Nova cultura
+            </button>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <input className={inputClass} placeholder="Buscar por nome/slug" value={search} onChange={(event) => setSearch(event.target.value)} />
+          <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "active" | "inactive")}>
+            <option value="all">Todas</option>
+            <option value="active">Ativas</option>
+            <option value="inactive">Inativas</option>
+          </select>
+          <input className={inputClass} placeholder="Tag (ex.: inverno)" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} />
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => loadCatalog().catch(() => undefined)}>Buscar</button>
+        </div>
+
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-slate-500">
+                <th className="py-2">Nome</th><th>Slug</th><th>Status</th><th>Tags</th><th>Faixa padrão</th><th className="text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {catalogLoading ? (
+                <tr><td className="py-3 text-slate-500" colSpan={6}>Carregando catálogo...</td></tr>
+              ) : catalogItems.length === 0 ? (
+                <tr><td className="py-3 text-slate-500" colSpan={6}>Nenhuma cultura encontrada.</td></tr>
+              ) : catalogItems.map((item) => (
+                <tr key={item.id} className="border-b border-slate-100">
+                  <td className="py-2 font-medium">{item.label}</td>
+                  <td>{item.slug}</td>
+                  <td>{item.isActive ? "Ativa" : "Inativa"}</td>
+                  <td>{item.tags.join(", ") || "-"}</td>
+                  <td>{item.defaultKgHaMin ?? "-"} - {item.defaultKgHaMax ?? "-"}</td>
+                  <td className="text-right">
+                    {canManageCatalog ? (
+                      <div className="inline-flex gap-2">
+                        <button type="button" className="rounded border px-2 py-1" onClick={() => {
+                          setEditingItem(item);
+                          setCatalogForm({
+                            slug: item.slug,
+                            label: item.label,
+                            defaultKgHaMin: item.defaultKgHaMin?.toString() || "",
+                            defaultKgHaMax: item.defaultKgHaMax?.toString() || "",
+                            notes: item.notes || "",
+                            tags: item.tags.join(", "),
+                            goals: Object.entries(item.goalsJson || {}).map(([goal, range]) => `${goal}:${range.min}-${range.max}`).join("; ")
+                          });
+                          setShowModal(true);
+                        }}>Editar</button>
+                        {item.isActive ? <button type="button" className="rounded border border-rose-300 px-2 py-1 text-rose-600" onClick={() => inactivateCatalog(item.id).catch(() => undefined)}>Inativar</button> : null}
+                      </div>
+                    ) : <span className="text-xs text-slate-400">Somente visualização</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      {showModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-4">
+            <h3 className="text-lg font-semibold">{editingItem ? "Editar cultura" : "Nova cultura"}</h3>
+            <p className="mb-3 text-xs text-slate-500">Campos em pt-BR. Dica: objetivos no formato cobertura:10-15; silagem:12-18.</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input className={inputClass} placeholder="Slug" title="Identificador único em minúsculas" value={catalogForm.slug} onChange={(event) => setCatalogForm((prev) => ({ ...prev, slug: event.target.value }))} />
+              <input className={inputClass} placeholder="Nome da cultura" title="Nome exibido na interface" value={catalogForm.label} onChange={(event) => setCatalogForm((prev) => ({ ...prev, label: event.target.value }))} />
+              <input className={inputClass} placeholder="kg/ha mínimo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMin} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMin: event.target.value }))} />
+              <input className={inputClass} placeholder="kg/ha máximo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMax} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMax: event.target.value }))} />
+              <input className={inputClass} placeholder="Tags separadas por vírgula" title="Ex.: verão, cobertura" value={catalogForm.tags} onChange={(event) => setCatalogForm((prev) => ({ ...prev, tags: event.target.value }))} />
+              <input className={inputClass} placeholder="Objetivos e faixas" title="Use objetivo:min-max; objetivo:min-max" value={catalogForm.goals} onChange={(event) => setCatalogForm((prev) => ({ ...prev, goals: event.target.value }))} />
+            </div>
+            <textarea className={`${inputClass} min-h-24`} placeholder="Observações técnicas" title="Resumo técnico curto" value={catalogForm.notes} onChange={(event) => setCatalogForm((prev) => ({ ...prev, notes: event.target.value }))} />
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" className="rounded border px-3 py-2" onClick={() => setShowModal(false)}>Cancelar</button>
+              <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-white" onClick={() => saveCatalog().catch(() => undefined)}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </section>
   );
 }
