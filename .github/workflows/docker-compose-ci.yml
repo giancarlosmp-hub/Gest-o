@@ -16,6 +16,10 @@ jobs:
       - name: Build and start stack
         run: docker compose up -d --build
 
+      - name: Print API logs on failure
+        if: failure()
+        run: docker compose logs api
+
       - name: Wait for API health
         run: |
           for i in {1..60}; do
@@ -30,12 +34,11 @@ jobs:
           docker compose logs api
           exit 1
 
+      - name: Smoke test health endpoint
+        run: curl -sf http://localhost:4000/health
+
       - name: Smoke test technical-cultures endpoint
         run: curl -sf http://localhost:4000/technical-cultures
-
-      - name: Smoke test health endpoint
-        run: |
-          curl -f http://localhost:4000/health
 
       - name: Smoke test auth login
         run: |
