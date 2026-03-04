@@ -606,17 +606,67 @@ export default function AssistenteTecnico() {
             </div>
           ) : null}
 
-          <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
-            <h3 className="text-sm font-semibold text-slate-800">Entenda o cálculo</h3>
-            <div className="mt-2 space-y-1 text-sm text-slate-600">
-              <p>1) plantas/m² = plantas/ha ÷ 10.000</p>
-              <p>2) fator = (germinação ÷ 100) × (pureza ÷ 100)</p>
-              <p>3) sementes/m² = plantas/m² ÷ fator</p>
-              <p>4) sementes/metro = sementes/m² × (espaçamento cm ÷ 100)</p>
-              <p>5) kg/ha = (sementes/m² × PMS) ÷ 1.000</p>
-              <p>6) kg/ha final = kg/ha × (1 + correção ÷ 100)</p>
+          <details className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
+            <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800 marker:content-none">
+              Entenda o cálculo
+            </summary>
+
+            <div className="mt-3 space-y-3 text-sm text-slate-600">
+              <div>
+                <p className="font-medium text-slate-800">O que é PMS</p>
+                <p>
+                  PMS é o Peso de Mil Sementes, medido em gramas. Esse valor representa o tamanho e a massa do lote e permite converter
+                  quantidade de sementes em kg/ha. Quanto maior o PMS, maior tende a ser a dose em peso para atingir a mesma população.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-medium text-slate-800">O que é germinação</p>
+                <p>
+                  Germinação é o percentual de sementes que formam plântulas normais em teste de laboratório. Ela indica o potencial
+                  mínimo de estabelecimento e entra diretamente no cálculo da quantidade de sementes necessária por área.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-medium text-slate-800">O que é pureza</p>
+                <p>
+                  Pureza é a fração do lote que realmente corresponde à semente da cultura (sem impurezas, materiais inertes ou sementes
+                  de outras espécies). Se a pureza é menor, é preciso distribuir mais material para obter o mesmo número de sementes úteis.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-medium text-slate-800">Como funciona a correção</p>
+                <p>
+                  O sistema calcula a população-alvo por m² e corrige as sementes necessárias usando o fator germinação × pureza. Em
+                  seguida, converte para sementes por metro linear e para kg/ha com base no PMS. A correção de campo é aplicada no final
+                  como margem operacional para perdas de semeadura e variações reais do talhão.
+                </p>
+              </div>
+
+              <div>
+                <p className="font-medium text-slate-800">Fatores que influenciam a emergência</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5">
+                  <li>Vigor da semente e qualidade do lote.</li>
+                  <li>Profundidade e uniformidade de deposição.</li>
+                  <li>Umidade do solo no momento da semeadura.</li>
+                  <li>Temperatura do solo e ocorrência de estresse térmico.</li>
+                  <li>Compactação, encrostamento e presença de palhada.</li>
+                  <li>Regulagem da plantadeira e velocidade de operação.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p>1) plantas/m² = plantas/ha ÷ 10.000</p>
+                <p>2) fator = (germinação ÷ 100) × (pureza ÷ 100)</p>
+                <p>3) sementes/m² = plantas/m² ÷ fator</p>
+                <p>4) sementes/metro = sementes/m² × (espaçamento cm ÷ 100)</p>
+                <p>5) kg/ha = (sementes/m² × PMS) ÷ 1.000</p>
+                <p>6) kg/ha final = kg/ha × (1 + correção ÷ 100)</p>
+              </div>
             </div>
-          </div>
+          </details>
         </article>
 
         {/* INDICAÇÃO RÁPIDA */}
