@@ -30,6 +30,9 @@ jobs:
           docker compose logs api
           exit 1
 
+      - name: Smoke test technical-cultures endpoint
+        run: curl -sf http://localhost:4000/technical-cultures
+
       - name: Smoke test health endpoint
         run: |
           curl -f http://localhost:4000/health

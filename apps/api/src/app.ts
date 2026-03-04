@@ -11,6 +11,8 @@ import { env } from "./config/env.js";
 
 export const app = express();
 
+let technicalCulturesPublicCache: { payload: object; expiresAt: number } | null = null;
+
 app.use(helmet());
 
 const allowedOrigins = env.frontendUrl
@@ -73,17 +75,27 @@ app.use(cookieParser());
 app.use(morgan("dev"));
 
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
-app.get("/technical-cultures", async (_req, res) => {
+app.get("/technical-cultures", async (req, res) => {
   try {
+    const cached = technicalCulturesPublicCache;
+    if (cached && cached.expiresAt > Date.now()) {
+      return res.status(200).json(cached.payload);
+    }
+
     const { prisma } = await import("./config/prisma.js");
     const items = await prisma.cultureCatalog.findMany({
       where: { isActive: true },
       orderBy: [{ label: "asc" }],
-      take: 10,
-      select: { slug: true, label: true, category: true },
+      take: 50,
+      select: { slug: true, label: true, category: true, isActive: true },
     });
-    return res.status(200).json({ data: items, source: "db" });
-  } catch {
+
+    const payload = { data: items.length ? items : [], source: items.length ? "db" : "empty" };
+    technicalCulturesPublicCache = { payload, expiresAt: Date.now() + 60_000 };
+
+    return res.status(200).json(payload);
+  } catch (err) {
+    console.error("[technical-cultures/public] error", err);
     return res.status(200).json({ data: [], source: "fallback" });
   }
 });
@@ -96,26 +108,19 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", crudRoutes);
 
-app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error("[unhandled error]", err);
   if (res.headersSent) {
-    next(err);
-    return;
+    return next(err);
   }
 
-  const status = typeof err === "object" && err !== null && "status" in err && Number.isInteger((err as { status?: number }).status)
-    ? Math.max(400, Math.min(599, Number((err as { status?: number }).status)))
-    : 500;
+  res.status(500).json({ message: "Internal server error" });
+});
 
-  const message =
-    typeof err === "object" && err !== null && "message" in err && typeof (err as { message?: unknown }).message === "string"
-      ? (err as { message: string }).message
-      : "Erro interno";
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason);
+});
 
-  if (status >= 500) {
-    console.error(`[error] ${req.method} ${req.originalUrl}`, err);
-  } else {
-    console.warn(`[error] ${req.method} ${req.originalUrl} -> ${status}: ${message}`);
-  }
-
-  res.status(status).json({ message: status >= 500 ? "Erro interno" : message });
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
 });
