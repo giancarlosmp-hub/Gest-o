@@ -124,6 +124,31 @@ const parseStoredCultures = (rawValue: string | null) => {
   }
 };
 
+const readCultureOverrides = () => {
+  try {
+    return parseStoredCultures(localStorage.getItem(CULTURES_OVERRIDE_KEY));
+  } catch {
+    return null;
+  }
+};
+
+const persistCultureOverrides = (items: CultureKgHa[]) => {
+  try {
+    localStorage.setItem(CULTURES_OVERRIDE_KEY, JSON.stringify(items));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const clearCultureOverrides = () => {
+  try {
+    localStorage.removeItem(CULTURES_OVERRIDE_KEY);
+  } catch {
+    // Ignore storage cleanup failures.
+  }
+};
+
 const buildRangeLabel = (min: number | null, max: number | null) => {
   if (min == null || max == null) return "—";
   return `${formatValue(min, 0)}–${formatValue(max, 0)} kg/ha`;
@@ -226,7 +251,7 @@ export default function AssistenteTecnico() {
   }, [cultureItems, form, results.kgHaFinal, results.sementesMetro]);
 
   useEffect(() => {
-    const stored = parseStoredCultures(localStorage.getItem(CULTURES_OVERRIDE_KEY));
+    const stored = readCultureOverrides();
     if (stored) {
       setCultureItems(stored.map(sanitizeCulture));
       return;
@@ -432,7 +457,12 @@ export default function AssistenteTecnico() {
     }
 
     setCultureItems(sanitized);
-    localStorage.setItem(CULTURES_OVERRIDE_KEY, JSON.stringify(sanitized));
+    const persisted = persistCultureOverrides(sanitized);
+    if (!persisted) {
+      setRecommendationWarning("Não foi possível salvar no navegador agora. Tente novamente.");
+      return;
+    }
+
     setRecommendationWarning("");
     setShowEditModal(false);
   };
@@ -440,7 +470,7 @@ export default function AssistenteTecnico() {
   const restoreDefaults = () => {
     const defaults = culturesKgHa.map(sanitizeCulture);
     setCultureItems(defaults);
-    localStorage.removeItem(CULTURES_OVERRIDE_KEY);
+    clearCultureOverrides();
     setRecommendationWarning("");
   };
 
