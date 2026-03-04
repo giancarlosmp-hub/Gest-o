@@ -73,6 +73,20 @@ app.use(cookieParser());
 app.use(morgan("dev"));
 
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
+app.get("/technical-cultures", async (_req, res) => {
+  try {
+    const { prisma } = await import("./config/prisma.js");
+    const items = await prisma.cultureCatalog.findMany({
+      where: { isActive: true },
+      orderBy: [{ label: "asc" }],
+      take: 10,
+      select: { slug: true, label: true, category: true },
+    });
+    return res.status(200).json({ data: items, source: "db" });
+  } catch {
+    return res.status(200).json({ data: [], source: "fallback" });
+  }
+});
 app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/", crudRoutes);
