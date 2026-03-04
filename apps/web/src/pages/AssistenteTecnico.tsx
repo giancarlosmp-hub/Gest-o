@@ -53,6 +53,23 @@ type CultureRecommendation = {
   goals: Record<string, Recommendation>;
 };
 
+type AlertSeverity = "warning" | "critical";
+
+type TechnicalAlert = {
+  message: string;
+  severity: AlertSeverity;
+};
+
+const parseRangeAverage = (range: string) => {
+  const matches = range.match(/\d+[\.,]?\d*/g);
+  if (!matches || matches.length < 2) return null;
+
+  const [min, max] = matches.slice(0, 2).map((value) => Number(value.replace(",", ".")));
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+
+  return (min + max) / 2;
+};
+
 const SORGO_NOTES = [
   "Ajustar conforme PMS (peso de mil sementes) do lote.",
   "Considerar a germinação real e o vigor do lote.",
@@ -160,6 +177,59 @@ export default function AssistenteTecnico() {
       fator
     };
   }, [form]);
+
+  const alerts = useMemo<TechnicalAlert[]>(() => {
+    const germinacao = parseNumber(form.germinacao);
+    const pureza = parseNumber(form.pureza);
+    const espacamentoCm = parseNumber(form.espacamentoCm);
+    const alertsList: TechnicalAlert[] = [];
+
+    if (germinacao > 0 && germinacao < 80) {
+      alertsList.push({
+        message: "Germinação baixa. Recomenda-se aumentar a correção.",
+        severity: "warning"
+      });
+    }
+
+    if (pureza > 0 && pureza < 90) {
+      alertsList.push({
+        message: "Pureza abaixo do ideal. Revisar lote.",
+        severity: "warning"
+      });
+    }
+
+    if (results.sementesMetro > 25) {
+      alertsList.push({
+        message: "Densidade elevada. Confirmar regulagem da plantadeira.",
+        severity: "warning"
+      });
+    }
+
+    if (espacamentoCm > 0 && (espacamentoCm < 15 || espacamentoCm > 80)) {
+      alertsList.push({
+        message: "Espaçamento fora da faixa usual. Conferir configuração de semeadura.",
+        severity: "warning"
+      });
+    }
+
+    const cultureKey = form.cultura.toLowerCase();
+    const cultureData = CULTURE_RECOMMENDATIONS[cultureKey];
+    if (cultureData) {
+      const objectiveKey = form.objetivo.trim().toLowerCase();
+      const goalKey = objectiveKey && cultureData.goals[objectiveKey] ? objectiveKey : Object.keys(cultureData.goals)[0];
+      const recommendationRange = cultureData.goals[goalKey]?.range;
+      const averageKgHa = recommendationRange ? parseRangeAverage(recommendationRange) : null;
+
+      if (averageKgHa && results.kgHaFinal > averageKgHa * 1.2) {
+        alertsList.push({
+          message: "Dose acima da recomendação média.",
+          severity: "critical"
+        });
+      }
+    }
+
+    return alertsList;
+  }, [form, results.kgHaFinal, results.sementesMetro]);
 
   const updateField = (key: keyof SemeaduraForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -333,6 +403,23 @@ export default function AssistenteTecnico() {
               <p className="mt-1 text-2xl font-bold text-emerald-700">{formatValue(results.kgHaFinal)} kg/ha</p>
             </div>
           </div>
+
+          {alerts.length ? (
+            <div className="mt-4 space-y-2">
+              {alerts.map((alert) => {
+                const alertClass =
+                  alert.severity === "critical"
+                    ? "border-red-200 bg-red-50 text-red-800"
+                    : "border-amber-200 bg-amber-50 text-amber-800";
+
+                return (
+                  <p key={`${alert.severity}-${alert.message}`} className={`rounded-lg border px-3 py-2 text-sm ${alertClass}`}>
+                    {alert.message}
+                  </p>
+                );
+              })}
+            </div>
+          ) : null}
 
           <div className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-slate-800">Entenda o cálculo</h3>
