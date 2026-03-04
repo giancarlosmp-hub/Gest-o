@@ -97,18 +97,82 @@ const cultureQuerySchema = z.object({
 });
 
 const TECHNICAL_CULTURES_CACHE_TTL_MS = 60_000;
+type TechnicalCultureCatalogSerializedItem = {
+  id: string;
+  slug: string;
+  label: string;
+  category: string;
+  isActive: boolean;
+  defaultKgHaMin: number | null;
+  defaultKgHaMax: number | null;
+  goalsJson: Prisma.JsonValue;
+  notes: string | null;
+  pmsDefault: number | null;
+  germinationDefault: number | null;
+  purityDefault: number | null;
+  populationTargetDefault: number | null;
+  rowSpacingCmDefault: number | null;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type TechnicalCulturesPayload = {
+  data: TechnicalCultureCatalogSerializedItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
 type TechnicalCulturesCacheEntry = {
   expiresAt: number;
-  payload: {
-    data: Awaited<ReturnType<typeof prisma.cultureCatalog.findMany>>;
-    total: number;
-    page: number;
-    pageSize: number;
-  };
+  payload: TechnicalCulturesPayload;
 };
+
 const technicalCulturesCache = new Map<string, TechnicalCulturesCacheEntry>();
 const clearTechnicalCulturesCache = () => technicalCulturesCache.clear();
 
+const TECHNICAL_CULTURES_STATIC_SEED: TechnicalCultureCatalogSerializedItem[] = [
+  {
+    id: "seed-soja",
+    slug: "soja",
+    label: "Soja",
+    category: "Grãos",
+    isActive: true,
+    defaultKgHaMin: null,
+    defaultKgHaMax: null,
+    goalsJson: {},
+    notes: "Catálogo técnico temporário (fallback)",
+    pmsDefault: null,
+    germinationDefault: null,
+    purityDefault: null,
+    populationTargetDefault: null,
+    rowSpacingCmDefault: null,
+    tags: ["grãos"],
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  },
+];
+
+const serializeTechnicalCultureCatalogItem = (item: Awaited<ReturnType<typeof prisma.cultureCatalog.findMany>>[number]): TechnicalCultureCatalogSerializedItem => ({
+  id: item.id,
+  slug: item.slug,
+  label: item.label,
+  category: item.category,
+  isActive: item.isActive,
+  defaultKgHaMin: item.defaultKgHaMin,
+  defaultKgHaMax: item.defaultKgHaMax,
+  goalsJson: item.goalsJson,
+  notes: item.notes,
+  pmsDefault: item.pmsDefault,
+  germinationDefault: item.germinationDefault,
+  purityDefault: item.purityDefault,
+  populationTargetDefault: item.populationTargetDefault,
+  rowSpacingCmDefault: item.rowSpacingCmDefault,
+  tags: item.tags,
+  createdAt: item.createdAt.toISOString(),
+  updatedAt: item.updatedAt.toISOString(),
+});
 
 const CLOSED_STAGE_VALUES = ["ganho", "perdido"] as const;
 const CLOSED_STAGES = new Set<string>(CLOSED_STAGE_VALUES);
@@ -4371,26 +4435,53 @@ const listCulturesHandler = async (req: express.Request, res: express.Response) 
     }
   }
 
-  const [items, total] = await Promise.all([
-    prisma.cultureCatalog.findMany({
-      where,
-      orderBy: [{ isActive: "desc" }, { label: "asc" }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.cultureCatalog.count({ where }),
-  ]);
+  try {
+    const [items, total] = await Promise.all([
+      prisma.cultureCatalog.findMany({
+        where,
+        orderBy: [{ isActive: "desc" }, { label: "asc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.cultureCatalog.count({ where }),
+    ]);
 
-  const payload = { data: items, total, page, pageSize };
+    const payload: TechnicalCulturesPayload = {
+      data: items.map(serializeTechnicalCultureCatalogItem),
+      total,
+      page,
+      pageSize,
+    };
 
-  if (isTechnicalCulturesRoute) {
+    if (isTechnicalCulturesRoute) {
+      technicalCulturesCache.set(cacheKey, {
+        payload,
+        expiresAt: Date.now() + TECHNICAL_CULTURES_CACHE_TTL_MS,
+      });
+    }
+
+    return res.status(200).json(payload);
+  } catch (error) {
+    if (!isTechnicalCulturesRoute) {
+      console.error("[cultures] erro ao listar catálogo", error);
+      return res.status(500).json({ message: "Erro interno" });
+    }
+
+    console.error("[technical-cultures] fallback para seed estático", error);
+    const fallbackPayload: TechnicalCulturesPayload = {
+      data: TECHNICAL_CULTURES_STATIC_SEED,
+      total: TECHNICAL_CULTURES_STATIC_SEED.length,
+      page,
+      pageSize,
+    };
+
     technicalCulturesCache.set(cacheKey, {
-      payload,
+      payload: fallbackPayload,
       expiresAt: Date.now() + TECHNICAL_CULTURES_CACHE_TTL_MS,
     });
-  }
 
-  return res.status(200).json(payload);
+    return res.status(200).json(fallbackPayload);
+  }
 };
 
 router.get("/cultures", listCulturesHandler);
