@@ -14,6 +14,76 @@ async function upsertUser(name, email, role, region) {
 
 const cropOptions = ["soja", "milho", "algodão", "café", "trigo"];
 const stageOptions = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
+
+const baseCultures = [
+  {
+    slug: "sorgo",
+    label: "Sorgo",
+    defaultKgHaMin: 8,
+    defaultKgHaMax: 18,
+    goalsJson: { silagem: { min: 12, max: 18 }, grao: { min: 8, max: 12 } },
+    notes: "Ajustar conforme PMS e vigor do lote.",
+    pmsDefault: 28,
+    germinationDefault: 85,
+    purityDefault: 98,
+    populationTargetDefault: 180000,
+    tags: ["verao", "forrageira", "graos"]
+  },
+  {
+    slug: "milho",
+    label: "Milho",
+    defaultKgHaMin: 14,
+    defaultKgHaMax: 24,
+    goalsJson: { grao: { min: 14, max: 20 }, silagem: { min: 18, max: 24 } },
+    notes: "Regular a semeadora conforme híbrido e espaçamento.",
+    pmsDefault: 32,
+    germinationDefault: 90,
+    purityDefault: 98,
+    populationTargetDefault: 65000,
+    tags: ["verao", "graos"]
+  },
+  {
+    slug: "milheto", label: "Milheto", defaultKgHaMin: 10, defaultKgHaMax: 20,
+    goalsJson: { cobertura: { min: 15, max: 20 }, pastejo: { min: 10, max: 15 } },
+    notes: "Boa opção para cobertura rápida de solo.", tags: ["cobertura", "verao", "forrageira"]
+  },
+  {
+    slug: "trigo", label: "Trigo", defaultKgHaMin: 100, defaultKgHaMax: 140,
+    goalsJson: { grao: { min: 100, max: 140 } },
+    notes: "Refinar pela população alvo e ambiente.", tags: ["inverno", "graos"]
+  },
+  {
+    slug: "aveia", label: "Aveia", defaultKgHaMin: 60, defaultKgHaMax: 100,
+    goalsJson: { cobertura: { min: 60, max: 90 }, pastejo: { min: 80, max: 100 } },
+    notes: "Pode ser usada para cobertura e pastejo.", tags: ["inverno", "cobertura", "forrageira"]
+  },
+  {
+    slug: "brachiaria", label: "Braquiária", defaultKgHaMin: 8, defaultKgHaMax: 15,
+    goalsJson: { cobertura: { min: 8, max: 12 }, pastejo: { min: 10, max: 15 } },
+    notes: "Avaliar valor cultural e pureza do lote.", tags: ["forrageira", "cobertura"]
+  },
+  {
+    slug: "soja", label: "Soja", defaultKgHaMin: 45, defaultKgHaMax: 80,
+    goalsJson: { grao: { min: 45, max: 80 } },
+    notes: "Ajustar à população por cultivar e ciclo.", tags: ["verao", "graos"]
+  },
+  {
+    slug: "feijao", label: "Feijão", defaultKgHaMin: 50, defaultKgHaMax: 80,
+    goalsJson: { grao: { min: 50, max: 80 } },
+    notes: "Verificar PMS e stand final desejado.", tags: ["graos"]
+  },
+  {
+    slug: "centeio", label: "Centeio", defaultKgHaMin: 70, defaultKgHaMax: 120,
+    goalsJson: { cobertura: { min: 70, max: 120 } },
+    notes: "Alto potencial de produção de palha.", tags: ["inverno", "cobertura"]
+  },
+  {
+    slug: "azevem", label: "Azevém", defaultKgHaMin: 20, defaultKgHaMax: 35,
+    goalsJson: { pastejo: { min: 20, max: 35 } },
+    notes: "Muito utilizado para pastejo no inverno.", tags: ["inverno", "forrageira", "pastejo"]
+  }
+];
+
 const cityByRegion = {
   Sudeste: ["Ribeirão Preto", "Uberaba", "Patrocínio"],
   Sul: ["Londrina", "Cascavel", "Passo Fundo"],
@@ -45,6 +115,14 @@ async function main() {
   await prisma.opportunity.deleteMany();
   await prisma.contact.deleteMany();
   await prisma.client.deleteMany();
+
+  for (const culture of baseCultures) {
+    await prisma.cultureCatalog.upsert({
+      where: { slug: culture.slug },
+      update: { ...culture, isActive: true },
+      create: { ...culture, isActive: true }
+    });
+  }
 
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;

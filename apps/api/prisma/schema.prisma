@@ -267,3 +267,23 @@ model AppConfig {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model CultureCatalog {
+  id                      String   @id @default(uuid())
+  slug                    String   @unique
+  label                   String
+  isActive                Boolean  @default(true)
+  defaultKgHaMin          Float?
+  defaultKgHaMax          Float?
+  goalsJson               Json
+  notes                   String?
+  pmsDefault              Float?
+  germinationDefault      Float?
+  purityDefault           Float?
+  populationTargetDefault Float?
+  tags                    String[] @default([])
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([isActive])
+}
