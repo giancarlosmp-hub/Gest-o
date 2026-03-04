@@ -7,6 +7,7 @@ import morgan from "morgan";
 import authRoutes from "./routes/authRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import cultureRoutes from "./routes/cultureRoutes.js";
 import { env } from "./config/env.js";
 
 export const app = express();
@@ -75,11 +76,13 @@ app.use(morgan("dev"));
 app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
 app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
+app.use("/", cultureRoutes);
 app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api", cultureRoutes);
 app.use("/api", crudRoutes);
 
 app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {

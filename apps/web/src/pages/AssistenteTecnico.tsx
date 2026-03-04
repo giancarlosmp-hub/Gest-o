@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useCulturesCatalog } from "../hooks/useCulturesCatalog";
 import api from "../lib/apiClient";
 import { getApiErrorMessage } from "../lib/apiError";
 import { toast } from "sonner";
@@ -82,7 +83,6 @@ const initialForm: SemeaduraForm = {
   correcaoCampo: "0"
 };
 
-
 const inputClass =
   "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
 
@@ -101,12 +101,16 @@ function formatValue(value: number, digits = 2) {
 
 /** Indicação rápida (kg/ha) */
 type Recommendation = {
-  range: string;
+  rangeMin: number;
+  rangeMax: number;
+  unit: string;
   notes: string[];
 };
 
 type CultureRecommendation = {
+  key: string;
   label: string;
+  notes: string[];
   goals: Record<string, Recommendation>;
 };
 
@@ -133,22 +137,30 @@ type TechnicalAlert = {
   severity: AlertSeverity;
 };
 
-const parseRangeAverage = (range: string) => {
-  const matches = range.match(/\d+[\.,]?\d*/g);
-  if (!matches || matches.length < 2) return null;
-
-  const [min, max] = matches.slice(0, 2).map((value) => Number(value.replace(",", ".")));
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-
-  return (min + max) / 2;
+const parseRangeAverage = (recommendation?: Recommendation) => {
+  if (!recommendation) return null;
+  if (!Number.isFinite(recommendation.rangeMin) || !Number.isFinite(recommendation.rangeMax)) return null;
+  return (recommendation.rangeMin + recommendation.rangeMax) / 2;
 };
+
+const GENERAL_RECOMMENDATION_RULES = [
+  "Ajustar a dose conforme PMS (peso de mil sementes) do lote.",
+  "Corrigir pela germinação real e pureza para estimar sementes viáveis.",
+  "Validar profundidade, umidade e regulagem da plantadeira antes de fechar a dose."
+];
+
+const formatRange = (recommendation: Recommendation) =>
+  `${formatValue(recommendation.rangeMin, 0)}–${formatValue(recommendation.rangeMax, 0)} ${recommendation.unit}`;
 
 const buildCultureRecommendations = (items: CultureCatalog[]) =>
   items.reduce<Record<string, CultureRecommendation>>((acc, culture) => {
     const goals = Object.entries(culture.goalsJson || {}).reduce<Record<string, Recommendation>>((goalAcc, [goal, range]) => {
       if (!Number.isFinite(range?.min) || !Number.isFinite(range?.max)) return goalAcc;
+
       goalAcc[goal] = {
-        range: `${formatValue(range.min, 0)}–${formatValue(range.max, 0)} kg/ha`,
+        rangeMin: range.min,
+        rangeMax: range.max,
+        unit: "kg/ha",
         notes: [culture.notes || "Ajuste a dose conforme qualidade do lote e objetivo de uso."]
       };
       return goalAcc;
@@ -156,13 +168,20 @@ const buildCultureRecommendations = (items: CultureCatalog[]) =>
 
     if (Object.keys(goals).length === 0 && culture.defaultKgHaMin != null && culture.defaultKgHaMax != null) {
       goals.padrao = {
-        range: `${formatValue(culture.defaultKgHaMin, 0)}–${formatValue(culture.defaultKgHaMax, 0)} kg/ha`,
+        rangeMin: culture.defaultKgHaMin,
+        rangeMax: culture.defaultKgHaMax,
+        unit: "kg/ha",
         notes: [culture.notes || "Ajuste técnico recomendado conforme campo."]
       };
     }
 
     if (Object.keys(goals).length > 0) {
-      acc[culture.slug] = { label: culture.label, goals };
+      acc[culture.slug] = {
+        key: culture.slug,
+        label: culture.label,
+        notes: culture.notes ? [culture.notes] : [],
+        goals
+      };
     }
 
     return acc;
@@ -179,9 +198,15 @@ const getGoalLabel = (goalKey: string) => {
 export default function AssistenteTecnico() {
   const { user } = useAuth();
   const canManageCatalog = user?.role === "diretor" || user?.role === "gerente";
+
   /** Calculadora */
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
   const [pdfStatus, setPdfStatus] = useState("");
+
+  /** Hook catálogo (offline fallback) */
+  const { catalog, isFallback } = useCulturesCatalog();
+
+  /** Catálogo (API) */
   const [catalogItems, setCatalogItems] = useState<CultureCatalog[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -189,7 +214,37 @@ export default function AssistenteTecnico() {
   const [tagFilter, setTagFilter] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editingItem, setEditingItem] = useState<CultureCatalog | null>(null);
-  const [catalogForm, setCatalogForm] = useState({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
+  const [catalogForm, setCatalogForm] = useState({
+    slug: "",
+    label: "",
+    defaultKgHaMin: "",
+    defaultKgHaMax: "",
+    notes: "",
+    tags: "",
+    goals: ""
+  });
+
+  /** Recomendações do hook (quando existir) */
+  const hookCultureRecommendations = useMemo<Record<string, CultureRecommendation>>(() => {
+    if (!catalog?.length) return {};
+    return catalog.reduce<Record<string, CultureRecommendation>>((acc, culture) => {
+      acc[culture.key] = {
+        key: culture.key,
+        label: culture.label,
+        notes: culture.notes ?? [],
+        goals: Object.entries(culture.goalsJson || {}).reduce<Record<string, Recommendation>>((goalAcc, [goal, range]) => {
+          goalAcc[goal] = {
+            rangeMin: range.min,
+            rangeMax: range.max,
+            unit: "kg/ha",
+            notes: []
+          };
+          return goalAcc;
+        }, {})
+      };
+      return acc;
+    }, {});
+  }, [catalog]);
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -229,6 +284,58 @@ export default function AssistenteTecnico() {
     };
   }, [form]);
 
+  const loadCatalog = async () => {
+    try {
+      setCatalogLoading(true);
+      const activeParam = statusFilter === "all" ? "" : `&active=${statusFilter === "active" ? "true" : "false"}`;
+      const tagParam = tagFilter ? `&tags=${encodeURIComponent(tagFilter)}` : "";
+      const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
+      const response = await api.get(`/cultures?page=1&pageSize=200${activeParam}${tagParam}${searchParam}`);
+      const items = Array.isArray(response.data?.data)
+        ? response.data.data
+        : Array.isArray(response.data)
+          ? response.data
+          : [];
+      setCatalogItems(items);
+
+      if (!form.cultura) {
+        const firstActiveLabel = items.find((item: CultureCatalog) => item.isActive)?.label;
+        if (firstActiveLabel) {
+          setForm((prev) => ({ ...prev, cultura: firstActiveLabel }));
+        }
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar o catálogo de culturas."));
+    } finally {
+      setCatalogLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, tagFilter]);
+
+  /** Recomendações: prioriza hook (offline/fallback), senão usa API */
+  const catalogCultureRecommendations = useMemo(
+    () => buildCultureRecommendations(catalogItems.filter((item) => item.isActive)),
+    [catalogItems]
+  );
+
+  const cultureRecommendations = useMemo<Record<string, CultureRecommendation>>(() => {
+    const hasHook = Object.keys(hookCultureRecommendations).length > 0;
+    return hasHook ? hookCultureRecommendations : catalogCultureRecommendations;
+  }, [hookCultureRecommendations, catalogCultureRecommendations]);
+
+  /** Lista de culturas (para a calculadora) usa LABEL */
+  const culturas = useMemo(() => {
+    const fromApi = catalogItems.filter((item) => item.isActive).map((item) => item.label);
+    if (fromApi.length) return fromApi;
+
+    const fromHook = catalog.map((item) => item.label);
+    return fromHook.length ? fromHook : ["Sorgo"];
+  }, [catalog, catalogItems]);
+
   const alerts = useMemo<TechnicalAlert[]>(() => {
     const germinacao = parseNumber(form.germinacao);
     const pureza = parseNumber(form.pureza);
@@ -263,13 +370,12 @@ export default function AssistenteTecnico() {
       });
     }
 
-    const cultureKey = form.cultura.toLowerCase();
+    const cultureKey = form.cultura.trim().toLowerCase();
     const cultureData = cultureRecommendations[cultureKey];
     if (cultureData) {
       const objectiveKey = form.objetivo.trim().toLowerCase();
       const goalKey = objectiveKey && cultureData.goals[objectiveKey] ? objectiveKey : Object.keys(cultureData.goals)[0];
-      const recommendationRange = cultureData.goals[goalKey]?.range;
-      const averageKgHa = recommendationRange ? parseRangeAverage(recommendationRange) : null;
+      const averageKgHa = parseRangeAverage(cultureData.goals[goalKey]);
 
       if (averageKgHa && results.kgHaFinal > averageKgHa * 1.2) {
         alertsList.push({
@@ -280,33 +386,7 @@ export default function AssistenteTecnico() {
     }
 
     return alertsList;
-  }, [form, results.kgHaFinal, results.sementesMetro]);
-
-  const loadCatalog = async () => {
-    try {
-      setCatalogLoading(true);
-      const activeParam = statusFilter === "all" ? "" : `&active=${statusFilter === "active" ? "true" : "false"}`;
-      const tagParam = tagFilter ? `&tags=${encodeURIComponent(tagFilter)}` : "";
-      const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
-      const response = await api.get(`/cultures?page=1&pageSize=200${activeParam}${tagParam}${searchParam}`);
-      const items = Array.isArray(response.data?.data) ? response.data.data : [];
-      setCatalogItems(items);
-      if (!form.cultura && items[0]?.label) {
-        setForm((prev) => ({ ...prev, cultura: items[0].label }));
-      }
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível carregar o catálogo de culturas."));
-    } finally {
-      setCatalogLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadCatalog().catch(() => undefined);
-  }, [statusFilter, tagFilter]);
-
-  const cultureRecommendations = useMemo(() => buildCultureRecommendations(catalogItems.filter((item) => item.isActive)), [catalogItems]);
-  const culturas = useMemo(() => catalogItems.filter((item) => item.isActive).map((item) => item.label), [catalogItems]);
+  }, [cultureRecommendations, form, results.kgHaFinal, results.sementesMetro]);
 
   const saveCatalog = async () => {
     try {
@@ -330,7 +410,7 @@ export default function AssistenteTecnico() {
         defaultKgHaMax: catalogForm.defaultKgHaMax ? Number(catalogForm.defaultKgHaMax) : null,
         notes: catalogForm.notes || null,
         goalsJson: goalsSource,
-        tags: catalogForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+        tags: catalogForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean)
       };
 
       if (editingItem) {
@@ -340,6 +420,7 @@ export default function AssistenteTecnico() {
         await api.post("/cultures", payload);
         toast.success("Cultura criada com sucesso.");
       }
+
       setShowModal(false);
       setEditingItem(null);
       setCatalogForm({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
@@ -492,6 +573,14 @@ export default function AssistenteTecnico() {
   const selectedCultureData = selectedCulture ? cultureRecommendations[selectedCulture] : undefined;
   const goalKeys = selectedCultureData ? Object.keys(selectedCultureData.goals) : [];
 
+  useEffect(() => {
+    if (!selectedCulture) return;
+    if (cultureRecommendations[selectedCulture]) return;
+
+    setSelectedCulture("");
+    setSelectedGoal("");
+  }, [cultureRecommendations, selectedCulture]);
+
   const effectiveGoal = useMemo(() => {
     if (!selectedCultureData) return "";
     if (goalKeys.length === 1) return goalKeys[0];
@@ -499,6 +588,9 @@ export default function AssistenteTecnico() {
   }, [goalKeys, selectedCultureData, selectedGoal]);
 
   const recommendation = selectedCultureData && effectiveGoal ? selectedCultureData.goals[effectiveGoal] : undefined;
+  const recommendationNotes = recommendation
+    ? [...(selectedCultureData?.notes ?? []), ...recommendation.notes, ...GENERAL_RECOMMENDATION_RULES]
+    : [];
 
   const handleCopyRecommendation = async () => {
     if (!selectedCultureData || !recommendation) return;
@@ -507,9 +599,9 @@ export default function AssistenteTecnico() {
     const text = [
       `Cultura: ${selectedCultureData.label}`,
       `Objetivo: ${goalLabel}`,
-      `Faixa recomendada: ${recommendation.range}`,
+      `Faixa recomendada: ${formatRange(recommendation)}`,
       "Observações:",
-      ...recommendation.notes.map((note) => `- ${note}`)
+      ...recommendationNotes.map((note) => `- ${note}`)
     ].join("\n");
 
     try {
@@ -601,13 +693,7 @@ export default function AssistenteTecnico() {
 
             <label className="block text-sm text-slate-700">
               PMS (g)
-              <input
-                type="number"
-                min="0"
-                value={form.pms}
-                onChange={(event) => updateField("pms", event.target.value)}
-                className={inputClass}
-              />
+              <input type="number" min="0" value={form.pms} onChange={(event) => updateField("pms", event.target.value)} className={inputClass} />
             </label>
 
             <label className="block text-sm text-slate-700">
@@ -623,23 +709,12 @@ export default function AssistenteTecnico() {
 
             <label className="block text-sm text-slate-700">
               Pureza (%)
-              <input
-                type="number"
-                min="0"
-                value={form.pureza}
-                onChange={(event) => updateField("pureza", event.target.value)}
-                className={inputClass}
-              />
+              <input type="number" min="0" value={form.pureza} onChange={(event) => updateField("pureza", event.target.value)} className={inputClass} />
             </label>
 
             <label className="block text-sm text-slate-700">
               Correção de campo (%)
-              <input
-                type="number"
-                value={form.correcaoCampo}
-                onChange={(event) => updateField("correcaoCampo", event.target.value)}
-                className={inputClass}
-              />
+              <input type="number" value={form.correcaoCampo} onChange={(event) => updateField("correcaoCampo", event.target.value)} className={inputClass} />
             </label>
           </div>
 
@@ -678,74 +753,13 @@ export default function AssistenteTecnico() {
               })}
             </div>
           ) : null}
-
-          <details className="mt-5 rounded-xl border border-slate-200 bg-white p-4">
-            <summary className="cursor-pointer list-none text-sm font-semibold text-slate-800 marker:content-none">
-              Entenda o cálculo
-            </summary>
-
-            <div className="mt-3 space-y-3 text-sm text-slate-600">
-              <div>
-                <p className="font-medium text-slate-800">O que é PMS</p>
-                <p>
-                  PMS é o Peso de Mil Sementes, medido em gramas. Esse valor representa o tamanho e a massa do lote e permite converter
-                  quantidade de sementes em kg/ha. Quanto maior o PMS, maior tende a ser a dose em peso para atingir a mesma população.
-                </p>
-              </div>
-
-              <div>
-                <p className="font-medium text-slate-800">O que é germinação</p>
-                <p>
-                  Germinação é o percentual de sementes que formam plântulas normais em teste de laboratório. Ela indica o potencial
-                  mínimo de estabelecimento e entra diretamente no cálculo da quantidade de sementes necessária por área.
-                </p>
-              </div>
-
-              <div>
-                <p className="font-medium text-slate-800">O que é pureza</p>
-                <p>
-                  Pureza é a fração do lote que realmente corresponde à semente da cultura (sem impurezas, materiais inertes ou sementes
-                  de outras espécies). Se a pureza é menor, é preciso distribuir mais material para obter o mesmo número de sementes úteis.
-                </p>
-              </div>
-
-              <div>
-                <p className="font-medium text-slate-800">Como funciona a correção</p>
-                <p>
-                  O sistema calcula a população-alvo por m² e corrige as sementes necessárias usando o fator germinação × pureza. Em
-                  seguida, converte para sementes por metro linear e para kg/ha com base no PMS. A correção de campo é aplicada no final
-                  como margem operacional para perdas de semeadura e variações reais do talhão.
-                </p>
-              </div>
-
-              <div>
-                <p className="font-medium text-slate-800">Fatores que influenciam a emergência</p>
-                <ul className="mt-1 list-disc space-y-1 pl-5">
-                  <li>Vigor da semente e qualidade do lote.</li>
-                  <li>Profundidade e uniformidade de deposição.</li>
-                  <li>Umidade do solo no momento da semeadura.</li>
-                  <li>Temperatura do solo e ocorrência de estresse térmico.</li>
-                  <li>Compactação, encrostamento e presença de palhada.</li>
-                  <li>Regulagem da plantadeira e velocidade de operação.</li>
-                </ul>
-              </div>
-
-              <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p>1) plantas/m² = plantas/ha ÷ 10.000</p>
-                <p>2) fator = (germinação ÷ 100) × (pureza ÷ 100)</p>
-                <p>3) sementes/m² = plantas/m² ÷ fator</p>
-                <p>4) sementes/metro = sementes/m² × (espaçamento cm ÷ 100)</p>
-                <p>5) kg/ha = (sementes/m² × PMS) ÷ 1.000</p>
-                <p>6) kg/ha final = kg/ha × (1 + correção ÷ 100)</p>
-              </div>
-            </div>
-          </details>
         </article>
 
         {/* INDICAÇÃO RÁPIDA */}
         <article className={cardClass}>
           <h2 className="text-base font-semibold text-slate-800">Indicação rápida de kg/ha</h2>
           <p className="mt-1 text-sm text-slate-500">Selecione cultura e objetivo para obter uma faixa de referência.</p>
+          {isFallback ? <p className="mt-1 text-xs text-amber-600">Catálogo offline — usando recomendações locais</p> : null}
 
           <div className="mt-4 grid gap-4">
             <label className="space-y-1 text-sm">
@@ -792,14 +806,14 @@ export default function AssistenteTecnico() {
             {recommendation ? (
               <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm text-slate-700">
-                  <span className="font-semibold">Faixa recomendada:</span> {recommendation.range}
+                  <span className="font-semibold">Faixa recomendada:</span> {formatRange(recommendation)}
                 </p>
 
                 <div className="text-sm text-slate-700">
                   <p className="font-semibold">Observações técnicas:</p>
                   <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {recommendation.notes.map((note) => (
-                      <li key={note}>{note}</li>
+                    {recommendationNotes.map((note, index) => (
+                      <li key={`${note}-${index}`}>{note}</li>
                     ))}
                   </ul>
                 </div>
@@ -819,6 +833,7 @@ export default function AssistenteTecnico() {
         </article>
       </div>
 
+      {/* CATÁLOGO */}
       <article className={cardClass}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -848,50 +863,87 @@ export default function AssistenteTecnico() {
             <option value="inactive">Inativas</option>
           </select>
           <input className={inputClass} placeholder="Tag (ex.: inverno)" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} />
-          <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => loadCatalog().catch(() => undefined)}>Buscar</button>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => loadCatalog().catch(() => undefined)}>
+            Buscar
+          </button>
         </div>
 
         <div className="mt-4 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b text-left text-slate-500">
-                <th className="py-2">Nome</th><th>Slug</th><th>Status</th><th>Tags</th><th>Faixa padrão</th><th className="text-right">Ações</th>
+                <th className="py-2">Nome</th>
+                <th>Slug</th>
+                <th>Status</th>
+                <th>Tags</th>
+                <th>Faixa padrão</th>
+                <th className="text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {catalogLoading ? (
-                <tr><td className="py-3 text-slate-500" colSpan={6}>Carregando catálogo...</td></tr>
-              ) : catalogItems.length === 0 ? (
-                <tr><td className="py-3 text-slate-500" colSpan={6}>Nenhuma cultura encontrada.</td></tr>
-              ) : catalogItems.map((item) => (
-                <tr key={item.id} className="border-b border-slate-100">
-                  <td className="py-2 font-medium">{item.label}</td>
-                  <td>{item.slug}</td>
-                  <td>{item.isActive ? "Ativa" : "Inativa"}</td>
-                  <td>{item.tags.join(", ") || "-"}</td>
-                  <td>{item.defaultKgHaMin ?? "-"} - {item.defaultKgHaMax ?? "-"}</td>
-                  <td className="text-right">
-                    {canManageCatalog ? (
-                      <div className="inline-flex gap-2">
-                        <button type="button" className="rounded border px-2 py-1" onClick={() => {
-                          setEditingItem(item);
-                          setCatalogForm({
-                            slug: item.slug,
-                            label: item.label,
-                            defaultKgHaMin: item.defaultKgHaMin?.toString() || "",
-                            defaultKgHaMax: item.defaultKgHaMax?.toString() || "",
-                            notes: item.notes || "",
-                            tags: item.tags.join(", "),
-                            goals: Object.entries(item.goalsJson || {}).map(([goal, range]) => `${goal}:${range.min}-${range.max}`).join("; ")
-                          });
-                          setShowModal(true);
-                        }}>Editar</button>
-                        {item.isActive ? <button type="button" className="rounded border border-rose-300 px-2 py-1 text-rose-600" onClick={() => inactivateCatalog(item.id).catch(() => undefined)}>Inativar</button> : null}
-                      </div>
-                    ) : <span className="text-xs text-slate-400">Somente visualização</span>}
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={6}>
+                    Carregando catálogo...
                   </td>
                 </tr>
-              ))}
+              ) : catalogItems.length === 0 ? (
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={6}>
+                    Nenhuma cultura encontrada.
+                  </td>
+                </tr>
+              ) : (
+                catalogItems.map((item) => (
+                  <tr key={item.id} className="border-b border-slate-100">
+                    <td className="py-2 font-medium">{item.label}</td>
+                    <td>{item.slug}</td>
+                    <td>{item.isActive ? "Ativa" : "Inativa"}</td>
+                    <td>{item.tags.join(", ") || "-"}</td>
+                    <td>
+                      {item.defaultKgHaMin ?? "-"} - {item.defaultKgHaMax ?? "-"}
+                    </td>
+                    <td className="text-right">
+                      {canManageCatalog ? (
+                        <div className="inline-flex gap-2">
+                          <button
+                            type="button"
+                            className="rounded border px-2 py-1"
+                            onClick={() => {
+                              setEditingItem(item);
+                              setCatalogForm({
+                                slug: item.slug,
+                                label: item.label,
+                                defaultKgHaMin: item.defaultKgHaMin?.toString() || "",
+                                defaultKgHaMax: item.defaultKgHaMax?.toString() || "",
+                                notes: item.notes || "",
+                                tags: item.tags.join(", "),
+                                goals: Object.entries(item.goalsJson || {})
+                                  .map(([goal, range]) => `${goal}:${range.min}-${range.max}`)
+                                  .join("; ")
+                              });
+                              setShowModal(true);
+                            }}
+                          >
+                            Editar
+                          </button>
+                          {item.isActive ? (
+                            <button
+                              type="button"
+                              className="rounded border border-rose-300 px-2 py-1 text-rose-600"
+                              onClick={() => inactivateCatalog(item.id).catch(() => undefined)}
+                            >
+                              Inativar
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">Somente visualização</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -902,23 +954,71 @@ export default function AssistenteTecnico() {
           <div className="w-full max-w-2xl rounded-xl bg-white p-4">
             <h3 className="text-lg font-semibold">{editingItem ? "Editar cultura" : "Nova cultura"}</h3>
             <p className="mb-3 text-xs text-slate-500">Campos em pt-BR. Dica: objetivos no formato cobertura:10-15; silagem:12-18.</p>
+
             <div className="grid gap-3 md:grid-cols-2">
-              <input className={inputClass} placeholder="Slug" title="Identificador único em minúsculas" value={catalogForm.slug} onChange={(event) => setCatalogForm((prev) => ({ ...prev, slug: event.target.value }))} />
-              <input className={inputClass} placeholder="Nome da cultura" title="Nome exibido na interface" value={catalogForm.label} onChange={(event) => setCatalogForm((prev) => ({ ...prev, label: event.target.value }))} />
-              <input className={inputClass} placeholder="kg/ha mínimo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMin} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMin: event.target.value }))} />
-              <input className={inputClass} placeholder="kg/ha máximo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMax} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMax: event.target.value }))} />
-              <input className={inputClass} placeholder="Tags separadas por vírgula" title="Ex.: verão, cobertura" value={catalogForm.tags} onChange={(event) => setCatalogForm((prev) => ({ ...prev, tags: event.target.value }))} />
-              <input className={inputClass} placeholder="Objetivos e faixas" title="Use objetivo:min-max; objetivo:min-max" value={catalogForm.goals} onChange={(event) => setCatalogForm((prev) => ({ ...prev, goals: event.target.value }))} />
+              <input
+                className={inputClass}
+                placeholder="Slug"
+                title="Identificador único em minúsculas"
+                value={catalogForm.slug}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, slug: event.target.value }))}
+              />
+              <input
+                className={inputClass}
+                placeholder="Nome da cultura"
+                title="Nome exibido na interface"
+                value={catalogForm.label}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, label: event.target.value }))}
+              />
+              <input
+                className={inputClass}
+                placeholder="kg/ha mínimo padrão"
+                title="Faixa base para recomendação"
+                value={catalogForm.defaultKgHaMin}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMin: event.target.value }))}
+              />
+              <input
+                className={inputClass}
+                placeholder="kg/ha máximo padrão"
+                title="Faixa base para recomendação"
+                value={catalogForm.defaultKgHaMax}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMax: event.target.value }))}
+              />
+              <input
+                className={inputClass}
+                placeholder="Tags separadas por vírgula"
+                title="Ex.: verão, cobertura"
+                value={catalogForm.tags}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, tags: event.target.value }))}
+              />
+              <input
+                className={inputClass}
+                placeholder="Objetivos e faixas"
+                title="Use objetivo:min-max; objetivo:min-max"
+                value={catalogForm.goals}
+                onChange={(event) => setCatalogForm((prev) => ({ ...prev, goals: event.target.value }))}
+              />
             </div>
-            <textarea className={`${inputClass} min-h-24`} placeholder="Observações técnicas" title="Resumo técnico curto" value={catalogForm.notes} onChange={(event) => setCatalogForm((prev) => ({ ...prev, notes: event.target.value }))} />
+
+            <textarea
+              className={`${inputClass} min-h-24`}
+              placeholder="Observações técnicas"
+              title="Resumo técnico curto"
+              value={catalogForm.notes}
+              onChange={(event) => setCatalogForm((prev) => ({ ...prev, notes: event.target.value }))}
+            />
+
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded border px-3 py-2" onClick={() => setShowModal(false)}>Cancelar</button>
-              <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-white" onClick={() => saveCatalog().catch(() => undefined)}>Salvar</button>
+              <button type="button" className="rounded border px-3 py-2" onClick={() => setShowModal(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-white" onClick={() => saveCatalog().catch(() => undefined)}>
+                Salvar
+              </button>
             </div>
           </div>
         </div>
       ) : null}
-
     </section>
   );
 }
