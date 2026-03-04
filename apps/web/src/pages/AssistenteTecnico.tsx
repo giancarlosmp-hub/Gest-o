@@ -79,6 +79,16 @@ const initialForm: SemeaduraForm = {
   correcaoCampo: "0"
 };
 
+const initialVcForm: VcForm = {
+  cultureId: "",
+  pureza: "",
+  germinacao: "",
+  sementesDuras: "",
+  considerarSementesDuras: false,
+  doseFisica: "",
+  doseSpv: "",
+  lastEditedDose: null,
+};
 
 const inputClass =
   "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
@@ -96,7 +106,25 @@ function formatValue(value: number, digits = 2) {
   });
 }
 
+function parseOptionalNumber(value: string) {
+  if (!value.trim()) return null;
+  const number = parseNumber(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 const CULTURES_OVERRIDE_KEY = "culturesKgHaOverrides";
+const VC_STORAGE_KEY = "technical_assistant_vc_last";
+
+type VcForm = {
+  cultureId: string;
+  pureza: string;
+  germinacao: string;
+  sementesDuras: string;
+  considerarSementesDuras: boolean;
+  doseFisica: string;
+  doseSpv: string;
+  lastEditedDose: "fisica" | "spv" | null;
+};
 
 type AlertSeverity = "warning" | "critical";
 
@@ -110,6 +138,8 @@ const sanitizeCulture = (item: CultureKgHa): CultureKgHa => ({
   ...item,
   kgHaMin: item.kgHaMin == null ? null : Math.max(0, item.kgHaMin),
   kgHaMax: item.kgHaMax == null ? null : Math.max(0, item.kgHaMax),
+  defaultPureza: item.defaultPureza == null ? undefined : Math.min(100, Math.max(0, item.defaultPureza)),
+  defaultGerminacao: item.defaultGerminacao == null ? undefined : Math.min(100, Math.max(0, item.defaultGerminacao)),
   notes: item.notes?.trim() || undefined,
 });
 
@@ -163,6 +193,18 @@ export default function AssistenteTecnico() {
   const [editSearch, setEditSearch] = useState("");
   const [editGroupFilter, setEditGroupFilter] = useState("todos");
   const [recommendationWarning, setRecommendationWarning] = useState("");
+  const [vcForm, setVcForm] = useState<VcForm>(initialVcForm);
+  const [vcMessage, setVcMessage] = useState("");
+
+  const activeCultures = useMemo(() => cultureItems.filter((item) => item.active), [cultureItems]);
+  const culturas = useMemo(() => activeCultures.map((item) => item.name), [activeCultures]);
+  const groupedOptions = useMemo(() => {
+    return activeCultures.reduce<Record<string, CultureKgHa[]>>((acc, item) => {
+      if (!acc[item.group]) acc[item.group] = [];
+      acc[item.group].push(item);
+      return acc;
+    }, {});
+  }, [activeCultures]);
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -250,6 +292,174 @@ export default function AssistenteTecnico() {
     return alertsList;
   }, [cultureItems, form, results.kgHaFinal, results.sementesMetro]);
 
+  const selectedVcCulture = useMemo(
+    () => activeCultures.find((item) => item.id === vcForm.cultureId) ?? null,
+    [activeCultures, vcForm.cultureId]
+  );
+
+  const vcComputed = useMemo(() => {
+    const pureza = parseOptionalNumber(vcForm.pureza);
+    const germinacao = parseOptionalNumber(vcForm.germinacao);
+    const sementesDuras = parseOptionalNumber(vcForm.sementesDuras) ?? 0;
+    const doseFisica = parseOptionalNumber(vcForm.doseFisica);
+    const doseSpv = parseOptionalNumber(vcForm.doseSpv);
+    const useSpvAsSource = doseFisica != null && doseSpv != null && vcForm.lastEditedDose === "spv";
+    const useFisicaAsSource = doseFisica != null && doseSpv != null && vcForm.lastEditedDose !== "spv";
+
+    const errors: string[] = [];
+
+    if (pureza != null && (pureza < 0 || pureza > 100)) {
+      errors.push("Pureza deve estar entre 0 e 100%.");
+    }
+
+    if (germinacao != null && (germinacao < 0 || germinacao > 100)) {
+      errors.push("Germinação deve estar entre 0 e 100%.");
+    }
+
+    if (vcForm.considerarSementesDuras && (sementesDuras < 0 || sementesDuras > 100)) {
+      errors.push("Sementes duras deve estar entre 0 e 100%.");
+    }
+
+    if ((doseFisica != null && doseFisica < 0) || (doseSpv != null && doseSpv < 0)) {
+      errors.push("As doses devem ser valores iguais ou maiores que zero.");
+    }
+
+    if (pureza == null || germinacao == null) {
+      return {
+        errors,
+        ready: false,
+        vc: 0,
+        fatorCorrecao: 0,
+        germinacaoEfetiva: 0,
+        doseSpvCalculada: null as number | null,
+        doseFisicaNecessaria: null as number | null,
+      };
+    }
+
+    const germinacaoEfetiva = vcForm.considerarSementesDuras ? Math.min(100, germinacao + sementesDuras) : germinacao;
+    const vc = (pureza * germinacaoEfetiva) / 100;
+    const fatorCorrecao = vc > 0 ? 100 / vc : 0;
+
+    const doseFisicaBase = useSpvAsSource ? null : doseFisica;
+    const doseSpvBase = useFisicaAsSource ? null : doseSpv;
+
+    const doseSpvCalculada = doseFisicaBase != null ? doseFisicaBase * (vc / 100) : null;
+    const doseFisicaNecessaria = doseSpvBase != null && vc > 0 ? doseSpvBase / (vc / 100) : null;
+
+    return {
+      errors,
+      ready: true,
+      vc,
+      fatorCorrecao,
+      germinacaoEfetiva,
+      doseSpvCalculada,
+      doseFisicaNecessaria,
+    };
+  }, [vcForm]);
+
+  const vcSummaryText = useMemo(() => {
+    if (!vcComputed.ready || vcComputed.vc <= 0 || vcComputed.errors.length) {
+      return "";
+    }
+
+    const physicalDose = vcComputed.doseFisicaNecessaria != null ? formatValue(vcComputed.doseFisicaNecessaria, 1) : "—";
+
+    return `VC = ${formatValue(vcComputed.vc, 1)}% (Pureza ${formatValue(parseNumber(vcForm.pureza), 1)}% × Germinação ${formatValue(vcComputed.germinacaoEfetiva, 1)}%). Fator de correção: ${formatValue(vcComputed.fatorCorrecao, 2)}. Dose física corrigida: ${physicalDose} kg/ha.`;
+  }, [vcComputed, vcForm.pureza]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VC_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<VcForm>;
+      setVcForm((prev) => ({
+        ...prev,
+        ...parsed,
+        considerarSementesDuras: Boolean(parsed.considerarSementesDuras),
+        lastEditedDose: parsed.lastEditedDose === "fisica" || parsed.lastEditedDose === "spv" ? parsed.lastEditedDose : null,
+      }));
+    } catch {
+      // Ignora inconsistências no localStorage.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(VC_STORAGE_KEY, JSON.stringify(vcForm));
+    } catch {
+      // Ignora falhas de persistência.
+    }
+  }, [vcForm]);
+
+  useEffect(() => {
+    if (!activeCultures.length || vcForm.cultureId) return;
+    setVcForm((prev) => ({ ...prev, cultureId: activeCultures[0].id }));
+  }, [activeCultures, vcForm.cultureId]);
+
+  const updateVcForm = (key: keyof VcForm, value: string | boolean) => {
+    setVcForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleVcCultureChange = (cultureId: string) => {
+    const culture = activeCultures.find((item) => item.id === cultureId);
+
+    setVcForm((prev) => ({
+      ...prev,
+      cultureId,
+      pureza: culture?.defaultPureza != null ? String(culture.defaultPureza) : "",
+      germinacao: culture?.defaultGerminacao != null ? String(culture.defaultGerminacao) : "",
+    }));
+  };
+
+  const clearVcForm = () => {
+    setVcForm(initialVcForm);
+    setVcMessage("");
+    try {
+      localStorage.removeItem(VC_STORAGE_KEY);
+    } catch {
+      // Ignore storage cleanup failures.
+    }
+  };
+
+  const handleCopyVc = async () => {
+    if (!vcSummaryText) return;
+    try {
+      await navigator.clipboard.writeText(vcSummaryText);
+      setVcMessage("Resultado copiado para envio no WhatsApp.");
+    } catch {
+      setVcMessage("Não foi possível copiar automaticamente neste dispositivo.");
+    }
+  };
+
+  useEffect(() => {
+    if (!vcForm.doseFisica.trim() || !vcForm.doseSpv.trim()) {
+      setVcMessage("");
+      return;
+    }
+
+    const message =
+      vcForm.lastEditedDose === "spv"
+        ? "Ambas as doses preenchidas: usando a Dose efetiva (SPV) como referência por ser o último campo alterado."
+        : "Ambas as doses preenchidas: usando a Dose física como referência por ser o último campo alterado.";
+
+    setVcMessage(message);
+  }, [vcForm.doseFisica, vcForm.doseSpv, vcForm.lastEditedDose]);
+
+  useEffect(() => {
+    if (!vcComputed.ready || vcComputed.vc !== 0) return;
+    setVcMessage("VC igual a 0%. Ajuste pureza e germinação para liberar as conversões de dose.");
+  }, [vcComputed.ready, vcComputed.vc]);
+
+  useEffect(() => {
+    if (!selectedVcCulture || vcForm.pureza || vcForm.germinacao) return;
+    setVcForm((prev) => ({
+      ...prev,
+      pureza: selectedVcCulture.defaultPureza != null ? String(selectedVcCulture.defaultPureza) : prev.pureza,
+      germinacao: selectedVcCulture.defaultGerminacao != null ? String(selectedVcCulture.defaultGerminacao) : prev.germinacao,
+    }));
+  }, [selectedVcCulture, vcForm.germinacao, vcForm.pureza]);
+
+
   useEffect(() => {
     const stored = readCultureOverrides();
     if (stored) {
@@ -258,16 +468,6 @@ export default function AssistenteTecnico() {
     }
     setCultureItems(culturesKgHa.map(sanitizeCulture));
   }, []);
-
-  const activeCultures = useMemo(() => cultureItems.filter((item) => item.active), [cultureItems]);
-  const culturas = useMemo(() => activeCultures.map((item) => item.name), [activeCultures]);
-  const groupedOptions = useMemo(() => {
-    return activeCultures.reduce<Record<string, CultureKgHa[]>>((acc, item) => {
-      if (!acc[item.group]) acc[item.group] = [];
-      acc[item.group].push(item);
-      return acc;
-    }, {});
-  }, [activeCultures]);
 
   useEffect(() => {
     if (!culturas.length) return;
@@ -755,6 +955,182 @@ export default function AssistenteTecnico() {
           </div>
         </article>
       </div>
+
+      <article className={cardClass}>
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">Valor Cultural (VC)</h2>
+            <p className="mt-1 text-sm text-slate-500">Calcule a eficiência da semente e a dose corrigida por pureza e germinação.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCopyVc}
+              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-emerald-500"
+            >
+              Copiar resultado
+            </button>
+            <button
+              type="button"
+              onClick={clearVcForm}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              Limpar
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <label className="block text-sm text-slate-700">
+            Cultura (opcional)
+            <select
+              value={vcForm.cultureId}
+              onChange={(event) => handleVcCultureChange(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Selecione</option>
+              {Object.entries(groupedOptions).map(([group, items]) => (
+                <optgroup key={`vc-${group}`} label={group}>
+                  {items.map((item) => (
+                    <option key={`vc-${item.id}`} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+
+          <label className="block text-sm text-slate-700">
+            Pureza (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={vcForm.pureza}
+              onChange={(event) => updateVcForm("pureza", event.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label className="block text-sm text-slate-700">
+            Germinação (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              value={vcForm.germinacao}
+              onChange={(event) => updateVcForm("germinacao", event.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={vcForm.considerarSementesDuras}
+              onChange={(event) => updateVcForm("considerarSementesDuras", event.target.checked)}
+            />
+            Considerar sementes duras na germinação
+          </label>
+
+          <label className="block text-sm text-slate-700">
+            Sementes duras (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              disabled={!vcForm.considerarSementesDuras}
+              value={vcForm.sementesDuras}
+              onChange={(event) => updateVcForm("sementesDuras", event.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label className="block text-sm text-slate-700">
+            Dose física (kg/ha)
+            <input
+              type="number"
+              min="0"
+              value={vcForm.doseFisica}
+              onChange={(event) =>
+                setVcForm((prev) => ({ ...prev, doseFisica: event.target.value, lastEditedDose: "fisica" }))
+              }
+              className={inputClass}
+            />
+          </label>
+
+          <label className="block text-sm text-slate-700 xl:col-span-2">
+            Dose efetiva (SPV) desejada (kg/ha)
+            <input
+              type="number"
+              min="0"
+              value={vcForm.doseSpv}
+              onChange={(event) =>
+                setVcForm((prev) => ({ ...prev, doseSpv: event.target.value, lastEditedDose: "spv" }))
+              }
+              className={inputClass}
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+          <p>Pureza: % de semente da espécie no lote.</p>
+          <p>Germinação: % de sementes que germinam em condições de teste.</p>
+          <p>VC combina pureza e germinação para indicar o potencial real do lote.</p>
+        </div>
+
+        {!vcForm.pureza.trim() || !vcForm.germinacao.trim() ? (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            Preencha pureza e germinação para calcular VC.
+          </p>
+        ) : null}
+
+        {vcComputed.errors.length ? (
+          <div className="mt-4 space-y-2">
+            {vcComputed.errors.map((error) => (
+              <p key={error} className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                {error}
+              </p>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-xs uppercase tracking-wide text-emerald-700">VC (%)</p>
+            <p className="mt-1 text-3xl font-bold text-emerald-700">{formatValue(vcComputed.vc, 1)}%</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Fator de correção</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">{vcComputed.vc > 0 ? formatValue(vcComputed.fatorCorrecao, 2) : "—"}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Dose efetiva (SPV)</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">
+              {vcComputed.vc > 0 && vcComputed.doseSpvCalculada != null ? `${formatValue(vcComputed.doseSpvCalculada, 1)} kg/ha` : "—"}
+            </p>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Dose física necessária</p>
+            <p className="mt-1 text-lg font-semibold text-slate-900">
+              {vcComputed.vc > 0 && vcComputed.doseFisicaNecessaria != null
+                ? `${formatValue(vcComputed.doseFisicaNecessaria, 1)} kg/ha`
+                : "—"}
+            </p>
+          </div>
+        </div>
+
+        {vcComputed.ready && vcComputed.vc === 0 ? (
+          <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            VC igual a 0%. Ajuste pureza e germinação para liberar as conversões de dose.
+          </p>
+        ) : null}
+
+        {vcMessage ? <p className="mt-4 text-sm text-slate-600">{vcMessage}</p> : null}
+
+        <p className="mt-4 text-xs text-slate-500">VC não substitui recomendação agronômica; é correção de qualidade do lote.</p>
+      </article>
 
       {showEditModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
