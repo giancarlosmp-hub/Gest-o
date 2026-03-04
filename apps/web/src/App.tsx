@@ -20,6 +20,7 @@ import AgendaPage from "./pages/AgendaPage";
 import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
 import CommercialScorePage from "./pages/CommercialScorePage";
 import AssistenteTecnicoPage from "./pages/AssistenteTecnico";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 
 export default function App() {
   const { user } = useAuth();
@@ -85,7 +86,19 @@ export default function App() {
         <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
 
-        <Route path="assistente-tecnico" element={<RoleRoute route="assistenteTecnico"><AssistenteTecnicoPage /></RoleRoute>} />
+        <Route
+          path="assistente-tecnico"
+          element={
+            <RouteErrorBoundary
+              fallbackTitle="Ops! Não foi possível abrir o Assistente Técnico."
+              fallbackMessage="Tente recarregar a página."
+            >
+              <RoleRoute route="assistenteTecnico">
+                <AssistenteTecnicoPage />
+              </RoleRoute>
+            </RouteErrorBoundary>
+          }
+        />
 
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
