@@ -11,7 +11,7 @@ import { env } from "./config/env.js";
 
 export const app = express();
 
-let technicalCulturesPublicCache: { payload: object; expiresAt: number } | null = null;
+let _tcCache: { data: object; expiresAt: number } | null = null;
 
 app.use(helmet());
 
@@ -74,12 +74,14 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(morgan("dev"));
 
-app.get("/health", (_req, res) => res.status(200).json({ status: "ok" }));
-app.get("/technical-cultures", async (req, res) => {
+app.get("/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+
+app.get("/technical-cultures", async (_req, res) => {
   try {
-    const cached = technicalCulturesPublicCache;
-    if (cached && cached.expiresAt > Date.now()) {
-      return res.status(200).json(cached.payload);
+    if (_tcCache && _tcCache.expiresAt > Date.now()) {
+      return res.status(200).json(_tcCache.data);
     }
 
     const { prisma } = await import("./config/prisma.js");
@@ -87,15 +89,15 @@ app.get("/technical-cultures", async (req, res) => {
       where: { isActive: true },
       orderBy: [{ label: "asc" }],
       take: 50,
-      select: { slug: true, label: true, category: true, isActive: true },
+      select: { slug: true, label: true, category: true },
     });
 
-    const payload = { data: items.length ? items : [], source: items.length ? "db" : "empty" };
-    technicalCulturesPublicCache = { payload, expiresAt: Date.now() + 60_000 };
+    const payload = { data: items, source: "db" };
+    _tcCache = { data: payload, expiresAt: Date.now() + 60_000 };
 
     return res.status(200).json(payload);
   } catch (err) {
-    console.error("[technical-cultures/public] error", err);
+    console.error("[technical-cultures]", err);
     return res.status(200).json({ data: [], source: "fallback" });
   }
 });
@@ -108,12 +110,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", crudRoutes);
 
-app.use((err: any, req: any, res: any, next: any) => {
-  console.error("[unhandled error]", err);
-  if (res.headersSent) {
-    return next(err);
-  }
-
+app.use((err: any, _req: any, res: any, next: any) => {
+  console.error("[express error]", err);
+  if (res.headersSent) return next(err);
   res.status(500).json({ message: "Internal server error" });
 });
 
