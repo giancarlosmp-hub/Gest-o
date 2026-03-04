@@ -272,6 +272,7 @@ model CultureCatalog {
   id                      String   @id @default(uuid())
   slug                    String   @unique
   label                   String
+  category                String   @default("Outras")
   isActive                Boolean  @default(true)
   defaultKgHaMin          Float?
   defaultKgHaMax          Float?
@@ -281,6 +282,7 @@ model CultureCatalog {
   germinationDefault      Float?
   purityDefault           Float?
   populationTargetDefault Float?
+  rowSpacingCmDefault     Float?
   tags                    String[] @default([])
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
