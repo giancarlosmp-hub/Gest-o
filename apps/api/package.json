@@ -11,7 +11,8 @@
     "prisma:migrate": "prisma db push",
     "prisma:seed": "node prisma/seed.js",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
-    "docker:start": "node dist/scripts/bootstrap.js"
+    "docker:start": "node dist/scripts/bootstrap.js",
+    "seed:fixture": "cross-env SEED_FIXTURE=1 prisma db seed"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -37,6 +38,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^22.7.4",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "cross-env": "^7.0.3"
   }
 }

@@ -3,6 +3,16 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+async function maybeRunFixtureSeed() {
+  if (process.env.SEED_FIXTURE === "1" || process.env.NODE_ENV === "testfixture") {
+    const { runFixtureSeed } = await import("./seedTestFixture.js");
+    await runFixtureSeed(prisma);
+    return true;
+  }
+
+  return false;
+}
+
 async function upsertUser(name, email, role, region) {
   const passwordHash = await bcrypt.hash("123456", 10);
   return prisma.user.upsert({
@@ -48,6 +58,8 @@ const cityByRegion = {
 };
 
 async function main() {
+  if (await maybeRunFixtureSeed()) return;
+
   await prisma.appConfig.upsert({
     where: { key: "weeklyVisitGoal" },
     update: { value: "25" },
