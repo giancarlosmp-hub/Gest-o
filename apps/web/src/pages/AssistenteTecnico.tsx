@@ -13,6 +13,60 @@ type SemeaduraForm = {
   correcaoCampo: string;
 };
 
+type JsPdfClass = new (options?: { unit?: string; format?: string }) => {
+  internal: { pageSize: { getWidth: () => number } };
+  setFont: (font: string, style: string) => void;
+  setFontSize: (size: number) => void;
+  setTextColor: (r: number, g: number, b: number) => void;
+  text: (text: string | string[], x: number, y: number) => void;
+  splitTextToSize: (text: string, size: number) => string[];
+  addImage: (imageData: string, format: string, x: number, y: number, width: number, height: number) => void;
+  save: (filename: string) => void;
+};
+
+declare global {
+  interface Window {
+    jspdf?: {
+      jsPDF: JsPdfClass;
+    };
+  }
+}
+
+const loadJsPdf = () =>
+  new Promise<JsPdfClass>((resolve, reject) => {
+    if (window.jspdf?.jsPDF) {
+      resolve(window.jspdf.jsPDF);
+      return;
+    }
+
+    const existingScript = document.querySelector('script[data-js="jspdf"]') as HTMLScriptElement | null;
+    if (existingScript) {
+      existingScript.addEventListener("load", () => {
+        if (window.jspdf?.jsPDF) {
+          resolve(window.jspdf.jsPDF);
+          return;
+        }
+        reject(new Error("Biblioteca jsPDF não carregada."));
+      });
+      existingScript.addEventListener("error", () => reject(new Error("Falha ao carregar jsPDF.")));
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js";
+    script.async = true;
+    script.dataset.js = "jspdf";
+    script.onload = () => {
+      if (window.jspdf?.jsPDF) {
+        resolve(window.jspdf.jsPDF);
+        return;
+      }
+      reject(new Error("Biblioteca jsPDF indisponível após carregamento."));
+    };
+    script.onerror = () => reject(new Error("Não foi possível baixar a biblioteca jsPDF."));
+    document.head.appendChild(script);
+  });
+
 const initialForm: SemeaduraForm = {
   cultura: "Sorgo",
   objetivo: "",
@@ -122,6 +176,7 @@ const getGoalLabel = (goalKey: string) => {
 export default function AssistenteTecnico() {
   /** Calculadora */
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
+  const [pdfStatus, setPdfStatus] = useState("");
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -166,6 +221,125 @@ export default function AssistenteTecnico() {
   };
 
   const clearForm = () => setForm(initialForm);
+
+  const loadImageAsDataUrl = (src: string) =>
+    new Promise<string>((resolve, reject) => {
+      const image = new Image();
+      image.crossOrigin = "anonymous";
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = image.naturalWidth;
+        canvas.height = image.naturalHeight;
+        const context = canvas.getContext("2d");
+
+        if (!context) {
+          reject(new Error("Não foi possível preparar a imagem para o PDF."));
+          return;
+        }
+
+        context.drawImage(image, 0, 0);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      image.onerror = () => reject(new Error("Não foi possível carregar a logo da Demetra."));
+      image.src = src;
+    });
+
+  const getTechnicalAlerts = () => {
+    const alerts: string[] = [];
+    const germinacao = parseNumber(form.germinacao);
+    const pureza = parseNumber(form.pureza);
+    const pms = parseNumber(form.pms);
+    const espacamento = parseNumber(form.espacamentoCm);
+
+    if (germinacao <= 0 || pureza <= 0) {
+      alerts.push("Preencha germinação e pureza com valores acima de zero para liberar o cálculo completo.");
+    }
+    if (results.fator < 0.7 && results.fator > 0) {
+      alerts.push("Fator de conversão baixo. Avalie qualidade do lote e ajuste de regulagem em campo.");
+    }
+    if (pms > 0 && pms < 15) {
+      alerts.push("PMS informado está baixo. Confira unidade e laudo da semente.");
+    }
+    if (espacamento > 0 && espacamento > 90) {
+      alerts.push("Espaçamento alto para muitas culturas. Valide o arranjo populacional planejado.");
+    }
+    if (!alerts.length) {
+      alerts.push("Sem alertas críticos para os dados informados.");
+    }
+
+    return alerts;
+  };
+
+  const handleExportPdf = async () => {
+    try {
+      setPdfStatus("");
+      const jsPDF = await loadJsPdf();
+      const pdf = new jsPDF({ unit: "mm", format: "a4" });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      let y = 18;
+
+      const logoDataUrl = await loadImageAsDataUrl(`${window.location.origin}/logo-demetra.png`);
+      pdf.addImage(logoDataUrl, "PNG", 14, 10, 28, 12);
+      y = 28;
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(16);
+      pdf.text("Relatório de Cálculo de Semeadura", 14, y);
+      y += 7;
+
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(10);
+      pdf.setTextColor(90, 90, 90);
+      pdf.text(`Data e hora: ${new Date().toLocaleString("pt-BR")}`, 14, y);
+      y += 8;
+
+      const addSectionTitle = (title: string) => {
+        pdf.setFont("helvetica", "bold");
+        pdf.setTextColor(24, 24, 27);
+        pdf.setFontSize(12);
+        pdf.text(title, 14, y);
+        y += 6;
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(10);
+        pdf.setTextColor(50, 50, 50);
+      };
+
+      const addLine = (label: string, value: string) => {
+        pdf.text(`${label}: ${value}`, 16, y);
+        y += 5;
+      };
+
+      addSectionTitle("Cultura e parâmetros informados");
+      addLine("Cultura", form.cultura);
+      addLine("Objetivo", form.objetivo || "Não informado");
+      addLine("População desejada (plantas/ha)", form.populacaoHa || "0");
+      addLine("Espaçamento (cm)", form.espacamentoCm || "0");
+      addLine("PMS (g)", form.pms || "0");
+      addLine("Germinação (%)", form.germinacao || "0");
+      addLine("Pureza (%)", form.pureza || "0");
+      addLine("Correção de campo (%)", form.correcaoCampo || "0");
+      y += 2;
+
+      addSectionTitle("Resultados calculados");
+      addLine("Plantas por m²", formatValue(results.plantasM2));
+      addLine("Sementes por m²", formatValue(results.sementesM2));
+      addLine("Sementes por metro linear", formatValue(results.sementesMetro));
+      addLine("kg/ha base", formatValue(results.kgHa));
+      addLine("kg/ha recomendado", `${formatValue(results.kgHaFinal)} kg/ha`);
+      y += 2;
+
+      addSectionTitle("Alertas técnicos");
+      getTechnicalAlerts().forEach((alert) => {
+        const lines = pdf.splitTextToSize(`• ${alert}`, pageWidth - 30);
+        pdf.text(lines, 16, y);
+        y += lines.length * 4.5;
+      });
+
+      pdf.save(`calculo-semeadura-${new Date().toISOString().slice(0, 10)}.pdf`);
+      setPdfStatus("PDF gerado com sucesso.");
+    } catch {
+      setPdfStatus("Não foi possível exportar o PDF neste dispositivo.");
+    }
+  };
 
   /** Recomendação rápida */
   const [selectedCulture, setSelectedCulture] = useState("");
@@ -218,14 +392,25 @@ export default function AssistenteTecnico() {
               <h2 className="text-base font-semibold text-slate-800">Calculadora de Semeadura</h2>
               <p className="mt-1 text-sm text-slate-500">Cálculo instantâneo de sementes por metro e kg/ha.</p>
             </div>
-            <button
-              type="button"
-              onClick={clearForm}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
-            >
-              Limpar
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportPdf}
+                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-emerald-500"
+              >
+                Exportar PDF
+              </button>
+              <button
+                type="button"
+                onClick={clearForm}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-100"
+              >
+                Limpar
+              </button>
+            </div>
           </div>
+
+          {pdfStatus ? <p className="mt-2 text-xs text-slate-500">{pdfStatus}</p> : null}
 
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block text-sm text-slate-700">
