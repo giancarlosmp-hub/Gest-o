@@ -9,6 +9,7 @@ import {
   clientSchema,
   companySchema,
   contactSchema,
+  cultureCatalogSchema,
   eventSchema,
   goalSchema,
   objectiveUpsertSchema,
@@ -29,6 +30,69 @@ import { z } from "zod";
 
 const router = Router();
 router.use(authMiddleware);
+
+
+type CultureGoalRange = { min: number; max: number };
+
+type CultureGoals = Record<string, CultureGoalRange>;
+
+const GOAL_KEY_NORMALIZER = /[^a-z0-9_\-]/g;
+
+const normalizeGoalKey = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(GOAL_KEY_NORMALIZER, "");
+
+const normalizeCulturePayload = (payload: z.infer<typeof cultureCatalogSchema>) => {
+  const goals = Object.entries(payload.goalsJson || {}).reduce<CultureGoals>((acc, [goal, range]) => {
+    const key = normalizeGoalKey(goal);
+    if (!key) return acc;
+    const min = Number(range.min);
+    const max = Number(range.max);
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min < 0 || max < min) {
+      throw Object.assign(new Error(`Faixa inválida para o objetivo '${goal}'.`), { status: 400 });
+    }
+    acc[key] = { min, max };
+    return acc;
+  }, {});
+
+  const tags = (payload.tags || [])
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 20);
+
+  if (payload.defaultKgHaMin != null && payload.defaultKgHaMax != null && payload.defaultKgHaMax < payload.defaultKgHaMin) {
+    throw Object.assign(new Error("Faixa padrão de kg/ha inválida."), { status: 400 });
+  }
+
+  return {
+    slug: payload.slug.trim().toLowerCase(),
+    label: payload.label.trim(),
+    isActive: payload.isActive ?? true,
+    defaultKgHaMin: payload.defaultKgHaMin ?? null,
+    defaultKgHaMax: payload.defaultKgHaMax ?? null,
+    goalsJson: goals,
+    notes: payload.notes?.trim() || null,
+    pmsDefault: payload.pmsDefault ?? null,
+    germinationDefault: payload.germinationDefault ?? null,
+    purityDefault: payload.purityDefault ?? null,
+    populationTargetDefault: payload.populationTargetDefault ?? null,
+    tags,
+  };
+};
+
+const cultureQuerySchema = z.object({
+  active: z.enum(["true", "false"]).optional(),
+  search: z.string().optional(),
+  tags: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional(),
+});
+
 
 const CLOSED_STAGE_VALUES = ["ganho", "perdido"] as const;
 const CLOSED_STAGES = new Set<string>(CLOSED_STAGE_VALUES);
@@ -4251,6 +4315,87 @@ router.post("/users/:id/reset-password", authorize("diretor"), validateBody(user
     user: updatedUser,
     temporaryPassword
   });
+});
+
+
+router.get("/cultures", async (req, res) => {
+  const parsedQuery = cultureQuerySchema.safeParse(req.query);
+  if (!parsedQuery.success) {
+    return res.status(400).json({ message: parsedQuery.error.issues[0]?.message || "Parâmetros inválidos." });
+  }
+
+  const { active, search, tags, page = 1, pageSize = 20 } = parsedQuery.data;
+  const where: Prisma.CultureCatalogWhereInput = {
+    ...(active ? { isActive: active === "true" } : {}),
+    ...(search
+      ? {
+          OR: [
+            { label: { contains: search, mode: "insensitive" } },
+            { slug: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(tags
+      ? {
+          tags: {
+            hasSome: tags.split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean),
+          },
+        }
+      : {}),
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.cultureCatalog.findMany({
+      where,
+      orderBy: [{ isActive: "desc" }, { label: "asc" }],
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }),
+    prisma.cultureCatalog.count({ where }),
+  ]);
+
+  res.status(200).json({ data: items, total, page, pageSize });
+});
+
+router.post("/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
+  try {
+    const payload = normalizeCulturePayload(req.body);
+    const created = await prisma.cultureCatalog.create({ data: payload });
+    res.status(201).json(created);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      return res.status(409).json({ message: "Slug já cadastrado." });
+    }
+    next(error);
+  }
+});
+
+router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
+  try {
+    const payload = normalizeCulturePayload(req.body);
+    const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    res.status(200).json(updated);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      return res.status(409).json({ message: "Slug já cadastrado." });
+    }
+    if ((error as { code?: string }).code === "P2025") {
+      return res.status(404).json({ message: "Cultura não encontrada." });
+    }
+    next(error);
+  }
+});
+
+router.delete("/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
+  try {
+    const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    res.status(200).json(updated);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2025") {
+      return res.status(404).json({ message: "Cultura não encontrada." });
+    }
+    next(error);
+  }
 });
 
 export default router;
