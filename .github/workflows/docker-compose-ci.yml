@@ -16,6 +16,10 @@ jobs:
       - name: Build and start stack
         run: docker compose up -d --build
 
+      - name: Print API logs on failure
+        if: failure()
+        run: docker compose logs api
+
       - name: Wait for API health
         run: |
           for i in {1..60}; do
