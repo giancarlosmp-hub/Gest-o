@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import OpportunityDetailsPage from "./pages/OpportunityDetailsPage";
 import ClientDetailsPage from "./pages/ClientDetailsPage";
@@ -19,8 +20,24 @@ import ActivitiesPage from "./pages/ActivitiesPage";
 import AgendaPage from "./pages/AgendaPage";
 import CommercialExecutionReportPage from "./pages/CommercialExecutionReportPage";
 import CommercialScorePage from "./pages/CommercialScorePage";
-import AssistenteTecnicoPage from "./pages/AssistenteTecnico";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
+
+const AssistenteTecnicoPage = lazy(() => import("./pages/AssistenteTecnico"));
+
+function AssistenteTecnicoRoute() {
+  return (
+    <RouteErrorBoundary
+      fallbackTitle="Ops! Não foi possível abrir o Assistente Técnico."
+      fallbackMessage="Tente recarregar a página."
+    >
+      <Suspense fallback={<div className="p-6 text-sm text-slate-600">Carregando Assistente Técnico...</div>}>
+        <RoleRoute route="assistenteTecnico">
+          <AssistenteTecnicoPage />
+        </RoleRoute>
+      </Suspense>
+    </RouteErrorBoundary>
+  );
+}
 
 export default function App() {
   const { user } = useAuth();
@@ -86,19 +103,7 @@ export default function App() {
         <Route path="atividades" element={<ActivitiesPage />} />
         <Route path="agenda" element={<AgendaPage />} />
 
-        <Route
-          path="assistente-tecnico"
-          element={
-            <RouteErrorBoundary
-              fallbackTitle="Ops! Não foi possível abrir o Assistente Técnico."
-              fallbackMessage="Tente recarregar a página."
-            >
-              <RoleRoute route="assistenteTecnico">
-                <AssistenteTecnicoPage />
-              </RoleRoute>
-            </RouteErrorBoundary>
-          }
-        />
+        <Route path="assistente-tecnico" element={<AssistenteTecnicoRoute />} />
 
         <Route path="relatórios" element={<ReportsPage />} />
         <Route path="relatorios" element={<ReportsPage />} />
