@@ -1,12 +1,13 @@
-import { Settings2, Target, Users } from "lucide-react";
+import { Leaf, Settings2, Target, Users } from "lucide-react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import CrudSimplePage from "./CrudSimplePage";
 import ActivityKpisPage from "./ActivityKpisPage";
 import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPanel";
+import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPanel";
 
-type SettingsSection = "kpis" | "discipline" | "users";
+type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -20,6 +21,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     label: "Disciplina Semanal",
     description: "Configure a meta mínima de visitas por semana para monitorar a execução de campo.",
     icon: Settings2
+  },
+  {
+    id: "technical-cultures",
+    label: "Catálogo Técnico",
+    description: "Edite culturas, faixas de kg/ha e padrões da calculadora do Assistente Técnico.",
+    icon: Leaf
   },
   {
     id: "users",
@@ -36,10 +43,12 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedSection === "users" || normalizedSection === "usuarios") return "users";
   if (normalizedSection === "kpis" || normalizedSection === "kpis-atividades") return "kpis";
   if (normalizedSection === "discipline" || normalizedSection === "disciplina") return "discipline";
+  if (normalizedSection === "technical-cultures" || normalizedSection === "catalogo-tecnico") return "technical-cultures";
 
   if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
   if (normalizedHash === "#disciplina" || normalizedHash === "#discipline") return "discipline";
+  if (normalizedHash === "#catalogo-tecnico" || normalizedHash === "#technical-cultures") return "technical-cultures";
 
   return "kpis";
 }
@@ -76,7 +85,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-3" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-4" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -113,6 +122,8 @@ export default function SettingsPage() {
         <ActivityKpisPage embedded />
       ) : activeSection === "discipline" ? (
         <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
+      ) : activeSection === "technical-cultures" ? (
+        <TechnicalCulturesPanel />
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage
