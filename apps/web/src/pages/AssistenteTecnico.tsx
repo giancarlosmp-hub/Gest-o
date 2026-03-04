@@ -5,6 +5,7 @@ import {
   type TechnicalCulture,
   fetchTechnicalCultures,
 } from "../lib/technicalCultures";
+import { getApiErrorMessage } from "../lib/apiError";
 
 const cardClass =
   "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
@@ -97,14 +98,17 @@ export default function AssistenteTecnico() {
         if (!mounted) return;
         setCultures((data ?? []).filter((item) => item.isActive));
       } catch (error) {
-        console.error("Falha ao carregar catálogo técnico", error);
+        console.error("Falha ao carregar catálogo técnico", {
+          reason: getApiErrorMessage(error, "Erro ao carregar catálogo técnico."),
+          error,
+        });
         if (!mounted) return;
 
         setCultures(CULTURE_FALLBACKS);
         setFallbackMessage(
           "Não foi possível carregar o catálogo da API. Exibindo catálogo local temporário."
         );
-        toast.warning("Falha ao carregar catálogo técnico. Usando fallback local.");
+        toast.warning("Catálogo temporário ativo. Verifique conexão com a API.");
       } finally {
         if (mounted) setLoading(false);
       }

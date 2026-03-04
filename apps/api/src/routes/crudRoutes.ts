@@ -96,6 +96,90 @@ const cultureQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+type TechnicalCultureCatalogItem = {
+  id: string;
+  name: string;
+  category: string;
+  kgHaMin: number | null;
+  kgHaMax: number | null;
+  pmsDefault: number | null;
+  populationDefaultHa: number | null;
+  spacingDefaultCm: number | null;
+  germinationDefault: number | null;
+  purityDefault: number | null;
+  notes?: string;
+};
+
+const TECHNICAL_CULTURES_STATIC_SEED: TechnicalCultureCatalogItem[] = [
+  {
+    id: "sorgo",
+    name: "Sorgo",
+    category: "Grãos",
+    kgHaMin: 8,
+    kgHaMax: 18,
+    pmsDefault: 28,
+    populationDefaultHa: 180000,
+    spacingDefaultCm: 45,
+    germinationDefault: 85,
+    purityDefault: 98,
+    notes: "Catálogo técnico seed padrão.",
+  },
+  {
+    id: "milho",
+    name: "Milho",
+    category: "Grãos",
+    kgHaMin: 14,
+    kgHaMax: 24,
+    pmsDefault: 32,
+    populationDefaultHa: 65000,
+    spacingDefaultCm: 50,
+    germinationDefault: 90,
+    purityDefault: 98,
+    notes: "Catálogo técnico seed padrão.",
+  },
+  {
+    id: "milheto",
+    name: "Milheto",
+    category: "Cobertura",
+    kgHaMin: 10,
+    kgHaMax: 20,
+    pmsDefault: 8,
+    populationDefaultHa: 250000,
+    spacingDefaultCm: 34,
+    germinationDefault: 80,
+    purityDefault: 95,
+    notes: "Catálogo técnico seed padrão.",
+  },
+];
+
+const serializeTechnicalCultureCatalogItem = (
+  item: {
+    slug: string;
+    label: string;
+    category: string;
+    defaultKgHaMin: number | null;
+    defaultKgHaMax: number | null;
+    pmsDefault: number | null;
+    populationTargetDefault: number | null;
+    rowSpacingCmDefault: number | null;
+    germinationDefault: number | null;
+    purityDefault: number | null;
+    notes: string | null;
+  }
+): TechnicalCultureCatalogItem => ({
+  id: item.slug,
+  name: item.label,
+  category: item.category,
+  kgHaMin: item.defaultKgHaMin,
+  kgHaMax: item.defaultKgHaMax,
+  pmsDefault: item.pmsDefault,
+  populationDefaultHa: item.populationTargetDefault,
+  spacingDefaultCm: item.rowSpacingCmDefault,
+  germinationDefault: item.germinationDefault,
+  purityDefault: item.purityDefault,
+  ...(item.notes ? { notes: item.notes } : {}),
+});
+
 
 const CLOSED_STAGE_VALUES = ["ganho", "perdido"] as const;
 const CLOSED_STAGES = new Set<string>(CLOSED_STAGE_VALUES);
@@ -4363,6 +4447,36 @@ const listCulturesHandler = async (req: express.Request, res: express.Response) 
 
 router.get("/cultures", listCulturesHandler);
 router.get("/technical/cultures", listCulturesHandler);
+router.get("/technical-cultures", async (_req, res) => {
+  try {
+    const dbCultures = await prisma.cultureCatalog.findMany({
+      where: { isActive: true },
+      orderBy: [{ label: "asc" }],
+      select: {
+        slug: true,
+        label: true,
+        category: true,
+        defaultKgHaMin: true,
+        defaultKgHaMax: true,
+        pmsDefault: true,
+        populationTargetDefault: true,
+        rowSpacingCmDefault: true,
+        germinationDefault: true,
+        purityDefault: true,
+        notes: true,
+      },
+    });
+
+    if (!dbCultures.length) {
+      return res.status(200).json({ items: TECHNICAL_CULTURES_STATIC_SEED, source: "seed" });
+    }
+
+    return res.status(200).json({ items: dbCultures.map(serializeTechnicalCultureCatalogItem), source: "db" });
+  } catch (error) {
+    console.error("[technical-cultures] Falha ao carregar do banco. Usando catálogo static.", error);
+    return res.status(200).json({ items: TECHNICAL_CULTURES_STATIC_SEED, source: "static" });
+  }
+});
 
 router.post("/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
   try {
