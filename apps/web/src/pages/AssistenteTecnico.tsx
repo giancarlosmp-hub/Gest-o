@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import api from "../lib/apiClient";
-import { getApiErrorMessage } from "../lib/apiError";
-import { toast } from "sonner";
-import { useAuth } from "../context/AuthContext";
+import { culturesKgHa, type CultureKgHa } from "../data/culturesKgHa";
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
 
@@ -99,32 +96,7 @@ function formatValue(value: number, digits = 2) {
   });
 }
 
-/** Indicação rápida (kg/ha) */
-type Recommendation = {
-  range: string;
-  notes: string[];
-};
-
-type CultureRecommendation = {
-  label: string;
-  goals: Record<string, Recommendation>;
-};
-
-type CultureCatalog = {
-  id: string;
-  slug: string;
-  label: string;
-  isActive: boolean;
-  defaultKgHaMin: number | null;
-  defaultKgHaMax: number | null;
-  goalsJson: Record<string, { min: number; max: number }>;
-  notes?: string | null;
-  pmsDefault?: number | null;
-  germinationDefault?: number | null;
-  purityDefault?: number | null;
-  populationTargetDefault?: number | null;
-  tags: string[];
-};
+const CULTURES_OVERRIDE_KEY = "culturesKgHaOverrides";
 
 type AlertSeverity = "warning" | "critical";
 
@@ -133,63 +105,39 @@ type TechnicalAlert = {
   severity: AlertSeverity;
 };
 
-const parseRangeAverage = (range: string) => {
-  const matches = range.match(/\d+[\.,]?\d*/g);
-  if (!matches || matches.length < 2) return null;
 
-  const [min, max] = matches.slice(0, 2).map((value) => Number(value.replace(",", ".")));
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+const sanitizeCulture = (item: CultureKgHa): CultureKgHa => ({
+  ...item,
+  kgHaMin: item.kgHaMin == null ? null : Math.max(0, item.kgHaMin),
+  kgHaMax: item.kgHaMax == null ? null : Math.max(0, item.kgHaMax),
+  notes: item.notes?.trim() || undefined,
+});
 
-  return (min + max) / 2;
+const parseStoredCultures = (rawValue: string | null) => {
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (!Array.isArray(parsed)) return null;
+    return parsed as CultureKgHa[];
+  } catch {
+    return null;
+  }
 };
 
-const buildCultureRecommendations = (items: CultureCatalog[]) =>
-  items.reduce<Record<string, CultureRecommendation>>((acc, culture) => {
-    const goals = Object.entries(culture.goalsJson || {}).reduce<Record<string, Recommendation>>((goalAcc, [goal, range]) => {
-      if (!Number.isFinite(range?.min) || !Number.isFinite(range?.max)) return goalAcc;
-      goalAcc[goal] = {
-        range: `${formatValue(range.min, 0)}–${formatValue(range.max, 0)} kg/ha`,
-        notes: [culture.notes || "Ajuste a dose conforme qualidade do lote e objetivo de uso."]
-      };
-      return goalAcc;
-    }, {});
-
-    if (Object.keys(goals).length === 0 && culture.defaultKgHaMin != null && culture.defaultKgHaMax != null) {
-      goals.padrao = {
-        range: `${formatValue(culture.defaultKgHaMin, 0)}–${formatValue(culture.defaultKgHaMax, 0)} kg/ha`,
-        notes: [culture.notes || "Ajuste técnico recomendado conforme campo."]
-      };
-    }
-
-    if (Object.keys(goals).length > 0) {
-      acc[culture.slug] = { label: culture.label, goals };
-    }
-
-    return acc;
-  }, {});
-
-const getGoalLabel = (goalKey: string) => {
-  if (goalKey === "padrao") return "Padrão";
-  if (goalKey === "grao") return "Grão";
-  if (goalKey === "silagem") return "Silagem";
-  if (goalKey === "cobertura") return "Cobertura";
-  return goalKey.charAt(0).toUpperCase() + goalKey.slice(1);
+const buildRangeLabel = (min: number | null, max: number | null) => {
+  if (min == null || max == null) return "—";
+  return `${formatValue(min, 0)}–${formatValue(max, 0)} kg/ha`;
 };
 
 export default function AssistenteTecnico() {
-  const { user } = useAuth();
-  const canManageCatalog = user?.role === "diretor" || user?.role === "gerente";
   /** Calculadora */
   const [form, setForm] = useState<SemeaduraForm>(initialForm);
   const [pdfStatus, setPdfStatus] = useState("");
-  const [catalogItems, setCatalogItems] = useState<CultureCatalog[]>([]);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("active");
-  const [tagFilter, setTagFilter] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<CultureCatalog | null>(null);
-  const [catalogForm, setCatalogForm] = useState({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
+  const [cultureItems, setCultureItems] = useState<CultureKgHa[]>([]);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editSearch, setEditSearch] = useState("");
+  const [editGroupFilter, setEditGroupFilter] = useState("todos");
+  const [recommendationWarning, setRecommendationWarning] = useState("");
 
   const results = useMemo(() => {
     const populacaoHa = parseNumber(form.populacaoHa);
@@ -263,15 +211,10 @@ export default function AssistenteTecnico() {
       });
     }
 
-    const cultureKey = form.cultura.toLowerCase();
-    const cultureData = cultureRecommendations[cultureKey];
-    if (cultureData) {
-      const objectiveKey = form.objetivo.trim().toLowerCase();
-      const goalKey = objectiveKey && cultureData.goals[objectiveKey] ? objectiveKey : Object.keys(cultureData.goals)[0];
-      const recommendationRange = cultureData.goals[goalKey]?.range;
-      const averageKgHa = recommendationRange ? parseRangeAverage(recommendationRange) : null;
-
-      if (averageKgHa && results.kgHaFinal > averageKgHa * 1.2) {
+    const cultureData = cultureItems.find((culture) => culture.active && culture.name === form.cultura);
+    if (cultureData && cultureData.kgHaMin != null && cultureData.kgHaMax != null) {
+      const averageKgHa = (cultureData.kgHaMin + cultureData.kgHaMax) / 2;
+      if (results.kgHaFinal > averageKgHa * 1.2) {
         alertsList.push({
           message: "Dose acima da recomendação média.",
           severity: "critical"
@@ -280,84 +223,33 @@ export default function AssistenteTecnico() {
     }
 
     return alertsList;
-  }, [form, results.kgHaFinal, results.sementesMetro]);
-
-  const loadCatalog = async () => {
-    try {
-      setCatalogLoading(true);
-      const activeParam = statusFilter === "all" ? "" : `&active=${statusFilter === "active" ? "true" : "false"}`;
-      const tagParam = tagFilter ? `&tags=${encodeURIComponent(tagFilter)}` : "";
-      const searchParam = search ? `&search=${encodeURIComponent(search)}` : "";
-      const response = await api.get(`/cultures?page=1&pageSize=200${activeParam}${tagParam}${searchParam}`);
-      const items = Array.isArray(response.data?.data) ? response.data.data : [];
-      setCatalogItems(items);
-      if (!form.cultura && items[0]?.label) {
-        setForm((prev) => ({ ...prev, cultura: items[0].label }));
-      }
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível carregar o catálogo de culturas."));
-    } finally {
-      setCatalogLoading(false);
-    }
-  };
+  }, [cultureItems, form, results.kgHaFinal, results.sementesMetro]);
 
   useEffect(() => {
-    loadCatalog().catch(() => undefined);
-  }, [statusFilter, tagFilter]);
-
-  const cultureRecommendations = useMemo(() => buildCultureRecommendations(catalogItems.filter((item) => item.isActive)), [catalogItems]);
-  const culturas = useMemo(() => catalogItems.filter((item) => item.isActive).map((item) => item.label), [catalogItems]);
-
-  const saveCatalog = async () => {
-    try {
-      const goalsSource = catalogForm.goals
-        .split(";")
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-        .reduce<Record<string, { min: number; max: number }>>((acc, row) => {
-          const [goal, range] = row.split(":");
-          const [min, max] = (range || "").split("-").map((value) => Number(value.trim()));
-          if (goal && Number.isFinite(min) && Number.isFinite(max)) {
-            acc[goal.trim().toLowerCase()] = { min, max };
-          }
-          return acc;
-        }, {});
-
-      const payload = {
-        slug: catalogForm.slug.trim().toLowerCase(),
-        label: catalogForm.label.trim(),
-        defaultKgHaMin: catalogForm.defaultKgHaMin ? Number(catalogForm.defaultKgHaMin) : null,
-        defaultKgHaMax: catalogForm.defaultKgHaMax ? Number(catalogForm.defaultKgHaMax) : null,
-        notes: catalogForm.notes || null,
-        goalsJson: goalsSource,
-        tags: catalogForm.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
-      };
-
-      if (editingItem) {
-        await api.put(`/cultures/${editingItem.id}`, payload);
-        toast.success("Cultura atualizada com sucesso.");
-      } else {
-        await api.post("/cultures", payload);
-        toast.success("Cultura criada com sucesso.");
-      }
-      setShowModal(false);
-      setEditingItem(null);
-      setCatalogForm({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
-      await loadCatalog();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível salvar a cultura."));
+    const stored = parseStoredCultures(localStorage.getItem(CULTURES_OVERRIDE_KEY));
+    if (stored) {
+      setCultureItems(stored.map(sanitizeCulture));
+      return;
     }
-  };
+    setCultureItems(culturesKgHa.map(sanitizeCulture));
+  }, []);
 
-  const inactivateCatalog = async (id: string) => {
-    try {
-      await api.delete(`/cultures/${id}`);
-      toast.success("Cultura inativada.");
-      await loadCatalog();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível inativar a cultura."));
+  const activeCultures = useMemo(() => cultureItems.filter((item) => item.active), [cultureItems]);
+  const culturas = useMemo(() => activeCultures.map((item) => item.name), [activeCultures]);
+  const groupedOptions = useMemo(() => {
+    return activeCultures.reduce<Record<string, CultureKgHa[]>>((acc, item) => {
+      if (!acc[item.group]) acc[item.group] = [];
+      acc[item.group].push(item);
+      return acc;
+    }, {});
+  }, [activeCultures]);
+
+  useEffect(() => {
+    if (!culturas.length) return;
+    if (!culturas.includes(form.cultura)) {
+      setForm((prev) => ({ ...prev, cultura: culturas[0] }));
     }
-  };
+  }, [culturas, form.cultura]);
 
   const updateField = (key: keyof SemeaduraForm, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -486,38 +378,70 @@ export default function AssistenteTecnico() {
 
   /** Recomendação rápida */
   const [selectedCulture, setSelectedCulture] = useState("");
-  const [selectedGoal, setSelectedGoal] = useState("");
-  const [copyStatus, setCopyStatus] = useState("");
 
-  const selectedCultureData = selectedCulture ? cultureRecommendations[selectedCulture] : undefined;
-  const goalKeys = selectedCultureData ? Object.keys(selectedCultureData.goals) : [];
+  const selectedCultureData = useMemo(
+    () => activeCultures.find((item) => item.id === selectedCulture) ?? null,
+    [activeCultures, selectedCulture]
+  );
 
-  const effectiveGoal = useMemo(() => {
-    if (!selectedCultureData) return "";
-    if (goalKeys.length === 1) return goalKeys[0];
-    return selectedGoal;
-  }, [goalKeys, selectedCultureData, selectedGoal]);
+  useEffect(() => {
+    if (!activeCultures.length || selectedCulture) return;
+    setSelectedCulture(activeCultures[0].id);
+  }, [activeCultures, selectedCulture]);
 
-  const recommendation = selectedCultureData && effectiveGoal ? selectedCultureData.goals[effectiveGoal] : undefined;
+  const editGroups = useMemo(() => ["todos", ...new Set(cultureItems.map((item) => item.group))], [cultureItems]);
 
-  const handleCopyRecommendation = async () => {
-    if (!selectedCultureData || !recommendation) return;
+  const filteredEditItems = useMemo(() => {
+    return cultureItems.filter((item) => {
+      const matchSearch = item.name.toLowerCase().includes(editSearch.toLowerCase());
+      const matchGroup = editGroupFilter === "todos" || item.group === editGroupFilter;
+      return matchSearch && matchGroup;
+    });
+  }, [cultureItems, editGroupFilter, editSearch]);
 
-    const goalLabel = getGoalLabel(effectiveGoal);
-    const text = [
-      `Cultura: ${selectedCultureData.label}`,
-      `Objetivo: ${goalLabel}`,
-      `Faixa recomendada: ${recommendation.range}`,
-      "Observações:",
-      ...recommendation.notes.map((note) => `- ${note}`)
-    ].join("\n");
+  const updateCultureItem = (id: string, field: keyof CultureKgHa, value: string | boolean) => {
+    setCultureItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
 
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus("Recomendação copiada.");
-    } catch {
-      setCopyStatus("Não foi possível copiar automaticamente.");
+        if (field === "kgHaMin" || field === "kgHaMax") {
+          if (value === "") return { ...item, [field]: null };
+          const numberValue = Number(value);
+          if (!Number.isFinite(numberValue)) return item;
+          return { ...item, [field]: Math.max(0, numberValue) };
+        }
+
+        if (field === "active") {
+          return { ...item, active: Boolean(value) };
+        }
+
+        return { ...item, [field]: value };
+      })
+    );
+  };
+
+  const saveOverrides = () => {
+    const sanitized = cultureItems.map(sanitizeCulture);
+    const hasInvalidRange = sanitized.some(
+      (item) => item.kgHaMin != null && item.kgHaMax != null && item.kgHaMin > item.kgHaMax
+    );
+
+    if (hasInvalidRange) {
+      setRecommendationWarning("Existem faixas com mínimo maior que o máximo. Revise antes de salvar.");
+      return;
     }
+
+    setCultureItems(sanitized);
+    localStorage.setItem(CULTURES_OVERRIDE_KEY, JSON.stringify(sanitized));
+    setRecommendationWarning("");
+    setShowEditModal(false);
+  };
+
+  const restoreDefaults = () => {
+    const defaults = culturesKgHa.map(sanitizeCulture);
+    setCultureItems(defaults);
+    localStorage.removeItem(CULTURES_OVERRIDE_KEY);
+    setRecommendationWarning("");
   };
 
   return (
@@ -745,7 +669,7 @@ export default function AssistenteTecnico() {
         {/* INDICAÇÃO RÁPIDA */}
         <article className={cardClass}>
           <h2 className="text-base font-semibold text-slate-800">Indicação rápida de kg/ha</h2>
-          <p className="mt-1 text-sm text-slate-500">Selecione cultura e objetivo para obter uma faixa de referência.</p>
+          <p className="mt-1 text-sm text-slate-500">Selecione a cultura para consultar a faixa recomendada de forma rápida.</p>
 
           <div className="mt-4 grid gap-4">
             <label className="space-y-1 text-sm">
@@ -755,165 +679,137 @@ export default function AssistenteTecnico() {
                 value={selectedCulture}
                 onChange={(event) => {
                   setSelectedCulture(event.target.value);
-                  setSelectedGoal("");
-                  setCopyStatus("");
+                  setRecommendationWarning("");
                 }}
               >
                 <option value="">Selecione</option>
-                {Object.entries(cultureRecommendations).map(([key, value]) => (
-                  <option key={key} value={key}>
-                    {value.label}
-                  </option>
+                {Object.entries(groupedOptions).map(([group, items]) => (
+                  <optgroup key={group} label={group}>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </optgroup>
                 ))}
               </select>
             </label>
 
-            {goalKeys.length > 1 ? (
-              <label className="space-y-1 text-sm">
-                <span className="font-medium text-slate-700">Objetivo</span>
-                <select
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                  value={selectedGoal}
-                  onChange={(event) => {
-                    setSelectedGoal(event.target.value);
-                    setCopyStatus("");
-                  }}
-                >
-                  <option value="">Selecione</option>
-                  {goalKeys.map((goal) => (
-                    <option key={goal} value={goal}>
-                      {getGoalLabel(goal)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold">Faixa recomendada (kg/ha):</span>{" "}
+                {selectedCultureData ? buildRangeLabel(selectedCultureData.kgHaMin, selectedCultureData.kgHaMax) : "—"}
+              </p>
 
-            {recommendation ? (
-              <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm text-slate-700">
-                  <span className="font-semibold">Faixa recomendada:</span> {recommendation.range}
+              <p className="text-sm text-slate-700">
+                <span className="font-semibold">Observações:</span>{" "}
+                {selectedCultureData?.notes || "—"}
+              </p>
+
+              {selectedCultureData && (selectedCultureData.kgHaMin == null || selectedCultureData.kgHaMax == null) ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Faixa incompleta para esta cultura. Ajuste na edição para mostrar o intervalo completo.
                 </p>
+              ) : null}
 
-                <div className="text-sm text-slate-700">
-                  <p className="font-semibold">Observações técnicas:</p>
-                  <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {recommendation.notes.map((note) => (
-                      <li key={note}>{note}</li>
-                    ))}
-                  </ul>
-                </div>
+              {recommendationWarning ? <p className="text-xs text-amber-700">{recommendationWarning}</p> : null}
 
-                <button
-                  type="button"
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700"
-                  onClick={handleCopyRecommendation}
-                >
-                  Copiar recomendação
-                </button>
-
-                {copyStatus ? <p className="text-xs text-slate-500">{copyStatus}</p> : null}
-              </div>
-            ) : null}
+              <button
+                type="button"
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                onClick={() => setShowEditModal(true)}
+              >
+                Editar recomendações
+              </button>
+            </div>
           </div>
         </article>
       </div>
 
-      <article className={cardClass}>
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-slate-800">Catálogo de Culturas</h2>
-            <p className="text-sm text-slate-500">Base única para recomendações de kg/ha e parâmetros da calculadora.</p>
-          </div>
-          {canManageCatalog ? (
-            <button
-              type="button"
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-medium text-white hover:bg-emerald-500"
-              onClick={() => {
-                setEditingItem(null);
-                setCatalogForm({ slug: "", label: "", defaultKgHaMin: "", defaultKgHaMax: "", notes: "", tags: "", goals: "" });
-                setShowModal(true);
-              }}
-            >
-              Nova cultura
-            </button>
-          ) : null}
-        </div>
-
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <input className={inputClass} placeholder="Buscar por nome/slug" value={search} onChange={(event) => setSearch(event.target.value)} />
-          <select className={inputClass} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as "all" | "active" | "inactive")}>
-            <option value="all">Todas</option>
-            <option value="active">Ativas</option>
-            <option value="inactive">Inativas</option>
-          </select>
-          <input className={inputClass} placeholder="Tag (ex.: inverno)" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} />
-          <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => loadCatalog().catch(() => undefined)}>Buscar</button>
-        </div>
-
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-slate-500">
-                <th className="py-2">Nome</th><th>Slug</th><th>Status</th><th>Tags</th><th>Faixa padrão</th><th className="text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {catalogLoading ? (
-                <tr><td className="py-3 text-slate-500" colSpan={6}>Carregando catálogo...</td></tr>
-              ) : catalogItems.length === 0 ? (
-                <tr><td className="py-3 text-slate-500" colSpan={6}>Nenhuma cultura encontrada.</td></tr>
-              ) : catalogItems.map((item) => (
-                <tr key={item.id} className="border-b border-slate-100">
-                  <td className="py-2 font-medium">{item.label}</td>
-                  <td>{item.slug}</td>
-                  <td>{item.isActive ? "Ativa" : "Inativa"}</td>
-                  <td>{item.tags.join(", ") || "-"}</td>
-                  <td>{item.defaultKgHaMin ?? "-"} - {item.defaultKgHaMax ?? "-"}</td>
-                  <td className="text-right">
-                    {canManageCatalog ? (
-                      <div className="inline-flex gap-2">
-                        <button type="button" className="rounded border px-2 py-1" onClick={() => {
-                          setEditingItem(item);
-                          setCatalogForm({
-                            slug: item.slug,
-                            label: item.label,
-                            defaultKgHaMin: item.defaultKgHaMin?.toString() || "",
-                            defaultKgHaMax: item.defaultKgHaMax?.toString() || "",
-                            notes: item.notes || "",
-                            tags: item.tags.join(", "),
-                            goals: Object.entries(item.goalsJson || {}).map(([goal, range]) => `${goal}:${range.min}-${range.max}`).join("; ")
-                          });
-                          setShowModal(true);
-                        }}>Editar</button>
-                        {item.isActive ? <button type="button" className="rounded border border-rose-300 px-2 py-1 text-rose-600" onClick={() => inactivateCatalog(item.id).catch(() => undefined)}>Inativar</button> : null}
-                      </div>
-                    ) : <span className="text-xs text-slate-400">Somente visualização</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      {showModal ? (
+      {showEditModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-4">
-            <h3 className="text-lg font-semibold">{editingItem ? "Editar cultura" : "Nova cultura"}</h3>
-            <p className="mb-3 text-xs text-slate-500">Campos em pt-BR. Dica: objetivos no formato cobertura:10-15; silagem:12-18.</p>
-            <div className="grid gap-3 md:grid-cols-2">
-              <input className={inputClass} placeholder="Slug" title="Identificador único em minúsculas" value={catalogForm.slug} onChange={(event) => setCatalogForm((prev) => ({ ...prev, slug: event.target.value }))} />
-              <input className={inputClass} placeholder="Nome da cultura" title="Nome exibido na interface" value={catalogForm.label} onChange={(event) => setCatalogForm((prev) => ({ ...prev, label: event.target.value }))} />
-              <input className={inputClass} placeholder="kg/ha mínimo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMin} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMin: event.target.value }))} />
-              <input className={inputClass} placeholder="kg/ha máximo padrão" title="Faixa base para recomendação" value={catalogForm.defaultKgHaMax} onChange={(event) => setCatalogForm((prev) => ({ ...prev, defaultKgHaMax: event.target.value }))} />
-              <input className={inputClass} placeholder="Tags separadas por vírgula" title="Ex.: verão, cobertura" value={catalogForm.tags} onChange={(event) => setCatalogForm((prev) => ({ ...prev, tags: event.target.value }))} />
-              <input className={inputClass} placeholder="Objetivos e faixas" title="Use objetivo:min-max; objetivo:min-max" value={catalogForm.goals} onChange={(event) => setCatalogForm((prev) => ({ ...prev, goals: event.target.value }))} />
+          <div className="w-full max-w-4xl rounded-xl bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-semibold text-slate-800">Editar recomendações</h3>
+              <button type="button" className="rounded border px-3 py-1 text-sm" onClick={() => setShowEditModal(false)}>Fechar</button>
             </div>
-            <textarea className={`${inputClass} min-h-24`} placeholder="Observações técnicas" title="Resumo técnico curto" value={catalogForm.notes} onChange={(event) => setCatalogForm((prev) => ({ ...prev, notes: event.target.value }))} />
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" className="rounded border px-3 py-2" onClick={() => setShowModal(false)}>Cancelar</button>
-              <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-white" onClick={() => saveCatalog().catch(() => undefined)}>Salvar</button>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <input
+                className={inputClass}
+                placeholder="Buscar cultura"
+                value={editSearch}
+                onChange={(event) => setEditSearch(event.target.value)}
+              />
+              <select className={inputClass} value={editGroupFilter} onChange={(event) => setEditGroupFilter(event.target.value)}>
+                {editGroups.map((group) => (
+                  <option key={group} value={group}>
+                    {group === "todos" ? "Todos os grupos" : group}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-4 max-h-80 overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-slate-500">
+                    <th className="py-2">Nome</th>
+                    <th>kg/ha mín</th>
+                    <th>kg/ha máx</th>
+                    <th>Ativo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredEditItems.map((item) => (
+                    <tr key={item.id} className="border-b border-slate-100">
+                      <td className="py-2">{item.name}</td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.kgHaMin ?? ""}
+                          onChange={(event) => updateCultureItem(item.id, "kgHaMin", event.target.value)}
+                          className="w-24 rounded border border-slate-300 px-2 py-1"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.kgHaMax ?? ""}
+                          onChange={(event) => updateCultureItem(item.id, "kgHaMax", event.target.value)}
+                          className="w-24 rounded border border-slate-300 px-2 py-1"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={item.active}
+                          onChange={(event) => updateCultureItem(item.id, "active", event.target.checked)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded border border-slate-300 px-3 py-2 text-sm"
+                onClick={restoreDefaults}
+              >
+                Restaurar padrão
+              </button>
+              <button
+                type="button"
+                className="rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white"
+                onClick={saveOverrides}
+              >
+                Salvar alterações
+              </button>
             </div>
           </div>
         </div>
