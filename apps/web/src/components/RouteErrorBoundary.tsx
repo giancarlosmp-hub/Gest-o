@@ -39,6 +39,8 @@ export default class RouteErrorBoundary extends Component<RouteErrorBoundaryProp
           <h1 className="text-lg font-semibold text-amber-900">{fallbackTitle}</h1>
           <p className="mt-2 text-sm text-amber-800">{fallbackMessage}</p>
 
+          <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white">Recarregar</button>
+
           {import.meta.env.DEV && this.state.errorMessage ? (
             <pre className="mt-4 overflow-auto rounded-lg border border-amber-300 bg-white p-3 text-xs text-red-700">
               {this.state.errorMessage}

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import express, { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
@@ -72,6 +72,7 @@ const normalizeCulturePayload = (payload: z.infer<typeof cultureCatalogSchema>) 
   return {
     slug: payload.slug.trim().toLowerCase(),
     label: payload.label.trim(),
+    category: payload.category.trim(),
     isActive: payload.isActive ?? true,
     defaultKgHaMin: payload.defaultKgHaMin ?? null,
     defaultKgHaMax: payload.defaultKgHaMax ?? null,
@@ -81,6 +82,7 @@ const normalizeCulturePayload = (payload: z.infer<typeof cultureCatalogSchema>) 
     germinationDefault: payload.germinationDefault ?? null,
     purityDefault: payload.purityDefault ?? null,
     populationTargetDefault: payload.populationTargetDefault ?? null,
+    rowSpacingCmDefault: payload.rowSpacingCmDefault ?? null,
     tags,
   };
 };
@@ -89,6 +91,7 @@ const cultureQuerySchema = z.object({
   active: z.enum(["true", "false"]).optional(),
   search: z.string().optional(),
   tags: z.string().optional(),
+  category: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
@@ -4318,15 +4321,16 @@ router.post("/users/:id/reset-password", authorize("diretor"), validateBody(user
 });
 
 
-router.get("/cultures", async (req, res) => {
+const listCulturesHandler = async (req: express.Request, res: express.Response) => {
   const parsedQuery = cultureQuerySchema.safeParse(req.query);
   if (!parsedQuery.success) {
     return res.status(400).json({ message: parsedQuery.error.issues[0]?.message || "Parâmetros inválidos." });
   }
 
-  const { active, search, tags, page = 1, pageSize = 20 } = parsedQuery.data;
+  const { active, search, tags, category, page = 1, pageSize = 20 } = parsedQuery.data;
   const where: Prisma.CultureCatalogWhereInput = {
     ...(active ? { isActive: active === "true" } : {}),
+    ...(category ? { category: { equals: category, mode: "insensitive" } } : {}),
     ...(search
       ? {
           OR: [
@@ -4354,8 +4358,11 @@ router.get("/cultures", async (req, res) => {
     prisma.cultureCatalog.count({ where }),
   ]);
 
-  res.status(200).json({ data: items, total, page, pageSize });
-});
+  return res.status(200).json({ data: items, total, page, pageSize });
+};
+
+router.get("/cultures", listCulturesHandler);
+router.get("/technical/cultures", listCulturesHandler);
 
 router.post("/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
   try {
@@ -4387,6 +4394,48 @@ router.put("/cultures/:id", authorize("diretor", "gerente"), validateBody(cultur
 });
 
 router.delete("/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
+  try {
+    const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
+    res.status(200).json(updated);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2025") {
+      return res.status(404).json({ message: "Cultura não encontrada." });
+    }
+    next(error);
+  }
+});
+
+
+router.post("/technical/cultures", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
+  try {
+    const payload = normalizeCulturePayload(req.body);
+    const created = await prisma.cultureCatalog.create({ data: payload });
+    res.status(201).json(created);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      return res.status(409).json({ message: "Slug já cadastrado." });
+    }
+    next(error);
+  }
+});
+
+router.put("/technical/cultures/:id", authorize("diretor", "gerente"), validateBody(cultureCatalogSchema), async (req, res, next) => {
+  try {
+    const payload = normalizeCulturePayload(req.body);
+    const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: payload });
+    res.status(200).json(updated);
+  } catch (error) {
+    if ((error as { code?: string }).code === "P2002") {
+      return res.status(409).json({ message: "Slug já cadastrado." });
+    }
+    if ((error as { code?: string }).code === "P2025") {
+      return res.status(404).json({ message: "Cultura não encontrada." });
+    }
+    next(error);
+  }
+});
+
+router.delete("/technical/cultures/:id", authorize("diretor", "gerente"), async (req, res, next) => {
   try {
     const updated = await prisma.cultureCatalog.update({ where: { id: req.params.id }, data: { isActive: false } });
     res.status(200).json(updated);

@@ -16,73 +16,29 @@ const cropOptions = ["soja", "milho", "algodão", "café", "trigo"];
 const stageOptions = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
 
 const baseCultures = [
-  {
-    slug: "sorgo",
-    label: "Sorgo",
-    defaultKgHaMin: 8,
-    defaultKgHaMax: 18,
-    goalsJson: { silagem: { min: 12, max: 18 }, grao: { min: 8, max: 12 } },
-    notes: "Ajustar conforme PMS e vigor do lote.",
-    pmsDefault: 28,
-    germinationDefault: 85,
-    purityDefault: 98,
-    populationTargetDefault: 180000,
-    tags: ["verao", "forrageira", "graos"]
-  },
-  {
-    slug: "milho",
-    label: "Milho",
-    defaultKgHaMin: 14,
-    defaultKgHaMax: 24,
-    goalsJson: { grao: { min: 14, max: 20 }, silagem: { min: 18, max: 24 } },
-    notes: "Regular a semeadora conforme híbrido e espaçamento.",
-    pmsDefault: 32,
-    germinationDefault: 90,
-    purityDefault: 98,
-    populationTargetDefault: 65000,
-    tags: ["verao", "graos"]
-  },
-  {
-    slug: "milheto", label: "Milheto", defaultKgHaMin: 10, defaultKgHaMax: 20,
-    goalsJson: { cobertura: { min: 15, max: 20 }, pastejo: { min: 10, max: 15 } },
-    notes: "Boa opção para cobertura rápida de solo.", tags: ["cobertura", "verao", "forrageira"]
-  },
-  {
-    slug: "trigo", label: "Trigo", defaultKgHaMin: 100, defaultKgHaMax: 140,
-    goalsJson: { grao: { min: 100, max: 140 } },
-    notes: "Refinar pela população alvo e ambiente.", tags: ["inverno", "graos"]
-  },
-  {
-    slug: "aveia", label: "Aveia", defaultKgHaMin: 60, defaultKgHaMax: 100,
-    goalsJson: { cobertura: { min: 60, max: 90 }, pastejo: { min: 80, max: 100 } },
-    notes: "Pode ser usada para cobertura e pastejo.", tags: ["inverno", "cobertura", "forrageira"]
-  },
-  {
-    slug: "brachiaria", label: "Braquiária", defaultKgHaMin: 8, defaultKgHaMax: 15,
-    goalsJson: { cobertura: { min: 8, max: 12 }, pastejo: { min: 10, max: 15 } },
-    notes: "Avaliar valor cultural e pureza do lote.", tags: ["forrageira", "cobertura"]
-  },
-  {
-    slug: "soja", label: "Soja", defaultKgHaMin: 45, defaultKgHaMax: 80,
-    goalsJson: { grao: { min: 45, max: 80 } },
-    notes: "Ajustar à população por cultivar e ciclo.", tags: ["verao", "graos"]
-  },
-  {
-    slug: "feijao", label: "Feijão", defaultKgHaMin: 50, defaultKgHaMax: 80,
-    goalsJson: { grao: { min: 50, max: 80 } },
-    notes: "Verificar PMS e stand final desejado.", tags: ["graos"]
-  },
-  {
-    slug: "centeio", label: "Centeio", defaultKgHaMin: 70, defaultKgHaMax: 120,
-    goalsJson: { cobertura: { min: 70, max: 120 } },
-    notes: "Alto potencial de produção de palha.", tags: ["inverno", "cobertura"]
-  },
-  {
-    slug: "azevem", label: "Azevém", defaultKgHaMin: 20, defaultKgHaMax: 35,
-    goalsJson: { pastejo: { min: 20, max: 35 } },
-    notes: "Muito utilizado para pastejo no inverno.", tags: ["inverno", "forrageira", "pastejo"]
-  }
+  { slug: "sorgo", label: "Sorgo", category: "Grãos", defaultKgHaMin: 8, defaultKgHaMax: 18, goalsJson: { silagem: { min: 12, max: 18 }, grao: { min: 8, max: 12 } }, notes: "Ajustar conforme PMS e vigor do lote.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 180000, rowSpacingCmDefault: 45, tags: ["verao", "forrageira", "graos"] },
+  { slug: "milho", label: "Milho", category: "Grãos", defaultKgHaMin: 14, defaultKgHaMax: 24, goalsJson: { grao: { min: 14, max: 20 }, silagem: { min: 18, max: 24 } }, notes: "Regular a semeadora conforme híbrido e espaçamento.", pmsDefault: 32, germinationDefault: 90, purityDefault: 98, populationTargetDefault: 65000, rowSpacingCmDefault: 50, tags: ["verao", "graos"] },
+  { slug: "milheto", label: "Milheto", category: "Cobertura", defaultKgHaMin: 10, defaultKgHaMax: 20, goalsJson: { cobertura: { min: 15, max: 20 }, pastejo: { min: 10, max: 15 } }, notes: "Boa opção para cobertura rápida de solo.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34, tags: ["cobertura", "verao", "forrageira"] },
+  { slug: "trigo", label: "Trigo", category: "Grãos", defaultKgHaMin: 100, defaultKgHaMax: 140, goalsJson: { grao: { min: 100, max: 140 } }, notes: "Refinar pela população alvo e ambiente.", pmsDefault: 35, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 2800000, rowSpacingCmDefault: 17, tags: ["inverno", "graos"] },
+  { slug: "triticale", label: "Triticale", category: "Grãos", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["inverno", "graos"] },
+  { slug: "aveia-preta", label: "Aveia Preta", category: "Cobertura", defaultKgHaMin: 60, defaultKgHaMax: 90, goalsJson: { cobertura: { min: 60, max: 90 } }, notes: "Pode ser usada para cobertura e pastejo.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 2400000, rowSpacingCmDefault: 17, tags: ["inverno", "cobertura"] },
+  { slug: "aveia-branca", label: "Aveia Branca", category: "Cobertura", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["inverno", "cobertura"] },
+  { slug: "centeio", label: "Centeio", category: "Cobertura", defaultKgHaMin: 70, defaultKgHaMax: 120, goalsJson: { cobertura: { min: 70, max: 120 } }, notes: "Alto potencial de produção de palha.", tags: ["inverno", "cobertura"] },
+  { slug: "trigo-mourisco", label: "Trigo Mourisco", category: "Cobertura", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["cobertura"] },
+  { slug: "nabo-forrageiro", label: "Nabo Forrageiro", category: "Cobertura", defaultKgHaMin: 8, defaultKgHaMax: 14, goalsJson: { cobertura: { min: 8, max: 14 } }, notes: "Dose depende do arranjo e do mix de cobertura.", pmsDefault: 11, germinationDefault: 85, purityDefault: 97, populationTargetDefault: 500000, rowSpacingCmDefault: 17, tags: ["inverno", "cobertura"] },
+  { slug: "ervilhaca", label: "Ervilhaca", category: "Leguminosas", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["leguminosa", "cobertura"] },
+  { slug: "crotalaria-spectabilis", label: "Crotalária Spectabilis", category: "Leguminosas", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["leguminosa", "cobertura"] },
+  { slug: "crotalaria-juncea", label: "Crotalária Juncea", category: "Leguminosas", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["leguminosa", "cobertura"] },
+  { slug: "estilosantes", label: "Estilosantes", category: "Leguminosas", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["leguminosa", "forrageira"] },
+  { slug: "capim-sudao", label: "Capim-Sudão", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "pastejo"] },
+  { slug: "panicum-mombaca", label: "Panicum Mombaça", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "pastejo"] },
+  { slug: "panicum-quenia", label: "Panicum Quênia", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "pastejo"] },
+  { slug: "brachiaria-ruziziensis", label: "Brachiaria Ruziziensis", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "cobertura"] },
+  { slug: "brachiaria-brizantha", label: "Brachiaria Brizantha", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "cobertura"] },
+  { slug: "brachiaria-decumbens", label: "Brachiaria Decumbens", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "cobertura"] },
+  { slug: "mulato-ii", label: "Brachiaria Híbrida Mulato II", category: "Forrageiras", defaultKgHaMin: null, defaultKgHaMax: null, goalsJson: {}, notes: "Ajustar conforme recomendação técnica interna.", tags: ["forrageira", "pastejo"] }
 ];
+
 
 const cityByRegion = {
   Sudeste: ["Ribeirão Preto", "Uberaba", "Patrocínio"],

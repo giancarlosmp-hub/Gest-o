@@ -166,6 +166,7 @@ const cultureGoalRangeSchema = z.object({
 export const cultureCatalogSchema = z.object({
   slug: z.string().min(2, "Slug é obrigatório.").regex(/^[a-z0-9-]+$/, "Slug deve conter apenas letras minúsculas, números e hífen."),
   label: z.string().min(2, "Nome da cultura é obrigatório."),
+  category: z.string().min(2, "Categoria é obrigatória.").default("Outras"),
   isActive: z.boolean().optional(),
   defaultKgHaMin: z.number().nonnegative().optional().nullable(),
   defaultKgHaMax: z.number().nonnegative().optional().nullable(),
@@ -175,6 +176,7 @@ export const cultureCatalogSchema = z.object({
   germinationDefault: z.number().positive().max(100).optional().nullable(),
   purityDefault: z.number().positive().max(100).optional().nullable(),
   populationTargetDefault: z.number().positive().optional().nullable(),
+  rowSpacingCmDefault: z.number().positive().optional().nullable(),
   tags: z.array(z.string().min(1)).max(20).optional().default([])
 });
 
