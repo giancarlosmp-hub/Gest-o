@@ -275,7 +275,7 @@ export default function OpportunitiesPage() {
       const query = params.toString() ? `?${params}` : "";
       const [oppRes, summaryRes, clientsRes] = await Promise.all([
         api.get(`/opportunities${query}`),
-        api.get("/opportunities/summary"),
+        api.get(`/opportunities/summary${query}`),
         api.get("/clients")
       ]);
 
@@ -649,21 +649,10 @@ export default function OpportunitiesPage() {
 
     setIsQuickActionLoading(stage);
     try {
-      const response = await api.put(`/opportunities/${targetId}`, { stage });
-      const updatedOpportunity = response.data;
+      const response = await api.patch(`/opportunities/${targetId}/close`, { stage, reason });
+      const updatedOpportunity = response.data?.opportunity;
+      if (!updatedOpportunity) throw new Error("Resposta inválida ao encerrar oportunidade");
       updateOpportunityInState(updatedOpportunity);
-
-      const reasonDescription = reason?.trim();
-      const eventDescription = reasonDescription
-        ? `Oportunidade encerrada como ${stageLabel[stage]}. Motivo/observação: ${reasonDescription}`
-        : `Oportunidade encerrada como ${stageLabel[stage]}`;
-
-      await api.post("/events", {
-        type: "status",
-        description: eventDescription,
-        opportunityId: targetId,
-        clientId: updatedOpportunity?.clientId || targetOpportunity.clientId
-      });
 
       if (filters.status === "open") {
         setItems((currentItems) => currentItems.filter((item) => item.id !== targetId));
@@ -673,8 +662,8 @@ export default function OpportunitiesPage() {
       triggerDashboardRefresh();
       if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
-    } catch {
-      toast.error("Não foi possível encerrar a oportunidade");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível encerrar a oportunidade"));
     } finally {
       setIsQuickActionLoading(null);
     }
