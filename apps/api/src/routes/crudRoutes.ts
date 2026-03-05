@@ -3326,6 +3326,7 @@ router.get("/opportunities/summary", async (req, res) => {
   });
 
   const totalsByStage: Record<string, { value: number; weighted: number }> = {};
+  const countByStage: Record<string, number> = {};
   const breakdownByCrop: Record<string, { value: number; weighted: number; count: number }> = {};
   const breakdownBySeason: Record<string, { value: number; weighted: number; count: number }> = {};
 
@@ -3345,6 +3346,7 @@ router.get("/opportunities/summary", async (req, res) => {
     if (!totalsByStage[opportunity.stage]) totalsByStage[opportunity.stage] = { value: 0, weighted: 0 };
     totalsByStage[opportunity.stage].value += opportunity.value;
     totalsByStage[opportunity.stage].weighted += weighted;
+    countByStage[opportunity.stage] = (countByStage[opportunity.stage] || 0) + 1;
 
     const cropKey = opportunity.crop || "não informado";
     if (!breakdownByCrop[cropKey]) breakdownByCrop[cropKey] = { value: 0, weighted: 0, count: 0 };
@@ -3376,6 +3378,8 @@ router.get("/opportunities/summary", async (req, res) => {
     totalPipelineValue,
     totalWeightedValue,
     totalsByStage,
+    countByStage,
+    totalCount: opportunities.length,
     breakdownByCrop,
     breakdownBySeason
   });
