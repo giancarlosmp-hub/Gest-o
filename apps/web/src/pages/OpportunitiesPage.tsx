@@ -289,23 +289,33 @@ export default function OpportunitiesPage() {
     status: filters.status
   }), [filters.ownerSellerId, filters.status]);
 
+  const buildOpportunitiesQuery = useCallback(() => {
+    const params = new URLSearchParams();
+    Object.entries(opportunitiesQueryKey).forEach(([key, value]) => {
+      if (typeof value === "boolean") {
+        if (value) params.set(key, "true");
+        return;
+      }
+      if (value) params.set(key, value);
+    });
+
+    if (!params.has("status")) params.set("status", "open");
+
+    return params.toString() ? `?${params.toString()}` : "";
+  }, [opportunitiesQueryKey]);
+
+  const loadSummary = useCallback(async (query: string) => {
+    const summaryRes = await api.get(`/opportunities/summary${query}`);
+    setSummary(summaryRes.data || emptySummary);
+    return summaryRes;
+  }, []);
+
   const refetchOpportunityQueries = useCallback(async () => {
     const requestId = opportunitiesRequestRef.current + 1;
     opportunitiesRequestRef.current = requestId;
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      Object.entries(opportunitiesQueryKey).forEach(([key, value]) => {
-        if (typeof value === "boolean") {
-          if (value) params.set(key, "true");
-          return;
-        }
-        if (value) params.set(key, value);
-      });
-
-      if (!params.has("status")) params.set("status", "open");
-
-      const query = params.toString() ? `?${params}` : "";
+      const query = buildOpportunitiesQuery();
       if (shouldLogOpportunityDiagnostics) {
         console.info("[diag-opportunities][load] refetching opportunities data", {
           userId: user?.id,
@@ -320,14 +330,13 @@ export default function OpportunitiesPage() {
       }
       const [oppRes, summaryRes, clientsRes] = await Promise.all([
         api.get(`/opportunities${query}`),
-        api.get(`/opportunities/summary${query}`),
+        loadSummary(query),
         api.get("/clients")
       ]);
 
       if (requestId !== opportunitiesRequestRef.current) return;
 
       setItems(oppRes.data || []);
-      setSummary(summaryRes.data || emptySummary);
       setClients(clientsRes.data || []);
 
       if (shouldLogOpportunityDiagnostics) {
@@ -347,7 +356,7 @@ export default function OpportunitiesPage() {
         setLoading(false);
       }
     }
-  }, [opportunitiesQueryKey, opportunitiesSummaryQueryKey, user?.id, user?.role]);
+  }, [buildOpportunitiesQuery, loadSummary, opportunitiesQueryKey, opportunitiesSummaryQueryKey, user?.id, user?.role]);
 
   const invalidateOpportunitiesAndDashboardQueries = useCallback(async () => {
     await refetchOpportunityQueries();
@@ -802,12 +811,9 @@ export default function OpportunitiesPage() {
 
     setIsSchedulingFollowUp(true);
     try {
-      // Fonte atual do KPI = GET /opportunities/summary no carregamento principal da página.
-      // Provável causa = aqui só atualiza a oportunidade em memória local e não refaz o fetch do summary,
-      // então Pipeline total/Valor ponderado/Atrasadas/Conversão podem ficar desatualizados após alterar follow-up.
       const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { followUpDate: pipelineFollowUpDate });
       updateOpportunityInState(response.data);
-      triggerDashboardRefresh();
+      await invalidateOpportunitiesAndDashboardQueries();
       await loadPipelineEvents(selectedOpportunity.id);
       toast.success("Follow-up agendado com sucesso");
     } catch {
