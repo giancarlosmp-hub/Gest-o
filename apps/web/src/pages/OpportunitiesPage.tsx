@@ -651,8 +651,10 @@ export default function OpportunitiesPage() {
     setIsQuickActionLoading(stage);
     try {
       const response = await api.patch(`/opportunities/${targetId}/close`, { stage, reason });
-      const updatedOpportunity = response.data?.opportunity;
-      if (!updatedOpportunity) throw new Error("Resposta inválida ao encerrar oportunidade");
+      const updatedOpportunity = response.data?.opportunity ?? response.data;
+      if (!updatedOpportunity || updatedOpportunity.id !== targetId) {
+        throw new Error("Resposta inválida ao encerrar oportunidade");
+      }
       updateOpportunityInState(updatedOpportunity);
 
       if (filters.status === "open") {
