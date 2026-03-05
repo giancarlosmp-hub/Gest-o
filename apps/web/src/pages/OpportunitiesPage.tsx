@@ -308,6 +308,9 @@ export default function OpportunitiesPage() {
       const query = params.toString() ? `?${params}` : "";
       if (shouldLogOpportunityDiagnostics) {
         console.info("[diag-opportunities][load] refetching opportunities data", {
+          userId: user?.id,
+          role: user?.role,
+          filtersApplied: opportunitiesQueryKey,
           opportunitiesQueryKey,
           opportunitiesSummaryQueryKey,
           opportunitiesEndpoint: `/opportunities${query}`,
@@ -326,12 +329,25 @@ export default function OpportunitiesPage() {
       setItems(oppRes.data || []);
       setSummary(summaryRes.data || emptySummary);
       setClients(clientsRes.data || []);
+
+      if (shouldLogOpportunityDiagnostics) {
+        console.info("[diag-opportunities][load][response]", {
+          userId: user?.id,
+          role: user?.role,
+          filtersApplied: opportunitiesQueryKey,
+          opportunitiesReturned: Array.isArray(oppRes.data) ? oppRes.data.length : 0,
+          pipelineTotal: summaryRes.data?.pipelineTotal,
+          weightedTotal: summaryRes.data?.weightedTotal,
+          overdueCount: summaryRes.data?.overdueCount,
+          conversionRate: summaryRes.data?.conversionRate
+        });
+      }
     } finally {
       if (requestId === opportunitiesRequestRef.current) {
         setLoading(false);
       }
     }
-  }, [opportunitiesQueryKey, opportunitiesSummaryQueryKey]);
+  }, [opportunitiesQueryKey, opportunitiesSummaryQueryKey, user?.id, user?.role]);
 
   const invalidateOpportunitiesAndDashboardQueries = useCallback(async () => {
     await refetchOpportunityQueries();
@@ -786,6 +802,9 @@ export default function OpportunitiesPage() {
 
     setIsSchedulingFollowUp(true);
     try {
+      // Fonte atual do KPI = GET /opportunities/summary no carregamento principal da página.
+      // Provável causa = aqui só atualiza a oportunidade em memória local e não refaz o fetch do summary,
+      // então Pipeline total/Valor ponderado/Atrasadas/Conversão podem ficar desatualizados após alterar follow-up.
       const response = await api.put(`/opportunities/${selectedOpportunity.id}`, { followUpDate: pipelineFollowUpDate });
       updateOpportunityInState(response.data);
       triggerDashboardRefresh();
@@ -888,6 +907,7 @@ export default function OpportunitiesPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {/* Fonte atual do KPI = payload de GET /opportunities/summary; provável causa de valores iguais entre vendedores = filtros/resumo não refletirem ownerSellerId/follow-up em todas as mutações. */}
         <Card title="Pipeline total" value={formatCurrencyBRL(summary.pipelineTotal)} loading={loading} />
         <Card title="Valor ponderado" value={formatCurrencyBRL(summary.weightedTotal)} loading={loading} />
         <Card title="Atrasadas" value={`${summary.overdueCount} • ${formatCurrencyBRL(summary.overdueValue)}`} loading={loading} />
