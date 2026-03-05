@@ -46,6 +46,9 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"email":"diretor@empresa.com","password":"123456"}'
 
+      - name: Smoke test opportunities + dashboard flow
+        run: node scripts/smoke/compose-smoke.mjs
+
       - name: Print service status
         if: always()
         run: docker compose ps
