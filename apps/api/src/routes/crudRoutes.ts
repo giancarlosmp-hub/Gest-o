@@ -3267,12 +3267,22 @@ router.delete("/contacts/:id", async (req, res) => {
 router.get("/opportunities", async (req, res) => {
   const parsedFilters = parseOpportunityFilterParams(req);
   if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
+  const shouldLogOpportunityDiagnostics = process.env.NODE_ENV !== "production";
 
   const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = parsePositiveInt(req.query.pageSize, 20);
   const todayStart = getUtcTodayStart();
   const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
+
+  if (shouldLogOpportunityDiagnostics) {
+    console.info("[diag-opportunities-api][list][request]", {
+      userId: req.user?.id,
+      role: req.user?.role,
+      filters: parsedFilters.params,
+      query: req.query
+    });
+  }
 
   const baseQuery = {
     where,
@@ -3285,6 +3295,24 @@ router.get("/opportunities", async (req, res) => {
 
   if (!hasPagination) {
     const opportunities: any[] = await prisma.opportunity.findMany(baseQuery);
+    if (shouldLogOpportunityDiagnostics) {
+      const totals = opportunities.reduce((acc, opportunity) => {
+        const weighted = getWeightedValue(opportunity.value, opportunity.probability);
+        const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+        return {
+          count: acc.count + 1,
+          value: acc.value + opportunity.value,
+          weighted: acc.weighted + weighted,
+          overdueCount: acc.overdueCount + (isOverdue ? 1 : 0)
+        };
+      }, { count: 0, value: 0, weighted: 0, overdueCount: 0 });
+      console.info("[diag-opportunities-api][list][response]", {
+        userId: req.user?.id,
+        role: req.user?.role,
+        filters: parsedFilters.params,
+        totals
+      });
+    }
     return res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
   }
 
@@ -3298,6 +3326,25 @@ router.get("/opportunities", async (req, res) => {
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (shouldLogOpportunityDiagnostics) {
+    const totals = opportunities.reduce((acc, opportunity) => {
+      const weighted = getWeightedValue(opportunity.value, opportunity.probability);
+      const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+      return {
+        count: acc.count + 1,
+        value: acc.value + opportunity.value,
+        weighted: acc.weighted + weighted,
+        overdueCount: acc.overdueCount + (isOverdue ? 1 : 0)
+      };
+    }, { count: 0, value: 0, weighted: 0, overdueCount: 0 });
+    console.info("[diag-opportunities-api][list][response-paginated]", {
+      userId: req.user?.id,
+      role: req.user?.role,
+      filters: parsedFilters.params,
+      pagination: { page, pageSize, total },
+      returnedTotals: totals
+    });
+  }
   return res.json({
     items: opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)),
     total,
@@ -3310,9 +3357,19 @@ router.get("/opportunities", async (req, res) => {
 router.get("/opportunities/summary", async (req, res) => {
   const parsedFilters = parseOpportunityFilterParams(req);
   if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
+  const shouldLogOpportunityDiagnostics = process.env.NODE_ENV !== "production";
 
   const todayStart = getUtcTodayStart();
   const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
+
+  if (shouldLogOpportunityDiagnostics) {
+    console.info("[diag-opportunities-api][summary][request]", {
+      userId: req.user?.id,
+      role: req.user?.role,
+      filters: parsedFilters.params,
+      query: req.query
+    });
+  }
 
   const opportunities: any[] = await prisma.opportunity.findMany({
     where,
@@ -3365,6 +3422,21 @@ router.get("/opportunities/summary", async (req, res) => {
 
   const closedCount = wonCount + lossCount;
   const conversionRate = parsedFilters.params.status === "open" || closedCount === 0 ? 0 : (wonCount / closedCount) * 100;
+  // Fonte atual do KPI = agregação deste endpoint /opportunities/summary.
+  // Provável causa = se filtros (ownerSellerId/overdue/status) não forem enviados/refetchados após mutações de follow-up,
+  // os cards no front podem permanecer com valores antigos ou aparentemente iguais entre vendedores.
+  if (shouldLogOpportunityDiagnostics) {
+    console.info("[diag-opportunities-api][summary][response]", {
+      userId: req.user?.id,
+      role: req.user?.role,
+      filters: parsedFilters.params,
+      totalCount: opportunities.length,
+      pipelineTotal: totalPipelineValue,
+      weightedTotal: totalWeightedValue,
+      overdueCount,
+      conversionRate
+    });
+  }
   res.json({
     pipelineTotal: totalPipelineValue,
     weightedTotal: totalWeightedValue,
