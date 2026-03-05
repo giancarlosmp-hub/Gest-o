@@ -357,14 +357,14 @@ export default function DashboardPage() {
     [month, debouncedSellerId, scoreSellerId]
   );
 
-  const fetchDashboard = useCallback((signal?: AbortSignal) => {
+  const fetchDashboard = useCallback((signal?: AbortSignal, options?: { force?: boolean }) => {
     const querySeller = debouncedSellerId ? `&sellerId=${debouncedSellerId}` : "";
     const [year, monthN] = month.split("-").map(Number);
     const from = `${month}-01`;
     const to = `${month}-${String(new Date(year, monthN, 0).getDate()).padStart(2, "0")}`;
 
     const existingRequest = dashboardInFlightRef.current.get(dashboardQueryKey);
-    if (existingRequest) return existingRequest;
+    if (existingRequest && !options?.force) return existingRequest;
 
     const scoreQuery = user?.role !== "vendedor" && scoreSellerId ? `&userId=${scoreSellerId}` : "";
 
@@ -412,11 +412,11 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const onRefresh = () => {
-      fetchDashboard();
+      fetchDashboard(undefined, { force: true });
     };
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") fetchDashboard();
+      if (document.visibilityState === "visible") fetchDashboard(undefined, { force: true });
     };
 
     window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);

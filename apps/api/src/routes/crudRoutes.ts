@@ -3260,9 +3260,13 @@ router.get("/opportunities", async (req, res) => {
 });
 
 router.get("/opportunities/summary", async (req, res) => {
+  const ownerSellerId = (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined);
   const todayStart = getUtcTodayStart();
   const opportunities: any[] = await prisma.opportunity.findMany({
-    where: sellerWhere(req),
+    where: {
+      ...sellerWhere(req),
+      ...(ownerSellerId ? { ownerSellerId } : {})
+    },
     select: { value: true, stage: true, crop: true, season: true, probability: true, expectedCloseDate: true }
   });
 
@@ -3304,6 +3308,69 @@ router.get("/opportunities/summary", async (req, res) => {
   }
 
   res.json({ totalPipelineValue, totalWeightedValue, totalsByStage, overdueCount, overdueValue, breakdownByCrop, breakdownBySeason });
+});
+
+router.patch("/opportunities/:id/close", async (req, res) => {
+  const stage = STAGE_ALIASES[String(req.body?.stage || "")];
+  if (!stage || !CLOSED_STAGES.has(stage)) {
+    return res.status(400).json({ message: "Etapa de encerramento inválida." });
+  }
+
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  const existingOpportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true, clientId: true, ownerSellerId: true, stage: true }
+  });
+
+  if (!existingOpportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const closedAt = new Date();
+  const updatedOpportunity = await prisma.opportunity.update({
+    where: { id: req.params.id },
+    data: {
+      stage,
+      expectedCloseDate: closedAt,
+      followUpDate: closedAt
+    },
+    include: {
+      client: {
+        select: { id: true, name: true, city: true, state: true }
+      },
+      ownerSeller: {
+        select: { id: true, name: true }
+      }
+    }
+  });
+
+  if (existingOpportunity.stage !== stage) {
+    await createEvent({
+      type: "mudanca_etapa",
+      description: `Etapa alterada de ${STAGE_LABELS[STAGE_ALIASES[existingOpportunity.stage] || "prospeccao"]} para ${STAGE_LABELS[stage]}`,
+      opportunityId: updatedOpportunity.id,
+      clientId: updatedOpportunity.clientId,
+      ownerSellerId: updatedOpportunity.ownerSellerId
+    });
+  }
+
+  await createEvent({
+    type: "status",
+    description: reason
+      ? `Oportunidade encerrada como ${STAGE_LABELS[stage]}. Motivo/observação: ${reason}`
+      : `Oportunidade encerrada como ${STAGE_LABELS[stage]}`,
+    opportunityId: updatedOpportunity.id,
+    clientId: updatedOpportunity.clientId,
+    ownerSellerId: updatedOpportunity.ownerSellerId
+  });
+
+  return res.status(200).json({
+    message: `Oportunidade encerrada como ${STAGE_LABELS[stage]}`,
+    opportunity: serializeOpportunity(updatedOpportunity, getUtcTodayStart())
+  });
 });
 
 router.post("/opportunities/import", async (req, res) => {
