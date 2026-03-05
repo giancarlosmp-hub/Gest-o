@@ -39,7 +39,7 @@ router.get("/summary", async (req, res) => {
   const whereSale = getSellerSalesFilter(req);
   const whereOwner = sellerWhere(req);
 
-  const [wonOpportunities, opportunitiesCreatedInMonth, newLeads, goals, users, recentActivities] = await Promise.all([
+  const [wonOpportunities, lostOpportunities, openOpportunities, newLeads, goals, users, recentActivities] = await Promise.all([
     prisma.opportunity.findMany({
       where: {
         ...whereOwner,
@@ -47,7 +47,20 @@ router.get("/summary", async (req, res) => {
         expectedCloseDate: { gte: start, lte: end }
       }
     }),
-    prisma.opportunity.findMany({ where: { ...whereOwner, createdAt: { gte: start, lte: end } } }),
+    prisma.opportunity.findMany({
+      where: {
+        ...whereOwner,
+        stage: "perdido",
+        expectedCloseDate: { gte: start, lte: end }
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        ...whereOwner,
+        stage: { notIn: ["ganho", "perdido"] },
+        expectedCloseDate: { gte: start, lte: end }
+      }
+    }),
     prisma.client.count({ where: { ...whereOwner, createdAt: { gte: start, lte: end } } }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } }),
     prisma.user.findMany({ where: req.user!.role === "vendedor" ? { id: req.user!.id } : { role: "vendedor", ...(whereSale.sellerId ? { id: whereSale.sellerId } : {}) } }),
@@ -63,9 +76,20 @@ router.get("/summary", async (req, res) => {
 
   const totalRevenue = wonOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0);
   const totalSales = wonOpportunities.length;
-  const conversionRate = opportunitiesCreatedInMonth.length
-    ? (totalSales / opportunitiesCreatedInMonth.length) * 100
+  const lostSales = lostOpportunities.length;
+  const conversionRate = totalSales + lostSales > 0
+    ? (totalSales / (totalSales + lostSales)) * 100
     : 0;
+  const counts = {
+    open: openOpportunities.length,
+    won: totalSales,
+    lost: lostSales
+  };
+  const totals = {
+    openValue: openOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0),
+    wonValue: totalRevenue,
+    lostValue: lostOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0)
+  };
   const objectiveTotal = goals.reduce((acc, goal) => acc + goal.targetValue, 0);
 
   const performance = users
@@ -91,6 +115,8 @@ router.get("/summary", async (req, res) => {
     totalSales,
     newLeads,
     conversionRate,
+    counts,
+    totals,
     objectiveTotal,
     performance,
     recentActivities

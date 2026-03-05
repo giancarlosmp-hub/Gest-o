@@ -194,6 +194,16 @@ export const dashboardSummarySchema = z.object({
   totalSales: z.number(),
   newLeads: z.number(),
   conversionRate: z.number(),
+  counts: z.object({
+    open: z.number(),
+    won: z.number(),
+    lost: z.number()
+  }),
+  totals: z.object({
+    openValue: z.number(),
+    wonValue: z.number(),
+    lostValue: z.number()
+  }),
   objectiveTotal: z.number(),
   performance: z.array(dashboardPerformanceSchema),
   recentActivities: z.array(z.unknown())
