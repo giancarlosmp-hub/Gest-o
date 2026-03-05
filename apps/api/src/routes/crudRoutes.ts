@@ -366,6 +366,7 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   proposalDate: opportunity.proposalDate.toISOString(),
   followUpDate: opportunity.followUpDate.toISOString(),
   expectedCloseDate: opportunity.expectedCloseDate.toISOString(),
+  closedAt: opportunity.closedAt ? opportunity.closedAt.toISOString() : null,
   lastContactAt: opportunity.lastContactAt ? opportunity.lastContactAt.toISOString() : null,
   plantingForecastDate: opportunity.plantingForecastDate ? opportunity.plantingForecastDate.toISOString() : null,
   createdAt: opportunity.createdAt.toISOString(),
@@ -3418,6 +3419,7 @@ router.patch("/opportunities/:id/close", async (req, res) => {
         where: { id: req.params.id },
         data: {
           stage,
+          closedAt,
           expectedCloseDate: closedAt,
           followUpDate: closedAt
         },
@@ -3824,7 +3826,8 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
     where: { id: req.params.id },
     data: {
       ...(normalizeOpportunityDates(req.body) as any),
-      ...(closedAt ? { expectedCloseDate: closedAt, followUpDate: closedAt } : {})
+      ...(closedAt ? { closedAt, expectedCloseDate: closedAt, followUpDate: closedAt } : {}),
+      ...(nextStageRaw && !CLOSED_STAGES.has(nextStageRaw) ? { closedAt: null } : {})
     }
   });
 

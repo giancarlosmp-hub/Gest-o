@@ -186,6 +186,7 @@ model Opportunity {
   proposalDate      DateTime
   followUpDate      DateTime
   expectedCloseDate DateTime
+  closedAt          DateTime?
   lastContactAt     DateTime?
   probability       Int?
   notes             String?

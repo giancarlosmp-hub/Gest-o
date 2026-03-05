@@ -121,7 +121,7 @@ export default function OpportunityDetailsPage() {
     try {
       await api.put(`/opportunities/${item.id}`, payload);
       await load();
-      triggerDashboardRefresh();
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
     } finally {
       setSaving(false);
     }

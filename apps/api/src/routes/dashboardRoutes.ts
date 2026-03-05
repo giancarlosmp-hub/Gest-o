@@ -13,6 +13,13 @@ const getMonthRange = (month: string) => {
   return { start, end };
 };
 
+const buildWonDateRangeFilter = (start: Date, end: Date) => ({
+  OR: [
+    { closedAt: { gte: start, lte: end } },
+    { closedAt: null, expectedCloseDate: { gte: start, lte: end } }
+  ]
+});
+
 const isBusinessDay = (date: Date) => {
   const day = date.getDay();
   return day >= 1 && day <= 5;
@@ -44,7 +51,7 @@ router.get("/summary", async (req, res) => {
       where: {
         ...whereOwner,
         stage: "ganho",
-        expectedCloseDate: { gte: start, lte: end }
+        ...buildWonDateRangeFilter(start, end)
       }
     }),
     prisma.opportunity.findMany({
@@ -136,9 +143,9 @@ router.get("/sales-series", async (req, res) => {
       where: {
         ...whereOwner,
         stage: "ganho",
-        expectedCloseDate: { gte: start, lte: end }
+        ...buildWonDateRangeFilter(start, end)
       },
-      orderBy: { expectedCloseDate: "asc" }
+      orderBy: [{ closedAt: "asc" }, { expectedCloseDate: "asc" }]
     }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } })
   ]);
@@ -165,7 +172,7 @@ router.get("/sales-series", async (req, res) => {
     labels.push(String(day));
 
     const realizedOfDay = wonOpportunities
-      .filter((opportunity) => opportunity.expectedCloseDate.getDate() === day)
+      .filter((opportunity) => (opportunity.closedAt || opportunity.expectedCloseDate).getDate() === day)
       .reduce((acc, opportunity) => acc + opportunity.value, 0);
     const objectiveOfDay = objectiveByDay.get(day) || 0;
 
@@ -208,18 +215,29 @@ router.get("/portfolio", async (req, res) => {
   const [clients, wonOpportunities, recentWonOpportunities, soldTodayData] = await Promise.all([
     prisma.client.findMany({ where: whereOwner, select: { id: true, name: true } }),
     prisma.opportunity.findMany({
-      where: { ...whereOwner, stage: "ganho", expectedCloseDate: { lte: end } },
-      select: { clientId: true, value: true, expectedCloseDate: true }
+      where: {
+        ...whereOwner,
+        stage: "ganho",
+        OR: [
+          { closedAt: { lte: end } },
+          { closedAt: null, expectedCloseDate: { lte: end } }
+        ]
+      },
+      select: { clientId: true, value: true, expectedCloseDate: true, closedAt: true }
     }),
     prisma.opportunity.findMany({
-      where: { ...whereOwner, stage: "ganho", expectedCloseDate: { gte: windowStart, lte: end } },
+      where: {
+        ...whereOwner,
+        stage: "ganho",
+        ...buildWonDateRangeFilter(windowStart, end)
+      },
       select: { clientId: true, value: true }
     }),
     prisma.opportunity.aggregate({
       where: {
         ...whereOwner,
         stage: "ganho",
-        expectedCloseDate: { gte: todayStart, lte: todayEnd }
+        ...buildWonDateRangeFilter(todayStart, todayEnd)
       },
       _sum: { value: true }
     })
@@ -228,8 +246,9 @@ router.get("/portfolio", async (req, res) => {
   const lastSaleByClient = new Map<string, Date>();
   for (const opportunity of wonOpportunities) {
     const currentDate = lastSaleByClient.get(opportunity.clientId);
-    if (!currentDate || opportunity.expectedCloseDate > currentDate) {
-      lastSaleByClient.set(opportunity.clientId, opportunity.expectedCloseDate);
+    const effectiveCloseDate = opportunity.closedAt || opportunity.expectedCloseDate;
+    if (!currentDate || effectiveCloseDate > currentDate) {
+      lastSaleByClient.set(opportunity.clientId, effectiveCloseDate);
     }
   }
 
