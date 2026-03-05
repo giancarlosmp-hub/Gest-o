@@ -59,6 +59,17 @@ type PaginatedClosedOpportunitiesResponse = {
   totalPages: number;
 };
 
+type ClosedSummaryResponse = {
+  pipelineTotal: number;
+  weightedTotal: number;
+  overdueCount: number;
+  overdueValue: number;
+  conversionRate: number;
+  byStage?: Record<string, { value: number; weighted: number }>;
+  countByStage?: Record<string, number>;
+  totalCount?: number;
+};
+
 type ClosedFilters = {
   dateFrom: string;
   dateTo: string;
@@ -128,7 +139,7 @@ export default function ReportsPage() {
   const [closedItems, setClosedItems] = useState<ClosedOpportunity[]>([]);
   const [closedTotals, setClosedTotals] = useState({ total: 0, page: 1, pageSize: 10, totalPages: 1 });
   const [closedLoading, setClosedLoading] = useState(true);
-  const [closedKpiItems, setClosedKpiItems] = useState<ClosedOpportunity[]>([]);
+  const [closedSummary, setClosedSummary] = useState<ClosedSummaryResponse | null>(null);
   const [sellerOptions, setSellerOptions] = useState<SelectOption[]>([]);
   const [clientOptions, setClientOptions] = useState<SelectOption[]>([]);
 
@@ -161,17 +172,17 @@ export default function ReportsPage() {
       if (value) params.set(key, value);
     });
 
-    const kpiParams = new URLSearchParams(params);
-    kpiParams.delete("page");
-    kpiParams.delete("pageSize");
+    const summaryParams = new URLSearchParams(params);
+    summaryParams.delete("page");
+    summaryParams.delete("pageSize");
 
     Promise.all([
       api.get<PaginatedClosedOpportunitiesResponse>(`/opportunities?${params.toString()}`),
-      api.get<ClosedOpportunity[]>(`/opportunities?${kpiParams.toString()}`)
+      api.get<ClosedSummaryResponse>(`/opportunities/summary?${summaryParams.toString()}`)
     ])
-      .then(([paginatedResponse, kpiResponse]) => {
+      .then(([paginatedResponse, summaryResponse]) => {
         setClosedItems(paginatedResponse.data.items || []);
-        setClosedKpiItems(Array.isArray(kpiResponse.data) ? kpiResponse.data : []);
+        setClosedSummary(summaryResponse.data || null);
         setClosedTotals({
           total: paginatedResponse.data.total,
           page: paginatedResponse.data.page,
@@ -220,16 +231,18 @@ export default function ReportsPage() {
   };
 
   const closedKpis = useMemo(() => {
-    const won = closedKpiItems.filter((item) => item.stage === "ganho");
-    const lost = closedKpiItems.filter((item) => item.stage === "perdido");
-    const totalWon = won.reduce((sum, item) => sum + item.value, 0);
-    const totalLost = lost.reduce((sum, item) => sum + item.value, 0);
-    const totalCount = closedKpiItems.length;
-    const winRate = totalCount ? (won.length / totalCount) * 100 : 0;
-    const averageWonTicket = won.length ? totalWon / won.length : 0;
+    const byStage = closedSummary?.byStage || {};
+    const wonStats = byStage.ganho || { value: 0, weighted: 0 };
+    const lostStats = byStage.perdido || { value: 0, weighted: 0 };
+    const totalWon = wonStats.value;
+    const totalLost = lostStats.value;
+    const totalCount = closedSummary?.totalCount ?? closedTotals.total;
+    const winRate = closedSummary?.conversionRate || 0;
+    const totalWonCount = closedSummary?.countByStage?.ganho || 0;
+    const averageWonTicket = totalWonCount > 0 ? totalWon / totalWonCount : 0;
 
     return { totalWon, totalLost, totalCount, winRate, averageWonTicket };
-  }, [closedKpiItems]);
+  }, [closedSummary, closedTotals.total]);
 
   const cropOptions = useMemo(() => Array.from(new Set(closedItems.map((item) => item.crop).filter(Boolean))) as string[], [closedItems]);
   const seasonOptions = useMemo(() => Array.from(new Set(closedItems.map((item) => item.season).filter(Boolean))) as string[], [closedItems]);

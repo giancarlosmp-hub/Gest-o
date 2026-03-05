@@ -662,6 +662,7 @@ export default function OpportunitiesPage() {
         if (selectedOpportunity?.id === targetId) closePipelineDrawer();
       }
 
+      await load();
       triggerDashboardRefresh();
       if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
