@@ -279,6 +279,16 @@ export default function OpportunitiesPage() {
     dateTo: filters.dateTo
   }), [debouncedSearch, filters]);
 
+  const opportunitiesSummaryQueryKey = useMemo(() => ({
+    ...opportunitiesQueryKey
+  }), [opportunitiesQueryKey]);
+
+  const dashboardMonthlySummaryQueryKey = useMemo(() => ({
+    month: new Date().toISOString().slice(0, 7),
+    ownerSellerId: filters.ownerSellerId,
+    status: filters.status
+  }), [filters.ownerSellerId, filters.status]);
+
   const refetchOpportunityQueries = useCallback(async () => {
     const requestId = opportunitiesRequestRef.current + 1;
     opportunitiesRequestRef.current = requestId;
@@ -299,6 +309,7 @@ export default function OpportunitiesPage() {
       if (shouldLogOpportunityDiagnostics) {
         console.info("[diag-opportunities][load] refetching opportunities data", {
           opportunitiesQueryKey,
+          opportunitiesSummaryQueryKey,
           opportunitiesEndpoint: `/opportunities${query}`,
           summaryEndpoint: `/opportunities/summary${query}`,
           clientsEndpoint: "/clients"
@@ -320,11 +331,25 @@ export default function OpportunitiesPage() {
         setLoading(false);
       }
     }
-  }, [opportunitiesQueryKey]);
+  }, [opportunitiesQueryKey, opportunitiesSummaryQueryKey]);
+
+  const invalidateOpportunitiesAndDashboardQueries = useCallback(async () => {
+    await refetchOpportunityQueries();
+    triggerDashboardRefresh();
+  }, [refetchOpportunityQueries]);
 
   useEffect(() => {
     refetchOpportunityQueries().catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar oportunidades")));
   }, [refetchOpportunityQueries]);
+
+  useEffect(() => {
+    if (!shouldLogOpportunityDiagnostics) return;
+    console.info("[diag-opportunities][query-keys]", {
+      opportunitiesListKanban: opportunitiesQueryKey,
+      opportunitiesSummary: opportunitiesSummaryQueryKey,
+      dashboardMonthlySummary: dashboardMonthlySummaryQueryKey
+    });
+  }, [dashboardMonthlySummaryQueryKey, opportunitiesQueryKey, opportunitiesSummaryQueryKey]);
 
   const sellers = useMemo(() => {
     const map = new Map<string, string>();
@@ -469,12 +494,15 @@ export default function OpportunitiesPage() {
         if (selectedOpportunity?.id === payload.opportunityId) closePipelineDrawer();
       }
 
-      await refetchOpportunityQueries();
-      triggerDashboardRefresh();
+      await invalidateOpportunitiesAndDashboardQueries();
     } catch (error) {
       setItems(previousItems);
       toast.error(getApiErrorMessage(error, isClosingStage ? "Não foi possível encerrar a oportunidade" : "Não foi possível mover a oportunidade de etapa"));
-      refetchOpportunityQueries().catch((loadError) => toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline")));
+      try {
+        await refetchOpportunityQueries();
+      } catch (loadError) {
+        toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline"));
+      }
     }
   };
 
@@ -529,13 +557,11 @@ export default function OpportunitiesPage() {
     try {
       if (editing) await api.put(`/opportunities/${editing}`, payload);
       else await api.post("/opportunities", payload);
-      triggerDashboardRefresh();
-
       setForm(emptyForm);
       setEditing(null);
       setOpportunityModalMode("create");
       setIsOpportunityModalOpen(false);
-      await refetchOpportunityQueries();
+      await invalidateOpportunitiesAndDashboardQueries();
       toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || "Erro ao salvar oportunidade";
@@ -596,8 +622,7 @@ export default function OpportunitiesPage() {
 
   const onDelete = async (id: string) => {
     await api.delete(`/opportunities/${id}`);
-    triggerDashboardRefresh();
-    await refetchOpportunityQueries();
+    await invalidateOpportunitiesAndDashboardQueries();
     toast.success("Oportunidade excluída");
   };
 
@@ -731,8 +756,7 @@ export default function OpportunitiesPage() {
           reloadPipelineEvents: selectedOpportunity?.id === targetId
         });
       }
-      await refetchOpportunityQueries();
-      triggerDashboardRefresh();
+      await invalidateOpportunitiesAndDashboardQueries();
       if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
     } catch (error) {
