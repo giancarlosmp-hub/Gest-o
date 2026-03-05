@@ -3405,6 +3405,16 @@ router.patch("/opportunities/:id/close", async (req, res) => {
   }
 
   const closedAt = new Date();
+  const shouldLogOpportunityDiagnostics = process.env.NODE_ENV !== "production";
+
+  if (shouldLogOpportunityDiagnostics) {
+    console.info("[diag-opportunities-api][close][request]", {
+      opportunityId: req.params.id,
+      body: req.body,
+      userId: req.user?.id,
+      userRole: req.user?.role
+    });
+  }
 
   try {
     const updatedOpportunity = await prisma.$transaction(async (tx) => {
@@ -3452,11 +3462,27 @@ router.patch("/opportunities/:id/close", async (req, res) => {
       return opportunity;
     });
 
-    return res.status(200).json({
+    const responsePayload = {
       message: `Oportunidade encerrada como ${STAGE_LABELS[stage]}`,
       opportunity: serializeOpportunity(updatedOpportunity, getUtcTodayStart())
-    });
-  } catch {
+    };
+
+    if (shouldLogOpportunityDiagnostics) {
+      console.info("[diag-opportunities-api][close][response]", {
+        status: 200,
+        opportunityId: responsePayload.opportunity?.id,
+        stage: responsePayload.opportunity?.stage
+      });
+    }
+
+    return res.status(200).json(responsePayload);
+  } catch (error) {
+    if (shouldLogOpportunityDiagnostics) {
+      console.error("[diag-opportunities-api][close][error]", {
+        opportunityId: req.params.id,
+        error
+      });
+    }
     return res.status(422).json({
       message: "Não foi possível encerrar a oportunidade. Verifique as regras de negócio e tente novamente."
     });

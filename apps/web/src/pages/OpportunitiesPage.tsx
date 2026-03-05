@@ -155,6 +155,7 @@ const emptySummary: Summary = {
 };
 
 const PIPELINE_VIEW_STORAGE_KEY = "opportunities.view";
+const shouldLogOpportunityDiagnostics = import.meta.env.MODE !== "production";
 
 function toDateInput(value?: string | null) {
   if (!value) return "";
@@ -280,6 +281,13 @@ export default function OpportunitiesPage() {
       if (!params.has("status")) params.set("status", "open");
 
       const query = params.toString() ? `?${params}` : "";
+      if (shouldLogOpportunityDiagnostics) {
+        console.info("[diag-opportunities][load] refetching opportunities data", {
+          opportunitiesEndpoint: `/opportunities${query}`,
+          summaryEndpoint: `/opportunities/summary${query}`,
+          clientsEndpoint: "/clients"
+        });
+      }
       const [oppRes, summaryRes, clientsRes] = await Promise.all([
         api.get(`/opportunities${query}`),
         api.get(`/opportunities/summary${query}`),
@@ -650,8 +658,22 @@ export default function OpportunitiesPage() {
 
     setIsQuickActionLoading(stage);
     try {
+      if (shouldLogOpportunityDiagnostics) {
+        console.info("[diag-opportunities][close][request]", {
+          endpoint: `/opportunities/${targetId}/close`,
+          payload: { stage, reason: reason || "" },
+          filters
+        });
+      }
       const response = await api.patch(`/opportunities/${targetId}/close`, { stage, reason });
       const updatedOpportunity = response.data?.opportunity ?? response.data;
+      if (shouldLogOpportunityDiagnostics) {
+        console.info("[diag-opportunities][close][response]", {
+          status: response.status,
+          body: response.data,
+          resolvedOpportunityId: updatedOpportunity?.id
+        });
+      }
       if (!updatedOpportunity || updatedOpportunity.id !== targetId) {
         throw new Error("Resposta inválida ao encerrar oportunidade");
       }
@@ -662,11 +684,21 @@ export default function OpportunitiesPage() {
         if (selectedOpportunity?.id === targetId) closePipelineDrawer();
       }
 
+      if (shouldLogOpportunityDiagnostics) {
+        console.info("[diag-opportunities][close][post-action] no query invalidation detected; executing manual refetch via load()", {
+          refetches: ["GET /opportunities", "GET /opportunities/summary", "GET /clients"],
+          triggers: ["load()", "triggerDashboardRefresh()"],
+          reloadPipelineEvents: selectedOpportunity?.id === targetId
+        });
+      }
       await load();
       triggerDashboardRefresh();
       if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
     } catch (error) {
+      if (shouldLogOpportunityDiagnostics) {
+        console.error("[diag-opportunities][close][error]", error);
+      }
       toast.error(getApiErrorMessage(error, "Não foi possível encerrar a oportunidade"));
     } finally {
       setIsQuickActionLoading(null);
