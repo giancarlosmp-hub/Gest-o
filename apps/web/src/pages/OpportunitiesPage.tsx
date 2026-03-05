@@ -424,16 +424,36 @@ export default function OpportunitiesPage() {
     const targetOpportunity = previousItems.find((item) => item.id === payload.opportunityId);
     if (!targetOpportunity) return;
 
-    setItems((currentItems) => currentItems.map((item) => (
-      item.id === payload.opportunityId ? { ...item, stage: destinationStage } : item
-    )));
+    const isClosingStage = destinationStage === "ganho" || destinationStage === "perdido";
+
+    if (!isClosingStage) {
+      setItems((currentItems) => currentItems.map((item) => (
+        item.id === payload.opportunityId ? { ...item, stage: destinationStage } : item
+      )));
+    }
 
     try {
-      await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
+      if (isClosingStage) {
+        const response = await api.patch(`/opportunities/${payload.opportunityId}/close`, { stage: destinationStage });
+        const updatedOpportunity = response.data?.opportunity ?? response.data;
+        if (!updatedOpportunity || updatedOpportunity.id !== payload.opportunityId) {
+          throw new Error("Resposta inválida ao encerrar oportunidade");
+        }
+        updateOpportunityInState(updatedOpportunity);
+      } else {
+        await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
+      }
+
+      if (filters.status === "open" && isClosingStage) {
+        setItems((currentItems) => currentItems.filter((item) => item.id !== payload.opportunityId));
+        if (selectedOpportunity?.id === payload.opportunityId) closePipelineDrawer();
+      }
+
+      await load();
       triggerDashboardRefresh();
     } catch (error) {
       setItems(previousItems);
-      toast.error(getApiErrorMessage(error, "Não foi possível mover a oportunidade de etapa"));
+      toast.error(getApiErrorMessage(error, isClosingStage ? "Não foi possível encerrar a oportunidade" : "Não foi possível mover a oportunidade de etapa"));
       load().catch((loadError) => toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline")));
     }
   };

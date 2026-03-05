@@ -264,7 +264,13 @@ const getWeekRangeFromStart = (weekStart: string) => {
   return { start, end, previousStart, previousEnd };
 };
 
-const getStageFilter = (stage?: string) => (stage ? STAGE_ALIASES[stage] : undefined);
+const normalizeStageInput = (stage?: string) => {
+  if (!stage) return undefined;
+  const normalized = stage.trim();
+  return STAGE_ALIASES[normalized] || STAGE_ALIASES[normalized.toLowerCase()];
+};
+
+const getStageFilter = (stage?: string) => normalizeStageInput(stage);
 type OpportunityStatusFilter = "open" | "closed" | "all";
 const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
   if (!status) return "open";
@@ -3386,7 +3392,7 @@ router.get("/opportunities/summary", async (req, res) => {
 });
 
 router.patch("/opportunities/:id/close", async (req, res) => {
-  const stage = STAGE_ALIASES[String(req.body?.stage || "")];
+  const stage = normalizeStageInput(String(req.body?.stage || ""));
   if (!stage || !CLOSED_STAGES.has(stage)) {
     return res.status(400).json({ message: "Etapa de encerramento inválida." });
   }
