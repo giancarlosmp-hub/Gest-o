@@ -3,6 +3,8 @@ const baseUrl = process.env.API_BASE_URL || "http://localhost:4000";
 const now = new Date();
 const month = now.toISOString().slice(0, 7);
 const todayIso = now.toISOString();
+const tomorrowIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+const yesterdayIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 const uniqueTag = `ci-smoke-${Date.now()}`;
 const opportunityValue = 12345;
 
@@ -63,16 +65,18 @@ const main = async () => {
   const dashboardBefore = await request(`/dashboard/summary?month=${month}&sellerId=${seller.id}`, { headers: authHeaders });
 
   console.log("[compose-smoke] Criar oportunidade aberta");
+  const title = `Smoke Opportunity ${uniqueTag}`;
+  const summaryScopedBefore = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}&search=${encodeURIComponent(uniqueTag)}`, { headers: authHeaders });
   const created = await request("/opportunities", {
     method: "POST",
     headers: authHeaders,
     body: JSON.stringify({
-      title: `Smoke Opportunity ${uniqueTag}`,
+      title,
       value: opportunityValue,
       stage: "prospeccao",
       proposalDate: todayIso,
-      followUpDate: todayIso,
-      expectedCloseDate: todayIso,
+      followUpDate: tomorrowIso,
+      expectedCloseDate: tomorrowIso,
       probability: 50,
       clientId: client.id,
       ownerSellerId: seller.id
@@ -80,16 +84,22 @@ const main = async () => {
   });
   assert(Boolean(created?.id), "Falha ao criar oportunidade", created);
 
-  const summaryOpenAfterCreate = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}`, { headers: authHeaders });
-  assert(
-    summaryOpenAfterCreate.totalCount === summaryOpenBefore.totalCount + 1,
-    "Summary status=open não incluiu a oportunidade criada",
-    {
-      before: summaryOpenBefore.totalCount,
-      after: summaryOpenAfterCreate.totalCount,
-      createdId: created.id
-    }
-  );
+  const summaryScopedAfterCreate = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}&search=${encodeURIComponent(uniqueTag)}`, { headers: authHeaders });
+  assert(summaryScopedAfterCreate.totalCount === summaryScopedBefore.totalCount + 1, "Summary scoped não incluiu a oportunidade criada", { before: summaryScopedBefore, after: summaryScopedAfterCreate, createdId: created.id });
+  assert(Number(summaryScopedAfterCreate.pipelineTotalValue || 0) >= opportunityValue, "pipelineTotalValue ausente ou inválido", summaryScopedAfterCreate);
+  assert(Number(summaryScopedAfterCreate.weightedValue || 0) > 0, "weightedValue ausente ou inválido", summaryScopedAfterCreate);
+  assert(summaryScopedAfterCreate.overdueCount === 0, "Oportunidade recém criada não deveria estar atrasada", summaryScopedAfterCreate);
+
+  console.log("[compose-smoke] Tornar follow-up atrasado e validar summary");
+  await request(`/opportunities/${created.id}`, {
+    method: "PUT",
+    headers: authHeaders,
+    body: JSON.stringify({ followUpDate: yesterdayIso })
+  });
+
+  const summaryScopedAfterFollowUp = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}&search=${encodeURIComponent(uniqueTag)}`, { headers: authHeaders });
+  assert(summaryScopedAfterFollowUp.overdueCount === 1, "Summary não refletiu overdueCount após atualizar followUpDate", summaryScopedAfterFollowUp);
+  assert(Number(summaryScopedAfterFollowUp.overdueValue || 0) >= opportunityValue, "Summary não refletiu overdueValue após atualizar followUpDate", summaryScopedAfterFollowUp);
 
   console.log("[compose-smoke] Encerrar oportunidade como ganho");
   await request(`/opportunities/${created.id}/close`, {

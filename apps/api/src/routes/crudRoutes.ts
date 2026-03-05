@@ -274,7 +274,13 @@ const getStageFilter = (stage?: string) => normalizeStageInput(stage);
 type OpportunityStatusFilter = "open" | "closed" | "all";
 const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
   if (!status) return "open";
-  if (status === "open" || status === "closed" || status === "all") return status;
+
+  const normalized = status.toLowerCase();
+  if (normalized === "abertas") return "open";
+  if (normalized === "encerradas") return "closed";
+  if (normalized === "todas") return "all";
+
+  if (normalized === "open" || normalized === "closed" || normalized === "all") return normalized;
   return undefined;
 };
 const getWeightedValue = (value: number, probability?: number | null) => value * ((probability ?? 0) / 100);
@@ -292,8 +298,9 @@ type OpportunityFilterParams = {
 };
 
 const parseOpportunityFilterParams = (req: Request) => {
-  const stage = getStageFilter(req.query.stage as string | undefined);
-  if (req.query.stage && !stage) return { error: "stage inválido" } as const;
+  const stageQuery = (req.query.stage as string | undefined) || (req.query.etapa as string | undefined);
+  const stage = getStageFilter(stageQuery);
+  if (stageQuery && !stage) return { error: "stage inválido" } as const;
 
   const status = getOpportunityStatusFilter(req.query.status as string | undefined);
   if (req.query.status && !status) return { error: "status inválido" } as const;
@@ -324,7 +331,7 @@ const parseOpportunityFilterParams = (req: Request) => {
       crop: req.query.crop as string | undefined,
       season: req.query.season as string | undefined,
       proposalDateWhere: Object.keys(proposalDateWhere).length ? proposalDateWhere : undefined,
-      overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true"
+      overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true"
     } satisfies OpportunityFilterParams
   } as const;
 };
@@ -342,7 +349,7 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
   if (params.proposalDateWhere) whereFilters.push({ proposalDate: params.proposalDateWhere });
   if (params.overdueOnly) {
     whereFilters.push({
-      expectedCloseDate: { lt: todayStart },
+      followUpDate: { lt: todayStart },
       stage: { notIn: [...CLOSED_STAGE_VALUES] }
     });
   }
@@ -359,6 +366,11 @@ const getDaysOverdue = (expectedCloseDate: Date, stage: string, todayStart: Date
   if (CLOSED_STAGES.has(stage)) return null;
   if (expectedCloseDate >= todayStart) return null;
   return Math.floor((todayStart.getTime() - expectedCloseDate.getTime()) / 86400000);
+};
+
+const isOpportunityOverdue = (opportunity: { stage: string; followUpDate: Date }, todayStart: Date) => {
+  if (CLOSED_STAGES.has(opportunity.stage)) return false;
+  return opportunity.followUpDate < todayStart;
 };
 
 const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
@@ -1237,7 +1249,7 @@ router.get("/reports/agro-crm", async (req, res) => {
       plantingWindow[month].pipelineValue += opportunity.value;
     }
 
-    const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+    const isOverdue = isOpportunityOverdue(opportunity, todayStart);
     if (isOverdue) {
       const sellerId = opportunity.ownerSeller.id;
       if (!overdueBySeller[sellerId]) {
@@ -3298,7 +3310,7 @@ router.get("/opportunities", async (req, res) => {
     if (shouldLogOpportunityDiagnostics) {
       const totals = opportunities.reduce((acc, opportunity) => {
         const weighted = getWeightedValue(opportunity.value, opportunity.probability);
-        const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+        const isOverdue = isOpportunityOverdue(opportunity, todayStart);
         return {
           count: acc.count + 1,
           value: acc.value + opportunity.value,
@@ -3329,7 +3341,7 @@ router.get("/opportunities", async (req, res) => {
   if (shouldLogOpportunityDiagnostics) {
     const totals = opportunities.reduce((acc, opportunity) => {
       const weighted = getWeightedValue(opportunity.value, opportunity.probability);
-      const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+      const isOverdue = isOpportunityOverdue(opportunity, todayStart);
       return {
         count: acc.count + 1,
         value: acc.value + opportunity.value,
@@ -3373,7 +3385,7 @@ router.get("/opportunities/summary", async (req, res) => {
 
   const opportunities: any[] = await prisma.opportunity.findMany({
     where,
-    select: { value: true, stage: true, crop: true, season: true, probability: true, expectedCloseDate: true }
+    select: { value: true, stage: true, crop: true, season: true, probability: true, followUpDate: true }
   });
 
   const totalsByStage: Record<string, { value: number; weighted: number }> = {};
@@ -3413,7 +3425,7 @@ router.get("/opportunities/summary", async (req, res) => {
     breakdownBySeason[seasonKey].weighted += weighted;
     breakdownBySeason[seasonKey].count += 1;
 
-    const isOverdue = opportunity.expectedCloseDate < todayStart && !CLOSED_STAGES.has(opportunity.stage);
+    const isOverdue = isOpportunityOverdue(opportunity, todayStart);
     if (isOverdue) {
       overdueCount += 1;
       overdueValue += opportunity.value;
@@ -3438,6 +3450,8 @@ router.get("/opportunities/summary", async (req, res) => {
     });
   }
   res.json({
+    pipelineTotalValue: totalPipelineValue,
+    weightedValue: totalWeightedValue,
     pipelineTotal: totalPipelineValue,
     weightedTotal: totalWeightedValue,
     overdueCount,
