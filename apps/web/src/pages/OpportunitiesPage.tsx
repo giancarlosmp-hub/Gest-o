@@ -335,7 +335,7 @@ export default function OpportunitiesPage() {
 
   const invalidateOpportunitiesAndDashboardQueries = useCallback(async () => {
     await refetchOpportunityQueries();
-    triggerDashboardRefresh();
+    triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
   }, [refetchOpportunityQueries]);
 
   useEffect(() => {

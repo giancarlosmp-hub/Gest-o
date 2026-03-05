@@ -411,7 +411,9 @@ export default function DashboardPage() {
   }, [fetchDashboard]);
 
   useEffect(() => {
-    const onRefresh = () => {
+    const onRefresh = (event?: Event) => {
+      const detailMonth = (event as CustomEvent<{ month?: string }> | undefined)?.detail?.month;
+      if (detailMonth && detailMonth !== month) return;
       fetchDashboard(undefined, { force: true });
     };
 
