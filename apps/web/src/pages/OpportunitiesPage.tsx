@@ -46,10 +46,14 @@ type Opportunity = {
 
 type Client = { id: string; name: string };
 type Summary = {
+  pipelineTotal: number;
+  weightedTotal: number;
   totalPipelineValue: number;
   totalWeightedValue: number;
   overdueCount: number;
   overdueValue: number;
+  conversionRate: number;
+  byStage?: Record<string, { value: number; weighted: number }>;
 };
 
 type Filters = {
@@ -141,10 +145,13 @@ const emptyForm: FormState = {
 };
 
 const emptySummary: Summary = {
+  pipelineTotal: 0,
+  weightedTotal: 0,
   totalPipelineValue: 0,
   totalWeightedValue: 0,
   overdueCount: 0,
-  overdueValue: 0
+  overdueValue: 0,
+  conversionRate: 0
 };
 
 const PIPELINE_VIEW_STORAGE_KEY = "opportunities.view";
@@ -350,12 +357,6 @@ export default function OpportunitiesPage() {
 
     return [...itemsToSort].sort(sortByPipelinePriority);
   }, [actionTodayFilter, items]);
-
-  const conversionRate = useMemo(() => {
-    if (!items.length) return 0;
-    const won = items.filter((item) => item.stage === "ganho").length;
-    return (won / items.length) * 100;
-  }, [items]);
 
   const getClientName = (item: Opportunity) => {
     if (typeof item.client === "string") return item.client;
@@ -788,10 +789,10 @@ export default function OpportunitiesPage() {
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <Card title="Pipeline total" value={formatCurrencyBRL(summary.totalPipelineValue)} loading={loading} />
-        <Card title="Valor ponderado" value={formatCurrencyBRL(summary.totalWeightedValue)} loading={loading} />
+        <Card title="Pipeline total" value={formatCurrencyBRL(summary.pipelineTotal)} loading={loading} />
+        <Card title="Valor ponderado" value={formatCurrencyBRL(summary.weightedTotal)} loading={loading} />
         <Card title="Atrasadas" value={`${summary.overdueCount} • ${formatCurrencyBRL(summary.overdueValue)}`} loading={loading} />
-        <Card title="Taxa de conversão" value={`${formatPercentBR(conversionRate)} (${items.filter((item) => item.stage === "ganho").length}/${items.length || 0})`} loading={loading} />
+        <Card title="Taxa de conversão" value={formatPercentBR(summary.conversionRate)} loading={loading} />
       </div>
 
       {viewMode === "list" ? (
