@@ -1,4 +1,4 @@
-import express, { Router } from "express";
+import express, { Router, type Request } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { validateBody } from "../middlewares/validate.js";
@@ -278,6 +278,82 @@ const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | 
   return undefined;
 };
 const getWeightedValue = (value: number, probability?: number | null) => value * ((probability ?? 0) / 100);
+
+type OpportunityFilterParams = {
+  stage?: OpportunityStage;
+  status: OpportunityStatusFilter;
+  ownerSellerId?: string;
+  clientId?: string;
+  search?: string;
+  crop?: string;
+  season?: string;
+  proposalDateWhere?: { gte?: Date; lte?: Date };
+  overdueOnly: boolean;
+};
+
+const parseOpportunityFilterParams = (req: Request) => {
+  const stage = getStageFilter(req.query.stage as string | undefined);
+  if (req.query.stage && !stage) return { error: "stage inválido" } as const;
+
+  const status = getOpportunityStatusFilter(req.query.status as string | undefined);
+  if (req.query.status && !status) return { error: "status inválido" } as const;
+  const resolvedStatus: OpportunityStatusFilter = status ?? "open";
+
+  const dateFrom = req.query.dateFrom as string | undefined;
+  const dateTo = req.query.dateTo as string | undefined;
+
+  const proposalDateWhere: OpportunityFilterParams["proposalDateWhere"] = {};
+  if (dateFrom) {
+    const parsed = normalizeDateToUtc(dateFrom, false);
+    if (!parsed) return { error: "dateFrom inválido" } as const;
+    proposalDateWhere.gte = parsed;
+  }
+  if (dateTo) {
+    const parsed = normalizeDateToUtc(dateTo, true);
+    if (!parsed) return { error: "dateTo inválido" } as const;
+    proposalDateWhere.lte = parsed;
+  }
+
+  return {
+    params: {
+      stage,
+      status: resolvedStatus,
+      ownerSellerId: (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined),
+      clientId: req.query.clientId as string | undefined,
+      search: req.query.search as string | undefined,
+      crop: req.query.crop as string | undefined,
+      season: req.query.season as string | undefined,
+      proposalDateWhere: Object.keys(proposalDateWhere).length ? proposalDateWhere : undefined,
+      overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true"
+    } satisfies OpportunityFilterParams
+  } as const;
+};
+
+const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, todayStart: Date) => {
+  const whereFilters: Prisma.OpportunityWhereInput[] = [sellerWhere(req)];
+
+  if (params.status === "open") whereFilters.push({ stage: { notIn: [...CLOSED_STAGE_VALUES] } });
+  if (params.status === "closed") whereFilters.push({ stage: { in: [...CLOSED_STAGE_VALUES] } });
+  if (params.stage) whereFilters.push({ stage: params.stage });
+  if (params.ownerSellerId) whereFilters.push({ ownerSellerId: params.ownerSellerId });
+  if (params.clientId) whereFilters.push({ clientId: params.clientId });
+  if (params.crop) whereFilters.push({ crop: params.crop });
+  if (params.season) whereFilters.push({ season: params.season });
+  if (params.proposalDateWhere) whereFilters.push({ proposalDate: params.proposalDateWhere });
+  if (params.overdueOnly) {
+    whereFilters.push({
+      expectedCloseDate: { lt: todayStart },
+      stage: { notIn: [...CLOSED_STAGE_VALUES] }
+    });
+  }
+  if (params.search) {
+    whereFilters.push({
+      OR: [{ title: { contains: params.search, mode: "insensitive" } }, { client: { name: { contains: params.search, mode: "insensitive" } } }]
+    });
+  }
+
+  return { AND: whereFilters } satisfies Prisma.OpportunityWhereInput;
+};
 
 const getDaysOverdue = (expectedCloseDate: Date, stage: string, todayStart: Date) => {
   if (CLOSED_STAGES.has(stage)) return null;
@@ -3188,59 +3264,14 @@ router.delete("/contacts/:id", async (req, res) => {
 });
 
 router.get("/opportunities", async (req, res) => {
-  const stage = getStageFilter(req.query.stage as string | undefined);
-  if (req.query.stage && !stage) return res.status(400).json({ message: "stage inválido" });
-  const status = getOpportunityStatusFilter(req.query.status as string | undefined);
-  if (req.query.status && !status) return res.status(400).json({ message: "status inválido" });
+  const parsedFilters = parseOpportunityFilterParams(req);
+  if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
 
-  const ownerSellerId = (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined);
-  const clientId = req.query.clientId as string | undefined;
-  const search = req.query.search as string | undefined;
-  const crop = req.query.crop as string | undefined;
-  const season = req.query.season as string | undefined;
-  const dateFrom = req.query.dateFrom as string | undefined;
-  const dateTo = req.query.dateTo as string | undefined;
-  const overdue = req.query.overdue === "true";
   const hasPagination = req.query.page !== undefined || req.query.pageSize !== undefined;
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = parsePositiveInt(req.query.pageSize, 20);
   const todayStart = getUtcTodayStart();
-
-  const proposalDateWhere: Record<string, Date> = {};
-  if (dateFrom) {
-    const parsed = normalizeDateToUtc(dateFrom, false);
-    if (!parsed) return res.status(400).json({ message: "dateFrom inválido" });
-    proposalDateWhere.gte = parsed;
-  }
-  if (dateTo) {
-    const parsed = normalizeDateToUtc(dateTo, true);
-    if (!parsed) return res.status(400).json({ message: "dateTo inválido" });
-    proposalDateWhere.lte = parsed;
-  }
-
-  const whereFilters: Prisma.OpportunityWhereInput[] = [sellerWhere(req)];
-
-  if (status === "open") whereFilters.push({ stage: { notIn: [...CLOSED_STAGE_VALUES] } });
-  if (status === "closed") whereFilters.push({ stage: { in: [...CLOSED_STAGE_VALUES] } });
-  if (stage) whereFilters.push({ stage });
-  if (ownerSellerId) whereFilters.push({ ownerSellerId });
-  if (clientId) whereFilters.push({ clientId });
-  if (crop) whereFilters.push({ crop });
-  if (season) whereFilters.push({ season });
-  if (dateFrom || dateTo) whereFilters.push({ proposalDate: proposalDateWhere });
-  if (overdue) {
-    whereFilters.push({
-      expectedCloseDate: { lt: todayStart },
-      stage: { notIn: [...CLOSED_STAGE_VALUES] }
-    });
-  }
-  if (search) {
-    whereFilters.push({
-      OR: [{ title: { contains: search, mode: "insensitive" } }, { client: { name: { contains: search, mode: "insensitive" } } }]
-    });
-  }
-
-  const where: Prisma.OpportunityWhereInput = { AND: whereFilters };
+  const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
 
   const baseQuery = {
     where,
@@ -3276,55 +3307,11 @@ router.get("/opportunities", async (req, res) => {
 });
 
 router.get("/opportunities/summary", async (req, res) => {
-  const stage = getStageFilter(req.query.stage as string | undefined);
-  if (req.query.stage && !stage) return res.status(400).json({ message: "stage inválido" });
-  const status = getOpportunityStatusFilter(req.query.status as string | undefined);
-  if (req.query.status && !status) return res.status(400).json({ message: "status inválido" });
+  const parsedFilters = parseOpportunityFilterParams(req);
+  if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
 
-  const ownerSellerId = (req.query.ownerId as string | undefined) || (req.query.ownerSellerId as string | undefined);
-  const clientId = req.query.clientId as string | undefined;
-  const crop = req.query.crop as string | undefined;
-  const season = req.query.season as string | undefined;
-  const dateFrom = req.query.dateFrom as string | undefined;
-  const dateTo = req.query.dateTo as string | undefined;
-  const overdue = req.query.overdue === "true";
-  const search = req.query.search as string | undefined;
   const todayStart = getUtcTodayStart();
-
-  const proposalDateWhere: Record<string, Date> = {};
-  if (dateFrom) {
-    const parsed = normalizeDateToUtc(dateFrom, false);
-    if (!parsed) return res.status(400).json({ message: "dateFrom inválido" });
-    proposalDateWhere.gte = parsed;
-  }
-  if (dateTo) {
-    const parsed = normalizeDateToUtc(dateTo, true);
-    if (!parsed) return res.status(400).json({ message: "dateTo inválido" });
-    proposalDateWhere.lte = parsed;
-  }
-
-  const whereFilters: Prisma.OpportunityWhereInput[] = [sellerWhere(req)];
-  if (status === "open") whereFilters.push({ stage: { notIn: [...CLOSED_STAGE_VALUES] } });
-  if (status === "closed") whereFilters.push({ stage: { in: [...CLOSED_STAGE_VALUES] } });
-  if (stage) whereFilters.push({ stage });
-  if (ownerSellerId) whereFilters.push({ ownerSellerId });
-  if (clientId) whereFilters.push({ clientId });
-  if (crop) whereFilters.push({ crop });
-  if (season) whereFilters.push({ season });
-  if (dateFrom || dateTo) whereFilters.push({ proposalDate: proposalDateWhere });
-  if (overdue) {
-    whereFilters.push({
-      expectedCloseDate: { lt: todayStart },
-      stage: { notIn: [...CLOSED_STAGE_VALUES] }
-    });
-  }
-  if (search) {
-    whereFilters.push({
-      OR: [{ title: { contains: search, mode: "insensitive" } }, { client: { name: { contains: search, mode: "insensitive" } } }]
-    });
-  }
-
-  const where: Prisma.OpportunityWhereInput = { AND: whereFilters };
+  const where = buildOpportunityWhere(req, parsedFilters.params, todayStart);
 
   const opportunities: any[] = await prisma.opportunity.findMany({
     where,
@@ -3341,6 +3328,7 @@ router.get("/opportunities/summary", async (req, res) => {
   let overdueCount = 0;
   let overdueValue = 0;
   let wonCount = 0;
+  let lossCount = 0;
 
   for (const opportunity of opportunities) {
     const weighted = getWeightedValue(opportunity.value, opportunity.probability);
@@ -3348,6 +3336,7 @@ router.get("/opportunities/summary", async (req, res) => {
     totalWeightedValue += weighted;
 
     if (opportunity.stage === "ganho") wonCount += 1;
+    if (opportunity.stage === "perdido") lossCount += 1;
 
     if (!totalsByStage[opportunity.stage]) totalsByStage[opportunity.stage] = { value: 0, weighted: 0 };
     totalsByStage[opportunity.stage].value += opportunity.value;
@@ -3373,7 +3362,8 @@ router.get("/opportunities/summary", async (req, res) => {
     }
   }
 
-  const conversionRate = opportunities.length ? (wonCount / opportunities.length) * 100 : 0;
+  const closedCount = wonCount + lossCount;
+  const conversionRate = parsedFilters.params.status === "open" || closedCount === 0 ? 0 : (wonCount / closedCount) * 100;
   res.json({
     pipelineTotal: totalPipelineValue,
     weightedTotal: totalWeightedValue,
