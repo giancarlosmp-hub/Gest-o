@@ -182,17 +182,18 @@ router.get("/portfolio", async (req, res) => {
   const [clients, wonOpportunities, recentWonOpportunities, soldTodayData] = await Promise.all([
     prisma.client.findMany({ where: whereOwner, select: { id: true, name: true } }),
     prisma.opportunity.findMany({
-      where: { ...whereOwner, stage: "ganho", proposalDate: { lte: end } },
-      select: { clientId: true, value: true, proposalDate: true }
+      where: { ...whereOwner, stage: "ganho", expectedCloseDate: { lte: end } },
+      select: { clientId: true, value: true, expectedCloseDate: true }
     }),
     prisma.opportunity.findMany({
-      where: { ...whereOwner, stage: "ganho", proposalDate: { gte: windowStart, lte: end } },
+      where: { ...whereOwner, stage: "ganho", expectedCloseDate: { gte: windowStart, lte: end } },
       select: { clientId: true, value: true }
     }),
-    prisma.sale.aggregate({
+    prisma.opportunity.aggregate({
       where: {
-        ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : (req.query.sellerId ? { sellerId: req.query.sellerId as string } : {})),
-        date: { gte: todayStart, lte: todayEnd }
+        ...whereOwner,
+        stage: "ganho",
+        expectedCloseDate: { gte: todayStart, lte: todayEnd }
       },
       _sum: { value: true }
     })
@@ -201,8 +202,8 @@ router.get("/portfolio", async (req, res) => {
   const lastSaleByClient = new Map<string, Date>();
   for (const opportunity of wonOpportunities) {
     const currentDate = lastSaleByClient.get(opportunity.clientId);
-    if (!currentDate || opportunity.proposalDate > currentDate) {
-      lastSaleByClient.set(opportunity.clientId, opportunity.proposalDate);
+    if (!currentDate || opportunity.expectedCloseDate > currentDate) {
+      lastSaleByClient.set(opportunity.clientId, opportunity.expectedCloseDate);
     }
   }
 

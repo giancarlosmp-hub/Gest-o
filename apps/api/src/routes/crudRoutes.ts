@@ -3790,7 +3790,17 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
     select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true }
   });
 
-  const data = await prisma.opportunity.update({ where: { id: req.params.id }, data: normalizeOpportunityDates(req.body) as any });
+  const nextStageRaw = typeof req.body.stage === "string" ? STAGE_ALIASES[req.body.stage] : undefined;
+  const isMovingToClosedStage = !!(nextStageRaw && CLOSED_STAGES.has(nextStageRaw) && previous && !CLOSED_STAGES.has(previous.stage));
+  const closedAt = isMovingToClosedStage ? new Date() : null;
+
+  const data = await prisma.opportunity.update({
+    where: { id: req.params.id },
+    data: {
+      ...(normalizeOpportunityDates(req.body) as any),
+      ...(closedAt ? { expectedCloseDate: closedAt, followUpDate: closedAt } : {})
+    }
+  });
 
   if (req.body.stage && previous && req.body.stage !== previous.stage) {
     const fromStage = STAGE_ALIASES[previous.stage] || "prospeccao";
