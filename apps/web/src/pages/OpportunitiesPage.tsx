@@ -1,4 +1,4 @@
-import { DragEvent, FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MoreHorizontal, Search } from "lucide-react";
@@ -220,6 +220,7 @@ export default function OpportunitiesPage() {
   const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
+  const opportunitiesRequestRef = useRef(0);
   const actionTodayFilter = searchParams.get("actionToday") === "true";
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
@@ -265,24 +266,39 @@ export default function OpportunitiesPage() {
     localStorage.setItem(PIPELINE_VIEW_STORAGE_KEY, mode);
   };
 
-  const load = async () => {
+  const opportunitiesQueryKey = useMemo(() => ({
+    status: filters.status,
+    stage: filters.stage,
+    ownerSellerId: filters.ownerSellerId,
+    overdueOnly: filters.overdue,
+    search: debouncedSearch,
+    clientId: filters.clientId,
+    crop: filters.crop,
+    season: filters.season,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo
+  }), [debouncedSearch, filters]);
+
+  const refetchOpportunityQueries = useCallback(async () => {
+    const requestId = opportunitiesRequestRef.current + 1;
+    opportunitiesRequestRef.current = requestId;
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      Object.entries(filters).forEach(([key, value]) => {
+      Object.entries(opportunitiesQueryKey).forEach(([key, value]) => {
         if (typeof value === "boolean") {
           if (value) params.set(key, "true");
           return;
         }
         if (value) params.set(key, value);
       });
-      if (debouncedSearch) params.set("search", debouncedSearch);
 
       if (!params.has("status")) params.set("status", "open");
 
       const query = params.toString() ? `?${params}` : "";
       if (shouldLogOpportunityDiagnostics) {
         console.info("[diag-opportunities][load] refetching opportunities data", {
+          opportunitiesQueryKey,
           opportunitiesEndpoint: `/opportunities${query}`,
           summaryEndpoint: `/opportunities/summary${query}`,
           clientsEndpoint: "/clients"
@@ -294,17 +310,21 @@ export default function OpportunitiesPage() {
         api.get("/clients")
       ]);
 
+      if (requestId !== opportunitiesRequestRef.current) return;
+
       setItems(oppRes.data || []);
       setSummary(summaryRes.data || emptySummary);
       setClients(clientsRes.data || []);
     } finally {
-      setLoading(false);
+      if (requestId === opportunitiesRequestRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [opportunitiesQueryKey]);
 
   useEffect(() => {
-    load().catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar oportunidades")));
-  }, [filters, debouncedSearch]);
+    refetchOpportunityQueries().catch((error) => toast.error(getApiErrorMessage(error, "Erro ao carregar oportunidades")));
+  }, [refetchOpportunityQueries]);
 
   const sellers = useMemo(() => {
     const map = new Map<string, string>();
@@ -449,12 +469,12 @@ export default function OpportunitiesPage() {
         if (selectedOpportunity?.id === payload.opportunityId) closePipelineDrawer();
       }
 
-      await load();
+      await refetchOpportunityQueries();
       triggerDashboardRefresh();
     } catch (error) {
       setItems(previousItems);
       toast.error(getApiErrorMessage(error, isClosingStage ? "Não foi possível encerrar a oportunidade" : "Não foi possível mover a oportunidade de etapa"));
-      load().catch((loadError) => toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline")));
+      refetchOpportunityQueries().catch((loadError) => toast.error(getApiErrorMessage(loadError, "Erro ao atualizar pipeline")));
     }
   };
 
@@ -515,7 +535,7 @@ export default function OpportunitiesPage() {
       setEditing(null);
       setOpportunityModalMode("create");
       setIsOpportunityModalOpen(false);
-      await load();
+      await refetchOpportunityQueries();
       toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || "Erro ao salvar oportunidade";
@@ -577,7 +597,7 @@ export default function OpportunitiesPage() {
   const onDelete = async (id: string) => {
     await api.delete(`/opportunities/${id}`);
     triggerDashboardRefresh();
-    await load();
+    await refetchOpportunityQueries();
     toast.success("Oportunidade excluída");
   };
 
@@ -705,13 +725,13 @@ export default function OpportunitiesPage() {
       }
 
       if (shouldLogOpportunityDiagnostics) {
-        console.info("[diag-opportunities][close][post-action] no query invalidation detected; executing manual refetch via load()", {
+        console.info("[diag-opportunities][close][post-action] no query invalidation detected; executing manual refetch via opportunities queries invalidation", {
           refetches: ["GET /opportunities", "GET /opportunities/summary", "GET /clients"],
-          triggers: ["load()", "triggerDashboardRefresh()"],
+          triggers: ["refetchOpportunityQueries()", "triggerDashboardRefresh()"],
           reloadPipelineEvents: selectedOpportunity?.id === targetId
         });
       }
-      await load();
+      await refetchOpportunityQueries();
       triggerDashboardRefresh();
       if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
@@ -925,7 +945,7 @@ export default function OpportunitiesPage() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImported={async () => {
-          await load();
+          await refetchOpportunityQueries();
         }}
       />
 
