@@ -114,6 +114,13 @@ const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   vencido: "border-rose-200 bg-rose-100 text-rose-700"
 };
 
+const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
+  hoje: "Hoje",
+  esta_semana: "Esta semana",
+  proximos_7_dias: "Próximos 7 dias",
+  personalizado: "Personalizado"
+};
+
 function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -160,6 +167,18 @@ function formatDateTime(value: string) {
     dateStyle: "short",
     timeStyle: "short"
   });
+}
+
+function formatDateOnly(value: string) {
+  return new Date(value).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit"
+  });
+}
+
+function isEventWithinRange(eventDateTime: string, startDate: Date, endDate: Date) {
+  const eventDate = new Date(eventDateTime);
+  return eventDate.getTime() >= startDate.getTime() && eventDate.getTime() <= endDate.getTime();
 }
 
 
@@ -230,6 +249,7 @@ export default function AgendaPage() {
 
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
   const [isEventsLoading, setIsEventsLoading] = useState(false);
+  const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
   const [summary, setSummary] = useState<AgendaSummary>({ reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 });
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -468,7 +488,7 @@ export default function AgendaPage() {
       abortController.abort();
       window.clearTimeout(timer);
     };
-  }, [eventsQuery, eventsQueryKey]);
+  }, [eventsQuery, eventsQueryKey, eventsRefreshToken]);
 
   const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
 
@@ -934,12 +954,6 @@ export default function AgendaPage() {
     }
   };
 
-  const refreshEvents = (newEvent: AgendaEvent) => {
-    setEvents((current) =>
-      [...current, newEvent].sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
-    );
-  };
-
   const openCreate = () => {
     setCreateForm({
       title: "",
@@ -1026,9 +1040,27 @@ export default function AgendaPage() {
         }
       }
 
-      refreshEvents(mapCreatedAgendaEvent(response.data));
+      const createdEvent = mapCreatedAgendaEvent(response.data);
+      const range = getRangeFromFilter(periodFilter, customFrom, customTo);
+      const createdEventInSelectedRange = isEventWithinRange(createdEvent.startDateTime, range.from, range.to);
+
+      if (createdEventInSelectedRange) {
+        setEventsRefreshToken((current) => current + 1);
+        toast.success("Agenda criada com sucesso.");
+      } else {
+        const createdDate = formatDateOnly(createdEvent.startDateTime);
+        toast(
+          `Evento criado para ${createdDate}. Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
+          {
+            action: {
+              label: "Trocar filtro",
+              onClick: () => setPeriodFilter("proximos_7_dias")
+            }
+          }
+        );
+      }
+
       closeCreate();
-      toast.success("Agenda criada com sucesso.");
     } catch (error: any) {
       toast.error(error?.response?.data?.message || "Erro ao criar agenda.");
     } finally {
