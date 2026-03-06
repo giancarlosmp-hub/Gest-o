@@ -475,6 +475,32 @@ export default function OpportunitiesPage() {
     event.dataTransfer.dropEffect = "move";
   };
 
+  const resolveCloseOpportunityResponse = (
+    response: { status: number; data?: any },
+    opportunityId: string,
+    fallbackOpportunity?: Opportunity | null,
+    targetStage?: "ganho" | "perdido"
+  ): Opportunity | null => {
+    const payloadOpportunity = response.data?.opportunity ?? response.data;
+
+    if (payloadOpportunity?.id === opportunityId) {
+      return payloadOpportunity as Opportunity;
+    }
+
+    if (response.status === 204 || (response.status >= 200 && response.status < 300 && !payloadOpportunity)) {
+      if (!fallbackOpportunity) return null;
+      const now = new Date().toISOString();
+      return {
+        ...fallbackOpportunity,
+        ...(targetStage ? { stage: targetStage } : {}),
+        expectedCloseDate: now,
+        followUpDate: now
+      };
+    }
+
+    throw new Error("Resposta inválida ao encerrar oportunidade");
+  };
+
   const handlePipelineColumnDrop = async (event: DragEvent<HTMLDivElement>, destinationStage: Stage) => {
     event.preventDefault();
 
@@ -505,11 +531,8 @@ export default function OpportunitiesPage() {
     try {
       if (isClosingStage) {
         const response = await api.patch(`/opportunities/${payload.opportunityId}/close`, { stage: destinationStage });
-        const updatedOpportunity = response.data?.opportunity ?? response.data;
-        if (!updatedOpportunity || updatedOpportunity.id !== payload.opportunityId) {
-          throw new Error("Resposta inválida ao encerrar oportunidade");
-        }
-        updateOpportunityInState(updatedOpportunity);
+        const updatedOpportunity = resolveCloseOpportunityResponse(response, payload.opportunityId, targetOpportunity, destinationStage);
+        if (updatedOpportunity) updateOpportunityInState(updatedOpportunity);
       } else {
         await api.put(`/opportunities/${payload.opportunityId}`, { stage: destinationStage });
       }
@@ -756,7 +779,7 @@ export default function OpportunitiesPage() {
         });
       }
       const response = await api.patch(`/opportunities/${targetId}/close`, { stage, reason });
-      const updatedOpportunity = response.data?.opportunity ?? response.data;
+      const updatedOpportunity = resolveCloseOpportunityResponse(response, targetId, targetOpportunity, stage);
       if (shouldLogOpportunityDiagnostics) {
         console.info("[diag-opportunities][close][response]", {
           status: response.status,
@@ -764,10 +787,7 @@ export default function OpportunitiesPage() {
           resolvedOpportunityId: updatedOpportunity?.id
         });
       }
-      if (!updatedOpportunity || updatedOpportunity.id !== targetId) {
-        throw new Error("Resposta inválida ao encerrar oportunidade");
-      }
-      updateOpportunityInState(updatedOpportunity);
+      if (updatedOpportunity) updateOpportunityInState(updatedOpportunity);
 
       if (filters.status === "open") {
         setItems((currentItems) => currentItems.filter((item) => item.id !== targetId));
