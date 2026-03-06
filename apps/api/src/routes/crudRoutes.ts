@@ -4238,8 +4238,8 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
 
   const where: Prisma.AgendaEventWhereInput = {
     ...(scopedSellerId ? { sellerId: scopedSellerId } : {}),
-    startDateTime: { gte: from },
-    endDateTime: { lte: to }
+    startDateTime: { lte: to },
+    endDateTime: { gte: from }
   };
 
   const events = await prisma.agendaEvent.findMany({

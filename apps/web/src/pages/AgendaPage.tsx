@@ -10,8 +10,8 @@ import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda"
 type Seller = { id: string; name: string };
 type AgendaSummary = { reunioes: number; roteiros: number; followUps: number; vencidos: number };
 
-type Visualizacao = "diaria" | "semanal";
-type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias" | "personalizado";
+type Visualizacao = "diaria" | "semanal" | "mensal" | "lista";
+type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias" | "proximos_30_dias" | "personalizado";
 
 type CreateAgendaForm = {
   title: string;
@@ -118,7 +118,13 @@ const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
   hoje: "Hoje",
   esta_semana: "Esta semana",
   proximos_7_dias: "Próximos 7 dias",
+  proximos_30_dias: "Próximos 30 dias",
   personalizado: "Personalizado"
+};
+
+type DateRange = {
+  start: Date;
+  end: Date;
 };
 
 function startOfDay(date: Date) {
@@ -133,12 +139,12 @@ function endOfDay(date: Date) {
   return next;
 }
 
-function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string) {
+function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string): DateRange {
   const today = new Date();
   const dayStart = startOfDay(today);
 
   if (periodFilter === "hoje") {
-    return { from: startOfDay(today), to: endOfDay(today) };
+    return { start: startOfDay(today), end: endOfDay(today) };
   }
 
   if (periodFilter === "esta_semana") {
@@ -148,18 +154,24 @@ function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, cust
     weekStart.setDate(weekStart.getDate() + diffToMonday);
     const weekEnd = endOfDay(new Date(weekStart));
     weekEnd.setDate(weekEnd.getDate() + 6);
-    return { from: weekStart, to: weekEnd };
+    return { start: weekStart, end: weekEnd };
   }
 
   if (periodFilter === "proximos_7_dias") {
     const next7Days = endOfDay(new Date(dayStart));
-    next7Days.setDate(next7Days.getDate() + 7);
-    return { from: dayStart, to: next7Days };
+    next7Days.setDate(next7Days.getDate() + 6);
+    return { start: dayStart, end: next7Days };
+  }
+
+  if (periodFilter === "proximos_30_dias") {
+    const next30Days = endOfDay(new Date(dayStart));
+    next30Days.setDate(next30Days.getDate() + 29);
+    return { start: dayStart, end: next30Days };
   }
 
   const from = customFrom ? startOfDay(new Date(`${customFrom}T00:00:00`)) : dayStart;
   const to = customTo ? endOfDay(new Date(`${customTo}T00:00:00`)) : endOfDay(dayStart);
-  return { from, to };
+  return { start: from, end: to };
 }
 
 function formatDateTime(value: string) {
@@ -179,6 +191,11 @@ function formatDateOnly(value: string) {
 function isEventWithinRange(eventDateTime: string, startDate: Date, endDate: Date) {
   const eventDate = new Date(eventDateTime);
   return eventDate.getTime() >= startDate.getTime() && eventDate.getTime() <= endDate.getTime();
+}
+
+function formatDayKey(value: string) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 
@@ -312,11 +329,12 @@ export default function AgendaPage() {
     nextStepDate: ""
   });
 
+  const dateRange = useMemo(() => getRangeFromFilter(periodFilter, customFrom, customTo), [periodFilter, customFrom, customTo]);
+
   const eventsQuery = useMemo(() => {
-    const range = getRangeFromFilter(periodFilter, customFrom, customTo);
     const params: Record<string, string> = {
-      from: range.from.toISOString().slice(0, 10),
-      to: range.to.toISOString().slice(0, 10)
+      from: dateRange.start.toISOString().slice(0, 10),
+      to: dateRange.end.toISOString().slice(0, 10)
     };
 
     if (user?.role === "vendedor" && user.id) {
@@ -326,7 +344,7 @@ export default function AgendaPage() {
     }
 
     return params;
-  }, [periodFilter, customFrom, customTo, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
+  }, [dateRange, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
 
@@ -503,6 +521,24 @@ export default function AgendaPage() {
 
     return byOverdue.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, overdueOnly]);
+
+  const groupedEventsByDay = useMemo(() => {
+    const grouped = new Map<string, AgendaEvent[]>();
+    filteredEvents.forEach((event) => {
+      const key = formatDayKey(event.startDateTime);
+      const current = grouped.get(key) || [];
+      current.push(event);
+      grouped.set(key, current);
+    });
+
+    return Array.from(grouped.entries())
+      .sort((a, b) => new Date(a[0]).getTime() - new Date(b[0]).getTime())
+      .map(([day, dayEvents]) => ({
+        day,
+        label: new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }),
+        events: dayEvents.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
+      }));
+  }, [filteredEvents]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
@@ -1042,7 +1078,7 @@ export default function AgendaPage() {
 
       const createdEvent = mapCreatedAgendaEvent(response.data);
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
-      const createdEventInSelectedRange = isEventWithinRange(createdEvent.startDateTime, range.from, range.to);
+      const createdEventInSelectedRange = isEventWithinRange(createdEvent.startDateTime, range.start, range.end);
 
       if (createdEventInSelectedRange) {
         setEventsRefreshToken((current) => current + 1);
@@ -1087,6 +1123,8 @@ export default function AgendaPage() {
           <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <option value="diaria">Diária</option>
             <option value="semanal">Semanal</option>
+            <option value="mensal">Mensal</option>
+            <option value="lista">Lista</option>
           </select>
         </label>
 
@@ -1100,6 +1138,7 @@ export default function AgendaPage() {
             <option value="hoje">Hoje</option>
             <option value="esta_semana">Esta semana</option>
             <option value="proximos_7_dias">Próximos 7 dias</option>
+            <option value="proximos_30_dias">Próximos 30 dias</option>
             <option value="personalizado">Personalizado</option>
           </select>
         </label>
@@ -1236,7 +1275,23 @@ export default function AgendaPage() {
           <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
         ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
-        ) : (
+        ) : view === "mensal" ? (
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {groupedEventsByDay.map((group) => (
+              <div key={group.day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
+                <div className="space-y-2">
+                  {group.events.map((event) => (
+                    <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
+                      <p className="truncate text-sm font-medium text-slate-900">{event.title}</p>
+                      <p className="text-xs text-slate-500">{formatTime(event.startDateTime)} • {TYPE_LABEL[event.type]}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : view === "lista" ? (
           <div className="divide-y">
             {filteredEvents.map((event) => {
               const isHighlighted = event.id === highlightedEventId;
@@ -1256,133 +1311,74 @@ export default function AgendaPage() {
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
                       </span>
-                      {isHighlighted ? (
-                        <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
-                      ) : null}
                     </div>
-                  </div>
-
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      title={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
-                      aria-label={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
-                      className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-                      onClick={() => void onSetAsDone(event)}
-                    >
-                      ✓
-                    </button>
-
-                    {isHighlighted ? (
-                      <>
-                        <button
-                          type="button"
-                          className="rounded-lg border border-brand-300 px-3 py-1 text-sm font-medium text-brand-700 hover:bg-brand-50"
-                          onClick={() => void openActivityModal(event)}
-                        >
-                          Registrar atividade
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-lg border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                          onClick={() => openRescheduleModal(event)}
-                        >
-                          Reagendar
-                        </button>
-                      </>
-                    ) : null}
-
-                    {event.type === "roteiro_visita" && event.stops?.length ? (<div className="mt-2 text-xs text-slate-600">{event.stops.map((stop) => (<div key={stop.id}>#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</div>))}</div>) : null}
-                    {event.clientId ? (
-                      <Link
-                        to={`/clientes/${event.clientId}`}
-                        title="Abrir cliente 360"
-                        aria-label="Abrir cliente 360"
-                        className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
-                      >
-                        Cliente
-                      </Link>
-                    ) : null}
-                    <button
-                      type="button"
-                      title="Criar follow-up"
-                      aria-label="Criar follow-up"
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      onClick={() => openFollowUpModal(event)}
-                    >
-                      F-up
-                    </button>
-                    <button
-                      type="button"
-                      title="Duplicar para amanhã"
-                      aria-label="Duplicar para amanhã"
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      onClick={() => void onDuplicateForNextDay(event)}
-                    >
-                      +1d
-                    </button>
-                    {event.type === "roteiro_visita" && event.stops?.length ? (
-                      <button
-                        type="button"
-                        className="rounded-md border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                        onClick={() => {
-                          setExecutionEventId(event.id);
-                          const params = new URLSearchParams(searchParams);
-                          params.set("execute", "1");
-                          params.set("eventId", event.id);
-                          setSearchParams(params);
-                        }}
-                      >
-                        Iniciar roteiro
-                      </button>
-                    ) : null}
                   </div>
                 </div>
               );
             })}
           </div>
+        ) : (
+          <div className="space-y-4 p-4">
+            {groupedEventsByDay.map((group) => (
+              <div key={group.day} className="overflow-hidden rounded-lg border border-slate-200">
+                <p className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
+                <div className="divide-y">
+                  {group.events.map((event) => {
+                    const isHighlighted = event.id === highlightedEventId;
+                    return (
+                      <div
+                        key={event.id}
+                        ref={isHighlighted ? highlightedEventRef : null}
+                        className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-slate-900">{event.title}</p>
+                          <p className="text-xs text-slate-500">{formatDateTime(event.startDateTime)}</p>
+
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+                            <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                            <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
+                            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
+                              {sellerById[event.userId] || "Vendedor"}
+                            </span>
+                            {isHighlighted ? (
+                              <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            title={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
+                            aria-label={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
+                            className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+                            onClick={() => void onSetAsDone(event)}
+                          >
+                            ✓
+                          </button>
+
+                          {event.clientId ? (
+                            <Link
+                              to={`/clientes/${event.clientId}`}
+                              title="Abrir cliente 360"
+                              aria-label="Abrir cliente 360"
+                              className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                            >
+                              Cliente
+                            </Link>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {isResultModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsResultModalOpen(false)}>
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold text-slate-900">Resultado da visita</h3>
-            <form className="mt-4 space-y-3" onSubmit={onSaveVisitResult}>
-              <label className="block text-sm font-medium text-slate-700">Status
-                <select value={visitResultForm.status} onChange={(event) => setVisitResultForm((current) => ({ ...current, status: event.target.value as VisitResultForm["status"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  <option value="realizada">Realizada</option>
-                  <option value="nao_realizada">Não realizada</option>
-                </select>
-              </label>
-              {visitResultForm.status === "nao_realizada" ? (
-                <label className="block text-sm font-medium text-slate-700">Motivo
-                  <select value={visitResultForm.reason} onChange={(event) => setVisitResultForm((current) => ({ ...current, reason: event.target.value as VisitResultForm["reason"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                    {Object.entries(VISIT_REASON_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                  </select>
-                </label>
-              ) : null}
-              <label className="block text-sm font-medium text-slate-700">Resumo
-                <input value={visitResultForm.summary} onChange={(event) => setVisitResultForm((current) => ({ ...current, summary: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </label>
-              <label className="block text-sm font-medium text-slate-700">Próximo passo
-                <select value={visitResultForm.nextStep} onChange={(event) => setVisitResultForm((current) => ({ ...current, nextStep: event.target.value as VisitResultForm["nextStep"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                  {Object.entries(NEXT_STEP_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-slate-700">Data do próximo passo
-                <input type="datetime-local" value={visitResultForm.nextStepDate} onChange={(event) => setVisitResultForm((current) => ({ ...current, nextStepDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-              </label>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-sm" onClick={() => setIsResultModalOpen(false)}>Cancelar</button>
-                <button type="submit" className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white">Salvar resultado</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Modal criação */}
       {isCreateOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeCreate}>
           <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
