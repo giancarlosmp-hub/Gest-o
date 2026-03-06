@@ -127,6 +127,55 @@ type DateRange = {
   end: Date;
 };
 
+function normalizeEventType(type: string | undefined): string {
+  return String(type || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+function isFollowUpEvent(event: AgendaEvent) {
+  const normalizedType = normalizeEventType(event.type);
+  if (normalizedType === "follow_up" || normalizedType === "followup") {
+    return true;
+  }
+
+  const title = String(event.title || "").toLowerCase();
+  const description = String(event.description || "").toLowerCase();
+  return title.includes("follow-up") || description.includes("follow-up");
+}
+
+function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
+  const now = Date.now();
+
+  return events.reduce<AgendaSummary>(
+    (acc, event) => {
+      const normalizedType = normalizeEventType(event.type);
+
+      if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") {
+        acc.reunioes += 1;
+      }
+
+      if (normalizedType === "roteiro_visita") {
+        acc.roteiros += 1;
+      }
+
+      if (isFollowUpEvent(event)) {
+        acc.followUps += 1;
+      }
+
+      const isDone = event.status === "realizado";
+      const isOverdue = new Date(event.endDateTime).getTime() < now && !isDone;
+      if (isOverdue) {
+        acc.vencidos += 1;
+      }
+
+      return acc;
+    },
+    { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 }
+  );
+}
+
 function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -267,7 +316,6 @@ export default function AgendaPage() {
   const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
   const [isEventsLoading, setIsEventsLoading] = useState(false);
   const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
-  const [summary, setSummary] = useState<AgendaSummary>({ reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 });
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -478,7 +526,6 @@ export default function AgendaPage() {
           .filter((item: AgendaEvent) => item.userId);
 
         setEvents(mappedEvents);
-        setSummary(response.data?.summary || { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 });
       } catch (error: any) {
         if (!active || error?.name === "CanceledError" || error?.code === "ERR_CANCELED") return;
         const status = error?.response?.status ?? "sem_status";
@@ -539,6 +586,8 @@ export default function AgendaPage() {
         events: dayEvents.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
       }));
   }, [filteredEvents]);
+
+  const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
