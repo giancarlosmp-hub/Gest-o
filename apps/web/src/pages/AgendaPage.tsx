@@ -299,10 +299,14 @@ export default function AgendaPage() {
       to: range.to.toISOString().slice(0, 10)
     };
 
-    if (canFilterBySeller && selectedSellerId) params.sellerId = selectedSellerId;
+    if (user?.role === "vendedor" && user.id) {
+      params.ownerId = user.id;
+    } else if (canFilterBySeller && selectedSellerId) {
+      params.ownerId = selectedSellerId;
+    }
 
     return params;
-  }, [periodFilter, customFrom, customTo, canFilterBySeller, selectedSellerId]);
+  }, [periodFilter, customFrom, customTo, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
 

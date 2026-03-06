@@ -4233,8 +4233,11 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
     return res.status(400).json({ message: "Parâmetros from/to inválidos." });
   }
 
+  const requestedOwnerId = (req.query.ownerId || req.query.sellerId) as string | undefined;
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : requestedOwnerId;
+
   const where: Prisma.AgendaEventWhereInput = {
-    ...sellerWhere(req),
+    ...(scopedSellerId ? { sellerId: scopedSellerId } : {}),
     startDateTime: { gte: from },
     endDateTime: { lte: to }
   };
