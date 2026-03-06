@@ -19,6 +19,15 @@ export const OpportunityStageEnum = z.enum([
 
 export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "envio_proposta", "visita_tecnica", "cliente_novo", "follow_up"]);
 export const EventTypeEnum = z.enum(["comentario", "mudanca_etapa", "status"]);
+export const AgendaEventTypeEnum = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
+export type AgendaEventType = z.infer<typeof AgendaEventTypeEnum>;
+
+export const AGENDA_EVENT_TYPE_OPTIONS = [
+  { id: "ONLINE_MEETING", value: "reuniao_online", label: "Reunião online" },
+  { id: "IN_PERSON_MEETING", value: "reuniao_presencial", label: "Reunião presencial" },
+  { id: "VISIT_ROUTE", value: "roteiro_visita", label: "Roteiro de visita" },
+  { id: "FOLLOW_UP", value: "followup", label: "Follow-up" }
+] as const;
 
 export const loginSchema = z.object({
   email: z.string().email(),

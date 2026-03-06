@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
+import { AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
 import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
@@ -84,21 +85,19 @@ const initialActivityForm: ActivityForm = {
   clientId: ""
 };
 
-const TYPE_LABEL: Record<AgendaEventType, string> = {
-  reuniao_online: "Reunião online",
-  reuniao_presencial: "Reunião presencial",
-  roteiro_visita: "Roteiro de visita",
-  follow_up: "Follow-up",
-  followup: "Follow-up"
-};
+const TYPE_LABEL: Record<SharedAgendaEventType, string> = AGENDA_EVENT_TYPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {} as Record<SharedAgendaEventType, string>);
 
-const TYPE_COLOR_CLASS: Record<AgendaEventType, string> = {
+const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
   reuniao_online: "bg-blue-100 text-blue-800 border-blue-200",
   reuniao_presencial: "bg-green-100 text-green-800 border-green-200",
   roteiro_visita: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  follow_up: "bg-amber-100 text-amber-800 border-amber-200",
   followup: "bg-amber-100 text-amber-800 border-amber-200"
 };
+
+const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => (type === "follow_up" ? "followup" : type);
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   agendado: "Agendado",
@@ -1251,7 +1250,7 @@ export default function AgendaPage() {
                     <p className="text-xs text-slate-500">{formatDateTime(event.startDateTime)}</p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
-                      <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                      <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}>{TYPE_LABEL[normalizeAgendaEventType(event.type)]}</span>
                       <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
@@ -1415,9 +1414,9 @@ export default function AgendaPage() {
                     onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   >
-                    {Object.entries(TYPE_LABEL).map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
+                    {AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {option.label}
                       </option>
                     ))}
                   </select>
