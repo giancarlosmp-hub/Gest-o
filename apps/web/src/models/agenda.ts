@@ -1,4 +1,4 @@
-export type AgendaEventType = "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup" | "follow_up";
+export type AgendaEventType = "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup";
 
 export type AgendaEventStatus = "agendado" | "realizado" | "vencido" | "cancelado";
 
