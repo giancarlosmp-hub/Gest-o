@@ -1,27 +1,102 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-if (!process.env.SEED_FIXTURE) {
-  console.log("Skipping fixture seed. Set SEED_FIXTURE=1 to run.");
-  process.exit(0);
-}
+const SOURCE_TAG = "source=fixture";
+const FIXTURE_PREFIX = `[fixture|${SOURCE_TAG}]`;
+const WINDOW_PAST_DAYS = 45;
+const WINDOW_FUTURE_DAYS = 15;
 
-const BR_STATES = ["SP", "RJ", "MG", "RS", "PR", "SC", "BA", "GO", "MT", "MS"];
+const BR_STATES = ["SP", "RJ", "MG", "RS", "PR", "SC", "BA", "GO", "MT", "MS", "TO", "MS"];
 const REGIONS = ["Sul", "Sudeste", "Centro-Oeste", "Norte", "Nordeste"];
-const SEGMENTS = ["Soja", "Milho", "Algodão", "Café", "Cana"];
+const SEGMENTS = ["Soja", "Milho", "Algodão", "Café", "Cana", "HF"];
+const ACTIVITY_TYPES: Prisma.ActivityType[] = ["ligacao", "follow_up", "envio_proposta", "visita"];
+const AGENDA_TYPES: Prisma.AgendaEventType[] = ["followup", "reuniao_online", "reuniao_presencial"];
+
+type StageSeed = {
+  stage: Prisma.OpportunityStage;
+  count: number;
+  probabilityMin: number;
+  probabilityMax: number;
+  closed: boolean;
+};
+
+const STAGE_DISTRIBUTION: StageSeed[] = [
+  { stage: "prospeccao", count: 3, probabilityMin: 10, probabilityMax: 35, closed: false },
+  { stage: "negociacao", count: 3, probabilityMin: 40, probabilityMax: 65, closed: false },
+  { stage: "proposta", count: 3, probabilityMin: 70, probabilityMax: 90, closed: false },
+  { stage: "ganho", count: 2, probabilityMin: 100, probabilityMax: 100, closed: true },
+  { stage: "perdido", count: 1, probabilityMin: 0, probabilityMax: 10, closed: true },
+];
 
 function randomBetween(min: number, max: number) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-function daysFromNow(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d;
+function addDays(base: Date, days: number) {
+  const date = new Date(base);
+  date.setDate(date.getDate() + days);
+  return date;
 }
 
-async function main() {
+function randomDateInWindow(today: Date, minOffset: number, maxOffset: number) {
+  return addDays(today, randomBetween(minOffset, maxOffset));
+}
+
+function marker(text: string) {
+  return `${FIXTURE_PREFIX} ${text}`;
+}
+
+async function cleanFixtureDataForSeller(sellerId: string) {
+  await prisma.activity.deleteMany({
+    where: {
+      ownerSellerId: sellerId,
+      notes: { contains: SOURCE_TAG },
+    },
+  });
+
+  await prisma.agendaStop.deleteMany({
+    where: {
+      notes: { contains: SOURCE_TAG },
+    },
+  });
+
+  await prisma.agendaEvent.deleteMany({
+    where: {
+      sellerId,
+      title: { contains: SOURCE_TAG },
+    },
+  });
+
+  await prisma.opportunity.deleteMany({
+    where: {
+      ownerSellerId: sellerId,
+      title: { contains: SOURCE_TAG },
+    },
+  });
+
+  await prisma.client.deleteMany({
+    where: {
+      ownerSellerId: sellerId,
+      name: { contains: SOURCE_TAG },
+    },
+  });
+}
+
+async function cleanFixtureData() {
+  const sellers = await prisma.user.findMany({
+    where: { role: "vendedor", isActive: true },
+    select: { id: true },
+  });
+
+  for (const seller of sellers) {
+    await cleanFixtureDataForSeller(seller.id);
+  }
+
+  console.log("Fixture clean complete.");
+}
+
+async function seedFixtureData() {
   const sellers = await prisma.user.findMany({
     where: { role: "vendedor", isActive: true },
     select: { id: true },
@@ -32,135 +107,138 @@ async function main() {
     process.exit(1);
   }
 
-  for (const seller of sellers) {
+  const today = new Date();
+
+  for (const [sellerIndex, seller] of sellers.entries()) {
     console.log(`Creating fixture data for seller ${seller.id}...`);
+    await cleanFixtureDataForSeller(seller.id);
 
-    // Cleanup previous fixtures for this seller
-    await prisma.activity.deleteMany({
-      where: { ownerSellerId: seller.id, notes: { startsWith: "[fixture]" } },
-    });
-    await prisma.opportunity.deleteMany({
-      where: { ownerSellerId: seller.id, title: { startsWith: "[fixture]" } },
-    });
-    await prisma.agendaEvent.deleteMany({
-      where: { sellerId: seller.id, title: { startsWith: "[fixture]" } },
-    });
-    await prisma.client.deleteMany({
-      where: { ownerSellerId: seller.id, name: { startsWith: "[fixture]" } },
-    });
-
-    // Create 20 clients
     const clients = [];
-    for (let i = 1; i <= 20; i++) {
-      const state = BR_STATES[i % BR_STATES.length];
+    for (let i = 1; i <= 12; i++) {
       const client = await prisma.client.create({
         data: {
-          name: `[fixture] Cliente ${i} - ${seller.id.slice(0, 6)}`,
+          name: marker(`Cliente ${i} vendedor ${sellerIndex + 1}`),
           city: `Cidade ${i}`,
-          state,
-          region: REGIONS[i % REGIONS.length],
-          segment: SEGMENTS[i % SEGMENTS.length],
+          state: BR_STATES[(i + sellerIndex) % BR_STATES.length],
+          region: REGIONS[(i + sellerIndex) % REGIONS.length],
+          segment: SEGMENTS[(i + sellerIndex) % SEGMENTS.length],
           ownerSellerId: seller.id,
         },
       });
       clients.push(client);
     }
 
-    // Create 30 opportunities
-    const stages = [
-      ...Array(12).fill("prospeccao"),
-      ...Array(8).fill("negociacao"),
-      ...Array(6).fill("proposta"),
-      ...Array(3).fill("ganho"),
-      ...Array(1).fill("perdido"),
-    ];
-    for (let i = 0; i < 30; i++) {
-      const client = clients[i % clients.length];
-      const isOverdue = i < 6;
-      const followDays = isOverdue ? -randomBetween(1, 30) : randomBetween(1, 90);
-      const followUpDate = daysFromNow(followDays);
-      await prisma.opportunity.create({
+    const opportunities = [];
+    let clientIndex = 0;
+
+    for (const stageSeed of STAGE_DISTRIBUTION) {
+      for (let i = 0; i < stageSeed.count; i++) {
+        const sequence = opportunities.length + 1;
+        const client = clients[clientIndex % clients.length];
+        clientIndex += 1;
+
+        const proposalDate = randomDateInWindow(today, -WINDOW_PAST_DAYS, -1);
+
+        const followUpMode = sequence % 3;
+        const followUpOffset =
+          followUpMode === 0
+            ? randomBetween(-10, -1)
+            : followUpMode === 1
+              ? randomBetween(1, 3)
+              : randomBetween(4, WINDOW_FUTURE_DAYS);
+        const followUpDate = addDays(today, followUpOffset);
+
+        const expectedCloseDate = stageSeed.closed
+          ? addDays(followUpDate, randomBetween(-3, 5))
+          : addDays(followUpDate, randomBetween(2, 12));
+
+        const closedAt = stageSeed.closed
+          ? randomDateInWindow(
+              today,
+              Math.max(-WINDOW_PAST_DAYS, -30),
+              stageSeed.stage === "ganho" ? 0 : 2,
+            )
+          : null;
+
+        const opportunity = await prisma.opportunity.create({
+          data: {
+            title: marker(`Oportunidade ${sequence} ${stageSeed.stage}`),
+            value: randomBetween(15000, 80000),
+            stage: stageSeed.stage,
+            probability: randomBetween(stageSeed.probabilityMin, stageSeed.probabilityMax),
+            proposalDate,
+            followUpDate,
+            expectedCloseDate,
+            closedAt,
+            notes: marker("Oportunidade de teste guiado 60 dias"),
+            clientId: client.id,
+            ownerSellerId: seller.id,
+          },
+        });
+
+        opportunities.push(opportunity);
+      }
+    }
+
+    const activityTargets = opportunities.slice(0, 8);
+    for (const [index, opportunity] of activityTargets.entries()) {
+      const dueDate = addDays(today, randomBetween(-WINDOW_PAST_DAYS, WINDOW_FUTURE_DAYS));
+      await prisma.activity.create({
         data: {
-          title: `[fixture] Oportunidade ${i + 1} - ${seller.id.slice(0, 6)}`,
-          value: randomBetween(5000, 250000),
-          stage: stages[i] as any,
-          probability: randomBetween(10, 90),
-          proposalDate: daysFromNow(-randomBetween(0, 30)),
-          followUpDate,
-          expectedCloseDate: isOverdue
-            ? daysFromNow(-randomBetween(1, 15))
-            : daysFromNow(randomBetween(1, 90)),
-          clientId: client.id,
+          type: ACTIVITY_TYPES[index % ACTIVITY_TYPES.length],
+          notes: marker(`Atividade oportunidade ${index + 1}`),
+          dueDate,
+          done: dueDate < today,
+          opportunityId: opportunity.id,
           ownerSellerId: seller.id,
         },
       });
     }
 
-    // Create 60 activities (5 per week, 12 weeks)
-    const activityTypes = ["visita", "follow_up", "envio_proposta"];
-    for (let week = 0; week < 12; week++) {
-      for (let day = 0; day < 5; day++) {
-        const dayOffset = (week - 6) * 7 + day;
-        const dueDate = daysFromNow(dayOffset);
-        const isPast = dayOffset < 0;
-        await prisma.activity.create({
-          data: {
-            type: activityTypes[(week + day) % activityTypes.length] as any,
-            notes: `[fixture] Atividade semana ${week + 1} dia ${day + 1}`,
-            dueDate,
-            done: isPast,
-            ownerSellerId: seller.id,
-          },
-        });
-      }
-    }
+    const agendaTargets = opportunities.slice(2, 10);
+    for (const [index, opportunity] of agendaTargets.entries()) {
+      const start = addDays(today, randomBetween(-WINDOW_PAST_DAYS, WINDOW_FUTURE_DAYS));
+      const end = addDays(start, 0);
+      end.setHours(end.getHours() + 1);
 
-    // Create 36 agenda events (3 per week, 12 weeks)
-    const eventTypes = ["reuniao_online", "reuniao_presencial", "roteiro_visita"];
-    for (let week = 0; week < 12; week++) {
-      for (let e = 0; e < 3; e++) {
-        const dayOffset = (week - 6) * 7 + e * 2;
-        const startDateTime = daysFromNow(dayOffset);
-        const endDateTime = new Date(startDateTime.getTime() + 60 * 60 * 1000);
-        const type = eventTypes[e];
-        const event = await prisma.agendaEvent.create({
-          data: {
-            title: `[fixture] Evento semana ${week + 1} - ${type}`,
-            type: type as any,
-            startDateTime,
-            endDateTime,
-            status: dayOffset < 0 ? "realizado" : "agendado",
-            sellerId: seller.id,
-          },
-        });
-
-        // Add stops for roteiro_visita
-        if (type === "roteiro_visita") {
-          const stopCount = randomBetween(4, 6);
-          for (let s = 0; s < stopCount; s++) {
-            const client = clients[s % clients.length];
-            await prisma.agendaStop.create({
-              data: {
-                agendaEventId: event.id,
-                order: s + 1,
-                clientId: client.id,
-                city: client.city,
-                notes: `[fixture] Parada ${s + 1}`,
-              },
-            });
-          }
-        }
-      }
+      await prisma.agendaEvent.create({
+        data: {
+          title: marker(`Compromisso oportunidade ${index + 1}`),
+          type: AGENDA_TYPES[index % AGENDA_TYPES.length],
+          startDateTime: start,
+          endDateTime: end,
+          status: start < today ? "realizado" : "agendado",
+          notes: marker("Compromisso criado via fixture"),
+          city: clients[index % clients.length]?.city,
+          clientId: opportunity.clientId,
+          opportunityId: opportunity.id,
+          sellerId: seller.id,
+        },
+      });
     }
 
     console.log(`Done for seller ${seller.id}`);
   }
 
   console.log("Fixture seed complete.");
-  await prisma.$disconnect();
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+async function main() {
+  const cleanOnly = process.argv.includes("--clean") || process.env.SEED_FIXTURE_CLEAN === "1";
+
+  if (cleanOnly) {
+    await cleanFixtureData();
+    return;
+  }
+
+  await seedFixtureData();
+}
+
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

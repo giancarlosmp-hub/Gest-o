@@ -12,6 +12,8 @@
     "dev:web": "npm run dev -w @salesforce-pro/web",
     "build": "npm run build -w @salesforce-pro/shared && npm run build -w @salesforce-pro/api && npm run build -w @salesforce-pro/web",
     "prisma:migrate": "npm run prisma:migrate -w @salesforce-pro/api",
-    "prisma:seed": "npm run prisma:seed -w @salesforce-pro/api"
+    "prisma:seed": "npm run prisma:seed -w @salesforce-pro/api",
+    "seed:fixture": "npm run seed:fixture -w @salesforce-pro/api",
+    "seed:fixture:clean": "npm run seed:fixture:clean -w @salesforce-pro/api"
   }
 }
