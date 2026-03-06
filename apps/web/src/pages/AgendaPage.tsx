@@ -97,7 +97,7 @@ const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
   followup: "bg-amber-100 text-amber-800 border-amber-200"
 };
 
-const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => (type === "follow_up" ? "followup" : type);
+const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => type;
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   agendado: "Agendado",
@@ -443,7 +443,7 @@ export default function AgendaPage() {
             clientId: item.clientId ? String(item.clientId) : undefined,
             title: String(item.title || "Sem título"),
             description: String(item.notes || "Compromisso da agenda."),
-            type: item.type === "followup" ? "followup" : ((item.type as AgendaEventType) || "follow_up"),
+            type: (item.type as AgendaEventType) || "followup",
             startDateTime: new Date(item.startDateTime).toISOString(),
             endDateTime: new Date(item.endDateTime).toISOString(),
             status: (item.status as AgendaEvent["status"]) || "agendado",
@@ -612,7 +612,7 @@ export default function AgendaPage() {
       if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
         const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
         await api.post("/activities", {
-          type: "follow_up",
+          type: "followup",
           dueDate: nextStepDate.toISOString(),
           notes: `Follow-up da visita: ${activeStop?.clientName || executionEvent.title} — ${visitResultForm.summary || "Sem resumo informado"}`,
           clientId: activeStop?.clientId || executionEvent.clientId,
@@ -649,7 +649,7 @@ export default function AgendaPage() {
           clientId: item.clientId ? String(item.clientId) : undefined,
           title: String(item.title || "Sem título"),
           description: String(item.notes || "Compromisso da agenda."),
-          type: item.type === "followup" ? "followup" : ((item.type as AgendaEventType) || "follow_up"),
+          type: (item.type as AgendaEventType) || "followup",
           startDateTime: new Date(item.startDateTime).toISOString(),
           endDateTime: new Date(item.endDateTime).toISOString(),
           status: (item.status as AgendaEvent["status"]) || "agendado",
@@ -812,7 +812,7 @@ export default function AgendaPage() {
     try {
       const response = await api.post("/agenda/events", {
         title: `${agendaEvent.title} (cópia)`,
-        type: agendaEvent.type === "follow_up" ? "followup" : agendaEvent.type,
+        type: agendaEvent.type,
         startDateTime: start.toISOString(),
         endDateTime: end.toISOString(),
         sellerId: agendaEvent.userId,
