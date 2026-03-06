@@ -373,20 +373,27 @@ const isOpportunityOverdue = (opportunity: { stage: string; followUpDate: Date }
   return opportunity.followUpDate < todayStart;
 };
 
+const toIsoStringOrNull = (value: unknown) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+};
+
 const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   ...opportunity,
-  proposalDate: opportunity.proposalDate.toISOString(),
-  followUpDate: opportunity.followUpDate.toISOString(),
-  expectedCloseDate: opportunity.expectedCloseDate.toISOString(),
-  closedAt: opportunity.closedAt ? opportunity.closedAt.toISOString() : null,
-  lastContactAt: opportunity.lastContactAt ? opportunity.lastContactAt.toISOString() : null,
-  plantingForecastDate: opportunity.plantingForecastDate ? opportunity.plantingForecastDate.toISOString() : null,
-  createdAt: opportunity.createdAt.toISOString(),
+  proposalDate: toIsoStringOrNull(opportunity.proposalDate),
+  followUpDate: toIsoStringOrNull(opportunity.followUpDate),
+  expectedCloseDate: toIsoStringOrNull(opportunity.expectedCloseDate),
+  closedAt: toIsoStringOrNull(opportunity.closedAt),
+  lastContactAt: toIsoStringOrNull(opportunity.lastContactAt),
+  plantingForecastDate: toIsoStringOrNull(opportunity.plantingForecastDate),
+  createdAt: toIsoStringOrNull(opportunity.createdAt),
   client: opportunity.client?.name,
   clientCity: opportunity.client?.city || null,
   clientState: opportunity.client?.state || null,
   owner: opportunity.ownerSeller?.name,
-  daysOverdue: getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart),
+  daysOverdue: opportunity.expectedCloseDate ? getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart) : null,
   weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
 });
 
