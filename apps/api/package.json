@@ -12,7 +12,8 @@
     "prisma:seed": "node prisma/seed.js",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",
-    "seed:fixture": "cross-env SEED_FIXTURE=1 tsx prisma/seedTestFixture.ts"
+    "seed:fixture": "tsx prisma/seedTestFixture.ts",
+    "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
