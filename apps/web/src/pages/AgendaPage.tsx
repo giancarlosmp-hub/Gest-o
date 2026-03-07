@@ -953,7 +953,7 @@ export default function AgendaPage() {
   };
 
   const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
-    if (agendaType === "roteiro_visita") return "visita_tecnica";
+    if (agendaType === "roteiro_visita") return "visita";
     return "reuniao";
   };
 
@@ -964,6 +964,7 @@ export default function AgendaPage() {
     params.set("type", getSuggestedActivityType(agendaEvent.type));
     if (agendaEvent.clientId) params.set("clientId", agendaEvent.clientId);
     if (agendaEvent.opportunityId) params.set("opportunityId", agendaEvent.opportunityId);
+    if (agendaEvent.id) params.set("agendaEventId", agendaEvent.id);
     navigate(`/atividades?${params.toString()}`);
   };
 
@@ -988,6 +989,7 @@ export default function AgendaPage() {
         notes: activityForm.notes.trim(),
         dueDate: new Date(activityForm.dueDate).toISOString(),
         clientId: activityForm.clientId,
+        agendaEventId: activityEvent?.id,
         ownerSellerId: activityEvent?.userId || (user?.role === "vendedor" ? user.id : selectedSellerId || undefined)
       });
       toast.success("Atividade registrada com sucesso.");

@@ -25,14 +25,11 @@ function getCurrentMonth() {
   return new Date().toISOString().slice(0, 7);
 }
 
-const createEmptyDraft = (): Record<ActivityTypeKey, number> => ({
-  ligacao: 0,
-  whatsapp: 0,
-  reuniao: 0,
-  envio_proposta: 0,
-  visita_tecnica: 0,
-  cliente_novo: 0
-});
+const createEmptyDraft = (): Record<ActivityTypeKey, number> =>
+  ACTIVITY_TYPE_OPTIONS.reduce((acc, option) => {
+    acc[option.value] = 0;
+    return acc;
+  }, {} as Record<ActivityTypeKey, number>);
 
 type ActivityKpisPageProps = {
   embedded?: boolean;

@@ -514,12 +514,27 @@ const getWeeklyVisitMedal = (visitsDone: number) => {
   return "none" as const;
 };
 
+const ACTIVITY_TYPE_ALIASES: Record<string, ActivityType> = {
+  follow_up: "followup",
+  envio_proposta: "proposta_enviada"
+};
+
+const normalizeActivityType = (type: string): ActivityType => {
+  const normalized = ACTIVITY_TYPE_ALIASES[type] ?? type;
+  return normalized as ActivityType;
+};
+
+const resolveActivityTypeFilters = (...types: string[]) => {
+  const normalized = Array.from(new Set(types.map(normalizeActivityType)));
+  return normalized.length === 1 ? { type: normalized[0] } : { type: { in: normalized } };
+};
+
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
   const { start, end } = getMonthRangeFromKey(monthKey);
   return prisma.activity.count({
     where: {
       ownerSellerId,
-      type,
+      ...resolveActivityTypeFilters(type),
       createdAt: { gte: start, lte: end }
     }
   });
@@ -1382,7 +1397,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
   });
 
   const followUpWhere: Prisma.ActivityWhereInput = {
-    type: "follow_up",
+    ...resolveActivityTypeFilters("followup", "follow_up"),
     createdAt: { gte: from, lte: to },
     ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
   };
@@ -1648,7 +1663,7 @@ router.get("/reports/weekly-missions", async (req, res) => {
     prisma.activity.groupBy({
       by: ["ownerSellerId"],
       where: {
-        type: "follow_up",
+        ...resolveActivityTypeFilters("followup", "follow_up"),
         done: true,
         dueDate: { gte: range.start, lte: range.end }
       },
@@ -1657,7 +1672,7 @@ router.get("/reports/weekly-missions", async (req, res) => {
     prisma.activity.groupBy({
       by: ["ownerSellerId"],
       where: {
-        type: "envio_proposta",
+        ...resolveActivityTypeFilters("proposta_enviada", "envio_proposta"),
         done: true,
         dueDate: { gte: range.start, lte: range.end }
       },
@@ -1817,7 +1832,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   const followUps = opportunities.length
     ? await prisma.activity.findMany({
         where: {
-          type: "follow_up",
+          ...resolveActivityTypeFilters("followup", "follow_up"),
           createdAt: { gte: from, lte: to },
           ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
           opportunityId: { in: opportunities }
@@ -2097,7 +2112,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
   const followUps = opportunities.length
     ? await prisma.activity.findMany({
         where: {
-          type: "follow_up",
+          ...resolveActivityTypeFilters("followup", "follow_up"),
           createdAt: { gte: range.start, lte: range.end },
           opportunityId: { in: opportunities }
         },
@@ -2360,7 +2375,7 @@ router.get("/reports/commercial-score", async (req, res) => {
   const followUps = opportunities.length
     ? await prisma.activity.findMany({
         where: {
-          type: "follow_up",
+          ...resolveActivityTypeFilters("followup", "follow_up"),
           createdAt: { gte: start, lte: end },
           ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
           opportunityId: { in: opportunities }
@@ -4026,7 +4041,7 @@ router.get("/activities", async (req, res) => {
   const activities = await prisma.activity.findMany({
     where: {
       ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
-      ...(type ? { type: type as ActivityType } : {}),
+      ...(type ? resolveActivityTypeFilters(type) : {}),
       ...(doneQuery !== undefined ? { done: doneQuery } : {}),
       ...(monthRange ? { dueDate: { gte: monthRange.start, lte: monthRange.end } } : {}),
       ...(clientId ? { opportunity: { clientId } } : {}),
@@ -4087,6 +4102,11 @@ router.get("/activities/monthly-counts", async (req, res) => {
 });
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const notes = (req.body.notes || req.body.description || "").trim();
+  if (!notes) {
+    return res.status(400).json({ message: "Descrição/notas da atividade é obrigatória." });
+  }
+
   const relatedOpportunity = req.body.opportunityId
     ? await prisma.opportunity.findFirst({
       where: {
@@ -4108,15 +4128,53 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
     return res.status(400).json({ message: "Cliente informado é diferente do cliente da oportunidade" });
   }
 
-  const createdActivity = await prisma.activity.create({
-    data: {
-      type: req.body.type,
-      notes: req.body.notes,
-      dueDate: new Date(req.body.dueDate),
-      done: req.body.done,
-      opportunityId: req.body.opportunityId,
-      ownerSellerId
+  const agendaEventId = req.body.agendaEventId || undefined;
+  if (agendaEventId) {
+    const agendaEvent = await prisma.agendaEvent.findFirst({
+      where: {
+        id: agendaEventId,
+        ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : {})
+      },
+      select: { id: true }
+    });
+
+    if (!agendaEvent) {
+      return res.status(404).json({ message: "Evento da agenda não encontrado." });
     }
+  }
+
+  const normalizedType = normalizeActivityType(req.body.type);
+
+  const createdActivity = await prisma.$transaction(async (tx) => {
+    const activity = await tx.activity.create({
+      data: {
+        type: normalizedType,
+        notes,
+        description: req.body.description || notes,
+        result: req.body.result,
+        dueDate: new Date(req.body.dueDate),
+        date: req.body.date ? new Date(req.body.date) : undefined,
+        duration: req.body.duration,
+        city: req.body.city,
+        crop: req.body.crop,
+        areaEstimated: req.body.areaEstimated,
+        product: req.body.product,
+        done: req.body.done,
+        clientId: resolvedClientId,
+        opportunityId: req.body.opportunityId,
+        agendaEventId,
+        ownerSellerId
+      }
+    });
+
+    if (agendaEventId) {
+      await tx.agendaEvent.update({
+        where: { id: agendaEventId },
+        data: { status: "realizado" }
+      });
+    }
+
+    return activity;
   });
 
   await createEvent({
@@ -4128,7 +4186,7 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   });
 
   const month = getMonthKey(createdActivity.createdAt);
-  const logicalCount = await getActivityCountByTypeInMonth(ownerSellerId, createdActivity.type, month);
+  const logicalCount = await getActivityCountByTypeInMonth(ownerSellerId, normalizeActivityType(createdActivity.type), month);
 
   return res.status(201).json({
     ...mapActivity(createdActivity),
@@ -4139,10 +4197,27 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   });
 });
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
-  const { clientId: _clientId, ...payload } = req.body;
+  const normalizedType = req.body.type ? normalizeActivityType(req.body.type) : undefined;
+  const notes = req.body.notes ?? req.body.description;
   const updatedActivity = await prisma.activity.update({
     where: { id: req.params.id },
-    data: { ...payload, ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}) }
+    data: {
+      ...(normalizedType ? { type: normalizedType } : {}),
+      ...(notes !== undefined ? { notes } : {}),
+      ...(req.body.description !== undefined ? { description: req.body.description } : {}),
+      ...(req.body.result !== undefined ? { result: req.body.result } : {}),
+      ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}),
+      ...(req.body.date ? { date: new Date(req.body.date) } : {}),
+      ...(req.body.duration !== undefined ? { duration: req.body.duration } : {}),
+      ...(req.body.city !== undefined ? { city: req.body.city } : {}),
+      ...(req.body.crop !== undefined ? { crop: req.body.crop } : {}),
+      ...(req.body.areaEstimated !== undefined ? { areaEstimated: req.body.areaEstimated } : {}),
+      ...(req.body.product !== undefined ? { product: req.body.product } : {}),
+      ...(req.body.done !== undefined ? { done: req.body.done } : {}),
+      ...(req.body.clientId !== undefined ? { clientId: req.body.clientId } : {}),
+      ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {}),
+      ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {})
+    }
   });
   return res.json(mapActivity(updatedActivity));
 });

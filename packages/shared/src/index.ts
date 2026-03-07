@@ -17,7 +17,7 @@ export const OpportunityStageEnum = z.enum([
   "perdido"
 ]);
 
-export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "envio_proposta", "visita_tecnica", "cliente_novo", "follow_up"]);
+export const ActivityTypeEnum = z.enum(["ligacao", "whatsapp", "visita", "reuniao", "followup", "proposta_enviada", "proposta_negociacao", "fechamento", "envio_proposta", "visita_tecnica", "cliente_novo", "follow_up"]);
 export const EventTypeEnum = z.enum(["comentario", "mudanca_etapa", "status"]);
 export const AgendaEventTypeEnum = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
 export type AgendaEventType = z.infer<typeof AgendaEventTypeEnum>;
@@ -99,11 +99,20 @@ export const opportunitySchema = z.object({
 
 export const activitySchema = z.object({
   type: ActivityTypeEnum,
-  notes: z.string().min(2),
+  notes: z.string().min(2).optional(),
+  description: z.string().min(2).optional(),
+  result: z.string().min(1).optional(),
   dueDate: z.string(),
+  date: z.string().optional(),
+  duration: z.number().int().nonnegative().optional(),
+  city: z.string().min(2).optional(),
+  crop: z.string().min(2).optional(),
+  areaEstimated: z.number().nonnegative().optional(),
+  product: z.string().min(2).optional(),
   done: z.boolean().optional(),
   opportunityId: z.string().optional(),
   clientId: z.string().optional(),
+  agendaEventId: z.string().optional(),
   ownerSellerId: z.string().optional()
 });
 
