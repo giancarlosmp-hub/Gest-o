@@ -586,13 +586,28 @@ const parsePositiveInt = (value: unknown, fallback: number) => {
 };
 
 const agendaEventTypeSchema = z.enum(["reuniao_online", "reuniao_presencial", "roteiro_visita", "followup"]);
-const agendaEventStatusSchema = z.enum(["agendado", "realizado", "vencido"]);
+const agendaEventStatusSchema = z.enum(["planned", "completed", "cancelled"]);
+
+const mapAgendaStatusToDb = (status: "planned" | "completed" | "cancelled") => {
+  if (status === "completed") return "realizado" as const;
+  if (status === "cancelled") return "vencido" as const;
+  return "agendado" as const;
+};
+
+const mapAgendaStatusFromDb = (status: string): "planned" | "completed" | "cancelled" => {
+  if (status === "realizado") return "completed";
+  if (status === "vencido") return "cancelled";
+  return "planned";
+};
 
 const agendaEventCreateSchema = z.object({
   title: z.string().min(2),
   type: agendaEventTypeSchema,
-  startDateTime: z.string(),
-  endDateTime: z.string(),
+  startDateTime: z.string().optional(),
+  endDateTime: z.string().optional(),
+  startsAt: z.string().optional(),
+  endsAt: z.string().optional(),
+  ownerId: z.string().optional(),
   ownerSellerId: z.string().optional(),
   sellerId: z.string().optional(),
   clientId: z.string().optional(),
@@ -616,6 +631,8 @@ const agendaEventUpdateSchema = z.object({
   title: z.string().min(2).optional(),
   startDateTime: z.string().optional(),
   endDateTime: z.string().optional(),
+  startsAt: z.string().optional(),
+  endsAt: z.string().optional(),
   notes: z.string().optional(),
   city: z.string().optional(),
   status: agendaEventStatusSchema.optional(),
@@ -4193,19 +4210,28 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   return res.status(201).json(created);
 });
 
-const resolveAgendaEventStatus = (agendaEvent: { status: string; endDateTime: Date }) => resolveStatus({ done: agendaEvent.status === "realizado", endAt: agendaEvent.endDateTime });
+const mapAgendaEvent = (agendaEvent: any) => {
+  const status = mapAgendaStatusFromDb(agendaEvent.status);
+  const startsAt = agendaEvent.startDateTime.toISOString();
+  const endsAt = agendaEvent.endDateTime.toISOString();
+  const ownerId = agendaEvent.sellerId;
+  const isOverdue = status === "planned" && new Date(endsAt).getTime() < Date.now();
 
-const mapAgendaEvent = (agendaEvent: any) => ({
+  return {
   id: agendaEvent.id,
+  ownerId,
+  userId: ownerId,
+  sellerId: ownerId,
   title: agendaEvent.title,
   type: agendaEvent.type,
-  startDateTime: agendaEvent.startDateTime.toISOString(),
-  endDateTime: agendaEvent.endDateTime.toISOString(),
+  startsAt,
+  endsAt,
+  startDateTime: startsAt,
+  endDateTime: endsAt,
   clientId: agendaEvent.clientId,
   opportunityId: agendaEvent.opportunityId,
-  sellerId: agendaEvent.sellerId,
-  status: resolveAgendaEventStatus(agendaEvent),
-  isOverdue: resolveAgendaEventStatus(agendaEvent) === "vencido",
+  status,
+  isOverdue,
   city: agendaEvent.city,
   notes: agendaEvent.notes,
   stops: (agendaEvent.stops || []).map((stop: any) => ({
@@ -4231,7 +4257,8 @@ const mapAgendaEvent = (agendaEvent: any) => ({
     nextStep: stop.nextStep,
     nextStepDate: stop.nextStepDate ? stop.nextStepDate.toISOString() : null
   }))
-});
+  };
+};
 
 router.get(["/agenda", "/agenda/events"], async (req, res) => {
   const fromInput = req.query.from as string | undefined;
@@ -4262,15 +4289,16 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
   const mappedEvents = events.map(mapAgendaEvent);
   const summary = mappedEvents.reduce(
     (acc, event) => {
-      if (event.type === "roteiro_visita") acc.roteiros += 1;
-      if (event.type === "followup") acc.followUps += 1;
-      else if (event.type === "follow_up") acc.followUps += 1;
-      else acc.reunioes += 1;
+      if (event.status !== "planned") return acc;
 
-      if (event.status === "vencido") acc.vencidos += 1;
+      if (event.type === "roteiro_visita") acc.routes += 1;
+      else if (event.type === "followup") acc.followups += 1;
+      else acc.meetings += 1;
+
+      if (new Date(event.endsAt || event.endDateTime).getTime() < Date.now()) acc.overdue += 1;
       return acc;
     },
-    { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 }
+    { meetings: 0, routes: 0, followups: 0, overdue: 0 }
   );
 
   return res.json({
@@ -4284,7 +4312,7 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
 });
 
 router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema), async (req, res) => {
-  const sellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.sellerId);
+  const sellerId = resolveOwnerId(req, req.body.ownerId || req.body.ownerSellerId || req.body.sellerId);
 
   if (req.body.type === "roteiro_visita" && (!Array.isArray(req.body.stops) || req.body.stops.length === 0)) {
     return res.status(400).json({ message: "Roteiro de visita deve conter ao menos uma parada." });
@@ -4294,8 +4322,8 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
     data: {
       title: req.body.title,
       type: req.body.type,
-      startDateTime: new Date(req.body.startDateTime),
-      endDateTime: new Date(req.body.endDateTime),
+      startDateTime: new Date(req.body.startsAt || req.body.startDateTime),
+      endDateTime: new Date(req.body.endsAt || req.body.endDateTime),
       sellerId,
       clientId: req.body.clientId,
       city: req.body.city,
@@ -4333,9 +4361,9 @@ router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpda
     where: { id: req.params.id },
     data: {
       ...(req.body.title ? { title: req.body.title } : {}),
-      ...(req.body.startDateTime ? { startDateTime: new Date(req.body.startDateTime) } : {}),
-      ...(req.body.endDateTime ? { endDateTime: new Date(req.body.endDateTime) } : {}),
-      ...(req.body.status ? { status: req.body.status } : {}),
+      ...((req.body.startsAt || req.body.startDateTime) ? { startDateTime: new Date(req.body.startsAt || req.body.startDateTime) } : {}),
+      ...((req.body.endsAt || req.body.endDateTime) ? { endDateTime: new Date(req.body.endsAt || req.body.endDateTime) } : {}),
+      ...(req.body.status ? { status: mapAgendaStatusToDb(req.body.status) } : {}),
       ...(req.body.notes !== undefined ? { notes: req.body.notes } : {}),
       ...(req.body.city !== undefined ? { city: req.body.city } : {}),
       ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {})

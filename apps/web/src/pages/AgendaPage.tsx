@@ -1,5 +1,5 @@
 import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
@@ -9,10 +9,10 @@ import { getApiErrorMessage } from "../lib/apiError";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 
 type Seller = { id: string; name: string };
-type AgendaSummary = { reunioes: number; roteiros: number; followUps: number; vencidos: number };
+type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
 
-type Visualizacao = "diaria" | "semanal" | "mensal" | "lista";
-type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias" | "proximos_30_dias" | "personalizado";
+type Visualizacao = "daily" | "weekly" | "monthly" | "list";
+type PeriodFilter = "today" | "this_week" | "next_7_days" | "next_30_days" | "custom_range";
 type CreateModalMode = "agenda" | "roteiro";
 
 type CreateAgendaForm = {
@@ -101,25 +101,23 @@ const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
 const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => type;
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
-  agendado: "Agendado",
-  realizado: "Realizado",
-  cancelado: "Agendado",
-  vencido: "Vencido"
+  planned: "Planejado",
+  completed: "Concluído",
+  cancelled: "Cancelado"
 };
 
 const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
-  agendado: "border-sky-200 bg-sky-100 text-sky-700",
-  realizado: "border-green-200 bg-green-100 text-green-700",
-  cancelado: "border-slate-200 bg-slate-100 text-slate-700",
-  vencido: "border-rose-200 bg-rose-100 text-rose-700"
+  planned: "border-sky-200 bg-sky-100 text-sky-700",
+  completed: "border-green-200 bg-green-100 text-green-700",
+  cancelled: "border-slate-200 bg-slate-100 text-slate-700"
 };
 
 const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
-  hoje: "Hoje",
-  esta_semana: "Esta semana",
-  proximos_7_dias: "Próximos 7 dias",
-  proximos_30_dias: "Próximos 30 dias",
-  personalizado: "Personalizado"
+  today: "Hoje",
+  this_week: "Esta semana",
+  next_7_days: "Próximos 7 dias",
+  next_30_days: "Próximos 30 dias",
+  custom_range: "Personalizado"
 };
 
 type DateRange = {
@@ -150,29 +148,17 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
 
   return events.reduce<AgendaSummary>(
     (acc, event) => {
+      if (event.status !== "planned") return acc;
+
       const normalizedType = normalizeEventType(event.type);
+      if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") acc.meetings += 1;
+      if (normalizedType === "roteiro_visita") acc.routes += 1;
+      if (isFollowUpEvent(event)) acc.followups += 1;
 
-      if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") {
-        acc.reunioes += 1;
-      }
-
-      if (normalizedType === "roteiro_visita") {
-        acc.roteiros += 1;
-      }
-
-      if (isFollowUpEvent(event)) {
-        acc.followUps += 1;
-      }
-
-      const isDone = event.status === "realizado";
-      const isOverdue = new Date(event.endDateTime).getTime() < now && !isDone;
-      if (isOverdue) {
-        acc.vencidos += 1;
-      }
-
+      if (new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
       return acc;
     },
-    { reunioes: 0, roteiros: 0, followUps: 0, vencidos: 0 }
+    { meetings: 0, routes: 0, followups: 0, overdue: 0 }
   );
 }
 
@@ -192,11 +178,11 @@ function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, cust
   const today = new Date();
   const dayStart = startOfDay(today);
 
-  if (periodFilter === "hoje") {
+  if (periodFilter === "today") {
     return { start: startOfDay(today), end: endOfDay(today) };
   }
 
-  if (periodFilter === "esta_semana") {
+  if (periodFilter === "this_week") {
     const weekStart = startOfDay(today);
     const dayOfWeek = weekStart.getDay();
     const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
@@ -206,13 +192,13 @@ function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, cust
     return { start: weekStart, end: weekEnd };
   }
 
-  if (periodFilter === "proximos_7_dias") {
+  if (periodFilter === "next_7_days") {
     const next7Days = endOfDay(new Date(dayStart));
     next7Days.setDate(next7Days.getDate() + 6);
     return { start: dayStart, end: next7Days };
   }
 
-  if (periodFilter === "proximos_30_dias") {
+  if (periodFilter === "next_30_days") {
     const next30Days = endOfDay(new Date(dayStart));
     next30Days.setDate(next30Days.getDate() + 29);
     return { start: dayStart, end: next30Days };
@@ -247,6 +233,19 @@ function formatDayKey(value: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+
+
+function getOwnerId(event: AgendaEvent): string {
+  return event.ownerId || getOwnerId(event) || event.sellerId || "";
+}
+
+function getStartsAt(event: AgendaEvent): string {
+  return event.startsAt || getStartsAt(event) || new Date().toISOString();
+}
+
+function getEndsAt(event: AgendaEvent): string {
+  return event.endsAt || getEndsAt(event) || getStartsAt(event);
+}
 
 function formatTime(value: string) {
   return new Date(value).toLocaleTimeString("pt-BR", {
@@ -288,26 +287,28 @@ function getInitialEvents(): AgendaEvent[] {
   return [
     {
       id: "event-1",
+      ownerId: "seller-1",
       userId: "seller-1",
       clientId: "client-1",
       opportunityId: "opp-1",
       title: "Kickoff técnico",
-      description: "Alinhar cronograma de implantação e responsáveis.",
+      notes: "Alinhar cronograma de implantação e responsáveis.",
       type: "reuniao_online",
-      startDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
-      endDateTime: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
-      status: "agendado"
+      startsAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
+      endsAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
+      status: "planned"
     }
   ];
 }
 
 export default function AgendaPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canFilterBySeller = user?.role === "gerente" || user?.role === "diretor";
 
-  const [view, setView] = useState<Visualizacao>("diaria");
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("hoje");
+  const [view, setView] = useState<Visualizacao>("daily");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("today");
   const [selectedSellerId, setSelectedSellerId] = useState<string>("");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -467,9 +468,9 @@ export default function AgendaPage() {
     if (!shouldHighlightNext) return;
 
     const nextView = searchParams.get("view");
-    if (nextView === "hoje") {
-      setPeriodFilter("hoje");
-      setView("diaria");
+    if (nextView === "today") {
+      setPeriodFilter("today");
+      setView("daily");
     }
 
     const sellerId = searchParams.get("sellerId");
@@ -504,18 +505,18 @@ export default function AgendaPage() {
 
         const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
         const mappedEvents = payload
-          .filter((item: any) => item?.id && item?.startDateTime && item?.endDateTime)
+          .filter((item: any) => item?.id && (item?.startsAt || item?.startDateTime) && (item?.endsAt || item?.endDateTime))
           .map((item: any): AgendaEvent => ({
             id: String(item.id),
-            userId: String(item.userId || item.ownerSellerId || item.sellerId || ""),
-            sellerId: String(item.sellerId || item.userId || ""),
+            ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+            userId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+            sellerId: String(item.ownerId || item.sellerId || item.userId || ""),
             clientId: item.clientId ? String(item.clientId) : undefined,
             title: String(item.title || "Sem título"),
-            description: String(item.notes || "Compromisso da agenda."),
-            type: (item.type as AgendaEventType) || "followup",
-            startDateTime: new Date(item.startDateTime).toISOString(),
-            endDateTime: new Date(item.endDateTime).toISOString(),
-            status: (item.status as AgendaEvent["status"]) || "agendado",
+              type: (item.type as AgendaEventType) || "followup",
+            startsAt: new Date(item.startsAt || item.startDateTime).toISOString(),
+            endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
+            status: (item.status as AgendaEvent["status"]) || "planned",
             isOverdue: Boolean(item.isOverdue),
             city: item.city ? String(item.city) : undefined,
             notes: item.notes ? String(item.notes) : null,
@@ -525,7 +526,7 @@ export default function AgendaPage() {
             checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
           })) : []
           }))
-          .filter((item: AgendaEvent) => item.userId);
+          .filter((item: AgendaEvent) => Boolean(getOwnerId(item)));
 
         setEvents(mappedEvents);
       } catch (error: any) {
@@ -561,20 +562,20 @@ export default function AgendaPage() {
 
   const filteredEvents = useMemo(() => {
     const byRole = events.filter((event) => {
-      if (user?.role === "vendedor") return event.userId === user.id;
-      if (canFilterBySeller && selectedSellerId) return event.userId === selectedSellerId;
+      if (user?.role === "vendedor") return getOwnerId(event) === user.id;
+      if (canFilterBySeller && selectedSellerId) return getOwnerId(event) === selectedSellerId;
       return true;
     });
 
-    const byOverdue = overdueOnly ? byRole.filter((event) => event.status === "vencido") : byRole;
+    const byOverdue = overdueOnly ? byRole.filter((event) => event.status === "planned" && new Date(getEndsAt(event)).getTime() < Date.now()) : byRole;
 
-    return byOverdue.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime());
+    return byOverdue.sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime());
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, overdueOnly]);
 
   const groupedEventsByDay = useMemo(() => {
     const grouped = new Map<string, AgendaEvent[]>();
     filteredEvents.forEach((event) => {
-      const key = formatDayKey(event.startDateTime);
+      const key = formatDayKey(getStartsAt(event));
       const current = grouped.get(key) || [];
       current.push(event);
       grouped.set(key, current);
@@ -585,11 +586,37 @@ export default function AgendaPage() {
       .map(([day, dayEvents]) => ({
         day,
         label: new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }),
-        events: dayEvents.sort((a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime())
+        events: dayEvents.sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())
       }));
   }, [filteredEvents]);
 
   const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
+
+  const weeklyRoutePlans = useMemo(() => {
+    const weekRange = getRangeFromFilter("this_week", customFrom, customTo);
+    const grouped = new Map<string, { dayLabel: string; city: string; visits: number }>();
+
+    filteredEvents
+      .filter((event) => event.type === "roteiro_visita" && event.status === "planned")
+      .filter((event) => isEventWithinRange(getStartsAt(event), weekRange.start, weekRange.end))
+      .forEach((event) => {
+        const date = new Date(getStartsAt(event));
+        const dayLabel = date.toLocaleDateString("pt-BR", { weekday: "long" });
+        const city = event.city || "Sem cidade";
+        const key = `${formatDayKey(getStartsAt(event))}::${city}`;
+        const current = grouped.get(key);
+        const visits = event.stops?.length || 1;
+        if (current) {
+          current.visits += visits;
+        } else {
+          grouped.set(key, { dayLabel, city, visits });
+        }
+      });
+
+    return Array.from(grouped.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([, value]) => value);
+  }, [filteredEvents, customFrom, customTo]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
@@ -599,8 +626,8 @@ export default function AgendaPage() {
 
     const now = Date.now();
     const nextEvent =
-      filteredEvents.find((event) => event.status !== "realizado" && new Date(event.endDateTime).getTime() >= now) ??
-      filteredEvents.find((event) => event.status !== "realizado");
+      filteredEvents.find((event) => event.status === "planned" && new Date(getEndsAt(event)).getTime() >= now) ??
+      filteredEvents.find((event) => event.status === "planned");
 
     setHighlightedEventId(nextEvent?.id || "");
   }, [filteredEvents, searchParams]);
@@ -623,7 +650,7 @@ export default function AgendaPage() {
   const executionStops = executionEvent?.stops || [];
   const completedStops = executionStops.filter((stop) => stop.checkOutAt).length;
   const nextStop = executionStops.find((stop) => !stop.checkOutAt) || null;
-  const lateMinutes = nextStop?.plannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStop.plannedTime).getTime()) / 60000)) : 0;
+  const lateMinutes = nextStop?.plannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStop?.plannedTime || "").getTime()) / 60000)) : 0;
 
   const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
     setEvents((current) =>
@@ -732,15 +759,15 @@ export default function AgendaPage() {
       setEvents(
         payload.map((item: any) => ({
           id: String(item.id),
-          userId: String(item.userId || item.ownerSellerId || item.sellerId || ""),
-          sellerId: String(item.sellerId || item.userId || ""),
+          ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+          userId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+          sellerId: String(item.ownerId || item.sellerId || item.userId || ""),
           clientId: item.clientId ? String(item.clientId) : undefined,
           title: String(item.title || "Sem título"),
-          description: String(item.notes || "Compromisso da agenda."),
           type: (item.type as AgendaEventType) || "followup",
-          startDateTime: new Date(item.startDateTime).toISOString(),
-          endDateTime: new Date(item.endDateTime).toISOString(),
-          status: (item.status as AgendaEvent["status"]) || "agendado",
+          startsAt: new Date(item.startsAt || item.startDateTime).toISOString(),
+          endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
+          status: (item.status as AgendaEvent["status"]) || "planned",
           isOverdue: Boolean(item.isOverdue),
           city: item.city ? String(item.city) : undefined,
           notes: item.notes ? String(item.notes) : null,
@@ -757,7 +784,7 @@ export default function AgendaPage() {
   };
 
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
-    const nextStatus = agendaEvent.status === "realizado" ? "agendado" : "realizado";
+    const nextStatus = agendaEvent.status === "completed" ? "planned" : "completed";
     try {
       await api.patch(`/agenda/${agendaEvent.id}`, { status: nextStatus });
     } catch {
@@ -779,11 +806,11 @@ export default function AgendaPage() {
           : item
       )
     );
-    toast.success(nextStatus === "realizado" ? "Agenda marcada como realizada." : "Agenda reaberta com sucesso.");
+    toast.success(nextStatus === "completed" ? "Agenda marcada como concluída." : "Agenda reaberta com sucesso.");
   };
 
   const openFollowUpModal = (agendaEvent: AgendaEvent) => {
-    const dueDate = new Date(agendaEvent.endDateTime);
+    const dueDate = new Date(getEndsAt(agendaEvent));
     dueDate.setDate(dueDate.getDate() + 2);
     setFollowUpSourceEvent(agendaEvent);
     setFollowUpForm({
@@ -826,7 +853,7 @@ export default function AgendaPage() {
       const created = response.data;
       setEvents((current) =>
         [...current, { ...followUpSourceEvent, ...created, id: created.id, title: created.title }].sort(
-          (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+          (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
         )
       );
       toast.success(response.data?.message || "Follow-up criado com sucesso.");
@@ -892,8 +919,8 @@ export default function AgendaPage() {
   };
 
   const onDuplicateForNextDay = async (agendaEvent: AgendaEvent) => {
-    const start = new Date(agendaEvent.startDateTime);
-    const end = new Date(agendaEvent.endDateTime);
+    const start = new Date(getStartsAt(agendaEvent));
+    const end = new Date(getEndsAt(agendaEvent));
     start.setDate(start.getDate() + 1);
     end.setDate(end.getDate() + 1);
 
@@ -910,7 +937,7 @@ export default function AgendaPage() {
       const created = response.data;
       setEvents((current) =>
         [...current, { ...agendaEvent, ...created, id: created.id, title: created.title }].sort(
-          (a, b) => new Date(a.startDateTime).getTime() - new Date(b.startDateTime).getTime()
+          (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
         )
       );
       toast.success(response.data?.message || "Evento duplicado para o dia seguinte.");
@@ -931,29 +958,13 @@ export default function AgendaPage() {
   };
 
   const openActivityModal = async (agendaEvent: AgendaEvent) => {
-    setActivityEvent(agendaEvent);
-    setActivityForm({
-      type: getSuggestedActivityType(agendaEvent.type),
-      notes: `Registro de Visita/Reunião — ${agendaEvent.title}`,
-      dueDate: toDateTimeInputValue(agendaEvent.endDateTime),
-      clientId: agendaEvent.clientId || ""
-    });
-    setIsActivityModalOpen(true);
-
-    if (activityClients.length) return;
-
-    try {
-      const response = await api.get("/clients");
-      const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
-      const mappedClients = Array.isArray(payload)
-        ? payload
-            .filter((item: any) => item?.id && item?.name)
-            .map((item: any) => ({ id: String(item.id), name: String(item.name) }))
-        : [];
-      setActivityClients(mappedClients);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível carregar clientes para registrar atividade."));
-    }
+    const params = new URLSearchParams();
+    params.set("open", "create");
+    params.set("date", getEndsAt(agendaEvent));
+    params.set("type", getSuggestedActivityType(agendaEvent.type));
+    if (agendaEvent.clientId) params.set("clientId", agendaEvent.clientId);
+    if (agendaEvent.opportunityId) params.set("opportunityId", agendaEvent.opportunityId);
+    navigate(`/atividades?${params.toString()}`);
   };
 
   const closeActivityModal = () => {
@@ -990,8 +1001,8 @@ export default function AgendaPage() {
 
   const openRescheduleModal = (agendaEvent: AgendaEvent) => {
     setRescheduleEvent(agendaEvent);
-    setRescheduleStartDateTime(toDateTimeInputValue(agendaEvent.startDateTime));
-    setRescheduleEndDateTime(toDateTimeInputValue(agendaEvent.endDateTime));
+    setRescheduleStartDateTime(toDateTimeInputValue(getStartsAt(agendaEvent)));
+    setRescheduleEndDateTime(toDateTimeInputValue(getEndsAt(agendaEvent)));
     setIsRescheduleOpen(true);
   };
 
@@ -1071,13 +1082,14 @@ export default function AgendaPage() {
   const mapCreatedAgendaEvent = (data: any): AgendaEvent => {
     return {
       id: String(data?.id || `event-${Date.now()}`),
-      userId: String(data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
+      ownerId: String(data?.ownerId || data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
+      userId: String(data?.ownerId || data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
       title: String(data?.title || createForm.title.trim()),
-      description: String(data?.description || "Compromisso criado manualmente."),
+      notes: String(data?.notes || "Compromisso criado manualmente."),
       type: (data?.type as AgendaEventType) || createForm.type,
-      startDateTime: new Date(data?.startDateTime || createForm.startDateTime).toISOString(),
-      endDateTime: new Date(data?.endDateTime || createForm.endDateTime).toISOString(),
-      status: (data?.status as AgendaEvent["status"]) || "agendado"
+      startsAt: new Date(data?.startsAt || data?.startDateTime || createForm.startDateTime).toISOString(),
+      endsAt: new Date(data?.endsAt || data?.endDateTime || createForm.endDateTime).toISOString(),
+      status: (data?.status as AgendaEvent["status"]) || "planned"
     };
   };
 
@@ -1144,19 +1156,19 @@ export default function AgendaPage() {
 
       const createdEvent = mapCreatedAgendaEvent(response.data);
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
-      const createdEventInSelectedRange = isEventWithinRange(createdEvent.startDateTime, range.start, range.end);
+      const createdEventInSelectedRange = isEventWithinRange(getStartsAt(createdEvent), range.start, range.end);
 
       if (createdEventInSelectedRange) {
         setEventsRefreshToken((current) => current + 1);
         toast.success("Agenda criada com sucesso.");
       } else {
-        const createdDate = formatDateOnly(createdEvent.startDateTime);
+        const createdDate = formatDateOnly(getStartsAt(createdEvent));
         toast(
           `Evento criado para ${createdDate}. Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
           {
             action: {
               label: "Trocar filtro",
-              onClick: () => setPeriodFilter("proximos_7_dias")
+              onClick: () => setPeriodFilter("next_7_days")
             }
           }
         );
@@ -1187,10 +1199,10 @@ export default function AgendaPage() {
         <label className="text-sm font-medium text-slate-700">
           Visualização
           <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
-            <option value="diaria">Diária</option>
-            <option value="semanal">Semanal</option>
-            <option value="mensal">Mensal</option>
-            <option value="lista">Lista</option>
+            <option value="daily">Diária</option>
+            <option value="weekly">Semanal</option>
+            <option value="monthly">Mensal</option>
+            <option value="list">Lista</option>
           </select>
         </label>
 
@@ -1201,11 +1213,11 @@ export default function AgendaPage() {
             onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)}
             className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
           >
-            <option value="hoje">Hoje</option>
-            <option value="esta_semana">Esta semana</option>
-            <option value="proximos_7_dias">Próximos 7 dias</option>
-            <option value="proximos_30_dias">Próximos 30 dias</option>
-            <option value="personalizado">Personalizado</option>
+            <option value="today">Hoje</option>
+            <option value="this_week">Esta semana</option>
+            <option value="next_7_days">Próximos 7 dias</option>
+            <option value="next_30_days">Próximos 30 dias</option>
+            <option value="custom_range">Personalizado</option>
           </select>
         </label>
 
@@ -1236,7 +1248,7 @@ export default function AgendaPage() {
         ) : null}
       </div>
 
-      {periodFilter === "personalizado" ? (
+      {periodFilter === "custom_range" ? (
         <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-2">
           <label className="text-sm font-medium text-slate-700">De
             <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
@@ -1248,7 +1260,24 @@ export default function AgendaPage() {
       ) : null}
 
       <div className="rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm">
-        <span className="font-semibold">Reuniões:</span> {summary.reunioes} | <span className="font-semibold">Roteiros:</span> {summary.roteiros} | <span className="font-semibold">Follow-ups:</span> {summary.followUps} | <span className="font-semibold">Vencidos:</span> {summary.vencidos}
+        <span className="font-semibold">Reuniões:</span> {summary.meetings} | <span className="font-semibold">Roteiros:</span> {summary.routes} | <span className="font-semibold">Follow-ups:</span> {summary.followups} | <span className="font-semibold">Atrasados:</span> {summary.overdue}
+      </div>
+
+
+      <div className="rounded-xl border bg-white p-4 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">Roteiro da Semana</h3>
+        <div className="mt-3 space-y-2 text-sm text-slate-700">
+          {!weeklyRoutePlans.length ? (
+            <p className="text-slate-500">Nenhum roteiro planejado para esta semana.</p>
+          ) : (
+            weeklyRoutePlans.map((item, index) => (
+              <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-lg border border-slate-200 p-3">
+                <p className="font-medium text-slate-900">{item.dayLabel} – {item.city}</p>
+                <p className="text-slate-600">{item.visits} visitas</p>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       <div className="rounded-xl border bg-white p-4 shadow-sm">
@@ -1263,11 +1292,11 @@ export default function AgendaPage() {
         </div>
       </div>
 
-      {searchParams.get("execute") === "1" && executionEvent ? (
+      {false && searchParams.get("execute") === "1" && executionEvent ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
           <div className="mb-3 flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-emerald-900">Modo execução · {executionEvent.title}</h3>
+              <h3 className="text-lg font-semibold text-emerald-900">Modo execução · {executionEvent?.title}</h3>
               <p className="text-sm text-emerald-800">{completedStops} de {executionStops.length} paradas concluídas.</p>
             </div>
             <button type="button" className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-800" onClick={() => void closeExecutionMode()}>
@@ -1281,8 +1310,8 @@ export default function AgendaPage() {
 
           {nextStop ? (
             <p className="mb-3 text-sm text-emerald-900">
-              Próxima parada: #{nextStop.order} {nextStop.clientName || "Cliente"}
-              {nextStop.plannedTime ? ` · ${new Date(nextStop.plannedTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              Próxima parada: #{nextStop?.order} {nextStop?.clientName || "Cliente"}
+              {nextStop?.plannedTime ? ` · ${new Date(nextStop?.plannedTime || "").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
               {lateMinutes > 0 ? ` · atraso de ${lateMinutes} min` : ""}
             </p>
           ) : (
@@ -1338,7 +1367,7 @@ export default function AgendaPage() {
           <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
         ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
-        ) : view === "mensal" ? (
+        ) : view === "monthly" ? (
           <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1347,14 +1376,14 @@ export default function AgendaPage() {
                   {group.events.map((event) => (
                     <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
                       <p className="truncate text-sm font-medium text-slate-900">{event.title}</p>
-                      <p className="text-xs text-slate-500">{formatTime(event.startDateTime)} • {TYPE_LABEL[event.type]}</p>
+                      <p className="text-xs text-slate-500">{formatTime(getStartsAt(event))} • {TYPE_LABEL[event.type]}</p>
                     </div>
                   ))}
                 </div>
               </div>
             ))}
           </div>
-        ) : view === "lista" ? (
+        ) : view === "list" ? (
           <div className="divide-y">
             {filteredEvents.map((event) => {
               const isHighlighted = event.id === highlightedEventId;
@@ -1366,14 +1395,14 @@ export default function AgendaPage() {
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-900">{event.title}</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(event.startDateTime)}</p>
+                    <p className="text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                       <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}>{TYPE_LABEL[normalizeAgendaEventType(event.type)]}</span>
                       {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                       <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
-                        {sellerById[event.userId] || "Vendedor"}
+                        {sellerById[getOwnerId(event)] || "Vendedor"}
                       </span>
                     </div>
                   </div>
@@ -1397,14 +1426,14 @@ export default function AgendaPage() {
                       >
                         <div className="min-w-0">
                           <p className="truncate font-medium text-slate-900">{event.title}</p>
-                          <p className="text-xs text-slate-500">{formatDateTime(event.startDateTime)}</p>
+                          <p className="text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                             <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
                             {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                             <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                             <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
-                              {sellerById[event.userId] || "Vendedor"}
+                              {sellerById[getOwnerId(event)] || "Vendedor"}
                             </span>
                             {isHighlighted ? (
                               <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
@@ -1424,13 +1453,22 @@ export default function AgendaPage() {
                           ) : null}
                           <button
                             type="button"
-                            title={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
-                            aria-label={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
+                            title={event.status === "completed" ? "Reabrir compromisso" : "Marcar como concluído"}
+                            aria-label={event.status === "completed" ? "Reabrir compromisso" : "Marcar como concluído"}
                             className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
                             onClick={() => void onSetAsDone(event)}
                           >
                             ✓
                           </button>
+                          {event.status === "completed" ? (
+                            <button
+                              type="button"
+                              className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
+                              onClick={() => void openActivityModal(event)}
+                            >
+                              Registrar atividade
+                            </button>
+                          ) : null}
 
                           {event.clientId ? (
                             <Link

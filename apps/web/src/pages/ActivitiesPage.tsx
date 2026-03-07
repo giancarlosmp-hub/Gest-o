@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
@@ -50,6 +51,7 @@ const STATUS_CLASS: Record<ActivityStatus, string> = {
 
 export default function ActivitiesPage() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isSeller = user?.role === "vendedor";
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
 
@@ -161,6 +163,33 @@ export default function ActivitiesPage() {
   useEffect(() => {
     void loadActivities();
   }, [debouncedSearch, filters.type, filters.done, filters.month, filters.clientId, filters.sellerId, filters.overdueOnly, canChooseSeller]);
+
+  useEffect(() => {
+    const openFromAgenda = searchParams.get("open") === "create";
+    if (!openFromAgenda) return;
+
+    const date = searchParams.get("date") || "";
+    const type = searchParams.get("type") || "ligacao";
+    const clientId = searchParams.get("clientId") || "";
+    const opportunityId = searchParams.get("opportunityId") || "";
+
+    setForm((current) => ({
+      ...current,
+      type,
+      dueDate: date ? new Date(date).toISOString().slice(0, 16) : current.dueDate,
+      clientId,
+      opportunityId
+    }));
+    setIsModalOpen(true);
+
+    const params = new URLSearchParams(searchParams);
+    params.delete("open");
+    params.delete("date");
+    params.delete("type");
+    params.delete("clientId");
+    params.delete("opportunityId");
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const clearFilters = () => {
     setFilters(initialFilters);
