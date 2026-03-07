@@ -26,12 +26,13 @@ function getCurrentMonth() {
 }
 
 const createEmptyDraft = (): Record<ActivityTypeKey, number> => ({
-  ligacao: 0,
-  whatsapp: 0,
+  visita: 0,
   reuniao: 0,
-  envio_proposta: 0,
-  visita_tecnica: 0,
-  cliente_novo: 0
+  ligacao: 0,
+  followup: 0,
+  proposta_enviada: 0,
+  proposta_negociacao: 0,
+  fechamento: 0
 });
 
 type ActivityKpisPageProps = {

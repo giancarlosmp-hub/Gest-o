@@ -22,14 +22,13 @@ enum OpportunityStage {
 }
 
 enum ActivityType {
-  ligacao
-  whatsapp
   visita
   reuniao
-  envio_proposta
-  visita_tecnica
-  cliente_novo
-  follow_up
+  ligacao
+  followup
+  proposta_enviada
+  proposta_negociacao
+  fechamento
 }
 
 enum EventType {
@@ -98,6 +97,7 @@ model Client {
   createdAt      DateTime      @default(now())
   agendaEvents   AgendaEvent[]
   agendaStops    AgendaStop[]
+  activities    Activity[]
 }
 
 model AgendaEvent {
@@ -118,6 +118,7 @@ model AgendaEvent {
   stops         AgendaStop[]
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
+  activities    Activity[]
 
   @@index([sellerId, startDateTime])
   @@index([startDateTime, endDateTime])
@@ -216,14 +217,27 @@ model TimelineEvent {
 model Activity {
   id            String       @id @default(cuid())
   type          ActivityType
-  notes         String
-  dueDate       DateTime
-  done          Boolean      @default(false)
+  description   String
+  result        String?
+  date          DateTime
+  duration      Int?
+  city          String?
+  crop          String?
+  areaEstimated Float?
+  product       String?
+  agendaEventId String?
+  agendaEvent   AgendaEvent? @relation(fields: [agendaEventId], references: [id])
   opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
   ownerSellerId String
   ownerSeller   User         @relation(fields: [ownerSellerId], references: [id])
   createdAt     DateTime     @default(now())
+
+  @@index([ownerSellerId, date])
+  @@index([agendaEventId])
+  @@index([type, date])
 }
 
 model Goal {

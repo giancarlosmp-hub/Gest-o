@@ -21,11 +21,16 @@ RUN apk add --no-cache openssl ca-certificates tini
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/package*.json ./apps/api/
+COPY --from=build /app/apps/api/src ./apps/api/src
+COPY --from=build /app/apps/api/tsconfig.json ./apps/api/tsconfig.json
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
 COPY --from=build /app/packages/shared/package*.json ./packages/shared/
 COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 
-EXPOSE 4000
+WORKDIR /app/apps/api
+RUN npm run build
+
+EXPOSE 3000
 ENTRYPOINT ["tini", "--"]
-CMD ["npm", "run", "docker:start", "-w", "@salesforce-pro/api"]
+CMD ["npm", "run", "docker:start"]
