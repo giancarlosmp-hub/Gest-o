@@ -15,7 +15,16 @@ type Activity = {
   id: string;
   type: string;
   notes: string;
+  description?: string | null;
+  result?: string | null;
   dueDate: string;
+  date?: string | null;
+  duration?: number | null;
+  city?: string | null;
+  crop?: string | null;
+  areaEstimated?: number | null;
+  product?: string | null;
+  agendaEventId?: string | null;
   done: boolean;
   status?: ActivityStatus;
   isOverdue?: boolean;
@@ -34,7 +43,7 @@ type ActivityFilters = {
   overdueOnly: boolean;
 };
 
-const initialForm = { type: "ligacao", notes: "", dueDate: "", clientId: "", opportunityId: "", ownerSellerId: "" };
+const initialForm = { type: "ligacao", notes: "", dueDate: "", city: "", clientId: "", opportunityId: "", agendaEventId: "", ownerSellerId: "" };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
 const STATUS_LABEL: Record<ActivityStatus, string> = {
@@ -172,13 +181,15 @@ export default function ActivitiesPage() {
     const type = searchParams.get("type") || "ligacao";
     const clientId = searchParams.get("clientId") || "";
     const opportunityId = searchParams.get("opportunityId") || "";
+    const agendaEventId = searchParams.get("agendaEventId") || "";
 
     setForm((current) => ({
       ...current,
       type,
       dueDate: date ? new Date(date).toISOString().slice(0, 16) : current.dueDate,
       clientId,
-      opportunityId
+      opportunityId,
+      agendaEventId
     }));
     setIsModalOpen(true);
 
@@ -188,6 +199,7 @@ export default function ActivitiesPage() {
     params.delete("type");
     params.delete("clientId");
     params.delete("opportunityId");
+    params.delete("agendaEventId");
     setSearchParams(params, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -220,9 +232,13 @@ export default function ActivitiesPage() {
       await api.post("/activities", {
         type: form.type,
         notes: form.notes.trim(),
+        description: form.notes.trim(),
         dueDate: new Date(form.dueDate).toISOString(),
+        date: new Date(form.dueDate).toISOString(),
+        city: form.city || undefined,
         clientId: form.clientId,
         opportunityId: form.opportunityId || undefined,
+        agendaEventId: form.agendaEventId || undefined,
         ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
       });
       toast.success("Atividade criada com sucesso.");

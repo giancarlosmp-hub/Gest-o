@@ -26,6 +26,10 @@ enum ActivityType {
   whatsapp
   visita
   reuniao
+  followup
+  proposta_enviada
+  proposta_negociacao
+  fechamento
   envio_proposta
   visita_tecnica
   cliente_novo
@@ -98,6 +102,7 @@ model Client {
   createdAt      DateTime      @default(now())
   agendaEvents   AgendaEvent[]
   agendaStops    AgendaStop[]
+  activities     Activity[]
 }
 
 model AgendaEvent {
@@ -116,6 +121,7 @@ model AgendaEvent {
   sellerId      String
   seller        User              @relation(fields: [sellerId], references: [id])
   stops         AgendaStop[]
+  activities    Activity[]
   createdAt     DateTime          @default(now())
   updatedAt     DateTime          @updatedAt
 
@@ -217,10 +223,22 @@ model Activity {
   id            String       @id @default(cuid())
   type          ActivityType
   notes         String
+  description   String?
+  result        String?
   dueDate       DateTime
+  date          DateTime?
+  duration      Int?
+  city          String?
+  crop          String?
+  areaEstimated Float?
+  product       String?
   done          Boolean      @default(false)
+  clientId      String?
+  client        Client?      @relation(fields: [clientId], references: [id])
   opportunityId String?
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  agendaEventId String?
+  agendaEvent   AgendaEvent? @relation(fields: [agendaEventId], references: [id], onDelete: SetNull)
   ownerSellerId String
   ownerSeller   User         @relation(fields: [ownerSellerId], references: [id])
   createdAt     DateTime     @default(now())
