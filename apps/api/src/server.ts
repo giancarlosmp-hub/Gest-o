@@ -2,7 +2,6 @@ import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 
-
 process.on("unhandledRejection", (reason) => {
   console.error("[process] Promise rejeitada sem tratamento", reason);
 });
@@ -25,14 +24,9 @@ async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
   }
 }
 
-async function start() {
+export async function startServer() {
   await waitForDatabase();
   app.listen(env.port, () => {
     console.log(`API on http://localhost:${env.port}`);
   });
 }
-
-start().catch((error) => {
-  console.error("Falha ao iniciar API", error);
-  process.exit(1);
-});
