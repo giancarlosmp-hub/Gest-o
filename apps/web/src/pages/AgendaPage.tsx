@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -13,6 +13,7 @@ type AgendaSummary = { reunioes: number; roteiros: number; followUps: number; ve
 
 type Visualizacao = "diaria" | "semanal" | "mensal" | "lista";
 type PeriodFilter = "hoje" | "esta_semana" | "proximos_7_dias" | "proximos_30_dias" | "personalizado";
+type CreateModalMode = "agenda" | "roteiro";
 
 type CreateAgendaForm = {
   title: string;
@@ -317,6 +318,7 @@ export default function AgendaPage() {
   const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createModalMode, setCreateModalMode] = useState<CreateModalMode>("agenda");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
   const [isActivitySubmitting, setIsActivitySubmitting] = useState(false);
@@ -362,6 +364,7 @@ export default function AgendaPage() {
   });
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
+  const [expandedRouteEventId, setExpandedRouteEventId] = useState<string>("");
   const highlightedEventRef = useRef<HTMLDivElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
   const [executionEventId, setExecutionEventId] = useState("");
@@ -1038,22 +1041,25 @@ export default function AgendaPage() {
     }
   };
 
-  const openCreate = () => {
+  const openCreate = (mode: CreateModalMode = "agenda") => {
+    const isRouteMode = mode === "roteiro";
+    setCreateModalMode(mode);
     setCreateForm({
-      title: "",
-      type: "reuniao_online",
+      title: isRouteMode ? "Roteiro do dia" : "",
+      type: isRouteMode ? "roteiro_visita" : "reuniao_online",
       startDateTime: "",
       endDateTime: "",
       sellerId: user?.role === "vendedor" ? user.id : selectedSellerId,
       notes: ""
     });
-    setDraftStops([]);
+    setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", city: "", plannedTime: "", notes: "" }] : []);
 
     setIsCreateOpen(true);
   };
 
   const closeCreate = () => {
     setIsCreateOpen(false);
+    setCreateModalMode("agenda");
     setDraftStops([]);
   };
 
@@ -1088,6 +1094,19 @@ export default function AgendaPage() {
       return;
     }
 
+    if (createForm.type === "roteiro_visita") {
+      if (!draftStops.length) {
+        toast.error("Adicione ao menos uma parada no roteiro.");
+        return;
+      }
+
+      const hasInvalidStop = draftStops.some((stop) => !stop.clientId && !stop.city.trim());
+      if (hasInvalidStop) {
+        toast.error("Cada parada deve ter cliente ou cidade informada.");
+        return;
+      }
+    }
+
     const ownerId = resolveAgendaOwnerId();
     if (!ownerId) {
       toast.error("Selecione um vendedor para criar a agenda.");
@@ -1096,11 +1115,21 @@ export default function AgendaPage() {
 
     setIsSubmitting(true);
     try {
-      const payload: Record<string, string> = {
+      const payload: Record<string, any> = {
         title: createForm.title.trim(),
         type: createForm.type,
         startDateTime: new Date(createForm.startDateTime).toISOString(),
-        endDateTime: new Date(createForm.endDateTime).toISOString()
+        endDateTime: new Date(createForm.endDateTime).toISOString(),
+        ...(createForm.type === "roteiro_visita"
+          ? {
+              stops: draftStops.map((stop) => ({
+                clientId: stop.clientId || undefined,
+                city: stop.city.trim() || undefined,
+                plannedTime: stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined,
+                notes: stop.notes.trim() || undefined
+              }))
+            }
+          : {})
       };
 
       // Proteção: vendedor sempre cria no próprio ID.
@@ -1112,17 +1141,6 @@ export default function AgendaPage() {
       }
 
       const response = await api.post("/agenda/events", { ...payload, notes: createForm.notes.trim() || undefined });
-
-      if (createForm.type === "roteiro_visita" && draftStops.length) {
-        for (const stop of draftStops) {
-          await api.post(`/agenda/events/${response.data.id}/stops`, {
-            clientId: stop.clientId || undefined,
-            city: stop.city || undefined,
-            plannedTime: stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined,
-            notes: stop.notes || undefined
-          });
-        }
-      }
 
       const createdEvent = mapCreatedAgendaEvent(response.data);
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
@@ -1160,7 +1178,7 @@ export default function AgendaPage() {
           <p className="text-sm text-slate-600">Roteiro de visitas / compromissos</p>
         </div>
 
-        <button type="button" onClick={openCreate} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white">
+        <button type="button" onClick={() => openCreate("agenda")} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white">
           Nova agenda
         </button>
       </header>
@@ -1239,10 +1257,7 @@ export default function AgendaPage() {
             <h3 className="text-base font-semibold text-slate-900">Roteiro de Visitas (dia)</h3>
             <p className="text-sm text-slate-500">Planeje múltiplas paradas e acompanhe execução no dia.</p>
           </div>
-          <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white" onClick={() => {
-            openCreate();
-            setCreateForm((current) => ({ ...current, type: "roteiro_visita", title: "Roteiro do dia" }));
-          }}>
+          <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white" onClick={() => openCreate("roteiro")}>
             Criar roteiro
           </button>
         </div>
@@ -1355,6 +1370,7 @@ export default function AgendaPage() {
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                       <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}>{TYPE_LABEL[normalizeAgendaEventType(event.type)]}</span>
+                      {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                       <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                       <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                         {sellerById[event.userId] || "Vendedor"}
@@ -1374,8 +1390,8 @@ export default function AgendaPage() {
                   {group.events.map((event) => {
                     const isHighlighted = event.id === highlightedEventId;
                     return (
+                      <Fragment key={event.id}>
                       <div
-                        key={event.id}
                         ref={isHighlighted ? highlightedEventRef : null}
                         className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
                       >
@@ -1385,6 +1401,7 @@ export default function AgendaPage() {
 
                           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
                             <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                            {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                             <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                             <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
                               {sellerById[event.userId] || "Vendedor"}
@@ -1396,6 +1413,15 @@ export default function AgendaPage() {
                         </div>
 
                         <div className="flex shrink-0 items-center gap-2">
+                          {event.type === "roteiro_visita" ? (
+                            <button
+                              type="button"
+                              className="rounded-md border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+                              onClick={() => setExpandedRouteEventId((current) => (current === event.id ? "" : event.id))}
+                            >
+                              {expandedRouteEventId === event.id ? "Ocultar paradas" : "Ver paradas"}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             title={event.status === "realizado" ? "Reabrir compromisso" : "Marcar como realizado"}
@@ -1418,6 +1444,20 @@ export default function AgendaPage() {
                           ) : null}
                         </div>
                       </div>
+                      {event.type === "roteiro_visita" && expandedRouteEventId === event.id ? (
+                        <div className="border-t border-emerald-100 bg-emerald-50 px-4 py-3">
+                          {!event.stops?.length ? (
+                            <p className="text-xs text-emerald-700">Sem paradas cadastradas.</p>
+                          ) : (
+                            <ul className="space-y-1 text-xs text-emerald-900">
+                              {event.stops.map((stop) => (
+                                <li key={stop.id}>#{stop.order} · {stop.clientName || "Cliente"}{stop.city ? ` · ${stop.city}` : ""}{stop.notes ? ` · ${stop.notes}` : ""}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ) : null}
+                      </Fragment>
                     );
                   })}
                 </div>
@@ -1432,8 +1472,8 @@ export default function AgendaPage() {
           <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Nova agenda</h3>
-                <p className="text-sm text-slate-500">Informe os dados básicos para criar um compromisso.</p>
+                <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
+                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje paradas por cliente/cidade para execução do vendedor." : "Informe os dados básicos para criar um compromisso."}</p>
               </div>
               <button type="button" onClick={closeCreate} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
                 ✕
@@ -1454,17 +1494,21 @@ export default function AgendaPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
-                  <select
-                    value={createForm.type}
-                    onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  >
-                    {AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
-                      <option key={option.id} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  {createModalMode === "roteiro" ? (
+                    <input value="Roteiro de visita" readOnly className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" />
+                  ) : (
+                    <select
+                      value={createForm.type}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    >
+                      {AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 {canFilterBySeller ? (
@@ -1523,21 +1567,24 @@ export default function AgendaPage() {
 
               {createForm.type === "roteiro_visita" ? (
                 <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs text-emerald-700">Paradas são obrigatórias no roteiro.</p>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-emerald-800">Paradas</p>
                     <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", city: "", plannedTime: "", notes: "" }])}>Adicionar parada</button>
                   </div>
                   {draftStops.map((stop, index) => (
-                    <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-4">
+                    <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-5">
                       <select value={stop.clientId} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId: event.target.value } : item))} className="rounded border px-2 py-1 text-xs">
                         <option value="">Cliente</option>
                         {activityClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
                       </select>
                       <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-1 text-xs" />
                       <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-1 text-xs" />
-                      <div className="flex gap-1">
+                      <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-1 text-xs" />
+                      <div className="flex gap-1 justify-end">
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
+                        <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => setDraftStops((current) => current.filter((item) => item.id !== stop.id))}>✕</button>
                       </div>
                     </div>
                   ))}
@@ -1553,7 +1600,7 @@ export default function AgendaPage() {
                   disabled={isSubmitting}
                   className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {isSubmitting ? "Salvando..." : "Salvar agenda"}
+                  {isSubmitting ? "Salvando..." : createModalMode === "roteiro" ? "Salvar roteiro" : "Salvar agenda"}
                 </button>
               </div>
             </form>
