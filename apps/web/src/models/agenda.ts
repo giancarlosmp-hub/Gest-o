@@ -1,32 +1,34 @@
 export type AgendaEventType = "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup";
 
-export type AgendaEventStatus = "agendado" | "realizado" | "vencido" | "cancelado";
+export type AgendaEventStatus = "planned" | "completed" | "cancelled";
 
 export type AgendaEvent = {
   id: string;
-  userId: string;
+  ownerId: string;
   clientId?: string;
   opportunityId?: string;
-  title: string;
-  description: string;
-  observation?: string;
   type: AgendaEventType;
-  startDateTime: string;
-  endDateTime: string;
-  location?: string;
+  title: string;
+  notes?: string | null;
+  startsAt: string;
+  endsAt: string;
   city?: string;
+  status: AgendaEventStatus;
+
+  // Backward compatibility fields
+  userId?: string;
+  sellerId?: string;
+  description?: string;
+  startDateTime?: string;
+  endDateTime?: string;
+  isOverdue?: boolean;
   mapsIntegration?: {
     placeId?: string;
     waypointOrder?: number;
     routeLegId?: string;
   };
-  status: AgendaEventStatus;
-  isOverdue?: boolean;
-  sellerId?: string;
-  notes?: string | null;
   stops?: AgendaStop[];
 };
-
 
 export type AgendaStop = {
   id: string;
