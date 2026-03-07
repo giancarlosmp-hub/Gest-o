@@ -953,7 +953,9 @@ export default function AgendaPage() {
   };
 
   const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
+    if (agendaType === "reuniao_online" || agendaType === "reuniao_presencial") return "reuniao";
     if (agendaType === "roteiro_visita") return "visita";
+    if (agendaType === "followup") return "followup";
     return "reuniao";
   };
 
@@ -962,8 +964,11 @@ export default function AgendaPage() {
     params.set("open", "create");
     params.set("date", getEndsAt(agendaEvent));
     params.set("type", getSuggestedActivityType(agendaEvent.type));
+    params.set("ownerSellerId", getOwnerId(agendaEvent));
+    params.set("notes", agendaEvent.notes || agendaEvent.description || agendaEvent.title);
     if (agendaEvent.clientId) params.set("clientId", agendaEvent.clientId);
     if (agendaEvent.opportunityId) params.set("opportunityId", agendaEvent.opportunityId);
+    if (agendaEvent.city) params.set("city", agendaEvent.city);
     if (agendaEvent.id) params.set("agendaEventId", agendaEvent.id);
     navigate(`/atividades?${params.toString()}`);
   };
@@ -1462,15 +1467,14 @@ export default function AgendaPage() {
                           >
                             ✓
                           </button>
-                          {event.status === "completed" ? (
-                            <button
-                              type="button"
-                              className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50"
-                              onClick={() => void openActivityModal(event)}
-                            >
-                              Registrar atividade
-                            </button>
-                          ) : null}
+                          <button
+                            type="button"
+                            className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={event.status === "completed"}
+                            onClick={() => void openActivityModal(event)}
+                          >
+                            {event.status === "completed" ? "Atividade já registrada" : "Registrar atividade"}
+                          </button>
 
                           {event.clientId ? (
                             <Link

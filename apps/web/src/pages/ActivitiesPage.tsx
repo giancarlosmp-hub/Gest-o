@@ -43,7 +43,21 @@ type ActivityFilters = {
   overdueOnly: boolean;
 };
 
-const initialForm = { type: "ligacao", notes: "", dueDate: "", city: "", clientId: "", opportunityId: "", agendaEventId: "", ownerSellerId: "" };
+const initialForm = {
+  type: "ligacao",
+  notes: "",
+  dueDate: "",
+  city: "",
+  clientId: "",
+  opportunityId: "",
+  agendaEventId: "",
+  ownerSellerId: "",
+  result: "",
+  duration: "",
+  crop: "",
+  areaEstimated: "",
+  product: ""
+};
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
 const STATUS_LABEL: Record<ActivityStatus, string> = {
@@ -182,14 +196,20 @@ export default function ActivitiesPage() {
     const clientId = searchParams.get("clientId") || "";
     const opportunityId = searchParams.get("opportunityId") || "";
     const agendaEventId = searchParams.get("agendaEventId") || "";
+    const ownerSellerId = searchParams.get("ownerSellerId") || "";
+    const notes = searchParams.get("notes") || "";
+    const city = searchParams.get("city") || "";
 
     setForm((current) => ({
       ...current,
-      type,
+      type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
       dueDate: date ? new Date(date).toISOString().slice(0, 16) : current.dueDate,
       clientId,
       opportunityId,
-      agendaEventId
+      agendaEventId,
+      ownerSellerId: ownerSellerId || current.ownerSellerId,
+      notes: notes || current.notes,
+      city: city || current.city
     }));
     setIsModalOpen(true);
 
@@ -200,6 +220,9 @@ export default function ActivitiesPage() {
     params.delete("clientId");
     params.delete("opportunityId");
     params.delete("agendaEventId");
+    params.delete("ownerSellerId");
+    params.delete("notes");
+    params.delete("city");
     setSearchParams(params, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -233,15 +256,23 @@ export default function ActivitiesPage() {
         type: form.type,
         notes: form.notes.trim(),
         description: form.notes.trim(),
+        result: form.result.trim() || undefined,
         dueDate: new Date(form.dueDate).toISOString(),
         date: new Date(form.dueDate).toISOString(),
+        duration: form.duration ? Number(form.duration) : undefined,
         city: form.city || undefined,
+        crop: form.crop.trim() || undefined,
+        areaEstimated: form.areaEstimated ? Number(form.areaEstimated) : undefined,
+        product: form.product.trim() || undefined,
         clientId: form.clientId,
         opportunityId: form.opportunityId || undefined,
         agendaEventId: form.agendaEventId || undefined,
         ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
       });
-      toast.success("Atividade criada com sucesso.");
+      toast.success(form.agendaEventId ? "Atividade registrada com sucesso" : "Atividade criada com sucesso.");
+      if (form.agendaEventId) {
+        toast.success("Compromisso concluído automaticamente");
+      }
       closeCreateModal();
       await loadActivities();
     } catch (error) {
@@ -473,6 +504,26 @@ export default function ActivitiesPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="text-sm">Resultado (opcional)</label>
+                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-sm">Duração em minutos (opcional)</label>
+                  <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-sm">Cultura (opcional)</label>
+                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.crop} onChange={(event) => setForm((previous) => ({ ...previous, crop: event.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-sm">Área estimada (opcional)</label>
+                  <input type="number" step="0.01" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={form.areaEstimated} onChange={(event) => setForm((previous) => ({ ...previous, areaEstimated: event.target.value }))} />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-sm">Produto (opcional)</label>
+                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Notas</label>
