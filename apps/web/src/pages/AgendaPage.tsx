@@ -728,10 +728,13 @@ export default function AgendaPage() {
         const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
         await api.post("/activities", {
           type: "followup",
-          dueDate: nextStepDate.toISOString(),
-          notes: `Follow-up da visita: ${activeStop?.clientName || executionEvent.title} — ${visitResultForm.summary || "Sem resumo informado"}`,
+          date: nextStepDate.toISOString(),
+          description: `Follow-up da visita: ${activeStop?.clientName || executionEvent.title} — ${visitResultForm.summary || "Sem resumo informado"}`,
+          result: visitResultForm.summary || undefined,
+          city: executionEvent.city || undefined,
           clientId: activeStop?.clientId || executionEvent.clientId,
           opportunityId: executionEvent.opportunityId || undefined,
+          agendaEventId: executionEvent.id,
           ownerSellerId: executionEvent.userId
         });
         toast.success("Follow-up criado na lista de atividades.");
@@ -953,7 +956,8 @@ export default function AgendaPage() {
   };
 
   const getSuggestedActivityType = (agendaType: AgendaEventType): ActivityTypeKey => {
-    if (agendaType === "roteiro_visita") return "visita_tecnica";
+    if (agendaType === "roteiro_visita") return "visita";
+    if (agendaType === "followup") return "followup";
     return "reuniao";
   };
 
@@ -985,9 +989,12 @@ export default function AgendaPage() {
     try {
       await api.post("/activities", {
         type: activityForm.type,
-        notes: activityForm.notes.trim(),
-        dueDate: new Date(activityForm.dueDate).toISOString(),
+        description: activityForm.notes.trim(),
+        date: new Date(activityForm.dueDate).toISOString(),
+        city: activityEvent?.city || undefined,
         clientId: activityForm.clientId,
+        opportunityId: activityEvent?.opportunityId || undefined,
+        agendaEventId: activityEvent?.id || undefined,
         ownerSellerId: activityEvent?.userId || (user?.role === "vendedor" ? user.id : selectedSellerId || undefined)
       });
       toast.success("Atividade registrada com sucesso.");

@@ -1,18 +1,21 @@
-export type ActivityTypeKey = "ligacao" | "whatsapp" | "reuniao" | "envio_proposta" | "visita_tecnica" | "cliente_novo";
+export type ActivityTypeKey = "visita" | "reuniao" | "ligacao" | "followup" | "proposta_enviada" | "proposta_negociacao" | "fechamento";
 
 export const ACTIVITY_TYPE_OPTIONS: Array<{ value: ActivityTypeKey; label: string }> = [
-  { value: "ligacao", label: "Ligação" },
-  { value: "whatsapp", label: "WhatsApp" },
+  { value: "visita", label: "Visita" },
   { value: "reuniao", label: "Reunião" },
-  { value: "envio_proposta", label: "Envio de proposta" },
-  { value: "visita_tecnica", label: "Visita técnica" },
-  { value: "cliente_novo", label: "Cliente novo (Prospecção)" }
+  { value: "ligacao", label: "Ligação" },
+  { value: "followup", label: "Follow-up" },
+  { value: "proposta_enviada", label: "Proposta enviada" },
+  { value: "proposta_negociacao", label: "Proposta em negociação" },
+  { value: "fechamento", label: "Fechamento" }
 ];
 
 const LEGACY_TYPE_MAP: Record<string, ActivityTypeKey> = {
-  mensagem: "whatsapp",
-  visita_presencial: "reuniao",
-  visita: "reuniao"
+  follow_up: "followup",
+  envio_proposta: "proposta_enviada",
+  visita_tecnica: "visita",
+  whatsapp: "ligacao",
+  cliente_novo: "visita"
 };
 
 const LABEL_BY_TYPE = ACTIVITY_TYPE_OPTIONS.reduce<Record<ActivityTypeKey, string>>((accumulator, option) => {

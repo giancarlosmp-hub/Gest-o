@@ -14,7 +14,9 @@ type ActivityStatus = "agendado" | "vencido" | "realizado";
 type Activity = {
   id: string;
   type: string;
+  description?: string;
   notes: string;
+  date?: string;
   dueDate: string;
   done: boolean;
   status?: ActivityStatus;
@@ -219,8 +221,8 @@ export default function ActivitiesPage() {
     try {
       await api.post("/activities", {
         type: form.type,
-        notes: form.notes.trim(),
-        dueDate: new Date(form.dueDate).toISOString(),
+        description: form.notes.trim(),
+        date: new Date(form.dueDate).toISOString(),
         clientId: form.clientId,
         opportunityId: form.opportunityId || undefined,
         ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined

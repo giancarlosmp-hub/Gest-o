@@ -331,7 +331,7 @@ export default function HomePage() {
     const targetKeys = {
       ligacao: ["ligacao"],
       visita: ["visita", "visita_tecnica", "visita_presencial"],
-      proposta: ["envio_proposta"]
+      proposta: ["proposta_enviada", "proposta_negociacao", "envio_proposta"]
     };
 
     const monthlyTargetByType = activityKpis.reduce<Record<string, number>>((accumulator, item) => {
