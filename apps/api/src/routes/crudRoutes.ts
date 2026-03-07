@@ -598,7 +598,18 @@ const agendaEventCreateSchema = z.object({
   clientId: z.string().optional(),
   city: z.string().optional(),
   notes: z.string().optional(),
-  opportunityId: z.string().optional()
+  opportunityId: z.string().optional(),
+  stops: z
+    .array(
+      z.object({
+        clientId: z.string().optional(),
+        city: z.string().optional(),
+        address: z.string().optional(),
+        plannedTime: z.string().optional(),
+        notes: z.string().optional()
+      })
+    )
+    .optional()
 });
 
 const agendaEventUpdateSchema = z.object({
@@ -4274,6 +4285,11 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
 
 router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema), async (req, res) => {
   const sellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.sellerId);
+
+  if (req.body.type === "roteiro_visita" && (!Array.isArray(req.body.stops) || req.body.stops.length === 0)) {
+    return res.status(400).json({ message: "Roteiro de visita deve conter ao menos uma parada." });
+  }
+
   const event = await prisma.agendaEvent.create({
     data: {
       title: req.body.title,
@@ -4284,7 +4300,21 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
       clientId: req.body.clientId,
       city: req.body.city,
       notes: req.body.notes,
-      opportunityId: req.body.opportunityId
+      opportunityId: req.body.opportunityId,
+      ...(req.body.stops?.length
+        ? {
+            stops: {
+              create: req.body.stops.map((stop: any, index: number) => ({
+                order: index + 1,
+                clientId: stop.clientId,
+                city: stop.city,
+                address: stop.address,
+                plannedTime: stop.plannedTime ? new Date(stop.plannedTime) : undefined,
+                notes: stop.notes
+              }))
+            }
+          }
+        : {})
     },
     include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
   });
