@@ -31,6 +31,7 @@ type Activity = {
   isOverdue?: boolean;
   ownerSellerId: string;
   ownerSeller?: { id: string; name: string };
+  client?: { id: string; name: string } | null;
   opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null;
 };
 
@@ -401,7 +402,7 @@ export default function ActivitiesPage() {
               {activities.map((item) => (
                 <tr key={item.id} className="border-t border-slate-100">
                   <td className="p-2">{toLabel(item.type)}</td>
-                  <td className="p-2">{item.opportunity?.client?.name || "—"}</td>
+                  <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
                   <td className="p-2">{item.opportunity?.title || "—"}</td>
                   <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
                   <td className="p-2">

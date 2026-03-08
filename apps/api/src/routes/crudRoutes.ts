@@ -3954,11 +3954,19 @@ router.get("/activities", async (req, res) => {
       ...(type ? resolveActivityTypeFilters(type) : {}),
       ...(doneQuery !== undefined ? { done: doneQuery } : {}),
       ...(monthRange ? { dueDate: { gte: monthRange.start, lte: monthRange.end } } : {}),
-      ...(clientId ? { opportunity: { clientId } } : {}),
+      ...(clientId
+        ? {
+            OR: [
+              { clientId },
+              { opportunity: { clientId } }
+            ]
+          }
+        : {}),
       ...(q
         ? {
             OR: [
               { notes: { contains: q, mode: "insensitive" } },
+              { client: { name: { contains: q, mode: "insensitive" } } },
               { opportunity: { title: { contains: q, mode: "insensitive" } } },
               { opportunity: { client: { name: { contains: q, mode: "insensitive" } } } }
             ]
@@ -3967,6 +3975,12 @@ router.get("/activities", async (req, res) => {
     },
     include: {
       ownerSeller: { select: { id: true, name: true } },
+      client: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
       opportunity: {
         select: {
           id: true,
@@ -4121,6 +4135,18 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
   const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : undefined;
   const executionDate = req.body.date ? new Date(req.body.date) : undefined;
 
+  const existingActivity = await prisma.activity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!existingActivity) {
+    return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
   const updatedActivity = await prisma.activity.update({
     where: { id: req.params.id },
     data: {
@@ -4145,10 +4171,37 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
   return res.json(mapActivity(updatedActivity));
 });
 router.patch("/activities/:id/done", async (req, res) => {
+  const existingActivity = await prisma.activity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!existingActivity) {
+    return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
   const updatedActivity = await prisma.activity.update({ where: { id: req.params.id }, data: { done: Boolean(req.body.done) } });
   return res.json(mapActivity(updatedActivity));
 });
-router.delete("/activities/:id", async (req, res) => { await prisma.activity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+router.delete("/activities/:id", async (req, res) => {
+  const existingActivity = await prisma.activity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req)
+    },
+    select: { id: true }
+  });
+
+  if (!existingActivity) {
+    return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
+  await prisma.activity.delete({ where: { id: req.params.id } });
+  res.status(204).send();
+});
 
 router.get("/events", async (req, res) => {
   const opportunityId = req.query.opportunityId as string | undefined;
