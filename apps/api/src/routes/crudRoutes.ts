@@ -533,6 +533,7 @@ const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "reuniao", "followup
 
 const resolveExecutionActivityDateFilter = (from: Date, to: Date): Prisma.ActivityWhereInput => ({
   OR: [
+    { date: { gte: from, lte: to } },
     { createdAt: { gte: from, lte: to } },
     { dueDate: { gte: from, lte: to } }
   ]
@@ -543,8 +544,9 @@ const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: Activi
   return prisma.activity.count({
     where: {
       ownerSellerId,
+      done: true,
       ...resolveActivityTypeFilters(type),
-      createdAt: { gte: start, lte: end }
+      ...resolveExecutionActivityDateFilter(start, end)
     }
   });
 };
@@ -1404,6 +1406,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        done: true,
         ...resolveActivityTypeFilters("visita", "reuniao", "followup", "follow_up"),
         ...resolveExecutionActivityDateFilter(from, to)
       },
@@ -1418,6 +1421,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        done: true,
         ...resolveActivityTypeFilters("followup", "follow_up"),
         ...resolveExecutionActivityDateFilter(from, to)
       },
@@ -1541,6 +1545,7 @@ router.get("/reports/weekly-discipline", async (req, res) => {
       by: ["ownerSellerId"],
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        done: true,
         ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
         ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
@@ -1810,6 +1815,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     prisma.activity.findMany({
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        done: true,
         ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
         ...resolveExecutionActivityDateFilter(from, to)
       },
@@ -1825,6 +1831,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       by: ["ownerSellerId"],
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        done: true,
         ...resolveActivityTypeFilters("visita", "reuniao"),
         ...resolveExecutionActivityDateFilter(inactivityWindow.start, inactivityWindow.end)
       },
@@ -2068,6 +2075,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     prisma.activity.findMany({
       where: {
         ...sellerWhere(req),
+        done: true,
         ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
         ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
@@ -2192,7 +2200,6 @@ router.get("/reports/commercial-score", async (req, res) => {
 
   const scopedSellerId = undefined;
   const { start, end } = getMonthRangeFromKey(month);
-  const punctualToleranceMs = 10 * 60 * 1000;
   const stageOrder: Record<string, number> = {
     prospeccao: 0,
     negociacao: 1,
@@ -2209,24 +2216,14 @@ router.get("/reports/commercial-score", async (req, res) => {
       },
       select: { id: true, name: true }
     }),
-    prisma.agendaEvent.findMany({
+    prisma.agendaEvent.groupBy({
+      by: ["sellerId"],
       where: {
         type: "roteiro_visita",
         startDateTime: { gte: start, lte: end },
         ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
       },
-      select: {
-        sellerId: true,
-        opportunityId: true,
-        stops: {
-          select: {
-            plannedTime: true,
-            checkInAt: true,
-            checkOutAt: true
-          },
-          orderBy: { order: "asc" }
-        }
-      }
+      _count: { _all: true }
     }),
     prisma.opportunity.findMany({
       where: {
@@ -2280,62 +2277,65 @@ router.get("/reports/commercial-score", async (req, res) => {
     })
   ]);
 
-  const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
-  const followUps = opportunities.length
-    ? await prisma.activity.findMany({
-        where: {
-          ...resolveActivityTypeFilters("followup", "follow_up"),
-          createdAt: { gte: start, lte: end },
-          ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
-          opportunityId: { in: opportunities }
-        },
-        select: {
-          ownerSellerId: true,
-          opportunityId: true,
-          createdAt: true
-        }
-      })
-    : [];
-
-  const followUpsIndex = followUps.reduce<Record<string, Date[]>>((acc, followUp) => {
-    if (!followUp.opportunityId) return acc;
-    const key = `${followUp.ownerSellerId}:${followUp.opportunityId}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(followUp.createdAt);
+  const plannedBySeller = plannedEvents.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._count._all;
     return acc;
   }, {});
 
-  const disciplineBySeller = plannedEvents.reduce<Record<string, { planned: number; executed: number; punctual: number; followUpAfterVisit: number }>>(
-    (acc, event) => {
-      if (!acc[event.sellerId]) {
-        acc[event.sellerId] = { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
-      }
+  const executionActivities = await prisma.activity.findMany({
+    where: {
+      ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+      done: true,
+      ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
+      ...resolveExecutionActivityDateFilter(start, end)
+    },
+    select: {
+      ownerSellerId: true,
+      opportunityId: true,
+      type: true,
+      createdAt: true,
+      dueDate: true,
+      date: true
+    }
+  });
 
-      const sellerStats = acc[event.sellerId];
-      sellerStats.planned += 1;
+  const followUpsIndex = executionActivities
+    .filter((item) => normalizeActivityType(item.type) === "followup" && item.opportunityId)
+    .reduce<Record<string, Date[]>>((acc, item) => {
+      if (!item.opportunityId) return acc;
+      const key = `${item.ownerSellerId}:${item.opportunityId}`;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item.date || item.createdAt || item.dueDate);
+      return acc;
+    }, {});
 
-      const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
-      const firstCheckout = event.stops.find((stop) => Boolean(stop.checkOutAt))?.checkOutAt;
-
-      if (firstCheckout) {
-        sellerStats.executed += 1;
-        if (event.opportunityId) {
-          const key = `${event.sellerId}:${event.opportunityId}`;
-          const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= firstCheckout.getTime());
-          if (hasFollowUpAfterVisit) sellerStats.followUpAfterVisit += 1;
-        }
-      }
-
-      if (firstStopWithCheckIn?.plannedTime && firstStopWithCheckIn.checkInAt) {
-        if (firstStopWithCheckIn.checkInAt.getTime() <= firstStopWithCheckIn.plannedTime.getTime() + punctualToleranceMs) {
-          sellerStats.punctual += 1;
-        }
-      }
-
+  const disciplineBySeller = sellers.reduce<Record<string, { planned: number; executed: number; punctual: number; followUpAfterVisit: number }>>(
+    (acc, seller) => {
+      acc[seller.id] = { planned: plannedBySeller[seller.id] || 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
       return acc;
     },
     {}
   );
+
+  for (const activity of executionActivities) {
+    if (!disciplineBySeller[activity.ownerSellerId]) {
+      disciplineBySeller[activity.ownerSellerId] = { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
+    }
+
+    const sellerStats = disciplineBySeller[activity.ownerSellerId];
+    sellerStats.executed += 1;
+    sellerStats.punctual += 1;
+
+    const normalizedType = normalizeActivityType(activity.type);
+    if ((normalizedType === "visita" || normalizedType === "reuniao") && activity.opportunityId) {
+      const key = `${activity.ownerSellerId}:${activity.opportunityId}`;
+      const executionDate = activity.date || activity.createdAt || activity.dueDate;
+      const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= executionDate.getTime());
+      if (hasFollowUpAfterVisit) {
+        sellerStats.followUpAfterVisit += 1;
+      }
+    }
+  }
 
   const referenceDate = end.getTime() > Date.now() ? new Date() : end;
 
@@ -4645,7 +4645,8 @@ router.get("/activity-kpis", async (req, res) => {
       by: ["ownerSellerId", "type"],
       where: {
         ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
-        createdAt: { gte: start, lte: end }
+        done: true,
+        ...resolveExecutionActivityDateFilter(start, end)
       },
       _count: { _all: true }
     })

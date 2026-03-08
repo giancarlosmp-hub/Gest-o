@@ -61,6 +61,9 @@ type Activity = {
   type: string;
   ownerSellerId: string;
   createdAt: string;
+  dueDate: string;
+  date?: string;
+  done?: boolean;
 };
 
 type ActivityTypeSummary = {
@@ -751,7 +754,8 @@ export default function DashboardPage() {
     for (const item of activities) {
       const normalizedType = normalizeActivityType(item.type);
       realizedByType.set(normalizedType, (realizedByType.get(normalizedType) ?? 0) + 1);
-      const day = item.createdAt.slice(0, 10);
+      const executionDate = item.date || item.createdAt || item.dueDate;
+      const day = executionDate.slice(0, 10);
       realizedByDay.set(day, (realizedByDay.get(day) ?? 0) + 1);
     }
 
