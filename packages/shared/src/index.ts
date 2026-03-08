@@ -102,7 +102,7 @@ export const activitySchema = z.object({
   notes: z.string().min(2).optional(),
   description: z.string().min(2).optional(),
   result: z.string().min(1).optional(),
-  dueDate: z.string(),
+  dueDate: z.string().optional(),
   date: z.string().optional(),
   duration: z.number().int().nonnegative().optional(),
   city: z.string().min(2).optional(),
@@ -113,6 +113,7 @@ export const activitySchema = z.object({
   opportunityId: z.string().optional(),
   clientId: z.string().optional(),
   agendaEventId: z.string().optional(),
+  ownerId: z.string().optional(),
   ownerSellerId: z.string().optional()
 });
 
