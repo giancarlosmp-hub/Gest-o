@@ -4214,6 +4214,7 @@ const mapAgendaEvent = (agendaEvent: any) => {
   const endsAt = agendaEvent.endDateTime.toISOString();
   const ownerId = agendaEvent.sellerId;
   const isOverdue = status === "planned" && new Date(endsAt).getTime() < Date.now();
+  const linkedActivityId = agendaEvent.activities?.[0]?.id || null;
 
   return {
   id: agendaEvent.id,
@@ -4232,6 +4233,8 @@ const mapAgendaEvent = (agendaEvent: any) => {
   isOverdue,
   city: agendaEvent.city,
   notes: agendaEvent.notes,
+  linkedActivityId,
+  hasLinkedActivity: Boolean(linkedActivityId),
   stops: (agendaEvent.stops || []).map((stop: any) => ({
     id: stop.id,
     order: stop.order,
@@ -4280,7 +4283,11 @@ router.get(["/agenda", "/agenda/events"], async (req, res) => {
 
   const events = await prisma.agendaEvent.findMany({
     where,
-    include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } }, client: true },
+    include: {
+      stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } },
+      client: true,
+      activities: { select: { id: true }, orderBy: { createdAt: "desc" }, take: 1 }
+    },
     orderBy: { startDateTime: "asc" }
   });
 

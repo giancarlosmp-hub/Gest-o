@@ -33,13 +33,6 @@ type DraftStop = {
   notes: string;
 };
 
-type ActivityForm = {
-  type: ActivityTypeKey;
-  notes: string;
-  dueDate: string;
-  clientId: string;
-};
-
 type ClientOption = { id: string; name: string };
 
 type FollowUpForm = {
@@ -78,13 +71,6 @@ const NEXT_STEP_LABEL: Record<VisitResultForm["nextStep"], string> = {
   criar_followup: "Criar follow-up",
   criar_oportunidade: "Criar oportunidade",
   reagendar: "Reagendar"
-};
-
-const initialActivityForm: ActivityForm = {
-  type: "reuniao",
-  notes: "",
-  dueDate: "",
-  clientId: ""
 };
 
 const TYPE_LABEL: Record<SharedAgendaEventType, string> = AGENDA_EVENT_TYPE_OPTIONS.reduce((acc, option) => {
@@ -327,6 +313,8 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
     isOverdue: Boolean(item.isOverdue),
     city: item.city ? String(item.city) : undefined,
     notes: item.notes ? String(item.notes) : null,
+    linkedActivityId: item.linkedActivityId ? String(item.linkedActivityId) : null,
+    hasLinkedActivity: Boolean(item.hasLinkedActivity),
     stops: Array.isArray(item.stops)
       ? item.stops.map((stop: any) => ({
           ...stop,
@@ -357,11 +345,7 @@ export default function AgendaPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createModalMode, setCreateModalMode] = useState<CreateModalMode>("agenda");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isActivityModalOpen, setIsActivityModalOpen] = useState(false);
-  const [isActivitySubmitting, setIsActivitySubmitting] = useState(false);
   const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
-  const [activityForm, setActivityForm] = useState<ActivityForm>(initialActivityForm);
-  const [activityEvent, setActivityEvent] = useState<AgendaEvent | null>(null);
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
   const [isFollowUpSubmitting, setIsFollowUpSubmitting] = useState(false);
   const [followUpSourceEvent, setFollowUpSourceEvent] = useState<AgendaEvent | null>(null);
@@ -963,51 +947,24 @@ export default function AgendaPage() {
   };
 
   const openActivityModal = async (agendaEvent: AgendaEvent) => {
+    if (agendaEvent.hasLinkedActivity || agendaEvent.linkedActivityId) {
+      toast.info("Este compromisso já possui atividade vinculada.");
+      navigate("/atividades");
+      return;
+    }
+
     const params = new URLSearchParams();
     params.set("open", "create");
     params.set("date", getEndsAt(agendaEvent));
     params.set("type", getSuggestedActivityType(agendaEvent.type));
     params.set("ownerSellerId", getOwnerId(agendaEvent));
     params.set("notes", agendaEvent.notes || agendaEvent.description || agendaEvent.title);
+    params.set("title", agendaEvent.title);
     if (agendaEvent.clientId) params.set("clientId", agendaEvent.clientId);
     if (agendaEvent.opportunityId) params.set("opportunityId", agendaEvent.opportunityId);
     if (agendaEvent.city) params.set("city", agendaEvent.city);
     if (agendaEvent.id) params.set("agendaEventId", agendaEvent.id);
     navigate(`/atividades?${params.toString()}`);
-  };
-
-  const closeActivityModal = () => {
-    setIsActivityModalOpen(false);
-    setActivityEvent(null);
-    setActivityForm(initialActivityForm);
-  };
-
-  const onSubmitActivity = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!activityForm.clientId || !activityForm.notes.trim() || !activityForm.dueDate) {
-      toast.error("Selecione cliente, notas e vencimento para registrar a atividade.");
-      return;
-    }
-
-    setIsActivitySubmitting(true);
-    try {
-      await api.post("/activities", {
-        type: activityForm.type,
-        notes: activityForm.notes.trim(),
-        dueDate: new Date(activityForm.dueDate).toISOString(),
-        clientId: activityForm.clientId,
-        agendaEventId: activityEvent?.id,
-        ownerSellerId: activityEvent?.userId || (user?.role === "vendedor" ? user.id : selectedSellerId || undefined)
-      });
-      toast.success("Atividade registrada com sucesso.");
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
-      closeActivityModal();
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível registrar atividade."));
-    } finally {
-      setIsActivitySubmitting(false);
-    }
   };
 
   const openRescheduleModal = (agendaEvent: AgendaEvent) => {
@@ -1466,20 +1423,20 @@ export default function AgendaPage() {
                           ) : null}
                           <button
                             type="button"
-                            title={event.status === "completed" ? "Reabrir compromisso" : "Marcar como concluído"}
-                            aria-label={event.status === "completed" ? "Reabrir compromisso" : "Marcar como concluído"}
+                            title={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
+                            aria-label={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
                             className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
                             onClick={() => void onSetAsDone(event)}
                           >
-                            ✓
+                            {event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
                           </button>
                           <button
                             type="button"
                             className="rounded-md border border-brand-300 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={event.status === "completed"}
+                            disabled={Boolean(event.hasLinkedActivity || event.linkedActivityId)}
                             onClick={() => void openActivityModal(event)}
                           >
-                            {event.status === "completed" ? "Atividade já registrada" : "Registrar atividade"}
+                            {event.hasLinkedActivity || event.linkedActivityId ? "Ver atividade" : "Registrar atividade"}
                           </button>
 
                           {event.clientId ? (
@@ -1757,89 +1714,6 @@ export default function AgendaPage() {
                 <button type="button" onClick={() => setIsQuickOpportunityModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
                 <button type="submit" disabled={isQuickOpportunitySubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
                   {isQuickOpportunitySubmitting ? "Salvando..." : "Salvar oportunidade"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {isActivityModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeActivityModal}>
-          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">Registrar atividade</h3>
-                <p className="text-sm text-slate-500">Cliente e tipo sugeridos a partir do próximo compromisso.</p>
-              </div>
-              <button type="button" onClick={closeActivityModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
-                ✕
-              </button>
-            </div>
-
-            <form className="space-y-3" onSubmit={onSubmitActivity}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
-                  <select
-                    value={activityForm.type}
-                    onChange={(event) => setActivityForm((current) => ({ ...current, type: event.target.value as ActivityTypeKey }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  >
-                    {ACTIVITY_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Vencimento</label>
-                  <input
-                    type="datetime-local"
-                    value={activityForm.dueDate}
-                    onChange={(event) => setActivityForm((current) => ({ ...current, dueDate: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                <select
-                  value={activityForm.clientId}
-                  onChange={(event) => setActivityForm((current) => ({ ...current, clientId: event.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <option value="">Selecione...</option>
-                  {activityClients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Notas</label>
-                <textarea
-                  value={activityForm.notes}
-                  onChange={(event) => setActivityForm((current) => ({ ...current, notes: event.target.value }))}
-                  className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeActivityModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isActivitySubmitting}
-                  className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  {isActivitySubmitting ? "Salvando..." : "Salvar atividade"}
                 </button>
               </div>
             </form>

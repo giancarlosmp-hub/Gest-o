@@ -199,17 +199,18 @@ export default function ActivitiesPage() {
     const agendaEventId = searchParams.get("agendaEventId") || "";
     const ownerSellerId = searchParams.get("ownerSellerId") || "";
     const notes = searchParams.get("notes") || "";
+    const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
 
     setForm((current) => ({
       ...current,
       type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
-      dueDate: date ? new Date(date).toISOString().slice(0, 16) : current.dueDate,
+      dueDate: date ? new Date(date).toISOString().slice(0, 10) : current.dueDate,
       clientId,
       opportunityId,
       agendaEventId,
       ownerSellerId: ownerSellerId || current.ownerSellerId,
-      notes: notes || current.notes,
+      notes: notes || title || current.notes,
       city: city || current.city
     }));
     setIsModalOpen(true);
@@ -223,6 +224,7 @@ export default function ActivitiesPage() {
     params.delete("agendaEventId");
     params.delete("ownerSellerId");
     params.delete("notes");
+    params.delete("title");
     params.delete("city");
     setSearchParams(params, { replace: true });
   }, [searchParams, setSearchParams]);
