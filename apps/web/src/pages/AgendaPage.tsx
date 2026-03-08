@@ -6,6 +6,7 @@ import api from "../lib/apiClient";
 import { AGENDA_EVENT_TYPE_OPTIONS, type AgendaEventType as SharedAgendaEventType } from "@salesforce-pro/shared";
 import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
+import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 
 type Seller = { id: string; name: string };
@@ -754,6 +755,7 @@ export default function AgendaPage() {
           ownerSellerId: executionEvent.userId
         });
         toast.success("Follow-up criado na lista de atividades.");
+        triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
       }
 
       if (visitResultForm.nextStep === "criar_oportunidade" && executionEvent) {
@@ -999,6 +1001,7 @@ export default function AgendaPage() {
         ownerSellerId: activityEvent?.userId || (user?.role === "vendedor" ? user.id : selectedSellerId || undefined)
       });
       toast.success("Atividade registrada com sucesso.");
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
       closeActivityModal();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível registrar atividade."));

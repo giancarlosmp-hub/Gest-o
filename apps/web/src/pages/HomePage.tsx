@@ -17,6 +17,15 @@ type Activity = {
   opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null;
 };
 
+type AgendaEventLite = {
+  id: string;
+  title: string;
+  type: string;
+  status?: "planned" | "completed" | "cancelled";
+  startsAt?: string;
+  startDateTime?: string;
+};
+
 type ActivityKpi = {
   type: string;
   targetValue: number;
@@ -158,6 +167,7 @@ export default function HomePage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [agendaEventsToday, setAgendaEventsToday] = useState<AgendaEventLite[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   const [weeklyMissions, setWeeklyMissions] = useState<WeeklyMissionSeller[]>([]);
@@ -174,10 +184,12 @@ export default function HomePage() {
       void refreshReminders(controller.signal);
       try {
         setPipelineError(null);
-        const [activitiesResponse, opportunitiesResponse, activityKpisResponse] = await Promise.all([
+        const today = new Date().toISOString().slice(0, 10);
+        const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse] = await Promise.all([
           api.get("/activities", { signal: controller.signal }),
           api.get("/opportunities?status=open", { signal: controller.signal }),
-          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal: controller.signal })
+          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal: controller.signal }),
+          api.get(`/agenda/events?from=${today}&to=${today}`, { signal: controller.signal })
         ]);
 
         if (!active) return;
@@ -187,6 +199,8 @@ export default function HomePage() {
           : opportunitiesResponse.data;
         setOpportunities(Array.isArray(opportunitiesPayload) ? opportunitiesPayload : []);
         setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
+        const agendaPayload = Array.isArray(agendaResponse.data?.items) ? agendaResponse.data.items : agendaResponse.data;
+        setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
 
         try {
           const coolingResponse = await api.get("/clients/alerts/cooling", { signal: controller.signal });
@@ -269,16 +283,20 @@ export default function HomePage() {
     []
   );
 
-  const { meetingsToday, activitiesToday, pendingFollowUps, urgentFollowUps } = useMemo(() => {
+  const { plannedAppointmentsToday, meetingsToday, activitiesToday, pendingFollowUps, urgentFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();
     const now = new Date();
+
+    const plannedAppointments = agendaEventsToday
+      .filter((item) => (item.status ?? "planned") === "planned")
+      .filter((item) => isSameDay(String(item.startsAt || item.startDateTime || ""), start, end));
 
     const meetings = activities
       .filter((item) => item.type === "reuniao" && isSameDay(item.dueDate, start, end))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
     const dayActivities = activities
-      .filter((item) => !item.done && isSameDay(item.dueDate, start, end))
+      .filter((item) => isSameDay(item.createdAt ?? item.dueDate, start, end))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
     const toFollowUpDate = (value?: string | null) => {
@@ -316,12 +334,13 @@ export default function HomePage() {
       });
 
     return {
+      plannedAppointmentsToday: plannedAppointments,
       meetingsToday: meetings,
       activitiesToday: dayActivities,
       pendingFollowUps: pending,
       urgentFollowUps: urgent
     };
-  }, [activities, opportunities]);
+  }, [activities, agendaEventsToday, opportunities]);
 
   const routineMetrics = useMemo(() => {
     const now = new Date();
@@ -798,8 +817,8 @@ export default function HomePage() {
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg bg-slate-50 p-3">
-              <p className="text-xs text-slate-500">Reuniões hoje</p>
-              <p className="text-2xl font-bold text-slate-900">{meetingsToday.length}</p>
+              <p className="text-xs text-slate-500">Compromissos planejados hoje</p>
+              <p className="text-2xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
             </div>
             <div className="rounded-lg bg-slate-50 p-3">
               <p className="text-xs text-slate-500">Follow-ups pendentes</p>

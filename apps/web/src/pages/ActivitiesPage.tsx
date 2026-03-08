@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
 import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
+import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 
 type Client = { id: string; name: string };
 type Opportunity = { id: string; title: string; clientId: string };
@@ -275,6 +276,7 @@ export default function ActivitiesPage() {
       }
       closeCreateModal();
       await loadActivities();
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar a atividade."));
     } finally {
@@ -417,6 +419,7 @@ export default function ActivitiesPage() {
                         try {
                           await api.delete(`/activities/${item.id}`);
                           await loadActivities();
+                          triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
                         } finally {
                           setRemovingId(null);
                         }
