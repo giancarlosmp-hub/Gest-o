@@ -56,6 +56,7 @@ export default function ClientDetailsPage() {
   const [contactForm, setContactForm] = useState<ContactFormState>(emptyContactForm);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [savingContact, setSavingContact] = useState(false);
   const [removingContactId, setRemovingContactId] = useState<string | null>(null);
 
@@ -76,7 +77,12 @@ export default function ClientDetailsPage() {
         isPrimary: Boolean(contact.isPrimary)
       }));
       setContacts(normalizedContacts);
-    } catch {
+    } catch (error) {
+      console.error("[ClientDetailsPage] Falha ao carregar contatos do cliente", {
+        clientId: id,
+        endpoint: `/clients/${id}/contacts`,
+        error
+      });
       setContacts([]);
       setContactsError("Não foi possível carregar os contatos deste cliente.");
     } finally {
@@ -88,17 +94,36 @@ export default function ClientDetailsPage() {
     const load = async () => {
       if (!id) return;
       setLoading(true);
+      setEventsError(null);
+
       try {
-        const [clientRes, eventsRes] = await Promise.all([
-          api.get(`/clients/${id}`),
-          api.get(`/events?clientId=${id}&take=20`)
-        ]);
+        const clientRes = await api.get(`/clients/${id}`);
         setClient(clientRes.data);
-        setEvents(eventsRes.data?.items || []);
-        setEventsCursor(eventsRes.data?.nextCursor || null);
-      } catch {
+      } catch (error) {
+        console.error("[ClientDetailsPage] Falha ao carregar dados principais do cliente", {
+          clientId: id,
+          endpoint: `/clients/${id}`,
+          error
+        });
         toast.error("Não foi possível carregar os detalhes do cliente");
         navigate("/clientes");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const eventsRes = await api.get(`/events?clientId=${id}&take=20`);
+        setEvents(eventsRes.data?.items || []);
+        setEventsCursor(eventsRes.data?.nextCursor || null);
+      } catch (error) {
+        console.error("[ClientDetailsPage] Falha ao carregar linha do tempo do cliente", {
+          clientId: id,
+          endpoint: `/events?clientId=${id}&take=20`,
+          error
+        });
+        setEvents([]);
+        setEventsCursor(null);
+        setEventsError("Não foi possível carregar a linha do tempo deste cliente.");
       } finally {
         setLoading(false);
       }
@@ -118,6 +143,14 @@ export default function ClientDetailsPage() {
       const response = await api.get(`/events?clientId=${id}&take=20&cursor=${eventsCursor}`);
       setEvents((current) => [...current, ...(response.data?.items || [])]);
       setEventsCursor(response.data?.nextCursor || null);
+      setEventsError(null);
+    } catch (error) {
+      console.error("[ClientDetailsPage] Falha ao carregar mais eventos do cliente", {
+        clientId: id,
+        endpoint: `/events?clientId=${id}&take=20&cursor=${eventsCursor}`,
+        error
+      });
+      setEventsError("Não foi possível carregar mais itens da linha do tempo.");
     } finally {
       setLoadingMoreEvents(false);
     }
@@ -330,6 +363,11 @@ export default function ClientDetailsPage() {
         ) : (
           <>
             <h3 className="mb-3 text-lg font-semibold">Linha do Tempo</h3>
+            {eventsError ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                {eventsError}
+              </div>
+            ) : null}
             <TimelineEventList
               events={events}
               loading={loading}
