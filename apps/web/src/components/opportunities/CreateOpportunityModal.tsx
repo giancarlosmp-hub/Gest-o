@@ -65,6 +65,10 @@ export default function CreateOpportunityModal({
   sanitizeNumericInput,
   onQuickCreateClient
 }: CreateOpportunityModalProps) {
+  const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
+  const labelClassName = "text-sm font-medium text-slate-700";
+  const helpClassName = "text-xs text-slate-500";
+
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
@@ -133,68 +137,148 @@ export default function CreateOpportunityModal({
         </div>
 
         <form onSubmit={onSubmit} className="flex h-full flex-col">
-          <div className="grid flex-1 gap-2 overflow-y-auto p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-4">
-            <input ref={titleInputRef} required className="rounded-lg border border-slate-200 p-2" placeholder="Título" value={form.title} onChange={(e) => onFormChange({ ...form, title: e.target.value })} />
-            <div className="space-y-2">
-              <select required className="w-full rounded-lg border border-slate-200 p-2" value={form.clientId} onChange={(e) => onFormChange({ ...form, clientId: e.target.value })}>
-                <option value="">Selecione cliente</option>
-                {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-              </select>
-              <button
-                type="button"
-                className="text-sm font-medium text-brand-700 hover:text-brand-800"
-                onClick={() => {
-                  setIsQuickCreateOpen((current) => !current);
-                  setQuickCreateError(null);
-                }}
-              >
-                {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
-              </button>
-              {isQuickCreateOpen ? (
-                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <div className="grid gap-2">
-                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => setQuickClient((prev) => ({ ...prev, name: e.target.value }))} />
-                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Cidade" value={quickClient.city} onChange={(e) => setQuickClient((prev) => ({ ...prev, city: e.target.value }))} />
-                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value }))} />
-                    <input required className="rounded-lg border border-slate-200 p-2" placeholder="Região" value={quickClient.region} onChange={(e) => setQuickClient((prev) => ({ ...prev, region: e.target.value }))} />
-                    {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
-                    <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
-                      {isCreatingClient ? "Criando cliente..." : "Salvar cliente"}
-                    </button>
-                  </div>
+          <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Identificação</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1">
+                  <span className={labelClassName}>Título *</span>
+                  <input ref={titleInputRef} required className={fieldClassName} placeholder="Ex: Oportunidade Milho Safra 25/26 – Cliente X" value={form.title} onChange={(e) => onFormChange({ ...form, title: e.target.value })} />
+                </label>
+                <div className="space-y-2">
+                  <label className="space-y-1">
+                    <span className={labelClassName}>Cliente *</span>
+                    <select required className={fieldClassName} value={form.clientId} onChange={(e) => onFormChange({ ...form, clientId: e.target.value })}>
+                      <option value="">Selecione o cliente</option>
+                      {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-brand-700 hover:text-brand-800"
+                    onClick={() => {
+                      setIsQuickCreateOpen((current) => !current);
+                      setQuickCreateError(null);
+                    }}
+                  >
+                    {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
+                  </button>
+                  {isQuickCreateOpen ? (
+                    <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="grid gap-2">
+                        <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => setQuickClient((prev) => ({ ...prev, name: e.target.value }))} />
+                        <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => setQuickClient((prev) => ({ ...prev, city: e.target.value }))} />
+                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value }))} />
+                        <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => setQuickClient((prev) => ({ ...prev, region: e.target.value }))} />
+                        {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
+                        <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
+                          {isCreatingClient ? "Criando cliente..." : "Salvar cliente"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-            {userRole !== "vendedor" ? (
-              <select required className="rounded-lg border border-slate-200 p-2" value={form.ownerSellerId} onChange={(e) => onFormChange({ ...form, ownerSellerId: e.target.value })}>
-                <option value="">Selecione vendedor</option>
-                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
-              </select>
-            ) : <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={userName || ""} />}
-            <select required className="rounded-lg border border-slate-200 p-2" value={form.stage} onChange={(e) => onFormChange({ ...form, stage: e.target.value as Stage })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Vendedor responsável *</span>
+                  {userRole !== "vendedor" ? (
+                    <select required className={fieldClassName} value={form.ownerSellerId} onChange={(e) => onFormChange({ ...form, ownerSellerId: e.target.value })}>
+                      <option value="">Selecione o vendedor</option>
+                      {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                    </select>
+                  ) : <input disabled className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={userName || ""} />}
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Etapa *</span>
+                  <select required className={fieldClassName} value={form.stage} onChange={(e) => onFormChange({ ...form, stage: e.target.value as Stage })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
+                </label>
+              </div>
+            </section>
 
-            <input required inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Valor" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
-            <input required inputMode="numeric" min={0} max={100} className="rounded-lg border border-slate-200 p-2" placeholder="Probabilidade %" value={form.probability} onChange={(e) => onFormChange({ ...form, probability: sanitizeNumericInput(e.target.value, false) })} />
-            <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.proposalEntryDate} onChange={(e) => onFormChange({ ...form, proposalEntryDate: e.target.value })} />
-            <input required type="date" className="rounded-lg border border-slate-200 p-2" value={form.expectedReturnDate} onChange={(e) => onFormChange({ ...form, expectedReturnDate: e.target.value })} />
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Valor e potencial</h4>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="space-y-1">
+                  <span className={labelClassName}>Valor *</span>
+                  <input required inputMode="decimal" className={fieldClassName} placeholder="Ex: 45000" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Probabilidade % *</span>
+                  <input required inputMode="numeric" min={0} max={100} className={fieldClassName} placeholder="Ex: 60" value={form.probability} onChange={(e) => onFormChange({ ...form, probability: sanitizeNumericInput(e.target.value, false) })} />
+                  <p className={helpClassName}>Chance estimada de fechamento da oportunidade.</p>
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Área (ha) (opcional)</span>
+                  <input inputMode="decimal" className={fieldClassName} placeholder="Ex: 120" value={form.areaHa} onChange={(e) => onFormChange({ ...form, areaHa: sanitizeNumericInput(e.target.value) })} />
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Ticket esperado/ha (opcional)</span>
+                  <input inputMode="decimal" className={fieldClassName} placeholder="Ex: 380" value={form.expectedTicketPerHa} onChange={(e) => onFormChange({ ...form, expectedTicketPerHa: sanitizeNumericInput(e.target.value) })} />
+                  <p className={helpClassName}>Valor estimado por hectare.</p>
+                </label>
+              </div>
+            </section>
 
-            <select className="rounded-lg border border-slate-200 p-2" value={form.crop} onChange={(e) => onFormChange({ ...form, crop: e.target.value })}>
-              <option value="">Cultura (opcional)</option>
-              {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
-            </select>
-            <input list="season-suggestions" className="rounded-lg border border-slate-200 p-2" placeholder="Safra (ex: 2025/26)" value={form.season} onChange={(e) => onFormChange({ ...form, season: e.target.value })} />
-            <datalist id="season-suggestions">
-              <option value="2024/25" />
-              <option value="2025/26" />
-              <option value="2026/27" />
-            </datalist>
-            <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Área (ha)" value={form.areaHa} onChange={(e) => onFormChange({ ...form, areaHa: sanitizeNumericInput(e.target.value) })} />
-            <input className="rounded-lg border border-slate-200 p-2" placeholder="Produto ofertado" value={form.productOffered} onChange={(e) => onFormChange({ ...form, productOffered: e.target.value })} />
-            <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.plantingForecastDate} onChange={(e) => onFormChange({ ...form, plantingForecastDate: e.target.value })} />
-            <input inputMode="decimal" className="rounded-lg border border-slate-200 p-2" placeholder="Ticket esperado/ha" value={form.expectedTicketPerHa} onChange={(e) => onFormChange({ ...form, expectedTicketPerHa: sanitizeNumericInput(e.target.value) })} />
-            <input type="date" className="rounded-lg border border-slate-200 p-2" value={form.lastContactAt} onChange={(e) => onFormChange({ ...form, lastContactAt: e.target.value })} />
-            <textarea className="rounded-lg border border-slate-200 p-2 sm:col-span-2 lg:col-span-4" placeholder="Notas" value={form.notes} onChange={(e) => onFormChange({ ...form, notes: e.target.value })} />
-            {errorMessage ? <p className="text-sm text-red-600 sm:col-span-2 lg:col-span-4">{errorMessage}</p> : null}
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Contexto técnico/comercial</h4>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="space-y-1">
+                  <span className={labelClassName}>Cultura (opcional)</span>
+                  <select className={fieldClassName} value={form.crop} onChange={(e) => onFormChange({ ...form, crop: e.target.value })}>
+                    <option value="">Selecione a cultura</option>
+                    {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Safra (opcional)</span>
+                  <input list="season-suggestions" className={fieldClassName} placeholder="Ex: 2025/26" value={form.season} onChange={(e) => onFormChange({ ...form, season: e.target.value })} />
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Produto ofertado (opcional)</span>
+                  <input className={fieldClassName} placeholder="Ex: Mix cobertura inverno" value={form.productOffered} onChange={(e) => onFormChange({ ...form, productOffered: e.target.value })} />
+                </label>
+              </div>
+              <datalist id="season-suggestions">
+                <option value="2024/25" />
+                <option value="2025/26" />
+                <option value="2026/27" />
+              </datalist>
+            </section>
+
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Datas</h4>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="space-y-1">
+                  <span className={labelClassName}>Data de entrada *</span>
+                  <input required type="date" className={fieldClassName} value={form.proposalEntryDate} onChange={(e) => onFormChange({ ...form, proposalEntryDate: e.target.value })} />
+                  <p className={helpClassName}>Quando a oportunidade entrou no funil.</p>
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Data de follow-up / retorno *</span>
+                  <input required type="date" className={fieldClassName} value={form.expectedReturnDate} onChange={(e) => onFormChange({ ...form, expectedReturnDate: e.target.value })} />
+                  <p className={helpClassName}>Próxima ação comercial planejada.</p>
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Fechamento previsto (opcional)</span>
+                  <input type="date" className={fieldClassName} value={form.plantingForecastDate} onChange={(e) => onFormChange({ ...form, plantingForecastDate: e.target.value })} />
+                  <p className={helpClassName}>Previsão estimada de fechamento.</p>
+                </label>
+                <label className="space-y-1">
+                  <span className={labelClassName}>Último contato (opcional)</span>
+                  <input type="date" className={fieldClassName} value={form.lastContactAt} onChange={(e) => onFormChange({ ...form, lastContactAt: e.target.value })} />
+                </label>
+              </div>
+            </section>
+
+            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Notas</h4>
+              <label className="space-y-1">
+                <span className={labelClassName}>Notas (opcional)</span>
+                <textarea className="w-full rounded-lg border border-slate-200 p-2" placeholder="Informações relevantes para a negociação" value={form.notes} onChange={(e) => onFormChange({ ...form, notes: e.target.value })} />
+              </label>
+            </section>
+
+            <p className="text-xs text-slate-500">Campos com * são obrigatórios.</p>
+            {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-6">
