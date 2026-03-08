@@ -601,6 +601,7 @@ export default function OpportunitiesPage() {
       expectedTicketPerHa: form.expectedTicketPerHa ? Number(form.expectedTicketPerHa) : undefined
     };
 
+    const isEditing = Boolean(editing);
     setIsSaving(true);
     try {
       if (editing) await api.put(`/opportunities/${editing}`, payload);
@@ -610,7 +611,7 @@ export default function OpportunitiesPage() {
       setOpportunityModalMode("create");
       setIsOpportunityModalOpen(false);
       await invalidateOpportunitiesAndDashboardQueries();
-      toast.success(editing ? "Oportunidade atualizada" : "Oportunidade criada");
+      toast.success(isEditing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
       const errorMessage = error.response?.data?.message || "Erro ao salvar oportunidade";
       setSubmitError(errorMessage);
@@ -652,7 +653,7 @@ export default function OpportunitiesPage() {
       stage: item.stage,
       probability: item.probability !== null && item.probability !== undefined ? String(item.probability) : "",
       proposalEntryDate: toDateInput(item.proposalDate),
-      expectedReturnDate: toDateInput(item.expectedCloseDate),
+      expectedReturnDate: toDateInput(item.followUpDate || item.expectedCloseDate),
       lastContactAt: toDateInput(item.lastContactAt),
       crop: item.crop ?? "",
       season: item.season ?? "",
@@ -766,7 +767,7 @@ export default function OpportunitiesPage() {
     if (!targetOpportunity) return;
     if (targetOpportunity.stage === stage) {
       toast.message(`A oportunidade já está como ${stageLabel[stage]}`);
-      return;
+      return true;
     }
 
     setIsQuickActionLoading(stage);
@@ -801,14 +802,23 @@ export default function OpportunitiesPage() {
           reloadPipelineEvents: selectedOpportunity?.id === targetId
         });
       }
-      await invalidateOpportunitiesAndDashboardQueries();
-      if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
       toast.success(`Oportunidade encerrada como ${stageLabel[stage]}`);
+      try {
+        await invalidateOpportunitiesAndDashboardQueries();
+        if (selectedOpportunity?.id === targetId) await loadPipelineEvents(targetId);
+      } catch (refreshError) {
+        if (shouldLogOpportunityDiagnostics) {
+          console.error("[diag-opportunities][close][refresh-error]", refreshError);
+        }
+        toast.warning("Oportunidade encerrada, mas não foi possível atualizar a tela automaticamente");
+      }
+      return true;
     } catch (error) {
       if (shouldLogOpportunityDiagnostics) {
         console.error("[diag-opportunities][close][error]", error);
       }
       toast.error(getApiErrorMessage(error, "Não foi possível encerrar a oportunidade"));
+      return false;
     } finally {
       setIsQuickActionLoading(null);
     }
@@ -817,8 +827,8 @@ export default function OpportunitiesPage() {
   const onConfirmCloseOpportunity = async (event: FormEvent) => {
     event.preventDefault();
     if (!closeOpportunityState || isQuickActionLoading) return;
-    await applyQuickStage(closeOpportunityState.stage, closeReason, closeOpportunityState.opportunityId);
-    closeCloseModal();
+    const didClose = await applyQuickStage(closeOpportunityState.stage, closeReason, closeOpportunityState.opportunityId);
+    if (didClose) closeCloseModal();
   };
 
   const onScheduleFollowUp = async (event: FormEvent) => {
