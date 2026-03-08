@@ -98,6 +98,10 @@ const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
   followup: "bg-amber-100 text-amber-800 border-amber-200"
 };
 
+const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
+  new Map(AGENDA_EVENT_TYPE_OPTIONS.map((option) => [option.value, option])).values()
+);
+
 const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => type;
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
@@ -148,7 +152,7 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
 
   return events.reduce<AgendaSummary>(
     (acc, event) => {
-      if (event.status !== "planned") return acc;
+      if (event.status === "completed" || event.status === "cancelled") return acc;
 
       const normalizedType = normalizeEventType(event.type);
       if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") acc.meetings += 1;
@@ -236,15 +240,19 @@ function formatDayKey(value: string) {
 
 
 function getOwnerId(event: AgendaEvent): string {
-  return event.ownerId || getOwnerId(event) || event.sellerId || "";
+  return event.ownerId || event.userId || event.sellerId || "";
 }
 
 function getStartsAt(event: AgendaEvent): string {
-  return event.startsAt || getStartsAt(event) || new Date().toISOString();
+  return event.startsAt || event.startDateTime || new Date().toISOString();
 }
 
 function getEndsAt(event: AgendaEvent): string {
-  return event.endsAt || getEndsAt(event) || getStartsAt(event);
+  return event.endsAt || event.endDateTime || getStartsAt(event);
+}
+
+function formatLocalDateParam(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
 function formatTime(value: string) {
@@ -299,6 +307,33 @@ function getInitialEvents(): AgendaEvent[] {
       status: "planned"
     }
   ];
+}
+
+
+function mapApiAgendaEvent(item: any): AgendaEvent {
+  return {
+    id: String(item.id),
+    ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+    userId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
+    sellerId: String(item.ownerId || item.sellerId || item.userId || ""),
+    clientId: item.clientId ? String(item.clientId) : undefined,
+    opportunityId: item.opportunityId ? String(item.opportunityId) : undefined,
+    title: String(item.title || "Sem título"),
+    type: (item.type as AgendaEventType) || "followup",
+    startsAt: new Date(item.startsAt || item.startDateTime).toISOString(),
+    endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
+    status: (item.status as AgendaEvent["status"]) || "planned",
+    isOverdue: Boolean(item.isOverdue),
+    city: item.city ? String(item.city) : undefined,
+    notes: item.notes ? String(item.notes) : null,
+    stops: Array.isArray(item.stops)
+      ? item.stops.map((stop: any) => ({
+          ...stop,
+          checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
+          checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
+        }))
+      : []
+  };
 }
 
 export default function AgendaPage() {
@@ -384,8 +419,8 @@ export default function AgendaPage() {
 
   const eventsQuery = useMemo(() => {
     const params: Record<string, string> = {
-      from: dateRange.start.toISOString().slice(0, 10),
-      to: dateRange.end.toISOString().slice(0, 10)
+      from: formatLocalDateParam(dateRange.start),
+      to: formatLocalDateParam(dateRange.end)
     };
 
     if (user?.role === "vendedor" && user.id) {
@@ -506,26 +541,7 @@ export default function AgendaPage() {
         const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
         const mappedEvents = payload
           .filter((item: any) => item?.id && (item?.startsAt || item?.startDateTime) && (item?.endsAt || item?.endDateTime))
-          .map((item: any): AgendaEvent => ({
-            id: String(item.id),
-            ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
-            userId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
-            sellerId: String(item.ownerId || item.sellerId || item.userId || ""),
-            clientId: item.clientId ? String(item.clientId) : undefined,
-            title: String(item.title || "Sem título"),
-              type: (item.type as AgendaEventType) || "followup",
-            startsAt: new Date(item.startsAt || item.startDateTime).toISOString(),
-            endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
-            status: (item.status as AgendaEvent["status"]) || "planned",
-            isOverdue: Boolean(item.isOverdue),
-            city: item.city ? String(item.city) : undefined,
-            notes: item.notes ? String(item.notes) : null,
-            stops: Array.isArray(item.stops) ? item.stops.map((stop: any) => ({
-            ...stop,
-            checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
-            checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
-          })) : []
-          }))
+          .map((item: any) => mapApiAgendaEvent(item))
           .filter((item: AgendaEvent) => Boolean(getOwnerId(item)));
 
         setEvents(mappedEvents);
@@ -567,10 +583,13 @@ export default function AgendaPage() {
       return true;
     });
 
-    const byOverdue = overdueOnly ? byRole.filter((event) => event.status === "planned" && new Date(getEndsAt(event)).getTime() < Date.now()) : byRole;
+    const byPeriod = byRole.filter((event) => isEventWithinRange(getStartsAt(event), dateRange.start, dateRange.end));
+    const byOverdue = overdueOnly
+      ? byPeriod.filter((event) => event.status === "planned" && new Date(getEndsAt(event)).getTime() < Date.now())
+      : byPeriod;
 
     return byOverdue.sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime());
-  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, overdueOnly]);
+  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId, overdueOnly, dateRange]);
 
   const groupedEventsByDay = useMemo(() => {
     const grouped = new Map<string, AgendaEvent[]>();
@@ -756,28 +775,7 @@ export default function AgendaPage() {
     try {
       const response = await api.get("/agenda/events", { params: eventsQuery });
       const payload = Array.isArray(response.data?.items) ? response.data.items : [];
-      setEvents(
-        payload.map((item: any) => ({
-          id: String(item.id),
-          ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
-          userId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
-          sellerId: String(item.ownerId || item.sellerId || item.userId || ""),
-          clientId: item.clientId ? String(item.clientId) : undefined,
-          title: String(item.title || "Sem título"),
-          type: (item.type as AgendaEventType) || "followup",
-          startsAt: new Date(item.startsAt || item.startDateTime).toISOString(),
-          endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
-          status: (item.status as AgendaEvent["status"]) || "planned",
-          isOverdue: Boolean(item.isOverdue),
-          city: item.city ? String(item.city) : undefined,
-          notes: item.notes ? String(item.notes) : null,
-          stops: Array.isArray(item.stops) ? item.stops.map((stop: any) => ({
-            ...stop,
-            checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
-            checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
-          })) : []
-        }))
-      );
+      setEvents(payload.map((item: any) => mapApiAgendaEvent(item)).filter((item: AgendaEvent) => Boolean(getOwnerId(item))));
     } catch {
       // já existe carga automática com debounce
     }
@@ -806,6 +804,7 @@ export default function AgendaPage() {
           : item
       )
     );
+    setEventsRefreshToken((current) => current + 1);
     toast.success(nextStatus === "completed" ? "Agenda marcada como concluída." : "Agenda reaberta com sucesso.");
   };
 
@@ -856,6 +855,7 @@ export default function AgendaPage() {
           (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
         )
       );
+      setEventsRefreshToken((current) => current + 1);
       toast.success(response.data?.message || "Follow-up criado com sucesso.");
       closeFollowUpModal();
     } catch (error) {
@@ -940,6 +940,7 @@ export default function AgendaPage() {
           (a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()
         )
       );
+      setEventsRefreshToken((current) => current + 1);
       toast.success(response.data?.message || "Evento duplicado para o dia seguinte.");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível duplicar evento."));
@@ -1044,12 +1045,13 @@ export default function AgendaPage() {
           item.id === rescheduleEvent.id
             ? {
                 ...item,
-                startDateTime: new Date(rescheduleStartDateTime).toISOString(),
-                endDateTime: new Date(rescheduleEndDateTime).toISOString()
+                startsAt: new Date(rescheduleStartDateTime).toISOString(),
+                endsAt: new Date(rescheduleEndDateTime).toISOString()
               }
             : item
         )
       );
+      setEventsRefreshToken((current) => current + 1);
       toast.success("Compromisso reagendado com sucesso.");
       closeRescheduleModal();
     } catch {
@@ -1166,12 +1168,13 @@ export default function AgendaPage() {
       const createdEventInSelectedRange = isEventWithinRange(getStartsAt(createdEvent), range.start, range.end);
 
       if (createdEventInSelectedRange) {
+        setEvents((current) => [...current, createdEvent].sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()));
         setEventsRefreshToken((current) => current + 1);
-        toast.success("Agenda criada com sucesso.");
+        toast.success("Compromisso criado com sucesso.");
       } else {
         const createdDate = formatDateOnly(getStartsAt(createdEvent));
         toast(
-          `Evento criado para ${createdDate}. Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
+          `Compromisso criado com sucesso, mas está fora do período exibido (${createdDate}). Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
           {
             action: {
               label: "Trocar filtro",
@@ -1546,7 +1549,7 @@ export default function AgendaPage() {
                       onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      {AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
+                      {UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
                         <option key={option.id} value={option.value}>
                           {option.label}
                         </option>
