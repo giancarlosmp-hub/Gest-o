@@ -89,6 +89,8 @@ const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
   new Map(AGENDA_EVENT_TYPE_OPTIONS.map((option) => [option.value, option])).values()
 );
 
+const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
+
 const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => type;
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
@@ -133,12 +135,14 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
 
   return events.reduce<AgendaSummary>(
     (acc, event) => {
+      if (event.status !== "planned") return acc;
+
       const normalizedType = normalizeEventType(event.type);
       if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") acc.meetings += 1;
       if (normalizedType === "roteiro_visita") acc.routes += 1;
       if (isFollowUpEvent(event)) acc.followups += 1;
 
-      if (event.status !== "completed" && event.status !== "cancelled" && new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
+      if (new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
       return acc;
     },
     { meetings: 0, routes: 0, followups: 0, overdue: 0 }
@@ -499,7 +503,6 @@ export default function AgendaPage() {
         }
 
         const response = await request;
-        inFlightRef.current.delete(eventsQueryKey);
         if (!active) return;
 
         const payload = Array.isArray(response.data?.items) ? response.data.items : Array.isArray(response.data) ? response.data : [];
@@ -523,6 +526,7 @@ export default function AgendaPage() {
         }
         toast.error(`Falha ao carregar agenda: ${status} - ${message}`);
       } finally {
+        inFlightRef.current.delete(eventsQueryKey);
         if (active) setIsEventsLoading(false);
       }
     };
@@ -1112,17 +1116,17 @@ export default function AgendaPage() {
 
       const createdEvent = mapCreatedAgendaEvent(response.data);
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
-      const createdEventInSelectedRange = isEventWithinRange(getStartsAt(createdEvent), range.start, range.end);
+      const createdEventInSelectedRange = isEventOverlappingRange(getStartsAt(createdEvent), getEndsAt(createdEvent), range.start, range.end);
 
       setEventsRefreshToken((current) => current + 1);
 
       if (createdEventInSelectedRange) {
         setEvents((current) => [...current, createdEvent].sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()));
-        toast.success("Compromisso criado com sucesso.");
+        toast.success(createForm.type === "roteiro_visita" ? "Roteiro criado com sucesso." : "Compromisso criado com sucesso.");
       } else {
         const createdDate = formatDateOnly(getStartsAt(createdEvent));
         toast(
-          `Compromisso criado com sucesso, mas está fora do período exibido (${createdDate}). Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
+          `${createForm.type === "roteiro_visita" ? "Roteiro" : "Compromisso"} criado com sucesso, mas está fora do período exibido (${createdDate}). Seu filtro está em “${PERIOD_FILTER_LABEL[periodFilter]}”. Trocar para “Próximos 7 dias”?`,
           {
             action: {
               label: "Trocar filtro",
@@ -1497,7 +1501,7 @@ export default function AgendaPage() {
                       onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
                       className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
-                      {UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.map((option) => (
+                      {CREATE_AGENDA_TYPE_OPTIONS.map((option) => (
                         <option key={option.id} value={option.value}>
                           {option.label}
                         </option>
