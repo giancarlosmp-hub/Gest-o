@@ -56,6 +56,7 @@ export default function ClientDetailsPage() {
   const [contactForm, setContactForm] = useState<ContactFormState>(emptyContactForm);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactsError, setContactsError] = useState<string | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
   const [savingContact, setSavingContact] = useState(false);
   const [removingContactId, setRemovingContactId] = useState<string | null>(null);
 
@@ -77,7 +78,11 @@ export default function ClientDetailsPage() {
       }));
       setContacts(normalizedContacts);
     } catch (error) {
-      console.error("[ClientDetailsPage] Falha ao carregar contatos", { clientId: id, error });
+      console.error("[ClientDetailsPage] Falha ao carregar contatos do cliente", {
+        clientId: id,
+        endpoint: `/clients/${id}/contacts`,
+        error
+      });
       setContacts([]);
       setContactsError("Não foi possível carregar os contatos deste cliente.");
     } finally {
@@ -88,17 +93,18 @@ export default function ClientDetailsPage() {
   useEffect(() => {
     const load = async () => {
       if (!id) return;
+
       setLoading(true);
+      setEventsError(null);
 
-      const [clientResult, eventsResult] = await Promise.allSettled([
-        api.get(`/clients/${id}`),
-        api.get(`/events?clientId=${id}&take=20`)
-      ]);
-
-      if (clientResult.status === "rejected") {
-        console.error("[ClientDetailsPage] Falha ao carregar cliente", {
+      try {
+        const clientRes = await api.get(`/clients/${id}`);
+        setClient(clientRes.data);
+      } catch (error) {
+        console.error("[ClientDetailsPage] Falha ao carregar dados principais do cliente", {
           clientId: id,
-          error: clientResult.reason
+          endpoint: `/clients/${id}`,
+          error
         });
         toast.error("Não foi possível carregar os detalhes do cliente");
         navigate("/clientes");
@@ -106,22 +112,22 @@ export default function ClientDetailsPage() {
         return;
       }
 
-      setClient(clientResult.value.data);
-
-      if (eventsResult.status === "fulfilled") {
-        setEvents(eventsResult.value.data?.items || []);
-        setEventsCursor(eventsResult.value.data?.nextCursor || null);
-      } else {
-        console.error("[ClientDetailsPage] Falha ao carregar timeline", {
+      try {
+        const eventsRes = await api.get(`/events?clientId=${id}&take=20`);
+        setEvents(eventsRes.data?.items || []);
+        setEventsCursor(eventsRes.data?.nextCursor || null);
+      } catch (error) {
+        console.error("[ClientDetailsPage] Falha ao carregar linha do tempo do cliente", {
           clientId: id,
-          error: eventsResult.reason
+          endpoint: `/events?clientId=${id}&take=20`,
+          error
         });
         setEvents([]);
         setEventsCursor(null);
-        toast.error("Não foi possível carregar a linha do tempo do cliente.");
+        setEventsError("Não foi possível carregar a linha do tempo deste cliente.");
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     };
 
     void load();
@@ -133,21 +139,32 @@ export default function ClientDetailsPage() {
 
   const loadMoreEvents = async () => {
     if (!id || !eventsCursor) return;
+
     setLoadingMoreEvents(true);
+
     try {
       const response = await api.get(`/events?clientId=${id}&take=20&cursor=${eventsCursor}`);
       setEvents((current) => [...current, ...(response.data?.items || [])]);
       setEventsCursor(response.data?.nextCursor || null);
+      setEventsError(null);
     } catch (error) {
-      console.error("[ClientDetailsPage] Falha ao carregar mais eventos", { clientId: id, cursor: eventsCursor, error });
-      toast.error("Não foi possível carregar mais eventos da linha do tempo.");
+      console.error("[ClientDetailsPage] Falha ao carregar mais eventos do cliente", {
+        clientId: id,
+        endpoint: `/events?clientId=${id}&take=20&cursor=${eventsCursor}`,
+        error
+      });
+      setEventsError("Não foi possível carregar mais itens da linha do tempo.");
     } finally {
       setLoadingMoreEvents(false);
     }
   };
 
   if (loading) {
-    return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-500">Carregando detalhes do cliente...</div>;
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-500">
+        Carregando detalhes do cliente...
+      </div>
+    );
   }
 
   if (!client) return null;
@@ -178,6 +195,7 @@ export default function ClientDetailsPage() {
 
   const saveContact = async () => {
     if (!id) return;
+
     if (!contactForm.name.trim() || !contactForm.email.trim()) {
       toast.error("Preencha pelo menos nome e email do contato.");
       return;
@@ -192,6 +210,7 @@ export default function ClientDetailsPage() {
     };
 
     setSavingContact(true);
+
     try {
       if (editingContactId) {
         await api.put(`/clients/${id}/contacts/${editingContactId}`, payload);
@@ -213,6 +232,7 @@ export default function ClientDetailsPage() {
     if (!id) return;
 
     setRemovingContactId(contactId);
+
     try {
       await api.delete(`/clients/${id}/contacts/${contactId}`);
       await loadContacts();
@@ -228,7 +248,13 @@ export default function ClientDetailsPage() {
     <div className="space-y-4 pb-5">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-900">Detalhes do Cliente</h2>
-        <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => navigate("/clientes")}>Voltar</button>
+        <button
+          type="button"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          onClick={() => navigate("/clientes")}
+        >
+          Voltar
+        </button>
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -249,14 +275,22 @@ export default function ClientDetailsPage() {
             <button
               type="button"
               onClick={() => setActiveTab("contacts")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${activeTab === "contacts" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                activeTab === "contacts"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
             >
               Contatos
             </button>
             <button
               type="button"
               onClick={() => setActiveTab("timeline")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${activeTab === "timeline" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-800"}`}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                activeTab === "timeline"
+                  ? "bg-white text-slate-900 shadow-sm"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
             >
               Linha do Tempo
             </button>
@@ -312,7 +346,9 @@ export default function ClientDetailsPage() {
                     <td className="px-2 py-3">{contact.email}</td>
                     <td className="px-2 py-3">
                       {contact.isPrimary ? (
-                        <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">Principal</span>
+                        <span className="inline-flex rounded-full bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-700">
+                          Principal
+                        </span>
                       ) : (
                         <span className="text-slate-400">-</span>
                       )}
@@ -353,6 +389,11 @@ export default function ClientDetailsPage() {
         ) : (
           <>
             <h3 className="mb-3 text-lg font-semibold">Linha do Tempo</h3>
+            {eventsError ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                {eventsError}
+              </div>
+            ) : null}
             <TimelineEventList
               events={events}
               loading={loading}
@@ -367,7 +408,11 @@ export default function ClientDetailsPage() {
       </section>
 
       {isContactModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
           <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-900">
               {editingContactId ? "Editar contato" : "Adicionar contato"}
@@ -383,7 +428,9 @@ export default function ClientDetailsPage() {
                 <span className="text-sm font-medium text-slate-700">Nome</span>
                 <input
                   value={contactForm.name}
-                  onChange={(event) => setContactForm((current) => ({ ...current, name: event.target.value }))}
+                  onChange={(event) =>
+                    setContactForm((current) => ({ ...current, name: event.target.value }))
+                  }
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
                 />
               </label>
@@ -392,7 +439,9 @@ export default function ClientDetailsPage() {
                 <span className="text-sm font-medium text-slate-700">Função/Setor</span>
                 <input
                   value={contactForm.roleSector}
-                  onChange={(event) => setContactForm((current) => ({ ...current, roleSector: event.target.value }))}
+                  onChange={(event) =>
+                    setContactForm((current) => ({ ...current, roleSector: event.target.value }))
+                  }
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
                 />
               </label>
@@ -401,7 +450,9 @@ export default function ClientDetailsPage() {
                 <span className="text-sm font-medium text-slate-700">Telefone</span>
                 <input
                   value={contactForm.phone}
-                  onChange={(event) => setContactForm((current) => ({ ...current, phone: event.target.value }))}
+                  onChange={(event) =>
+                    setContactForm((current) => ({ ...current, phone: event.target.value }))
+                  }
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
                 />
               </label>
@@ -411,7 +462,9 @@ export default function ClientDetailsPage() {
                 <input
                   type="email"
                   value={contactForm.email}
-                  onChange={(event) => setContactForm((current) => ({ ...current, email: event.target.value }))}
+                  onChange={(event) =>
+                    setContactForm((current) => ({ ...current, email: event.target.value }))
+                  }
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-600"
                 />
               </label>
@@ -421,7 +474,9 @@ export default function ClientDetailsPage() {
               <input
                 type="checkbox"
                 checked={contactForm.isPrimary}
-                onChange={(event) => setContactForm((current) => ({ ...current, isPrimary: event.target.checked }))}
+                onChange={(event) =>
+                  setContactForm((current) => ({ ...current, isPrimary: event.target.checked }))
+                }
                 className="h-4 w-4 rounded border-slate-300 text-brand-700 focus:ring-brand-600"
               />
               Definir como contato principal
