@@ -2654,7 +2654,7 @@ router.get("/clients", async (req, res) => {
   });
 });
 
-router.get("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
+router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -2955,7 +2955,7 @@ router.post("/clients/import", async (req, res) => {
   res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors });
 });
 
-router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()), async (req, res) => {
+router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
@@ -3000,7 +3000,7 @@ router.put("/clients/:id([0-9a-fA-F-]{36})", validateBody(clientSchema.partial()
   }
 });
 
-router.delete("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
+router.delete("/clients/:id", async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
@@ -3010,7 +3010,7 @@ router.delete("/clients/:id([0-9a-fA-F-]{36})", async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/clients/:id([0-9a-fA-F-]{36})/contacts", async (req, res) => {
+router.get("/clients/:id/contacts", async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
@@ -3033,7 +3033,7 @@ router.get("/clients/:id([0-9a-fA-F-]{36})/contacts", async (req, res) => {
 });
 
 router.post(
-  "/clients/:id([0-9a-fA-F-]{36})/contacts",
+  "/clients/:id/contacts",
   validateBody(clientContactSchema),
   async (req, res) => {
     const client = await prisma.client.findFirst({
@@ -3059,7 +3059,7 @@ router.post(
 );
 
 router.put(
-  "/clients/:id([0-9a-fA-F-]{36})/contacts/:contactId",
+  "/clients/:id/contacts/:contactId",
   validateBody(clientContactSchema.partial()),
   async (req, res) => {
     const client = await prisma.client.findFirst({
@@ -3092,7 +3092,7 @@ router.put(
   }
 );
 
-router.delete("/clients/:id([0-9a-fA-F-]{36})/contacts/:contactId", async (req, res) => {
+router.delete("/clients/:id/contacts/:contactId", async (req, res) => {
   const existingContact = await prisma.contact.findFirst({
     where: {
       id: req.params.contactId,
