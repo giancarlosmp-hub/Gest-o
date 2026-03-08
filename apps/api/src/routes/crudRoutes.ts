@@ -529,6 +529,15 @@ const resolveActivityTypeFilters = (...types: string[]) => {
   return normalized.length === 1 ? { type: normalized[0] } : { type: { in: normalized } };
 };
 
+const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "reuniao", "followup", "follow_up"];
+
+const resolveExecutionActivityDateFilter = (from: Date, to: Date): Prisma.ActivityWhereInput => ({
+  OR: [
+    { createdAt: { gte: from, lte: to } },
+    { dueDate: { gte: from, lte: to } }
+  ]
+});
+
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
   const { start, end } = getMonthRangeFromKey(monthKey);
   return prisma.activity.count({
@@ -1373,55 +1382,72 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
 
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw;
 
-  const plannedEvents = await prisma.agendaEvent.findMany({
-    where: {
-      type: "roteiro_visita",
-      startDateTime: { gte: from, lte: to },
-      ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-    },
-    select: {
-      id: true,
-      sellerId: true,
-      startDateTime: true,
-      opportunityId: true,
-      seller: { select: { name: true } },
-      stops: {
-        select: {
-          plannedTime: true,
-          checkInAt: true,
-          checkOutAt: true
-        },
-        orderBy: { order: "asc" }
+  const [sellers, plannedEvents, executedActivities, followUps] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        role: "vendedor",
+        isActive: true,
+        ...(scopedSellerId ? { id: scopedSellerId } : {})
+      },
+      select: { id: true, name: true }
+    }),
+    prisma.agendaEvent.findMany({
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: from, lte: to },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      select: {
+        sellerId: true
       }
-    }
-  });
+    }),
+    prisma.activity.findMany({
+      where: {
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        ...resolveActivityTypeFilters("visita", "reuniao", "followup", "follow_up"),
+        ...resolveExecutionActivityDateFilter(from, to)
+      },
+      select: {
+        ownerSellerId: true,
+        opportunityId: true,
+        type: true,
+        dueDate: true,
+        createdAt: true
+      }
+    }),
+    prisma.activity.findMany({
+      where: {
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        ...resolveActivityTypeFilters("followup", "follow_up"),
+        ...resolveExecutionActivityDateFilter(from, to)
+      },
+      select: { ownerSellerId: true }
+    })
+  ]);
 
-  const followUpWhere: Prisma.ActivityWhereInput = {
-    ...resolveActivityTypeFilters("followup", "follow_up"),
-    createdAt: { gte: from, lte: to },
-    ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
-  };
+  const plannedBySeller = plannedEvents.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = (acc[item.sellerId] || 0) + 1;
+    return acc;
+  }, {});
 
-  const followUps = await prisma.activity.findMany({
-    where: followUpWhere,
-    select: { ownerSellerId: true }
-  });
+  const executedBySeller = executedActivities.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
+    return acc;
+  }, {});
 
   const followUpsBySeller = followUps.reduce<Record<string, number>>((acc, item) => {
     acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
 
-  const opportunitiesBySeller = plannedEvents.reduce<Record<string, Set<string>>>((acc, event) => {
-    if (!event.opportunityId) return acc;
-    if (!acc[event.sellerId]) acc[event.sellerId] = new Set<string>();
-    acc[event.sellerId].add(event.opportunityId);
+  const opportunitiesBySeller = executedActivities.reduce<Record<string, Set<string>>>((acc, item) => {
+    if (!item.opportunityId) return acc;
+    if (!acc[item.ownerSellerId]) acc[item.ownerSellerId] = new Set<string>();
+    acc[item.ownerSellerId].add(item.opportunityId);
     return acc;
   }, {});
 
-  const punctualToleranceMs = 10 * 60 * 1000;
-
-  const sellerStatsMap = plannedEvents.reduce<
+  const sellerStatsMap = sellers.reduce<
     Record<
       string,
       {
@@ -1432,38 +1458,18 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
         punctualCount: number;
       }
     >
-  >((acc, event) => {
-    const sellerStat =
-      acc[event.sellerId] ||
-      (acc[event.sellerId] = {
-        sellerId: event.sellerId,
-        sellerName: event.seller.name,
-        planned: 0,
-        executed: 0,
-        punctualCount: 0
-      });
-
-    sellerStat.planned += 1;
-
-    const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
-    const hasCheckout = event.stops.some((stop) => Boolean(stop.checkOutAt));
-
-    if (hasCheckout) {
-      sellerStat.executed += 1;
-    }
-
-    if (firstStopWithCheckIn) {
-      const plannedReference = firstStopWithCheckIn.plannedTime || event.startDateTime;
-      const checkInAt = firstStopWithCheckIn.checkInAt!;
-      if (checkInAt.getTime() <= plannedReference.getTime() + punctualToleranceMs) {
-        sellerStat.punctualCount += 1;
-      }
-    }
-
+  >((acc, seller) => {
+    acc[seller.id] = {
+      sellerId: seller.id,
+      sellerName: seller.name,
+      planned: plannedBySeller[seller.id] || 0,
+      executed: executedBySeller[seller.id] || 0,
+      punctualCount: executedBySeller[seller.id] || 0
+    };
     return acc;
   }, {});
 
-  const sellers = Object.values(sellerStatsMap).map((stats) => {
+  const sellerRows = Object.values(sellerStatsMap).map((stats) => {
     const notExecuted = Math.max(stats.planned - stats.executed, 0);
     const followUpsCount = followUpsBySeller[stats.sellerId] || 0;
     const opportunitiesCount = opportunitiesBySeller[stats.sellerId]?.size || 0;
@@ -1483,12 +1489,12 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     };
   });
 
-  const totalPlanned = sellers.reduce((sum, item) => sum + item.planned, 0);
-  const totalExecuted = sellers.reduce((sum, item) => sum + item.executed, 0);
-  const totalNotExecuted = sellers.reduce((sum, item) => sum + item.notExecuted, 0);
-  const totalPunctual = sellers.reduce((sum, item) => sum + (item.punctualRate / 100) * item.executed, 0);
-  const followUpGenerated = sellers.reduce((sum, item) => sum + item.followUps, 0);
-  const opportunitiesGenerated = sellers.reduce((sum, item) => sum + item.opportunities, 0);
+  const totalPlanned = sellerRows.reduce((sum, item) => sum + item.planned, 0);
+  const totalExecuted = sellerRows.reduce((sum, item) => sum + item.executed, 0);
+  const totalNotExecuted = sellerRows.reduce((sum, item) => sum + item.notExecuted, 0);
+  const totalPunctual = sellerRows.reduce((sum, item) => sum + (item.punctualRate / 100) * item.executed, 0);
+  const followUpGenerated = sellerRows.reduce((sum, item) => sum + item.followUps, 0);
+  const opportunitiesGenerated = sellerRows.reduce((sum, item) => sum + item.opportunities, 0);
 
   return res.json({
     totalPlanned,
@@ -1498,7 +1504,7 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
     punctualRate: totalExecuted ? (totalPunctual / totalExecuted) * 100 : 0,
     followUpGenerated,
     opportunitiesGenerated,
-    sellers: sellers.sort((a, b) => b.executionRate - a.executionRate)
+    sellers: sellerRows.sort((a, b) => b.executionRate - a.executionRate)
   });
 });
 
@@ -1531,17 +1537,12 @@ router.get("/reports/weekly-discipline", async (req, res) => {
       },
       _count: { _all: true }
     }),
-    prisma.agendaEvent.groupBy({
-      by: ["sellerId"],
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
       where: {
-        type: "roteiro_visita",
-        startDateTime: { gte: range.start, lte: range.end },
-        stops: {
-          some: {
-            checkOutAt: { not: null }
-          }
-        },
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
+        ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
       _count: { _all: true }
     })
@@ -1553,7 +1554,7 @@ router.get("/reports/weekly-discipline", async (req, res) => {
   }, {});
 
   const executedMap = executedBySeller.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._count._all;
+    acc[item.ownerSellerId] = item._count._all;
     return acc;
   }, {});
 
@@ -1785,75 +1786,69 @@ router.get("/reports/discipline-ranking", async (req, res) => {
   }
 
   const scopedSellerId = undefined;
-  const punctualToleranceMs = 10 * 60 * 1000;
   const inactivityWindow = getLastBusinessDaysWindow(3);
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
-  const plannedEvents = await prisma.agendaEvent.findMany({
-    where: {
-      type: "roteiro_visita",
-      startDateTime: { gte: from, lte: to },
-      ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-    },
-    select: {
-      id: true,
-      sellerId: true,
-      opportunityId: true,
-      seller: { select: { name: true } },
-      stops: {
-        select: {
-          plannedTime: true,
-          checkInAt: true,
-          checkOutAt: true
-        },
-        orderBy: { order: "asc" }
-      }
-    }
-  });
-
-  const sellersWithRecentVisits = await prisma.agendaEvent.groupBy({
-    by: ["sellerId"],
-    where: {
-      type: "roteiro_visita",
-      startDateTime: { gte: inactivityWindow.start, lte: inactivityWindow.end },
-      stops: {
-        some: {
-          checkOutAt: { not: null }
-        }
+  const [sellers, plannedBySellerRows, executedActivities, recentExecutionRows] = await Promise.all([
+    prisma.user.findMany({
+      where: {
+        role: "vendedor",
+        isActive: true,
+        ...(scopedSellerId ? { id: scopedSellerId } : {})
       },
-      ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-    }
-  });
+      select: { id: true, name: true }
+    }),
+    prisma.agendaEvent.groupBy({
+      by: ["sellerId"],
+      where: {
+        type: "roteiro_visita",
+        startDateTime: { gte: from, lte: to },
+        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+      },
+      _count: { _all: true }
+    }),
+    prisma.activity.findMany({
+      where: {
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
+        ...resolveExecutionActivityDateFilter(from, to)
+      },
+      select: {
+        ownerSellerId: true,
+        opportunityId: true,
+        type: true,
+        createdAt: true,
+        dueDate: true
+      }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        ...resolveActivityTypeFilters("visita", "reuniao"),
+        ...resolveExecutionActivityDateFilter(inactivityWindow.start, inactivityWindow.end)
+      },
+      _count: { _all: true }
+    })
+  ]);
 
-  const activeSellersInWindow = new Set(sellersWithRecentVisits.map((item) => item.sellerId));
-
-  const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
-
-  const followUps = opportunities.length
-    ? await prisma.activity.findMany({
-        where: {
-          ...resolveActivityTypeFilters("followup", "follow_up"),
-          createdAt: { gte: from, lte: to },
-          ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
-          opportunityId: { in: opportunities }
-        },
-        select: {
-          ownerSellerId: true,
-          opportunityId: true,
-          createdAt: true
-        }
-      })
-    : [];
-
-  const followUpsIndex = followUps.reduce<Record<string, Date[]>>((acc, followUp) => {
-    if (!followUp.opportunityId) return acc;
-    const key = `${followUp.ownerSellerId}:${followUp.opportunityId}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(followUp.createdAt);
+  const plannedBySeller = plannedBySellerRows.reduce<Record<string, number>>((acc, item) => {
+    acc[item.sellerId] = item._count._all;
     return acc;
   }, {});
 
-  const statsBySeller = plannedEvents.reduce<
+  const activeSellersInWindow = new Set(recentExecutionRows.filter((item) => item._count._all > 0).map((item) => item.ownerSellerId));
+
+  const followUpsIndex = executedActivities
+    .filter((item) => normalizeActivityType(item.type) === "followup" && item.opportunityId)
+    .reduce<Record<string, Date[]>>((acc, item) => {
+      const key = `${item.ownerSellerId}:${item.opportunityId}`;
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(item.createdAt);
+      return acc;
+    }, {});
+
+  const statsBySeller = sellers.reduce<
     Record<
       string,
       {
@@ -1865,49 +1860,38 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         followUpAfterVisit: number;
       }
     >
-  >((acc, event) => {
-    const sellerStats =
-      acc[event.sellerId] ||
-      (acc[event.sellerId] = {
-        sellerId: event.sellerId,
-        sellerName: event.seller.name,
-        planned: 0,
-        executed: 0,
-        punctual: 0,
-        followUpAfterVisit: 0
-      });
-
-    sellerStats.planned += 1;
-
-    const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
-    const firstCheckout = event.stops.find((stop) => Boolean(stop.checkOutAt))?.checkOutAt;
-
-    if (firstCheckout) {
-      sellerStats.executed += 1;
-
-      if (event.opportunityId) {
-        const key = `${event.sellerId}:${event.opportunityId}`;
-        const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= firstCheckout.getTime());
-        if (hasFollowUpAfterVisit) {
-          sellerStats.followUpAfterVisit += 1;
-        }
-      }
-    }
-
-    if (firstStopWithCheckIn) {
-      const plannedReference = firstStopWithCheckIn.plannedTime;
-      const checkInAt = firstStopWithCheckIn.checkInAt!;
-      if (plannedReference && checkInAt.getTime() <= plannedReference.getTime() + punctualToleranceMs) {
-        sellerStats.punctual += 1;
-      }
-    }
-
+  >((acc, seller) => {
+    acc[seller.id] = {
+      sellerId: seller.id,
+      sellerName: seller.name,
+      planned: plannedBySeller[seller.id] || 0,
+      executed: 0,
+      punctual: 0,
+      followUpAfterVisit: 0
+    };
     return acc;
   }, {});
 
+  for (const activity of executedActivities) {
+    const sellerStats = statsBySeller[activity.ownerSellerId];
+    if (!sellerStats) continue;
+    sellerStats.executed += 1;
+    sellerStats.punctual += 1;
+
+    const normalizedType = normalizeActivityType(activity.type);
+    if ((normalizedType === "visita" || normalizedType === "reuniao") && activity.opportunityId) {
+      const key = `${activity.ownerSellerId}:${activity.opportunityId}`;
+      const executionDate = activity.createdAt || activity.dueDate;
+      const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= executionDate.getTime());
+      if (hasFollowUpAfterVisit) {
+        sellerStats.followUpAfterVisit += 1;
+      }
+    }
+  }
+
   const ranking = Object.values(statsBySeller)
     .map((stats) => {
-      const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : 0;
+      const executionRate = stats.planned ? (stats.executed / stats.planned) * 100 : stats.executed > 0 ? 100 : 0;
       const punctualRate = stats.executed ? (stats.punctual / stats.executed) * 100 : 0;
       const followUpRate = stats.executed ? (stats.followUpAfterVisit / stats.executed) * 100 : 0;
       const baseDisciplineScore = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
@@ -2064,10 +2048,9 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     return res.status(400).json({ message: "Parâmetro weekStart inválido. Use YYYY-MM-DD." });
   }
 
-  const punctualToleranceMs = 10 * 60 * 1000;
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
-  const [sellers, currentSales, previousSales, plannedEvents, opportunitiesCreated] = await Promise.all([
+  const [sellers, currentSales, previousSales, executionActivities, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
       where: { role: "vendedor" },
       select: { id: true, name: true }
@@ -2082,23 +2065,18 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       where: { date: { gte: range.previousStart, lte: range.previousEnd } },
       _sum: { value: true }
     }),
-    prisma.agendaEvent.findMany({
+    prisma.activity.findMany({
       where: {
-        type: "roteiro_visita",
-        startDateTime: { gte: range.start, lte: range.end }
+        ...sellerWhere(req),
+        ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
+        ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
       select: {
-        id: true,
-        sellerId: true,
+        ownerSellerId: true,
+        type: true,
         opportunityId: true,
-        stops: {
-          select: {
-            plannedTime: true,
-            checkInAt: true,
-            checkOutAt: true
-          },
-          orderBy: { order: "asc" }
-        }
+        createdAt: true,
+        dueDate: true
       }
     }),
     prisma.opportunity.findMany({
@@ -2106,23 +2084,6 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       select: { ownerSellerId: true }
     })
   ]);
-
-  const opportunities = Array.from(new Set(plannedEvents.map((event) => event.opportunityId).filter(Boolean))) as string[];
-
-  const followUps = opportunities.length
-    ? await prisma.activity.findMany({
-        where: {
-          ...resolveActivityTypeFilters("followup", "follow_up"),
-          createdAt: { gte: range.start, lte: range.end },
-          opportunityId: { in: opportunities }
-        },
-        select: {
-          ownerSellerId: true,
-          opportunityId: true,
-          createdAt: true
-        }
-      })
-    : [];
 
   const currentSalesMap = currentSales.reduce<Record<string, number>>((acc, row) => {
     acc[row.sellerId] = row._sum.value ?? 0;
@@ -2139,57 +2100,14 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     return acc;
   }, {});
 
-  const followUpsIndex = followUps.reduce<Record<string, Date[]>>((acc, followUp) => {
-    if (!followUp.opportunityId) return acc;
-    const key = `${followUp.ownerSellerId}:${followUp.opportunityId}`;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(followUp.createdAt);
+  const executedBySeller = executionActivities.reduce<Record<string, number>>((acc, item) => {
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
 
-  const disciplineBySeller = plannedEvents.reduce<
-    Record<
-      string,
-      {
-        planned: number;
-        executed: number;
-        punctual: number;
-        followUpAfterVisit: number;
-      }
-    >
-  >((acc, event) => {
-    const row =
-      acc[event.sellerId] ||
-      (acc[event.sellerId] = {
-        planned: 0,
-        executed: 0,
-        punctual: 0,
-        followUpAfterVisit: 0
-      });
-
-    row.planned += 1;
-
-    const firstStopWithCheckIn = event.stops.find((stop) => Boolean(stop.checkInAt));
-    const firstCheckout = event.stops.find((stop) => Boolean(stop.checkOutAt))?.checkOutAt;
-
-    if (firstCheckout) {
-      row.executed += 1;
-
-      if (event.opportunityId) {
-        const key = `${event.sellerId}:${event.opportunityId}`;
-        const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some(
-          (createdAt) => createdAt.getTime() >= firstCheckout.getTime()
-        );
-        if (hasFollowUpAfterVisit) row.followUpAfterVisit += 1;
-      }
-    }
-
-    if (firstStopWithCheckIn?.plannedTime && firstStopWithCheckIn.checkInAt) {
-      if (firstStopWithCheckIn.checkInAt.getTime() <= firstStopWithCheckIn.plannedTime.getTime() + punctualToleranceMs) {
-        row.punctual += 1;
-      }
-    }
-
+  const followUpsBySeller = executionActivities.reduce<Record<string, number>>((acc, item) => {
+    if (normalizeActivityType(item.type) !== "followup") return acc;
+    acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
 
@@ -2226,41 +2144,32 @@ router.get("/reports/weekly-highlights", async (req, res) => {
 
   const bestExecutor = topByMetric(
     sellers.map((seller) => {
-      const discipline = disciplineBySeller[seller.id] || { planned: 0, executed: 0, punctual: 0, followUpAfterVisit: 0 };
-      const executionRate = discipline.planned ? (discipline.executed / discipline.planned) * 100 : 0;
-      const punctualRate = discipline.executed ? (discipline.punctual / discipline.executed) * 100 : 0;
-      const followUpRate = discipline.executed ? (discipline.followUpAfterVisit / discipline.executed) * 100 : 0;
-      const disciplineScoreBase = executionRate * 0.5 + punctualRate * 0.3 + followUpRate * 0.2;
-      const volumeFactor = discipline.planned < weeklyVisitGoal ? discipline.planned / weeklyVisitGoal : 1;
-      const metricValue = disciplineScoreBase * volumeFactor;
+      const executed = executedBySeller[seller.id] || 0;
+      const followUps = followUpsBySeller[seller.id] || 0;
+      const followUpRate = executed > 0 ? (followUps / executed) * 100 : 0;
+      const volumeFactor = executed < weeklyVisitGoal ? executed / weeklyVisitGoal : 1;
+      const metricValue = (followUpRate * 0.4 + Math.min(executed, weeklyVisitGoal) / weeklyVisitGoal * 100 * 0.6) * volumeFactor;
 
       return {
         sellerId: seller.id,
         sellerName: seller.name,
-        metricLabel: "Discipline score da semana",
+        metricLabel: "Disciplina de execução da semana",
         metricValue,
         medal: "🥇"
       };
     })
   );
 
-  const executedVisitsMap = plannedEvents.reduce<Record<string, number>>((acc, event) => {
-    const hasCheckout = event.stops.some((stop) => Boolean(stop.checkOutAt));
-    if (!hasCheckout) return acc;
-    acc[event.sellerId] = (acc[event.sellerId] || 0) + 1;
-    return acc;
-  }, {});
-
   const bestConversion = topByMetric(
     sellers.map((seller) => {
       const created = opportunitiesCreatedMap[seller.id] || 0;
-      const executedVisits = executedVisitsMap[seller.id] || 0;
-      const conversionRate = executedVisits > 0 ? (created / executedVisits) * 100 : 0;
+      const executed = executedBySeller[seller.id] || 0;
+      const conversionRate = executed > 0 ? (created / executed) * 100 : 0;
 
       return {
         sellerId: seller.id,
         sellerName: seller.name,
-        metricLabel: "Oportunidades criadas / visitas realizadas (%)",
+        metricLabel: "Oportunidades criadas / atividades executadas (%)",
         metricValue: conversionRate,
         medal: "🎯"
       };
