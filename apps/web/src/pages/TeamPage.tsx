@@ -55,6 +55,14 @@ type SellerObjective = {
   amount: number;
 };
 
+type DashboardSummaryResponse = {
+  totalRevenue: number;
+  performance: Array<{
+    sellerId: string;
+    revenue: number;
+  }>;
+};
+
 const roleLabel: Record<string, string> = {
   diretor: "Diretor",
   gerente: "Gerente",
@@ -98,6 +106,7 @@ export default function TeamPage() {
   const [objectiveMonth, setObjectiveMonth] = useState(() => getCurrentMonthKey());
   const [savingObjective, setSavingObjective] = useState(false);
   const [teamActivitiesInMonth, setTeamActivitiesInMonth] = useState<number | null>(null);
+  const [teamRevenueInMonth, setTeamRevenueInMonth] = useState<number | null>(null);
 
   const isManagerProfile = user?.role === "gerente" || user?.role === "diretor";
   const isDirector = user?.role === "diretor";
@@ -111,11 +120,12 @@ export default function TeamPage() {
     const month = Number(monthString);
     const monthKey = `${yearString}-${monthString}`;
 
-    const [usersResponse, opportunitiesResponse, activitiesResponse, objectivesResponse] = await Promise.all([
+    const [usersResponse, opportunitiesResponse, activitiesResponse, objectivesResponse, dashboardSummaryResponse] = await Promise.all([
       api.get<TeamUser[]>("/users"),
       api.get<TeamOpportunity[]>("/opportunities"),
       api.get<TeamActivity[]>("/activities"),
-      api.get<SellerObjective[]>(`/objectives?month=${month}&year=${year}`)
+      api.get<SellerObjective[]>(`/objectives?month=${month}&year=${year}`),
+      api.get<DashboardSummaryResponse>(`/dashboard/summary?month=${monthKey}`)
     ]);
 
     const loadedUsers = Array.isArray(usersResponse.data) ? usersResponse.data : [];
@@ -134,9 +144,21 @@ export default function TeamPage() {
       return acc;
     }, {});
 
+    const sellerRevenueInMonth = new Map(dashboardSummaryResponse.data.performance.map((seller) => [seller.sellerId, seller.revenue]));
+
+    const sellerMetrics = buildSellerMetrics(loadedUsers, loadedOpportunities, loadedActivities, objectivesBySeller, monthKey);
+    Object.entries(sellerMetrics).forEach(([sellerId, metrics]) => {
+      const monthlyRevenue = sellerRevenueInMonth.get(sellerId);
+      if (typeof monthlyRevenue !== "number") return;
+      metrics.monthlyRevenue = monthlyRevenue;
+      metrics.isRevenueEstimated = false;
+      metrics.progressPercent = metrics.objectiveAmount > 0 ? (monthlyRevenue / metrics.objectiveAmount) * 100 : 0;
+    });
+
     setUsers(loadedUsers);
     setTeamActivitiesInMonth(activitiesInMonth);
-    setMetricsBySeller(buildSellerMetrics(loadedUsers, loadedOpportunities, loadedActivities, objectivesBySeller, monthKey));
+    setTeamRevenueInMonth(dashboardSummaryResponse.data.totalRevenue);
+    setMetricsBySeller(sellerMetrics);
   };
 
   useEffect(() => {
@@ -147,6 +169,7 @@ export default function TeamPage() {
         toast.error(getApiErrorMessage(error, "Não foi possível carregar os dados da equipe."));
         setUsers([]);
         setTeamActivitiesInMonth(null);
+        setTeamRevenueInMonth(null);
         setMetricsBySeller({});
       } finally {
         setLoading(false);
@@ -179,7 +202,9 @@ export default function TeamPage() {
     const sellerIds = new Set(users.filter((teamUser) => teamUser.role === "vendedor").map((teamUser) => teamUser.id));
     const metricsList = Array.from(sellerIds).map((sellerId) => metricsBySeller[sellerId]).filter((value): value is SellerCardMetrics => Boolean(value));
 
-    const totalRevenue = metricsList.reduce((sum, metrics) => sum + (metrics.monthlyRevenue || 0), 0);
+    const totalRevenue = typeof teamRevenueInMonth === "number"
+      ? teamRevenueInMonth
+      : metricsList.reduce((sum, metrics) => sum + (metrics.monthlyRevenue || 0), 0);
     const totalObjective = metricsList.reduce((sum, metrics) => sum + (metrics.objectiveAmount || 0), 0);
     const totalPipeline = metricsList.reduce((sum, metrics) => sum + (metrics.openPipelineValue || 0), 0);
     const totalActivities = teamActivitiesInMonth ?? 0;
@@ -192,7 +217,7 @@ export default function TeamPage() {
       totalActivities,
       progressPercent
     };
-  }, [users, metricsBySeller, teamActivitiesInMonth]);
+  }, [users, metricsBySeller, teamActivitiesInMonth, teamRevenueInMonth]);
 
   const barChartOptions = useMemo<ChartOptions<"bar">>(
     () => ({
