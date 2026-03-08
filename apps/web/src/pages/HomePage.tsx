@@ -138,6 +138,10 @@ function isSameDay(dateValue: string, start: Date, end: Date) {
   return date >= start && date < end;
 }
 
+function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDate"> & { date?: string }) {
+  return activity.date || activity.createdAt || activity.dueDate;
+}
+
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 export default function HomePage() {
@@ -299,7 +303,7 @@ export default function HomePage() {
 
 
     const dayActivities = activities
-      .filter((item) => isSameDay(item.createdAt ?? item.dueDate, start, end))
+      .filter((item) => isSameDay(getActivityExecutionDate(item), start, end))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
     const toFollowUpDate = (value?: string | null) => {
@@ -346,7 +350,7 @@ export default function HomePage() {
     }, {});
 
     const todayCountByType = activities.reduce<Record<string, number>>((accumulator, item) => {
-      if (!isSameDay(item.createdAt ?? item.dueDate, start, end)) {
+      if (!isSameDay(getActivityExecutionDate(item), start, end)) {
         return accumulator;
       }
       const normalized = normalizeActivityType(item.type);

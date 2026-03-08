@@ -437,6 +437,13 @@ const getMonthRangeFromKey = (monthKey: string) => {
   };
 };
 
+const buildWonOpportunityDateRangeFilter = (start: Date, end: Date): Prisma.OpportunityWhereInput => ({
+  OR: [
+    { closedAt: { gte: start, lte: end } },
+    { closedAt: null, expectedCloseDate: { gte: start, lte: end } }
+  ]
+});
+
 const getWeekRangeFromMonday = (weekStartRaw: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartRaw)) return null;
   const start = normalizeDateToUtc(weekStartRaw);
@@ -1954,10 +1961,11 @@ router.get("/reports/score-monthly", async (req, res) => {
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" }
     }),
-    prisma.sale.groupBy({
-      by: ["sellerId"],
+    prisma.opportunity.groupBy({
+      by: ["ownerSellerId"],
       where: {
-        date: { gte: start, lte: end }
+        stage: "ganho",
+        ...buildWonOpportunityDateRangeFilter(start, end)
       },
       _sum: { value: true }
     }),
@@ -1978,7 +1986,7 @@ router.get("/reports/score-monthly", async (req, res) => {
   ]);
 
   const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._sum.value ?? 0;
+    acc[item.ownerSellerId] = item._sum.value ?? 0;
     return acc;
   }, {});
 
@@ -2257,11 +2265,12 @@ router.get("/reports/commercial-score", async (req, res) => {
         description: true
       }
     }),
-    prisma.sale.groupBy({
-      by: ["sellerId"],
+    prisma.opportunity.groupBy({
+      by: ["ownerSellerId"],
       where: {
-        date: { gte: start, lte: end },
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
+        stage: "ganho",
+        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
+        ...buildWonOpportunityDateRangeFilter(start, end)
       },
       _sum: { value: true }
     }),
@@ -2379,7 +2388,7 @@ router.get("/reports/commercial-score", async (req, res) => {
   }, {});
 
   const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._sum.value ?? 0;
+    acc[item.ownerSellerId] = item._sum.value ?? 0;
     return acc;
   }, {});
   const goalsBySeller = monthGoals.reduce<Record<string, number>>((acc, item) => {
@@ -2481,11 +2490,12 @@ router.get("/reports/consistency", async (req, res) => {
     monthKeys.map(async (month) => {
       const { start, end } = getMonthRangeFromKey(month);
       const [sales, goals] = await Promise.all([
-        prisma.sale.groupBy({
-          by: ["sellerId"],
+        prisma.opportunity.groupBy({
+          by: ["ownerSellerId"],
           where: {
-            date: { gte: start, lte: end },
-            sellerId: { in: sellers.map((seller) => seller.id) }
+            stage: "ganho",
+            ownerSellerId: { in: sellers.map((seller) => seller.id) },
+            ...buildWonOpportunityDateRangeFilter(start, end)
           },
           _sum: { value: true }
         }),
@@ -2502,7 +2512,7 @@ router.get("/reports/consistency", async (req, res) => {
       ]);
 
       const salesBySeller = sales.reduce<Record<string, number>>((acc, item) => {
-        acc[item.sellerId] = item._sum.value ?? 0;
+        acc[item.ownerSellerId] = item._sum.value ?? 0;
         return acc;
       }, {});
 
