@@ -14,6 +14,8 @@ export type AgendaEvent = {
   endsAt: string;
   city?: string;
   status: AgendaEventStatus;
+  linkedActivityId?: string | null;
+  hasLinkedActivity?: boolean;
 
   // Backward compatibility fields
   userId?: string;
