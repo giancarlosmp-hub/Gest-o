@@ -125,13 +125,7 @@ function normalizeEventType(type: string | undefined): string {
 
 function isFollowUpEvent(event: AgendaEvent) {
   const normalizedType = normalizeEventType(event.type);
-  if (normalizedType === "follow_up" || normalizedType === "followup") {
-    return true;
-  }
-
-  const title = String(event.title || "").toLowerCase();
-  const description = String(event.description || "").toLowerCase();
-  return title.includes("follow-up") || description.includes("follow-up");
+  return normalizedType === "follow_up" || normalizedType === "followup";
 }
 
 function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
@@ -139,14 +133,12 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
 
   return events.reduce<AgendaSummary>(
     (acc, event) => {
-      if (event.status === "completed" || event.status === "cancelled") return acc;
-
       const normalizedType = normalizeEventType(event.type);
       if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") acc.meetings += 1;
       if (normalizedType === "roteiro_visita") acc.routes += 1;
       if (isFollowUpEvent(event)) acc.followups += 1;
 
-      if (new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
+      if (event.status !== "completed" && event.status !== "cancelled" && new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
       return acc;
     },
     { meetings: 0, routes: 0, followups: 0, overdue: 0 }
@@ -219,6 +211,12 @@ function isEventWithinRange(eventDateTime: string, startDate: Date, endDate: Dat
   return eventDate.getTime() >= startDate.getTime() && eventDate.getTime() <= endDate.getTime();
 }
 
+function isEventOverlappingRange(startsAt: string, endsAt: string, startDate: Date, endDate: Date) {
+  const eventStart = new Date(startsAt).getTime();
+  const eventEnd = new Date(endsAt).getTime();
+  return eventStart <= endDate.getTime() && eventEnd >= startDate.getTime();
+}
+
 function formatDayKey(value: string) {
   const date = new Date(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -277,25 +275,6 @@ function getCurrentPositionOptional(timeoutMs = 5000): Promise<StopGeolocationPa
   });
 }
 
-function getInitialEvents(): AgendaEvent[] {
-  const now = new Date();
-  return [
-    {
-      id: "event-1",
-      ownerId: "seller-1",
-      userId: "seller-1",
-      clientId: "client-1",
-      opportunityId: "opp-1",
-      title: "Kickoff técnico",
-      notes: "Alinhar cronograma de implantação e responsáveis.",
-      type: "reuniao_online",
-      startsAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9, 0).toISOString(),
-      endsAt: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0).toISOString(),
-      status: "planned"
-    }
-  ];
-}
-
 
 function mapApiAgendaEvent(item: any): AgendaEvent {
   return {
@@ -338,7 +317,7 @@ export default function AgendaPage() {
   const [customTo, setCustomTo] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
 
-  const [events, setEvents] = useState<AgendaEvent[]>(() => getInitialEvents());
+  const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [isEventsLoading, setIsEventsLoading] = useState(false);
   const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
 
@@ -568,7 +547,7 @@ export default function AgendaPage() {
       return true;
     });
 
-    const byPeriod = byRole.filter((event) => isEventWithinRange(getStartsAt(event), dateRange.start, dateRange.end));
+    const byPeriod = byRole.filter((event) => isEventOverlappingRange(getStartsAt(event), getEndsAt(event), dateRange.start, dateRange.end));
     const byOverdue = overdueOnly
       ? byPeriod.filter((event) => event.status === "planned" && new Date(getEndsAt(event)).getTime() < Date.now())
       : byPeriod;
@@ -596,11 +575,19 @@ export default function AgendaPage() {
 
   const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
 
+  const roleScopedEvents = useMemo(() => {
+    return events.filter((event) => {
+      if (user?.role === "vendedor") return getOwnerId(event) === user.id;
+      if (canFilterBySeller && selectedSellerId) return getOwnerId(event) === selectedSellerId;
+      return true;
+    });
+  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
+
   const weeklyRoutePlans = useMemo(() => {
     const weekRange = getRangeFromFilter("this_week", customFrom, customTo);
     const grouped = new Map<string, { dayLabel: string; city: string; visits: number }>();
 
-    filteredEvents
+    roleScopedEvents
       .filter((event) => event.type === "roteiro_visita" && event.status === "planned")
       .filter((event) => isEventWithinRange(getStartsAt(event), weekRange.start, weekRange.end))
       .forEach((event) => {
@@ -620,7 +607,7 @@ export default function AgendaPage() {
     return Array.from(grouped.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([, value]) => value);
-  }, [filteredEvents, customFrom, customTo]);
+  }, [roleScopedEvents, customFrom, customTo]);
 
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
@@ -1127,9 +1114,10 @@ export default function AgendaPage() {
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
       const createdEventInSelectedRange = isEventWithinRange(getStartsAt(createdEvent), range.start, range.end);
 
+      setEventsRefreshToken((current) => current + 1);
+
       if (createdEventInSelectedRange) {
         setEvents((current) => [...current, createdEvent].sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime()));
-        setEventsRefreshToken((current) => current + 1);
         toast.success("Compromisso criado com sucesso.");
       } else {
         const createdDate = formatDateOnly(getStartsAt(createdEvent));
@@ -1207,7 +1195,7 @@ export default function AgendaPage() {
               onChange={(event) => setSelectedSellerId(event.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
-              <option value="">Todos</option>
+              <option value="">{user?.role === "diretor" ? "Todos" : "Time"}</option>
               {sellers.map((seller) => (
                 <option key={seller.id} value={seller.id}>
                   {seller.name}
