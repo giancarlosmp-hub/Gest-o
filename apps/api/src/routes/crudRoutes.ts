@@ -3931,6 +3931,7 @@ const mapActivity = (activity: any) => {
   const status = resolveStatus({ done: activity.done, endAt: activity.dueDate });
   return {
     ...activity,
+    ownerId: activity.ownerSellerId,
     status,
     isOverdue: status === "vencido"
   };
@@ -4010,7 +4011,7 @@ router.get("/activities/monthly-counts", async (req, res) => {
   );
 });
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
-  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId);
+  const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.ownerId);
   const notes = (req.body.notes || req.body.description || "").trim();
   if (!notes) {
     return res.status(400).json({ message: "Descrição/notas da atividade é obrigatória." });
@@ -4054,6 +4055,13 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
 
   const normalizedType = normalizeActivityType(req.body.type);
 
+  const activityDateSource = req.body.date || req.body.dueDate;
+  if (!activityDateSource) {
+    return res.status(400).json({ message: "Informe date ou dueDate para a atividade." });
+  }
+  const dueDate = new Date(req.body.dueDate || activityDateSource);
+  const executionDate = req.body.date ? new Date(req.body.date) : dueDate;
+
   const createdActivity = await prisma.$transaction(async (tx) => {
     const activity = await tx.activity.create({
       data: {
@@ -4061,8 +4069,8 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
         notes,
         description: req.body.description || notes,
         result: req.body.result,
-        dueDate: new Date(req.body.dueDate),
-        date: req.body.date ? new Date(req.body.date) : undefined,
+        dueDate,
+        date: executionDate,
         duration: req.body.duration,
         city: req.body.city,
         crop: req.body.crop,
@@ -4108,6 +4116,11 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
 router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
   const normalizedType = req.body.type ? normalizeActivityType(req.body.type) : undefined;
   const notes = req.body.notes ?? req.body.description;
+
+  const ownerSellerId = req.body.ownerSellerId ?? req.body.ownerId;
+  const dueDate = req.body.dueDate ? new Date(req.body.dueDate) : undefined;
+  const executionDate = req.body.date ? new Date(req.body.date) : undefined;
+
   const updatedActivity = await prisma.activity.update({
     where: { id: req.params.id },
     data: {
@@ -4115,8 +4128,8 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
       ...(notes !== undefined ? { notes } : {}),
       ...(req.body.description !== undefined ? { description: req.body.description } : {}),
       ...(req.body.result !== undefined ? { result: req.body.result } : {}),
-      ...(req.body.dueDate ? { dueDate: new Date(req.body.dueDate) } : {}),
-      ...(req.body.date ? { date: new Date(req.body.date) } : {}),
+      ...(dueDate ? { dueDate } : {}),
+      ...(executionDate ? { date: executionDate } : {}),
       ...(req.body.duration !== undefined ? { duration: req.body.duration } : {}),
       ...(req.body.city !== undefined ? { city: req.body.city } : {}),
       ...(req.body.crop !== undefined ? { crop: req.body.crop } : {}),
@@ -4125,7 +4138,8 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
       ...(req.body.done !== undefined ? { done: req.body.done } : {}),
       ...(req.body.clientId !== undefined ? { clientId: req.body.clientId } : {}),
       ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {}),
-      ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {})
+      ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {}),
+      ...(ownerSellerId !== undefined ? { ownerSellerId } : {})
     }
   });
   return res.json(mapActivity(updatedActivity));
