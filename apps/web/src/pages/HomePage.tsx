@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckSquare, Clock3, MessageCircleWarning, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -6,6 +6,7 @@ import api from "../lib/apiClient";
 import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
+import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 
 type Activity = {
   id: string;
@@ -137,13 +138,6 @@ function isSameDay(dateValue: string, start: Date, end: Date) {
   return date >= start && date < end;
 }
 
-function getMeetingType(notes: string) {
-  const normalized = notes.toLowerCase();
-  if (normalized.includes("online")) return "online";
-  if (normalized.includes("presencial")) return "presencial";
-  return "não informado";
-}
-
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 
 export default function HomePage() {
@@ -175,24 +169,19 @@ export default function HomePage() {
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-
-    const loadData = async () => {
+  const loadCentralData = useCallback(
+    async (signal?: AbortSignal) => {
       setLoading(true);
-      void refreshReminders(controller.signal);
+      void refreshReminders(signal);
       try {
         setPipelineError(null);
         const today = new Date().toISOString().slice(0, 10);
         const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse] = await Promise.all([
-          api.get("/activities", { signal: controller.signal }),
-          api.get("/opportunities?status=open", { signal: controller.signal }),
-          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal: controller.signal }),
-          api.get(`/agenda/events?from=${today}&to=${today}`, { signal: controller.signal })
+          api.get("/activities", { signal }),
+          api.get("/opportunities?status=open", { signal }),
+          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal }),
+          api.get(`/agenda/events?from=${today}&to=${today}`, { signal })
         ]);
-
-        if (!active) return;
         setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
         const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
           ? opportunitiesResponse.data.items
@@ -203,12 +192,11 @@ export default function HomePage() {
         setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
 
         try {
-          const coolingResponse = await api.get("/clients/alerts/cooling", { signal: controller.signal });
-          if (!active) return;
+          const coolingResponse = await api.get("/clients/alerts/cooling", { signal });
           const count = Number(coolingResponse.data?.count ?? 0);
           setCoolingClients({ count: Number.isFinite(count) ? count : 0, unavailable: false });
         } catch (coolingError: unknown) {
-          if (!active || (coolingError as { code?: string })?.code === "ERR_CANCELED") return;
+          if ((coolingError as { code?: string })?.code === "ERR_CANCELED") return;
           const status = (coolingError as { response?: { status?: number } })?.response?.status;
           if (status === 404) {
             setCoolingClients({
@@ -225,19 +213,39 @@ export default function HomePage() {
           }
         }
       } catch (error) {
-        if (!active || (error as { code?: string })?.code === "ERR_CANCELED") return;
+        if ((error as { code?: string })?.code === "ERR_CANCELED") return;
         setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
       } finally {
-        if (active) setLoading(false);
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-    };
+    },
+    [dashboardQueryKey, refreshReminders]
+  );
 
-    void loadData();
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void loadCentralData(controller.signal);
     return () => {
-      active = false;
       controller.abort();
     };
-  }, [dashboardQueryKey, refreshReminders]);
+  }, [loadCentralData]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void loadCentralData();
+    };
+
+    window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+    window.addEventListener("focus", onRefresh);
+
+    return () => {
+      window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
+  }, [loadCentralData]);
 
 
   useEffect(() => {
@@ -283,17 +291,12 @@ export default function HomePage() {
     []
   );
 
-  const { plannedAppointmentsToday, meetingsToday, activitiesToday, pendingFollowUps, urgentFollowUps } = useMemo(() => {
+  const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();
-    const now = new Date();
-
     const plannedAppointments = agendaEventsToday
       .filter((item) => (item.status ?? "planned") === "planned")
       .filter((item) => isSameDay(String(item.startsAt || item.startDateTime || ""), start, end));
 
-    const meetings = activities
-      .filter((item) => item.type === "reuniao" && isSameDay(item.dueDate, start, end))
-      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
     const dayActivities = activities
       .filter((item) => isSameDay(item.createdAt ?? item.dueDate, start, end))
@@ -317,28 +320,11 @@ export default function HomePage() {
         return aDate.getTime() - bDate.getTime();
       });
 
-    const urgent = opportunities
-      .filter((item) => {
-        const followUpDate = toFollowUpDate(item.followUpDate);
-        return followUpDate !== null && followUpDate <= end;
-      })
-      .map((item) => {
-        const followUpDate = toFollowUpDate(item.followUpDate);
-        return { ...item, overdue: followUpDate !== null && followUpDate < now };
-      })
-      .sort((a, b) => {
-        const aDate = toFollowUpDate(a.followUpDate);
-        const bDate = toFollowUpDate(b.followUpDate);
-        if (!aDate || !bDate) return 0;
-        return aDate.getTime() - bDate.getTime();
-      });
 
     return {
       plannedAppointmentsToday: plannedAppointments,
-      meetingsToday: meetings,
       activitiesToday: dayActivities,
-      pendingFollowUps: pending,
-      urgentFollowUps: urgent
+      pendingFollowUps: pending
     };
   }, [activities, agendaEventsToday, opportunities]);
 
@@ -834,41 +820,38 @@ export default function HomePage() {
         <article className={blockClass}>
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
-              <h2 className="text-lg font-semibold text-slate-900">Reuniões de Hoje</h2>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Planejamento</p>
+              <h2 className="text-lg font-semibold text-slate-900">Agenda de hoje</h2>
             </div>
             <UsersRound className="text-brand-700" size={20} />
           </div>
 
           <div className="space-y-2">
             {loading ? (
-              <p className="text-sm text-slate-500">Carregando reuniões...</p>
-            ) : meetingsToday.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhuma reunião para hoje.</p>
+              <p className="text-sm text-slate-500">Carregando agenda...</p>
+            ) : plannedAppointmentsToday.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhum item planejado na Agenda para hoje.</p>
             ) : (
-              meetingsToday.map((meeting) => (
+              plannedAppointmentsToday.map((item) => {
+                const startsAt = item.startsAt || item.startDateTime;
+
+                return (
                 <div
-                  key={meeting.id}
+                  key={item.id}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
                 >
                   <div>
                     <p className="text-sm font-medium text-slate-900">
-                      {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
-                        new Date(meeting.dueDate)
-                      )}
+                      {startsAt
+                        ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(startsAt))
+                        : "Sem horário"}
                     </p>
-                    <p className="text-xs text-slate-600">
-                      {meeting.opportunity?.client?.name ?? "Cliente não informado"} · {getMeetingType(meeting.notes)}
-                    </p>
+                    <p className="text-xs text-slate-600">{item.title || "Compromisso"}</p>
+                    <p className="text-xs text-slate-500">Origem: Agenda</p>
                   </div>
-                  <Link
-                    to={meeting.opportunity?.client?.id ? `/clientes/${meeting.opportunity.client.id}` : "/clientes"}
-                    className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800"
-                  >
-                    Abrir cliente
-                  </Link>
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         </article>
@@ -876,53 +859,17 @@ export default function HomePage() {
         <article className={blockClass}>
           <div className="mb-4 flex items-center justify-between">
             <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
-              <h2 className="text-lg font-semibold text-slate-900">Follow-ups Urgentes</h2>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Execução</p>
+              <h2 className="text-lg font-semibold text-slate-900">Atividades executadas hoje</h2>
             </div>
             <MessageCircleWarning className="text-brand-700" size={20} />
           </div>
 
           <div className="space-y-2">
             {loading ? (
-              <p className="text-sm text-slate-500">Carregando follow-ups...</p>
-            ) : urgentFollowUps.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhum follow-up urgente.</p>
-            ) : (
-              urgentFollowUps.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">{item.title}</p>
-                    <p className="text-xs text-slate-600">
-                      {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Follow-up: {item.followUpDate ? new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate)) : "Sem data"}
-                    </p>
-                  </div>
-                  {(item as any).overdue && <span className="h-3 w-3 rounded-full bg-red-500" title="Vencido" />}
-                </div>
-              ))
-            )}
-          </div>
-        </article>
-
-        <article className={blockClass}>
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
-              <h2 className="text-lg font-semibold text-slate-900">Atividades do Dia</h2>
-            </div>
-            <CheckSquare className="text-brand-700" size={20} />
-          </div>
-
-          <div className="space-y-2">
-            {loading ? (
               <p className="text-sm text-slate-500">Carregando atividades...</p>
             ) : activitiesToday.length === 0 ? (
-              <p className="text-sm text-slate-500">Sem atividades com vencimento hoje.</p>
+              <p className="text-sm text-slate-500">Nenhuma atividade executada hoje.</p>
             ) : (
               activitiesToday.map((activity) => (
                 <div
@@ -932,13 +879,74 @@ export default function HomePage() {
                   <div>
                     <p className="text-sm font-medium text-slate-900">{activity.notes || "Atividade"}</p>
                     <p className="text-xs text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
+                    <p className="text-xs text-slate-500">Origem: Activities</p>
                   </div>
                   <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                     <Clock3 size={14} />
                     {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
-                      new Date(activity.dueDate)
+                      new Date(activity.createdAt || activity.dueDate)
                     )}
                   </span>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pendências</p>
+              <h2 className="text-lg font-semibold text-slate-900">Followups pendentes</h2>
+            </div>
+            <CheckSquare className="text-brand-700" size={20} />
+          </div>
+
+          <div className="space-y-2">
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando follow-ups...</p>
+            ) : pendingFollowUps.length === 0 ? (
+              <p className="text-sm text-slate-500">Sem follow-ups pendentes.</p>
+            ) : (
+              pendingFollowUps.slice(0, 6).map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                    <p className="text-xs text-slate-600">{typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}</p>
+                    <p className="text-xs text-slate-500">Follow-up: {item.followUpDate ? new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate)) : "Sem data"}</p>
+                  </div>
+                  <span className="text-xs font-medium text-amber-700">Ação pendente</span>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Criticidade</p>
+              <h2 className="text-lg font-semibold text-slate-900">Oportunidades críticas</h2>
+            </div>
+            <MessageCircleWarning className="text-brand-700" size={20} />
+          </div>
+
+          <div className="space-y-2">
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando oportunidades críticas...</p>
+            ) : pipelineOfDay.topFive.length === 0 ? (
+              <p className="text-sm text-slate-500">Sem negociações críticas no momento.</p>
+            ) : (
+              pipelineOfDay.topFive.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                  <p className="text-xs text-slate-600">
+                    {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
+                  </p>
+                  <p className="text-xs text-red-700">{getPipelinePriorityLabel(item.priorityType)} · {item.daysLate} dia(s)</p>
                 </div>
               ))
             )}
