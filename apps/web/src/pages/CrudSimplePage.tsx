@@ -1753,7 +1753,7 @@ export default function CrudSimplePage({
 
       {isClientsPage && isImportModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 md:p-4" role="dialog" aria-modal="true">
-          <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
             <div className="shrink-0 border-b border-slate-200 px-5 py-4 md:px-6">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
               <p className="text-sm text-slate-500">Use um arquivo .xlsx para mapear, validar os dados e importar em lote.</p>
@@ -1907,8 +1907,7 @@ export default function CrudSimplePage({
                     </p>
                   ) : null}
 
-                  <div className="min-h-[240px] max-h-[48vh] flex-1 overflow-hidden rounded-xl border border-slate-200">
-                    <div className="h-full overflow-x-auto overflow-y-auto">
+                  <div className="preview-table-container min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border border-slate-200">
                     <table className="w-full min-w-[980px] text-sm">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
                         <tr>
@@ -1978,7 +1977,6 @@ export default function CrudSimplePage({
                         )}
                       </tbody>
                     </table>
-                    </div>
                   </div>
 
                   {importPreviewRows.length > 200 ? (
