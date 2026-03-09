@@ -65,7 +65,7 @@ const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", 
 const STATUS_LABEL: Record<ActivityStatus, string> = {
   agendado: "Agendado",
   vencido: "Vencido",
-  realizado: "Realizado"
+  realizado: "Concluído"
 };
 
 const STATUS_CLASS: Record<ActivityStatus, string> = {
@@ -89,10 +89,20 @@ export default function ActivitiesPage() {
   const [opportunitySearch, setOpportunitySearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingAction, setSavingAction] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
+  const [executionActivity, setExecutionActivity] = useState<Activity | null>(null);
+  const [rescheduleActivity, setRescheduleActivity] = useState<Activity | null>(null);
+  const [duplicateActivity, setDuplicateActivity] = useState<Activity | null>(null);
+  const [editActivity, setEditActivity] = useState<Activity | null>(null);
   const [filters, setFilters] = useState<ActivityFilters>(initialFilters);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [executionForm, setExecutionForm] = useState({ result: "", observations: "", duration: "" });
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [duplicateDate, setDuplicateDate] = useState("");
+  const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
 
   const filteredClients = useMemo(() => {
     const search = clientSearch.trim().toLowerCase();
@@ -179,6 +189,11 @@ export default function ActivitiesPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const refreshAfterMutation = async () => {
+    await loadActivities();
+    triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
   };
 
   useEffect(() => {
@@ -278,12 +293,140 @@ export default function ActivitiesPage() {
         toast.success("Compromisso concluído automaticamente");
       }
       closeCreateModal();
-      await loadActivities();
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+      await refreshAfterMutation();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar a atividade."));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const deleteActivity = async (id: string) => {
+    if (!window.confirm("Tem certeza que deseja excluir esta atividade?")) return;
+    setRemovingId(id);
+    try {
+      await api.delete(`/activities/${id}`);
+      await refreshAfterMutation();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível excluir a atividade."));
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const openExecutionModal = (activity: Activity) => {
+    setExecutionActivity(activity);
+    setExecutionForm({ result: activity.result || "", observations: activity.description || "", duration: activity.duration ? String(activity.duration) : "" });
+  };
+
+  const executeActivity = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!executionActivity) return;
+    setSavingAction(true);
+    try {
+      await api.put(`/activities/${executionActivity.id}`, {
+        done: true,
+        date: new Date().toISOString(),
+        result: executionForm.result.trim() || null,
+        description: executionForm.observations.trim() || null,
+        duration: executionForm.duration ? Number(executionForm.duration) : null
+      });
+      toast.success("Atividade executada com sucesso.");
+      setExecutionActivity(null);
+      await refreshAfterMutation();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível executar a atividade."));
+    } finally {
+      setSavingAction(false);
+    }
+  };
+
+  const openRescheduleModal = (activity: Activity) => {
+    setRescheduleActivity(activity);
+    setRescheduleDate(new Date(activity.dueDate).toISOString().slice(0, 10));
+  };
+
+  const reschedule = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!rescheduleActivity || !rescheduleDate) return;
+    setSavingAction(true);
+    try {
+      await api.put(`/activities/${rescheduleActivity.id}`, {
+        dueDate: new Date(rescheduleDate).toISOString()
+      });
+      toast.success("Atividade reagendada.");
+      setRescheduleActivity(null);
+      await refreshAfterMutation();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível reagendar a atividade."));
+    } finally {
+      setSavingAction(false);
+    }
+  };
+
+  const openDuplicateModal = (activity: Activity) => {
+    setDuplicateActivity(activity);
+    setDuplicateDate("");
+  };
+
+  const duplicate = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!duplicateActivity || !duplicateDate) return;
+    setSavingAction(true);
+    try {
+      await api.post("/activities", {
+        type: duplicateActivity.type,
+        notes: duplicateActivity.notes,
+        description: duplicateActivity.description || duplicateActivity.notes,
+        dueDate: new Date(duplicateDate).toISOString(),
+        date: new Date(duplicateDate).toISOString(),
+        duration: duplicateActivity.duration || undefined,
+        city: duplicateActivity.city || undefined,
+        crop: duplicateActivity.crop || undefined,
+        areaEstimated: duplicateActivity.areaEstimated || undefined,
+        product: duplicateActivity.product || undefined,
+        clientId: duplicateActivity.client?.id || duplicateActivity.opportunity?.client?.id,
+        opportunityId: duplicateActivity.opportunity?.id || undefined,
+        ownerSellerId: duplicateActivity.ownerSellerId
+      });
+      toast.success("Atividade duplicada com sucesso.");
+      setDuplicateActivity(null);
+      await refreshAfterMutation();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível duplicar a atividade."));
+    } finally {
+      setSavingAction(false);
+    }
+  };
+
+  const openEditModal = (activity: Activity) => {
+    setEditActivity(activity);
+    setEditForm({
+      type: activity.type,
+      notes: activity.notes,
+      dueDate: new Date(activity.dueDate).toISOString().slice(0, 10),
+      duration: activity.duration ? String(activity.duration) : ""
+    });
+  };
+
+  const edit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!editActivity) return;
+    setSavingAction(true);
+    try {
+      await api.put(`/activities/${editActivity.id}`, {
+        type: editForm.type,
+        notes: editForm.notes.trim(),
+        dueDate: new Date(editForm.dueDate).toISOString(),
+        duration: editForm.duration ? Number(editForm.duration) : null
+      });
+      toast.success("Atividade atualizada com sucesso.");
+      setEditActivity(null);
+      await refreshAfterMutation();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível atualizar a atividade."));
+    } finally {
+      setSavingAction(false);
     }
   };
 
@@ -395,48 +538,168 @@ export default function ActivitiesPage() {
                 <th className="p-2">Vencimento</th>
                 <th className="p-2">Status</th>
                 <th className="p-2">Notas</th>
-                <th className="p-2">Ações</th>
+                <th className="p-2 text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
-              {activities.map((item) => (
-                <tr key={item.id} className="border-t border-slate-100">
-                  <td className="p-2">{toLabel(item.type)}</td>
-                  <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
-                  <td className="p-2">{item.opportunity?.title || "—"}</td>
-                  <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
-                  <td className="p-2">
-                    {item.status ? (
-                      <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[item.status]}`}>{STATUS_LABEL[item.status]}</span>
-                    ) : (item.done ? "Realizado" : "Agendado")}
-                  </td>
-                  <td className="p-2">{item.notes}</td>
-                  <td className="p-2">
-                    <button
-                      type="button"
-                      className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700"
-                      disabled={removingId === item.id}
-                      onClick={async () => {
-                        if (!window.confirm("Tem certeza que deseja excluir esta atividade?")) return;
-                        setRemovingId(item.id);
-                        try {
-                          await api.delete(`/activities/${item.id}`);
-                          await loadActivities();
-                          triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
-                        } finally {
-                          setRemovingId(null);
-                        }
-                      }}
-                    >
-                      Excluir
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {activities.map((item) => {
+                const status = item.status || (item.done ? "realizado" : "agendado");
+                return (
+                  <tr key={item.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => setSelectedActivity(item)}>
+                    <td className="p-2">{toLabel(item.type)}</td>
+                    <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
+                    <td className="p-2">{item.opportunity?.title || "—"}</td>
+                    <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
+                    <td className="p-2">
+                      <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                    </td>
+                    <td className="p-2">{item.notes}</td>
+                    <td className="p-2">
+                      <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+                        {status === "agendado" ? (
+                          <>
+                            <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                            <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
+                            <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                          </>
+                        ) : null}
+                        {status === "vencido" ? (
+                          <>
+                            <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                            <button type="button" className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
+                            <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                          </>
+                        ) : null}
+                        {status === "realizado" ? (
+                          <>
+                            <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
+                            <button type="button" className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
       </div>
+
+      {selectedActivity ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setSelectedActivity(null)}>
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-xl font-semibold">Detalhes da atividade</h3>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setSelectedActivity(null)}>✕</button>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <p><strong>Tipo:</strong> {toLabel(selectedActivity.type)}</p>
+              <p><strong>Status:</strong> {STATUS_LABEL[selectedActivity.status || (selectedActivity.done ? "realizado" : "agendado")]}</p>
+              <p><strong>Cliente:</strong> {selectedActivity.opportunity?.client?.name || selectedActivity.client?.name || "—"}</p>
+              <p><strong>Oportunidade:</strong> {selectedActivity.opportunity?.title || "—"}</p>
+              <p><strong>Vencimento:</strong> {new Date(selectedActivity.dueDate).toLocaleString("pt-BR")}</p>
+              <p><strong>Executada em:</strong> {selectedActivity.date ? new Date(selectedActivity.date).toLocaleString("pt-BR") : "—"}</p>
+              <p className="md:col-span-2"><strong>Notas:</strong> {selectedActivity.notes || "—"}</p>
+              <p className="md:col-span-2"><strong>Resultado:</strong> {selectedActivity.result || "—"}</p>
+              <p className="md:col-span-2"><strong>Observações:</strong> {selectedActivity.description || "—"}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {executionActivity ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setExecutionActivity(null)}>
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h3 className="mb-4 text-xl font-semibold">Executar atividade</h3>
+            <form className="space-y-3" onSubmit={executeActivity}>
+              <div>
+                <label className="text-sm">Resultado</label>
+                <input className="w-full rounded-lg border border-slate-300 p-2" value={executionForm.result} onChange={(event) => setExecutionForm((previous) => ({ ...previous, result: event.target.value }))} />
+              </div>
+              <div>
+                <label className="text-sm">Observações</label>
+                <textarea className="min-h-20 w-full rounded-lg border border-slate-300 p-2" value={executionForm.observations} onChange={(event) => setExecutionForm((previous) => ({ ...previous, observations: event.target.value }))} />
+              </div>
+              <div>
+                <label className="text-sm">Duração real (minutos)</label>
+                <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={executionForm.duration} onChange={(event) => setExecutionForm((previous) => ({ ...previous, duration: event.target.value }))} />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setExecutionActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">{savingAction ? "Salvando..." : "Concluir execução"}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {rescheduleActivity ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setRescheduleActivity(null)}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h3 className="mb-4 text-xl font-semibold">Reagendar atividade</h3>
+            <form className="space-y-3" onSubmit={reschedule}>
+              <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setRescheduleActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {duplicateActivity ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setDuplicateActivity(null)}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h3 className="mb-4 text-xl font-semibold">Duplicar atividade</h3>
+            <form className="space-y-3" onSubmit={duplicate}>
+              <label className="text-sm">Nova data de vencimento</label>
+              <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Duplicar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {editActivity ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setEditActivity(null)}>
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <h3 className="mb-4 text-xl font-semibold">Editar atividade</h3>
+            <form className="space-y-3" onSubmit={edit}>
+              <div>
+                <label className="text-sm">Tipo</label>
+                <select className="w-full rounded-lg border border-slate-300 p-2" value={editForm.type} onChange={(event) => setEditForm((previous) => ({ ...previous, type: event.target.value }))}>
+                  {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
+                    <option key={activityType.value} value={activityType.value}>{activityType.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm">Notas</label>
+                <textarea required className="min-h-20 w-full rounded-lg border border-slate-300 p-2" value={editForm.notes} onChange={(event) => setEditForm((previous) => ({ ...previous, notes: event.target.value }))} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm">Vencimento</label>
+                  <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={editForm.dueDate} onChange={(event) => setEditForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-sm">Duração (min)</label>
+                  <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={editForm.duration} onChange={(event) => setEditForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setEditActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       {isModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCreateModal}>
