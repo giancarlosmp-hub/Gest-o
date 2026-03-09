@@ -124,20 +124,20 @@ export default function CreateOpportunityModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-0 sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-full flex-col bg-white sm:h-auto sm:max-w-3xl sm:rounded-2xl"
+        className="flex h-full w-full max-w-full flex-col bg-white sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:max-w-3xl sm:rounded-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-6">
+        <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
           <button type="button" className="rounded-md border border-slate-200 px-3 py-1 text-sm text-slate-600" onClick={onClose}>
             Fechar
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="flex h-full flex-col">
-          <div className="flex-1 space-y-6 overflow-y-auto p-4 sm:p-6">
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Identificação</h4>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -281,7 +281,7 @@ export default function CreateOpportunityModal({
             {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-slate-200 px-4 py-3 sm:px-6">
+          <div className="sticky bottom-0 z-10 flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
             <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={onClose}>
               Cancelar
             </button>
