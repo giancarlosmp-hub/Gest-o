@@ -21,6 +21,8 @@ Monorepo completo com frontend React + Vite + TypeScript e backend Node.js + Exp
 ```bash
 docker compose up -d --build
 ```
+
+> O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
 Valide os serviços:
 ```bash
 docker compose ps
@@ -63,7 +65,14 @@ npm run dev
 ## Prisma
 - Gerar client: `npm run prisma:generate -w @salesforce-pro/api`
 - Migrate: `npm run prisma:migrate`
-- Seed: `npm run prisma:seed`
+- Seed manual: `npm run prisma:seed`
+
+### Seed no bootstrap (opcional para desenvolvimento)
+Por padrão, o seed automático está desligado (`SEED_ON_BOOTSTRAP=false`).
+Para forçar seed no startup da API em ambiente de dev, defina:
+```bash
+SEED_ON_BOOTSTRAP=true
+```
 
 ### Backfill de normalizados de clientes
 Para preencher `cnpjNormalized`, `nameNormalized` e `cityNormalized` em registros já existentes:

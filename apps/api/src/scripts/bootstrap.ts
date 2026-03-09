@@ -34,7 +34,12 @@ function runStep(command: string, label: string) {
 async function start() {
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-  runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
+
+  if (env.seedOnBootstrap) {
+    runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
+  } else {
+    console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
+  }
 
   app.listen(env.port, () => {
     console.log(`API on http://localhost:${env.port}`);

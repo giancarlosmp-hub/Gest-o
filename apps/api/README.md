@@ -11,3 +11,8 @@ npm run seed:fixture
 # All fixture records have names/titles starting with "[fixture]"
 # Run seed:fixture again to reset
 ```
+
+## Bootstrap da API
+- `npm run docker:start` espera o Postgres e roda `prisma db push`.
+- O seed padrão (`prisma/seed.js`) **não** roda automaticamente, salvo quando `SEED_ON_BOOTSTRAP=true`.
+- Para seed manual: `npm run prisma:seed`.

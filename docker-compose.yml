@@ -26,6 +26,7 @@ services:
       FRONTEND_URL: http://localhost:5173
       JWT_ACCESS_SECRET: super-access
       JWT_REFRESH_SECRET: super-refresh
+      SEED_ON_BOOTSTRAP: "false"
     ports:
       - "4000:4000"
     restart: on-failure
