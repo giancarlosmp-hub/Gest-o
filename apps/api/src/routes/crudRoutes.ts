@@ -893,11 +893,25 @@ const withClientNormalizedFields = <T extends { name?: string; city?: string; st
 
 const clientImportActionSchema = z.enum(["update", "skip", "import_anyway"]).optional();
 
-const clientImportRowSchema = clientSchema.extend({
-  sourceRowNumber: z.number().int().positive().optional(),
-  existingClientId: z.string().optional(),
-  action: clientImportActionSchema
-});
+const clientImportRowSchema = clientSchema
+  .extend({
+    sourceRowNumber: z.number().int().positive().optional(),
+    existingClientId: z.string().optional(),
+    action: clientImportActionSchema,
+    ownerSellerName: z.string().optional(),
+    vendedor_responsavel: z.string().optional(),
+    vendedor_responsavel_id: z.string().optional()
+  })
+  .transform((row) => {
+    const ownerFromName = typeof row.ownerSellerName === "string" ? row.ownerSellerName : undefined;
+    const ownerFromLabel = typeof row.vendedor_responsavel === "string" ? row.vendedor_responsavel : undefined;
+    const ownerFromLegacy = typeof row.vendedor_responsavel_id === "string" ? row.vendedor_responsavel_id : undefined;
+
+    return {
+      ...row,
+      ownerSellerId: row.ownerSellerId ?? ownerFromName ?? ownerFromLabel ?? ownerFromLegacy
+    };
+  });
 
 const clientImportRequestSchema = z.object({
   rows: z.array(clientImportRowSchema).optional(),
@@ -1132,22 +1146,55 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
   // Dedup dentro do arquivo
   const fileFingerprintCount = new Map<string, number>();
 
+  const normalizeSellerName = (value?: string | null) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  const availableSellers = await prisma.user.findMany({
+    where: { role: "vendedor" },
+    select: { id: true, name: true }
+  });
+
+  const sellersByName = new Map<string, { id: string; name: string }>();
+  availableSellers.forEach((seller) => {
+    const normalized = normalizeSellerName(seller.name);
+    if (!normalized || sellersByName.has(normalized)) return;
+    sellersByName.set(normalized, seller);
+  });
+
   // Primeiro passo: valida e resolve ownerSellerId, e computa fingerprints do arquivo
   const prepared = rows.map((row, index) => {
-    const parsedRow = clientSchema.safeParse(row);
-    const rowNumber = Number(row.sourceRowNumber ?? index + 2);
+    const parsedRow = clientImportRowSchema.safeParse(row);
+    const rowNumber = Number((row as any).sourceRowNumber ?? index + 2);
 
     if (!parsedRow.success) {
       const message = parsedRow.error.issues[0]?.message ?? "Dados inválidos para importação.";
       return { kind: "error" as const, rowNumber, row, error: message };
     }
 
-    const ownerSellerId =
-      req.user!.role === "vendedor"
-        ? req.user!.id
-        : req.user!.role === "gerente" || req.user!.role === "diretor"
-          ? resolveOwnerId(req, parsedRow.data.ownerSellerId)
-          : resolveOwnerId(req);
+    const ownerRaw = String(parsedRow.data.ownerSellerId ?? "").trim();
+
+    let ownerSellerId: string;
+    if (req.user!.role === "vendedor") {
+      ownerSellerId = req.user!.id;
+    } else if (req.user!.role === "gerente" || req.user!.role === "diretor") {
+      if (!ownerRaw) {
+        ownerSellerId = resolveOwnerId(req);
+      } else {
+        const sellerByName = sellersByName.get(normalizeSellerName(ownerRaw));
+        if (sellerByName) {
+          ownerSellerId = resolveOwnerId(req, sellerByName.id);
+        } else if (UUID_V4_REGEX.test(ownerRaw)) {
+          ownerSellerId = resolveOwnerId(req, ownerRaw);
+        } else {
+          return { kind: "error" as const, rowNumber, row, error: "Vendedor responsável não encontrado" };
+        }
+      }
+    } else {
+      ownerSellerId = resolveOwnerId(req);
+    }
 
     const payload = { ...parsedRow.data, ownerSellerId };
     const fp = buildDuplicateFingerprint(payload);
