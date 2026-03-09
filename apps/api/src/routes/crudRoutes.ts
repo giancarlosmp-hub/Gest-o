@@ -530,6 +530,41 @@ const resolveActivityTypeFilters = (...types: string[]) => {
   return normalized.length === 1 ? { type: normalized[0] } : { type: { in: normalized } };
 };
 
+const ACTIVITY_EXECUTED_LABEL: Partial<Record<ActivityType, string>> = {
+  ligacao: "Ligação executada",
+  visita: "Visita executada",
+  reuniao: "Reunião executada",
+  proposta_enviada: "Envio de proposta executado",
+  followup: "Follow-up executado",
+  follow_up: "Follow-up executado",
+};
+
+const buildActivityExecutedDescription = (activity: {
+  type: ActivityType;
+  date?: Date | null;
+  result?: string | null;
+  description?: string | null;
+  opportunityId?: string | null;
+}) => {
+  const baseLabel = ACTIVITY_EXECUTED_LABEL[normalizeActivityType(activity.type)] || "Atividade executada";
+  const executedAt = (activity.date || new Date()).toLocaleString("pt-BR", { timeZone: "UTC" });
+  const details = [`Executada em ${executedAt} (UTC)`];
+
+  if (activity.result?.trim()) {
+    details.push(`Resultado: ${activity.result.trim()}`);
+  }
+
+  if (activity.description?.trim()) {
+    details.push(`Observações: ${activity.description.trim()}`);
+  }
+
+  if (activity.opportunityId) {
+    details.push(`Oportunidade vinculada: ${activity.opportunityId}`);
+  }
+
+  return `${baseLabel}. ${details.join(" | ")}`;
+};
+
 const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "reuniao", "followup", "follow_up"];
 
 const resolveExecutionActivityDateFilter = (from: Date, to: Date): Prisma.ActivityWhereInput => ({
@@ -4174,33 +4209,60 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
       id: req.params.id,
       ...sellerWhere(req)
     },
-    select: { id: true }
+    select: {
+      id: true,
+      done: true,
+      type: true,
+      date: true,
+      description: true,
+      result: true,
+      clientId: true,
+      opportunityId: true,
+      ownerSellerId: true
+    }
   });
 
   if (!existingActivity) {
     return res.status(404).json({ message: "Atividade não encontrada" });
   }
 
-  const updatedActivity = await prisma.activity.update({
-    where: { id: req.params.id },
-    data: {
-      ...(normalizedType ? { type: normalizedType } : {}),
-      ...(notes !== undefined ? { notes } : {}),
-      ...(req.body.description !== undefined ? { description: req.body.description } : {}),
-      ...(req.body.result !== undefined ? { result: req.body.result } : {}),
-      ...(dueDate ? { dueDate } : {}),
-      ...(executionDate ? { date: executionDate } : {}),
-      ...(req.body.duration !== undefined ? { duration: req.body.duration } : {}),
-      ...(req.body.city !== undefined ? { city: req.body.city } : {}),
-      ...(req.body.crop !== undefined ? { crop: req.body.crop } : {}),
-      ...(req.body.areaEstimated !== undefined ? { areaEstimated: req.body.areaEstimated } : {}),
-      ...(req.body.product !== undefined ? { product: req.body.product } : {}),
-      ...(req.body.done !== undefined ? { done: req.body.done } : {}),
-      ...(req.body.clientId !== undefined ? { clientId: req.body.clientId } : {}),
-      ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {}),
-      ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {}),
-      ...(ownerSellerId !== undefined ? { ownerSellerId } : {})
+  const updatedActivity = await prisma.$transaction(async (tx) => {
+    const activity = await tx.activity.update({
+      where: { id: req.params.id },
+      data: {
+        ...(normalizedType ? { type: normalizedType } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+        ...(req.body.description !== undefined ? { description: req.body.description } : {}),
+        ...(req.body.result !== undefined ? { result: req.body.result } : {}),
+        ...(dueDate ? { dueDate } : {}),
+        ...(executionDate ? { date: executionDate } : {}),
+        ...(req.body.duration !== undefined ? { duration: req.body.duration } : {}),
+        ...(req.body.city !== undefined ? { city: req.body.city } : {}),
+        ...(req.body.crop !== undefined ? { crop: req.body.crop } : {}),
+        ...(req.body.areaEstimated !== undefined ? { areaEstimated: req.body.areaEstimated } : {}),
+        ...(req.body.product !== undefined ? { product: req.body.product } : {}),
+        ...(req.body.done !== undefined ? { done: req.body.done } : {}),
+        ...(req.body.clientId !== undefined ? { clientId: req.body.clientId } : {}),
+        ...(req.body.opportunityId !== undefined ? { opportunityId: req.body.opportunityId } : {}),
+        ...(req.body.agendaEventId !== undefined ? { agendaEventId: req.body.agendaEventId } : {}),
+        ...(ownerSellerId !== undefined ? { ownerSellerId } : {})
+      }
+    });
+
+    const transitionedToDone = !existingActivity.done && activity.done;
+    if (transitionedToDone && activity.clientId) {
+      await tx.timelineEvent.create({
+        data: {
+          type: "status",
+          description: buildActivityExecutedDescription(activity),
+          clientId: activity.clientId,
+          opportunityId: activity.opportunityId,
+          ownerSellerId: activity.ownerSellerId
+        }
+      });
     }
+
+    return activity;
   });
   return res.json(mapActivity(updatedActivity));
 });
