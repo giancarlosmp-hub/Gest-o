@@ -48,6 +48,7 @@ type ActivityFilters = {
 const initialForm = {
   type: "ligacao",
   notes: "",
+  observations: "",
   dueDate: "",
   city: "",
   clientId: "",
@@ -58,7 +59,8 @@ const initialForm = {
   duration: "",
   crop: "",
   areaEstimated: "",
-  product: ""
+  product: "",
+  executed: false
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
@@ -264,8 +266,13 @@ export default function ActivitiesPage() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
+    const requiresExecutionFields = form.executed;
     if (!form.clientId || !form.notes.trim() || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
       toast.error(canChooseSeller ? "Preencha vendedor, cliente, notas e vencimento." : "Preencha cliente, notas e vencimento.");
+      return;
+    }
+    if (requiresExecutionFields && (!form.result.trim() || !form.observations.trim() || !form.duration)) {
+      toast.error("Para atividades já realizadas, preencha resultado, observações e duração.");
       return;
     }
 
@@ -274,11 +281,12 @@ export default function ActivitiesPage() {
       await api.post("/activities", {
         type: form.type,
         notes: form.notes.trim(),
-        description: form.notes.trim(),
-        result: form.result.trim() || undefined,
+        description: requiresExecutionFields ? form.observations.trim() : form.notes.trim(),
+        result: requiresExecutionFields ? form.result.trim() : undefined,
         dueDate: new Date(form.dueDate).toISOString(),
-        date: new Date(form.dueDate).toISOString(),
-        duration: form.duration ? Number(form.duration) : undefined,
+        date: requiresExecutionFields ? new Date().toISOString() : new Date(form.dueDate).toISOString(),
+        duration: requiresExecutionFields ? Number(form.duration) : undefined,
+        done: requiresExecutionFields,
         city: form.city || undefined,
         crop: form.crop.trim() || undefined,
         areaEstimated: form.areaEstimated ? Number(form.areaEstimated) : undefined,
@@ -729,6 +737,22 @@ export default function ActivitiesPage() {
                   <label className="text-sm">Vencimento</label>
                   <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="inline-flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.executed}
+                      onChange={(event) =>
+                        setForm((previous) => ({
+                          ...previous,
+                          executed: event.target.checked,
+                          ...(event.target.checked ? {} : { result: "", observations: "", duration: "" })
+                        }))
+                      }
+                    />
+                    Atividade já realizada
+                  </label>
+                </div>
                 {canChooseSeller ? (
                   <div className="md:col-span-2">
                     <label className="text-sm">Vendedor responsável</label>
@@ -775,12 +799,12 @@ export default function ActivitiesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm">Resultado (opcional)</label>
-                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
+                  <label className="text-sm">Resultado {form.executed ? "" : "(opcional)"}</label>
+                  <input required={form.executed} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="text-sm">Duração em minutos (opcional)</label>
-                  <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                  <label className="text-sm">Duração em minutos {form.executed ? "" : "(opcional)"}</label>
+                  <input type="number" min={0} required={form.executed} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Cultura (opcional)</label>
@@ -793,6 +817,16 @@ export default function ActivitiesPage() {
                 <div className="md:col-span-2">
                   <label className="text-sm">Produto (opcional)</label>
                   <input className="w-full rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-sm">Observações {form.executed ? "" : "(opcional)"}</label>
+                  <textarea
+                    required={form.executed}
+                    disabled={!form.executed}
+                    className="min-h-24 w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100"
+                    value={form.observations}
+                    onChange={(event) => setForm((previous) => ({ ...previous, observations: event.target.value }))}
+                  />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Notas</label>

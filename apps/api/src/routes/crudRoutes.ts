@@ -531,12 +531,12 @@ const resolveActivityTypeFilters = (...types: string[]) => {
 };
 
 const ACTIVITY_EXECUTED_LABEL: Partial<Record<ActivityType, string>> = {
-  ligacao: "Ligação executada",
-  visita: "Visita executada",
-  reuniao: "Reunião executada",
-  proposta_enviada: "Envio de proposta executado",
-  followup: "Follow-up executado",
-  follow_up: "Follow-up executado",
+  ligacao: "Ligação realizada",
+  visita: "Visita realizada",
+  reuniao: "Reunião realizada",
+  proposta_enviada: "Envio de proposta realizado",
+  followup: "Follow-up realizado",
+  follow_up: "Follow-up realizado",
 };
 
 const buildActivityExecutedDescription = (activity: {
@@ -545,6 +545,7 @@ const buildActivityExecutedDescription = (activity: {
   result?: string | null;
   description?: string | null;
   opportunityId?: string | null;
+  opportunityTitle?: string | null;
 }) => {
   const baseLabel = ACTIVITY_EXECUTED_LABEL[normalizeActivityType(activity.type)] || "Atividade executada";
   const executedAt = (activity.date || new Date()).toLocaleString("pt-BR", { timeZone: "UTC" });
@@ -559,7 +560,7 @@ const buildActivityExecutedDescription = (activity: {
   }
 
   if (activity.opportunityId) {
-    details.push(`Oportunidade vinculada: ${activity.opportunityId}`);
+    details.push(activity.opportunityTitle ? `Oportunidade vinculada: ${activity.opportunityTitle}` : "Oportunidade vinculada");
   }
 
   return `${baseLabel}. ${details.join(" | ")}`;
@@ -4106,7 +4107,7 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
         id: req.body.opportunityId,
         ...sellerWhere(req)
       },
-      select: { id: true, clientId: true }
+      select: { id: true, clientId: true, title: true }
     })
     : null;
 
@@ -4144,6 +4145,11 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   }
   const dueDate = new Date(req.body.dueDate || activityDateSource);
   const executionDate = req.body.date ? new Date(req.body.date) : dueDate;
+  const isExecuted = Boolean(req.body.done);
+
+  if (isExecuted && (!req.body.result || !String(req.body.result).trim() || !req.body.description || !String(req.body.description).trim() || req.body.duration == null)) {
+    return res.status(400).json({ message: "Atividades concluídas exigem resultado, observações e duração." });
+  }
 
   const createdActivity = await prisma.$transaction(async (tx) => {
     const activity = await tx.activity.create({
@@ -4171,6 +4177,18 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
       await tx.agendaEvent.update({
         where: { id: agendaEventId },
         data: { status: "realizado" }
+      });
+    }
+
+    if (activity.done && activity.clientId) {
+      await tx.timelineEvent.create({
+        data: {
+          type: "status",
+          description: buildActivityExecutedDescription({ ...activity, opportunityTitle: relatedOpportunity?.title }),
+          clientId: activity.clientId,
+          opportunityId: activity.opportunityId,
+          ownerSellerId: activity.ownerSellerId
+        }
       });
     }
 
