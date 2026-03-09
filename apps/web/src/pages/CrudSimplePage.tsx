@@ -1753,8 +1753,8 @@ export default function CrudSimplePage({
 
       {isClientsPage && isImportModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="mb-4">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="shrink-0 border-b border-slate-200 px-6 py-4">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
               <p className="text-sm text-slate-500">Use um arquivo .xlsx para mapear, validar os dados e importar em lote.</p>
               <p className="mt-1 text-xs text-slate-500">
@@ -1762,8 +1762,9 @@ export default function CrudSimplePage({
               </p>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-4">
-              <div className="flex flex-wrap items-center gap-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-4">
+              <div className="shrink-0 pb-3">
+                <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() =>
@@ -1781,6 +1782,7 @@ export default function CrudSimplePage({
                   onChange={handleImportFileChange}
                   className="block w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800"
                 />
+                </div>
               </div>
 
               {importExcelHeaders.length > 0 && importStep === 1 ? (
@@ -1802,9 +1804,9 @@ export default function CrudSimplePage({
               ) : null}
 
               {importStep === 2 ? (
-                <>
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
                   {!isSeller && canChooseOwnerSeller && !importColumnMapping.ownerSellerId ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
                       <label className="block text-sm font-medium text-slate-700" htmlFor="import-default-owner">
                         Vendedor padrão para este lote *
                       </label>
@@ -1831,26 +1833,28 @@ export default function CrudSimplePage({
                   ) : null}
 
                   {importSummary ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                       <p className="font-medium text-slate-900">Resumo da importação</p>
-                      <p>
-                        Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span>
-                      </p>
-                      <p>
-                        Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span>
-                      </p>
-                      <p>
-                        Ignorados por validação: <span className="font-semibold text-slate-900">{importSummary.ignoredByValidation}</span>
-                      </p>
-                      <p>
-                        Já existentes: <span className="font-semibold text-slate-900">{importSummary.alreadyExisting}</span>
-                      </p>
-                      <p>
-                        Duplicados: <span className="font-semibold text-slate-900">{importSummary.duplicates}</span>
-                      </p>
-                      <p>
-                        Falhas da API: <span className="font-semibold text-slate-900">{importSummary.apiFailures}</span>
-                      </p>
+                      <div className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                        <p>
+                          Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span>
+                        </p>
+                        <p>
+                          Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span>
+                        </p>
+                        <p>
+                          Ignorados por validação: <span className="font-semibold text-slate-900">{importSummary.ignoredByValidation}</span>
+                        </p>
+                        <p>
+                          Já existentes: <span className="font-semibold text-slate-900">{importSummary.alreadyExisting}</span>
+                        </p>
+                        <p>
+                          Duplicados: <span className="font-semibold text-slate-900">{importSummary.duplicates}</span>
+                        </p>
+                        <p>
+                          Falhas da API: <span className="font-semibold text-slate-900">{importSummary.apiFailures}</span>
+                        </p>
+                      </div>
                       <button
                         type="button"
                         onClick={downloadImportFinalReport}
@@ -1862,7 +1866,7 @@ export default function CrudSimplePage({
                   ) : null}
 
                   {importValidationErrors.length > 0 ? (
-                    <div className="max-h-32 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+                    <div className="shrink-0 max-h-24 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
                       {importValidationErrors.slice(0, 20).map((validationError) => (
                         <p key={validationError}>• {validationError}</p>
                       ))}
@@ -1872,7 +1876,7 @@ export default function CrudSimplePage({
                     </div>
                   ) : null}
 
-                  <p className="text-sm text-slate-600">
+                  <p className="shrink-0 text-sm text-slate-600">
                     Total linhas: <span className="font-semibold text-slate-900">{importCounters.totalAnalyzed}</span>
                     {" · "}
                     <span className="font-semibold text-emerald-700">{importCounters.validCount} válidas</span>
@@ -1885,23 +1889,26 @@ export default function CrudSimplePage({
                   </p>
 
                   {didRunLocalValidation ? (
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
                       <p className="font-medium text-slate-900">Resumo da validação local</p>
-                      <p>Total linhas: {importCounters.totalAnalyzed}</p>
-                      <p>Total válidas: {importCounters.validCount}</p>
-                      <p>Total duplicadas no arquivo: {importCounters.duplicateInFileCount}</p>
-                      <p>Total já existentes no sistema: {importCounters.duplicateInSystemCount}</p>
-                      <p>Total com erro: {importCounters.errorCount}</p>
+                      <div className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
+                        <p>Total linhas: {importCounters.totalAnalyzed}</p>
+                        <p>Total válidas: {importCounters.validCount}</p>
+                        <p>Total duplicadas no arquivo: {importCounters.duplicateInFileCount}</p>
+                        <p>Total já existentes no sistema: {importCounters.duplicateInSystemCount}</p>
+                        <p>Total com erro: {importCounters.errorCount}</p>
+                      </div>
                     </div>
                   ) : null}
 
                   {isImporting ? (
-                    <p className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
+                    <p className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
                       Importando {importProgress.current}/{importProgress.total}
                     </p>
                   ) : null}
 
-                  <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-200">
+                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200">
+                    <div className="h-full overflow-y-auto overflow-x-auto">
                     <table className="w-full min-w-[980px] text-sm">
                       <thead className="bg-slate-100 text-left text-slate-700">
                         <tr>
@@ -1971,16 +1978,17 @@ export default function CrudSimplePage({
                         )}
                       </tbody>
                     </table>
+                    </div>
                   </div>
 
                   {importPreviewRows.length > 200 ? (
-                    <p className="text-xs text-slate-500">+{importPreviewRows.length - 200} linhas não exibidas no preview.</p>
+                    <p className="shrink-0 text-xs text-slate-500">+{importPreviewRows.length - 200} linhas não exibidas no preview.</p>
                   ) : null}
-                </>
+                </div>
               ) : null}
             </div>
 
-            <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-4">
+            <div className="shrink-0 flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
               <button
                 type="button"
                 onClick={resetImportState}
