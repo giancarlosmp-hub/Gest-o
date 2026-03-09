@@ -22,10 +22,13 @@ declare global {
 
 export const normalizeHeader = (value: unknown) =>
   String(value ?? "")
+    .replace(/^\uFEFF/, "")
     .trim()
+    .replace(/[_\s]+/g, " ")
     .toLowerCase()
-    .normalize("NFD")
+    .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
     .replace(/[^a-z0-9]/g, "");
 
 export const normalizeTextValue = (value: unknown) => String(value ?? "").trim();
