@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, CheckSquare, Clock3, MessageCircleWarning, SunMoon, UsersRound } from "lucide-react";
+import { CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../lib/apiClient";
@@ -143,6 +143,16 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
 }
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
+const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
+type PanelId = (typeof defaultPanelOrder)[number];
+
+function normalizePanelOrder(value: unknown): PanelId[] {
+  if (!Array.isArray(value)) return [...defaultPanelOrder];
+  const validItems = value.filter((item): item is PanelId => defaultPanelOrder.includes(item as PanelId));
+  const missingItems = defaultPanelOrder.filter((item) => !validItems.includes(item));
+  return [...validItems, ...missingItems];
+}
 
 export default function HomePage() {
   const { user } = useAuth();
@@ -170,6 +180,17 @@ export default function HomePage() {
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   const [weeklyMissions, setWeeklyMissions] = useState<WeeklyMissionSeller[]>([]);
   const [loading, setLoading] = useState(true);
+  const [panelOrder, setPanelOrder] = useState<PanelId[]>(() => {
+    if (typeof window === "undefined") return [...defaultPanelOrder];
+    const storedOrder = window.localStorage.getItem(PANEL_ORDER_STORAGE_KEY);
+    if (!storedOrder) return [...defaultPanelOrder];
+    try {
+      return normalizePanelOrder(JSON.parse(storedOrder));
+    } catch {
+      return [...defaultPanelOrder];
+    }
+  });
+  const [draggedPanelId, setDraggedPanelId] = useState<PanelId | null>(null);
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
@@ -569,8 +590,46 @@ export default function HomePage() {
     return "Proposta sem retorno";
   };
 
+  useEffect(() => {
+    window.localStorage.setItem(PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
+  }, [panelOrder]);
+
+  const handlePanelDrop = useCallback(
+    (targetPanelId: PanelId) => {
+      if (!draggedPanelId || draggedPanelId === targetPanelId) return;
+      setPanelOrder((currentOrder) => {
+        const startIndex = currentOrder.indexOf(draggedPanelId);
+        const endIndex = currentOrder.indexOf(targetPanelId);
+        if (startIndex < 0 || endIndex < 0) return currentOrder;
+        const updatedOrder = [...currentOrder];
+        updatedOrder.splice(startIndex, 1);
+        updatedOrder.splice(endIndex, 0, draggedPanelId);
+        return updatedOrder;
+      });
+      setDraggedPanelId(null);
+    },
+    [draggedPanelId]
+  );
+
+  const scrollablePanelClass = "max-h-[220px] overflow-y-auto pr-1";
+
+  const renderDragHandle = (panelId: PanelId) => (
+    <button
+      type="button"
+      draggable
+      onDragStart={() => setDraggedPanelId(panelId)}
+      onDragEnd={() => setDraggedPanelId(null)}
+      className="mb-3 inline-flex cursor-grab items-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 active:cursor-grabbing"
+      title="Arraste para reordenar"
+      aria-label="Arrastar painel"
+    >
+      <GripVertical size={14} />
+      Prioridade do painel
+    </button>
+  );
+
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       <section className="space-y-2">
         {alerts.showOverdueFollowUpAlert && (
           <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
@@ -621,8 +680,9 @@ export default function HomePage() {
         </p>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <article className={blockClass}>
+      <section className="flex flex-col gap-4">
+        <article className={blockClass} style={{ order: panelOrder.indexOf("routine") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("routine")}>
+          {renderDragHandle("routine")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Painel de Disciplina Comercial</p>
@@ -659,7 +719,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("missions") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("missions")}>
+          {renderDragHandle("missions")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Gamificação</p>
@@ -713,7 +774,8 @@ export default function HomePage() {
           )}
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("pipeline") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("pipeline")}>
+          {renderDragHandle("pipeline")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
@@ -732,7 +794,7 @@ export default function HomePage() {
             <p className="text-2xl font-bold text-slate-900">{pipelineOfDay.total}</p>
           </div>
 
-          <div className="mt-3 space-y-2">
+          <div className={`mt-3 space-y-2 ${pipelineOfDay.topFive.length > 3 ? scrollablePanelClass : ""}`}>
             {pipelineError ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>
             ) : loading ? (
@@ -755,7 +817,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("alerts") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("alerts")}>
+          {renderDragHandle("alerts")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Prioridades</p>
@@ -767,7 +830,7 @@ export default function HomePage() {
             <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">{coolingClients.message}</p>
           )}
 
-          <div className="space-y-2">
+          <div className={`space-y-2 ${smartAlerts.items.length > 3 ? scrollablePanelClass : ""}`}>
             {smartAlerts.items.map((alert) => (
               <div key={alert.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
                 <div>
@@ -797,7 +860,8 @@ export default function HomePage() {
           )}
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("summary") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("summary")}>
+          {renderDragHandle("summary")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
@@ -821,7 +885,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("agenda") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("agenda")}>
+          {renderDragHandle("agenda")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Planejamento</p>
@@ -830,7 +895,7 @@ export default function HomePage() {
             <UsersRound className="text-brand-700" size={20} />
           </div>
 
-          <div className="space-y-2">
+          <div className={`space-y-2 ${plannedAppointmentsToday.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando agenda...</p>
             ) : plannedAppointmentsToday.length === 0 ? (
@@ -860,7 +925,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("activities") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("activities")}>
+          {renderDragHandle("activities")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Execução</p>
@@ -869,7 +935,7 @@ export default function HomePage() {
             <MessageCircleWarning className="text-brand-700" size={20} />
           </div>
 
-          <div className="space-y-2">
+          <div className={`space-y-2 ${activitiesToday.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando atividades...</p>
             ) : activitiesToday.length === 0 ? (
@@ -897,7 +963,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("followups") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("followups")}>
+          {renderDragHandle("followups")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Pendências</p>
@@ -906,7 +973,7 @@ export default function HomePage() {
             <CheckSquare className="text-brand-700" size={20} />
           </div>
 
-          <div className="space-y-2">
+          <div className={`space-y-2 ${pendingFollowUps.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando follow-ups...</p>
             ) : pendingFollowUps.length === 0 ? (
@@ -929,7 +996,8 @@ export default function HomePage() {
           </div>
         </article>
 
-        <article className={blockClass}>
+        <article className={blockClass} style={{ order: panelOrder.indexOf("critical") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("critical")}>
+          {renderDragHandle("critical")}
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Criticidade</p>
@@ -938,7 +1006,7 @@ export default function HomePage() {
             <MessageCircleWarning className="text-brand-700" size={20} />
           </div>
 
-          <div className="space-y-2">
+          <div className={`space-y-2 ${pipelineOfDay.topFive.length > 3 ? scrollablePanelClass : ""}`}>
             {loading ? (
               <p className="text-sm text-slate-500">Carregando oportunidades críticas...</p>
             ) : pipelineOfDay.topFive.length === 0 ? (
