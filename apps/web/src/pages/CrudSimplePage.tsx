@@ -636,7 +636,11 @@ export default function CrudSimplePage({
         ].some((value) => value !== "" && value !== undefined)
       );
 
-  const validateImportRows = (rows: ClientImportRow[], defaultOwnerSellerId?: string): ImportValidationSummary => {
+  const validateImportRows = (
+    rows: ClientImportRow[],
+    mapping: Partial<Record<ClientImportFieldKey, string>>,
+    defaultOwnerSellerId?: string
+  ): ImportValidationSummary => {
     const errors: string[] = [];
     const rowResults: ImportAnalysisRow[] = [];
     let validCount = 0;
@@ -648,14 +652,14 @@ export default function CrudSimplePage({
       return { errors, rowResults, validCount: 0, errorCount: 0, duplicateInFileCount: 0 };
     }
 
-    const hasOwnerSellerMapping = Boolean(importColumnMapping.ownerSellerId);
-    const hasAtLeastOneResolvedOwnerSeller = rows.some((row) => Boolean(row.ownerSellerId) && !row.ownerSellerLookupError);
+    const hasOwnerSellerMapping = Boolean(mapping.ownerSellerId);
+    const hasAnyOwnerSellerValueInRows = rows.some((row) => Boolean(row.ownerSellerId) || Boolean(row.ownerSellerLookupError));
 
     if (
       !isSeller &&
       canChooseOwnerSeller &&
       !defaultOwnerSellerId &&
-      (!hasOwnerSellerMapping || !hasAtLeastOneResolvedOwnerSeller)
+      (!hasOwnerSellerMapping || !hasAnyOwnerSellerValueInRows)
     ) {
       errors.push("Selecione um vendedor padrão para este lote ou mapeie a coluna de vendedor responsável.");
     }
@@ -830,7 +834,7 @@ export default function CrudSimplePage({
     defaultOwnerSellerId?: string
   ) => {
     const mappedRows = buildRowsFromCurrentMapping(rows, mapping, defaultOwnerSellerId);
-    const validation = validateImportRows(mappedRows, defaultOwnerSellerId);
+    const validation = validateImportRows(mappedRows, mapping, defaultOwnerSellerId);
 
     setImportRows(mappedRows);
     setImportValidationErrors(validation.errors);
@@ -1146,6 +1150,13 @@ export default function CrudSimplePage({
       const batchRows = validRows.slice(index, index + batchSize);
 
       try {
+        if (import.meta.env.DEV) {
+          console.debug("[clients-import] payload batch", {
+            rowCount: batchRows.length,
+            rows: batchRows.map((row) => buildImportRequestRow(row))
+          });
+        }
+
         const response = await api.post<{
           totalImportados?: number;
           totalAtualizados?: number;
@@ -1167,8 +1178,26 @@ export default function CrudSimplePage({
         (response.data?.results ?? []).forEach((result) => {
           resultsByRow.set(result.rowNumber, result);
         });
+
+        (response.data?.errors ?? []).forEach((error) => {
+          if (resultsByRow.has(error.rowNumber)) return;
+          resultsByRow.set(error.rowNumber, {
+            rowNumber: error.rowNumber,
+            clientName: error.clientName,
+            status: "API_FAILURE",
+            category: "validation",
+            reason: error.message,
+            createdId: ""
+          });
+        });
       } catch (error: any) {
         const fallbackReason = error?.response?.data?.message || "Falha ao importar lote de clientes na API.";
+        if (import.meta.env.DEV) {
+          console.error("[clients-import] erro ao enviar batch", {
+            reason: fallbackReason,
+            batchRows: batchRows.map((row) => buildImportRequestRow(row))
+          });
+        }
         apiFailures += batchRows.length;
         batchRows.forEach((row) => {
           resultsByRow.set(row.sourceRowNumber, {
