@@ -1752,9 +1752,9 @@ export default function CrudSimplePage({
       ) : null}
 
       {isClientsPage && isImportModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
-            <div className="shrink-0 border-b border-slate-200 px-6 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-3 md:p-4" role="dialog" aria-modal="true">
+          <div className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+            <div className="shrink-0 border-b border-slate-200 px-5 py-4 md:px-6">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
               <p className="text-sm text-slate-500">Use um arquivo .xlsx para mapear, validar os dados e importar em lote.</p>
               <p className="mt-1 text-xs text-slate-500">
@@ -1762,8 +1762,8 @@ export default function CrudSimplePage({
               </p>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-4">
-              <div className="shrink-0 pb-3">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-3 md:px-6 md:py-4">
+              <div className="shrink-0 pb-2">
                 <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
@@ -1780,7 +1780,7 @@ export default function CrudSimplePage({
                   type="file"
                   accept=".xlsx"
                   onChange={handleImportFileChange}
-                  className="block w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800"
+                  className="block w-full max-w-md rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 file:mr-4 file:rounded-md file:border-0 file:bg-brand-700 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-brand-800"
                 />
                 </div>
               </div>
@@ -1804,9 +1804,9 @@ export default function CrudSimplePage({
               ) : null}
 
               {importStep === 2 ? (
-                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                <div className="flex min-h-0 flex-1 flex-col gap-2.5">
                   {!isSeller && canChooseOwnerSeller && !importColumnMapping.ownerSellerId ? (
-                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                       <label className="block text-sm font-medium text-slate-700" htmlFor="import-default-owner">
                         Vendedor padrão para este lote *
                       </label>
@@ -1833,7 +1833,7 @@ export default function CrudSimplePage({
                   ) : null}
 
                   {importSummary ? (
-                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
                       <p className="font-medium text-slate-900">Resumo da importação</p>
                       <div className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
                         <p>
@@ -1889,7 +1889,7 @@ export default function CrudSimplePage({
                   </p>
 
                   {didRunLocalValidation ? (
-                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+                    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-sm text-slate-700">
                       <p className="font-medium text-slate-900">Resumo da validação local</p>
                       <div className="mt-2 grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-3">
                         <p>Total linhas: {importCounters.totalAnalyzed}</p>
@@ -1907,10 +1907,10 @@ export default function CrudSimplePage({
                     </p>
                   ) : null}
 
-                  <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200">
-                    <div className="h-full overflow-y-auto overflow-x-auto">
+                  <div className="min-h-[320px] flex-1 overflow-hidden rounded-xl border border-slate-200">
+                    <div className="h-full overflow-x-auto overflow-y-auto">
                     <table className="w-full min-w-[980px] text-sm">
-                      <thead className="bg-slate-100 text-left text-slate-700">
+                      <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
                         <tr>
                           {clientImportColumns.map((column) => (
                             <th key={column} className="px-3 py-2 font-medium">
@@ -1988,7 +1988,7 @@ export default function CrudSimplePage({
               ) : null}
             </div>
 
-            <div className="shrink-0 flex justify-end gap-2 border-t border-slate-200 px-6 py-4">
+            <div className="shrink-0 flex justify-end gap-2 border-t border-slate-200 px-5 py-4 md:px-6">
               <button
                 type="button"
                 onClick={resetImportState}
