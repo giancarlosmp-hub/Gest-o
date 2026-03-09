@@ -1590,7 +1590,7 @@ export default function CrudSimplePage({
 
       {isClientsPage && isImportModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
             <div className="mb-4">
               <h3 className="text-xl font-semibold text-slate-900">Importar clientes (Excel)</h3>
               <p className="text-sm text-slate-500">Use um arquivo .xlsx para mapear, validar os dados e importar em lote.</p>
@@ -1599,7 +1599,7 @@ export default function CrudSimplePage({
               </p>
             </div>
 
-            <div className="space-y-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
               <div className="flex flex-wrap items-center gap-3">
                 <button
                   type="button"
@@ -1729,7 +1729,7 @@ export default function CrudSimplePage({
                     </p>
                   ) : null}
 
-                  <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <div className="max-h-[60vh] overflow-auto rounded-xl border border-slate-200">
                     <table className="w-full min-w-[980px] text-sm">
                       <thead className="bg-slate-100 text-left text-slate-700">
                         <tr>
