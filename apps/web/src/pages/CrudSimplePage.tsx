@@ -1080,6 +1080,17 @@ export default function CrudSimplePage({
     URL.revokeObjectURL(url);
   };
 
+  const buildImportRequestRow = (row: ImportAnalysisRow): Record<string, unknown> => {
+    const sanitizedPayload = buildImportPayload(row);
+
+    return {
+      ...sanitizedPayload,
+      sourceRowNumber: row.sourceRowNumber,
+      existingClientId: row.existingClientId,
+      action: row.action
+    };
+  };
+
   const importValidRowsInBatches = async (validRows: ImportAnalysisRow[]) => {
     const batchSize = 50;
     let imported = 0;
@@ -1089,33 +1100,47 @@ export default function CrudSimplePage({
     for (let index = 0; index < validRows.length; index += batchSize) {
       const batchRows = validRows.slice(index, index + batchSize);
 
-      const batchResults = await Promise.all(
-        batchRows.map(async (row) => {
-          try {
-            const response = await api.post("/clients", buildImportPayload(row));
-            const createdId = String(response?.data?.id ?? response?.data?.client?.id ?? "");
-            return {
-              rowNumber: row.sourceRowNumber,
-              success: true as const,
-              reason: "Cliente importado com sucesso.",
-              createdId
-            };
-          } catch (error: any) {
-            return {
-              rowNumber: row.sourceRowNumber,
-              success: false as const,
-              reason: error?.response?.data?.message || "Falha ao importar cliente na API.",
-              createdId: ""
-            };
-          }
-        })
-      );
+      try {
+        const response = await api.post<{
+          totalImportados?: number;
+          totalErros?: number;
+          errors?: ClientImportErrorItem[];
+        }>(
+          "/clients/import",
+          {
+            rows: batchRows.map((row) => buildImportRequestRow(row))
+          },
+          { timeout: 30000 }
+        );
 
-      batchResults.forEach((result) => {
-        resultsByRow.set(result.rowNumber, result);
-        if (result.success) imported += 1;
-        else apiFailures += 1;
-      });
+        imported += Number(response.data?.totalImportados ?? 0);
+        apiFailures += Number(response.data?.totalErros ?? 0);
+
+        const errorByRowNumber = new Map<number, string>();
+        (response.data?.errors ?? []).forEach((error) => {
+          errorByRowNumber.set(error.rowNumber, error.message || "Falha ao importar cliente na API.");
+        });
+
+        batchRows.forEach((row) => {
+          const rowErrorMessage = errorByRowNumber.get(row.sourceRowNumber);
+
+          resultsByRow.set(row.sourceRowNumber, {
+            success: !rowErrorMessage,
+            reason: rowErrorMessage || "Cliente importado com sucesso.",
+            createdId: ""
+          });
+        });
+      } catch (error: any) {
+        const fallbackReason = error?.response?.data?.message || "Falha ao importar lote de clientes na API.";
+        apiFailures += batchRows.length;
+        batchRows.forEach((row) => {
+          resultsByRow.set(row.sourceRowNumber, {
+            success: false,
+            reason: fallbackReason,
+            createdId: ""
+          });
+        });
+      }
 
       setImportProgress({ current: Math.min(index + batchRows.length, validRows.length), total: validRows.length });
     }
