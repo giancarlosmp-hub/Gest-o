@@ -636,7 +636,15 @@ export default function CrudSimplePage({
       return { errors, rowResults, validCount: 0, errorCount: 0, duplicateInFileCount: 0 };
     }
 
-    if (!isSeller && canChooseOwnerSeller && !defaultOwnerSellerId && !importColumnMapping.ownerSellerId) {
+    const hasOwnerSellerMapping = Boolean(importColumnMapping.ownerSellerId);
+    const hasAtLeastOneResolvedOwnerSeller = rows.some((row) => Boolean(row.ownerSellerId) && !row.ownerSellerLookupError);
+
+    if (
+      !isSeller &&
+      canChooseOwnerSeller &&
+      !defaultOwnerSellerId &&
+      (!hasOwnerSellerMapping || !hasAtLeastOneResolvedOwnerSeller)
+    ) {
       errors.push("Selecione um vendedor padrão para este lote ou mapeie a coluna de vendedor responsável.");
     }
 
