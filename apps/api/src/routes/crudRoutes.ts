@@ -2997,14 +2997,32 @@ router.post("/clients/import", async (req, res) => {
   let totalIgnorados = 0;
   let totalErros = 0;
   const errors: Array<{ rowNumber: number; clientName: string; message: string }> = [];
+  const results: Array<{
+    rowNumber: number;
+    clientName: string;
+    status: "IMPORTED" | "UPDATED" | "IGNORED" | "API_FAILURE";
+    category: "imported" | "updated" | "ignored" | "duplicate" | "validation" | "api_error";
+    reason: string;
+  }> = [];
+
+  const registerApiFailure = (rowNumber: number, clientName: string, message: string, category: "duplicate" | "validation" | "api_error" = "api_error") => {
+    totalErros += 1;
+    errors.push({ rowNumber, clientName, message });
+    results.push({
+      rowNumber,
+      clientName,
+      status: "API_FAILURE",
+      category,
+      reason: message
+    });
+  };
 
   for (const item of preview) {
     const rowAction = item.row?.action;
     const clientName = String(item.row?.name ?? "");
 
     if (item.status === "error") {
-      totalErros += 1;
-      errors.push({ rowNumber: item.rowNumber, clientName, message: item.error });
+      registerApiFailure(item.rowNumber, clientName, item.error, "validation");
       continue;
     }
 
@@ -3016,17 +3034,24 @@ router.post("/clients/import", async (req, res) => {
     if (item.status === "duplicate") {
       if (rowAction === "skip") {
         totalIgnorados += 1;
+        results.push({
+          rowNumber: item.rowNumber,
+          clientName,
+          status: "IGNORED",
+          category: "ignored",
+          reason: item.reason || "Linha ignorada por decisão do usuário."
+        });
         continue;
       }
 
       if (rowAction === "update") {
         if (!item.existingClientId) {
-          totalErros += 1;
-          errors.push({
-            rowNumber: item.rowNumber,
+          registerApiFailure(
+            item.rowNumber,
             clientName,
-            message: "Não é possível atualizar: duplicado no arquivo (sem cliente existente vinculado)."
-          });
+            "Cliente duplicado no arquivo sem vínculo com cliente existente para atualização.",
+            "duplicate"
+          );
           continue;
         }
 
@@ -3051,26 +3076,26 @@ router.post("/clients/import", async (req, res) => {
             data: resolvedUpdateData
           });
           totalAtualizados += 1;
-        } catch (error) {
-          if (isDatabaseUniqueViolation(error)) {
-            totalErros += 1;
-            errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
-            continue;
-          }
-          totalErros += 1;
-          errors.push({
+          results.push({
             rowNumber: item.rowNumber,
             clientName,
-            message: "Não foi possível atualizar cliente existente."
+            status: "UPDATED",
+            category: "updated",
+            reason: "Cliente atualizado com sucesso."
           });
+        } catch (error) {
+          if (isDatabaseUniqueViolation(error)) {
+            registerApiFailure(item.rowNumber, clientName, "Cliente duplicado.", "duplicate");
+            continue;
+          }
+          registerApiFailure(item.rowNumber, clientName, "Erro interno ao atualizar cliente.");
         }
         continue;
       }
 
       // import_anyway ou ação vazia -> cria novo (ação vazia é erro, para forçar decisão)
       if (!rowAction) {
-        totalErros += 1;
-        errors.push({ rowNumber: item.rowNumber, clientName, message: "Cliente duplicado sem ação definida." });
+        registerApiFailure(item.rowNumber, clientName, "Cliente duplicado sem ação definida.", "duplicate");
         continue;
       }
     }
@@ -3078,6 +3103,13 @@ router.post("/clients/import", async (req, res) => {
     // New ou Duplicate com import_anyway
     if (rowAction === "skip") {
       totalIgnorados += 1;
+      results.push({
+        rowNumber: item.rowNumber,
+        clientName,
+        status: "IGNORED",
+        category: "ignored",
+        reason: "Linha ignorada por decisão do usuário."
+      });
       continue;
     }
 
@@ -3086,27 +3118,32 @@ router.post("/clients/import", async (req, res) => {
       await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
       await prisma.client.create({ data: payload });
       totalImportados += 1;
+      results.push({
+        rowNumber: item.rowNumber,
+        clientName,
+        status: "IMPORTED",
+        category: "imported",
+        reason: "Cliente importado com sucesso."
+      });
     } catch (error) {
       if (isDatabaseUniqueViolation(error)) {
-        totalErros += 1;
-        errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+        registerApiFailure(item.rowNumber, clientName, "Cliente duplicado.", "duplicate");
         continue;
       }
       if (isDatabaseForeignKeyViolation(error)) {
-        totalErros += 1;
-        errors.push({
-          rowNumber: item.rowNumber,
+        registerApiFailure(
+          item.rowNumber,
           clientName,
-          message: `Vendedor responsável não encontrado: ${String(item.row?.ownerSellerId || "").trim() || "(vazio)"}`
-        });
+          `Vendedor responsável não encontrado: ${String(item.row?.ownerSellerId || "").trim() || "(vazio)"}`,
+          "validation"
+        );
         continue;
       }
-      totalErros += 1;
-      errors.push({ rowNumber: item.rowNumber, clientName, message: "Não foi possível importar cliente." });
+      registerApiFailure(item.rowNumber, clientName, "Erro interno ao criar cliente.");
     }
   }
 
-  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors });
+  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors, results });
 });
 
 router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
