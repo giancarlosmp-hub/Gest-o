@@ -1907,7 +1907,7 @@ export default function CrudSimplePage({
                     </p>
                   ) : null}
 
-                  <div className="min-h-[320px] flex-1 overflow-hidden rounded-xl border border-slate-200">
+                  <div className="min-h-[240px] max-h-[48vh] flex-1 overflow-hidden rounded-xl border border-slate-200">
                     <div className="h-full overflow-x-auto overflow-y-auto">
                     <table className="w-full min-w-[980px] text-sm">
                       <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-700">
