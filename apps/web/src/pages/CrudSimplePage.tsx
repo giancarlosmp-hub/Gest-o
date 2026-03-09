@@ -52,6 +52,8 @@ type ClientImportRow = {
   cnpj?: string;
   segment?: string;
   ownerSellerId?: string;
+  ownerSellerName?: string;
+  ownerSellerLookupError?: string;
 };
 
 type ClientImportErrorItem = {
@@ -139,7 +141,7 @@ const clientImportTemplateColumns = [
   "tipo_cliente",
   "cnpj_cpf",
   "segmento",
-  "vendedor_responsavel_id"
+  "vendedor_responsavel"
 ] as const;
 
 const importMappingStorageKey = "clientsImport.columnMapping.v1";
@@ -155,7 +157,7 @@ const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
   { key: "farmSizeHa", label: "area_total_ha", required: false },
   { key: "cnpj", label: "cnpj_cpf", required: false },
   { key: "segment", label: "segmento", required: false },
-  { key: "ownerSellerId", label: "vendedor_responsavel_id", required: false }
+  { key: "ownerSellerId", label: "vendedor_responsavel", required: false }
 ];
 
 const getImportColumnLabel = (key: (typeof clientImportColumns)[number]) =>
@@ -415,7 +417,7 @@ export default function CrudSimplePage({
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportTemplateColumns],
-      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", ""]
+      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", "Ana Souza"]
     ];
 
     const xlsx = await loadXlsxLibrary();
@@ -437,25 +439,39 @@ export default function CrudSimplePage({
       farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal", "areatotalha"],
       cnpj: ["cnpj", "cpf", "cnpjcpf", "documento", "cnpj_cpf"],
       segment: ["segment", "segmento", "atividade", "perfil"],
-      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid"]
+      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid", "vendedor_responsavel_id"]
     };
 
     const normalizedHeaders = headers.map((header) => ({ header, normalized: normalizeHeader(header) }));
     const mapping: Partial<Record<ClientImportFieldKey, string>> = {};
 
     clientImportFieldDefinitions.forEach((field) => {
+      const normalizedFieldLabel = normalizeHeader(field.label);
       const expected = normalizeHeader(field.key);
       const candidates = normalizedHeaders.filter((item) => {
         if (!item.normalized) return false;
         if (item.normalized === expected) return true;
+        if (item.normalized === normalizedFieldLabel) return true;
         return synonyms[field.key].some(
           (synonym) => item.normalized.includes(synonym) || synonym.includes(item.normalized)
         );
       });
 
-      if (candidates.length === 1) {
-        mapping[field.key] = candidates[0].header;
+      if (candidates.length === 0) return;
+
+      const exactLabelMatch = candidates.find((item) => item.normalized === normalizedFieldLabel);
+      if (exactLabelMatch) {
+        mapping[field.key] = exactLabelMatch.header;
+        return;
       }
+
+      const exactKeyMatch = candidates.find((item) => item.normalized === expected);
+      if (exactKeyMatch) {
+        mapping[field.key] = exactKeyMatch.header;
+        return;
+      }
+
+      mapping[field.key] = candidates[0].header;
     });
 
     return mapping;
@@ -521,9 +537,53 @@ export default function CrudSimplePage({
     const potentialHaResult = parseDecimalValue(potentialValue);
     const farmSizeHaResult = parseDecimalValue(farmValue);
 
-    const resolvedOwnerSeller = isSeller
-      ? user?.id
-      : (mapping.ownerSellerId ? normalizeTextValue(row[mapping.ownerSellerId]) : "") || defaultOwnerSellerId;
+    const normalizeSellerName = (value?: string) =>
+      String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+
+    const sellersByName = users.reduce<Map<string, { id: string; name: string }>>((acc, seller) => {
+      const normalized = normalizeSellerName(seller.name);
+      if (!normalized || acc.has(normalized)) return acc;
+      acc.set(normalized, { id: seller.id, name: seller.name });
+      return acc;
+    }, new Map());
+
+    const sellersById = users.reduce<Map<string, { id: string; name: string }>>((acc, seller) => {
+      const normalized = normalizeTextValue(seller.id);
+      if (!normalized) return acc;
+      acc.set(normalized, { id: seller.id, name: seller.name });
+      return acc;
+    }, new Map());
+
+    const rawOwnerSeller = mapping.ownerSellerId ? normalizeTextValue(row[mapping.ownerSellerId]) : "";
+
+    let resolvedOwnerSellerId = "";
+    let resolvedOwnerSellerName = "";
+    let ownerSellerLookupError = "";
+
+    if (isSeller && user?.id) {
+      resolvedOwnerSellerId = user.id;
+      resolvedOwnerSellerName = user.name || "";
+    } else if (rawOwnerSeller) {
+      const byId = sellersById.get(rawOwnerSeller);
+      if (byId) {
+        resolvedOwnerSellerId = byId.id;
+        resolvedOwnerSellerName = byId.name;
+      } else {
+        const byName = sellersByName.get(normalizeSellerName(rawOwnerSeller));
+        if (byName) {
+          resolvedOwnerSellerId = byName.id;
+          resolvedOwnerSellerName = byName.name;
+        } else {
+          ownerSellerLookupError = "Vendedor responsável não encontrado";
+        }
+      }
+    } else if (defaultOwnerSellerId) {
+      resolvedOwnerSellerId = defaultOwnerSellerId;
+      resolvedOwnerSellerName = users.find((seller) => seller.id === defaultOwnerSellerId)?.name || "";
+    }
 
     return {
       sourceRowNumber: rowIndex + 2,
@@ -536,7 +596,9 @@ export default function CrudSimplePage({
       clientType: mapping.clientType ? normalizeTextValue(row[mapping.clientType]) : "",
       cnpj: mapping.cnpj ? normalizeTextValue(row[mapping.cnpj]) : "",
       segment: mapping.segment ? normalizeTextValue(row[mapping.segment]) : "",
-      ownerSellerId: resolvedOwnerSeller ? normalizeTextValue(resolvedOwnerSeller) : ""
+      ownerSellerId: resolvedOwnerSellerId ? normalizeTextValue(resolvedOwnerSellerId) : "",
+      ownerSellerName: resolvedOwnerSellerName,
+      ownerSellerLookupError
     };
   };
 
@@ -598,6 +660,9 @@ export default function CrudSimplePage({
         if (!/^\d{11}$|^\d{14}$/.test(numericDocument)) {
           rowErrors.push("CNPJ/CPF inválido (use 11 ou 14 dígitos)");
         }
+      }
+      if (row.ownerSellerLookupError) {
+        rowErrors.push(row.ownerSellerLookupError);
       }
       if (rowErrors.length === 0) {
         const normalizedDocument = String(row.cnpj ?? "").replace(/\D/g, "");
@@ -1755,7 +1820,7 @@ export default function CrudSimplePage({
                               <td className="px-3 py-2">{row.clientType || "—"}</td>
                               <td className="px-3 py-2">{row.cnpj || "—"}</td>
                               <td className="px-3 py-2">{row.segment || "—"}</td>
-                              <td className="px-3 py-2">{row.ownerSellerId || "—"}</td>
+                              <td className="px-3 py-2">{row.ownerSellerName || row.ownerSellerId || "—"}</td>
 
                               <td className="px-3 py-2">
                                 {row.status === "new"
