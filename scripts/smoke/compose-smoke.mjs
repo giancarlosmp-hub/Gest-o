@@ -7,6 +7,8 @@ const tomorrowIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 const yesterdayIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 const uniqueTag = `ci-smoke-${Date.now()}`;
 const opportunityValue = 12345;
+const smokeEmail = process.env.SMOKE_EMAIL || "diretor@empresa.com";
+const smokePassword = process.env.SMOKE_PASSWORD || "123456";
 
 const request = async (path, options = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -43,7 +45,7 @@ const main = async () => {
   console.log("[compose-smoke] Login com usuário seed");
   const login = await request("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email: "diretor@empresa.com", password: "123456" })
+    body: JSON.stringify({ email: smokeEmail, password: smokePassword })
   });
   const token = login?.accessToken;
   assert(Boolean(token), "Falha ao obter access token no login", login);
