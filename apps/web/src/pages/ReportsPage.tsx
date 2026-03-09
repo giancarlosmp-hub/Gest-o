@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Bar, Doughnut } from "react-chartjs-2";
 import {
   ArcElement,
@@ -17,6 +17,12 @@ import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/forma
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
 type AgroCrmResponse = {
+  summary: {
+    pipelineTotal: number;
+    weightedTotal: number;
+    overdueCount: number;
+    overdueValue: number;
+  };
   kpis: {
     pipelineByCrop: Array<{ crop: string; value: number; weighted: number; count: number }>;
     pipelineBySeason: Array<{ season: string; value: number; weighted: number; count: number }>;
@@ -134,6 +140,7 @@ const monthLabel = (value: string) => {
 };
 
 export default function ReportsPage() {
+  const [searchParams] = useSearchParams();
   const [report, setReport] = useState<AgroCrmResponse | null>(null);
   const [closedFilters, setClosedFilters] = useState<ClosedFilters>(getClosedDefaultFilters);
   const [closedItems, setClosedItems] = useState<ClosedOpportunity[]>([]);
@@ -144,7 +151,15 @@ export default function ReportsPage() {
   const [clientOptions, setClientOptions] = useState<SelectOption[]>([]);
 
   useEffect(() => {
-    api.get<AgroCrmResponse>("/reports/agro-crm").then((response) => setReport(response.data));
+    const params = new URLSearchParams();
+    const filterKeys = ["ownerSellerId", "ownerId", "clientId", "crop", "season", "dateFrom", "dateTo", "search", "overdue"];
+    filterKeys.forEach((key) => {
+      const value = searchParams.get(key);
+      if (value) params.set(key, value);
+    });
+
+    const reportUrl = params.toString() ? `/reports/agro-crm?${params.toString()}` : "/reports/agro-crm";
+    api.get<AgroCrmResponse>(reportUrl).then((response) => setReport(response.data));
     Promise.all([api.get("/users"), api.get("/clients")]).then(([usersRes, clientsRes]) => {
       const users = Array.isArray(usersRes.data) ? usersRes.data : [];
       const sellers = users.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
@@ -153,7 +168,7 @@ export default function ReportsPage() {
       setSellerOptions(sellers.map((item: any) => ({ id: item.id, name: item.name })));
       setClientOptions(clients.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: item.id, name: item.name })));
     });
-  }, []);
+  }, [searchParams]);
 
 
   useEffect(() => {
@@ -193,12 +208,11 @@ export default function ReportsPage() {
       .finally(() => setClosedLoading(false));
   }, [closedFilters, closedTotals.page, closedTotals.pageSize]);
 
-  const totals = useMemo(() => {
-    const pipeline = report?.kpis.pipelineByCrop.reduce((sum, row) => sum + row.value, 0) || 0;
-    const weighted = report?.kpis.pipelineByCrop.reduce((sum, row) => sum + row.weighted, 0) || 0;
-    const overdue = report?.kpis.overdueBySeller.reduce((sum, row) => sum + row.overdueCount, 0) || 0;
-    return { pipeline, weighted, overdue };
-  }, [report]);
+  const totals = useMemo(() => ({
+    pipeline: report?.summary.pipelineTotal || 0,
+    weighted: report?.summary.weightedTotal || 0,
+    overdue: report?.summary.overdueCount || 0
+  }), [report]);
 
   const barOptions: ChartOptions<"bar"> = {
     ...baseChartOptions,
