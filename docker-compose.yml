@@ -27,6 +27,9 @@ services:
       JWT_ACCESS_SECRET: super-access
       JWT_REFRESH_SECRET: super-refresh
       SEED_ON_BOOTSTRAP: "false"
+      ENABLE_SMOKE_BOOTSTRAP: "true"
+      SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
+      SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
       - "4000:4000"
     restart: on-failure

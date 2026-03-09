@@ -74,6 +74,11 @@ Para forçar seed no startup da API em ambiente de dev, defina:
 SEED_ON_BOOTSTRAP=true
 ```
 
+
+### Bootstrap mínimo para compose-smoke
+O compose padrão habilita `ENABLE_SMOKE_BOOTSTRAP=true` para garantir um usuário técnico de login e um vendedor/cliente mínimos do smoke test de forma **idempotente** (sem `deleteMany`).
+Isso não executa o seed destrutivo e não reseta dados reais.
+
 ### Backfill de normalizados de clientes
 Para preencher `cnpjNormalized`, `nameNormalized` e `cityNormalized` em registros já existentes:
 ```bash

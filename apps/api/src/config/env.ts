@@ -13,5 +13,9 @@ export const env = {
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "access-secret",
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "refresh-secret",
   frontendUrl: process.env.FRONTEND_URL || "http://localhost:5173",
-  seedOnBootstrap: toBoolean(process.env.SEED_ON_BOOTSTRAP, false)
+  seedOnBootstrap: toBoolean(process.env.SEED_ON_BOOTSTRAP, false),
+  enableSmokeBootstrap: toBoolean(process.env.ENABLE_SMOKE_BOOTSTRAP, false),
+  smokeDirectorEmail: process.env.SMOKE_DIRECTOR_EMAIL || "diretor@empresa.com",
+  smokeDirectorPassword: process.env.SMOKE_DIRECTOR_PASSWORD || "123456",
+  smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com"
 };
