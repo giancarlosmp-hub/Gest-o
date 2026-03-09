@@ -22,6 +22,7 @@ type CreateAgendaForm = {
   startDateTime: string;
   endDateTime: string;
   sellerId: string;
+  clientId: string;
   notes: string;
 };
 
@@ -364,6 +365,7 @@ export default function AgendaPage() {
     startDateTime: "",
     endDateTime: "",
     sellerId: "",
+    clientId: "",
     notes: ""
   });
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
@@ -1021,6 +1023,7 @@ export default function AgendaPage() {
       startDateTime: "",
       endDateTime: "",
       sellerId: user?.role === "vendedor" ? user.id : selectedSellerId,
+      clientId: "",
       notes: ""
     });
     setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", city: "", plannedTime: "", notes: "" }] : []);
@@ -1049,7 +1052,8 @@ export default function AgendaPage() {
       type: (data?.type as AgendaEventType) || createForm.type,
       startsAt: new Date(data?.startsAt || data?.startDateTime || createForm.startDateTime).toISOString(),
       endsAt: new Date(data?.endsAt || data?.endDateTime || createForm.endDateTime).toISOString(),
-      status: (data?.status as AgendaEvent["status"]) || "planned"
+      status: (data?.status as AgendaEvent["status"]) || "planned",
+      clientId: String(data?.clientId || createForm.clientId || "") || undefined
     };
   };
 
@@ -1092,6 +1096,7 @@ export default function AgendaPage() {
         type: createForm.type,
         startDateTime: new Date(createForm.startDateTime).toISOString(),
         endDateTime: new Date(createForm.endDateTime).toISOString(),
+        ...(createForm.clientId ? { clientId: createForm.clientId } : {}),
         ...(createForm.type === "roteiro_visita"
           ? {
               stops: draftStops.map((stop) => ({
@@ -1553,6 +1558,24 @@ export default function AgendaPage() {
                   />
                 </div>
               </div>
+
+              {createForm.type !== "roteiro_visita" ? (
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
+                  <select
+                    value={createForm.clientId}
+                    onChange={(event) => setCreateForm((current) => ({ ...current, clientId: event.target.value }))}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    <option value="">Sem vínculo</option>
+                    {activityClients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : null}
 
 
               <div>
