@@ -806,6 +806,10 @@ const isDatabaseUniqueViolation = (error: unknown) => {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 };
 
+const isDatabaseForeignKeyViolation = (error: unknown) => {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";
+};
+
 class DuplicateClientError extends Error {
   statusCode: number;
 
@@ -1158,7 +1162,9 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
   });
 
   const sellersByName = new Map<string, { id: string; name: string }>();
+  const sellersById = new Map<string, { id: string; name: string }>();
   availableSellers.forEach((seller) => {
+    sellersById.set(seller.id, seller);
     const normalized = normalizeSellerName(seller.name);
     if (!normalized || sellersByName.has(normalized)) return;
     sellersByName.set(normalized, seller);
@@ -1186,10 +1192,22 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
         const sellerByName = sellersByName.get(normalizeSellerName(ownerRaw));
         if (sellerByName) {
           ownerSellerId = resolveOwnerId(req, sellerByName.id);
-        } else if (UUID_V4_REGEX.test(ownerRaw)) {
+        } else if (sellersById.has(ownerRaw)) {
           ownerSellerId = resolveOwnerId(req, ownerRaw);
+        } else if (UUID_V4_REGEX.test(ownerRaw)) {
+          return {
+            kind: "error" as const,
+            rowNumber,
+            row,
+            error: `Vendedor responsável não encontrado: ${ownerRaw}`
+          };
         } else {
-          return { kind: "error" as const, rowNumber, row, error: "Vendedor responsável não encontrado" };
+          return {
+            kind: "error" as const,
+            rowNumber,
+            row,
+            error: `Vendedor responsável não encontrado: ${ownerRaw}`
+          };
         }
       }
     } else {
@@ -3072,6 +3090,15 @@ router.post("/clients/import", async (req, res) => {
       if (isDatabaseUniqueViolation(error)) {
         totalErros += 1;
         errors.push({ rowNumber: item.rowNumber, clientName, message: DUPLICATE_CLIENT_MESSAGE });
+        continue;
+      }
+      if (isDatabaseForeignKeyViolation(error)) {
+        totalErros += 1;
+        errors.push({
+          rowNumber: item.rowNumber,
+          clientName,
+          message: `Vendedor responsável não encontrado: ${String(item.row?.ownerSellerId || "").trim() || "(vazio)"}`
+        });
         continue;
       }
       totalErros += 1;
