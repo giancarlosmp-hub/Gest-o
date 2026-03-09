@@ -633,6 +633,26 @@ const mapAgendaStatusFromDb = (status: string): "planned" | "completed" | "cance
   return "planned";
 };
 
+const AGENDA_TIMELINE_LABEL: Record<"reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup", string> = {
+  reuniao_online: "Reunião online agendada",
+  reuniao_presencial: "Reunião presencial agendada",
+  roteiro_visita: "Roteiro de visita planejado",
+  followup: "Follow-up agendado"
+};
+
+const buildAgendaCreatedDescription = (event: { type: "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup"; title: string }) => {
+  const baseLabel = AGENDA_TIMELINE_LABEL[event.type] || "Compromisso agendado";
+  return `${baseLabel}: ${event.title}`;
+};
+
+const buildAgendaStatusDescription = (
+  status: "completed" | "cancelled",
+  event: { type: "reuniao_online" | "reuniao_presencial" | "roteiro_visita" | "followup"; title: string }
+) => {
+  const base = status === "completed" ? "Compromisso concluído" : "Compromisso cancelado";
+  return `${base}: ${event.title} (${AGENDA_TIMELINE_LABEL[event.type]})`;
+};
+
 const agendaEventCreateSchema = z.object({
   title: z.string().min(2),
   type: agendaEventTypeSchema,
@@ -4415,11 +4435,36 @@ router.post(["/agenda", "/agenda/events"], validateBody(agendaEventCreateSchema)
     include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
   });
 
+  if (event.clientId) {
+    await createEvent({
+      type: "status",
+      description: buildAgendaCreatedDescription({ type: event.type, title: event.title }),
+      clientId: event.clientId,
+      ownerSellerId: event.sellerId
+    });
+  }
+
+  if (event.type === "roteiro_visita" && event.stops?.length) {
+    for (const stop of event.stops) {
+      if (!stop.clientId) continue;
+      const stopLabel = `Visita em roteiro planejada: ${event.title} (parada ${stop.order})`;
+      await createEvent({
+        type: "status",
+        description: stopLabel,
+        clientId: stop.clientId,
+        ownerSellerId: event.sellerId
+      });
+    }
+  }
+
   return res.status(201).json(mapAgendaEvent(event));
 });
 
 router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpdateSchema), async (req, res) => {
-  const event = await prisma.agendaEvent.findUnique({ where: { id: req.params.id }, select: { sellerId: true } });
+  const event = await prisma.agendaEvent.findUnique({
+    where: { id: req.params.id },
+    select: { sellerId: true, title: true, type: true, status: true, clientId: true }
+  });
   if (!event) return res.status(404).json({ message: "Evento não encontrado." });
   if (req.user!.role === "vendedor" && event.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
@@ -4438,6 +4483,17 @@ router.patch(["/agenda/:id", "/agenda/events/:id"], validateBody(agendaEventUpda
     },
     include: { stops: { include: { client: { select: { name: true } } }, orderBy: { order: "asc" } } }
   });
+
+  const previousStatus = mapAgendaStatusFromDb(event.status);
+  const currentStatus = mapAgendaStatusFromDb(updated.status);
+  if (event.clientId && previousStatus !== currentStatus && (currentStatus === "completed" || currentStatus === "cancelled")) {
+    await createEvent({
+      type: "status",
+      description: buildAgendaStatusDescription(currentStatus, { type: updated.type, title: updated.title }),
+      clientId: event.clientId,
+      ownerSellerId: updated.sellerId
+    });
+  }
 
   return res.json(mapAgendaEvent(updated));
 });
@@ -4560,7 +4616,10 @@ router.patch(["/agenda-events/:id/check-out", "/agenda/events/:id/check-out"], v
 });
 
 router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validateBody(agendaStopResultSchema), async (req, res) => {
-  const stop = await prisma.agendaStop.findUnique({ where: { id: req.params.id }, include: { agendaEvent: { select: { sellerId: true } } } });
+  const stop = await prisma.agendaStop.findUnique({
+    where: { id: req.params.id },
+    include: { agendaEvent: { select: { sellerId: true, title: true } } }
+  });
   if (!stop) return res.status(404).json({ message: "Parada não encontrada." });
   if (req.user!.role === "vendedor" && stop.agendaEvent.sellerId !== req.user!.id) {
     return res.status(403).json({ message: "Acesso negado." });
@@ -4580,6 +4639,16 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
       nextStepDate: req.body.nextStepDate ? new Date(req.body.nextStepDate) : null
     }
   });
+
+  if (updated.clientId) {
+    const statusLabel = updated.resultStatus === "realizada" ? "Compromisso concluído" : "Compromisso cancelado";
+    await createEvent({
+      type: "status",
+      description: `${statusLabel}: Visita em roteiro (${stop.agendaEvent.title})`,
+      clientId: updated.clientId,
+      ownerSellerId: stop.agendaEvent.sellerId
+    });
+  }
 
   return res.json({
     id: updated.id,
