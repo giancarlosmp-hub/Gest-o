@@ -1069,6 +1069,51 @@ const isMeaningfulImportString = (value: unknown) => {
   return trimmed !== "" && trimmed !== "-";
 };
 
+const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any) => {
+  const ownerSellerId =
+    req.user?.role === "vendedor"
+      ? req.user.id
+      : typeof payload.ownerSellerId === "string" && payload.ownerSellerId.trim()
+        ? payload.ownerSellerId.trim()
+        : resolveOwnerId(req);
+
+  const data = {
+    name: payload.name.trim(),
+    city: payload.city.trim(),
+    state: payload.state.trim(),
+    region: payload.region.trim(),
+    ownerSellerId,
+    ...(typeof payload.segment === "string" && isMeaningfulImportString(payload.segment) ? { segment: payload.segment.trim() } : {}),
+    ...(typeof payload.clientType === "string" && isMeaningfulImportString(payload.clientType)
+      ? { clientType: payload.clientType.trim().toUpperCase() as ClientType }
+      : {}),
+    ...(typeof payload.cnpj === "string" && isMeaningfulImportString(payload.cnpj) ? { cnpj: payload.cnpj.trim() } : {}),
+    ...(typeof payload.potentialHa === "number" && Number.isFinite(payload.potentialHa) && payload.potentialHa >= 0
+      ? { potentialHa: payload.potentialHa }
+      : {}),
+    ...(typeof payload.farmSizeHa === "number" && Number.isFinite(payload.farmSizeHa) && payload.farmSizeHa >= 0
+      ? { farmSizeHa: payload.farmSizeHa }
+      : {})
+  };
+
+  return withClientNormalizedFields(data);
+};
+
+const getImportPersistenceErrorMessage = (error: unknown) => {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === "P2002") return "Cliente duplicado.";
+    if (error.code === "P2003") return "Vendedor responsável não encontrado.";
+    return `Falha de banco (${error.code}).`;
+  }
+
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return `Dados inválidos para persistência: ${error.message.split("\n")[0] ?? "erro de validação."}`;
+  }
+
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Erro interno ao criar cliente.";
+};
+
 const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
 
@@ -3114,7 +3159,7 @@ router.post("/clients/import", async (req, res) => {
     }
 
     try {
-      const payload = withClientNormalizedFields(item.payload);
+      const payload = resolveImportCreateData(item.payload, req);
       await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
       await prisma.client.create({ data: payload });
       totalImportados += 1;
@@ -3139,7 +3184,7 @@ router.post("/clients/import", async (req, res) => {
         );
         continue;
       }
-      registerApiFailure(item.rowNumber, clientName, "Erro interno ao criar cliente.");
+      registerApiFailure(item.rowNumber, clientName, getImportPersistenceErrorMessage(error));
     }
   }
 
