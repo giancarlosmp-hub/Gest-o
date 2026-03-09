@@ -129,20 +129,33 @@ const clientImportColumns = [
   "ownerSellerId"
 ] as const;
 
+const clientImportTemplateColumns = [
+  "nome",
+  "cidade",
+  "uf",
+  "regiao",
+  "potencial_ha",
+  "area_total_ha",
+  "tipo_cliente",
+  "cnpj_cpf",
+  "segmento",
+  "vendedor_responsavel_id"
+] as const;
+
 const importMappingStorageKey = "clientsImport.columnMapping.v1";
 const importTemplatesStorageKey = "clientsImport.templates.v1";
 
 const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
-  { key: "name", label: "Nome", required: true },
-  { key: "city", label: "Cidade", required: true },
-  { key: "state", label: "UF", required: true },
-  { key: "clientType", label: "Tipo PJ/PF", required: true },
-  { key: "region", label: "Região", required: false },
-  { key: "potentialHa", label: "Potencial (ha)", required: false },
-  { key: "farmSizeHa", label: "Área total (ha)", required: false },
-  { key: "cnpj", label: "CNPJ/CPF", required: false },
-  { key: "segment", label: "Segmento", required: false },
-  { key: "ownerSellerId", label: "Vendedor responsável", required: false }
+  { key: "name", label: "nome", required: true },
+  { key: "city", label: "cidade", required: true },
+  { key: "state", label: "uf", required: true },
+  { key: "clientType", label: "tipo_cliente", required: true },
+  { key: "region", label: "regiao", required: false },
+  { key: "potentialHa", label: "potencial_ha", required: false },
+  { key: "farmSizeHa", label: "area_total_ha", required: false },
+  { key: "cnpj", label: "cnpj_cpf", required: false },
+  { key: "segment", label: "segmento", required: false },
+  { key: "ownerSellerId", label: "vendedor_responsavel_id", required: false }
 ];
 
 const getImportColumnLabel = (key: (typeof clientImportColumns)[number]) =>
@@ -401,7 +414,7 @@ export default function CrudSimplePage({
 
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
-      [...clientImportColumns],
+      [...clientImportTemplateColumns],
       ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", ""]
     ];
 
@@ -421,10 +434,10 @@ export default function CrudSimplePage({
       clientType: ["clienttype", "tipo", "pjpf", "pessoa", "tipocliente"],
       region: ["region", "regiao"],
       potentialHa: ["potentialha", "potencial", "hapotencial", "potencialha"],
-      farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal"],
-      cnpj: ["cnpj", "cpf", "cnpjcpf", "documento"],
+      farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal", "areatotalha"],
+      cnpj: ["cnpj", "cpf", "cnpjcpf", "documento", "cnpj_cpf"],
       segment: ["segment", "segmento", "atividade", "perfil"],
-      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller"]
+      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid"]
     };
 
     const normalizedHeaders = headers.map((header) => ({ header, normalized: normalizeHeader(header) }));
