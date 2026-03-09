@@ -68,15 +68,27 @@ type ClientImportStatus = "new" | "duplicate_in_file" | "duplicate" | "error";
 type ClientImportSummary = {
   total: number;
   imported: number;
-  ignoredByError: number;
+  ignoredByValidation: number;
+  alreadyExisting: number;
+  duplicates: number;
   apiFailures: number;
+  updated: number;
 };
 
 type ClientImportFinalReportRow = {
   rowNumber: number;
-  status: "IMPORTADO" | "ERRO" | "FALHA_API";
+  status: "IMPORTADO" | "ATUALIZADO" | "IGNORADO" | "ERRO_VALIDACAO" | "JA_EXISTENTE" | "DUPLICADO" | "FALHA_API";
   reason: string;
   createdId: string;
+};
+
+type ImportApiResultItem = {
+  rowNumber: number;
+  clientName: string;
+  status: "IMPORTED" | "UPDATED" | "IGNORED" | "API_FAILURE";
+  category: "imported" | "updated" | "ignored" | "duplicate" | "validation" | "api_error";
+  reason: string;
+  createdId?: string;
 };
 
 type ImportAnalysisRow = ClientImportRow & {
@@ -1014,15 +1026,33 @@ export default function CrudSimplePage({
 
   const buildImportFinalReportRows = (
     previewRows: ImportAnalysisRow[],
-    importResultsByRow: Map<number, { success: boolean; reason: string; createdId: string }>
+    importResultsByRow: Map<number, ImportApiResultItem>
   ): ClientImportFinalReportRow[] => {
     return previewRows
       .map((row) => {
         if (row.status === "error") {
           return {
             rowNumber: row.sourceRowNumber,
-            status: "ERRO" as const,
+            status: "ERRO_VALIDACAO" as const,
             reason: row.errorMessage || "Linha inválida no preview.",
+            createdId: ""
+          };
+        }
+
+        if (row.status === "duplicate_in_file") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            status: "DUPLICADO" as const,
+            reason: row.errorMessage || "Cliente duplicado no arquivo.",
+            createdId: ""
+          };
+        }
+
+        if (row.status === "duplicate" && (row.action || "skip") === "skip") {
+          return {
+            rowNumber: row.sourceRowNumber,
+            status: "JA_EXISTENTE" as const,
+            reason: row.errorMessage || "Cliente já existente no sistema.",
             createdId: ""
           };
         }
@@ -1038,20 +1068,26 @@ export default function CrudSimplePage({
           };
         }
 
-        if (!importResult.success) {
+        if (importResult.status === "API_FAILURE") {
+          const failureStatus: ClientImportFinalReportRow["status"] =
+            importResult.category === "duplicate" ? "DUPLICADO" : "FALHA_API";
+
           return {
             rowNumber: row.sourceRowNumber,
-            status: "FALHA_API" as const,
+            status: failureStatus,
             reason: importResult.reason,
             createdId: ""
           };
         }
 
+        const finalStatus: ClientImportFinalReportRow["status"] =
+          importResult.status === "UPDATED" ? "ATUALIZADO" : importResult.status === "IGNORED" ? "IGNORADO" : "IMPORTADO";
+
         return {
           rowNumber: row.sourceRowNumber,
-          status: "IMPORTADO" as const,
+          status: finalStatus,
           reason: importResult.reason,
-          createdId: importResult.createdId
+          createdId: importResult.createdId || ""
         };
       })
       .sort((a, b) => a.rowNumber - b.rowNumber);
@@ -1102,8 +1138,9 @@ export default function CrudSimplePage({
   const importValidRowsInBatches = async (validRows: ImportAnalysisRow[]) => {
     const batchSize = 50;
     let imported = 0;
+    let updated = 0;
     let apiFailures = 0;
-    const resultsByRow = new Map<number, { success: boolean; reason: string; createdId: string }>();
+    const resultsByRow = new Map<number, ImportApiResultItem>();
 
     for (let index = 0; index < validRows.length; index += batchSize) {
       const batchRows = validRows.slice(index, index + batchSize);
@@ -1111,8 +1148,10 @@ export default function CrudSimplePage({
       try {
         const response = await api.post<{
           totalImportados?: number;
+          totalAtualizados?: number;
           totalErros?: number;
           errors?: ClientImportErrorItem[];
+          results?: ImportApiResultItem[];
         }>(
           "/clients/import",
           {
@@ -1122,28 +1161,21 @@ export default function CrudSimplePage({
         );
 
         imported += Number(response.data?.totalImportados ?? 0);
+        updated += Number(response.data?.totalAtualizados ?? 0);
         apiFailures += Number(response.data?.totalErros ?? 0);
 
-        const errorByRowNumber = new Map<number, string>();
-        (response.data?.errors ?? []).forEach((error) => {
-          errorByRowNumber.set(error.rowNumber, error.message || "Falha ao importar cliente na API.");
-        });
-
-        batchRows.forEach((row) => {
-          const rowErrorMessage = errorByRowNumber.get(row.sourceRowNumber);
-
-          resultsByRow.set(row.sourceRowNumber, {
-            success: !rowErrorMessage,
-            reason: rowErrorMessage || "Cliente importado com sucesso.",
-            createdId: ""
-          });
+        (response.data?.results ?? []).forEach((result) => {
+          resultsByRow.set(result.rowNumber, result);
         });
       } catch (error: any) {
         const fallbackReason = error?.response?.data?.message || "Falha ao importar lote de clientes na API.";
         apiFailures += batchRows.length;
         batchRows.forEach((row) => {
           resultsByRow.set(row.sourceRowNumber, {
-            success: false,
+            rowNumber: row.sourceRowNumber,
+            clientName: row.name,
+            status: "API_FAILURE",
+            category: "api_error",
             reason: fallbackReason,
             createdId: ""
           });
@@ -1155,6 +1187,7 @@ export default function CrudSimplePage({
 
     return {
       imported,
+      updated,
       apiFailures,
       resultsByRow
     };
@@ -1176,7 +1209,6 @@ export default function CrudSimplePage({
     const validRows = importPreviewRows.filter(
       (row) => row.status === "new" || (row.status === "duplicate" && row.action === "import_anyway")
     );
-    const ignoredByError = importPreviewRows.length - validRows.length;
 
     if (validRows.length === 0) {
       toast.warning("Não há linhas válidas para importar.");
@@ -1190,12 +1222,18 @@ export default function CrudSimplePage({
     setImportProgress({ current: 0, total: validRows.length });
 
     try {
-      const { imported, apiFailures, resultsByRow } = await importValidRowsInBatches(validRows);
+      const { imported, updated, apiFailures, resultsByRow } = await importValidRowsInBatches(validRows);
+      const ignoredByValidation = importPreviewRows.filter((row) => row.status === "error").length;
+      const alreadyExisting = importPreviewRows.filter((row) => row.status === "duplicate" && (row.action || "skip") === "skip").length;
+      const duplicates = importPreviewRows.filter((row) => row.status === "duplicate_in_file").length;
       const resolvedSummary: ClientImportSummary = {
         total: importPreviewRows.length,
         imported,
-        ignoredByError,
-        apiFailures
+        ignoredByValidation,
+        alreadyExisting,
+        duplicates,
+        apiFailures,
+        updated
       };
 
       const reportRows = buildImportFinalReportRows(importPreviewRows, resultsByRow);
@@ -1203,13 +1241,11 @@ export default function CrudSimplePage({
       setImportSummary(resolvedSummary);
       setImportFinalReportRows(reportRows);
 
-      if (apiFailures > 0) {
-        toast.warning(
-          `Importação finalizada: ${imported} importado(s), ${ignoredByError} ignorado(s) por erro e ${apiFailures} falha(s) da API.`
-        );
-      } else {
-        toast.success(`Importação concluída: ${imported} importado(s), ${ignoredByError} ignorado(s) por erro.`);
-      }
+      const mainFailure = reportRows.find((row) => row.status === "FALHA_API" || row.status === "DUPLICADO")?.reason;
+      const summaryText = `Importação concluída: ${imported} importado(s), ${updated} atualizado(s), ${ignoredByValidation} ignorado(s) por validação, ${alreadyExisting} já existente(s), ${duplicates} duplicado(s) e ${apiFailures} falha(s) de API.`;
+
+      if (apiFailures > 0) toast.warning(mainFailure ? `${summaryText} Motivo principal: ${mainFailure}` : summaryText);
+      else toast.success(summaryText);
 
       await loadClients();
     } catch (e: any) {
@@ -1772,7 +1808,16 @@ export default function CrudSimplePage({
                         Total importado: <span className="font-semibold text-slate-900">{importSummary.imported}</span>
                       </p>
                       <p>
-                        Ignorados por erro: <span className="font-semibold text-slate-900">{importSummary.ignoredByError}</span>
+                        Total atualizado: <span className="font-semibold text-slate-900">{importSummary.updated}</span>
+                      </p>
+                      <p>
+                        Ignorados por validação: <span className="font-semibold text-slate-900">{importSummary.ignoredByValidation}</span>
+                      </p>
+                      <p>
+                        Já existentes: <span className="font-semibold text-slate-900">{importSummary.alreadyExisting}</span>
+                      </p>
+                      <p>
+                        Duplicados: <span className="font-semibold text-slate-900">{importSummary.duplicates}</span>
                       </p>
                       <p>
                         Falhas da API: <span className="font-semibold text-slate-900">{importSummary.apiFailures}</span>
