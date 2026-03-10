@@ -5,8 +5,16 @@ import { type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } 
 import { getApiErrorMessage } from "../../lib/apiError";
 
 const extractFriendlyCultureError = (error: unknown) => {
-  const message = getApiErrorMessage(error, "Falha ao salvar cultura.");
+  const message = getApiErrorMessage(error, "Não foi possível salvar o catálogo técnico.");
   const normalized = message.toLowerCase();
+
+  if (normalized.includes("slug") && (normalized.includes("já") || normalized.includes("duplicate") || normalized.includes("exists"))) {
+    return "Slug já existente. Escolha outro identificador para a cultura.";
+  }
+
+  if (normalized.includes("nome da cultura") || normalized.includes("label") || normalized.includes("nome")) {
+    return "Nome da cultura é obrigatório.";
+  }
 
   if (normalized.includes("germinationdefault") || normalized.includes("germinação")) {
     return "Germinação padrão deve estar entre 0 e 100.";
@@ -16,7 +24,11 @@ const extractFriendlyCultureError = (error: unknown) => {
     return "Pureza padrão deve estar entre 0 e 100.";
   }
 
-  return message;
+  if (normalized.includes("categoria")) {
+    return "Categoria é obrigatória.";
+  }
+
+  return "Não foi possível salvar o catálogo técnico. Revise os campos e tente novamente.";
 };
 
 const emptyForm: CultureFormInput = {
@@ -45,9 +57,10 @@ const toNumber = (value: string) => {
 type CultureRowProps = {
   item: TechnicalCulture;
   onEdit: (item: TechnicalCulture) => void;
+  disableEdit?: boolean;
 };
 
-const CultureTableRow = memo(function CultureTableRow({ item, onEdit }: CultureRowProps) {
+const CultureTableRow = memo(function CultureTableRow({ item, onEdit, disableEdit = false }: CultureRowProps) {
   return (
     <tr className="border-t border-slate-200 text-slate-700">
       <td className="px-3 py-2.5">{item.label}</td>
@@ -56,7 +69,7 @@ const CultureTableRow = memo(function CultureTableRow({ item, onEdit }: CultureR
       <td className="px-3 py-2.5">{item.defaultKgHaMin ?? "—"}</td>
       <td className="px-3 py-2.5">{item.defaultKgHaMax ?? "—"}</td>
       <td className="px-3 py-2.5">
-        <button className="text-brand-700" type="button" onClick={() => onEdit(item)}>Editar</button>
+        <button className="text-brand-700 disabled:cursor-not-allowed disabled:opacity-50" type="button" onClick={() => onEdit(item)} disabled={disableEdit}>Editar</button>
       </td>
     </tr>
   );
@@ -69,18 +82,29 @@ export default function TechnicalCulturesPanel() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [form, setForm] = useState<CultureFormInput>(emptyForm);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
-  const loadCultures = async () => {
+  const loadCultures = async ({ keepLoading = false }: { keepLoading?: boolean } = {}) => {
+    if (!keepLoading) {
+      setLoading(true);
+    }
+    setLoadError("");
+
     try {
       const data = await fetchTechnicalCultures();
       setCultures(data);
+      return data;
     } catch (error) {
+      const friendlyMessage = "Não foi possível carregar o catálogo técnico. Tente novamente.";
       console.error("Falha ao carregar catálogo técnico em configurações", {
-        reason: getApiErrorMessage(error, "Erro ao carregar catálogo técnico."),
+        reason: getApiErrorMessage(error, friendlyMessage),
         error,
       });
-      toast.error(getApiErrorMessage(error, "Falha ao carregar catálogo técnico da API."));
+      setLoadError(friendlyMessage);
       setCultures([]);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -95,7 +119,10 @@ export default function TechnicalCulturesPanel() {
     [cultures, search]
   );
 
+  const isDegradedMode = Boolean(loadError) || cultures.some((item) => item.id.startsWith("fallback-"));
+
   const openEditor = useCallback((item?: TechnicalCulture) => {
+    setSaveSuccess(false);
     setIsFormOpen(true);
 
     if (!item) {
@@ -124,6 +151,11 @@ export default function TechnicalCulturesPanel() {
   }, []);
 
   const save = async () => {
+    if (isDegradedMode) {
+      toast.error("Catálogo em modo degradado. Salvar está bloqueado até reconectar com a API.");
+      return;
+    }
+
     if (!form.label.trim() || !form.slug.trim() || !form.category.trim()) {
       toast.error("Preencha nome, slug e categoria.");
       return;
@@ -162,15 +194,30 @@ export default function TechnicalCulturesPanel() {
     };
 
     try {
-      if (editing) await api.put(`/technical/cultures/${editing.id}`, payload);
-      else await api.post("/technical/cultures", payload);
-      toast.success("Catálogo técnico salvo.");
+      setSaving(true);
+      setSaveSuccess(false);
+
+      const response = editing
+        ? await api.put<TechnicalCulture>(`/technical/cultures/${editing.id}`, payload)
+        : await api.post<TechnicalCulture>("/technical/cultures", payload);
+
+      const refreshed = await loadCultures({ keepLoading: true });
+      const persisted = refreshed?.some((item) => item.id === response.data.id);
+
+      if (!persisted) {
+        toast.error("Não foi possível confirmar a persistência na API após salvar. Tente recarregar.");
+        return;
+      }
+
+      toast.success("Cultura salva com sucesso.");
+      setSaveSuccess(true);
       setEditing(null);
       setIsFormOpen(false);
       setForm(emptyForm);
-      await loadCultures();
     } catch (error) {
       toast.error(extractFriendlyCultureError(error));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -184,31 +231,61 @@ export default function TechnicalCulturesPanel() {
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-4 flex items-center justify-between gap-2">
         <h3 className="text-base font-semibold text-slate-900">Catálogo Técnico (Culturas)</h3>
-        <button className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={() => openEditor()} type="button">Nova cultura</button>
+        <button className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" onClick={() => openEditor()} type="button" disabled={isDegradedMode || loading || saving}>Nova cultura</button>
       </div>
+
+      {isDegradedMode ? (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Modo degradado ativo: sem persistência confiável na API. A edição foi bloqueada até a conexão ser restabelecida.
+        </div>
+      ) : null}
+
+      {saveSuccess ? (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          Persistência confirmada na API. Dados sincronizados com o backend.
+        </div>
+      ) : null}
+
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,1fr)]">
         <section className="rounded-xl border border-slate-200 bg-slate-50/40 p-3">
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome/categoria" className="mb-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
-          <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200 bg-white">
-            <table className="min-w-full text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-600">
-                <tr>
-                  <th className="px-3 py-2.5 font-semibold">Nome</th>
-                  <th className="px-3 py-2.5 font-semibold">Categoria</th>
-                  <th className="px-3 py-2.5 font-semibold">Ativo</th>
-                  <th className="px-3 py-2.5 font-semibold">kg/ha min</th>
-                  <th className="px-3 py-2.5 font-semibold">kg/ha max</th>
-                  <th className="px-3 py-2.5 font-semibold">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((item) => (
-                  <CultureTableRow key={item.id} item={item} onEdit={openEditor} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada.</p> : null}
+          {loading ? (
+            <div className="flex min-h-[14rem] items-center justify-center rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">Carregando catálogo técnico...</div>
+          ) : null}
+
+          {!loading && loadError ? (
+            <div className="space-y-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              <p>{loadError}</p>
+              <button type="button" className="rounded border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold" onClick={() => loadCultures()}>
+                Tentar novamente
+              </button>
+            </div>
+          ) : null}
+
+          {!loading && !loadError ? (
+            <>
+              <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200 bg-white">
+                <table className="min-w-full text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2.5 font-semibold">Nome</th>
+                      <th className="px-3 py-2.5 font-semibold">Categoria</th>
+                      <th className="px-3 py-2.5 font-semibold">Ativo</th>
+                      <th className="px-3 py-2.5 font-semibold">kg/ha min</th>
+                      <th className="px-3 py-2.5 font-semibold">kg/ha max</th>
+                      <th className="px-3 py-2.5 font-semibold">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((item) => (
+                      <CultureTableRow key={item.id} item={item} onEdit={openEditor} disableEdit={isDegradedMode || saving} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada no catálogo técnico.</p> : null}
+            </>
+          ) : null}
         </section>
 
         {isFormOpen ? (
@@ -288,7 +365,7 @@ export default function TechnicalCulturesPanel() {
           </div>
 
           <div className="sticky bottom-0 mt-4 flex items-center gap-2 border-t border-slate-200 bg-slate-50 pt-3">
-            <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={save}>Salvar cultura</button>
+            <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60" onClick={save} disabled={saving || loading || isDegradedMode}>{saving ? "Salvando..." : "Salvar cultura"}</button>
             <button type="button" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" onClick={cancelEditing}>Cancelar edição</button>
           </div>
           </div>
