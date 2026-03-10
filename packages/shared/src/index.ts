@@ -141,7 +141,7 @@ export const goalSchema = z.object({
 export const objectiveUpsertSchema = z.object({
   month: z.number().int().min(1).max(12),
   year: z.number().int().min(2000).max(2100),
-  amount: z.number().positive()
+  amount: z.number().nonnegative()
 });
 
 

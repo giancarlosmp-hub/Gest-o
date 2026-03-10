@@ -289,7 +289,10 @@ export default function TeamPage() {
     const [yearString, monthString] = objectiveMonth.split("-");
     const parsedAmount = Number(objectiveAmount.replace(",", "."));
 
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      toast.error("Informe um valor válido para o objetivo.");
+      return;
+    }
 
     setSavingObjective(true);
     try {
@@ -302,6 +305,25 @@ export default function TeamPage() {
       await loadTeamData(objectiveMonth);
       setObjectiveModalUser(null);
       setObjectiveAmount("");
+      toast.success(parsedAmount === 0 ? "Objetivo removido com sucesso." : "Objetivo salvo com sucesso.");
+    } finally {
+      setSavingObjective(false);
+    }
+  };
+
+
+  const handleRemoveObjective = async () => {
+    if (!objectiveModalUser) return;
+
+    const [yearString, monthString] = objectiveMonth.split("-");
+
+    setSavingObjective(true);
+    try {
+      await api.delete(`/objectives/${objectiveModalUser.id}?month=${Number(monthString)}&year=${Number(yearString)}`);
+      await loadTeamData(objectiveMonth);
+      setObjectiveModalUser(null);
+      setObjectiveAmount("");
+      toast.success("Objetivo removido com sucesso.");
     } finally {
       setSavingObjective(false);
     }
@@ -576,7 +598,9 @@ export default function TeamPage() {
                           style={{ width: `${progressWidth}%` }}
                         />
                       </div>
-                      <p className="mt-1 text-[11px] text-slate-500">Objetivo do mês: {formatCurrencyBRL(objective)}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Objetivo do mês: {objective > 0 ? formatCurrencyBRL(objective) : "Sem meta definida"}
+                      </p>
                     </div>
                   </div>
 
@@ -685,7 +709,7 @@ export default function TeamPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-900">Definir objetivo</h3>
-            <p className="mt-1 text-sm text-slate-500">Configure o objetivo mensal de {objectiveModalUser.name}.</p>
+            <p className="mt-1 text-sm text-slate-500">Configure o objetivo mensal de {objectiveModalUser.name}. Valor 0 remove a meta.</p>
 
             <div className="mt-4 space-y-3">
               <label className="block">
@@ -717,6 +741,13 @@ export default function TeamPage() {
                 className="inline-flex flex-1 items-center justify-center rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Cancelar
+              </button>
+              <button
+                onClick={handleRemoveObjective}
+                disabled={savingObjective}
+                className="inline-flex flex-1 items-center justify-center rounded-lg border border-rose-300 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+              >
+                Remover meta
               </button>
               <button
                 onClick={handleSaveObjective}
