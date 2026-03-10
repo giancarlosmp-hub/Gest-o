@@ -5,6 +5,21 @@ import { env } from "../config/env.js";
 export async function ensureSmokeBootstrap() {
   if (!env.enableSmokeBootstrap) return;
 
+  const [usersCount, clientsCount, opportunitiesCount] = await Promise.all([
+    prisma.user.count(),
+    prisma.client.count(),
+    prisma.opportunity.count()
+  ]);
+
+  if (usersCount > 0 || clientsCount > 0 || opportunitiesCount > 0) {
+    console.log("Bootstrap smoke ignorado: base já possui dados", {
+      usersCount,
+      clientsCount,
+      opportunitiesCount
+    });
+    return;
+  }
+
   const passwordHash = await bcrypt.hash(env.smokeDirectorPassword, 10);
 
   const director = await prisma.user.upsert({
