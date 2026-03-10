@@ -113,6 +113,7 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
 ];
 
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
+const TEMPLATE_HEADERS = ["titulo", "cliente", "valor", "etapa", "status", "responsavelEmail", "followUp", "probabilidade", "observacoes"];
 
 
 const getSavedMappingForUser = (userId?: string | null): Partial<Record<OpportunityImportFieldKey, string>> => {
@@ -270,6 +271,20 @@ export default function OpportunityImportModal({
   const [dedupeWindowDays, setDedupeWindowDays] = useState(30);
   const [dedupeCompareStatuses, setDedupeCompareStatuses] = useState<"open_only" | "open_and_closed">("open_only");
   const [dedupeMode, setDedupeMode] = useState<"skip" | "upsert">("skip");
+
+  const handleDownloadTemplate = () => {
+    const csvContent = `${TEMPLATE_HEADERS.join(";")}\r\n`;
+    const utf8Bom = "\uFEFF";
+    const blob = new Blob([utf8Bom, csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "opportunities-import-template.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   const counters = useMemo(
     () => ({
@@ -487,13 +502,13 @@ export default function OpportunityImportModal({
 
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-3">
-            <a
-              href="/templates/opportunities-import-template.csv"
-              download
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
               ⬇️ Baixar template
-            </a>
+            </button>
             <a
               href="/templates/opportunities-import-example.csv"
               download

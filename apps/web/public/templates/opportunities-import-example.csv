@@ -1,9 +1,9 @@
-titulo,cliente,valor,etapa,status,responsavelEmail,followUp,probabilidade,observacoes
-Algodão Safra 25/26,Coop X,52000.00,prospeccao,open,vendedor@empresa.com,2026-01-10,20,Primeiro contato via WhatsApp
-Milho Verão Lote 3,Fazenda São Pedro,148000.50,negociacao,open,comercial@empresa.com,15/02/2026,55,Cliente pediu ajuste de prazo
-Soja Premium Exportação,Coop X,93000.00,proposta,open,vendedor@empresa.com,2026-02-20,75,Proposta enviada por e-mail
-Fertilizante NPK 20-10,Novo Cliente Horizonte,41000.00,prospeccao,open,comercial@empresa.com,28/01/2026,30,Novo cliente para testar criação automática
-Defensivo Programa Safra,Fazenda São Pedro,125500.00,ganho,closed,vendedor@empresa.com,2026-03-05,100,Pedido confirmado
-Sementes Tratadas A+,Coop X,67000.00,negociacao,open,comercial@empresa.com,2026-03-15,60,Negociação com comitê de compras
-Consultoria Técnica Mensal,Novo Cliente Horizonte,8500.00,proposta,open,vendedor@empresa.com,12/03/2026,80,Escopo revisado
-Pacote Irrigação Setor Norte,Fazenda Boa Vista,180000.00,ganho,closed,comercial@empresa.com,2026-04-01,95,Implantação iniciando em abril
+﻿titulo;cliente;valor;etapa;status;responsavelEmail;followUp;probabilidade;observacoes
+Algodão Safra 25/26;Coop X;52000.00;prospeccao;open;vendedor@empresa.com;2026-01-10;20;Primeiro contato via WhatsApp
+Milho Verão Lote 3;Fazenda São Pedro;148000.50;negociacao;open;comercial@empresa.com;15/02/2026;55;Cliente pediu ajuste de prazo
+Soja Premium Exportação;Coop X;93000.00;proposta;open;vendedor@empresa.com;2026-02-20;75;Proposta enviada por e-mail
+Fertilizante NPK 20-10;Novo Cliente Horizonte;41000.00;prospeccao;open;comercial@empresa.com;28/01/2026;30;Novo cliente para testar criação automática
+Defensivo Programa Safra;Fazenda São Pedro;125500.00;ganho;closed;vendedor@empresa.com;2026-03-05;100;Pedido confirmado
+Sementes Tratadas A+;Coop X;67000.00;negociacao;open;comercial@empresa.com;2026-03-15;60;Negociação com comitê de compras
+Consultoria Técnica Mensal;Novo Cliente Horizonte;8500.00;proposta;open;vendedor@empresa.com;12/03/2026;80;Escopo revisado
+Pacote Irrigação Setor Norte;Fazenda Boa Vista;180000.00;ganho;closed;comercial@empresa.com;2026-04-01;95;Implantação iniciando em abril
