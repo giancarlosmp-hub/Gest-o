@@ -4000,8 +4000,8 @@ router.get("/opportunities/import/dictionary", async (_req, res) => {
       { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
       { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
       { key: "status", required: false, accepted: ["open", "closed"] },
-      { key: "responsavelEmail", required: true, notes: "precisa existir no sistema" },
-      { key: "followUp", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "email_responsavel", required: true, notes: "precisa existir no sistema" },
+      { key: "follow_up", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
       { key: "probabilidade", required: false, notes: "0 a 100" },
       { key: "observacoes", required: false }
     ],

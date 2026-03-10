@@ -88,8 +88,8 @@ const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
     { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
     { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
     { key: "status", required: false, accepted: ["open", "closed"] },
-    { key: "responsavelEmail", required: true, notes: "precisa existir no sistema" },
-    { key: "followUp", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "email_responsavel", required: true, notes: "precisa existir no sistema" },
+    { key: "follow_up", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
     { key: "probabilidade", required: false, notes: "0 a 100" },
     { key: "observacoes", required: false }
   ],
@@ -106,14 +106,14 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
   { key: "value", label: "Valor", required: false, aliases: ["value", "valor", "valor total", "amount"] },
   { key: "stage", label: "Etapa", required: false, aliases: ["stage", "etapa", "fase"] },
   { key: "status", label: "Status", required: false, aliases: ["status", "situacao"] },
-  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "email", "responsavel", "vendedor"] },
-  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
+  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "emailresponsavel", "email", "responsavel", "vendedor"] },
+  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "follow_up", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
   { key: "probability", label: "Probabilidade (%)", required: false, aliases: ["probability", "probabilidade"] },
   { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] }
 ];
 
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
-const TEMPLATE_HEADERS = ["titulo", "cliente", "valor", "etapa", "status", "responsavelEmail", "followUp", "probabilidade", "observacoes"];
+const TEMPLATE_HEADERS = ["titulo", "cliente", "valor", "etapa", "status", "email_responsavel", "follow_up", "probabilidade", "observacoes"];
 const TEMPLATE_EXAMPLE_ROWS = [
   ["Algodão Safra 25/26", "Coop X", "52000.00", "prospeccao", "open", "vendedor@empresa.com", "2026-01-10", "20", "Primeiro contato via WhatsApp"],
   ["Milho Verão Lote 3", "Fazenda São Pedro", "148000.50", "negociacao", "open", "comercial@empresa.com", "15/02/2026", "55", "Cliente pediu ajuste de prazo"],
@@ -387,7 +387,7 @@ export default function OpportunityImportModal({
       setMapping(resolvedMapping);
       const missingRequired = REQUIRED_FIELDS.filter((field) => !resolvedMapping[field]);
       if (missingRequired.length) {
-        toast.warning("Faltam colunas obrigatórias no arquivo: titulo, cliente e/ou responsavelEmail.");
+        toast.warning("Faltam colunas obrigatórias no arquivo: titulo, cliente e/ou email_responsavel/responsavelEmail.");
       }
       const nextPreviewRows = buildPreviewRows(parsed.rows, resolvedMapping);
       setPreviewRows(await runDedupePreview(nextPreviewRows));
@@ -556,7 +556,7 @@ export default function OpportunityImportModal({
             <p className="mb-2 font-semibold text-slate-900">Ajuda rápida</p>
             <p>Etapas aceitas: {dictionary.columns.find((item) => item.key === "etapa")?.accepted?.join(", ") || "prospeccao, negociacao, proposta, ganho"}</p>
             <p>Status aceitos: {dictionary.columns.find((item) => item.key === "status")?.accepted?.join(", ") || "open, closed"}</p>
-            <p>Data de follow-up: {dictionary.columns.find((item) => item.key === "followUp")?.notes || "aceita yyyy-mm-dd ou dd/mm/aaaa"}</p>
+            <p>Data de follow-up: {dictionary.columns.find((item) => item.key === "follow_up")?.notes || "aceita yyyy-mm-dd ou dd/mm/aaaa"}</p>
           </div>
 
           <p className="text-sm text-slate-600">
@@ -661,7 +661,7 @@ export default function OpportunityImportModal({
                   <th className="px-3 py-2">Título</th>
                   <th className="px-3 py-2">Cliente</th>
                   <th className="px-3 py-2">Valor</th>
-                  <th className="px-3 py-2">Estágio</th>
+                  <th className="px-3 py-2">Etapa</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Motivo</th>
                 </tr>
