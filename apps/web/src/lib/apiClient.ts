@@ -4,9 +4,15 @@ import type { AxiosRequestConfig, AxiosResponse } from "axios";
 
 const resolveApiBaseUrl = () => {
   const configuredBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
-  if (!configuredBaseUrl) return "http://localhost:4000";
+  if (configuredBaseUrl) {
+    return configuredBaseUrl.replace(/\/+$/, "");
+  }
 
-  return configuredBaseUrl.replace(/\/+$/, "");
+  if (import.meta.env.DEV) {
+    return "http://localhost:4000";
+  }
+
+  return "";
 };
 
 const apiTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15_000);

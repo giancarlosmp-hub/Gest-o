@@ -23,7 +23,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/salesforce_pro?schema=public
       PORT: 4000
-      FRONTEND_URL: http://localhost:5173
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
       JWT_ACCESS_SECRET: super-access
       JWT_REFRESH_SECRET: super-refresh
       SEED_ON_BOOTSTRAP: "false"
@@ -37,7 +37,7 @@ services:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:4000/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -47,15 +47,17 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
     environment:
-      VITE_API_URL: http://localhost:4000
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
     ports:
       - "5173:80"
     depends_on:
       api:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost/index.html >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
