@@ -12,9 +12,8 @@ type OpportunityPreviewRow = {
   value?: number;
   stage: string;
   payload: Record<string, unknown>;
-  status: "valid" | "error" | "duplicate";
-  errorMessage?: string;
-  duplicateMessage?: string;
+  status: "new" | "update" | "ignored" | "error";
+  reason?: string;
   invalidFields?: string[];
 };
 
@@ -86,7 +85,7 @@ type OpportunityImportResponse = {
   }>;
 };
 
-const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId"];
+const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId", "value", "stage", "probability"];
 const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho"]);
 const VALID_STATUS = new Set(["open", "closed"]);
 
@@ -96,7 +95,7 @@ const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
     { key: "cliente", required: true, example: "Coop X" },
     { key: "vendedor_responsavel", required: true, notes: "nome do vendedor; também aceitamos email_responsavel" },
     { key: "email_responsavel", required: true, notes: "compatível com arquivos legados" },
-    { key: "etapa", required: true, accepted: ["prospeccao", "negociacao", "proposta", "ganho", "perdido"] },
+    { key: "etapa", required: true, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
     { key: "valor", required: true, example: "52000.00", notes: "use ponto como decimal" },
     { key: "probabilidade", required: true, notes: "0 a 100" },
     { key: "data_entrada", required: true, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
@@ -124,7 +123,7 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
   { key: "value", label: "Valor", required: false, aliases: ["value", "valor", "valor total", "amount"] },
   { key: "stage", label: "Etapa", required: false, aliases: ["stage", "etapa", "fase"] },
   { key: "status", label: "Status", required: false, aliases: ["status", "situacao"] },
-  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "emailresponsavel", "email_responsavel", "email", "responsavel", "vendedor", "responsavelemail"] },
+  { key: "ownerEmail", label: "E-mail do responsável", required: false, aliases: ["owneremail", "responsavelemail", "emailresponsavel", "email_responsavel", "email", "responsavel", "vendedor", "responsavelemail"] },
   { key: "ownerSellerName", label: "Vendedor responsável", required: false, aliases: ["vendedor_responsavel", "vendedorresponsavel", "nomeresponsavel", "responsavel_nome", "ownersellername"] },
   { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "follow_up", "dataseguimento", "datafollowup"] },
   { key: "proposalDate", label: "Data de entrada", required: false, aliases: ["proposaldate", "data_entrada", "dataentrada", "data de entrada"] },
@@ -218,7 +217,7 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     return row[mappedHeader];
   };
 
-  return rows.map<OpportunityPreviewRow>((row, index) => {
+  const previewRows = rows.map<OpportunityPreviewRow>((row, index) => {
     const valueResult = parseDecimalValue(getMappedValue(row, "value"));
     const stage = normalizeTextValue(getMappedValue(row, "stage")).toLowerCase();
     const status = normalizeTextValue(getMappedValue(row, "status")).toLowerCase();
@@ -262,7 +261,7 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
         season: normalizeTextValue(getMappedValue(row, "season")) || undefined,
         productOffered: normalizeTextValue(getMappedValue(row, "productOffered")) || undefined
       },
-      status: "valid",
+      status: "new",
       invalidFields: []
     };
 
@@ -270,21 +269,21 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     const invalidFields = new Set<string>();
 
     if (!previewRow.title) {
-      errors.push("Título obrigatório");
+      errors.push("título obrigatório");
       invalidFields.add("title");
     }
     if (!previewRow.clientId) {
-      errors.push("Cliente obrigatório");
+      errors.push("cliente obrigatório");
       invalidFields.add("clientNameOrId");
     }
     if (!ownerEmail && !ownerSellerName) {
-      errors.push("Informe vendedor_responsavel ou email_responsavel");
+      errors.push("vendedor não encontrado");
       invalidFields.add("ownerEmail");
       invalidFields.add("ownerSellerName");
     }
 
-    if (valueResult.isInvalid) {
-      errors.push("Valor inválido");
+    if (valueResult.isInvalid || valueResult.parsedValue === undefined || Number(valueResult.parsedValue) <= 0) {
+      errors.push("valor inválido");
       invalidFields.add("value");
     }
     if (areaHaResult.isInvalid) {
@@ -296,43 +295,59 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
       invalidFields.add("expectedTicketPerHa");
     }
 
-    if (stage && !VALID_STAGES.has(stage)) {
-      errors.push("Etapa inválida");
+    if (!stage || !VALID_STAGES.has(stage)) {
+      errors.push("etapa inválida");
       invalidFields.add("stage");
     }
     if (status && !VALID_STATUS.has(status)) {
-      errors.push("Status deve ser open ou closed");
+      errors.push("status inválido");
       invalidFields.add("status");
     }
     if (followUpDate && !/^\d{4}-\d{2}-\d{2}$/.test(followUpDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(followUpDate)) {
-      errors.push("Follow-up deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      errors.push("data inválida");
       invalidFields.add("followUpDate");
     }
     if (proposalDate && !/^\d{4}-\d{2}-\d{2}$/.test(proposalDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(proposalDate)) {
-      errors.push("Data de entrada deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      errors.push("data inválida");
       invalidFields.add("proposalDate");
     }
     if (expectedCloseDate && !/^\d{4}-\d{2}-\d{2}$/.test(expectedCloseDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(expectedCloseDate)) {
-      errors.push("Fechamento previsto deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      errors.push("data inválida");
       invalidFields.add("expectedCloseDate");
     }
     if (lastContactAt && !/^\d{4}-\d{2}-\d{2}$/.test(lastContactAt) && !/^\d{2}\/\d{2}\/\d{4}$/.test(lastContactAt)) {
-      errors.push("Último contato deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      errors.push("data inválida");
       invalidFields.add("lastContactAt");
     }
-    if (probability !== undefined && (Number.isNaN(probability) || probability < 0 || probability > 100)) {
-      errors.push("Probabilidade deve estar entre 0 e 100");
+    if (probability === undefined || Number.isNaN(probability) || probability < 0 || probability > 100) {
+      errors.push("probabilidade inválida");
       invalidFields.add("probability");
     }
 
     if (errors.length) {
       previewRow.status = "error";
-      previewRow.errorMessage = errors.join(" · ");
+      previewRow.reason = errors.join(" · ");
       previewRow.invalidFields = Array.from(invalidFields);
     }
 
     return previewRow;
   });
+
+  const seenKeys = new Set<string>();
+  for (const row of previewRows) {
+    if (row.status === "error") continue;
+    const payload = row.payload as { ownerEmail?: string; ownerSellerName?: string };
+    const ownerKey = (payload.ownerEmail || payload.ownerSellerName || "").toLowerCase();
+    const key = [row.clientId.toLowerCase(), row.title.toLowerCase(), row.stage.toLowerCase(), ownerKey].join("|");
+    if (seenKeys.has(key)) {
+      row.status = "error";
+      row.reason = row.reason ? `${row.reason} · linha duplicada no arquivo` : "linha duplicada no arquivo";
+    } else {
+      seenKeys.add(key);
+    }
+  }
+
+  return previewRows;
 };
 
 export default function OpportunityImportModal({
@@ -396,8 +411,8 @@ export default function OpportunityImportModal({
   const counters = useMemo(
     () => ({
       totalRead: previewRows.length,
-      valid: previewRows.filter((row) => row.status === "valid").length,
-      duplicate: previewRows.filter((row) => row.status === "duplicate").length,
+      valid: previewRows.filter((row) => row.status === "new" || row.status === "update").length,
+      duplicate: previewRows.filter((row) => row.status === "ignored" || row.status === "update").length,
       error: previewRows.filter((row) => row.status === "error").length
     }),
     [previewRows]
@@ -485,7 +500,7 @@ export default function OpportunityImportModal({
   const runDedupePreview = async (rows: OpportunityPreviewRow[]) => {
     if (!dedupeEnabled) return rows;
 
-    const validRows = rows.filter((row) => row.status === "valid");
+    const validRows = rows.filter((row) => row.status === "new");
     if (!validRows.length) return rows;
 
     try {
@@ -503,19 +518,33 @@ export default function OpportunityImportModal({
         }
       });
 
-      const duplicatesByRow = new Map((data.skippedDetails || [])
-        .filter((item) => item.reason === "duplicate")
-        .map((item) => [item.row + 1, item]));
+      const lineByDryRunRow = new Map(validRows.map((row, index) => [index + 1, row.line]));
+
+      const reasonByLine = new Map<number, string>();
+      for (const item of data.skippedDetails || []) {
+        const line = lineByDryRunRow.get(item.row);
+        if (!line) continue;
+        if (item.reason === "duplicate") reasonByLine.set(line, "duplicada no sistema");
+        if (item.reason === "client_missing") reasonByLine.set(line, "cliente não encontrado");
+        if (item.reason === "owner_missing") reasonByLine.set(line, "vendedor não encontrado");
+      }
 
       return rows.map((row) => {
-        const duplicate = duplicatesByRow.get(row.line);
-        if (!duplicate) return row;
+        const reason = reasonByLine.get(row.line);
+        if (!reason) return row;
 
-        const formattedDate = duplicate.matchedCreatedAt ? new Date(duplicate.matchedCreatedAt).toLocaleDateString("pt-BR") : "data desconhecida";
+        if (reason === "duplicada no sistema") {
+          return {
+            ...row,
+            status: dedupeMode === "upsert" ? "update" as const : "ignored" as const,
+            reason: dedupeMode === "upsert" ? "duplicada no sistema" : "duplicada no sistema"
+          };
+        }
+
         return {
           ...row,
-          status: "duplicate" as const,
-          duplicateMessage: `Possível duplicado de '${duplicate.matchedTitle || "Oportunidade"}' (cliente ${duplicate.matchedClientName || "N/A"}) criada em ${formattedDate}`
+          status: "error" as const,
+          reason
         };
       });
     } catch {
@@ -526,7 +555,7 @@ export default function OpportunityImportModal({
   const handleApplyMapping = async () => {
     const missingRequired = REQUIRED_FIELDS.filter((field) => !mapping[field]);
     if (missingRequired.length) {
-      toast.warning("Mapeie as colunas obrigatórias: Título, Cliente e E-mail do responsável.");
+      toast.warning("Mapeie as colunas obrigatórias: Título, Cliente, Valor, Etapa e Probabilidade.");
       return;
     }
 
@@ -538,11 +567,11 @@ export default function OpportunityImportModal({
   };
 
   const handleImport = async () => {
-    if (!previewRows.length || counters.error > 0) return;
+    if (!previewRows.length) return;
 
     setIsImporting(true);
     try {
-      const validRows = previewRows.filter((row) => row.status === "valid").map((row) => row.payload);
+      const validRows = previewRows.filter((row) => row.status === "new" || row.status === "update").map((row) => row.payload);
 
       const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
         rows: validRows,
@@ -563,7 +592,7 @@ export default function OpportunityImportModal({
       const ignored = data?.ignored ?? data?.skipped ?? data?.totalIgnored ?? data?.totalIgnorados ?? 0;
       const errors = data?.errors ?? [];
 
-      toast.success(`${isDryRun ? "Simulação concluída" : "Concluído"}: ${created} criadas, ${updated} atualizadas, ${ignored} ignoradas (duplicadas)`, {
+      toast.success(`${isDryRun ? "Simulação concluída" : "Concluído"}: ${created} importados, ${updated} atualizados, ${ignored} ignorados, ${errors.length} falhas`, {
         action: errors.length
           ? {
               label: "Ver detalhes",
@@ -760,8 +789,8 @@ export default function OpportunityImportModal({
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "valid" ? "VÁLIDO" : row.status === "duplicate" ? "DUPLICADO" : "ERRO"}</td>
-                      <td className="px-3 py-2">{row.errorMessage || row.duplicateMessage || "OK"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</td>
+                      <td className="px-3 py-2">{row.reason || "OK"}</td>
                     </tr>
                   ))
                 ) : (
@@ -794,7 +823,7 @@ export default function OpportunityImportModal({
             type="button"
             onClick={handleImport}
             className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isImporting || counters.totalRead === 0 || counters.error > 0}
+            disabled={isImporting || counters.totalRead === 0 || counters.valid === 0}
           >
             {isImporting ? (isDryRun ? "Simulando..." : "Importando...") : isDryRun ? "Simular" : "Importar"}
           </button>
