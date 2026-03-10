@@ -1062,6 +1062,55 @@ const normalizeOpportunityTitle = (value?: string | null) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const normalizeSellerLookup = (value?: string | null) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const normalizeSellerEmail = (value?: string | null) => String(value ?? "").toLowerCase().trim();
+
+const resolveOpportunityOwner = ({
+  ownerEmail,
+  ownerSellerName,
+  ownersByEmail,
+  ownersByName,
+  fallbackOwnerId
+}: {
+  ownerEmail?: string;
+  ownerSellerName?: string;
+  ownersByEmail: Map<string, { id: string; email: string; name: string }>;
+  ownersByName: Map<string, { id: string; email: string; name: string }>;
+  fallbackOwnerId: string;
+}) => {
+  const normalizedEmail = normalizeSellerEmail(ownerEmail);
+  const normalizedName = normalizeSellerLookup(ownerSellerName);
+
+  const ownerByEmail = normalizedEmail ? ownersByEmail.get(normalizedEmail) : undefined;
+  const ownerByName = normalizedName ? ownersByName.get(normalizedName) : undefined;
+
+  if (ownerByEmail && ownerByName && ownerByEmail.id !== ownerByName.id) {
+    return {
+      success: false as const,
+      message: "conflito entre vendedor_responsavel e email_responsavel (conflito de identificação do vendedor)"
+    };
+  }
+
+  if (normalizedEmail) {
+    if (ownerByEmail) return { success: true as const, ownerSellerId: ownerByEmail.id };
+    if (!normalizedName) return { success: false as const, message: "vendedor não encontrado por e-mail" };
+  }
+
+  if (normalizedName) {
+    if (ownerByName) return { success: true as const, ownerSellerId: ownerByName.id };
+    return { success: false as const, message: "vendedor não encontrado por nome" };
+  }
+
+  return { success: true as const, ownerSellerId: fallbackOwnerId };
+};
+
 const isLikelyOpportunityTitleDuplicate = (candidate: string, existing: string) => {
   if (!candidate || !existing) return false;
   if (candidate === existing) return true;
@@ -1422,6 +1471,7 @@ type OpportunityImportSkippedReason =
   | "duplicate_file"
   | "client_missing"
   | "owner_missing"
+  | "owner_conflict"
   | "invalid_row"
   | "invalid_stage"
   | "invalid_status"
@@ -1473,8 +1523,8 @@ const processOpportunityImport = async ({
     if (!item.parsed.success) continue;
     const row = item.parsed.data;
 
-    const email = row.ownerEmail?.trim().toLowerCase();
-    const name = row.ownerSellerName?.trim().toLowerCase();
+    const email = normalizeSellerEmail(row.ownerEmail);
+    const name = normalizeSellerLookup(row.ownerSellerName);
     if (email) ownerEmails.add(email);
     if (name) ownerNames.add(name);
 
@@ -1488,19 +1538,13 @@ const processOpportunityImport = async ({
 
   if (ownerEmails.size || ownerNames.size) {
     const users = await prisma.user.findMany({
-      where: {
-        role: "vendedor",
-        OR: [
-          ...(ownerEmails.size ? [{ email: { in: Array.from(ownerEmails) } }] : []),
-          ...(ownerNames.size ? [{ name: { in: Array.from(ownerNames) } }] : [])
-        ]
-      },
+      where: { role: "vendedor" },
       select: { id: true, email: true, name: true }
     });
 
     for (const owner of users) {
-      ownersByEmail.set(owner.email.trim().toLowerCase(), owner);
-      ownersByName.set(owner.name.trim().toLowerCase(), owner);
+      ownersByEmail.set(normalizeSellerEmail(owner.email), owner);
+      ownersByName.set(normalizeSellerLookup(owner.name), owner);
     }
   }
 
@@ -1542,8 +1586,8 @@ const processOpportunityImport = async ({
     const row = item.parsed.data;
 
     try {
-      const ownerEmail = row.ownerEmail?.trim().toLowerCase();
-      const ownerSellerName = row.ownerSellerName?.trim().toLowerCase();
+      const ownerEmail = normalizeSellerEmail(row.ownerEmail);
+      const ownerSellerName = normalizeSellerLookup(row.ownerSellerName);
 
       if (req.user?.role === "vendedor" && ownerEmail && ownerEmail !== req.user.email.toLowerCase()) {
         const message = "Vendedor só pode importar para o próprio e-mail ou sem ownerEmail.";
@@ -1554,30 +1598,24 @@ const processOpportunityImport = async ({
         continue;
       }
 
-      let ownerSellerId = req.user!.id;
-      if (ownerEmail) {
-        const owner = ownersByEmail.get(ownerEmail);
-        if (!owner) {
-          const message = "vendedor não encontrado";
-          failed += 1;
-          errors.push({ row: rowNumber, message });
-          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
-          rowResults.push({ row: rowNumber, status: "error", reason: "owner_missing", message });
-          continue;
-        }
-        ownerSellerId = owner.id;
-      } else if (ownerSellerName) {
-        const owner = ownersByName.get(ownerSellerName);
-        if (!owner) {
-          const message = "vendedor não encontrado";
-          failed += 1;
-          errors.push({ row: rowNumber, message });
-          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
-          rowResults.push({ row: rowNumber, status: "error", reason: "owner_missing", message });
-          continue;
-        }
-        ownerSellerId = owner.id;
+      const resolvedOwner = resolveOpportunityOwner({
+        ownerEmail,
+        ownerSellerName,
+        ownersByEmail,
+        ownersByName,
+        fallbackOwnerId: req.user!.id
+      });
+
+      if (!resolvedOwner.success) {
+        const reason = resolvedOwner.message.includes("conflito") ? "owner_conflict" : "owner_missing";
+        failed += 1;
+        errors.push({ row: rowNumber, message: resolvedOwner.message });
+        skippedDetails.push({ row: rowNumber, reason });
+        rowResults.push({ row: rowNumber, status: "error", reason, message: resolvedOwner.message });
+        continue;
       }
+
+      const ownerSellerId = resolvedOwner.ownerSellerId;
 
       const clientLookup = row.clientNameOrId.trim();
       const isUuid = UUID_V4_REGEX.test(clientLookup);
