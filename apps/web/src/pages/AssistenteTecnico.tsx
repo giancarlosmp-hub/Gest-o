@@ -176,9 +176,18 @@ export default function AssistenteTecnico() {
     const correcaoCampo = parseNumber(form.correcaoCampo);
 
     const plantasM2 = populacaoHa / 10000;
-    const fator = (germinacao / 100) * (pureza / 100);
+    const fatorGerminacao = germinacao / 100;
+    const fatorPureza = pureza / 100;
+    const fatorCampo = 1 + correcaoCampo / 100;
+    const fatorQualidade = fatorGerminacao * fatorPureza;
 
-    if (fator <= 0 || espacamentoCm <= 0 || pms <= 0 || populacaoHa <= 0) {
+    if (
+      fatorQualidade <= 0 ||
+      fatorCampo <= 0 ||
+      espacamentoCm <= 0 ||
+      pms <= 0 ||
+      populacaoHa <= 0
+    ) {
       return {
         plantasM2,
         sementesM2: 0,
@@ -188,18 +197,21 @@ export default function AssistenteTecnico() {
       };
     }
 
-    const sementesM2 = plantasM2 / fator;
+    const sementesNecessariasHa = populacaoHa / fatorQualidade;
+    const sementesCorrigidasHa = sementesNecessariasHa * fatorCampo;
+    const sementesM2 = sementesCorrigidasHa / 10000;
     const sementesMetro = sementesM2 * (espacamentoCm / 100);
 
-    // Mantido conforme seu cálculo atual (evita mudança de comportamento)
-    const kgHa = (sementesM2 * pms) / 1000;
+    // PMS é peso de 1000 sementes em gramas.
+    // kg/ha = sementes corrigidas (ha) * PMS (g/1000 sementes) / 1.000.000
+    const kgHa = (sementesCorrigidasHa * pms) / 1000000;
 
     return {
       plantasM2,
       sementesM2,
       sementesMetro,
       kgHa,
-      kgHaFinal: kgHa * (1 + correcaoCampo / 100),
+      kgHaFinal: kgHa,
     };
   }, [form]);
 
