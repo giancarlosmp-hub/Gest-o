@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } from "../../lib/technicalCultures";
@@ -42,6 +42,26 @@ const toNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+type CultureRowProps = {
+  item: TechnicalCulture;
+  onEdit: (item: TechnicalCulture) => void;
+};
+
+const CultureTableRow = memo(function CultureTableRow({ item, onEdit }: CultureRowProps) {
+  return (
+    <tr className="border-t border-slate-200 text-slate-700">
+      <td className="px-3 py-2.5">{item.label}</td>
+      <td className="px-3 py-2.5">{item.category}</td>
+      <td className="px-3 py-2.5">{item.isActive ? "Sim" : "Não"}</td>
+      <td className="px-3 py-2.5">{item.defaultKgHaMin ?? "—"}</td>
+      <td className="px-3 py-2.5">{item.defaultKgHaMax ?? "—"}</td>
+      <td className="px-3 py-2.5">
+        <button className="text-brand-700" type="button" onClick={() => onEdit(item)}>Editar</button>
+      </td>
+    </tr>
+  );
+});
+
 export default function TechnicalCulturesPanel() {
   const [cultures, setCultures] = useState<TechnicalCulture[]>([]);
   const [search, setSearch] = useState("");
@@ -75,7 +95,7 @@ export default function TechnicalCulturesPanel() {
     [cultures, search]
   );
 
-  const openEditor = (item?: TechnicalCulture) => {
+  const openEditor = useCallback((item?: TechnicalCulture) => {
     setIsFormOpen(true);
 
     if (!item) {
@@ -101,7 +121,7 @@ export default function TechnicalCulturesPanel() {
       goalsJson: item.goalsJson,
       tags: item.tags
     });
-  };
+  }, []);
 
   const save = async () => {
     if (!form.label.trim() || !form.slug.trim() || !form.category.trim()) {
@@ -166,24 +186,33 @@ export default function TechnicalCulturesPanel() {
         <h3 className="text-base font-semibold text-slate-900">Catálogo Técnico (Culturas)</h3>
         <button className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={() => openEditor()} type="button">Nova cultura</button>
       </div>
-      <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome/categoria" className="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead><tr className="text-left text-slate-500"><th>Nome</th><th>Categoria</th><th>Ativo</th><th>kg/ha min</th><th>kg/ha max</th><th>Ações</th></tr></thead>
-          <tbody>
-            {filtered.map((item) => (
-              <tr key={item.id} className="border-t border-slate-200">
-                <td>{item.label}</td><td>{item.category}</td><td>{item.isActive ? "Sim" : "Não"}</td><td>{item.defaultKgHaMin ?? "—"}</td><td>{item.defaultKgHaMax ?? "—"}</td>
-                <td><button className="text-brand-700" type="button" onClick={() => openEditor(item)}>Editar</button></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada.</p> : null}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,1fr)]">
+        <section className="rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome/categoria" className="mb-3 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" />
+          <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200 bg-white">
+            <table className="min-w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-600">
+                <tr>
+                  <th className="px-3 py-2.5 font-semibold">Nome</th>
+                  <th className="px-3 py-2.5 font-semibold">Categoria</th>
+                  <th className="px-3 py-2.5 font-semibold">Ativo</th>
+                  <th className="px-3 py-2.5 font-semibold">kg/ha min</th>
+                  <th className="px-3 py-2.5 font-semibold">kg/ha max</th>
+                  <th className="px-3 py-2.5 font-semibold">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((item) => (
+                  <CultureTableRow key={item.id} item={item} onEdit={openEditor} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada.</p> : null}
+        </section>
 
-      {isFormOpen ? (
-        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        {isFormOpen ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editing ? "Modo edição" : "Modo criação"}</p>
@@ -194,6 +223,7 @@ export default function TechnicalCulturesPanel() {
             </button>
           </div>
 
+          <div className="max-h-[56vh] space-y-4 overflow-y-auto pr-1">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="text-xs font-medium text-slate-700">
               Slug
@@ -255,13 +285,19 @@ export default function TechnicalCulturesPanel() {
               <textarea className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.notes ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
             </label>
           </div>
+          </div>
 
-          <div className="mt-4 flex items-center gap-2">
+          <div className="sticky bottom-0 mt-4 flex items-center gap-2 border-t border-slate-200 bg-slate-50 pt-3">
             <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={save}>Salvar cultura</button>
             <button type="button" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" onClick={cancelEditing}>Cancelar edição</button>
           </div>
-        </div>
-      ) : null}
+          </div>
+        ) : (
+          <div className="flex min-h-[14rem] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+            Selecione <span className="mx-1 font-semibold text-slate-700">Editar</span> em uma cultura ou clique em <span className="mx-1 font-semibold text-slate-700">Nova cultura</span> para abrir o formulário.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
