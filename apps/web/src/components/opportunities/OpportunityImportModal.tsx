@@ -114,6 +114,13 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
 
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
 const TEMPLATE_HEADERS = ["titulo", "cliente", "valor", "etapa", "status", "responsavelEmail", "followUp", "probabilidade", "observacoes"];
+const TEMPLATE_EXAMPLE_ROWS = [
+  ["Algodão Safra 25/26", "Coop X", "52000.00", "prospeccao", "open", "vendedor@empresa.com", "2026-01-10", "20", "Primeiro contato via WhatsApp"],
+  ["Milho Verão Lote 3", "Fazenda São Pedro", "148000.50", "negociacao", "open", "comercial@empresa.com", "15/02/2026", "55", "Cliente pediu ajuste de prazo"],
+  ["Soja Premium Exportação", "Coop X", "93000.00", "proposta", "open", "vendedor@empresa.com", "2026-02-20", "75", "Proposta enviada por e-mail"],
+  ["Fertilizante NPK 20-10", "Novo Cliente Horizonte", "41000.00", "prospeccao", "open", "comercial@empresa.com", "28/01/2026", "30", "Novo cliente para testar criação automática"],
+  ["Defensivo Programa Safra", "Fazenda São Pedro", "125500.00", "ganho", "closed", "vendedor@empresa.com", "2026-03-05", "100", "Pedido confirmado"]
+];
 
 
 const getSavedMappingForUser = (userId?: string | null): Partial<Record<OpportunityImportFieldKey, string>> => {
@@ -272,18 +279,36 @@ export default function OpportunityImportModal({
   const [dedupeCompareStatuses, setDedupeCompareStatuses] = useState<"open_only" | "open_and_closed">("open_only");
   const [dedupeMode, setDedupeMode] = useState<"skip" | "upsert">("skip");
 
-  const handleDownloadTemplate = () => {
-    const csvContent = `${TEMPLATE_HEADERS.join(";")}\r\n`;
+  const escapeCsvCell = (value: string) => {
+    const escapedValue = value.split('"').join('""');
+    if (/[;\r\n"]/.test(escapedValue)) {
+      return `"${escapedValue}"`;
+    }
+    return escapedValue;
+  };
+
+  const downloadCsvFile = (fileName: string, rows: string[][]) => {
+    const csvContent = rows
+      .map((row) => row.map((cell) => escapeCsvCell(cell)).join(";"))
+      .join("\r\n");
     const utf8Bom = "\uFEFF";
-    const blob = new Blob([utf8Bom, csvContent], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([utf8Bom, `${csvContent}\r\n`], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "opportunities-import-template.csv";
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadTemplate = () => {
+    downloadCsvFile("opportunities-import-template.csv", [TEMPLATE_HEADERS]);
+  };
+
+  const handleDownloadFilledExample = () => {
+    downloadCsvFile("opportunities-import-example.csv", [TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLE_ROWS]);
   };
 
   const counters = useMemo(
@@ -509,13 +534,13 @@ export default function OpportunityImportModal({
             >
               ⬇️ Baixar template
             </button>
-            <a
-              href="/templates/opportunities-import-example.csv"
-              download
+            <button
+              type="button"
+              onClick={handleDownloadFilledExample}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             >
               ⬇️ Baixar exemplo preenchido
-            </a>
+            </button>
 
             <input
               type="file"
