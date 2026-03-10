@@ -13,6 +13,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build workspace @salesforce-pro/shared
+        run: npm run build -w @salesforce-pro/shared
+
+      - name: Build workspace @salesforce-pro/web
+        run: npm run build -w @salesforce-pro/web
+
+      - name: Build workspace @salesforce-pro/api
+        run: npm run build -w @salesforce-pro/api
+
+      - name: Type check (all workspaces)
+        run: npm run typecheck
+
       - name: Build and start stack
         run: docker compose up -d --build
 
@@ -34,11 +54,8 @@ jobs:
           docker compose logs api
           exit 1
 
-      - name: Smoke test health endpoint
-        run: curl -sf http://localhost:4000/health
-
-      - name: Smoke test technical-cultures endpoint
-        run: curl -sf http://localhost:4000/technical-cultures
+      - name: Smoke test API main endpoints
+        run: node scripts/smoke/api-endpoints-smoke.mjs
 
       - name: Smoke test auth login
         run: |
