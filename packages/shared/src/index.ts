@@ -168,6 +168,14 @@ export const userCreateSchema = z.object({
   region: z.string().min(2).optional()
 });
 
+export const userUpdateSchema = z.object({
+  name: z.string().min(2),
+  email: z.string().email(),
+  password: z.string().min(6).optional(),
+  role: roleSchema,
+  region: z.string().min(2).optional()
+});
+
 export const userResetPasswordSchema = z.object({
   temporaryPasswordLength: z.number().int().min(8).max(32).optional()
 });
@@ -282,6 +290,7 @@ export type ActivityKpiUpsertInput = z.infer<typeof activityKpiUpsertSchema>;
 export type UserActivationInput = z.infer<typeof userActivationSchema>;
 export type UserRoleUpdateInput = z.infer<typeof userRoleUpdateSchema>;
 export type UserCreateInput = z.infer<typeof userCreateSchema>;
+export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type WeeklyVisitMinimumInput = z.infer<typeof weeklyVisitMinimumSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;

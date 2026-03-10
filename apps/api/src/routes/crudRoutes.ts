@@ -18,6 +18,7 @@ import {
   userCreateSchema,
   userResetPasswordSchema,
   userRoleUpdateSchema,
+  userUpdateSchema,
   weeklyVisitMinimumSchema
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
@@ -5592,12 +5593,47 @@ router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchem
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
-router.post("/users", authorize("diretor"), async (req, res) => {
+router.post("/users", authorize("diretor"), validateBody(userCreateSchema), async (req, res) => {
   const { name, email, password, role, region } = req.body;
   const bcrypt = await import("bcryptjs");
   const passwordHash = await bcrypt.default.hash(password, 10);
   const user = await prisma.user.create({ data: { name, email, passwordHash, role, region } });
-  res.status(201).json({ id: user.id, email: user.email });
+  return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: { id: user.id, email: user.email } });
+});
+router.put("/users/:id", authorize("diretor"), validateBody(userUpdateSchema), async (req, res) => {
+  const { id } = req.params;
+  const { name, email, password, role, region } = req.body;
+
+  if (req.user!.id === id && role !== "diretor") {
+    return res.status(400).json({ success: false, message: "Você não pode remover seu próprio papel de diretor." });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    if (!user) return res.status(404).json({ success: false, message: "Usuário não encontrado." });
+
+    const data: Record<string, unknown> = { name, email, role, region };
+
+    if (typeof password === "string" && password.trim().length > 0) {
+      const bcrypt = await import("bcryptjs");
+      data.passwordHash = await bcrypt.default.hash(password, 10);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data,
+      select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true }
+    });
+
+    return res.json({ success: true, message: "Usuário atualizado com sucesso.", data: updated });
+  } catch (error: any) {
+    if (error?.code === "P2002") {
+      return res.status(409).json({ success: false, message: "Já existe outro usuário com este e-mail corporativo." });
+    }
+
+    console.error("[users:update]", error);
+    return res.status(500).json({ success: false, message: "Não foi possível atualizar o usuário.", details: error?.message });
+  }
 });
 router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
 router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivationSchema), async (req, res) => {
@@ -5648,83 +5684,88 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
   const { id } = req.params;
 
   if (req.user!.id === id) {
-    return res.status(400).json({ message: "Você não pode excluir seu próprio usuário." });
+    return res.status(400).json({ success: false, message: "Você não pode excluir seu próprio usuário." });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id },
-    select: { id: true, role: true }
-  });
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, role: true }
+    });
 
-  if (!user) {
-    return res.status(404).json({ message: "Usuário não encontrado." });
-  }
-
-  if (user.role === "diretor") {
-    const directorsCount = await prisma.user.count({ where: { role: "diretor" } });
-    if (directorsCount <= 1) {
-      return res.status(400).json({ message: "Não é possível excluir o último diretor." });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "Usuário não encontrado." });
     }
-  }
 
-  if (user.role === "gerente") {
-    const managersCount = await prisma.user.count({ where: { role: "gerente" } });
-    if (managersCount <= 1) {
-      return res.status(400).json({ message: "Não é possível excluir o último gerente." });
+    if (user.role === "diretor") {
+      const directorsCount = await prisma.user.count({ where: { role: "diretor" } });
+      if (directorsCount <= 1) {
+        return res.status(400).json({ success: false, message: "Não é possível excluir o último diretor." });
+      }
     }
+
+    if (user.role === "gerente") {
+      const managersCount = await prisma.user.count({ where: { role: "gerente" } });
+      if (managersCount <= 1) {
+        return res.status(400).json({ success: false, message: "Não é possível excluir o último gerente." });
+      }
+    }
+
+    const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
+      await Promise.all([
+        prisma.client.count({ where: { ownerSellerId: id } }),
+        prisma.opportunity.count({ where: { ownerSellerId: id } }),
+        prisma.activity.count({ where: { ownerSellerId: id } }),
+        prisma.agendaEvent.count({ where: { sellerId: id } }),
+        prisma.contact.count({ where: { ownerSellerId: id } }),
+        prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
+        prisma.goal.count({ where: { sellerId: id } }),
+        prisma.activityKPI.count({ where: { sellerId: id } }),
+        prisma.sale.count({ where: { sellerId: id } })
+      ]);
+
+    if (clientsCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem clientes vinculados." });
+    }
+
+    if (opportunitiesCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem oportunidades vinculadas." });
+    }
+
+    if (activitiesCount > 0 || agendaEventsCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem atividades/agendas vinculadas." });
+    }
+
+    if (contactsCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem contatos vinculados." });
+    }
+
+    if (timelineEventsCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem eventos vinculados." });
+    }
+
+    if (goalsCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem metas vinculadas." });
+    }
+
+    if (activityKpisCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem KPIs vinculados." });
+    }
+
+    if (salesCount > 0) {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem vendas vinculadas." });
+    }
+
+    await prisma.user.delete({ where: { id } });
+    return res.json({ success: true, message: "Usuário excluído com sucesso." });
+  } catch (error: any) {
+    if (error?.code === "P2003") {
+      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem vínculos ativos em outros registros." });
+    }
+
+    console.error("[users:delete]", error);
+    return res.status(500).json({ success: false, message: "Não foi possível excluir o usuário.", details: error?.message });
   }
-
-  const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
-    await Promise.all([
-      prisma.client.count({ where: { ownerSellerId: id } }),
-      prisma.opportunity.count({ where: { ownerSellerId: id } }),
-      prisma.activity.count({ where: { ownerSellerId: id } }),
-      prisma.agendaEvent.count({ where: { sellerId: id } }),
-      prisma.contact.count({ where: { ownerSellerId: id } }),
-      prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
-      prisma.goal.count({ where: { sellerId: id } }),
-      prisma.activityKPI.count({ where: { sellerId: id } }),
-      prisma.sale.count({ where: { sellerId: id } })
-    ]);
-
-  if (clientsCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem clientes vinculados." });
-  }
-
-  if (opportunitiesCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem oportunidades vinculadas." });
-  }
-
-  if (activitiesCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem atividades vinculadas." });
-  }
-
-  if (agendaEventsCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem agendas vinculadas." });
-  }
-
-  if (contactsCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem contatos vinculados." });
-  }
-
-  if (timelineEventsCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem eventos vinculados." });
-  }
-
-  if (goalsCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem metas vinculadas." });
-  }
-
-  if (activityKpisCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem KPIs vinculados." });
-  }
-
-  if (salesCount > 0) {
-    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem vendas vinculadas." });
-  }
-
-  await prisma.user.delete({ where: { id } });
-  return res.status(204).send();
 });
 
 
