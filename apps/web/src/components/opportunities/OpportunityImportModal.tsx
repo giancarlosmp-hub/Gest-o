@@ -83,6 +83,12 @@ type OpportunityImportResponse = {
     matchedClientName?: string;
     matchedCreatedAt?: string;
   }>;
+  rowResults?: Array<{
+    row: number;
+    status: "created" | "updated" | "ignored" | "error";
+    reason?: string;
+    message?: string;
+  }>;
 };
 
 const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId", "value", "stage", "probability"];
@@ -498,53 +504,43 @@ export default function OpportunityImportModal({
   };
 
   const runDedupePreview = async (rows: OpportunityPreviewRow[]) => {
-    if (!dedupeEnabled) return rows;
-
-    const validRows = rows.filter((row) => row.status === "new");
-    if (!validRows.length) return rows;
+    if (!rows.length) return rows;
 
     try {
-      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import", {
-        rows: validRows.map((row) => row.payload),
+      const { data } = await api.post<OpportunityImportResponse>("/opportunities/import/preview", {
+        rows: rows.map((row) => row.payload),
         options: {
-          dryRun: true,
           createClientIfMissing,
           dedupe: {
             enabled: dedupeEnabled,
             windowDays: dedupeWindowDays,
             compareStatuses: dedupeCompareStatuses,
-            mode: "skip"
+            mode: dedupeMode
           }
         }
       });
 
-      const lineByDryRunRow = new Map(validRows.map((row, index) => [index + 1, row.line]));
+      const resultByRow = new Map((data.rowResults || []).map((item) => [item.row, item]));
 
-      const reasonByLine = new Map<number, string>();
-      for (const item of data.skippedDetails || []) {
-        const line = lineByDryRunRow.get(item.row);
-        if (!line) continue;
-        if (item.reason === "duplicate") reasonByLine.set(line, "duplicada no sistema");
-        if (item.reason === "client_missing") reasonByLine.set(line, "cliente não encontrado");
-        if (item.reason === "owner_missing") reasonByLine.set(line, "vendedor não encontrado");
-      }
+      return rows.map<OpportunityPreviewRow>((row, index) => {
+        const result = resultByRow.get(index + 1);
+        if (!result) return row;
 
-      return rows.map((row) => {
-        const reason = reasonByLine.get(row.line);
-        if (!reason) return row;
+        if (result.status === "created") return { ...row, status: "new" as const, reason: undefined };
+        if (result.status === "updated") return { ...row, status: "update" as const, reason: undefined };
 
-        if (reason === "duplicada no sistema") {
+        if (result.status === "ignored") {
           return {
             ...row,
-            status: dedupeMode === "upsert" ? "update" as const : "ignored" as const,
-            reason: dedupeMode === "upsert" ? "duplicada no sistema" : "duplicada no sistema"
+            status: "ignored" as const,
+            reason: result.message || (result.reason === "duplicate" ? "duplicada no sistema" : "linha ignorada")
           };
         }
 
         return {
           ...row,
           status: "error" as const,
-          reason
+          reason: result.message || "Erro de validação"
         };
       });
     } catch {
