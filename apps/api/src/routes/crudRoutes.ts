@@ -960,17 +960,53 @@ const parseOpportunityImportDate = (value?: string) => {
   return null;
 };
 
-const opportunityImportRowSchema = z.object({
-  title: z.string().min(1),
-  clientNameOrId: z.string().min(1),
-  value: z.number().nonnegative().optional(),
-  stage: opportunityImportStageSchema.optional(),
-  status: opportunityImportStatusSchema,
-  ownerEmail: z.string().email(),
-  followUpDate: z.string().optional(),
-  probability: z.number().int().min(0).max(100).optional(),
-  notes: z.string().max(2000).optional()
-});
+const opportunityImportRowSchema = z
+  .object({
+    title: z.string().min(1),
+    clientNameOrId: z.string().min(1),
+    value: z.number().nonnegative().optional(),
+    stage: opportunityImportStageSchema.optional(),
+    status: opportunityImportStatusSchema,
+    ownerEmail: z.string().email().optional(),
+    ownerSellerName: z.string().optional(),
+    vendedor_responsavel: z.string().optional(),
+    email_responsavel: z.string().email().optional(),
+    responsavelEmail: z.string().email().optional(),
+    followUpDate: z.string().optional(),
+    followUp: z.string().optional(),
+    proposalDate: z.string().optional(),
+    data_entrada: z.string().optional(),
+    expectedCloseDate: z.string().optional(),
+    fechamento_previsto: z.string().optional(),
+    lastContactAt: z.string().optional(),
+    ultimo_contato: z.string().optional(),
+    probability: z.number().int().min(0).max(100).optional(),
+    notes: z.string().max(2000).optional(),
+    areaHa: z.number().nonnegative().optional(),
+    area_ha: z.number().nonnegative().optional(),
+    expectedTicketPerHa: z.number().nonnegative().optional(),
+    ticket_esperado_ha: z.number().nonnegative().optional(),
+    crop: z.string().optional(),
+    cultura: z.string().optional(),
+    season: z.string().optional(),
+    safra: z.string().optional(),
+    productOffered: z.string().optional(),
+    produto_ofertado: z.string().optional()
+  })
+  .transform((row) => ({
+    ...row,
+    ownerEmail: row.ownerEmail ?? row.email_responsavel ?? row.responsavelEmail,
+    ownerSellerName: row.ownerSellerName ?? row.vendedor_responsavel,
+    followUpDate: row.followUpDate ?? row.followUp,
+    proposalDate: row.proposalDate ?? row.data_entrada,
+    expectedCloseDate: row.expectedCloseDate ?? row.fechamento_previsto,
+    lastContactAt: row.lastContactAt ?? row.ultimo_contato,
+    areaHa: row.areaHa ?? row.area_ha,
+    expectedTicketPerHa: row.expectedTicketPerHa ?? row.ticket_esperado_ha,
+    crop: row.crop ?? row.cultura,
+    season: row.season ?? row.safra,
+    productOffered: row.productOffered ?? row.produto_ofertado
+  }));
 
 const opportunityImportPayloadSchema = z.object({
   rows: z.array(z.unknown()).default([]),
@@ -3792,6 +3828,7 @@ router.post("/opportunities/import", async (req, res) => {
 
     try {
       const ownerEmail = row.ownerEmail?.trim().toLowerCase();
+      const ownerSellerName = row.ownerSellerName?.trim();
 
       if (req.user?.role === "vendedor" && ownerEmail && ownerEmail !== req.user.email.toLowerCase()) {
         skipped += 1;
@@ -3804,6 +3841,12 @@ router.post("/opportunities/import", async (req, res) => {
       if (ownerEmail) {
         const owner = await prisma.user.findFirst({
           where: { email: { equals: ownerEmail, mode: "insensitive" } },
+          select: { id: true }
+        });
+        if (owner?.id) ownerSellerId = owner.id;
+      } else if (ownerSellerName) {
+        const owner = await prisma.user.findFirst({
+          where: { name: { equals: ownerSellerName, mode: "insensitive" } },
           select: { id: true }
         });
         if (owner?.id) ownerSellerId = owner.id;
@@ -3853,16 +3896,39 @@ router.post("/opportunities/import", async (req, res) => {
       }
 
       const parsedFollowUpDate = parseOpportunityImportDate(row.followUpDate);
+      const parsedProposalDate = parseOpportunityImportDate(row.proposalDate);
+      const parsedExpectedCloseDate = parseOpportunityImportDate(row.expectedCloseDate);
+      const parsedLastContactAt = parseOpportunityImportDate(row.lastContactAt);
+
       if (row.followUpDate && !parsedFollowUpDate) {
         skipped += 1;
         errors.push({ row: rowNumber, message: "Data de follow-up inválida. Use yyyy-mm-dd ou dd/mm/aaaa." });
         skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
         continue;
       }
+      if (row.proposalDate && !parsedProposalDate) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Data de entrada inválida. Use yyyy-mm-dd ou dd/mm/aaaa." });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
+        continue;
+      }
+      if (row.expectedCloseDate && !parsedExpectedCloseDate) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Fechamento previsto inválido. Use yyyy-mm-dd ou dd/mm/aaaa." });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
+        continue;
+      }
+      if (row.lastContactAt && !parsedLastContactAt) {
+        skipped += 1;
+        errors.push({ row: rowNumber, message: "Último contato inválido. Use yyyy-mm-dd ou dd/mm/aaaa." });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
+        continue;
+      }
 
       const followUpDate = parsedFollowUpDate ?? new Date();
-      const proposalDate = followUpDate;
-      const expectedCloseDate = followUpDate;
+      const proposalDate = parsedProposalDate ?? followUpDate;
+      const expectedCloseDate = parsedExpectedCloseDate ?? followUpDate;
+      const lastContactAt = parsedLastContactAt ?? undefined;
 
       if (!validateDateOrder(proposalDate.toISOString(), expectedCloseDate.toISOString())) {
         skipped += 1;
@@ -3920,6 +3986,9 @@ router.post("/opportunities/import", async (req, res) => {
 
       if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "upsert") {
         const followUpDateValue = parseOpportunityImportDate(row.followUpDate) ?? undefined;
+        const proposalDateValue = parseOpportunityImportDate(row.proposalDate) ?? undefined;
+        const expectedCloseDateValue = parseOpportunityImportDate(row.expectedCloseDate) ?? undefined;
+        const lastContactAtValue = parseOpportunityImportDate(row.lastContactAt) ?? undefined;
         if (dryRun) {
           updated += 1;
           continue;
@@ -3947,6 +4016,14 @@ router.post("/opportunities/import", async (req, res) => {
               ...(stage ? { stage } : {}),
               ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
               ...(followUpDateValue ? { followUpDate: followUpDateValue } : {}),
+              ...(proposalDateValue ? { proposalDate: proposalDateValue } : {}),
+              ...(expectedCloseDateValue ? { expectedCloseDate: expectedCloseDateValue } : {}),
+              ...(lastContactAtValue ? { lastContactAt: lastContactAtValue } : {}),
+              ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
+              ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
+              ...(row.crop ? { crop: row.crop } : {}),
+              ...(row.season ? { season: row.season } : {}),
+              ...(row.productOffered ? { productOffered: row.productOffered } : {}),
               ...(notesWithTimestamp !== undefined ? { notes: notesWithTimestamp } : {}),
               ...(req.user?.role !== "vendedor" || existingOpportunity.ownerSellerId === req.user.id ? { ownerSellerId } : {})
             }
@@ -3973,6 +4050,12 @@ router.post("/opportunities/import", async (req, res) => {
             proposalDate,
             followUpDate,
             expectedCloseDate,
+            ...(lastContactAt ? { lastContactAt } : {}),
+            ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
+            ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
+            ...(row.crop ? { crop: row.crop } : {}),
+            ...(row.season ? { season: row.season } : {}),
+            ...(row.productOffered ? { productOffered: row.productOffered } : {}),
             clientId: client.id,
             ownerSellerId
           }
@@ -3997,13 +4080,22 @@ router.get("/opportunities/import/dictionary", async (_req, res) => {
     columns: [
       { key: "titulo", required: true, example: "Algodão Safra 25/26" },
       { key: "cliente", required: true, example: "Coop X" },
-      { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
-      { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
-      { key: "status", required: false, accepted: ["open", "closed"] },
-      { key: "email_responsavel", required: true, notes: "precisa existir no sistema" },
-      { key: "follow_up", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
-      { key: "probabilidade", required: false, notes: "0 a 100" },
-      { key: "observacoes", required: false }
+      { key: "vendedor_responsavel", required: true, notes: "nome do vendedor; também aceitamos email_responsavel" },
+      { key: "email_responsavel", required: true, notes: "compatível com arquivos legados" },
+      { key: "etapa", required: true, accepted: ["prospeccao", "negociacao", "proposta", "ganho", "perdido"] },
+      { key: "valor", required: true, example: "52000.00", notes: "use ponto como decimal" },
+      { key: "probabilidade", required: true, notes: "0 a 100" },
+      { key: "data_entrada", required: true, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "follow_up", required: true, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "area_ha", required: false },
+      { key: "ticket_esperado_ha", required: false },
+      { key: "cultura", required: false },
+      { key: "safra", required: false },
+      { key: "produto_ofertado", required: false },
+      { key: "fechamento_previsto", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "ultimo_contato", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+      { key: "observacoes", required: false },
+      { key: "status", required: false, accepted: ["open", "closed"] }
     ],
     tips: [
       "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",

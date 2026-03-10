@@ -25,9 +25,18 @@ type OpportunityImportFieldKey =
   | "stage"
   | "status"
   | "ownerEmail"
+  | "ownerSellerName"
   | "followUpDate"
+  | "proposalDate"
+  | "expectedCloseDate"
+  | "lastContactAt"
   | "probability"
-  | "notes";
+  | "notes"
+  | "areaHa"
+  | "expectedTicketPerHa"
+  | "crop"
+  | "season"
+  | "productOffered";
 
 type OpportunityImportField = {
   key: OpportunityImportFieldKey;
@@ -77,7 +86,7 @@ type OpportunityImportResponse = {
   }>;
 };
 
-const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId", "ownerEmail"];
+const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId"];
 const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho"]);
 const VALID_STATUS = new Set(["open", "closed"]);
 
@@ -85,13 +94,22 @@ const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
   columns: [
     { key: "titulo", required: true, example: "Algodão Safra 25/26" },
     { key: "cliente", required: true, example: "Coop X" },
-    { key: "valor", required: false, example: "52000.00", notes: "use ponto como decimal" },
-    { key: "etapa", required: false, accepted: ["prospeccao", "negociacao", "proposta", "ganho"] },
-    { key: "status", required: false, accepted: ["open", "closed"] },
-    { key: "email_responsavel", required: true, notes: "precisa existir no sistema" },
-    { key: "follow_up", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
-    { key: "probabilidade", required: false, notes: "0 a 100" },
-    { key: "observacoes", required: false }
+    { key: "vendedor_responsavel", required: true, notes: "nome do vendedor; também aceitamos email_responsavel" },
+    { key: "email_responsavel", required: true, notes: "compatível com arquivos legados" },
+    { key: "etapa", required: true, accepted: ["prospeccao", "negociacao", "proposta", "ganho", "perdido"] },
+    { key: "valor", required: true, example: "52000.00", notes: "use ponto como decimal" },
+    { key: "probabilidade", required: true, notes: "0 a 100" },
+    { key: "data_entrada", required: true, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "follow_up", required: true, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "area_ha", required: false },
+    { key: "ticket_esperado_ha", required: false },
+    { key: "cultura", required: false },
+    { key: "safra", required: false },
+    { key: "produto_ofertado", required: false },
+    { key: "fechamento_previsto", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "ultimo_contato", required: false, notes: "aceita yyyy-mm-dd ou dd/mm/aaaa" },
+    { key: "observacoes", required: false },
+    { key: "status", required: false, accepted: ["open", "closed"] }
   ],
   tips: [
     "Se 'cliente' não existir e a opção 'Criar cliente automaticamente' estiver ligada, será criado como PJ com dados mínimos.",
@@ -106,20 +124,48 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
   { key: "value", label: "Valor", required: false, aliases: ["value", "valor", "valor total", "amount"] },
   { key: "stage", label: "Etapa", required: false, aliases: ["stage", "etapa", "fase"] },
   { key: "status", label: "Status", required: false, aliases: ["status", "situacao"] },
-  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "emailresponsavel", "email", "responsavel", "vendedor"] },
-  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "follow_up", "dataseguimento", "datafollowup", "proposaldate", "expectedclosedate"] },
+  { key: "ownerEmail", label: "E-mail do responsável", required: true, aliases: ["owneremail", "responsavelemail", "emailresponsavel", "email_responsavel", "email", "responsavel", "vendedor", "responsavelemail"] },
+  { key: "ownerSellerName", label: "Vendedor responsável", required: false, aliases: ["vendedor_responsavel", "vendedorresponsavel", "nomeresponsavel", "responsavel_nome", "ownersellername"] },
+  { key: "followUpDate", label: "Data de follow-up", required: false, aliases: ["followupdate", "followup", "follow_up", "dataseguimento", "datafollowup"] },
+  { key: "proposalDate", label: "Data de entrada", required: false, aliases: ["proposaldate", "data_entrada", "dataentrada", "data de entrada"] },
+  { key: "expectedCloseDate", label: "Fechamento previsto", required: false, aliases: ["expectedclosedate", "fechamento_previsto", "fechamentoprevisto"] },
+  { key: "lastContactAt", label: "Último contato", required: false, aliases: ["lastcontactat", "ultimo_contato", "ultimocontato"] },
   { key: "probability", label: "Probabilidade (%)", required: false, aliases: ["probability", "probabilidade"] },
-  { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] }
+  { key: "notes", label: "Observações", required: false, aliases: ["notes", "observacoes", "observação", "comentarios"] },
+  { key: "areaHa", label: "Área (ha)", required: false, aliases: ["area_ha", "areaha"] },
+  { key: "expectedTicketPerHa", label: "Ticket esperado/ha", required: false, aliases: ["ticket_esperado_ha", "ticketesperadoha", "expectedticketperha"] },
+  { key: "crop", label: "Cultura", required: false, aliases: ["crop", "cultura"] },
+  { key: "season", label: "Safra", required: false, aliases: ["season", "safra"] },
+  { key: "productOffered", label: "Produto ofertado", required: false, aliases: ["productoffered", "produto_ofertado", "produtoofertado"] }
 ];
 
 const LOCAL_STORAGE_MAPPING_KEY = "opportunity-import-column-mapping";
-const TEMPLATE_HEADERS = ["titulo", "cliente", "valor", "etapa", "status", "email_responsavel", "follow_up", "probabilidade", "observacoes"];
+const TEMPLATE_HEADERS = [
+  "titulo",
+  "cliente",
+  "vendedor_responsavel",
+  "email_responsavel",
+  "etapa",
+  "valor",
+  "probabilidade",
+  "data_entrada",
+  "follow_up",
+  "area_ha",
+  "ticket_esperado_ha",
+  "cultura",
+  "safra",
+  "produto_ofertado",
+  "fechamento_previsto",
+  "ultimo_contato",
+  "observacoes",
+  "status"
+];
 const TEMPLATE_EXAMPLE_ROWS = [
-  ["Algodão Safra 25/26", "Coop X", "52000.00", "prospeccao", "open", "vendedor@empresa.com", "2026-01-10", "20", "Primeiro contato via WhatsApp"],
-  ["Milho Verão Lote 3", "Fazenda São Pedro", "148000.50", "negociacao", "open", "comercial@empresa.com", "15/02/2026", "55", "Cliente pediu ajuste de prazo"],
-  ["Soja Premium Exportação", "Coop X", "93000.00", "proposta", "open", "vendedor@empresa.com", "2026-02-20", "75", "Proposta enviada por e-mail"],
-  ["Fertilizante NPK 20-10", "Novo Cliente Horizonte", "41000.00", "prospeccao", "open", "comercial@empresa.com", "28/01/2026", "30", "Novo cliente para testar criação automática"],
-  ["Defensivo Programa Safra", "Fazenda São Pedro", "125500.00", "ganho", "closed", "vendedor@empresa.com", "2026-03-05", "100", "Pedido confirmado"]
+  ["Algodão Safra 25/26", "Coop X", "Carlos Silva", "vendedor@empresa.com", "prospeccao", "52000.00", "20", "2026-01-04", "2026-01-10", "120", "430.00", "algodao", "2025/26", "Programa Algodão Premium", "2026-02-15", "2026-01-08", "Primeiro contato via WhatsApp", "open"],
+  ["Milho Verão Lote 3", "Fazenda São Pedro", "Aline Souza", "comercial@empresa.com", "negociacao", "148000.50", "55", "2026-01-18", "15/02/2026", "210", "705.50", "milho", "2025/26", "Pacote Nutrição Verão", "2026-03-05", "2026-02-02", "Cliente pediu ajuste de prazo", "open"],
+  ["Soja Premium Exportação", "Coop X", "Carlos Silva", "vendedor@empresa.com", "proposta", "93000.00", "75", "2026-01-25", "2026-02-20", "175", "531.43", "soja", "2025/26", "Soja Premium Export", "2026-03-18", "2026-02-10", "Proposta enviada por e-mail", "open"],
+  ["Fertilizante NPK 20-10", "Novo Cliente Horizonte", "Aline Souza", "comercial@empresa.com", "prospeccao", "41000.00", "30", "2026-01-06", "28/01/2026", "80", "512.50", "outros", "2025/26", "NPK 20-10", "2026-02-28", "2026-01-17", "Novo cliente para testar criação automática", "open"],
+  ["Defensivo Programa Safra", "Fazenda São Pedro", "Carlos Silva", "vendedor@empresa.com", "ganho", "125500.00", "100", "2026-02-01", "2026-03-05", "260", "482.69", "soja", "2025/26", "Programa Safra Completo", "2026-03-05", "2026-03-04", "Pedido confirmado", "closed"]
 ];
 
 
@@ -183,6 +229,12 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     const title = normalizeTextValue(getMappedValue(row, "title"));
     const clientNameOrId = normalizeTextValue(getMappedValue(row, "clientNameOrId"));
     const ownerEmail = normalizeTextValue(getMappedValue(row, "ownerEmail"));
+    const ownerSellerName = normalizeTextValue(getMappedValue(row, "ownerSellerName"));
+    const areaHaResult = parseDecimalValue(getMappedValue(row, "areaHa"));
+    const expectedTicketPerHaResult = parseDecimalValue(getMappedValue(row, "expectedTicketPerHa"));
+    const proposalDate = normalizeTextValue(getMappedValue(row, "proposalDate"));
+    const expectedCloseDate = normalizeTextValue(getMappedValue(row, "expectedCloseDate"));
+    const lastContactAt = normalizeTextValue(getMappedValue(row, "lastContactAt"));
 
     const previewRow: OpportunityPreviewRow = {
       line: index + 2,
@@ -197,9 +249,18 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
         stage: stage || "prospeccao",
         status: status || undefined,
         ownerEmail: ownerEmail || undefined,
+        ownerSellerName: ownerSellerName || undefined,
         followUpDate: followUpDate || undefined,
+        proposalDate: proposalDate || undefined,
+        expectedCloseDate: expectedCloseDate || undefined,
+        lastContactAt: lastContactAt || undefined,
         probability: probability === undefined || Number.isNaN(probability) ? undefined : Number(probability),
-        notes: normalizeTextValue(getMappedValue(row, "notes")) || undefined
+        notes: normalizeTextValue(getMappedValue(row, "notes")) || undefined,
+        areaHa: areaHaResult.isInvalid ? undefined : areaHaResult.parsedValue,
+        expectedTicketPerHa: expectedTicketPerHaResult.isInvalid ? undefined : expectedTicketPerHaResult.parsedValue,
+        crop: normalizeTextValue(getMappedValue(row, "crop")) || undefined,
+        season: normalizeTextValue(getMappedValue(row, "season")) || undefined,
+        productOffered: normalizeTextValue(getMappedValue(row, "productOffered")) || undefined
       },
       status: "valid",
       invalidFields: []
@@ -216,14 +277,23 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
       errors.push("Cliente obrigatório");
       invalidFields.add("clientNameOrId");
     }
-    if (!ownerEmail) {
-      errors.push("E-mail do responsável obrigatório");
+    if (!ownerEmail && !ownerSellerName) {
+      errors.push("Informe vendedor_responsavel ou email_responsavel");
       invalidFields.add("ownerEmail");
+      invalidFields.add("ownerSellerName");
     }
 
     if (valueResult.isInvalid) {
       errors.push("Valor inválido");
       invalidFields.add("value");
+    }
+    if (areaHaResult.isInvalid) {
+      errors.push("Área (ha) inválida");
+      invalidFields.add("areaHa");
+    }
+    if (expectedTicketPerHaResult.isInvalid) {
+      errors.push("Ticket esperado/ha inválido");
+      invalidFields.add("expectedTicketPerHa");
     }
 
     if (stage && !VALID_STAGES.has(stage)) {
@@ -237,6 +307,18 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
     if (followUpDate && !/^\d{4}-\d{2}-\d{2}$/.test(followUpDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(followUpDate)) {
       errors.push("Follow-up deve estar em yyyy-mm-dd ou dd/mm/aaaa");
       invalidFields.add("followUpDate");
+    }
+    if (proposalDate && !/^\d{4}-\d{2}-\d{2}$/.test(proposalDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(proposalDate)) {
+      errors.push("Data de entrada deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      invalidFields.add("proposalDate");
+    }
+    if (expectedCloseDate && !/^\d{4}-\d{2}-\d{2}$/.test(expectedCloseDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(expectedCloseDate)) {
+      errors.push("Fechamento previsto deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      invalidFields.add("expectedCloseDate");
+    }
+    if (lastContactAt && !/^\d{4}-\d{2}-\d{2}$/.test(lastContactAt) && !/^\d{2}\/\d{2}\/\d{4}$/.test(lastContactAt)) {
+      errors.push("Último contato deve estar em yyyy-mm-dd ou dd/mm/aaaa");
+      invalidFields.add("lastContactAt");
     }
     if (probability !== undefined && (Number.isNaN(probability) || probability < 0 || probability > 100)) {
       errors.push("Probabilidade deve estar entre 0 e 100");
@@ -387,7 +469,7 @@ export default function OpportunityImportModal({
       setMapping(resolvedMapping);
       const missingRequired = REQUIRED_FIELDS.filter((field) => !resolvedMapping[field]);
       if (missingRequired.length) {
-        toast.warning("Faltam colunas obrigatórias no arquivo: titulo, cliente e/ou email_responsavel/responsavelEmail.");
+        toast.warning("Faltam colunas obrigatórias no arquivo: titulo e cliente.");
       }
       const nextPreviewRows = buildPreviewRows(parsed.rows, resolvedMapping);
       setPreviewRows(await runDedupePreview(nextPreviewRows));

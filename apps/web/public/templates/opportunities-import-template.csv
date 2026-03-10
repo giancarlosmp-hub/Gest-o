@@ -1,1 +1,1 @@
-﻿titulo;cliente;valor;etapa;status;responsavelEmail;followUp;probabilidade;observacoes
+titulo;cliente;vendedor_responsavel;email_responsavel;etapa;valor;probabilidade;data_entrada;follow_up;area_ha;ticket_esperado_ha;cultura;safra;produto_ofertado;fechamento_previsto;ultimo_contato;observacoes;status
