@@ -16,7 +16,7 @@ let _tcCache: { data: object; expiresAt: number } | null = null;
 
 app.use(helmet());
 
-const allowedOrigins = env.frontendUrl
+const allowedOrigins = env.corsAllowedOrigins
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
@@ -34,7 +34,7 @@ app.use(
     credentials: true,
   })
 );
-const isProduction = process.env.NODE_ENV === "production";
+const isProduction = env.isProduction;
 
 const apiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -62,11 +62,25 @@ const apiRateLimit = rateLimit({
 
 app.use(requestContextMiddleware);
 app.use(apiRateLimit);
+app.use((req, res, next) => {
+  req.setTimeout(env.apiRequestTimeoutMs);
+  res.setTimeout(env.apiRequestTimeoutMs, () => {
+    if (!res.headersSent) {
+      res.status(408).json({ message: "Request timeout" });
+    }
+  });
+  next();
+});
+
 app.use(express.json());
 app.use(cookieParser());
 
 app.get("/health", (_req, res) => {
-  res.status(200).json({ status: "ok" });
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    version: env.appVersion,
+  });
 });
 
 app.get("/technical-cultures", async (_req, res) => {
@@ -118,16 +132,4 @@ app.use((err: any, req: any, res: any, next: any) => {
 
   if (res.headersSent) return next(err);
   res.status(500).json({ message: "Internal server error" });
-});
-
-process.on("unhandledRejection", (reason) => {
-  logApiEvent("ERROR", "[unhandledRejection]", {
-    stack: reason instanceof Error ? reason.stack : String(reason),
-  });
-});
-
-process.on("uncaughtException", (err) => {
-  logApiEvent("ERROR", "[uncaughtException]", {
-    stack: err instanceof Error ? err.stack : String(err),
-  });
 });
