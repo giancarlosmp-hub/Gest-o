@@ -14,6 +14,13 @@
     "prisma:migrate": "npm run prisma:migrate -w @salesforce-pro/api",
     "prisma:seed": "npm run prisma:seed -w @salesforce-pro/api",
     "seed:fixture": "npm run seed:fixture -w @salesforce-pro/api",
-    "seed:fixture:clean": "npm run seed:fixture:clean -w @salesforce-pro/api"
+    "seed:fixture:clean": "npm run seed:fixture:clean -w @salesforce-pro/api",
+    "typecheck": "npm run build -w @salesforce-pro/shared && npm run typecheck -w @salesforce-pro/web && npm run typecheck -w @salesforce-pro/api",
+    "typecheck:shared": "npm run typecheck -w @salesforce-pro/shared",
+    "typecheck:web": "npm run typecheck -w @salesforce-pro/web",
+    "typecheck:api": "npm run typecheck -w @salesforce-pro/api",
+    "build:shared": "npm run build -w @salesforce-pro/shared",
+    "build:web": "npm run build -w @salesforce-pro/web",
+    "build:api": "npm run build -w @salesforce-pro/api"
   }
 }

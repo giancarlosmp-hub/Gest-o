@@ -13,7 +13,8 @@
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",
     "seed:fixture": "tsx prisma/seedTestFixture.ts",
-    "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean"
+    "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean",
+    "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
