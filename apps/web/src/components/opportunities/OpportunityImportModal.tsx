@@ -601,13 +601,13 @@ export default function OpportunityImportModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-5xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-        <div className="mb-4">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+        <div className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-6">
           <h3 className="text-xl font-semibold text-slate-900">Importar oportunidades</h3>
           <p className="text-sm text-slate-500">Importe oportunidades via planilha (CSV ou XLSX).</p>
         </div>
 
-        <div className="space-y-4">
+        <div className="shrink-0 border-b border-slate-200 px-6 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -633,6 +633,9 @@ export default function OpportunityImportModal({
 
             {fileName ? <span className="text-xs text-slate-500">Arquivo: {fileName}</span> : null}
           </div>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
 
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-slate-700">
             <p className="mb-2 font-semibold text-slate-900">Ajuda rápida</p>
@@ -777,7 +780,7 @@ export default function OpportunityImportModal({
           ) : null}
         </div>
 
-        <div className="mt-4 flex justify-end gap-2 border-t border-slate-200 pt-4">
+        <div className="flex shrink-0 justify-end gap-2 border-t border-slate-200 px-6 py-4">
           <button
             type="button"
             onClick={reset}
