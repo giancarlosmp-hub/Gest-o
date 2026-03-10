@@ -5644,6 +5644,88 @@ router.post("/users/:id/reset-password", authorize("diretor"), validateBody(user
     temporaryPassword
   });
 });
+router.delete("/users/:id", authorize("diretor"), async (req, res) => {
+  const { id } = req.params;
+
+  if (req.user!.id === id) {
+    return res.status(400).json({ message: "Você não pode excluir seu próprio usuário." });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true, role: true }
+  });
+
+  if (!user) {
+    return res.status(404).json({ message: "Usuário não encontrado." });
+  }
+
+  if (user.role === "diretor") {
+    const directorsCount = await prisma.user.count({ where: { role: "diretor" } });
+    if (directorsCount <= 1) {
+      return res.status(400).json({ message: "Não é possível excluir o último diretor." });
+    }
+  }
+
+  if (user.role === "gerente") {
+    const managersCount = await prisma.user.count({ where: { role: "gerente" } });
+    if (managersCount <= 1) {
+      return res.status(400).json({ message: "Não é possível excluir o último gerente." });
+    }
+  }
+
+  const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
+    await Promise.all([
+      prisma.client.count({ where: { ownerSellerId: id } }),
+      prisma.opportunity.count({ where: { ownerSellerId: id } }),
+      prisma.activity.count({ where: { ownerSellerId: id } }),
+      prisma.agendaEvent.count({ where: { sellerId: id } }),
+      prisma.contact.count({ where: { ownerSellerId: id } }),
+      prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
+      prisma.goal.count({ where: { sellerId: id } }),
+      prisma.activityKPI.count({ where: { sellerId: id } }),
+      prisma.sale.count({ where: { sellerId: id } })
+    ]);
+
+  if (clientsCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem clientes vinculados." });
+  }
+
+  if (opportunitiesCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem oportunidades vinculadas." });
+  }
+
+  if (activitiesCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem atividades vinculadas." });
+  }
+
+  if (agendaEventsCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem agendas vinculadas." });
+  }
+
+  if (contactsCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem contatos vinculados." });
+  }
+
+  if (timelineEventsCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem eventos vinculados." });
+  }
+
+  if (goalsCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem metas vinculadas." });
+  }
+
+  if (activityKpisCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem KPIs vinculados." });
+  }
+
+  if (salesCount > 0) {
+    return res.status(400).json({ message: "Não é possível excluir este usuário porque existem vendas vinculadas." });
+  }
+
+  await prisma.user.delete({ where: { id } });
+  return res.status(204).send();
+});
 
 
 const listCulturesHandler = async (req: express.Request, res: express.Response) => {

@@ -1392,9 +1392,14 @@ export default function CrudSimplePage({
     const userConfirmed = window.confirm("Tem certeza que deseja excluir este registro?");
     if (!userConfirmed) return;
 
-    await api.delete(`${endpoint}/${id}`);
-    if (isClientsPage) await loadClients();
-    else await load();
+    try {
+      await api.delete(`${endpoint}/${id}`);
+      toast.success("Registro excluído com sucesso.");
+      if (isClientsPage) await loadClients();
+      else await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Não foi possível excluir o registro.");
+    }
   };
 
   const onOpenDetails = (id: string) => {
