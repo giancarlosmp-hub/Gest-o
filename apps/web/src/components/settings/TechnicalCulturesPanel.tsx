@@ -4,6 +4,21 @@ import api from "../../lib/apiClient";
 import { type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } from "../../lib/technicalCultures";
 import { getApiErrorMessage } from "../../lib/apiError";
 
+const extractFriendlyCultureError = (error: unknown) => {
+  const message = getApiErrorMessage(error, "Falha ao salvar cultura.");
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes("germinationdefault") || normalized.includes("germinação")) {
+    return "Germinação padrão deve estar entre 0 e 100.";
+  }
+
+  if (normalized.includes("puritydefault") || normalized.includes("pureza")) {
+    return "Pureza padrão deve estar entre 0 e 100.";
+  }
+
+  return message;
+};
+
 const emptyForm: CultureFormInput = {
   slug: "",
   label: "",
@@ -31,6 +46,7 @@ export default function TechnicalCulturesPanel() {
   const [cultures, setCultures] = useState<TechnicalCulture[]>([]);
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<TechnicalCulture | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
   const [form, setForm] = useState<CultureFormInput>(emptyForm);
   const [loading, setLoading] = useState(true);
 
@@ -60,6 +76,8 @@ export default function TechnicalCulturesPanel() {
   );
 
   const openEditor = (item?: TechnicalCulture) => {
+    setIsFormOpen(true);
+
     if (!item) {
       setEditing(null);
       setForm(emptyForm);
@@ -96,16 +114,50 @@ export default function TechnicalCulturesPanel() {
       return;
     }
 
+    if (form.germinationDefault != null && (form.germinationDefault < 0 || form.germinationDefault > 100)) {
+      toast.error("Germinação padrão deve estar entre 0 e 100.");
+      return;
+    }
+
+    if (form.purityDefault != null && (form.purityDefault < 0 || form.purityDefault > 100)) {
+      toast.error("Pureza padrão deve estar entre 0 e 100.");
+      return;
+    }
+
+    const payload: CultureFormInput = {
+      slug: form.slug.trim().toLowerCase(),
+      label: form.label.trim(),
+      category: form.category.trim(),
+      isActive: form.isActive,
+      defaultKgHaMin: form.defaultKgHaMin,
+      defaultKgHaMax: form.defaultKgHaMax,
+      notes: form.notes,
+      pmsDefault: form.pmsDefault,
+      germinationDefault: form.germinationDefault,
+      purityDefault: form.purityDefault,
+      populationTargetDefault: form.populationTargetDefault,
+      rowSpacingCmDefault: form.rowSpacingCmDefault,
+      goalsJson: form.goalsJson ?? {},
+      tags: form.tags ?? []
+    };
+
     try {
-      if (editing) await api.put(`/technical/cultures/${editing.id}`, form);
-      else await api.post("/technical/cultures", form);
+      if (editing) await api.put(`/technical/cultures/${editing.id}`, payload);
+      else await api.post("/technical/cultures", payload);
       toast.success("Catálogo técnico salvo.");
       setEditing(null);
+      setIsFormOpen(false);
       setForm(emptyForm);
       await loadCultures();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Falha ao salvar cultura."));
+      toast.error(extractFriendlyCultureError(error));
     }
+  };
+
+  const cancelEditing = () => {
+    setEditing(null);
+    setForm(emptyForm);
+    setIsFormOpen(false);
   };
 
   return (
@@ -130,23 +182,86 @@ export default function TechnicalCulturesPanel() {
       </div>
       {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada.</p> : null}
 
-      <div className="mt-4 grid gap-2 md:grid-cols-2">
-        <input className="rounded border px-2 py-1" placeholder="Slug" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))} />
-        <input className="rounded border px-2 py-1" placeholder="Nome" value={form.label} onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))} />
-        <input className="rounded border px-2 py-1" placeholder="Categoria" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} />
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isActive} onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))} />Ativo</label>
-        <input className="rounded border px-2 py-1" placeholder="kg/ha mínimo" value={form.defaultKgHaMin ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, defaultKgHaMin: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="kg/ha máximo" value={form.defaultKgHaMax ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, defaultKgHaMax: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="População alvo (plantas/ha)" value={form.populationTargetDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, populationTargetDefault: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="Espaçamento padrão (cm)" value={form.rowSpacingCmDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, rowSpacingCmDefault: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="PMS padrão" value={form.pmsDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, pmsDefault: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="Germinação padrão (%)" value={form.germinationDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, germinationDefault: toNumber(e.target.value) }))} />
-        <input className="rounded border px-2 py-1" placeholder="Pureza padrão (%)" value={form.purityDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, purityDefault: toNumber(e.target.value) }))} />
-        <textarea className="rounded border px-2 py-1 md:col-span-2" placeholder="Observações técnicas" value={form.notes ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
-      </div>
-      <div className="mt-3">
-        <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={save}>Salvar cultura</button>
-      </div>
+      {isFormOpen ? (
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{editing ? "Modo edição" : "Modo criação"}</p>
+              <h4 className="text-sm font-semibold text-slate-900">{editing ? `Editando cultura: ${editing.label}` : "Nova cultura"}</h4>
+            </div>
+            <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" onClick={() => openEditor()}>
+              Nova cultura
+            </button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-medium text-slate-700">
+              Slug
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              Nome
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.label} onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              Categoria
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.category} onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))} />
+            </label>
+
+            <label className="flex items-center gap-2 self-end rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <input type="checkbox" checked={form.isActive} onChange={(e) => setForm((prev) => ({ ...prev, isActive: e.target.checked }))} />
+              Ativo
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              kg/ha mínimo
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.defaultKgHaMin ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, defaultKgHaMin: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              kg/ha máximo
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.defaultKgHaMax ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, defaultKgHaMax: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              População alvo (plantas/ha)
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.populationTargetDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, populationTargetDefault: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              Espaçamento padrão (cm)
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.rowSpacingCmDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, rowSpacingCmDefault: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              PMS padrão
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.pmsDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, pmsDefault: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              Germinação padrão (%)
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.germinationDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, germinationDefault: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700">
+              Pureza padrão (%)
+              <input className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.purityDefault ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, purityDefault: toNumber(e.target.value) }))} />
+            </label>
+
+            <label className="text-xs font-medium text-slate-700 md:col-span-2">
+              Observações técnicas
+              <textarea className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" value={form.notes ?? ""} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} />
+            </label>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2">
+            <button type="button" className="rounded bg-emerald-600 px-3 py-2 text-xs font-semibold text-white" onClick={save}>Salvar cultura</button>
+            <button type="button" className="rounded border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700" onClick={cancelEditing}>Cancelar edição</button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
