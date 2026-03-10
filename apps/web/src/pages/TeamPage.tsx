@@ -305,7 +305,9 @@ export default function TeamPage() {
       await loadTeamData(objectiveMonth);
       setObjectiveModalUser(null);
       setObjectiveAmount("");
-      toast.success(parsedAmount === 0 ? "Objetivo removido com sucesso." : "Objetivo salvo com sucesso.");
+      toast.success("Objetivo salvo com sucesso.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível salvar o objetivo."));
     } finally {
       setSavingObjective(false);
     }
@@ -324,6 +326,8 @@ export default function TeamPage() {
       setObjectiveModalUser(null);
       setObjectiveAmount("");
       toast.success("Objetivo removido com sucesso.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível remover o objetivo."));
     } finally {
       setSavingObjective(false);
     }
@@ -709,7 +713,7 @@ export default function TeamPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold text-slate-900">Definir objetivo</h3>
-            <p className="mt-1 text-sm text-slate-500">Configure o objetivo mensal de {objectiveModalUser.name}. Valor 0 remove a meta.</p>
+            <p className="mt-1 text-sm text-slate-500">Configure o objetivo mensal de {objectiveModalUser.name}.</p>
 
             <div className="mt-4 space-y-3">
               <label className="block">
