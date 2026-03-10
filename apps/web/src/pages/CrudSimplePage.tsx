@@ -195,6 +195,7 @@ export default function CrudSimplePage({
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formFieldErrors, setFormFieldErrors] = useState<
@@ -1357,6 +1358,17 @@ export default function CrudSimplePage({
         }
       }
 
+      if (endpoint === "/users") {
+        payload.name = String(payload.name || "").trim();
+        payload.email = String(payload.email || "").trim();
+
+        if (typeof payload.password === "string") {
+          const trimmedPassword = payload.password.trim();
+          if (!trimmedPassword) delete payload.password;
+          else payload.password = trimmedPassword;
+        }
+      }
+
       if (editing) await api.put(`${endpoint}/${editing}`, payload);
       else await api.post(endpoint, payload);
 
@@ -1378,20 +1390,23 @@ export default function CrudSimplePage({
   const onEdit = (item: any) => {
     setFormError(null);
     setFormFieldErrors({});
+    const nextForm = endpoint === "/users" ? { ...item, password: "" } : item;
+
     if (createInModal) {
       setEditing(item.id);
-      setForm(item);
+      setForm(nextForm);
       setIsCreateModalOpen(true);
       return;
     }
     setEditing(item.id);
-    setForm(item);
+    setForm(nextForm);
   };
 
   const onDelete = async (id: string) => {
     const userConfirmed = window.confirm("Tem certeza que deseja excluir este registro?");
     if (!userConfirmed) return;
 
+    setDeletingId(id);
     try {
       await api.delete(`${endpoint}/${id}`);
       toast.success("Registro excluído com sucesso.");
@@ -1399,6 +1414,8 @@ export default function CrudSimplePage({
       else await load();
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Não foi possível excluir o registro.");
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -1478,12 +1495,14 @@ export default function CrudSimplePage({
         >
           {fields.map((f) => {
             const fieldPlaceholder = f.placeholder ?? `Informe ${f.label.toLowerCase()}`;
+            const isPasswordOptionalOnUserEdit = endpoint === "/users" && f.key === "password" && Boolean(editing);
+            const isFieldRequired = !isPasswordOptionalOnUserEdit;
 
             if (f.type === "select") {
               return (
                 <select
                   key={f.key}
-                  required
+                  required={isFieldRequired}
                   className="rounded-lg border p-2"
                   value={form[f.key] ?? ""}
                   onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
@@ -1501,7 +1520,7 @@ export default function CrudSimplePage({
             return (
               <input
                 key={f.key}
-                required
+                required={isFieldRequired}
                 className="rounded-lg border p-2"
                 type={f.type || "text"}
                 placeholder={fieldPlaceholder}
@@ -1675,6 +1694,7 @@ export default function CrudSimplePage({
                               className="rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
                               aria-label="Abrir ações"
                               onClick={() => setOpenActionsMenuId((current) => (current === it.id ? null : it.id))}
+                              disabled={saving || deletingId === it.id}
                             >
                               <MoreHorizontal size={16} />
                             </button>
@@ -1698,6 +1718,7 @@ export default function CrudSimplePage({
                                     setOpenActionsMenuId(null);
                                     void onDelete(it.id);
                                   }}
+                                  disabled={saving || deletingId === it.id}
                                 >
                                   Excluir
                                 </button>
