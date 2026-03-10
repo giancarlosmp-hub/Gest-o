@@ -9,7 +9,9 @@ const resolveApiBaseUrl = () => {
   return configuredBaseUrl.replace(/\/+$/, "");
 };
 
-const api = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true });
+const apiTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15_000);
+
+const api = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true, timeout: apiTimeoutMs });
 
 const MAX_CONCURRENT_REQUESTS = 6;
 const RATE_LIMIT_COOLDOWN_MS = 3_000;
