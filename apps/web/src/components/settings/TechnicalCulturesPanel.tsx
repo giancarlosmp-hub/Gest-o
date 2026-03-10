@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
-import { CULTURE_FALLBACKS, type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } from "../../lib/technicalCultures";
+import { type CultureFormInput, type TechnicalCulture, fetchTechnicalCultures } from "../../lib/technicalCultures";
 import { getApiErrorMessage } from "../../lib/apiError";
 
 const emptyForm: CultureFormInput = {
@@ -32,6 +32,7 @@ export default function TechnicalCulturesPanel() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<TechnicalCulture | null>(null);
   const [form, setForm] = useState<CultureFormInput>(emptyForm);
+  const [loading, setLoading] = useState(true);
 
   const loadCultures = async () => {
     try {
@@ -42,8 +43,10 @@ export default function TechnicalCulturesPanel() {
         reason: getApiErrorMessage(error, "Erro ao carregar catálogo técnico."),
         error,
       });
-      setCultures(CULTURE_FALLBACKS);
-      toast.warning("Catálogo temporário ativo. Verifique conexão com a API.");
+      toast.error(getApiErrorMessage(error, "Falha ao carregar catálogo técnico da API."));
+      setCultures([]);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -77,8 +80,8 @@ export default function TechnicalCulturesPanel() {
       purityDefault: item.purityDefault,
       populationTargetDefault: item.populationTargetDefault,
       rowSpacingCmDefault: item.rowSpacingCmDefault,
-      goalsJson: {},
-      tags: []
+      goalsJson: item.goalsJson,
+      tags: item.tags
     });
   };
 
@@ -99,9 +102,9 @@ export default function TechnicalCulturesPanel() {
       toast.success("Catálogo técnico salvo.");
       setEditing(null);
       setForm(emptyForm);
-      loadCultures();
-    } catch {
-      toast.error("Falha ao salvar cultura.");
+      await loadCultures();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Falha ao salvar cultura."));
     }
   };
 
@@ -125,6 +128,7 @@ export default function TechnicalCulturesPanel() {
           </tbody>
         </table>
       </div>
+      {!loading && filtered.length === 0 ? <p className="mt-2 text-xs text-slate-500">Nenhuma cultura encontrada.</p> : null}
 
       <div className="mt-4 grid gap-2 md:grid-cols-2">
         <input className="rounded border px-2 py-1" placeholder="Slug" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))} />
