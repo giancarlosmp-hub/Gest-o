@@ -3,11 +3,12 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
-import morgan from "morgan";
 import authRoutes from "./routes/authRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import { env } from "./config/env.js";
+import { requestContextMiddleware } from "./middlewares/requestLogging.js";
+import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 
 export const app = express();
 
@@ -45,34 +46,24 @@ const apiRateLimit = rateLimit({
     const details = req.rateLimit;
     const userId = req.user?.id ?? "anonymous";
 
-    if (!isProduction) {
-      console.warn("[rate-limit] 429", {
-        route: req.originalUrl,
-        ip: req.ip,
-        userId,
-        current: details?.used,
-        limit: details?.limit,
-        remaining: details?.remaining,
-      });
-    } else {
-      console.error("[rate-limit] 429", {
-        route: req.originalUrl,
-        ip: req.ip,
-        userId,
-        current: details?.used,
-        limit: details?.limit,
-        remaining: details?.remaining,
-      });
-    }
+    logApiEvent("WARN", "[rate-limit] 429", {
+      requestId: req.requestId,
+      route: req.originalUrl,
+      ip: req.ip,
+      userId,
+      current: details?.used,
+      limit: details?.limit,
+      remaining: details?.remaining,
+    });
 
     res.status(429).json({ message: "Muitas requisições. Tente novamente em instantes." });
   },
 });
 
+app.use(requestContextMiddleware);
 app.use(apiRateLimit);
 app.use(express.json());
 app.use(cookieParser());
-app.use(morgan("dev"));
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
@@ -97,7 +88,12 @@ app.get("/technical-cultures", async (_req, res) => {
 
     return res.status(200).json(payload);
   } catch (err) {
-    console.error("[technical-cultures]", err);
+    logApiEvent("ERROR", "[technical-cultures] fallback", {
+      requestId: _req.requestId,
+      endpoint: _req.originalUrl,
+      user: _req.user ? { id: _req.user.id, email: _req.user.email, role: _req.user.role } : null,
+      stack: err instanceof Error ? err.stack : String(err),
+    });
     return res.status(200).json({ data: [], source: "fallback" });
   }
 });
@@ -110,16 +106,28 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", crudRoutes);
 
-app.use((err: any, _req: any, res: any, next: any) => {
-  console.error("[express error]", err);
+app.use((err: any, req: any, res: any, next: any) => {
+  logApiEvent("ERROR", "[express error] Internal server error", {
+    requestId: req.requestId,
+    endpoint: req.originalUrl,
+    method: req.method,
+    payload: sanitizePayload({ body: req.body, params: req.params, query: req.query }),
+    user: req.user ? { id: req.user.id, email: req.user.email, role: req.user.role } : null,
+    stack: err instanceof Error ? err.stack : String(err),
+  });
+
   if (res.headersSent) return next(err);
   res.status(500).json({ message: "Internal server error" });
 });
 
 process.on("unhandledRejection", (reason) => {
-  console.error("[unhandledRejection]", reason);
+  logApiEvent("ERROR", "[unhandledRejection]", {
+    stack: reason instanceof Error ? reason.stack : String(reason),
+  });
 });
 
 process.on("uncaughtException", (err) => {
-  console.error("[uncaughtException]", err);
+  logApiEvent("ERROR", "[uncaughtException]", {
+    stack: err instanceof Error ? err.stack : String(err),
+  });
 });
