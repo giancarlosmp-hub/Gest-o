@@ -41,32 +41,32 @@ export const CULTURE_FALLBACKS: TechnicalCulture[] = [
   { id: "fallback-milheto", slug: "milheto", label: "Milheto", category: "Cobertura", isActive: true, defaultKgHaMin: 10, defaultKgHaMax: 20, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34, goalsJson: {}, tags: [] }
 ];
 
+type TechnicalCultureApiItem = {
+  id: string;
+  slug?: string;
+  name?: string;
+  label?: string;
+  category: string;
+  isActive?: boolean;
+  defaultKgHaMin?: number | null;
+  defaultKgHaMax?: number | null;
+  kgHaMin?: number | null;
+  kgHaMax?: number | null;
+  notes?: string | null;
+  pmsDefault?: number | null;
+  germinationDefault?: number | null;
+  purityDefault?: number | null;
+  populationTargetDefault?: number | null;
+  populationDefaultHa?: number | null;
+  rowSpacingCmDefault?: number | null;
+  spacingDefaultCm?: number | null;
+  goalsJson?: Record<string, { min: number; max: number }>;
+  tags?: string[];
+};
+
 type TechnicalCultureCatalogResponse = {
-  data?: Array<Omit<TechnicalCulture, "goalsJson" | "tags"> & { goalsJson?: Record<string, { min: number; max: number }>; tags?: string[] }>;
-  items?: Array<
-    {
-      id: string;
-      slug?: string;
-      name?: string;
-      label?: string;
-      category: string;
-      isActive?: boolean;
-      defaultKgHaMin?: number | null;
-      defaultKgHaMax?: number | null;
-      kgHaMin?: number | null;
-      kgHaMax?: number | null;
-      notes?: string | null;
-      pmsDefault?: number | null;
-      germinationDefault?: number | null;
-      purityDefault?: number | null;
-      populationTargetDefault?: number | null;
-      populationDefaultHa?: number | null;
-      rowSpacingCmDefault?: number | null;
-      spacingDefaultCm?: number | null;
-      goalsJson?: Record<string, { min: number; max: number }>;
-      tags?: string[];
-    }
-  >;
+  data?: TechnicalCultureApiItem[];
+  items?: TechnicalCultureApiItem[];
 };
 
 export async function fetchTechnicalCultures() {
