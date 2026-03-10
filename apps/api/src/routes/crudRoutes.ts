@@ -5758,6 +5758,13 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
       }
     }
 
+    await prisma.goal.deleteMany({
+      where: {
+        sellerId: id,
+        targetValue: { lte: 0 }
+      }
+    });
+
     const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
       await Promise.all([
         prisma.client.count({ where: { ownerSellerId: id } }),
@@ -5766,7 +5773,7 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
         prisma.agendaEvent.count({ where: { sellerId: id } }),
         prisma.contact.count({ where: { ownerSellerId: id } }),
         prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
-        prisma.goal.count({ where: { sellerId: id } }),
+        prisma.goal.count({ where: { sellerId: id, targetValue: { gt: 0 } } }),
         prisma.activityKPI.count({ where: { sellerId: id } }),
         prisma.sale.count({ where: { sellerId: id } })
       ]);
@@ -5792,7 +5799,10 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
     }
 
     if (goalsCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem metas vinculadas." });
+      return res.status(400).json({
+        success: false,
+        message: "Não é possível excluir este usuário porque existem objetivos mensais vinculados. Remova os objetivos na aba Equipe e tente novamente."
+      });
     }
 
     if (activityKpisCount > 0) {
