@@ -14,6 +14,8 @@ export type TechnicalCulture = {
   purityDefault: number | null;
   populationTargetDefault: number | null;
   rowSpacingCmDefault: number | null;
+  goalsJson: Record<string, { min: number; max: number }>;
+  tags: string[];
 };
 
 export type CultureFormInput = {
@@ -34,65 +36,25 @@ export type CultureFormInput = {
 };
 
 export const CULTURE_FALLBACKS: TechnicalCulture[] = [
-  { id: "fallback-sorgo", slug: "sorgo", label: "Sorgo", category: "Grãos", isActive: true, defaultKgHaMin: 8, defaultKgHaMax: 18, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 180000, rowSpacingCmDefault: 45 },
-  { id: "fallback-milho", slug: "milho", label: "Milho", category: "Grãos", isActive: true, defaultKgHaMin: 14, defaultKgHaMax: 24, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 32, germinationDefault: 90, purityDefault: 98, populationTargetDefault: 65000, rowSpacingCmDefault: 50 },
-  { id: "fallback-milheto", slug: "milheto", label: "Milheto", category: "Cobertura", isActive: true, defaultKgHaMin: 10, defaultKgHaMax: 20, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34 }
+  { id: "fallback-sorgo", slug: "sorgo", label: "Sorgo", category: "Grãos", isActive: true, defaultKgHaMin: 8, defaultKgHaMax: 18, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 28, germinationDefault: 85, purityDefault: 98, populationTargetDefault: 180000, rowSpacingCmDefault: 45, goalsJson: {}, tags: [] },
+  { id: "fallback-milho", slug: "milho", label: "Milho", category: "Grãos", isActive: true, defaultKgHaMin: 14, defaultKgHaMax: 24, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 32, germinationDefault: 90, purityDefault: 98, populationTargetDefault: 65000, rowSpacingCmDefault: 50, goalsJson: {}, tags: [] },
+  { id: "fallback-milheto", slug: "milheto", label: "Milheto", category: "Cobertura", isActive: true, defaultKgHaMin: 10, defaultKgHaMax: 20, notes: "Fallback local ativo. Ajuste em Configurações.", pmsDefault: 8, germinationDefault: 80, purityDefault: 95, populationTargetDefault: 250000, rowSpacingCmDefault: 34, goalsJson: {}, tags: [] }
 ];
 
 type TechnicalCultureCatalogResponse = {
-  items: Array<{
-    id: string;
-    name: string;
-    category: string;
-    kgHaMin: number | null;
-    kgHaMax: number | null;
-    pmsDefault: number | null;
-    populationDefaultHa: number | null;
-    spacingDefaultCm: number | null;
-    germinationDefault: number | null;
-    purityDefault: number | null;
-    notes?: string;
-  }>;
-  source: "db" | "seed" | "static";
+  data: Array<Omit<TechnicalCulture, "goalsJson" | "tags"> & { goalsJson?: Record<string, { min: number; max: number }>; tags?: string[] }>;
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
-const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-const mapCatalogItemToTechnicalCulture = (item: TechnicalCultureCatalogResponse["items"][number]): TechnicalCulture => ({
-  id: item.id,
-  slug: item.id,
-  label: item.name,
-  category: item.category,
-  isActive: true,
-  defaultKgHaMin: item.kgHaMin,
-  defaultKgHaMax: item.kgHaMax,
-  notes: item.notes ?? null,
-  pmsDefault: item.pmsDefault,
-  germinationDefault: item.germinationDefault,
-  purityDefault: item.purityDefault,
-  populationTargetDefault: item.populationDefaultHa,
-  rowSpacingCmDefault: item.spacingDefaultCm,
-});
-
 export async function fetchTechnicalCultures() {
-  const endpoint = "/technical-cultures";
-  const baseURL = api.defaults.baseURL ?? "";
-  const fullUrl = `${String(baseURL).replace(/\/+$/, "")}${endpoint}`;
-
-  if (import.meta.env.DEV) {
-    console.info("[technical-cultures] Request", { endpoint, baseURL, fullUrl });
-  }
-
-  try {
-    const response = await api.get<TechnicalCultureCatalogResponse>(endpoint);
-    return response.data.items.map(mapCatalogItemToTechnicalCulture);
-  } catch (error) {
-    if (import.meta.env.DEV) {
-      console.warn("[technical-cultures] Primeira tentativa falhou. Aplicando retry.", error);
-    }
-
-    await wait(300);
-    const retryResponse = await api.get<TechnicalCultureCatalogResponse>(endpoint);
-    return retryResponse.data.items.map(mapCatalogItemToTechnicalCulture);
-  }
+  const response = await api.get<TechnicalCultureCatalogResponse>("/technical/cultures", {
+    params: { page: 1, pageSize: 200 },
+  });
+  return response.data.data.map((item) => ({
+    ...item,
+    goalsJson: item.goalsJson ?? {},
+    tags: item.tags ?? [],
+  }));
 }
