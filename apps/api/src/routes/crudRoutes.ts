@@ -42,7 +42,7 @@ const GOAL_KEY_NORMALIZER = /[^a-z0-9_\-]/g;
 const normalizeGoalKey = (value: string) =>
   value
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim()
     .replace(/\s+/g, "_")
@@ -1072,6 +1072,44 @@ const normalizeSellerLookup = (value?: string | null) =>
 
 const normalizeSellerEmail = (value?: string | null) => String(value ?? "").toLowerCase().trim();
 
+const normalizeClientLookup = (value?: string | null) =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+const resolveClientByName = ({
+  clientName,
+  clientsByNormalizedName,
+  rowNumber,
+  dryRun
+}: {
+  clientName: string;
+  clientsByNormalizedName: Map<string, Array<{ id: string; name: string }>>;
+  rowNumber: number;
+  dryRun: boolean;
+}) => {
+  const normalizedClientName = normalizeClientLookup(clientName);
+  const matches = normalizedClientName ? clientsByNormalizedName.get(normalizedClientName) ?? [] : [];
+  const resolved = matches.length === 1 ? matches[0] : null;
+
+  console.info("[opportunities/import][client-resolver]", {
+    phase: dryRun ? "preview" : "import",
+    rowNumber,
+    originalName: clientName,
+    normalizedName: normalizedClientName,
+    matchesCount: matches.length,
+    resolvedClientId: resolved?.id,
+    resolvedClientName: resolved?.name
+  });
+
+  if (!matches.length) return { status: "missing" as const };
+  if (matches.length > 1) return { status: "ambiguous" as const, matches };
+  return { status: "resolved" as const, client: resolved };
+};
+
 const resolveOpportunityOwner = ({
   ownerEmail,
   ownerSellerName,
@@ -1470,6 +1508,7 @@ type OpportunityImportSkippedReason =
   | "duplicate"
   | "duplicate_file"
   | "client_missing"
+  | "client_ambiguous"
   | "owner_missing"
   | "owner_conflict"
   | "invalid_row"
@@ -1563,7 +1602,7 @@ const processOpportunityImport = async ({
 
     const clientLookup = row.clientNameOrId.trim();
     if (UUID_V4_REGEX.test(clientLookup)) clientIds.add(clientLookup);
-    else clientNames.add(clientLookup.toLowerCase());
+    else clientNames.add(clientLookup);
   }
 
   const ownersByEmail = new Map<string, { id: string; email: string; name: string }>();
@@ -1581,24 +1620,25 @@ const processOpportunityImport = async ({
     }
   }
 
-  const clientsById = new Map<string, { id: string }>();
-  const clientsByName = new Map<string, { id: string }>();
+  const clientsById = new Map<string, { id: string; name: string }>();
+  const clientsByNormalizedName = new Map<string, Array<{ id: string; name: string }>>();
 
   if (clientIds.size || clientNames.size) {
     const clients = await prisma.client.findMany({
       where: {
         ...sellerWhere(req),
-        OR: [
-          ...(clientIds.size ? [{ id: { in: Array.from(clientIds) } }] : []),
-          ...(clientNames.size ? [{ name: { in: Array.from(clientNames) } }] : [])
-        ]
+        ...(clientIds.size && !clientNames.size ? { id: { in: Array.from(clientIds) } } : {})
       },
       select: { id: true, name: true }
     });
 
     for (const client of clients) {
-      clientsById.set(client.id, { id: client.id });
-      clientsByName.set(client.name.trim().toLowerCase(), { id: client.id });
+      clientsById.set(client.id, { id: client.id, name: client.name });
+      const normalizedName = normalizeClientLookup(client.name);
+      if (!normalizedName) continue;
+      const bucket = clientsByNormalizedName.get(normalizedName) ?? [];
+      bucket.push({ id: client.id, name: client.name });
+      clientsByNormalizedName.set(normalizedName, bucket);
     }
   }
 
@@ -1706,9 +1746,26 @@ const processOpportunityImport = async ({
         }
 
         if (dryRun) {
-          let client = isUuid ? clientsById.get(clientLookup) : clientsByName.get(clientLookup.toLowerCase());
-          if (!client && createClientIfMissing) {
-            client = { id: "dry-run-client" };
+          const resolvedClient = isUuid
+            ? (clientsById.get(clientLookup) ? { status: "resolved" as const, client: clientsById.get(clientLookup)! } : { status: "missing" as const })
+            : resolveClientByName({
+                clientName: clientLookup,
+                clientsByNormalizedName,
+                rowNumber,
+                dryRun
+              });
+
+          let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
+          if (!client && createClientIfMissing && resolvedClient.status !== "ambiguous") {
+            client = { id: "dry-run-client", name: clientLookup };
+          }
+          if (resolvedClient.status === "ambiguous") {
+            const message = "cliente ambíguo";
+            failed += 1;
+            errors.push({ row: rowNumber, message });
+            skippedDetails.push({ row: rowNumber, reason: "client_ambiguous" });
+            rowResults.push({ row: rowNumber, status: "error", reason: "client_ambiguous", message });
+            continue;
           }
           if (!client) {
             const message = "cliente não encontrado";
@@ -1734,9 +1791,18 @@ const processOpportunityImport = async ({
         }
 
         const rowExecutionResult = await prisma.$transaction(async (tx) => {
-          let client = isUuid ? clientsById.get(clientLookup) : clientsByName.get(clientLookup.toLowerCase());
+          const resolvedClient = isUuid
+            ? (clientsById.get(clientLookup) ? { status: "resolved" as const, client: clientsById.get(clientLookup)! } : { status: "missing" as const })
+            : resolveClientByName({
+                clientName: clientLookup,
+                clientsByNormalizedName,
+                rowNumber,
+                dryRun
+              });
 
-          if (!client) {
+          let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
+
+          if (!client && resolvedClient.status !== "ambiguous") {
             const existingClient = await tx.client.findFirst({
               where: {
                 ...sellerWhere(req),
@@ -1746,10 +1812,21 @@ const processOpportunityImport = async ({
             });
 
             if (existingClient) {
-              client = { id: existingClient.id };
-              clientsById.set(existingClient.id, { id: existingClient.id });
-              clientsByName.set(existingClient.name.trim().toLowerCase(), { id: existingClient.id });
+              client = { id: existingClient.id, name: existingClient.name };
+              clientsById.set(existingClient.id, { id: existingClient.id, name: existingClient.name });
+              const normalizedExistingName = normalizeClientLookup(existingClient.name);
+              if (normalizedExistingName) {
+                const bucket = clientsByNormalizedName.get(normalizedExistingName) ?? [];
+                if (!bucket.some((entry) => entry.id === existingClient.id)) {
+                  bucket.push({ id: existingClient.id, name: existingClient.name });
+                  clientsByNormalizedName.set(normalizedExistingName, bucket);
+                }
+              }
             }
+          }
+
+          if (resolvedClient.status === "ambiguous") {
+            return { outcome: "error", reason: "client_ambiguous", message: "cliente ambíguo" } as const;
           }
 
           if (!client && createClientIfMissing) {
@@ -1763,9 +1840,14 @@ const processOpportunityImport = async ({
               },
               select: { id: true, name: true }
             });
-            client = { id: createdClient.id };
-            clientsById.set(createdClient.id, { id: createdClient.id });
-            clientsByName.set(createdClient.name.trim().toLowerCase(), { id: createdClient.id });
+            client = { id: createdClient.id, name: createdClient.name };
+            clientsById.set(createdClient.id, { id: createdClient.id, name: createdClient.name });
+            const normalizedCreatedName = normalizeClientLookup(createdClient.name);
+            if (normalizedCreatedName) {
+              const bucket = clientsByNormalizedName.get(normalizedCreatedName) ?? [];
+              bucket.push({ id: createdClient.id, name: createdClient.name });
+              clientsByNormalizedName.set(normalizedCreatedName, bucket);
+            }
           }
 
           if (!client) {
