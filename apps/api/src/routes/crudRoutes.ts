@@ -5482,16 +5482,39 @@ router.put("/objectives/:userId", authorize("diretor", "gerente"), validateBody(
     return res.status(404).json({ message: "Vendedor não encontrado" });
   }
 
-  const existing = await prisma.goal.findFirst({
+  if (amount === 0) {
+    await prisma.goal.deleteMany({
+      where: {
+        sellerId: req.params.userId,
+        month: monthKey
+      }
+    });
+
+    return res.json({
+      userId: req.params.userId,
+      month,
+      year,
+      amount: null,
+      removed: true
+    });
+  }
+
+  const goal = await prisma.goal.upsert({
     where: {
+      sellerId_month: {
+        sellerId: req.params.userId,
+        month: monthKey
+      }
+    },
+    update: {
+      targetValue: amount
+    },
+    create: {
       sellerId: req.params.userId,
-      month: monthKey
+      month: monthKey,
+      targetValue: amount
     }
   });
-
-  const goal = existing
-    ? await prisma.goal.update({ where: { id: existing.id }, data: { targetValue: amount } })
-    : await prisma.goal.create({ data: { sellerId: req.params.userId, month: monthKey, targetValue: amount } });
 
   return res.json({
     id: goal.id,
@@ -5499,8 +5522,32 @@ router.put("/objectives/:userId", authorize("diretor", "gerente"), validateBody(
     month,
     year,
     amount: goal.targetValue,
-    createdAt: goal.createdAt
+    createdAt: goal.createdAt,
+    removed: false
   });
+});
+
+router.delete("/objectives/:userId", authorize("diretor", "gerente"), async (req, res) => {
+  const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);
+
+  if (!parsedPeriod) {
+    return res.status(400).json({ message: "Mês/ano inválidos" });
+  }
+
+  const seller = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true, role: true } });
+
+  if (!seller || seller.role !== "vendedor") {
+    return res.status(404).json({ message: "Vendedor não encontrado" });
+  }
+
+  await prisma.goal.deleteMany({
+    where: {
+      sellerId: req.params.userId,
+      month: parsedPeriod.monthKey
+    }
+  });
+
+  return res.status(204).send();
 });
 
 router.get("/goals", async (req, res) => {
