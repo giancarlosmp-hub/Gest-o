@@ -42,18 +42,54 @@ export const CULTURE_FALLBACKS: TechnicalCulture[] = [
 ];
 
 type TechnicalCultureCatalogResponse = {
-  data: Array<Omit<TechnicalCulture, "goalsJson" | "tags"> & { goalsJson?: Record<string, { min: number; max: number }>; tags?: string[] }>;
-  total: number;
-  page: number;
-  pageSize: number;
+  data?: Array<Omit<TechnicalCulture, "goalsJson" | "tags"> & { goalsJson?: Record<string, { min: number; max: number }>; tags?: string[] }>;
+  items?: Array<
+    {
+      id: string;
+      slug?: string;
+      name?: string;
+      label?: string;
+      category: string;
+      isActive?: boolean;
+      defaultKgHaMin?: number | null;
+      defaultKgHaMax?: number | null;
+      kgHaMin?: number | null;
+      kgHaMax?: number | null;
+      notes?: string | null;
+      pmsDefault?: number | null;
+      germinationDefault?: number | null;
+      purityDefault?: number | null;
+      populationTargetDefault?: number | null;
+      populationDefaultHa?: number | null;
+      rowSpacingCmDefault?: number | null;
+      spacingDefaultCm?: number | null;
+      goalsJson?: Record<string, { min: number; max: number }>;
+      tags?: string[];
+    }
+  >;
 };
 
 export async function fetchTechnicalCultures() {
   const response = await api.get<TechnicalCultureCatalogResponse>("/technical/cultures", {
-    params: { page: 1, pageSize: 200 },
+    params: { page: 1, pageSize: 100 },
   });
-  return response.data.data.map((item) => ({
-    ...item,
+
+  const sourceItems = response.data.data ?? response.data.items ?? [];
+
+  return sourceItems.map((item) => ({
+    id: item.id,
+    slug: item.slug ?? item.id,
+    label: item.label ?? item.name ?? item.slug ?? item.id,
+    category: item.category,
+    isActive: item.isActive ?? true,
+    defaultKgHaMin: item.defaultKgHaMin ?? item.kgHaMin ?? null,
+    defaultKgHaMax: item.defaultKgHaMax ?? item.kgHaMax ?? null,
+    notes: item.notes ?? null,
+    pmsDefault: item.pmsDefault ?? null,
+    germinationDefault: item.germinationDefault ?? null,
+    purityDefault: item.purityDefault ?? null,
+    populationTargetDefault: item.populationTargetDefault ?? item.populationDefaultHa ?? null,
+    rowSpacingCmDefault: item.rowSpacingCmDefault ?? item.spacingDefaultCm ?? null,
     goalsJson: item.goalsJson ?? {},
     tags: item.tags ?? [],
   }));
