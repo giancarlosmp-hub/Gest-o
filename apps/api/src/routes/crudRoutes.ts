@@ -1046,6 +1046,13 @@ const DEFAULT_OPPORTUNITY_IMPORT_DEDUPE = {
   mode: "skip" as const
 };
 
+type OpportunityImportDedupeOptions = {
+  enabled: boolean;
+  windowDays: number;
+  compareStatuses: "open_only" | "open_and_closed";
+  mode: "skip" | "upsert";
+};
+
 const normalizeOpportunityTitle = (value?: string | null) =>
   String(value ?? "")
     .toLowerCase()
@@ -1408,6 +1415,420 @@ const validateDateOrder = (proposalDate?: string, expectedCloseDate?: string) =>
   const expected = normalizeDateToUtc(expectedCloseDate);
   if (!proposal || !expected) return true;
   return expected >= proposal;
+};
+
+type OpportunityImportSkippedReason =
+  | "duplicate"
+  | "duplicate_file"
+  | "client_missing"
+  | "owner_missing"
+  | "invalid_row"
+  | "invalid_stage"
+  | "invalid_status"
+  | "invalid_date"
+  | "forbidden_owner"
+  | "unexpected_error";
+
+type OpportunityImportRowResult = {
+  row: number;
+  status: "created" | "updated" | "ignored" | "error";
+  reason?: OpportunityImportSkippedReason;
+  message?: string;
+  matchedId?: string;
+  matchedTitle?: string;
+  matchedClientName?: string;
+  matchedCreatedAt?: string;
+};
+
+const processOpportunityImport = async ({
+  req,
+  rows,
+  createClientIfMissing,
+  dryRun,
+  dedupe
+}: {
+  req: any;
+  rows: unknown[];
+  createClientIfMissing: boolean;
+  dryRun: boolean;
+  dedupe: OpportunityImportDedupeOptions;
+}) => {
+  const errors: Array<{ row: number; message: string }> = [];
+  const rowResults: OpportunityImportRowResult[] = [];
+  const skippedDetails: Array<{ row: number; reason: OpportunityImportSkippedReason; matchedId?: string; matchedTitle?: string; matchedClientName?: string; matchedCreatedAt?: string }> = [];
+  let created = 0;
+  let updated = 0;
+  let ignored = 0;
+  let failed = 0;
+
+  const parsedRows = rows.map((rawRow, index) => ({ rowNumber: index + 1, parsed: opportunityImportRowSchema.safeParse(rawRow) }));
+
+  const ownerEmails = new Set<string>();
+  const ownerNames = new Set<string>();
+  const clientIds = new Set<string>();
+  const clientNames = new Set<string>();
+  const duplicateFileKeySeen = new Set<string>();
+
+  for (const item of parsedRows) {
+    if (!item.parsed.success) continue;
+    const row = item.parsed.data;
+
+    const email = row.ownerEmail?.trim().toLowerCase();
+    const name = row.ownerSellerName?.trim().toLowerCase();
+    if (email) ownerEmails.add(email);
+    if (name) ownerNames.add(name);
+
+    const clientLookup = row.clientNameOrId.trim();
+    if (UUID_V4_REGEX.test(clientLookup)) clientIds.add(clientLookup);
+    else clientNames.add(clientLookup.toLowerCase());
+  }
+
+  const ownersByEmail = new Map<string, { id: string; email: string; name: string }>();
+  const ownersByName = new Map<string, { id: string; email: string; name: string }>();
+
+  if (ownerEmails.size || ownerNames.size) {
+    const users = await prisma.user.findMany({
+      where: {
+        role: "vendedor",
+        OR: [
+          ...(ownerEmails.size ? [{ email: { in: Array.from(ownerEmails) } }] : []),
+          ...(ownerNames.size ? [{ name: { in: Array.from(ownerNames) } }] : [])
+        ]
+      },
+      select: { id: true, email: true, name: true }
+    });
+
+    for (const owner of users) {
+      ownersByEmail.set(owner.email.trim().toLowerCase(), owner);
+      ownersByName.set(owner.name.trim().toLowerCase(), owner);
+    }
+  }
+
+  const clientsById = new Map<string, { id: string }>();
+  const clientsByName = new Map<string, { id: string }>();
+
+  if (clientIds.size || clientNames.size) {
+    const clients = await prisma.client.findMany({
+      where: {
+        ...sellerWhere(req),
+        OR: [
+          ...(clientIds.size ? [{ id: { in: Array.from(clientIds) } }] : []),
+          ...(clientNames.size ? [{ name: { in: Array.from(clientNames) } }] : [])
+        ]
+      },
+      select: { id: true, name: true }
+    });
+
+    for (const client of clients) {
+      clientsById.set(client.id, { id: client.id });
+      clientsByName.set(client.name.trim().toLowerCase(), { id: client.id });
+    }
+  }
+
+  const dedupeCandidatesCache = new Map<string, Array<{ id: string; title: string; createdAt: Date; ownerSellerId: string; client: { name: string } }>>();
+
+  for (const item of parsedRows) {
+    const rowNumber = item.rowNumber;
+
+    if (!item.parsed.success) {
+      const message = item.parsed.error.issues[0]?.message ?? "Linha inválida para importação.";
+      failed += 1;
+      errors.push({ row: rowNumber, message });
+      skippedDetails.push({ row: rowNumber, reason: "invalid_row" });
+      rowResults.push({ row: rowNumber, status: "error", reason: "invalid_row", message });
+      continue;
+    }
+
+    const row = item.parsed.data;
+
+    try {
+      const ownerEmail = row.ownerEmail?.trim().toLowerCase();
+      const ownerSellerName = row.ownerSellerName?.trim().toLowerCase();
+
+      if (req.user?.role === "vendedor" && ownerEmail && ownerEmail !== req.user.email.toLowerCase()) {
+        const message = "Vendedor só pode importar para o próprio e-mail ou sem ownerEmail.";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "forbidden_owner" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "forbidden_owner", message });
+        continue;
+      }
+
+      let ownerSellerId = req.user!.id;
+      if (ownerEmail) {
+        const owner = ownersByEmail.get(ownerEmail);
+        if (!owner) {
+          const message = "vendedor não encontrado";
+          failed += 1;
+          errors.push({ row: rowNumber, message });
+          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
+          rowResults.push({ row: rowNumber, status: "error", reason: "owner_missing", message });
+          continue;
+        }
+        ownerSellerId = owner.id;
+      } else if (ownerSellerName) {
+        const owner = ownersByName.get(ownerSellerName);
+        if (!owner) {
+          const message = "vendedor não encontrado";
+          failed += 1;
+          errors.push({ row: rowNumber, message });
+          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
+          rowResults.push({ row: rowNumber, status: "error", reason: "owner_missing", message });
+          continue;
+        }
+        ownerSellerId = owner.id;
+      }
+
+      const clientLookup = row.clientNameOrId.trim();
+      const isUuid = UUID_V4_REGEX.test(clientLookup);
+      let client = isUuid ? clientsById.get(clientLookup) : clientsByName.get(clientLookup.toLowerCase());
+
+      if (!client && createClientIfMissing) {
+        if (dryRun) {
+          client = { id: "dry-run-client" };
+        } else {
+          const createdClient = await prisma.client.create({
+            data: {
+              name: clientLookup,
+              city: "N/A",
+              state: "NA",
+              region: "Importação",
+              ownerSellerId
+            },
+            select: { id: true, name: true }
+          });
+          client = { id: createdClient.id };
+          clientsById.set(createdClient.id, { id: createdClient.id });
+          clientsByName.set(createdClient.name.trim().toLowerCase(), { id: createdClient.id });
+        }
+      }
+
+      if (!client) {
+        const message = "cliente não encontrado";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "client_missing" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "client_missing", message });
+        continue;
+      }
+
+      const stageValue = row.stage ?? "prospeccao";
+      const stage = IMPORT_STAGE_MAP[stageValue];
+      if (!stage) {
+        const message = "etapa inválida";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_stage" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "invalid_stage", message });
+        continue;
+      }
+
+      if (row.status && !["open", "closed"].includes(row.status)) {
+        const message = "status inválido";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_status" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "invalid_status", message });
+        continue;
+      }
+
+      const duplicateFileKey = [client.id, normalizeOpportunityTitle(row.title), stage, ownerSellerId].join("|");
+      if (duplicateFileKeySeen.has(duplicateFileKey)) {
+        ignored += 1;
+        const message = "linha duplicada no arquivo";
+        skippedDetails.push({ row: rowNumber, reason: "duplicate_file" });
+        rowResults.push({ row: rowNumber, status: "ignored", reason: "duplicate_file", message });
+        continue;
+      }
+      duplicateFileKeySeen.add(duplicateFileKey);
+
+      const parsedFollowUpDate = parseOpportunityImportDate(row.followUpDate);
+      const parsedProposalDate = parseOpportunityImportDate(row.proposalDate);
+      const parsedExpectedCloseDate = parseOpportunityImportDate(row.expectedCloseDate);
+      const parsedLastContactAt = parseOpportunityImportDate(row.lastContactAt);
+
+      if ((row.followUpDate && !parsedFollowUpDate) || (row.proposalDate && !parsedProposalDate) || (row.expectedCloseDate && !parsedExpectedCloseDate) || (row.lastContactAt && !parsedLastContactAt)) {
+        const message = "data inválida";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "invalid_date", message });
+        continue;
+      }
+
+      const followUpDate = parsedFollowUpDate ?? new Date();
+      const proposalDate = parsedProposalDate ?? followUpDate;
+      const expectedCloseDate = parsedExpectedCloseDate ?? followUpDate;
+      const lastContactAt = parsedLastContactAt ?? undefined;
+
+      if (!validateDateOrder(proposalDate.toISOString(), expectedCloseDate.toISOString())) {
+        const message = "data inválida";
+        failed += 1;
+        errors.push({ row: rowNumber, message });
+        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
+        rowResults.push({ row: rowNumber, status: "error", reason: "invalid_date", message });
+        continue;
+      }
+
+      const normalizedTitle = normalizeOpportunityTitle(row.title);
+      let duplicateOpportunity: {
+        id: string;
+        title: string;
+        createdAt: Date;
+        client: { name: string };
+        ownerSellerId: string;
+      } | null = null;
+
+      if (dedupe.enabled) {
+        const cacheKey = `${client.id}|${ownerSellerId}|${stage}`;
+        if (!dedupeCandidatesCache.has(cacheKey)) {
+          const createdAtStart = new Date();
+          createdAtStart.setDate(createdAtStart.getDate() - dedupe.windowDays);
+
+          const candidates = await prisma.opportunity.findMany({
+            where: {
+              ...sellerWhere(req),
+              clientId: client.id,
+              ownerSellerId,
+              stage,
+              createdAt: { gte: createdAtStart },
+              ...(dedupe.compareStatuses === "open_only" ? { stage: { notIn: ["ganho", "perdido"] as OpportunityStage[] } } : {})
+            },
+            orderBy: { createdAt: "desc" },
+            select: {
+              id: true,
+              title: true,
+              createdAt: true,
+              ownerSellerId: true,
+              client: { select: { name: true } }
+            }
+          });
+          dedupeCandidatesCache.set(cacheKey, candidates);
+        }
+
+        const duplicateCandidates = dedupeCandidatesCache.get(cacheKey) ?? [];
+        duplicateOpportunity = duplicateCandidates.find((candidate) => normalizeOpportunityTitle(candidate.title) === normalizedTitle) ?? null;
+      }
+
+      if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "skip") {
+        ignored += 1;
+        skippedDetails.push({
+          row: rowNumber,
+          reason: "duplicate",
+          matchedId: duplicateOpportunity.id,
+          matchedTitle: duplicateOpportunity.title,
+          matchedClientName: duplicateOpportunity.client.name,
+          matchedCreatedAt: duplicateOpportunity.createdAt.toISOString()
+        });
+        rowResults.push({
+          row: rowNumber,
+          status: "ignored",
+          reason: "duplicate",
+          message: "duplicada no sistema",
+          matchedId: duplicateOpportunity.id,
+          matchedTitle: duplicateOpportunity.title,
+          matchedClientName: duplicateOpportunity.client.name,
+          matchedCreatedAt: duplicateOpportunity.createdAt.toISOString()
+        });
+        continue;
+      }
+
+      if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "upsert") {
+        const followUpDateValue = parseOpportunityImportDate(row.followUpDate) ?? undefined;
+        const proposalDateValue = parseOpportunityImportDate(row.proposalDate) ?? undefined;
+        const expectedCloseDateValue = parseOpportunityImportDate(row.expectedCloseDate) ?? undefined;
+        const lastContactAtValue = parseOpportunityImportDate(row.lastContactAt) ?? undefined;
+        if (!dryRun) {
+          await prisma.$transaction(async (tx) => {
+            const existingOpportunity = await tx.opportunity.findFirst({
+              where: {
+                id: duplicateOpportunity!.id,
+                ...sellerWhere(req)
+              },
+              select: { id: true, notes: true, ownerSellerId: true }
+            });
+
+            if (!existingOpportunity) throw new Error("Oportunidade duplicada não encontrada para atualização.");
+
+            const notesWithTimestamp = row.notes
+              ? `${existingOpportunity.notes ? `${existingOpportunity.notes}\n\n` : ""}[Import ${new Date().toISOString()}] ${row.notes}`
+              : existingOpportunity.notes;
+
+            await tx.opportunity.update({
+              where: { id: existingOpportunity.id },
+              data: {
+                ...(typeof row.value === "number" ? { value: row.value } : {}),
+                ...(stage ? { stage } : {}),
+                ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
+                ...(followUpDateValue ? { followUpDate: followUpDateValue } : {}),
+                ...(proposalDateValue ? { proposalDate: proposalDateValue } : {}),
+                ...(expectedCloseDateValue ? { expectedCloseDate: expectedCloseDateValue } : {}),
+                ...(lastContactAtValue ? { lastContactAt: lastContactAtValue } : {}),
+                ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
+                ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
+                ...(row.crop ? { crop: row.crop } : {}),
+                ...(row.season ? { season: row.season } : {}),
+                ...(row.productOffered ? { productOffered: row.productOffered } : {}),
+                ...(notesWithTimestamp !== undefined ? { notes: notesWithTimestamp } : {}),
+                ...(req.user?.role !== "vendedor" || existingOpportunity.ownerSellerId === req.user.id ? { ownerSellerId } : {})
+              }
+            });
+          });
+        }
+
+        updated += 1;
+        rowResults.push({ row: rowNumber, status: "updated" });
+        continue;
+      }
+
+      if (!dryRun) {
+        await prisma.opportunity.create({
+          data: {
+            title: row.title,
+            value: row.value,
+            stage,
+            probability: row.probability,
+            notes: row.notes,
+            proposalDate,
+            followUpDate,
+            expectedCloseDate,
+            ...(lastContactAt ? { lastContactAt } : {}),
+            ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
+            ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
+            ...(row.crop ? { crop: row.crop } : {}),
+            ...(row.season ? { season: row.season } : {}),
+            ...(row.productOffered ? { productOffered: row.productOffered } : {}),
+            clientId: client.id,
+            ownerSellerId
+          }
+        });
+      }
+
+      created += 1;
+      rowResults.push({ row: rowNumber, status: "created" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erro inesperado na linha";
+      failed += 1;
+      errors.push({ row: rowNumber, message });
+      skippedDetails.push({ row: rowNumber, reason: "unexpected_error" });
+      rowResults.push({ row: rowNumber, status: "error", reason: "unexpected_error", message });
+      console.warn(`[opportunities/import] linha ${rowNumber}: ${message}`);
+    }
+  }
+
+  const summary = { imported: created, updated, ignored, failed };
+
+  return {
+    created,
+    updated,
+    ignored,
+    skipped: ignored + failed,
+    failed,
+    errors,
+    skippedDetails,
+    rowResults,
+    summary
+  };
 };
 
 // ==============================
@@ -3804,375 +4225,48 @@ router.post("/opportunities/import", async (req, res) => {
     ...(payload.data.options?.dedupe ?? {})
   };
 
-  const errors: Array<{ row: number; message: string }> = [];
-  const skippedDetails: Array<{ row: number; reason: "duplicate" | "duplicate_file" | "client_missing" | "owner_missing" | "invalid_row" | "invalid_stage" | "invalid_status" | "invalid_date" | "forbidden_owner" | "unexpected_error"; matchedId?: string; matchedTitle?: string; matchedClientName?: string; matchedCreatedAt?: string }> = [];
-  let created = 0;
-  let updated = 0;
-  let skipped = 0;
+  const result = await processOpportunityImport({
+    req,
+    rows,
+    createClientIfMissing,
+    dryRun,
+    dedupe
+  });
 
-  const parsedRows = rows.map((rawRow, index) => ({ rowNumber: index + 1, parsed: opportunityImportRowSchema.safeParse(rawRow) }));
-
-  const ownerEmails = new Set<string>();
-  const ownerNames = new Set<string>();
-  const clientIds = new Set<string>();
-  const clientNames = new Set<string>();
-  const duplicateFileKeySeen = new Set<string>();
-
-  for (const item of parsedRows) {
-    if (!item.parsed.success) continue;
-    const row = item.parsed.data;
-
-    const email = row.ownerEmail?.trim().toLowerCase();
-    const name = row.ownerSellerName?.trim().toLowerCase();
-    if (email) ownerEmails.add(email);
-    if (name) ownerNames.add(name);
-
-    const clientLookup = row.clientNameOrId.trim();
-    if (UUID_V4_REGEX.test(clientLookup)) clientIds.add(clientLookup);
-    else clientNames.add(clientLookup.toLowerCase());
-  }
-
-  const ownersByEmail = new Map<string, { id: string; email: string; name: string }>();
-  const ownersByName = new Map<string, { id: string; email: string; name: string }>();
-
-  if (ownerEmails.size || ownerNames.size) {
-    const users = await prisma.user.findMany({
-      where: {
-        role: "vendedor",
-        OR: [
-          ...(ownerEmails.size ? [{ email: { in: Array.from(ownerEmails) } }] : []),
-          ...(ownerNames.size ? [{ name: { in: Array.from(ownerNames) } }] : [])
-        ]
-      },
-      select: { id: true, email: true, name: true }
-    });
-
-    for (const owner of users) {
-      ownersByEmail.set(owner.email.trim().toLowerCase(), owner);
-      ownersByName.set(owner.name.trim().toLowerCase(), owner);
-    }
-  }
-
-  const clientsById = new Map<string, { id: string }>();
-  const clientsByName = new Map<string, { id: string }>();
-
-  if (clientIds.size || clientNames.size) {
-    const clients = await prisma.client.findMany({
-      where: {
-        ...sellerWhere(req),
-        OR: [
-          ...(clientIds.size ? [{ id: { in: Array.from(clientIds) } }] : []),
-          ...(clientNames.size ? [{ name: { in: Array.from(clientNames) } }] : [])
-        ]
-      },
-      select: { id: true, name: true }
-    });
-
-    for (const client of clients) {
-      clientsById.set(client.id, { id: client.id });
-      clientsByName.set(client.name.trim().toLowerCase(), { id: client.id });
-    }
-  }
-
-  const dedupeCandidatesCache = new Map<string, Array<{ id: string; title: string; createdAt: Date; ownerSellerId: string; client: { name: string } }>>();
-
-  for (const item of parsedRows) {
-    const rowNumber = item.rowNumber;
-
-    if (!item.parsed.success) {
-      skipped += 1;
-      const message = item.parsed.error.issues[0]?.message ?? "Linha inválida para importação.";
-      errors.push({ row: rowNumber, message });
-      skippedDetails.push({ row: rowNumber, reason: "invalid_row" });
-      continue;
-    }
-
-    const row = item.parsed.data;
-
-    try {
-      const ownerEmail = row.ownerEmail?.trim().toLowerCase();
-      const ownerSellerName = row.ownerSellerName?.trim().toLowerCase();
-
-      if (req.user?.role === "vendedor" && ownerEmail && ownerEmail !== req.user.email.toLowerCase()) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "Vendedor só pode importar para o próprio e-mail ou sem ownerEmail." });
-        skippedDetails.push({ row: rowNumber, reason: "forbidden_owner" });
-        continue;
-      }
-
-      let ownerSellerId = req.user!.id;
-      if (ownerEmail) {
-        const owner = ownersByEmail.get(ownerEmail);
-        if (!owner) {
-          skipped += 1;
-          errors.push({ row: rowNumber, message: "vendedor não encontrado" });
-          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
-          continue;
-        }
-        ownerSellerId = owner.id;
-      } else if (ownerSellerName) {
-        const owner = ownersByName.get(ownerSellerName);
-        if (!owner) {
-          skipped += 1;
-          errors.push({ row: rowNumber, message: "vendedor não encontrado" });
-          skippedDetails.push({ row: rowNumber, reason: "owner_missing" });
-          continue;
-        }
-        ownerSellerId = owner.id;
-      }
-
-      const clientLookup = row.clientNameOrId.trim();
-      const isUuid = UUID_V4_REGEX.test(clientLookup);
-      let client = isUuid ? clientsById.get(clientLookup) : clientsByName.get(clientLookup.toLowerCase());
-
-      if (!client && createClientIfMissing) {
-        if (dryRun) {
-          client = { id: "dry-run-client" };
-        } else {
-          const createdClient = await prisma.client.create({
-            data: {
-              name: clientLookup,
-              city: "N/A",
-              state: "NA",
-              region: "Importação",
-              ownerSellerId
-            },
-            select: { id: true, name: true }
-          });
-          client = { id: createdClient.id };
-          clientsById.set(createdClient.id, { id: createdClient.id });
-          clientsByName.set(createdClient.name.trim().toLowerCase(), { id: createdClient.id });
-        }
-      }
-
-      if (!client) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "cliente não encontrado" });
-        skippedDetails.push({ row: rowNumber, reason: "client_missing" });
-        continue;
-      }
-
-      const stageValue = row.stage ?? "prospeccao";
-      const stage = IMPORT_STAGE_MAP[stageValue];
-      if (!stage) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "etapa inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_stage" });
-        continue;
-      }
-
-      if (row.status && !["open", "closed"].includes(row.status)) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "status inválido" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_status" });
-        continue;
-      }
-
-      const duplicateFileKey = [client.id, normalizeOpportunityTitle(row.title), stage, ownerSellerId].join("|");
-      if (duplicateFileKeySeen.has(duplicateFileKey)) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "linha duplicada no arquivo" });
-        skippedDetails.push({ row: rowNumber, reason: "duplicate_file" });
-        continue;
-      }
-      duplicateFileKeySeen.add(duplicateFileKey);
-
-      const parsedFollowUpDate = parseOpportunityImportDate(row.followUpDate);
-      const parsedProposalDate = parseOpportunityImportDate(row.proposalDate);
-      const parsedExpectedCloseDate = parseOpportunityImportDate(row.expectedCloseDate);
-      const parsedLastContactAt = parseOpportunityImportDate(row.lastContactAt);
-
-      if (row.followUpDate && !parsedFollowUpDate) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "data inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
-        continue;
-      }
-      if (row.proposalDate && !parsedProposalDate) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "data inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
-        continue;
-      }
-      if (row.expectedCloseDate && !parsedExpectedCloseDate) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "data inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
-        continue;
-      }
-      if (row.lastContactAt && !parsedLastContactAt) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "data inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
-        continue;
-      }
-
-      const followUpDate = parsedFollowUpDate ?? new Date();
-      const proposalDate = parsedProposalDate ?? followUpDate;
-      const expectedCloseDate = parsedExpectedCloseDate ?? followUpDate;
-      const lastContactAt = parsedLastContactAt ?? undefined;
-
-      if (!validateDateOrder(proposalDate.toISOString(), expectedCloseDate.toISOString())) {
-        skipped += 1;
-        errors.push({ row: rowNumber, message: "data inválida" });
-        skippedDetails.push({ row: rowNumber, reason: "invalid_date" });
-        continue;
-      }
-
-      const normalizedTitle = normalizeOpportunityTitle(row.title);
-      let duplicateOpportunity: {
-        id: string;
-        title: string;
-        createdAt: Date;
-        client: { name: string };
-        ownerSellerId: string;
-      } | null = null;
-
-      if (dedupe.enabled) {
-        const cacheKey = `${client.id}|${ownerSellerId}|${stage}`;
-        if (!dedupeCandidatesCache.has(cacheKey)) {
-          const createdAtStart = new Date();
-          createdAtStart.setDate(createdAtStart.getDate() - dedupe.windowDays);
-
-          const candidates = await prisma.opportunity.findMany({
-            where: {
-              ...sellerWhere(req),
-              clientId: client.id,
-              ownerSellerId,
-              stage,
-              createdAt: { gte: createdAtStart },
-              ...(dedupe.compareStatuses === "open_only" ? { stage: { notIn: ["ganho", "perdido"] as OpportunityStage[] } } : {})
-            },
-            orderBy: { createdAt: "desc" },
-            select: {
-              id: true,
-              title: true,
-              createdAt: true,
-              ownerSellerId: true,
-              client: { select: { name: true } }
-            }
-          });
-          dedupeCandidatesCache.set(cacheKey, candidates);
-        }
-
-        const duplicateCandidates = dedupeCandidatesCache.get(cacheKey) ?? [];
-        duplicateOpportunity =
-          duplicateCandidates.find((candidate) => normalizeOpportunityTitle(candidate.title) === normalizedTitle) ?? null;
-      }
-
-      if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "skip") {
-        skipped += 1;
-        skippedDetails.push({
-          row: rowNumber,
-          reason: "duplicate",
-          matchedId: duplicateOpportunity.id,
-          matchedTitle: duplicateOpportunity.title,
-          matchedClientName: duplicateOpportunity.client.name,
-          matchedCreatedAt: duplicateOpportunity.createdAt.toISOString()
-        });
-        continue;
-      }
-
-      if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "upsert") {
-        const followUpDateValue = parseOpportunityImportDate(row.followUpDate) ?? undefined;
-        const proposalDateValue = parseOpportunityImportDate(row.proposalDate) ?? undefined;
-        const expectedCloseDateValue = parseOpportunityImportDate(row.expectedCloseDate) ?? undefined;
-        const lastContactAtValue = parseOpportunityImportDate(row.lastContactAt) ?? undefined;
-        if (dryRun) {
-          updated += 1;
-          continue;
-        }
-
-        await prisma.$transaction(async (tx) => {
-          const existingOpportunity = await tx.opportunity.findFirst({
-            where: {
-              id: duplicateOpportunity!.id,
-              ...sellerWhere(req)
-            },
-            select: { id: true, notes: true, ownerSellerId: true }
-          });
-
-          if (!existingOpportunity) throw new Error("Oportunidade duplicada não encontrada para atualização.");
-
-          const notesWithTimestamp = row.notes
-            ? `${existingOpportunity.notes ? `${existingOpportunity.notes}
-
-` : ""}[Import ${new Date().toISOString()}] ${row.notes}`
-            : existingOpportunity.notes;
-
-          await tx.opportunity.update({
-            where: { id: existingOpportunity.id },
-            data: {
-              ...(typeof row.value === "number" ? { value: row.value } : {}),
-              ...(stage ? { stage } : {}),
-              ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
-              ...(followUpDateValue ? { followUpDate: followUpDateValue } : {}),
-              ...(proposalDateValue ? { proposalDate: proposalDateValue } : {}),
-              ...(expectedCloseDateValue ? { expectedCloseDate: expectedCloseDateValue } : {}),
-              ...(lastContactAtValue ? { lastContactAt: lastContactAtValue } : {}),
-              ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
-              ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
-              ...(row.crop ? { crop: row.crop } : {}),
-              ...(row.season ? { season: row.season } : {}),
-              ...(row.productOffered ? { productOffered: row.productOffered } : {}),
-              ...(notesWithTimestamp !== undefined ? { notes: notesWithTimestamp } : {}),
-              ...(req.user?.role !== "vendedor" || existingOpportunity.ownerSellerId === req.user.id ? { ownerSellerId } : {})
-            }
-          });
-        });
-
-        updated += 1;
-        continue;
-      }
-
-      if (dryRun) {
-        created += 1;
-        continue;
-      }
-
-      await prisma.opportunity.create({
-        data: {
-          title: row.title,
-          value: row.value,
-          stage,
-          probability: row.probability,
-          notes: row.notes,
-          proposalDate,
-          followUpDate,
-          expectedCloseDate,
-          ...(lastContactAt ? { lastContactAt } : {}),
-          ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
-          ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
-          ...(row.crop ? { crop: row.crop } : {}),
-          ...(row.season ? { season: row.season } : {}),
-          ...(row.productOffered ? { productOffered: row.productOffered } : {}),
-          clientId: client.id,
-          ownerSellerId
-        }
-      });
-
-      created += 1;
-    } catch (error) {
-      skipped += 1;
-      const message = error instanceof Error ? error.message : "Erro inesperado na linha";
-      errors.push({ row: rowNumber, message });
-      skippedDetails.push({ row: rowNumber, reason: "unexpected_error" });
-      console.warn(`[opportunities/import] linha ${rowNumber}: ${message}`);
-    }
-  }
-
-  const summary = { imported: created, updated, ignored: skipped, failed: errors.length };
   console.info("[opportunities/import][audit]", {
     actorId: req.user?.id,
     totalRows: rows.length,
-    imported: summary.imported,
-    updated: summary.updated,
-    ignored: summary.ignored,
-    failed: summary.failed,
+    imported: result.summary.imported,
+    updated: result.summary.updated,
+    ignored: result.summary.ignored,
+    failed: result.summary.failed,
     dryRun
   });
 
-  return res.status(200).json({ created, updated, skipped, errors, skippedDetails, summary });
+  return res.status(200).json(result);
+});
+
+router.post("/opportunities/import/preview", async (req, res) => {
+  const payload = opportunityImportPayloadSchema.safeParse(req.body);
+  if (!payload.success) return res.status(400).json({ message: "Payload inválido para preview." });
+
+  const rows = payload.data.rows;
+  const createClientIfMissing = Boolean(payload.data.options?.createClientIfMissing);
+  const dedupe = {
+    ...DEFAULT_OPPORTUNITY_IMPORT_DEDUPE,
+    ...(payload.data.options?.dedupe ?? {}),
+    mode: payload.data.options?.dedupe?.mode ?? "skip"
+  };
+
+  const result = await processOpportunityImport({
+    req,
+    rows,
+    createClientIfMissing,
+    dryRun: true,
+    dedupe
+  });
+
+  return res.status(200).json(result);
 });
 
 router.get("/opportunities/import/dictionary", async (_req, res) => {
