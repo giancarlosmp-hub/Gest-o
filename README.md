@@ -43,6 +43,14 @@ VITE_API_URL=https://api.seudominio.com
 - Sem `VITE_API_URL`, o fallback para `http://localhost:4000` ocorre apenas em desenvolvimento (`npm run dev`).
 - Em produção, não deixe essas variáveis apontando para `localhost`.
 
+### Publicar CRM com Nginx no VPS
+Para configurar o domínio `crm.demetraagronegocios.com.br` com proxy para o frontend em `127.0.0.1:5173`, execute:
+
+```bash
+bash scripts/setup-nginx-crm.sh
+bash scripts/setup-ssl-crm.sh
+```
+
 ### Validação no Windows (CMD)
 ```cmd
 docker compose down -v
