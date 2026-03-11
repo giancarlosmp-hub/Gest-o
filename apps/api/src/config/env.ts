@@ -25,5 +25,6 @@ export const env = {
   enableSmokeBootstrap: toBoolean(process.env.ENABLE_SMOKE_BOOTSTRAP, false),
   smokeDirectorEmail: process.env.SMOKE_DIRECTOR_EMAIL || "diretor@empresa.com",
   smokeDirectorPassword: process.env.SMOKE_DIRECTOR_PASSWORD || "123456",
+  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5432/salesforce_pro?schema=public",
   smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com"
 };
