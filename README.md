@@ -19,8 +19,10 @@ Monorepo completo com frontend React + Vite + TypeScript e backend Node.js + Exp
 
 ## Rodar com Docker Compose
 ```bash
-docker compose up -d --build
+bash deploy.sh
 ```
+
+> Para todos os deploys (locais e em VPS), use sempre `bash deploy.sh` para recriar os volumes do zero e evitar incompatibilidade de senha no Postgres.
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
 Valide os serviços:
@@ -59,13 +61,13 @@ bash scripts/setup-ssl-crm.sh
 ### Validação no Windows (CMD)
 ```cmd
 docker compose down -v
-docker compose up -d --build
+bash deploy.sh
 docker compose ps
 curl http://localhost:4000/health
 curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d "{\"email\":\"diretor@empresa.com\",\"password\":\"123456\"}"
 ```
 Esperado:
-- `docker compose up -d --build` finaliza sem erro.
+- `bash deploy.sh` finaliza sem erro.
 - `curl http://localhost:4000/health` retorna HTTP 200.
 - Login retorna HTTP 200 com usuário `diretor@empresa.com`.
 
