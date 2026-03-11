@@ -16,4 +16,4 @@ npm run seed:fixture
 - `npm run docker:start` espera o Postgres e roda `prisma db push`.
 - O seed padrão (`prisma/seed.js`) **não** roda automaticamente, salvo quando `SEED_ON_BOOTSTRAP=true`.
 - Para seed manual: `npm run prisma:seed`.
-- Com `ENABLE_SMOKE_BOOTSTRAP=true`, o bootstrap garante usuário/credenciais mínimas para compose-smoke sem limpeza de tabelas.
+- Com `ENABLE_SMOKE_BOOTSTRAP=true`, o bootstrap garante seed idempotente para compose-smoke: Diretor, Gerente, 4 Vendedores, cliente smoke e meta mensal para o Vendedor 1.
