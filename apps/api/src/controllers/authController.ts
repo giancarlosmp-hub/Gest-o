@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
-import bcrypt from "bcryptjs";
 import { prisma } from "../config/prisma.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
+import { verifyPassword } from "../utils/password.js";
 
 const cookieConfig = { httpOnly: true, sameSite: "lax" as const, secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 };
 
@@ -10,7 +10,7 @@ export async function login(req: Request, res: Response) {
   const user = await prisma.user.findUnique({ where: { email } });
   if (!user) return res.status(401).json({ message: "Credenciais inválidas" });
   if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
-  const ok = await bcrypt.compare(password, user.passwordHash);
+  const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
   const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
   const accessToken = signAccessToken(payload);

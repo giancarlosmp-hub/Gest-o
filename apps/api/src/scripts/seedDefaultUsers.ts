@@ -1,6 +1,6 @@
-import bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
 
 const DEFAULT_PASSWORD = "123456";
 
@@ -14,27 +14,56 @@ const DEFAULT_USERS: Array<{ name: string; email: string; role: Role; region: st
 ];
 
 export async function seedDefaultUsers() {
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 10);
+  const defaultPasswordHash = await hashPassword(DEFAULT_PASSWORD);
 
   for (const user of DEFAULT_USERS) {
-    const existing = await prisma.user.findUnique({ where: { email: user.email }, select: { id: true } });
+    const existing = await prisma.user.findUnique({
+      where: { email: user.email },
+      select: { id: true, passwordHash: true }
+    });
 
-    if (existing) {
-      console.log(`Seed user already exists: ${user.email}`);
+    if (!existing) {
+      await prisma.user.create({
+        data: {
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          region: user.region,
+          passwordHash: defaultPasswordHash,
+          isActive: true
+        }
+      });
+
+      console.log(`Seed user created: ${user.email}`);
       continue;
     }
 
-    await prisma.user.create({
+    const hasValidDefaultPassword = await verifyPassword(DEFAULT_PASSWORD, existing.passwordHash);
+    if (!hasValidDefaultPassword) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          name: user.name,
+          role: user.role,
+          region: user.region,
+          passwordHash: defaultPasswordHash,
+          isActive: true
+        }
+      });
+      console.log(`Seed user password refreshed: ${user.email}`);
+      continue;
+    }
+
+    await prisma.user.update({
+      where: { id: existing.id },
       data: {
         name: user.name,
-        email: user.email,
         role: user.role,
         region: user.region,
-        passwordHash,
         isActive: true
       }
     });
 
-    console.log(`Seed user created: ${user.email}`);
+    console.log(`Seed user already valid: ${user.email}`);
   }
 }

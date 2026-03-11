@@ -4,12 +4,34 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function upsertUser(name, email, role, region) {
-  const passwordHash = await bcrypt.hash("123456", 10);
-  return prisma.user.upsert({
-    where: { email },
-    update: { name, role, region, passwordHash },
-    create: { name, email, role, region, passwordHash }
+  const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
+
+  if (!existing) {
+    const passwordHash = await bcrypt.hash("123456", 10);
+    const createdUser = await prisma.user.create({
+      data: { name, email, role, region, passwordHash, isActive: true }
+    });
+    console.log(`Seed user created: ${email}`);
+    return createdUser;
+  }
+
+  const hasDefaultPassword = await bcrypt.compare("123456", existing.passwordHash).catch(() => false);
+  if (!hasDefaultPassword) {
+    const passwordHash = await bcrypt.hash("123456", 10);
+    const refreshedUser = await prisma.user.update({
+      where: { id: existing.id },
+      data: { name, role, region, passwordHash, isActive: true }
+    });
+    console.log(`Seed user password refreshed: ${email}`);
+    return refreshedUser;
+  }
+
+  const updatedUser = await prisma.user.update({
+    where: { id: existing.id },
+    data: { name, role, region, isActive: true }
   });
+  console.log(`Seed user already valid: ${email}`);
+  return updatedUser;
 }
 
 const cropOptions = ["soja", "milho", "algodão", "café", "trigo"];
