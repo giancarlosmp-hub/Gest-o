@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16
+    command: postgres -c password_encryption=md5
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
