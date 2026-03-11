@@ -34,7 +34,7 @@ services:
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
       - "4000:4000"
-    restart: on-failure
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy

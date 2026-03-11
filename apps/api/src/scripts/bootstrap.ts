@@ -5,8 +5,8 @@ import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 
-const MAX_DB_RETRIES = 30;
-const RETRY_DELAY_MS = 2000;
+const MAX_DB_RETRIES = 60;
+const RETRY_DELAY_MS = 3000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
