@@ -104,6 +104,25 @@ Para preencher `cnpjNormalized`, `nameNormalized` e `cityNormalized` em registro
 docker compose exec api npm run clients:backfill-normalized -w @salesforce-pro/api
 ```
 
+### Garantir usuário administrativo (diretor) via CLI
+Para criar/atualizar um usuário administrativo de forma idempotente (sem insert manual no banco), execute:
+
+```bash
+docker compose exec api npm run admin:ensure-user -w @salesforce-pro/api -- --name="Admin" --email="admin@demetra.local" --password="Admin123!" --role="diretor" --region="Nacional"
+```
+
+Comportamento do comando:
+- se o e-mail não existir, cria o usuário com `isActive=true`;
+- se já existir, atualiza `name`, `role`, `region`, `isActive=true` e a senha (com o mesmo hash do login);
+- valida roles permitidas (`diretor`, `gerente`, `vendedor`);
+- não exibe senha em texto puro nos logs.
+
+Exemplo de uso no VPS (produção):
+
+```bash
+docker compose -f /opt/demetra/docker-compose.yml exec api npm run admin:ensure-user -w @salesforce-pro/api -- --name="Diretor Produção" --email="diretor@seudominio.com" --password="TroqueAgora#2026" --role="diretor" --region="Nacional"
+```
+
 ## Usuários seed
 - diretor@empresa.com / 123456 (diretor)
 - gerente@empresa.com / 123456 (gerente)
