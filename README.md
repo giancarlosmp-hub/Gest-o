@@ -22,6 +22,8 @@ Monorepo completo com frontend React + Vite + TypeScript e backend Node.js + Exp
 bash deploy.sh
 ```
 
+> Deploy recomendado: execute sempre `bash deploy.sh`.
+
 > Para todos os deploys (locais e em VPS), use sempre `bash deploy.sh` para recriar os volumes do zero e evitar incompatibilidade de senha no Postgres.
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
