@@ -18,15 +18,21 @@ Monorepo completo com frontend React + Vite + TypeScript e backend Node.js + Exp
 - Docker e Docker Compose (opcional, recomendado)
 
 ## Rodar com Docker Compose
+
+## Deploy normal (preserva dados)
 ```bash
 bash deploy.sh
 ```
 
-> Deploy recomendado: execute sempre `bash deploy.sh`.
-
-> Para todos os deploys (locais e em VPS), use sempre `bash deploy.sh` para recriar os volumes do zero e evitar incompatibilidade de senha no Postgres.
+## Reset total (apaga tudo)
+```bash
+bash deploy-reset.sh
+```
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
+
+> Após aplicar esta mudança no servidor, rode **uma vez**: `docker compose down -v && docker compose up -d` para limpar volume antigo e iniciar com a nova configuração.
+
 Valide os serviços:
 ```bash
 docker compose ps
@@ -76,7 +82,7 @@ Esperado:
 
 ## Deploy em Produção
 Sempre usar: `bash deploy.sh`
-Nunca usar: `docker compose up --build` (sem `-v`)
+Para reset completo quando necessário: `bash deploy-reset.sh`
 
 ## Variáveis obrigatórias no .env
 ```bash
