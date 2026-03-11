@@ -141,6 +141,19 @@ function prismaClientExists() {
   );
 }
 
+
+function resolveSchemaPath() {
+  if (existsSync("prisma/schema.prisma")) return "prisma/schema.prisma";
+  if (existsSync("apps/api/prisma/schema.prisma")) return "apps/api/prisma/schema.prisma";
+  throw new Error("schema.prisma não encontrado em prisma/schema.prisma nem apps/api/prisma/schema.prisma");
+}
+
+function resolveSeedPath() {
+  if (existsSync("prisma/seed.js")) return "prisma/seed.js";
+  if (existsSync("apps/api/prisma/seed.js")) return "apps/api/prisma/seed.js";
+  throw new Error("seed.js não encontrado em prisma/seed.js nem apps/api/prisma/seed.js");
+}
+
 function ensurePrismaClientGenerated() {
   if (prismaClientExists()) {
     logStep("Prisma client já existe no runtime");
@@ -148,7 +161,8 @@ function ensurePrismaClientGenerated() {
   }
 
   logStep("Prisma client ausente no runtime; gerando client");
-  runStep("npx prisma generate --schema apps/api/prisma/schema.prisma", "prisma generate (fallback)");
+  const schemaPath = resolveSchemaPath();
+  runStep(`npx prisma generate --schema ${schemaPath}`, "prisma generate (fallback)");
 }
 
 async function loadRuntimeModules() {
@@ -166,7 +180,8 @@ async function start() {
   await waitForDatabase();
 
   ensurePrismaClientGenerated();
-  runStep("npx prisma migrate deploy --schema apps/api/prisma/schema.prisma", "prisma migrate deploy");
+  const schemaPath = resolveSchemaPath();
+  runStep(`npx prisma migrate deploy --schema ${schemaPath}`, "prisma migrate deploy");
 
   const { app, prisma, ensureSmokeBootstrap } = await loadRuntimeModules();
   await prisma.$connect();
@@ -175,7 +190,8 @@ async function start() {
   await ensureSmokeBootstrap();
 
   if (env.seedOnBootstrap) {
-    runStep("node apps/api/prisma/seed.js", "seed");
+    const seedPath = resolveSeedPath();
+    runStep(`node ${seedPath}`, "seed");
   } else {
     logStep("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }

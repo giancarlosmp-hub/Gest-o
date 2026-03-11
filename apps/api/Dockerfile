@@ -9,6 +9,7 @@ COPY packages/shared/package*.json ./packages/shared/
 RUN npm install
 
 COPY . .
+COPY apps/api/prisma ./apps/api/prisma
 
 # Garante geração explícita do Prisma Client durante o build da imagem.
 RUN npx prisma generate --schema=apps/api/prisma/schema.prisma
