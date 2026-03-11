@@ -1,104 +1,74 @@
-import bcrypt from "bcryptjs";
 import { prisma } from "../config/prisma.js";
-import { env } from "../config/env.js";
+import { seedDefaultUsers } from "./seedDefaultUsers.js";
+
+const DEFAULT_SELLER_EMAIL = "vendedor1@empresa.com";
+const DEFAULT_SMOKE_CLIENT_ID = "smoke-client-bootstrap";
+const DEFAULT_SMOKE_CLIENT_NAME = "[smoke] Cliente Bootstrap";
 
 export async function ensureSmokeBootstrap() {
-  if (!env.enableSmokeBootstrap) return;
+  await seedDefaultUsers();
 
-  const [usersCount, clientsCount, opportunitiesCount] = await Promise.all([
-    prisma.user.count(),
-    prisma.client.count(),
-    prisma.opportunity.count()
-  ]);
-
-  if (usersCount > 0 || clientsCount > 0 || opportunitiesCount > 0) {
-    console.log("Bootstrap smoke ignorado: base já possui dados", {
-      usersCount,
-      clientsCount,
-      opportunitiesCount
-    });
-    return;
+  const seller = await prisma.user.findUnique({ where: { email: DEFAULT_SELLER_EMAIL }, select: { id: true, email: true } });
+  if (!seller) {
+    throw new Error(`Seed seller not found: ${DEFAULT_SELLER_EMAIL}`);
   }
 
-  const passwordHash = await bcrypt.hash(env.smokeDirectorPassword, 10);
+  const existingClient = await prisma.client.findUnique({ where: { id: DEFAULT_SMOKE_CLIENT_ID }, select: { id: true } });
 
-  const director = await prisma.user.upsert({
-    where: { email: env.smokeDirectorEmail },
-    update: {
-      name: "Diretor Smoke",
-      role: "diretor",
-      region: "Nacional",
-      isActive: true,
-      passwordHash
-    },
-    create: {
-      name: "Diretor Smoke",
-      email: env.smokeDirectorEmail,
-      role: "diretor",
-      region: "Nacional",
-      isActive: true,
-      passwordHash
-    }
-  });
+  if (existingClient) {
+    await prisma.client.update({
+      where: { id: DEFAULT_SMOKE_CLIENT_ID },
+      data: {
+        name: DEFAULT_SMOKE_CLIENT_NAME,
+        city: "São Paulo",
+        state: "SP",
+        region: "Sudeste",
+        ownerSellerId: seller.id,
+        clientType: "PJ"
+      }
+    });
+    console.log(`Seed client already exists: ${DEFAULT_SMOKE_CLIENT_ID}`);
+  } else {
+    await prisma.client.create({
+      data: {
+        id: DEFAULT_SMOKE_CLIENT_ID,
+        name: DEFAULT_SMOKE_CLIENT_NAME,
+        city: "São Paulo",
+        state: "SP",
+        region: "Sudeste",
+        ownerSellerId: seller.id,
+        clientType: "PJ"
+      }
+    });
+    console.log(`Seed client created: ${DEFAULT_SMOKE_CLIENT_ID}`);
+  }
 
-  const seller = await prisma.user.upsert({
-    where: { email: env.smokeSellerEmail },
-    update: {
-      name: "Vendedor Smoke",
-      role: "vendedor",
-      region: "Sudeste",
-      isActive: true
-    },
-    create: {
-      name: "Vendedor Smoke",
-      email: env.smokeSellerEmail,
-      role: "vendedor",
-      region: "Sudeste",
-      isActive: true,
-      passwordHash
-    }
-  });
-
-  await prisma.client.upsert({
-    where: { id: "smoke-client-bootstrap" },
-    update: {
-      name: "[smoke] Cliente Bootstrap",
-      city: "São Paulo",
-      state: "SP",
-      region: "Sudeste",
-      ownerSellerId: seller.id,
-      clientType: "PJ"
-    },
-    create: {
-      id: "smoke-client-bootstrap",
-      name: "[smoke] Cliente Bootstrap",
-      city: "São Paulo",
-      state: "SP",
-      region: "Sudeste",
-      ownerSellerId: seller.id,
-      clientType: "PJ"
-    }
-  });
-
-  await prisma.goal.upsert({
+  const month = new Date().toISOString().slice(0, 7);
+  const existingGoal = await prisma.goal.findUnique({
     where: {
       sellerId_month: {
         sellerId: seller.id,
-        month: new Date().toISOString().slice(0, 7)
+        month
       }
     },
-    update: {
-      targetValue: 100000
-    },
-    create: {
-      sellerId: seller.id,
-      month: new Date().toISOString().slice(0, 7),
-      targetValue: 100000
-    }
+    select: { id: true }
   });
 
+  if (existingGoal) {
+    console.log(`Seed goal already exists: ${seller.email} (${month})`);
+  } else {
+    await prisma.goal.create({
+      data: {
+        sellerId: seller.id,
+        month,
+        targetValue: 100000
+      }
+    });
+    console.log(`Seed goal created: ${seller.email} (${month})`);
+  }
+
   console.log("Bootstrap smoke garantido", {
-    directorEmail: director.email,
-    sellerEmail: seller.email
+    sellerEmail: seller.email,
+    month
   });
 }

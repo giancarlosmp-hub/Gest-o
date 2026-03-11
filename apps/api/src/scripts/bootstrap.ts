@@ -35,7 +35,11 @@ function runStep(command: string, label: string) {
 async function start() {
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-  await ensureSmokeBootstrap();
+  if (env.enableSmokeBootstrap) {
+    await ensureSmokeBootstrap();
+  } else {
+    console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
+  }
 
   if (env.seedOnBootstrap) {
     runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
