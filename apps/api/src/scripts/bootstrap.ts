@@ -8,6 +8,12 @@ import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
 
+function ensureDatabaseUrlFromEnvironment() {
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
+    throw new Error("DATABASE_URL não definida no ambiente");
+  }
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -34,6 +40,7 @@ function runStep(command: string, label: string) {
 }
 
 async function start() {
+  ensureDatabaseUrlFromEnvironment();
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
   await ensureAdminBootstrap();
