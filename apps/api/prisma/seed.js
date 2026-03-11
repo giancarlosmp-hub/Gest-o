@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
+import { hashPassword, verifyPassword } from "../src/utils/password.ts";
 
 const prisma = new PrismaClient();
 
@@ -7,7 +7,7 @@ async function upsertUser(name, email, role, region) {
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
 
   if (!existing) {
-    const passwordHash = await bcrypt.hash("123456", 10);
+    const passwordHash = await hashPassword("123456");
     const createdUser = await prisma.user.create({
       data: { name, email, role, region, passwordHash, isActive: true }
     });
@@ -15,9 +15,9 @@ async function upsertUser(name, email, role, region) {
     return createdUser;
   }
 
-  const hasDefaultPassword = await bcrypt.compare("123456", existing.passwordHash).catch(() => false);
+  const hasDefaultPassword = await verifyPassword("123456", existing.passwordHash);
   if (!hasDefaultPassword) {
-    const passwordHash = await bcrypt.hash("123456", 10);
+    const passwordHash = await hashPassword("123456");
     const refreshedUser = await prisma.user.update({
       where: { id: existing.id },
       data: { name, role, region, passwordHash, isActive: true }
