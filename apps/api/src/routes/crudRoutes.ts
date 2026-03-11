@@ -29,6 +29,7 @@ import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
 import { z } from "zod";
+import { hashPassword } from "../utils/password.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -5642,8 +5643,7 @@ router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) =>
 router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
 router.post("/users", authorize("diretor"), validateBody(userCreateSchema), async (req, res) => {
   const { name, email, password, role, region } = req.body;
-  const bcrypt = await import("bcryptjs");
-  const passwordHash = await bcrypt.default.hash(password, 10);
+  const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({ data: { name, email, passwordHash, role, region } });
   return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: { id: user.id, email: user.email } });
 });
@@ -5662,8 +5662,7 @@ router.put("/users/:id", authorize("diretor"), validateBody(userUpdateSchema), a
     const data: Record<string, unknown> = { name, email, role, region };
 
     if (typeof password === "string" && password.trim().length > 0) {
-      const bcrypt = await import("bcryptjs");
-      data.passwordHash = await bcrypt.default.hash(password, 10);
+      data.passwordHash = await hashPassword(password);
     }
 
     const updated = await prisma.user.update({
@@ -5712,8 +5711,7 @@ router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdat
 router.post("/users/:id/reset-password", authorize("diretor"), validateBody(userResetPasswordSchema), async (req, res) => {
   const temporaryPasswordLength = req.body.temporaryPasswordLength ?? 12;
   const temporaryPassword = randomBytes(temporaryPasswordLength).toString("base64url").slice(0, temporaryPasswordLength);
-  const bcrypt = await import("bcryptjs");
-  const passwordHash = await bcrypt.default.hash(temporaryPassword, 10);
+  const passwordHash = await hashPassword(temporaryPassword);
 
   const updatedUser = await prisma.user.update({
     where: { id: req.params.id },
