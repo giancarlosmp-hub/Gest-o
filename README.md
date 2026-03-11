@@ -73,6 +73,18 @@ Esperado:
 - `curl http://localhost:4000/health` retorna HTTP 200.
 - Login retorna HTTP 200 com usuário `diretor@empresa.com`.
 
+
+## Deploy em Produção
+Sempre usar: `bash deploy.sh`
+Nunca usar: `docker compose up --build` (sem `-v`)
+
+## Variáveis obrigatórias no .env
+```bash
+FRONTEND_URL=https://crm.demetraagronegocios.com.br
+CORS_ALLOWED_ORIGINS=https://crm.demetraagronegocios.com.br
+VITE_API_URL=https://crm.demetraagronegocios.com.br/api
+```
+
 ## Rodar local (sem Docker)
 1. Suba um PostgreSQL local.
 2. Copie `.env.example` para `.env` e ajuste `DATABASE_URL`.
