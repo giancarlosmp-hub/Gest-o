@@ -3,6 +3,7 @@ import { app } from "../app.js";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
+import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 
 const MAX_DB_RETRIES = 30;
 const RETRY_DELAY_MS = 2000;
@@ -35,6 +36,7 @@ function runStep(command: string, label: string) {
 async function start() {
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+  await ensureAdminBootstrap();
   if (env.enableSmokeBootstrap) {
     await ensureSmokeBootstrap();
   } else {
