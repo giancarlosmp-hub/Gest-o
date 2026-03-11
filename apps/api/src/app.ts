@@ -12,6 +12,10 @@ import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 
 export const app = express();
 
+if (env.isProduction) {
+  app.set("trust proxy", 1);
+}
+
 let _tcCache: { data: object; expiresAt: number } | null = null;
 
 app.use(helmet());

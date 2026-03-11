@@ -2,8 +2,9 @@ import { Request, Response } from "express";
 import { prisma } from "../config/prisma.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import { verifyPassword } from "../utils/password.js";
+import { env } from "../config/env.js";
 
-const cookieConfig = { httpOnly: true, sameSite: "lax" as const, secure: false, maxAge: 7 * 24 * 60 * 60 * 1000 };
+const cookieConfig = { httpOnly: true, sameSite: "lax" as const, secure: env.isProduction, maxAge: 7 * 24 * 60 * 60 * 1000 };
 
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
