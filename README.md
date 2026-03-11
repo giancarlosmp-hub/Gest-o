@@ -35,13 +35,18 @@ Acesse:
 ### Variáveis de produção (VPS)
 No ambiente de produção, defina no `.env` (ou no provedor de deploy):
 ```bash
+NODE_ENV=production
 FRONTEND_URL=https://crm.seudominio.com
 CORS_ALLOWED_ORIGINS=https://crm.seudominio.com
 VITE_API_URL=/api
+JWT_ACCESS_SECRET=<segredo-forte>
+JWT_REFRESH_SECRET=<segredo-forte-diferente>
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
+- No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
+- O serviço `web` depende de `api` com `condition: service_started` para não bloquear a stack por falso `unhealthy` quando apenas o healthcheck do backend oscilar.
 
 ### Publicar CRM com Nginx no VPS
 Para configurar o domínio `crm.demetraagronegocios.com.br` com proxy para o frontend em `127.0.0.1:5173` e API em `127.0.0.1:4000` via `/api`, execute:
