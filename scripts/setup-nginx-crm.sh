@@ -3,6 +3,7 @@ set -e
 
 DOMAIN="crm.demetraagronegocios.com.br"
 UPSTREAM="http://127.0.0.1:5173"
+API_UPSTREAM="http://127.0.0.1:4000"
 NGINX_SITE_PATH="/etc/nginx/sites-available/crm"
 NGINX_ENABLED_PATH="/etc/nginx/sites-enabled/crm"
 NGINX_DEFAULT_ENABLED="/etc/nginx/sites-enabled/default"
@@ -32,6 +33,15 @@ $SUDO tee "$NGINX_SITE_PATH" >/dev/null <<NGINX_CONF
 server {
     listen 80;
     server_name ${DOMAIN};
+
+    location /api/ {
+        proxy_pass ${API_UPSTREAM}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
 
     location / {
         proxy_pass ${UPSTREAM};

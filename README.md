@@ -37,14 +37,14 @@ No ambiente de produção, defina no `.env` (ou no provedor de deploy):
 ```bash
 FRONTEND_URL=https://crm.seudominio.com
 CORS_ALLOWED_ORIGINS=https://crm.seudominio.com
-VITE_API_URL=https://api.seudominio.com
+VITE_API_URL=/api
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
-- Sem `VITE_API_URL`, o fallback para `http://localhost:4000` ocorre apenas em desenvolvimento (`npm run dev`).
-- Em produção, não deixe essas variáveis apontando para `localhost`.
+- Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
+- Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 
 ### Publicar CRM com Nginx no VPS
-Para configurar o domínio `crm.demetraagronegocios.com.br` com proxy para o frontend em `127.0.0.1:5173`, execute:
+Para configurar o domínio `crm.demetraagronegocios.com.br` com proxy para o frontend em `127.0.0.1:5173` e API em `127.0.0.1:4000` via `/api`, execute:
 
 ```bash
 bash scripts/setup-nginx-crm.sh
