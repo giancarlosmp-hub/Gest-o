@@ -94,6 +94,23 @@ SEED_ON_BOOTSTRAP=true
 ```
 
 
+### Bootstrap administrativo opcional (produção)
+Para garantir automaticamente um usuário diretor inicial no startup da API (modo idempotente), configure:
+
+```bash
+ADMIN_BOOTSTRAP_ENABLED=true
+ADMIN_BOOTSTRAP_NAME="Diretor Produção"
+ADMIN_BOOTSTRAP_EMAIL="diretor@seudominio.com"
+ADMIN_BOOTSTRAP_PASSWORD="TroqueAgora#2026"
+ADMIN_BOOTSTRAP_ROLE="diretor"
+ADMIN_BOOTSTRAP_REGION="Nacional"
+```
+
+Comportamento:
+- `ADMIN_BOOTSTRAP_ENABLED=false` (ou ausente): não faz nada;
+- `true`: busca por e-mail; cria se não existir; atualiza `name`, `passwordHash`, `role`, `region` e `isActive=true` se já existir;
+- não cria usuário duplicado.
+
 ### Bootstrap mínimo para compose-smoke
 O compose padrão habilita `ENABLE_SMOKE_BOOTSTRAP=true` para garantir um usuário técnico de login e um vendedor/cliente mínimos do smoke test de forma **idempotente** (sem `deleteMany`).
 Isso não executa o seed destrutivo e não reseta dados reais.
