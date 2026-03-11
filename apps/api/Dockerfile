@@ -8,9 +8,10 @@ COPY apps/api/package*.json ./apps/api/
 COPY packages/shared/package*.json ./packages/shared/
 RUN npm install
 
+COPY apps/api/prisma ./apps/api/prisma
 COPY . .
 RUN npm run build -w @salesforce-pro/shared \
-  && npm run prisma:generate -w @salesforce-pro/api \
+  && npx prisma generate --schema=apps/api/prisma/schema.prisma \
   && npm run build -w @salesforce-pro/api
 
 FROM node:20-alpine AS runtime
@@ -20,6 +21,8 @@ RUN apk add --no-cache openssl ca-certificates tini
 
 COPY --from=build /app/package*.json ./
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=build /app/apps/api/package*.json ./apps/api/
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/prisma ./apps/api/prisma
