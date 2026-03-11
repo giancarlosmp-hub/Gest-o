@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { URL } from "node:url";
 import { env } from "../config/env.js";
@@ -132,6 +133,24 @@ async function waitForDatabase() {
   }
 }
 
+
+function prismaClientExists() {
+  return (
+    existsSync("node_modules/.prisma/client") &&
+    existsSync("node_modules/@prisma/client")
+  );
+}
+
+function ensurePrismaClientGenerated() {
+  if (prismaClientExists()) {
+    logStep("Prisma client já existe no runtime");
+    return;
+  }
+
+  logStep("Prisma client ausente no runtime; gerando client");
+  runStep("npx prisma generate --schema apps/api/prisma/schema.prisma", "prisma generate (fallback)");
+}
+
 async function loadRuntimeModules() {
   const [{ app }, { prisma }, { ensureSmokeBootstrap }] = await Promise.all([
     import("../app.js"),
@@ -146,8 +165,8 @@ async function start() {
   validateEnvironment();
   await waitForDatabase();
 
-  runStep("npx prisma generate --schema prisma/schema.prisma", "prisma generate");
-  runStep("npx prisma migrate deploy --schema prisma/schema.prisma", "prisma migrate deploy");
+  ensurePrismaClientGenerated();
+  runStep("npx prisma migrate deploy --schema apps/api/prisma/schema.prisma", "prisma migrate deploy");
 
   const { app, prisma, ensureSmokeBootstrap } = await loadRuntimeModules();
   await prisma.$connect();
@@ -156,7 +175,7 @@ async function start() {
   await ensureSmokeBootstrap();
 
   if (env.seedOnBootstrap) {
-    runStep("node prisma/seed.js", "seed");
+    runStep("node apps/api/prisma/seed.js", "seed");
   } else {
     logStep("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }
