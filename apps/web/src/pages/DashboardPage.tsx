@@ -935,7 +935,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-col gap-2 sm:items-end">
         <Link
           to="/dashboard/score-comercial"
           className="rounded-lg border border-brand-300 bg-white px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50"

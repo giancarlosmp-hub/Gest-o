@@ -100,25 +100,36 @@ export default function AppLayout() {
         </div>
       )}
 
-      <main className="flex-1">
-        <header className="border-b border-brand-100 bg-white px-4 py-3 flex items-center justify-between">
-          <button
-            className="rounded-md p-1 text-brand-700 md:hidden"
-            onClick={() => setOpen(true)}
-            aria-label="Abrir menu"
-          >
-            <Menu />
-          </button>
+      <main className="min-w-0 flex-1">
+        <header className="border-b border-brand-100 bg-white px-3 py-3 sm:px-4">
+          <div className="flex items-center gap-2 md:hidden">
+            <button
+              className="rounded-md p-1 text-brand-700 md:hidden"
+              onClick={() => setOpen(true)}
+              aria-label="Abrir menu"
+            >
+              <Menu />
+            </button>
 
-          <BrandLogo size="header" textClassName="text-brand-700" className="md:hidden" />
+            <BrandLogo size="header" textClassName="text-brand-700" className="min-w-0 md:hidden" />
 
-          <div className="ml-auto flex items-center gap-3">
-            <div className="text-sm text-slate-700">
-              <strong>{user?.name}</strong> ({user?.role})
+            <button
+              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800 md:hidden"
+              onClick={logout}
+            >
+              <LogOut size={16} />
+              <span className="hidden xs:inline">Logout</span>
+            </button>
+          </div>
+
+          <div className="mt-2 flex min-w-0 items-center justify-between gap-2 md:mt-0 md:justify-end md:gap-3">
+            <div className="min-w-0 text-sm text-slate-700 md:text-right">
+              <strong className="block truncate">{user?.name}</strong>
+              <span className="block truncate text-xs text-slate-500">Perfil: {user?.role}</span>
             </div>
 
             <button
-              className="inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800"
+              className="hidden items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800 md:inline-flex"
               onClick={logout}
             >
               <LogOut size={16} />
@@ -127,7 +138,7 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <div className="p-4">
+        <div className="p-3 sm:p-4">
           <Outlet />
         </div>
       </main>
