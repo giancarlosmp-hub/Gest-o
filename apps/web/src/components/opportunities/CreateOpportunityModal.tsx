@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 
@@ -21,7 +21,13 @@ type FormState = {
   ownerSellerId: string;
 };
 
-type ClientOption = { id: string; name: string };
+type ClientOption = {
+  id: string;
+  name: string;
+  city?: string | null;
+  state?: string | null;
+  cnpj?: string | null;
+};
 type SellerOption = { id: string; name: string };
 
 type CreateOpportunityModalProps = {
@@ -73,6 +79,8 @@ export default function CreateOpportunityModal({
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
+  const [clientSearch, setClientSearch] = useState("");
+  const [isClientDropdownOpen, setIsClientDropdownOpen] = useState(false);
   const [quickClient, setQuickClient] = useState({
     name: "",
     city: "",
@@ -90,8 +98,47 @@ export default function CreateOpportunityModal({
     setIsQuickCreateOpen(false);
     setIsCreatingClient(false);
     setQuickCreateError(null);
+    setClientSearch("");
+    setIsClientDropdownOpen(false);
     setQuickClient({ name: "", city: "", state: "", region: "" });
   }, [open]);
+
+  const selectedClient = useMemo(() => clients.find((client) => client.id === form.clientId) || null, [clients, form.clientId]);
+
+  const formatClientLocation = (client: ClientOption) => {
+    const city = client.city?.trim();
+    const state = client.state?.trim()?.toUpperCase();
+    if (city && state) return `${city}/${state}`;
+    if (city) return city;
+    if (state) return state;
+    return "Cidade não informada";
+  };
+
+  const formatClientLabel = (client: ClientOption) => `${client.name} — ${formatClientLocation(client)}`;
+
+  useEffect(() => {
+    if (!selectedClient) return;
+    setClientSearch(formatClientLabel(selectedClient));
+  }, [selectedClient]);
+
+  const normalizeText = (value?: string | null) =>
+    (value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  const filteredClients = useMemo(() => {
+    const term = normalizeText(clientSearch.trim());
+    if (!term) return clients;
+
+    return clients.filter((client) => {
+      const searchableCnpj = (client.cnpj || "").replace(/\D/g, "");
+      const searchableTermDigits = term.replace(/\D/g, "");
+
+      return [client.name, client.city, client.state, client.cnpj].some((value) => normalizeText(value).includes(term))
+        || Boolean(searchableTermDigits && searchableCnpj.includes(searchableTermDigits));
+    });
+  }, [clientSearch, clients]);
 
   const handleQuickCreateClient = async () => {
     const payload = {
@@ -148,10 +195,41 @@ export default function CreateOpportunityModal({
                 <div className="space-y-2">
                   <label className="space-y-1">
                     <span className={labelClassName}>Cliente *</span>
-                    <select required className={fieldClassName} value={form.clientId} onChange={(e) => onFormChange({ ...form, clientId: e.target.value })}>
-                      <option value="">Selecione o cliente</option>
-                      {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                    </select>
+                    <div className="relative">
+                      <input
+                        className={fieldClassName}
+                        value={clientSearch}
+                        onFocus={() => setIsClientDropdownOpen(true)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setClientSearch(value);
+                          setIsClientDropdownOpen(true);
+                          if (form.clientId) onFormChange({ ...form, clientId: "" });
+                        }}
+                        placeholder="Pesquisar por nome, cidade, UF ou CNPJ"
+                      />
+                      <input required tabIndex={-1} className="sr-only" value={form.clientId} onChange={() => undefined} aria-hidden />
+                      {isClientDropdownOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                          {filteredClients.length ? filteredClients.map((client) => (
+                            <button
+                              key={client.id}
+                              type="button"
+                              className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                onFormChange({ ...form, clientId: client.id });
+                                setClientSearch(formatClientLabel(client));
+                                setIsClientDropdownOpen(false);
+                              }}
+                            >
+                              <p className="text-sm text-slate-900">{formatClientLabel(client)}</p>
+                              {client.cnpj ? <p className="text-xs text-slate-500">CNPJ: {client.cnpj}</p> : null}
+                            </button>
+                          )) : <p className="px-3 py-2 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
+                        </div>
+                      ) : null}
+                    </div>
                   </label>
                   <button
                     type="button"
