@@ -70,6 +70,19 @@ const cityByRegion = {
 };
 
 async function main() {
+  const realUsersCount = await prisma.user.count({
+    where: {
+      email: {
+        contains: "@demetraagronegocios.com.br"
+      }
+    }
+  });
+
+  if (realUsersCount > 0) {
+    console.log("Usuários reais encontrados, pulando seed padrão.");
+    return;
+  }
+
   await prisma.appConfig.upsert({
     where: { key: "weeklyVisitGoal" },
     update: { value: "25" },
