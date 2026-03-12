@@ -44,7 +44,13 @@ type Opportunity = {
   expectedTicketPerHa?: number | null;
 };
 
-type Client = { id: string; name: string };
+type Client = {
+  id: string;
+  name: string;
+  city?: string | null;
+  state?: string | null;
+  cnpj?: string | null;
+};
 type Summary = {
   pipelineTotal: number;
   weightedTotal: number;
@@ -685,7 +691,13 @@ export default function OpportunitiesPage() {
         ownerSellerId
       });
 
-      const createdClient = { id: response.data.id, name: response.data.name };
+      const createdClient = {
+        id: response.data.id,
+        name: response.data.name,
+        city: response.data.city,
+        state: response.data.state,
+        cnpj: response.data.cnpj
+      };
       setClients((current) => {
         const next = [...current, createdClient];
         return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
