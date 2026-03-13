@@ -274,6 +274,14 @@ const normalizeStageInput = (stage?: string) => {
 };
 
 const getStageFilter = (stage?: string) => normalizeStageInput(stage);
+const closedOpportunityEditSchema = z.object({
+  title: z.string().trim().min(1).max(255).optional(),
+  value: z.coerce.number().finite().nonnegative().optional(),
+  crop: z.string().trim().max(100).nullable().optional(),
+  season: z.string().trim().max(100).nullable().optional(),
+  stage: z.enum(CLOSED_STAGE_VALUES).optional()
+}).refine((payload) => Object.keys(payload).length > 0, { message: "Nenhum campo para atualização foi informado." });
+
 type OpportunityStatusFilter = "open" | "closed" | "all";
 const getOpportunityStatusFilter = (status?: string): OpportunityStatusFilter | undefined => {
   if (!status) return "open";
@@ -4436,6 +4444,117 @@ router.patch("/opportunities/:id/close", async (req, res) => {
       message: "Não foi possível encerrar a oportunidade. Verifique as regras de negócio e tente novamente."
     });
   }
+});
+
+router.patch("/opportunities/:id/closed-report", async (req, res) => {
+  const parsed = closedOpportunityEditSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido para edição." });
+  }
+
+  const existingOpportunity = await prisma.opportunity.findFirst({
+    where: {
+      id: req.params.id,
+      ...sellerWhere(req),
+      stage: { in: ["ganho", "perdido"] }
+    },
+    include: {
+      client: {
+        select: { id: true, name: true, city: true, state: true }
+      },
+      ownerSeller: {
+        select: { id: true, name: true }
+      }
+    }
+  });
+
+  if (!existingOpportunity) {
+    return res.status(404).json({ message: "Oportunidade encerrada não encontrada." });
+  }
+
+  const nextValues = parsed.data;
+  const normalizedCrop = nextValues.crop === undefined ? undefined : (nextValues.crop?.trim() || null);
+  const normalizedSeason = nextValues.season === undefined ? undefined : (nextValues.season?.trim() || null);
+
+  const changedFields: Array<{ field: string; oldValue: string | null; newValue: string | null }> = [];
+
+  if (nextValues.title !== undefined && nextValues.title !== existingOpportunity.title) {
+    changedFields.push({ field: "title", oldValue: existingOpportunity.title, newValue: nextValues.title });
+  }
+  if (nextValues.value !== undefined && nextValues.value !== existingOpportunity.value) {
+    changedFields.push({ field: "value", oldValue: String(existingOpportunity.value), newValue: String(nextValues.value) });
+  }
+  if (normalizedCrop !== undefined && normalizedCrop !== existingOpportunity.crop) {
+    changedFields.push({ field: "crop", oldValue: existingOpportunity.crop, newValue: normalizedCrop });
+  }
+  if (normalizedSeason !== undefined && normalizedSeason !== existingOpportunity.season) {
+    changedFields.push({ field: "season", oldValue: existingOpportunity.season, newValue: normalizedSeason });
+  }
+  if (nextValues.stage !== undefined && nextValues.stage !== existingOpportunity.stage) {
+    changedFields.push({ field: "stage", oldValue: existingOpportunity.stage, newValue: nextValues.stage });
+  }
+
+  if (!changedFields.length) {
+    return res.status(200).json({
+      message: "Nenhuma alteração detectada.",
+      opportunity: serializeOpportunity(existingOpportunity, getUtcTodayStart())
+    });
+  }
+
+  const actorId = req.user?.id;
+  if (!actorId) {
+    return res.status(401).json({ message: "Usuário autenticado não encontrado." });
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const updatedOpportunity = await tx.opportunity.update({
+      where: { id: req.params.id },
+      data: {
+        ...(nextValues.title !== undefined ? { title: nextValues.title } : {}),
+        ...(nextValues.value !== undefined ? { value: nextValues.value } : {}),
+        ...(normalizedCrop !== undefined ? { crop: normalizedCrop } : {}),
+        ...(normalizedSeason !== undefined ? { season: normalizedSeason } : {}),
+        ...(nextValues.stage !== undefined ? { stage: nextValues.stage } : {})
+      },
+      include: {
+        client: {
+          select: { id: true, name: true, city: true, state: true }
+        },
+        ownerSeller: {
+          select: { id: true, name: true }
+        }
+      }
+    });
+
+    await tx.opportunityChangeLog.createMany({
+      data: changedFields.map((fieldChange) => ({
+        opportunityId: updatedOpportunity.id,
+        actorId,
+        field: fieldChange.field,
+        oldValue: fieldChange.oldValue,
+        newValue: fieldChange.newValue
+      }))
+    });
+
+    await Promise.all(changedFields.map((fieldChange) =>
+      tx.timelineEvent.create({
+        data: {
+          type: fieldChange.field === "stage" ? "mudanca_etapa" : "status",
+          description: `Edição de oportunidade encerrada: ${fieldChange.field} de '${fieldChange.oldValue ?? "—"}' para '${fieldChange.newValue ?? "—"}'`,
+          opportunityId: updatedOpportunity.id,
+          clientId: updatedOpportunity.clientId,
+          ownerSellerId: updatedOpportunity.ownerSellerId
+        }
+      })
+    ));
+
+    return updatedOpportunity;
+  });
+
+  return res.json({
+    message: "Oportunidade encerrada atualizada com sucesso.",
+    opportunity: serializeOpportunity(updated, getUtcTodayStart())
+  });
 });
 
 router.post("/opportunities/import", async (req, res) => {
