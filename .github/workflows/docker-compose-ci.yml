@@ -34,6 +34,9 @@ jobs:
         run: npm run typecheck
 
       - name: Build and start stack
+        env:
+          ENABLE_SMOKE_BOOTSTRAP: "true"
+          SEED_ON_BOOTSTRAP: "true"
         run: docker compose up -d --build
 
       - name: Print API logs on failure
