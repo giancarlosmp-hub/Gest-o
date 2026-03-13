@@ -47,6 +47,15 @@ export async function ensureAdminBootstrap() {
     return;
   }
 
+  const realUsersCount = await prisma.user.count({
+    where: { email: { contains: '@demetraagronegocios.com.br' } }
+  });
+
+  if (realUsersCount > 0) {
+    console.log('Produção detectada, pulando admin bootstrap.');
+    return;
+  }
+
   const config = getAdminBootstrapConfig();
   const passwordHash = await hashPassword(config.password);
 

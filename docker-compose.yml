@@ -30,8 +30,9 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://crm.demetraagronegocios.com.br}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super-access}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super-refresh}
-      SEED_ON_BOOTSTRAP: "false"
-      ENABLE_SMOKE_BOOTSTRAP: "true"
+      SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
+      ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}
+      ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-false}
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:

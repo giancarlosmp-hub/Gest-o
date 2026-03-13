@@ -6,6 +6,15 @@ const DEFAULT_SMOKE_CLIENT_ID = "smoke-client-bootstrap";
 const DEFAULT_SMOKE_CLIENT_NAME = "[smoke] Cliente Bootstrap";
 
 export async function ensureSmokeBootstrap() {
+  const realUsersCount = await prisma.user.count({
+    where: { email: { contains: '@demetraagronegocios.com.br' } }
+  });
+
+  if (realUsersCount > 0) {
+    console.log('Produção detectada, pulando smoke bootstrap.');
+    return;
+  }
+
   await seedDefaultUsers();
 
   const seller = await prisma.user.findUnique({ where: { email: DEFAULT_SELLER_EMAIL }, select: { id: true, email: true } });
