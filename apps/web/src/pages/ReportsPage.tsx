@@ -11,7 +11,10 @@ import {
   Tooltip,
   type ChartOptions
 } from "chart.js";
+import { toast } from "sonner";
 import api from "../lib/apiClient";
+import { useAuth } from "../context/AuthContext";
+import { getApiErrorMessage } from "../lib/apiError";
 import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
@@ -87,6 +90,13 @@ type ClosedFilters = {
 };
 
 type SelectOption = { id: string; name: string };
+type ClosedEditForm = {
+  title: string;
+  value: string;
+  crop: string;
+  season: string;
+  stage: ClosedOpportunityStage;
+};
 
 const toDateInput = (date: Date) => {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -140,6 +150,7 @@ const monthLabel = (value: string) => {
 };
 
 export default function ReportsPage() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const [report, setReport] = useState<AgroCrmResponse | null>(null);
   const [closedFilters, setClosedFilters] = useState<ClosedFilters>(getClosedDefaultFilters);
@@ -149,17 +160,65 @@ export default function ReportsPage() {
   const [closedSummary, setClosedSummary] = useState<ClosedSummaryResponse | null>(null);
   const [sellerOptions, setSellerOptions] = useState<SelectOption[]>([]);
   const [clientOptions, setClientOptions] = useState<SelectOption[]>([]);
+  const [editingClosed, setEditingClosed] = useState<ClosedOpportunity | null>(null);
+  const [closedEditForm, setClosedEditForm] = useState<ClosedEditForm | null>(null);
+  const [isSavingClosedEdit, setIsSavingClosedEdit] = useState(false);
 
-  useEffect(() => {
+  const canEditClosedOpportunities = user?.role === "diretor" || user?.role === "gerente" || user?.role === "vendedor";
+
+  const buildReportParams = () => {
     const params = new URLSearchParams();
     const filterKeys = ["ownerSellerId", "ownerId", "clientId", "crop", "season", "dateFrom", "dateTo", "search", "overdue"];
     filterKeys.forEach((key) => {
       const value = searchParams.get(key);
       if (value) params.set(key, value);
     });
+    return params;
+  };
 
+  const refreshAgroReport = async () => {
+    const params = buildReportParams();
     const reportUrl = params.toString() ? `/reports/agro-crm?${params.toString()}` : "/reports/agro-crm";
-    api.get<AgroCrmResponse>(reportUrl).then((response) => setReport(response.data));
+    const response = await api.get<AgroCrmResponse>(reportUrl);
+    setReport(response.data);
+  };
+
+  const refreshClosedData = async () => {
+    setClosedLoading(true);
+    const params = new URLSearchParams({
+      status: "closed",
+      page: String(closedTotals.page),
+      pageSize: String(closedTotals.pageSize)
+    });
+
+    Object.entries(closedFilters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+
+    const summaryParams = new URLSearchParams(params);
+    summaryParams.delete("page");
+    summaryParams.delete("pageSize");
+
+    try {
+      const [paginatedResponse, summaryResponse] = await Promise.all([
+        api.get<PaginatedClosedOpportunitiesResponse>(`/opportunities?${params.toString()}`),
+        api.get<ClosedSummaryResponse>(`/opportunities/summary?${summaryParams.toString()}`)
+      ]);
+      setClosedItems(paginatedResponse.data.items || []);
+      setClosedSummary(summaryResponse.data || null);
+      setClosedTotals({
+        total: paginatedResponse.data.total,
+        page: paginatedResponse.data.page,
+        pageSize: paginatedResponse.data.pageSize,
+        totalPages: paginatedResponse.data.totalPages
+      });
+    } finally {
+      setClosedLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshAgroReport();
     Promise.all([api.get("/users"), api.get("/clients")]).then(([usersRes, clientsRes]) => {
       const users = Array.isArray(usersRes.data) ? usersRes.data : [];
       const sellers = users.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
@@ -176,37 +235,52 @@ export default function ReportsPage() {
   }, [closedFilters]);
 
   useEffect(() => {
-    setClosedLoading(true);
-    const params = new URLSearchParams({
-      status: "closed",
-      page: String(closedTotals.page),
-      pageSize: String(closedTotals.pageSize)
-    });
-
-    Object.entries(closedFilters).forEach(([key, value]) => {
-      if (value) params.set(key, value);
-    });
-
-    const summaryParams = new URLSearchParams(params);
-    summaryParams.delete("page");
-    summaryParams.delete("pageSize");
-
-    Promise.all([
-      api.get<PaginatedClosedOpportunitiesResponse>(`/opportunities?${params.toString()}`),
-      api.get<ClosedSummaryResponse>(`/opportunities/summary?${summaryParams.toString()}`)
-    ])
-      .then(([paginatedResponse, summaryResponse]) => {
-        setClosedItems(paginatedResponse.data.items || []);
-        setClosedSummary(summaryResponse.data || null);
-        setClosedTotals({
-          total: paginatedResponse.data.total,
-          page: paginatedResponse.data.page,
-          pageSize: paginatedResponse.data.pageSize,
-          totalPages: paginatedResponse.data.totalPages
-        });
-      })
-      .finally(() => setClosedLoading(false));
+    refreshClosedData();
   }, [closedFilters, closedTotals.page, closedTotals.pageSize]);
+
+  const openClosedEditModal = (opportunity: ClosedOpportunity) => {
+    setEditingClosed(opportunity);
+    setClosedEditForm({
+      title: opportunity.title,
+      value: String(opportunity.value),
+      crop: opportunity.crop || "",
+      season: opportunity.season || "",
+      stage: opportunity.stage
+    });
+  };
+
+  const closeClosedEditModal = () => {
+    setEditingClosed(null);
+    setClosedEditForm(null);
+    setIsSavingClosedEdit(false);
+  };
+
+  const handleSaveClosedEdit = async () => {
+    if (!editingClosed || !closedEditForm) return;
+
+    const valueAsNumber = Number(closedEditForm.value.replace(",", "."));
+    if (!Number.isFinite(valueAsNumber) || valueAsNumber < 0) {
+      toast.error("Informe um valor válido para a oportunidade.");
+      return;
+    }
+
+    setIsSavingClosedEdit(true);
+    try {
+      await api.patch(`/opportunities/${editingClosed.id}/closed-report`, {
+        title: closedEditForm.title.trim(),
+        value: valueAsNumber,
+        crop: closedEditForm.crop.trim() || null,
+        season: closedEditForm.season.trim() || null,
+        stage: closedEditForm.stage
+      });
+      await Promise.all([refreshClosedData(), refreshAgroReport()]);
+      toast.success("Oportunidade encerrada atualizada com sucesso.");
+      closeClosedEditModal();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível salvar as alterações."));
+      setIsSavingClosedEdit(false);
+    }
+  };
 
   const totals = useMemo(() => ({
     pipeline: report?.summary.pipelineTotal || 0,
@@ -481,13 +555,14 @@ export default function ReportsPage() {
                 <th className="py-2 pr-3 font-medium">Safra</th>
                 <th className="py-2 pr-3 font-medium">Etapa</th>
                 <th className="py-2 pr-3 font-medium">Valor</th>
+                <th className="py-2 pr-3 font-medium text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {closedLoading ? (
-                <tr><td colSpan={7} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
+                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
               ) : closedItems.length === 0 ? (
-                <tr><td colSpan={7} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
+                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
               ) : closedItems.map((item) => (
                 <tr key={item.id} className="border-b border-slate-100">
                   <td className="py-2 pr-3 text-slate-700">{item.title}</td>
@@ -497,6 +572,19 @@ export default function ReportsPage() {
                   <td className="py-2 pr-3 text-slate-700">{item.season || "—"}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</td>
                   <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</td>
+                  <td className="py-2 pr-3 text-right">
+                    {canEditClosedOpportunities ? (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        onClick={() => openClosedEditModal(item)}
+                      >
+                        ✏️ Editar
+                      </button>
+                    ) : (
+                      <span className="text-xs text-slate-400">Sem permissão</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -528,6 +616,61 @@ export default function ReportsPage() {
           </div>
         </div>
       </section>
+
+      {editingClosed && closedEditForm ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Editar oportunidade encerrada</h3>
+                <p className="text-sm text-slate-500">Cliente e vendedor são campos somente leitura para manter integridade estrutural.</p>
+              </div>
+              <button type="button" className="text-sm font-medium text-slate-500 hover:text-slate-700" onClick={closeClosedEditModal}>Fechar</button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="md:col-span-2 text-sm">
+                <span className="mb-1 block text-slate-600">Título</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={closedEditForm.title} onChange={(e) => setClosedEditForm((prev) => prev ? ({ ...prev, title: e.target.value }) : prev)} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Valor</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={closedEditForm.value} onChange={(e) => setClosedEditForm((prev) => prev ? ({ ...prev, value: e.target.value }) : prev)} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Etapa final</span>
+                <select className="w-full rounded-lg border border-slate-200 px-3 py-2" value={closedEditForm.stage} onChange={(e) => setClosedEditForm((prev) => prev ? ({ ...prev, stage: e.target.value as ClosedOpportunityStage }) : prev)}>
+                  <option value="ganho">Ganho</option>
+                  <option value="perdido">Perdido</option>
+                </select>
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Cultura</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={closedEditForm.crop} onChange={(e) => setClosedEditForm((prev) => prev ? ({ ...prev, crop: e.target.value }) : prev)} />
+              </label>
+              <label className="text-sm">
+                <span className="mb-1 block text-slate-600">Safra</span>
+                <input className="w-full rounded-lg border border-slate-200 px-3 py-2" value={closedEditForm.season} onChange={(e) => setClosedEditForm((prev) => prev ? ({ ...prev, season: e.target.value }) : prev)} />
+              </label>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Cliente (somente leitura)</div>
+                <div className="font-medium text-slate-800">{editingClosed.client}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <div className="text-xs uppercase tracking-wide text-slate-500">Vendedor (somente leitura)</div>
+                <div className="font-medium text-slate-800">{editingClosed.owner}</div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-sm" onClick={closeClosedEditModal} disabled={isSavingClosedEdit}>Cancelar</button>
+              <button type="button" className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={handleSaveClosedEdit} disabled={isSavingClosedEdit}>
+                {isSavingClosedEdit ? "Salvando..." : "Salvar alterações"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

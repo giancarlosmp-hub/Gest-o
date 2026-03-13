@@ -72,6 +72,7 @@ model User {
   clients      Client[]
   contacts     Contact[]
   opportunities Opportunity[]
+  opportunityChangeLogs OpportunityChangeLog[]
   activities   Activity[]
   timelineEvents TimelineEvent[]
   goals        Goal[]
@@ -203,7 +204,22 @@ model Opportunity {
   activities        Activity[]
   agendaEvents      AgendaEvent[]
   timelineEvents    TimelineEvent[]
+  changeLogs        OpportunityChangeLog[]
   createdAt         DateTime         @default(now())
+}
+
+model OpportunityChangeLog {
+  id            String      @id @default(cuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  actorId       String
+  actor         User        @relation(fields: [actorId], references: [id])
+  field         String
+  oldValue      String?
+  newValue      String?
+  createdAt     DateTime    @default(now())
+
+  @@index([opportunityId, createdAt])
 }
 
 model TimelineEvent {
