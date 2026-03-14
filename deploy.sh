@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
+echo "Fazendo backup antes do deploy..."
+bash /apps/gest-o/backup.sh
 echo "Iniciando deploy..."
-git pull origin main
 docker compose down
 docker compose up -d --build
 echo "Aguardando sistema inicializar..."
