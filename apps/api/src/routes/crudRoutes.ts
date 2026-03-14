@@ -3930,7 +3930,41 @@ router.delete("/clients/:id", async (req, res) => {
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
     return res.status(403).json({ message: "Sem permissão" });
   }
-  await prisma.client.delete({ where: { id: req.params.id } });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.activity.deleteMany({
+      where: {
+        OR: [
+          { clientId: req.params.id },
+          { opportunity: { clientId: req.params.id } }
+        ]
+      }
+    });
+
+    await tx.timelineEvent.deleteMany({
+      where: {
+        OR: [
+          { clientId: req.params.id },
+          { opportunity: { clientId: req.params.id } }
+        ]
+      }
+    });
+
+    await tx.contact.deleteMany({ where: { clientId: req.params.id } });
+    await tx.agendaStop.deleteMany({ where: { clientId: req.params.id } });
+    await tx.agendaEvent.deleteMany({
+      where: {
+        OR: [
+          { clientId: req.params.id },
+          { opportunity: { clientId: req.params.id } }
+        ]
+      }
+    });
+    await tx.opportunityChangeLog.deleteMany({ where: { opportunity: { clientId: req.params.id } } });
+    await tx.opportunity.deleteMany({ where: { clientId: req.params.id } });
+    await tx.client.delete({ where: { id: req.params.id } });
+  });
+
   res.status(204).send();
 });
 
@@ -5167,6 +5201,38 @@ router.post("/events", validateBody(eventSchema), async (req, res) => {
   });
 
   return res.status(201).json(created);
+});
+
+router.delete(["/events/:id", "/agenda/:id", "/agenda/events/:id"], async (req, res) => {
+  const agendaEvent = await prisma.agendaEvent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, sellerId: true }
+  });
+
+  if (agendaEvent) {
+    if (req.user!.role === "vendedor" && agendaEvent.sellerId !== req.user!.id) {
+      return res.status(403).json({ message: "Acesso negado." });
+    }
+
+    await prisma.agendaEvent.delete({ where: { id: req.params.id } });
+    return res.status(204).send();
+  }
+
+  const timelineEvent = await prisma.timelineEvent.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, ownerSellerId: true }
+  });
+
+  if (!timelineEvent) {
+    return res.status(404).json({ message: "Evento não encontrado." });
+  }
+
+  if (req.user!.role === "vendedor" && timelineEvent.ownerSellerId !== req.user!.id) {
+    return res.status(403).json({ message: "Acesso negado." });
+  }
+
+  await prisma.timelineEvent.delete({ where: { id: req.params.id } });
+  return res.status(204).send();
 });
 
 const mapAgendaEvent = (agendaEvent: any) => {

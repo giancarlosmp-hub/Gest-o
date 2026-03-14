@@ -926,6 +926,20 @@ export default function AgendaPage() {
     }
   };
 
+  const onDeleteAgendaEvent = async (agendaEvent: AgendaEvent) => {
+    const shouldDelete = window.confirm(`Excluir a agenda "${agendaEvent.title}"?`);
+    if (!shouldDelete) return;
+
+    try {
+      await api.delete(`/events/${agendaEvent.id}`);
+      setEvents((current) => current.filter((item) => item.id !== agendaEvent.id));
+      setEventsRefreshToken((current) => current + 1);
+      toast.success("Agenda excluída com sucesso.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível excluir a agenda."));
+    }
+  };
+
   const toDateTimeInputValue = (value: string) => {
     const date = new Date(value);
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
@@ -1426,6 +1440,13 @@ export default function AgendaPage() {
                             onClick={() => void onSetAsDone(event)}
                           >
                             {event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-md border border-rose-300 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                            onClick={() => void onDeleteAgendaEvent(event)}
+                          >
+                            Excluir
                           </button>
                           <button
                             type="button"
