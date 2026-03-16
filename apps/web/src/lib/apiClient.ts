@@ -107,6 +107,62 @@ let accessToken = localStorage.getItem("accessToken") || "";
 export const setAccessToken = (t: string) => { accessToken = t; localStorage.setItem("accessToken", t); };
 export const clearAccessToken = () => { accessToken = ""; localStorage.removeItem("accessToken"); };
 
+const AUTH_COOKIE_NAMES = ["accessToken", "refreshToken", "token", "authToken", "crm_auth"];
+let isHandlingUnauthorized = false;
+
+const clearAuthCookies = () => {
+  if (typeof document === "undefined") return;
+
+  const cookieNames = new Set(AUTH_COOKIE_NAMES);
+  document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim().split("=")[0])
+    .filter(Boolean)
+    .forEach((name) => {
+      if (name.toLowerCase().includes("token") || name.toLowerCase().includes("auth")) {
+        cookieNames.add(name);
+      }
+    });
+
+  const hosts = window.location.hostname.split(".");
+  const domainVariants = ["", window.location.hostname];
+  if (hosts.length > 1) {
+    domainVariants.push(`.${hosts.slice(-2).join(".")}`);
+  }
+
+  cookieNames.forEach((name) => {
+    domainVariants.forEach((domain) => {
+      const domainPart = domain ? `; domain=${domain}` : "";
+      document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${domainPart}`;
+    });
+  });
+};
+
+export const clearSession = () => {
+  clearAccessToken();
+  sessionStorage.removeItem("accessToken");
+  localStorage.removeItem("refreshToken");
+  sessionStorage.removeItem("refreshToken");
+  clearAuthCookies();
+};
+
+const redirectToLoginOnce = () => {
+  if (isHandlingUnauthorized) return;
+  isHandlingUnauthorized = true;
+
+  clearSession();
+  sessionStorage.setItem("session-expired", "1");
+
+  if (window.location.pathname !== "/login") {
+    window.location.replace("/login");
+    return;
+  }
+
+  window.setTimeout(() => {
+    isHandlingUnauthorized = false;
+  }, 500);
+};
+
 
 const withApiErrorDetails = (error: any) => {
   const status = error?.response?.status;
@@ -131,21 +187,10 @@ api.interceptors.response.use((r) => r, async (error) => {
   const status = error.response?.status;
   const isNetworkError = !error.response;
   const requestUrl = String(error.config?.url || "");
-  const isAuthRoute = requestUrl.includes("/auth/login") || requestUrl.includes("/auth/refresh");
+  const isAuthLoginRoute = requestUrl.includes("/auth/login");
 
-  if (status === 401 && !error.config?._retry && !isAuthRoute) {
-    error.config._retry = true;
-    try {
-      const { data } = await api.post("/auth/refresh");
-      setAccessToken(data.accessToken);
-      error.config.headers.Authorization = `Bearer ${data.accessToken}`;
-      return api(error.config);
-    } catch {
-      clearAccessToken();
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
-    }
+  if (status === 401 && !isAuthLoginRoute) {
+    redirectToLoginOnce();
   }
 
   if (status === 429) {
