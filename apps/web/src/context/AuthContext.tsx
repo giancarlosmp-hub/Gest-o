@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState } from "react";
-import api, { clearAccessToken, setAccessToken } from "../lib/apiClient";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import api, { clearSession, setAccessToken } from "../lib/apiClient";
 
 export type UserRole = "diretor" | "gerente" | "vendedor";
 
@@ -17,19 +17,28 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const meRequestRef = useRef<Promise<void> | null>(null);
 
-  const fetchMe = async () => {
-    try {
-      const { data } = await api.get("/auth/me");
-      setUser(data);
-    } catch {
-      setUser(null);
-    } finally {
-      setLoading(false);
-    }
+  const fetchMe = () => {
+    if (meRequestRef.current) return meRequestRef.current;
+
+    meRequestRef.current = (async () => {
+      try {
+        const { data } = await api.get("/auth/me");
+        setUser(data);
+      } catch {
+        clearSession();
+        setUser(null);
+      } finally {
+        setLoading(false);
+        meRequestRef.current = null;
+      }
+    })();
+
+    return meRequestRef.current;
   };
 
-  useEffect(() => { fetchMe(); }, []);
+  useEffect(() => { void fetchMe(); }, []);
 
   const login = async (email: string, password: string) => {
     const { data } = await api.post("/auth/login", { email, password });
@@ -38,9 +47,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    await api.post("/auth/logout");
-    clearAccessToken();
-    setUser(null);
+    try {
+      await api.post("/auth/logout");
+    } finally {
+      clearSession();
+      setUser(null);
+    }
   };
 
   return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;

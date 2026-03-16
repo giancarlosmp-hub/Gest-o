@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
@@ -9,6 +9,13 @@ export default function LoginPage() {
   const nav = useNavigate();
   const [email, setEmail] = useState("diretor@empresa.com");
   const [password, setPassword] = useState("123456");
+
+  useEffect(() => {
+    if (sessionStorage.getItem("session-expired") === "1") {
+      sessionStorage.removeItem("session-expired");
+      toast.error("Sua sessão expirou. Faça login novamente.");
+    }
+  }, []);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
