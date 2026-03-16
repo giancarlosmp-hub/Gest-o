@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:16
-    restart: unless-stopped
+    restart: always
     command: postgres -c password_encryption=md5
     environment:
       POSTGRES_USER: postgres
@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d salesforce_pro"]
       interval: 5s
@@ -38,7 +38,7 @@ services:
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
       - "4000:4000"
-    restart: unless-stopped
+    restart: always
     depends_on:
       db:
         condition: service_healthy
@@ -56,7 +56,7 @@ services:
       start_period: 60s
 
   web:
-    restart: unless-stopped
+    restart: always
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -77,4 +77,5 @@ services:
       start_period: 20s
 
 volumes:
-  pgdata:
+  postgres_data:
+    name: pgdata
