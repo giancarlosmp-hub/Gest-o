@@ -1,7 +1,7 @@
 import { LogOut, Menu, Ruler } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth, type UserRole } from "../context/AuthContext";
 import BrandLogo from "../components/BrandLogo";
 import { canAccessRoute, type AppRoute } from "../lib/authorization";
 import { useReminders } from "../hooks/useReminders";
@@ -33,6 +33,18 @@ const items: SidebarItem[] = [
   { id: "relatorios", label: "Relatórios", path: "/relatórios" },
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
+
+function canAccessSidebarItem(item: SidebarItem, role?: UserRole | null) {
+  if (item.route) return canAccessRoute(item.route, role);
+
+  // Proteção defensiva: mantém o menu mobile alinhado a permissões já existentes,
+  // mesmo se algum item for adicionado sem o `route` correspondente.
+  if (item.path.startsWith("/equipe")) return canAccessRoute("equipe", role);
+  if (item.path.startsWith("/objetivos") || item.path.startsWith("/metas")) return canAccessRoute("objetivos", role);
+  if (item.path.startsWith("/configurações") || item.path.startsWith("/configuracoes")) return canAccessRoute("configuracoes", role);
+
+  return true;
+}
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
@@ -66,7 +78,7 @@ export default function AppLayout() {
       </h1>
 
       {items
-        .filter((item) => !item.route || canAccessRoute(item.route, user?.role))
+        .filter((item) => canAccessSidebarItem(item, user?.role))
         .map((item) => {
           const active = isActiveItem(item);
           const badgeCount = getSidebarBadgeCount(item);
