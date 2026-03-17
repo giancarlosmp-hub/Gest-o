@@ -258,6 +258,16 @@ function formatStopPlannedTime(value: AgendaStop["plannedTime"]) {
   return new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function isGenericClientPlaceholder(value?: string | null) {
+  const normalized = (value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return normalized === "cliente" || normalized === "cliente vinculado";
+}
+
 type StopGeolocationPayload = {
   lat?: number;
   lng?: number;
@@ -308,6 +318,8 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
     stops: Array.isArray(item.stops)
       ? item.stops.map((stop: any) => ({
           ...stop,
+          clientId: stop?.clientId ? String(stop.clientId) : null,
+          clientName: stop?.clientName || stop?.client?.name || null,
           checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
           checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
         }))
@@ -631,7 +643,7 @@ export default function AgendaPage() {
 
   const getStopClientDisplayName = (stop: AgendaStop) => {
     const explicitName = stop.clientName?.trim();
-    if (explicitName) return explicitName;
+    if (explicitName && !isGenericClientPlaceholder(explicitName)) return explicitName;
 
     if (stop.clientId) {
       const linkedClientName = clientById.get(String(stop.clientId))?.name?.trim();
@@ -1546,8 +1558,8 @@ export default function AgendaPage() {
       </div>
 
       {isCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-2 sm:items-center sm:p-4" onClick={closeCreate}>
-          <div className="my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl sm:my-0 sm:max-h-[calc(100dvh-2rem)]" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/60 p-2 sm:items-center sm:p-4" onClick={closeCreate}>
+          <div className="my-2 flex h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)]" onClick={(e) => e.stopPropagation()}>
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
@@ -1670,12 +1682,13 @@ export default function AgendaPage() {
                         clients={activityClients}
                         value={stop.clientId}
                         onChange={(clientId) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId } : item))}
-                        className="w-full rounded border px-2 py-1 text-xs"
+                        className="w-full rounded border px-2 py-2 text-sm"
+                        placeholder="Pesquisar cliente por nome, cidade, UF ou CNPJ"
                         emptyLabel="Nenhum cliente encontrado."
                       />
-                      <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-1 text-xs" />
-                      <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-1 text-xs" />
-                      <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-1 text-xs" />
+                      <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-2 text-sm" />
+                      <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-2 text-sm" />
+                      <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-2 text-sm" />
                       <div className="flex gap-1 justify-end">
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
