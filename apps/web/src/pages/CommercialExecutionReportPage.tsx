@@ -69,6 +69,7 @@ export default function CommercialExecutionReportPage() {
   const [loading, setLoading] = useState(true);
   const [sellerOptions, setSellerOptions] = useState<SelectOption[]>([]);
   const [weeklyVisits, setWeeklyVisits] = useState<WeeklyVisitsItem[]>([]);
+  const [isMobile, setIsMobile] = useState(false);
   const [filters, setFilters] = useState(() => {
     const today = new Date();
     const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -106,6 +107,15 @@ export default function CommercialExecutionReportPage() {
     api.get<WeeklyVisitsItem[]>(`/reports/weekly-visits?${params.toString()}`).then((response) => {
       setWeeklyVisits(Array.isArray(response.data) ? response.data : []);
     });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const sync = () => setIsMobile(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
   }, []);
 
   const chartData = useMemo(() => {
@@ -180,9 +190,9 @@ export default function CommercialExecutionReportPage() {
 
       <section className={cardClass}>
         <h3 className="text-base font-semibold text-slate-900">Planejado vs Realizado por vendedor</h3>
-        <div className="mt-4 h-72">
+        <div className="mt-4 h-64 sm:h-72">
           <Bar
-            options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top" as const } } }}
+            options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top" as const, display: !isMobile }, tooltip: { enabled: true } }, scales: { x: { ticks: { autoSkip: true, maxTicksLimit: isMobile ? 4 : 12, maxRotation: 0 } } } }}
             data={chartData}
           />
         </div>
@@ -190,7 +200,7 @@ export default function CommercialExecutionReportPage() {
 
       <section className={cardClass}>
         <h3 className="mb-4 text-base font-semibold text-slate-900">Detalhamento por vendedor</h3>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -219,6 +229,22 @@ export default function CommercialExecutionReportPage() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="space-y-3 md:hidden">
+          {report.sellers.map((seller) => (
+            <article key={seller.sellerId} className="rounded-xl border border-slate-200 p-3 text-sm">
+              <h4 className="font-semibold text-slate-900">{seller.sellerName}</h4>
+              <dl className="mt-2 space-y-1">
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Planejado</dt><dd className="text-slate-700">{formatNumberBR(seller.planned)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Realizado</dt><dd className="text-slate-700">{formatNumberBR(seller.executed)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Não realizado</dt><dd className="text-slate-700">{formatNumberBR(seller.notExecuted)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">% Execução</dt><dd className={`font-semibold ${getPerformanceClass(seller.executionRate)}`}>{formatPercentBR(seller.executionRate)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">% Pontualidade</dt><dd className={`font-semibold ${getPerformanceClass(seller.punctualRate)}`}>{formatPercentBR(seller.punctualRate)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Follow-ups</dt><dd className="text-slate-700">{formatNumberBR(seller.followUps)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Oportunidades</dt><dd className="text-slate-700">{formatNumberBR(seller.opportunities)}</dd></div>
+              </dl>
+            </article>
+          ))}
         </div>
         <div className="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
           <div>Follow-ups gerados: <span className="font-semibold text-slate-900">{formatNumberBR(report.followUpGenerated)}</span></div>
