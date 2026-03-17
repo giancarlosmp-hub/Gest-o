@@ -622,6 +622,33 @@ export default function AgendaPage() {
       .map(([, value]) => value);
   }, [roleScopedEvents, customFrom, customTo]);
 
+  const clientById = useMemo(() => new Map(activityClients.map((client) => [client.id, client])), [activityClients]);
+
+  const getStopClientDisplayName = (stop: AgendaStop) => {
+    const explicitName = stop.clientName?.trim();
+    if (explicitName) return explicitName;
+
+    if (stop.clientId) {
+      const linkedClientName = clientById.get(String(stop.clientId))?.name?.trim();
+      if (linkedClientName) return linkedClientName;
+      return "Cliente vinculado";
+    }
+
+    return "Cliente";
+  };
+
+  const getStopCityDisplayName = (stop: AgendaStop) => {
+    const explicitCity = stop.city?.trim();
+    if (explicitCity) return explicitCity;
+
+    if (stop.clientId) {
+      const linkedClientCity = clientById.get(String(stop.clientId))?.city?.trim();
+      if (linkedClientCity) return linkedClientCity;
+    }
+
+    return "Não informada";
+  };
+
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
     if (!shouldHighlightNext || !filteredEvents.length) {
@@ -1298,8 +1325,8 @@ export default function AgendaPage() {
 
           {nextStop ? (
             <p className="mb-3 text-sm text-emerald-900">
-              Próxima parada: #{nextStop?.order} {nextStop?.clientName || "Cliente"}
-              {nextStop?.plannedTime ? ` · ${new Date(nextStop?.plannedTime || "").toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              Próxima parada: #{nextStop!.order} {getStopClientDisplayName(nextStop!)}
+              {nextStop!.plannedTime ? ` · ${new Date(nextStop!.plannedTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
               {lateMinutes > 0 ? ` · atraso de ${lateMinutes} min` : ""}
             </p>
           ) : (
@@ -1311,8 +1338,8 @@ export default function AgendaPage() {
               <div key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
-                  <p className="text-sm font-semibold text-slate-900">{stop.clientName || "Cliente"}</p>
-                  <p className="text-xs text-slate-600">Cidade: {stop.city || "Não informada"}</p>
+                  <p className="text-sm font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
+                  <p className="text-xs text-slate-600">Cidade: {getStopCityDisplayName(stop)}</p>
                   <p className="text-xs text-slate-600">
                     <span className="inline-flex items-center gap-1">
                       {stop.checkInAt ? `Check-in ${formatTime(stop.checkInAt)}` : "Check-in pendente"}
@@ -1489,8 +1516,8 @@ export default function AgendaPage() {
                                 <li key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
                                   <div className="space-y-1 text-sm text-slate-800">
                                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
-                                    <p className="font-semibold text-slate-900">{stop.clientName || "Cliente"}</p>
-                                    <p className="text-xs text-slate-600">Cidade: {stop.city || "Não informada"}</p>
+                                    <p className="font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
+                                    <p className="text-xs text-slate-600">Cidade: {getStopCityDisplayName(stop)}</p>
                                     <p className="text-xs text-slate-600">Observação: {stop.notes || "Sem observação"}</p>
                                   </div>
                                 </li>
