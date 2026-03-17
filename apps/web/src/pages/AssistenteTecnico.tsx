@@ -8,10 +8,10 @@ import {
 import { getApiErrorMessage } from "../lib/apiError";
 
 const cardClass =
-  "rounded-2xl border border-slate-200 bg-white p-6 shadow-sm";
+  "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6";
 
 const inputClass =
-  "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
+  "mt-1 w-full max-w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 shadow-sm outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200";
 
 type SemeaduraForm = {
   culturaId: string;
@@ -446,13 +446,13 @@ export default function AssistenteTecnico() {
         </p>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-2">
         <article className={cardClass}>
           <h2 className="text-base font-semibold text-slate-800">
             Calculadora de Semeadura
           </h2>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <label className="block text-sm text-slate-700">
               Cultura
               <select
@@ -548,7 +548,7 @@ export default function AssistenteTecnico() {
             </label>
           </div>
 
-          <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+          <div className="mt-5 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <p className="text-xs uppercase text-slate-500">Plantas por m²</p>
               <p className="text-lg font-semibold">
@@ -567,12 +567,19 @@ export default function AssistenteTecnico() {
                 {formatValue(results.sementesMetro)}
               </p>
             </div>
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:col-span-2 lg:col-span-1">
               <p className="text-xs uppercase text-emerald-700">
                 kg/ha recomendado
               </p>
-              <p className="text-2xl font-bold text-emerald-700">
-                {formatValue(results.kgHaFinal)} kg/ha
+              <p className="mt-1 text-2xl font-bold leading-tight text-emerald-700 sm:text-3xl">
+                {formatValue(results.kgHaFinal)}
+              </p>
+              <p className="text-sm font-semibold text-emerald-700">kg/ha</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-white p-3 sm:col-span-2 lg:col-span-1">
+              <p className="text-xs uppercase text-slate-500">Dose base</p>
+              <p className="text-lg font-semibold text-slate-900">
+                {formatValue(results.kgHa)} kg/ha
               </p>
             </div>
           </div>
@@ -639,7 +646,7 @@ export default function AssistenteTecnico() {
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <label className="block text-sm text-slate-700">
             Cultura (opcional)
             <select
@@ -730,7 +737,7 @@ export default function AssistenteTecnico() {
             />
           </label>
 
-          <label className="block text-sm text-slate-700 xl:col-span-2">
+          <label className="block text-sm text-slate-700">
             Dose efetiva (SPV) desejada (kg/ha)
             <input
               type="number"
@@ -779,7 +786,7 @@ export default function AssistenteTecnico() {
           </div>
         ) : null}
 
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
             <p className="text-xs uppercase tracking-wide text-emerald-700">
               VC (%)
