@@ -102,19 +102,25 @@ export default function AppLayout() {
 
       <main className="min-w-0 flex-1">
         <header className="border-b border-brand-100 bg-white px-3 py-3 sm:px-4">
-          <div className="flex items-center gap-2 md:hidden">
+          <div className="flex items-start gap-2 md:hidden">
             <button
-              className="rounded-md p-1 text-brand-700 md:hidden"
+              className="shrink-0 rounded-md p-1 text-brand-700 md:hidden"
               onClick={() => setOpen(true)}
               aria-label="Abrir menu"
             >
               <Menu />
             </button>
 
-            <BrandLogo size="header" textClassName="text-brand-700" className="min-w-0 md:hidden" />
+            <div className="min-w-0 flex-1 pt-0.5">
+              <BrandLogo
+                size="header"
+                textClassName="text-brand-700"
+                className="min-w-0 md:hidden"
+              />
+            </div>
 
             <button
-              className="ml-auto inline-flex items-center gap-2 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white hover:bg-brand-800 md:hidden"
+              className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-700 px-2.5 py-2 text-xs font-medium text-white hover:bg-brand-800 xs:gap-2 xs:px-3 xs:text-sm md:hidden"
               onClick={logout}
             >
               <LogOut size={16} />
@@ -123,9 +129,11 @@ export default function AppLayout() {
           </div>
 
           <div className="mt-2 flex min-w-0 items-center justify-between gap-2 md:mt-0 md:justify-end md:gap-3">
-            <div className="min-w-0 text-sm text-slate-700 md:text-right">
-              <strong className="block truncate">{user?.name}</strong>
-              <span className="block truncate text-xs text-slate-500">Perfil: {user?.role}</span>
+            <div className="min-w-0 text-xs text-slate-700 sm:text-sm md:text-right">
+              <strong className="block break-words leading-tight md:truncate">{user?.name}</strong>
+              <span className="mt-0.5 block break-words text-[11px] leading-tight text-slate-500 sm:text-xs md:truncate">
+                Perfil: {user?.role}
+              </span>
             </div>
 
             <button
