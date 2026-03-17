@@ -27,8 +27,8 @@ export default function DonutLegendChips({ items, total, formatValue = formatNum
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} aria-hidden />
             <span className="font-medium text-slate-800">{item.label}</span>
             <span className="text-slate-500">•</span>
-            <span>{formatValue(item.value)}</span>
-            <span className="text-slate-500">•</span>
+            <span className="hidden sm:inline">{formatValue(item.value)}</span>
+            <span className="hidden text-slate-500 sm:inline">•</span>
             <span>{formatPercent(percent)}</span>
           </div>
         );

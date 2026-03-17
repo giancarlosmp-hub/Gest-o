@@ -160,7 +160,7 @@ const donutSegmentColors = [
 ];
 
 const cardClass = "dashboard-card-enter rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
-const doughnutContainerClass = "mx-auto flex h-[240px] w-full max-w-[240px] items-center justify-center";
+const doughnutContainerClass = "mx-auto flex h-[200px] w-full max-w-[200px] items-center justify-center sm:h-[240px] sm:max-w-[240px]";
 
 type DoughnutCenterTextOptions = {
   label: string;
@@ -342,6 +342,19 @@ export default function DashboardPage() {
   const [monthlyScore, setMonthlyScore] = useState<MonthlyScoreResponse | null>(null);
   const [scoreSellerId, setScoreSellerId] = useState("");
   const [scoreSearch, setScoreSearch] = useState("");
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 767px)");
+    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+
+    setIsMobile(media.matches);
+    media.addEventListener("change", onChange);
+
+    return () => {
+      media.removeEventListener("change", onChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (user?.role === "vendedor") return;
@@ -443,7 +456,13 @@ export default function DashboardPage() {
       plugins: {
         legend: {
           position: "bottom",
-          labels: { color: palette.textMuted, usePointStyle: true },
+          labels: {
+            color: palette.textMuted,
+            usePointStyle: true,
+            boxWidth: isMobile ? 10 : 24,
+            padding: isMobile ? 10 : 16,
+            font: { size: isMobile ? 11 : 12 },
+          },
         },
         tooltip: {
           callbacks: {
@@ -452,14 +471,22 @@ export default function DashboardPage() {
         },
       },
       scales: {
-        x: { ticks: { color: palette.textMuted }, grid: { color: palette.grid } },
+        x: {
+          ticks: {
+            color: palette.textMuted,
+            autoSkip: true,
+            maxTicksLimit: isMobile ? 6 : 12,
+            maxRotation: 0,
+          },
+          grid: { color: palette.grid },
+        },
         y: {
           ticks: { color: palette.textMuted, callback: (value) => formatCompactNumberBR(Number(value)) },
           grid: { color: palette.grid },
         },
       },
     }),
-    []
+    [isMobile]
   );
 
 
@@ -1030,14 +1057,14 @@ export default function DashboardPage() {
           <div className="mt-2 text-sm text-amber-600">Objetivo do mês não definido.</div>
         )}
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-stretch">
-          <div className="h-[340px] w-full xl:col-span-9 xl:h-[360px]">
+          <div className="h-[250px] w-full sm:h-[300px] xl:col-span-9 xl:h-[360px]">
             <Line
               options={lineOptions}
               data={{
                 labels: series.labels,
                 datasets: [
                   {
-                    label: "Faturado acumulado",
+                    label: isMobile ? "Faturado" : "Faturado acumulado",
                     data: series.realizedAccumulated,
                     borderColor: palette.success,
                     backgroundColor: "rgba(47, 158, 68, 0.2)",
@@ -1045,7 +1072,7 @@ export default function DashboardPage() {
                     tension: 0.3,
                   },
                   {
-                    label: "Objetivo acumulado",
+                    label: isMobile ? "Objetivo" : "Objetivo acumulado",
                     data: series.objectiveAccumulated,
                     borderColor: palette.primary,
                     backgroundColor: "rgba(11, 60, 29, 0.2)",
@@ -1149,14 +1176,14 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-12">
-          <div className="h-[320px] xl:col-span-8">
+          <div className="h-[230px] sm:h-[280px] xl:col-span-8 xl:h-[320px]">
             <Line
               options={activityLineOptions}
               data={{
                 labels: activityPerformance.labels,
                 datasets: [
                   {
-                    label: "Realizado acumulado (atividades)",
+                    label: isMobile ? "Realizado" : "Realizado acumulado (atividades)",
                     data: activityPerformance.realizedAccumulated,
                     borderColor: palette.success,
                     backgroundColor: "rgba(47, 158, 68, 0.2)",
@@ -1164,7 +1191,7 @@ export default function DashboardPage() {
                     tension: 0.3,
                   },
                   {
-                    label: "Meta acumulada (atividades)",
+                    label: isMobile ? "Meta" : "Meta acumulada (atividades)",
                     data: activityPerformance.targetAccumulated,
                     borderColor: palette.primary,
                     backgroundColor: "rgba(11, 60, 29, 0.2)",
