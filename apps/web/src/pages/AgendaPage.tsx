@@ -8,7 +8,7 @@ import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activi
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
-import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
+import ClientSelect from "../components/ClientSelect";
 
 type Seller = { id: string; name: string };
 type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
@@ -35,7 +35,13 @@ type DraftStop = {
   notes: string;
 };
 
-type ClientOption = SearchableClientOption;
+type ClientOption = {
+  id: string;
+  name: string;
+  city?: string | null;
+  state?: string | null;
+  cnpj?: string | null;
+};
 
 type FollowUpForm = {
   type: "followup";
@@ -1139,6 +1145,11 @@ export default function AgendaPage() {
       return;
     }
 
+    if (createForm.type !== "roteiro_visita" && !createForm.clientId) {
+      toast.error("Selecione um cliente");
+      return;
+    }
+
     if (createForm.type === "roteiro_visita") {
       if (!draftStops.length) {
         toast.error("Adicione ao menos uma parada no roteiro.");
@@ -1649,13 +1660,15 @@ export default function AgendaPage() {
               {createForm.type !== "roteiro_visita" ? (
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                  <ClientSearchSelect
-                    clients={activityClients}
+                  <ClientSelect
                     value={createForm.clientId}
-                    onChange={(clientId) => setCreateForm((current) => ({ ...current, clientId }))}
-                    emptyLabel="Nenhum cliente encontrado."
+                    onChange={(client) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        clientId: client?.id || ""
+                      }))
+                    }
                   />
-                  <p className="mt-1 text-xs text-slate-500">Deixe em branco para criar sem vínculo com cliente.</p>
                 </div>
               ) : null}
 
@@ -1678,13 +1691,13 @@ export default function AgendaPage() {
                   </div>
                   {draftStops.map((stop, index) => (
                     <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-5">
-                      <ClientSearchSelect
-                        clients={activityClients}
+                      <ClientSelect
                         value={stop.clientId}
-                        onChange={(clientId) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId } : item))}
-                        className="w-full rounded border px-2 py-2 text-sm"
-                        placeholder="Pesquisar cliente por nome, cidade, UF ou CNPJ"
-                        emptyLabel="Nenhum cliente encontrado."
+                        onChange={(client) =>
+                          setDraftStops((current) =>
+                            current.map((item) => (item.id === stop.id ? { ...item, clientId: client?.id || "" } : item))
+                          )
+                        }
                       />
                       <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-2 text-sm" />
                       <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-2 text-sm" />
@@ -1747,12 +1760,14 @@ export default function AgendaPage() {
 
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                <ClientSearchSelect
-                  clients={activityClients}
+                <ClientSelect
                   value={followUpForm.clientId}
-                  onChange={(clientId) => setFollowUpForm((current) => ({ ...current, clientId }))}
-                  placeholder="Selecione..."
-                  emptyLabel="Nenhum cliente encontrado."
+                  onChange={(client) =>
+                    setFollowUpForm((current) => ({
+                      ...current,
+                      clientId: client?.id || ""
+                    }))
+                  }
                 />
               </div>
 
