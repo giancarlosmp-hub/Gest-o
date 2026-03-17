@@ -1302,25 +1302,28 @@ export default function AgendaPage() {
           <div className="space-y-2">
             {executionStops.map((stop) => (
               <div key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-slate-900">#{stop.order} {stop.clientName || "Cliente"} {stop.city ? `• ${stop.city}` : ""}</p>
-                  <div className="flex items-center gap-2">
-                    <button type="button" disabled={Boolean(stop.checkInAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
-                    <button type="button" disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-1 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
-                  </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
+                  <p className="text-sm font-semibold text-slate-900">{stop.clientName || "Cliente"}</p>
+                  <p className="text-xs text-slate-600">Cidade: {stop.city || "Não informada"}</p>
+                  <p className="text-xs text-slate-600">
+                    <span className="inline-flex items-center gap-1">
+                      {stop.checkInAt ? `Check-in ${formatTime(stop.checkInAt)}` : "Check-in pendente"}
+                      {stop.checkInLat != null && stop.checkInLng != null ? <span title="Local registrado">📍</span> : null}
+                    </span>{" "}
+                    ·{" "}
+                    <span className="inline-flex items-center gap-1">
+                      {stop.checkOutAt ? `Check-out ${formatTime(stop.checkOutAt)}` : "Check-out pendente"}
+                      {stop.checkOutLat != null && stop.checkOutLng != null ? <span title="Local registrado">📍</span> : null}
+                    </span>
+                  </p>
+                  {stop.notes ? <p className="text-xs text-slate-600">Observação: {stop.notes}</p> : null}
+                  {stop.resultStatus ? <p className="text-xs text-slate-600">Resultado: {stop.resultStatus === "realizada" ? "Realizada" : "Não realizada"}</p> : null}
                 </div>
-                <p className="mt-1 text-xs text-slate-600">
-                  <span className="inline-flex items-center gap-1">
-                    {stop.checkInAt ? `Check-in ${formatTime(stop.checkInAt)}` : "Check-in pendente"}
-                    {stop.checkInLat != null && stop.checkInLng != null ? <span title="Local registrado">📍</span> : null}
-                  </span>{" "}
-                  ·{" "}
-                  <span className="inline-flex items-center gap-1">
-                    {stop.checkOutAt ? `Check-out ${formatTime(stop.checkOutAt)}` : "Check-out pendente"}
-                    {stop.checkOutLat != null && stop.checkOutLng != null ? <span title="Local registrado">📍</span> : null}
-                  </span>
-                </p>
-                {stop.resultStatus ? <p className="mt-1 text-xs text-slate-600">Resultado: {stop.resultStatus === "realizada" ? "Realizada" : "Não realizada"}</p> : null}
+                <div className="mobile-action-stack mt-3">
+                  <button type="button" disabled={Boolean(stop.checkInAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-2 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
+                  <button type="button" disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-2 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
+                </div>
               </div>
             ))}
           </div>
@@ -1474,9 +1477,16 @@ export default function AgendaPage() {
                           {!event.stops?.length ? (
                             <p className="text-xs text-emerald-700">Sem paradas cadastradas.</p>
                           ) : (
-                            <ul className="space-y-1 text-xs text-emerald-900">
+                            <ul className="space-y-2">
                               {event.stops.map((stop) => (
-                                <li key={stop.id}>#{stop.order} · {stop.clientName || "Cliente"}{stop.city ? ` · ${stop.city}` : ""}{stop.notes ? ` · ${stop.notes}` : ""}</li>
+                                <li key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
+                                  <div className="space-y-1 text-sm text-slate-800">
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
+                                    <p className="font-semibold text-slate-900">{stop.clientName || "Cliente"}</p>
+                                    <p className="text-xs text-slate-600">Cidade: {stop.city || "Não informada"}</p>
+                                    <p className="text-xs text-slate-600">Observação: {stop.notes || "Sem observação"}</p>
+                                  </div>
+                                </li>
                               ))}
                             </ul>
                           )}
