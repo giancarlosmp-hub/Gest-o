@@ -84,6 +84,29 @@ Esperado:
 Sempre usar: `bash deploy.sh`
 Para reset completo quando necessário: `bash deploy-reset.sh`
 
+## Trava de segurança do deploy
+O `deploy.sh` agora inclui uma validação defensiva de integridade de dados para evitar que uma atualização finalize com banco vazio/inconsistente.
+
+Fluxo aplicado automaticamente:
+1. executa o backup antes do deploy (comportamento preservado);
+2. coleta snapshot de contagem das tabelas críticas antes de subir os novos containers:
+   - `User`
+   - `Client`
+   - `Opportunity`
+   - `TimelineEvent`
+   - `AgendaEvent`
+   - `Activity`
+3. registra essas contagens em log (`logs/deploy-YYYYMMDD-HHMMSS.log`);
+4. sobe os containers, valida healthcheck e coleta novo snapshot;
+5. aplica trava de segurança e aborta com erro (`exit 1`) se detectar:
+   - `User` zerada em qualquer cenário;
+   - `Client` zerada após ter dados antes;
+   - `Opportunity` zerada após ter dados antes;
+   - `TimelineEvent` zerada após ter dados antes;
+   - múltiplas tabelas críticas zeradas ao mesmo tempo.
+
+Quando a trava aciona, o deploy **não** é marcado como concluído e o motivo fica explícito no log.
+
 ## Variáveis obrigatórias no .env
 ```bash
 FRONTEND_URL=https://crm.demetraagronegocios.com.br
