@@ -12,8 +12,10 @@ type ClientSearchSelectProps = {
   clients: SearchableClientOption[];
   value: string;
   onChange: (clientId: string) => void;
+  required?: boolean;
   placeholder?: string;
   emptyLabel?: string;
+  maxListHeightClassName?: string;
   className?: string;
 };
 
@@ -41,8 +43,10 @@ export default function ClientSearchSelect({
   clients,
   value,
   onChange,
+  required = false,
   placeholder = "Pesquisar por nome, cidade, UF ou CNPJ",
   emptyLabel = "Nenhum cliente encontrado.",
+  maxListHeightClassName = "max-h-56",
   className = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
 }: ClientSearchSelectProps) {
   const [searchValue, setSearchValue] = useState("");
@@ -96,15 +100,16 @@ export default function ClientSearchSelect({
         }}
         placeholder={placeholder}
       />
+      {required ? <input required tabIndex={-1} className="sr-only" value={value} onChange={() => undefined} aria-hidden /> : null}
       {isOpen ? (
-        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+        <div className={`absolute z-20 mt-1 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg ${maxListHeightClassName}`}>
           {filteredClients.length ? (
             filteredClients.map((client) => (
               <button
                 key={client.id}
                 type="button"
                 className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
-                onMouseDown={(event) => {
+                onPointerDown={(event) => {
                   event.preventDefault();
                   onChange(client.id);
                   setSearchValue(formatClientLabel(client));

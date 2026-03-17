@@ -1734,16 +1734,13 @@ export default function AgendaPage() {
 
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                <select
+                <ClientSearchSelect
+                  clients={activityClients}
                   value={followUpForm.clientId}
-                  onChange={(event) => setFollowUpForm((current) => ({ ...current, clientId: event.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <option value="">Selecione...</option>
-                  {activityClients.map((client) => (
-                    <option key={client.id} value={client.id}>{client.name}</option>
-                  ))}
-                </select>
+                  onChange={(clientId) => setFollowUpForm((current) => ({ ...current, clientId }))}
+                  placeholder="Selecione..."
+                  emptyLabel="Nenhum cliente encontrado."
+                />
               </div>
 
               <div>
