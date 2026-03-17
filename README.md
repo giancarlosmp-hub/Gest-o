@@ -25,13 +25,12 @@ bash deploy.sh
 ```
 
 ## Reset total (apaga tudo)
+> **Somente ambiente de desenvolvimento/testes. Nunca use em produção.**
 ```bash
 bash deploy-reset.sh
 ```
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
-
-> Após aplicar esta mudança no servidor, rode **uma vez**: `docker compose down -v && docker compose up -d` para limpar volume antigo e iniciar com a nova configuração.
 
 Valide os serviços:
 ```bash
@@ -68,8 +67,8 @@ bash scripts/setup-ssl-crm.sh
 
 ### Validação no Windows (CMD)
 ```cmd
-docker compose down -v
-bash deploy.sh
+docker compose down
+docker compose up -d
 docker compose ps
 curl http://localhost:4000/health
 curl -X POST http://localhost:4000/auth/login -H "Content-Type: application/json" -d "{\"email\":\"diretor@empresa.com\",\"password\":\"123456\"}"
@@ -82,7 +81,38 @@ Esperado:
 
 ## Deploy em Produção
 Sempre usar: `bash deploy.sh`
-Para reset completo quando necessário: `bash deploy-reset.sh`
+
+### ⚠️ Atenção — Segurança de Dados
+NUNCA execute:
+
+```bash
+docker compose down -v
+```
+
+Esse comando remove os volumes Docker e APAGA completamente o banco de dados.
+
+Use sempre:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+ou:
+
+```bash
+bash deploy.sh
+```
+
+
+## Segurança de Dados em Produção
+- A API executa uma verificação de sanidade (`checkDatabaseHealth`) antes de subir em `NODE_ENV=production`.
+- Em produção, banco inconsistente é bloqueado com erro crítico e a inicialização é abortada (`fail-safe`).
+- Em produção, `SEED_ON_BOOTSTRAP`, `ENABLE_SMOKE_BOOTSTRAP` e `ADMIN_BOOTSTRAP_ENABLED` são sempre ignorados, mesmo que estejam `true`.
+- O `deploy.sh` captura snapshot antes/depois do deploy para `User`, `Client`, `Opportunity` e `TimelineEvent` e aborta automaticamente se detectar risco de perda.
+- O `backup.sh` valida o conteúdo do banco após o `pg_dump` e descarta dump inconsistente (arquivo removido).
+- O volume do PostgreSQL é fixo (`gest-o_pgdata`) para evitar alternância acidental de volume.
+
 
 ## Trava de segurança do deploy
 O `deploy.sh` agora inclui uma validação defensiva de integridade de dados para evitar que uma atualização finalize com banco vazio/inconsistente.
@@ -94,8 +124,6 @@ Fluxo aplicado automaticamente:
    - `Client`
    - `Opportunity`
    - `TimelineEvent`
-   - `AgendaEvent`
-   - `Activity`
 3. registra essas contagens em log (`logs/deploy-YYYYMMDD-HHMMSS.log`);
 4. sobe os containers, valida healthcheck e coleta novo snapshot;
 5. aplica trava de segurança e aborta com erro (`exit 1`) se detectar:

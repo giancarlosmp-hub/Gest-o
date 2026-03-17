@@ -1,9 +1,10 @@
 import { execSync } from "node:child_process";
 import { app } from "../app.js";
-import { env } from "../config/env.js";
+import { env, runtimeGuards } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
+import { checkDatabaseHealth } from "../utils/databaseHealth.js";
 
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
@@ -42,15 +43,25 @@ function runStep(command: string, label: string) {
 async function start() {
   ensureDatabaseUrlFromEnvironment();
   await waitForDatabase();
+
+  if (env.isProduction && env.enableSmokeBootstrapRequested) {
+    console.warn("[SAFEGUARD] Seed/Bootstrap ignorado em produção por segurança (ENABLE_SMOKE_BOOTSTRAP)");
+  }
+
+  if (env.isProduction && env.seedOnBootstrapRequested) {
+    console.warn("[SAFEGUARD] Seed/Bootstrap ignorado em produção por segurança (SEED_ON_BOOTSTRAP)");
+  }
+
+  await checkDatabaseHealth();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
   await ensureAdminBootstrap();
-  if (env.enableSmokeBootstrap) {
+  if (runtimeGuards.enableSmokeBootstrap) {
     await ensureSmokeBootstrap();
   } else {
     console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
   }
 
-  if (env.seedOnBootstrap) {
+  if (runtimeGuards.seedOnBootstrap) {
     runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
   } else {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");

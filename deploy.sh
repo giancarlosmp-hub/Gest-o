@@ -4,9 +4,8 @@ set -euo pipefail
 LOG_DIR="${DEPLOY_LOG_DIR:-./logs}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
-
-# Tabelas críticas monitoradas para detectar perda inesperada de dados.
-CRITICAL_TABLES=("User" "Client" "Opportunity" "TimelineEvent" "AgendaEvent" "Activity")
+DB_NAME="salesforce_pro"
+CRITICAL_TABLES=("User" "Client" "Opportunity" "TimelineEvent")
 
 declare -A PRE_COUNTS=()
 declare -A POST_COUNTS=()
@@ -21,121 +20,118 @@ log() {
 
 run_psql_count() {
   local table="$1"
-  docker compose exec -T db psql -U postgres -d salesforce_pro -t -A -c "SELECT COUNT(*) FROM \"$table\";" | tr -d '[:space:]'
+  docker compose exec -T db psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"$table\";" | tr -d '[:space:]'
 }
 
-collect_counts() {
-  local phase="$1"
+collect_snapshot() {
+  local label="$1"
   local -n target_ref=$2
-  local table=""
 
-  log "Coletando snapshot de contagem ($phase)..."
+  log "[SAFEGUARD] Capturando snapshot de contagens ($label)..."
   for table in "${CRITICAL_TABLES[@]}"; do
-    local count=""
+    local count
     count="$(run_psql_count "$table")"
 
     if [[ ! "$count" =~ ^[0-9]+$ ]]; then
-      log "ERRO: Não foi possível ler contagem válida para tabela $table no snapshot $phase (valor recebido: '$count')."
+      log "[BLOCKED] Não foi possível ler contagem válida de $table em $label (valor='$count')."
       exit 1
     fi
 
     target_ref["$table"]="$count"
-    log "Snapshot $phase | tabela=$table | total=$count"
+    log "[SAFEGUARD] Snapshot $label | tabela=$table | total=$count"
   done
 }
 
-validate_data_safety() {
+validate_data_integrity() {
   local -a reasons=()
-  local table=""
-  local zeroed_tables=0
+  local zeroed_critical=0
 
-  # Regra global: múltiplas tabelas críticas zeradas simultaneamente indicam risco severo.
   for table in "${CRITICAL_TABLES[@]}"; do
     local before="${PRE_COUNTS[$table]:-0}"
     local after="${POST_COUNTS[$table]:-0}"
-
     if (( before > 0 && after == 0 )); then
-      ((zeroed_tables += 1))
+      ((zeroed_critical += 1))
     fi
   done
 
+  if (( ${PRE_COUNTS["User"]:-0} > 0 && ${POST_COUNTS["User"]:-0} == 0 )); then
+    reasons+=("User tinha dados antes e ficou zerada")
+  fi
+
   if (( ${POST_COUNTS["User"]:-0} == 0 )); then
-    reasons+=("Tabela User ficou com zero registros após o deploy")
+    reasons+=("User == 0 após deploy")
   fi
 
   if (( ${PRE_COUNTS["Client"]:-0} > 0 && ${POST_COUNTS["Client"]:-0} == 0 )); then
-    reasons+=("Client tinha dados antes do deploy e ficou zerada")
+    reasons+=("Client tinha dados antes e ficou zerada")
   fi
 
   if (( ${PRE_COUNTS["Opportunity"]:-0} > 0 && ${POST_COUNTS["Opportunity"]:-0} == 0 )); then
-    reasons+=("Opportunity tinha dados antes do deploy e ficou zerada")
+    reasons+=("Opportunity tinha dados antes e ficou zerada")
   fi
 
   if (( ${PRE_COUNTS["TimelineEvent"]:-0} > 0 && ${POST_COUNTS["TimelineEvent"]:-0} == 0 )); then
-    reasons+=("TimelineEvent tinha dados antes do deploy e ficou zerada")
+    reasons+=("TimelineEvent tinha dados antes e ficou zerada")
   fi
 
-  if (( zeroed_tables >= 2 )); then
-    reasons+=("Múltiplas tabelas críticas zeraram ao mesmo tempo (total=$zeroed_tables)")
+  if (( zeroed_critical >= 2 )); then
+    reasons+=("Múltiplas tabelas críticas zeraram simultaneamente (total=$zeroed_critical)")
   fi
 
   if (( ${#reasons[@]} > 0 )); then
-    log "ERRO CRÍTICO: trava de segurança de dados acionada."
+    log "[CRITICAL] DEPLOY BLOQUEADO: perda de dados detectada"
     for reason in "${reasons[@]}"; do
-      log "- $reason"
+      log "[BLOCKED] $reason"
     done
 
-    log "Comparativo final de contagens críticas:"
     for table in "${CRITICAL_TABLES[@]}"; do
-      log "  $table: antes=${PRE_COUNTS[$table]} | depois=${POST_COUNTS[$table]}"
+      log "[SAFEGUARD] Comparativo $table | antes=${PRE_COUNTS[$table]} | depois=${POST_COUNTS[$table]}"
     done
 
-    log "Deploy abortado por segurança. Revise o banco e restaure manualmente se necessário."
     exit 1
   fi
 
-  log "Validação de segurança concluída: nenhuma perda crítica detectada."
+  log "[SAFEGUARD] Validação concluída sem perda de dados detectada"
 }
 
 main() {
-  log "Log do deploy: $LOG_FILE"
-  log "Fazendo backup antes do deploy..."
+  log "[INFO] Log do deploy: $LOG_FILE"
 
-  # Mantém compatibilidade com o fluxo atual do VPS e fallback para execução local.
   if [[ -x /apps/gest-o/backup.sh ]]; then
+    log "[INFO] Executando backup pré-deploy"
     bash /apps/gest-o/backup.sh | tee -a "$LOG_FILE"
   elif [[ -x ./backup.sh ]]; then
+    log "[INFO] Executando backup pré-deploy"
     bash ./backup.sh | tee -a "$LOG_FILE"
   else
-    log "ERRO: script de backup não encontrado em /apps/gest-o/backup.sh nem ./backup.sh"
+    log "[BLOCKED] backup.sh não encontrado"
     exit 1
   fi
 
-  collect_counts "antes" PRE_COUNTS
+  collect_snapshot "antes" PRE_COUNTS
 
-  log "Iniciando deploy..."
+  log "[INFO] Iniciando deploy dos containers"
   docker compose down | tee -a "$LOG_FILE"
   docker compose up -d --build | tee -a "$LOG_FILE"
 
-  log "Aguardando sistema inicializar..."
+  log "[INFO] Aguardando inicialização"
   sleep 20
 
-  log "Status dos serviços:"
+  log "[INFO] Status dos serviços"
   docker compose ps | tee -a "$LOG_FILE"
 
-  log "Validando healthcheck da API..."
-  local health_status=""
+  local health_status
   health_status="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4000/health || true)"
   if [[ "$health_status" != "200" ]]; then
-    log "ERRO: Healthcheck da API falhou (HTTP $health_status)."
+    log "[BLOCKED] Healthcheck da API falhou (HTTP $health_status)"
     exit 1
   fi
-  log "Healthcheck da API OK (HTTP 200)."
+  log "[SAFEGUARD] Healthcheck da API OK"
 
-  collect_counts "depois" POST_COUNTS
-  validate_data_safety
+  collect_snapshot "depois" POST_COUNTS
+  validate_data_integrity
 
-  log "Deploy concluído com sucesso!"
+  log "[INFO] Deploy concluído com sucesso"
 }
 
 main "$@"

@@ -1,5 +1,5 @@
 import { Role } from "@prisma/client";
-import { env } from "../config/env.js";
+import { env, runtimeGuards } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { hashPassword } from "../utils/password.js";
@@ -43,7 +43,13 @@ function getAdminBootstrapConfig(): AdminBootstrapConfig {
 }
 
 export async function ensureAdminBootstrap() {
-  if (!env.adminBootstrapEnabled) {
+  if (env.isProduction && env.adminBootstrapEnabledRequested) {
+    logApiEvent("WARN", "[SAFEGUARD] Seed/Bootstrap ignorado em produção por segurança", {
+      feature: "ADMIN_BOOTSTRAP_ENABLED",
+    });
+  }
+
+  if (!runtimeGuards.adminBootstrapEnabled) {
     return;
   }
 
