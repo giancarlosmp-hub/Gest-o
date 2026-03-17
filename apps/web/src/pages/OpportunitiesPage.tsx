@@ -9,6 +9,7 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
+import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import { getApiErrorMessage } from "../lib/apiError";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -990,10 +991,16 @@ export default function OpportunitiesPage() {
             ) : (
               <input disabled className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500 lg:col-span-2" value={user?.name || "Meu pipeline"} />
             )}
-            <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.clientId} onChange={(e) => setFilters((prev) => ({ ...prev, clientId: e.target.value }))}>
-              <option value="">Todos clientes</option>
-              {clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-            </select>
+            <div className="lg:col-span-2">
+              <ClientSearchSelect
+                clients={clients}
+                value={filters.clientId}
+                onChange={(clientId) => setFilters((prev) => ({ ...prev, clientId }))}
+                placeholder="Buscar cliente para filtrar"
+                emptyLabel="Nenhum cliente encontrado."
+                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm"
+              />
+            </div>
             <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.crop} onChange={(e) => setFilters((prev) => ({ ...prev, crop: e.target.value }))}>
               <option value="">Todas culturas</option>
               {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}

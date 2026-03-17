@@ -30,6 +30,10 @@ type ClientOption = {
 };
 type SellerOption = { id: string; name: string };
 
+const LARGE_LIST_THRESHOLD = 30;
+const MIN_SEARCH_LENGTH_FOR_LARGE_LIST = 2;
+const MAX_VISIBLE_OPTIONS = 80;
+
 type CreateOpportunityModalProps = {
   open: boolean;
   title: string;
@@ -129,7 +133,10 @@ export default function CreateOpportunityModal({
 
   const filteredClients = useMemo(() => {
     const term = normalizeText(clientSearch.trim());
-    if (!term) return clients;
+    if (!term) {
+      if (clients.length > LARGE_LIST_THRESHOLD) return [];
+      return clients;
+    }
 
     return clients.filter((client) => {
       const searchableCnpj = (client.cnpj || "").replace(/\D/g, "");
@@ -139,6 +146,9 @@ export default function CreateOpportunityModal({
         || Boolean(searchableTermDigits && searchableCnpj.includes(searchableTermDigits));
     });
   }, [clientSearch, clients]);
+
+  const shouldRequireSearch = clients.length > LARGE_LIST_THRESHOLD && clientSearch.trim().length < MIN_SEARCH_LENGTH_FOR_LARGE_LIST;
+  const visibleClients = filteredClients.slice(0, MAX_VISIBLE_OPTIONS);
 
   const handleQuickCreateClient = async () => {
     const payload = {
@@ -210,8 +220,15 @@ export default function CreateOpportunityModal({
                       />
                       <input required tabIndex={-1} className="sr-only" value={form.clientId} onChange={() => undefined} aria-hidden />
                       {isClientDropdownOpen ? (
-                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                          {filteredClients.length ? filteredClients.map((client) => (
+                        <div
+                          className="absolute left-0 right-0 z-20 mt-1 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+                          style={{ maxHeight: "min(18rem, calc(100vh - 14rem))" }}
+                        >
+                          {shouldRequireSearch ? (
+                            <p className="px-3 py-2 text-sm text-slate-500">
+                              Digite ao menos {MIN_SEARCH_LENGTH_FOR_LARGE_LIST} caracteres para buscar clientes.
+                            </p>
+                          ) : visibleClients.length ? visibleClients.map((client) => (
                             <button
                               key={client.id}
                               type="button"
@@ -227,6 +244,11 @@ export default function CreateOpportunityModal({
                               {client.cnpj ? <p className="text-xs text-slate-500">CNPJ: {client.cnpj}</p> : null}
                             </button>
                           )) : <p className="px-3 py-2 text-sm text-slate-500">Nenhum cliente encontrado.</p>}
+                          {!shouldRequireSearch && filteredClients.length > MAX_VISIBLE_OPTIONS ? (
+                            <p className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                              Mostrando {MAX_VISIBLE_OPTIONS} de {filteredClients.length} resultados. Continue digitando para refinar.
+                            </p>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
