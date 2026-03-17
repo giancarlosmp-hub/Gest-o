@@ -1128,8 +1128,8 @@ export default function OpportunitiesPage() {
             </button>
           </div>
 
-          <div className="overflow-x-auto">
-            <div className={`grid min-w-[1050px] gap-3 ${pipelineStages.length === 2 ? "grid-cols-2" : pipelineStages.length === 3 ? "grid-cols-3" : "grid-cols-5"}`}>
+          <div>
+            <div className={`grid grid-cols-1 gap-3 ${pipelineStages.length === 2 ? "sm:grid-cols-2" : pipelineStages.length === 3 ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2 xl:grid-cols-5"}`}>
               {pipelineStages.map((stage) => {
                 const stageItems = opportunitiesByStage[stage];
                 const stageTotal = stageItems.reduce((sum, item) => sum + Number(item.value || 0), 0);
@@ -1137,7 +1137,7 @@ export default function OpportunitiesPage() {
                 return (
                   <div
                     key={stage}
-                    className="flex min-h-[430px] flex-col rounded-xl border border-slate-200 bg-slate-50"
+                    className="flex min-h-[360px] flex-col rounded-xl border border-slate-200 bg-slate-50 md:min-h-[430px]"
                     onDragOver={handlePipelineColumnDragOver}
                     onDrop={(event) => {
                       handlePipelineColumnDrop(event, stage).catch(() => {
@@ -1170,13 +1170,19 @@ export default function OpportunitiesPage() {
                             }
                           }}
                         >
-                          <div className="text-sm font-semibold text-slate-800">{item.title}</div>
-                          <div className="text-xs text-slate-600">{getClientName(item)}</div>
-                          <div className="text-sm font-medium text-slate-900">{formatCurrencyBRL(item.value)}</div>
-                          <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
-                          <ReturnStatusBadge status={getReturnStatus(item)} />
+                          <div className="min-w-0 space-y-1">
+                            <div className="text-sm font-semibold leading-tight text-slate-800 break-words">{item.title}</div>
+                            <div className="text-xs text-slate-600 break-words">{getClientName(item)}</div>
+                          </div>
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <div className="text-base font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</div>
+                              <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
+                            </div>
+                            <ReturnStatusBadge status={getReturnStatus(item)} />
+                          </div>
                           {!["ganho", "perdido"].includes(item.stage) ? (
-                            <div className="relative" onClick={(event) => event.stopPropagation()}>
+                            <div className="relative flex justify-end" onClick={(event) => event.stopPropagation()}>
                               <button
                                 type="button"
                                 className="rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
