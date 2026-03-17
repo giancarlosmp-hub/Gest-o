@@ -1245,7 +1245,7 @@ export default function AgendaPage() {
       <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-3">
         <label className="text-sm font-medium text-slate-700">
           Visualização
-          <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+          <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <option value="daily">Diária</option>
             <option value="weekly">Semanal</option>
             <option value="monthly">Mensal</option>
@@ -1258,7 +1258,7 @@ export default function AgendaPage() {
           <select
             value={periodFilter}
             onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
           >
             <option value="today">Hoje</option>
             <option value="this_week">Esta semana</option>
@@ -1282,7 +1282,7 @@ export default function AgendaPage() {
             <select
               value={selectedSellerId}
               onChange={(event) => setSelectedSellerId(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
             >
               <option value="">{user?.role === "diretor" ? "Todos" : "Time"}</option>
               {sellers.map((seller) => (
@@ -1298,10 +1298,10 @@ export default function AgendaPage() {
       {periodFilter === "custom_range" ? (
         <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-2">
           <label className="text-sm font-medium text-slate-700">De
-            <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
           <label className="text-sm font-medium text-slate-700">Até
-            <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
         </div>
       ) : null}
@@ -1588,7 +1588,7 @@ export default function AgendaPage() {
                 <input
                   value={createForm.title}
                   onChange={(event) => setCreateForm((current) => ({ ...current, title: event.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   placeholder="Ex.: Reunião de planejamento"
                 />
                 </div>
@@ -1602,7 +1602,7 @@ export default function AgendaPage() {
                     <select
                       value={createForm.type}
                       onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
                       {CREATE_AGENDA_TYPE_OPTIONS.map((option) => (
                         <option key={option.id} value={option.value}>
@@ -1619,7 +1619,7 @@ export default function AgendaPage() {
                     <select
                       value={createForm.sellerId}
                       onChange={(event) => setCreateForm((current) => ({ ...current, sellerId: event.target.value }))}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                      className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                     >
                       {isSellersLoading ? <option value="">Carregando vendedores…</option> : <option value="">Padrão do sistema</option>}
                       {!isSellersLoading
@@ -1643,7 +1643,7 @@ export default function AgendaPage() {
                     type="datetime-local"
                     value={createForm.startDateTime}
                     onChange={(event) => setCreateForm((current) => ({ ...current, startDateTime: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
@@ -1652,7 +1652,7 @@ export default function AgendaPage() {
                     type="datetime-local"
                     value={createForm.endDateTime}
                     onChange={(event) => setCreateForm((current) => ({ ...current, endDateTime: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                    className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
               </div>
@@ -1678,7 +1678,7 @@ export default function AgendaPage() {
                 <textarea
                   value={createForm.notes}
                   onChange={(event) => setCreateForm((current) => ({ ...current, notes: event.target.value }))}
-                  className="min-h-20 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 
@@ -1732,8 +1732,8 @@ export default function AgendaPage() {
       ) : null}
 
       {isFollowUpModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeFollowUpModal}>
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeFollowUpModal}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Criar follow-up</h3>
@@ -1745,7 +1745,7 @@ export default function AgendaPage() {
             <form className="space-y-3" onSubmit={onSubmitFollowUp}>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
-                <input value="Follow-up" readOnly className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                <input value="Follow-up" readOnly className="w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
               </div>
 
               <div>
@@ -1754,7 +1754,7 @@ export default function AgendaPage() {
                   type="datetime-local"
                   value={followUpForm.dueDate}
                   onChange={(event) => setFollowUpForm((current) => ({ ...current, dueDate: event.target.value }))}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 
@@ -1777,7 +1777,7 @@ export default function AgendaPage() {
                   value={followUpForm.opportunityId}
                   onChange={(event) => setFollowUpForm((current) => ({ ...current, opportunityId: event.target.value }))}
                   placeholder="ID da oportunidade"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 
@@ -1786,7 +1786,7 @@ export default function AgendaPage() {
                 <textarea
                   value={followUpForm.notes}
                   onChange={(event) => setFollowUpForm((current) => ({ ...current, notes: event.target.value }))}
-                  className="min-h-20 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 
@@ -1802,27 +1802,27 @@ export default function AgendaPage() {
       ) : null}
 
       {isQuickOpportunityModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setIsQuickOpportunityModalOpen(false)}>
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setIsQuickOpportunityModalOpen(false)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold text-slate-900">Criar oportunidade pós-visita</h3>
             <p className="mt-1 text-sm text-slate-500">Pré-preenchida para salvar em poucos segundos.</p>
             <form className="mt-4 space-y-3" onSubmit={onSubmitQuickOpportunity}>
               <label className="block text-sm font-medium text-slate-700">Título
-                <input value={quickOpportunityForm.title} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <input value={quickOpportunityForm.title} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </label>
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <label className="block text-sm font-medium text-slate-700">Valor
-                  <input inputMode="decimal" value={quickOpportunityForm.value} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, value: event.target.value.replace(/,/g, ".").replace(/[^\d.]/g, "") }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <input inputMode="decimal" value={quickOpportunityForm.value} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, value: event.target.value.replace(/,/g, ".").replace(/[^\d.]/g, "") }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </label>
                 <label className="block text-sm font-medium text-slate-700">Etapa
-                  <select value={quickOpportunityForm.stage} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, stage: event.target.value as QuickOpportunityForm["stage"] }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                  <select value={quickOpportunityForm.stage} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, stage: event.target.value as QuickOpportunityForm["stage"] }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm">
                     <option value="prospeccao">Prospecção</option>
                     <option value="negociacao">Negociação</option>
                     <option value="proposta">Proposta</option>
                   </select>
                 </label>
                 <label className="block text-sm font-medium text-slate-700">Follow-up
-                  <input type="date" value={quickOpportunityForm.followUpDate} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                  <input type="date" value={quickOpportunityForm.followUpDate} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </label>
               </div>
               <div className="mobile-action-stack justify-end pt-2">
@@ -1837,8 +1837,8 @@ export default function AgendaPage() {
       ) : null}
 
       {isRescheduleOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={closeRescheduleModal}>
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeRescheduleModal}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Reagendar compromisso</h3>
@@ -1856,7 +1856,7 @@ export default function AgendaPage() {
                   type="datetime-local"
                   value={rescheduleStartDateTime}
                   onChange={(event) => setRescheduleStartDateTime(event.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 
@@ -1866,7 +1866,7 @@ export default function AgendaPage() {
                   type="datetime-local"
                   value={rescheduleEndDateTime}
                   onChange={(event) => setRescheduleEndDateTime(event.target.value)}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </div>
 

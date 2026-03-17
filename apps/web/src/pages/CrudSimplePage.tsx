@@ -1740,7 +1740,7 @@ export default function CrudSimplePage({
             ) : null}
 
             <div className={isClientsPage ? "hidden overflow-auto md:block" : "overflow-auto"}>
-              <table className="w-full text-sm">
+              <table className="min-w-[600px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
                     {fields.map((f) => (

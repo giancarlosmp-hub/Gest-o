@@ -265,7 +265,7 @@ export default function TechnicalCulturesPanel() {
           {!loading && !loadError ? (
             <>
               <div className="max-h-[52vh] overflow-auto rounded-lg border border-slate-200 bg-white">
-                <table className="min-w-full text-sm">
+                <table className="min-w-[600px] w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-100 text-left text-slate-600">
                     <tr>
                       <th className="px-3 py-2.5 font-semibold">Nome</th>

@@ -101,7 +101,7 @@ export default function AppLayout() {
   );
 
   return (
-    <div className="flex">
+    <div className="flex w-full max-w-full overflow-x-hidden">
       <div className="hidden md:block">{sidebar}</div>
 
       {open && (
@@ -158,7 +158,7 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <div className="crm-page-shell p-4 sm:p-4">
+        <div className="crm-page-shell min-w-0 px-4 py-4 md:px-6">
           <Outlet />
         </div>
       </main>

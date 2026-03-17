@@ -309,8 +309,8 @@ export default function ClientDetailsPage() {
         </div>
 
         {activeTab === "contacts" ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="w-full overflow-x-auto">
+            <table className="min-w-[600px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-2 py-3 font-semibold">Nome</th>

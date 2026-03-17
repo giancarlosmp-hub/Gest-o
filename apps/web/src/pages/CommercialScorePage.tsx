@@ -222,7 +222,7 @@ export default function CommercialScorePage() {
               <p className="mt-3 text-sm text-slate-500">Sem dados para o mês selecionado.</p>
             ) : (
               <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full text-sm">
+                <table className="min-w-[600px] w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-left text-slate-500">
                       <th className="pb-2 pr-3">Posição</th>

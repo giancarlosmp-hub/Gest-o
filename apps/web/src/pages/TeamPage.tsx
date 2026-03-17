@@ -507,8 +507,8 @@ export default function TeamPage() {
                 })}
               </div>
 
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <div className="w-full overflow-x-auto rounded-lg border border-slate-200">
+                <table className="min-w-[600px] w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-3 py-2 font-semibold">Posição</th>

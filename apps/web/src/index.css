@@ -133,7 +133,7 @@ body {
 input,
 select,
 textarea {
-  @apply border-slate-300;
+  @apply min-w-0 border-slate-300;
 }
 
 input:focus,
