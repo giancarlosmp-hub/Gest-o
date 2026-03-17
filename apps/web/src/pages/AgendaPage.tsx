@@ -253,6 +253,11 @@ function formatTime(value: string) {
   });
 }
 
+function formatStopPlannedTime(value: AgendaStop["plannedTime"]) {
+  if (!value) return null;
+  return new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 type StopGeolocationPayload = {
   lat?: number;
   lng?: number;
@@ -681,7 +686,11 @@ export default function AgendaPage() {
   const executionStops = executionEvent?.stops || [];
   const completedStops = executionStops.filter((stop) => stop.checkOutAt).length;
   const nextStop = executionStops.find((stop) => !stop.checkOutAt) || null;
-  const lateMinutes = nextStop?.plannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStop?.plannedTime || "").getTime()) / 60000)) : 0;
+  const nextStopOrder = nextStop?.order ?? null;
+  const nextStopPlannedTime = nextStop?.plannedTime;
+  const nextStopClientDisplayName = nextStop ? getStopClientDisplayName(nextStop) : null;
+  const nextStopPlannedTimeLabel = formatStopPlannedTime(nextStopPlannedTime);
+  const lateMinutes = nextStopPlannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStopPlannedTime).getTime()) / 60000)) : 0;
 
   const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
     setEvents((current) =>
@@ -1325,8 +1334,8 @@ export default function AgendaPage() {
 
           {nextStop ? (
             <p className="mb-3 text-sm text-emerald-900">
-              Próxima parada: #{nextStop!.order} {getStopClientDisplayName(nextStop!)}
-              {nextStop!.plannedTime ? ` · ${new Date(nextStop!.plannedTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}` : ""}
+              Próxima parada: #{nextStopOrder} {nextStopClientDisplayName}
+              {nextStopPlannedTimeLabel ? ` · ${nextStopPlannedTimeLabel}` : ""}
               {lateMinutes > 0 ? ` · atraso de ${lateMinutes} min` : ""}
             </p>
           ) : (
