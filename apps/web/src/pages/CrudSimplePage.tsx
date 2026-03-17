@@ -1424,7 +1424,7 @@ export default function CrudSimplePage({
     navigate(`${detailsPath}/${id}`);
   };
 
-  const onRowClick = (event: MouseEvent<HTMLTableRowElement>, id: string) => {
+  const onRowClick = (event: MouseEvent<HTMLElement>, id: string) => {
     if (!detailsPath) return;
 
     const targetElement = event.target as HTMLElement;
@@ -1634,7 +1634,7 @@ export default function CrudSimplePage({
         </div>
       ) : null}
 
-      <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? <div className="p-4 text-slate-500">Carregando...</div> : null}
 
         {error ? (
@@ -1651,36 +1651,36 @@ export default function CrudSimplePage({
         ) : null}
 
         {!loading && !error ? (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
-                {fields.map((f) => (
-                  <th className="p-2 text-left" key={f.key}>
-                    {f.label}
-                  </th>
-                ))}
-                {detailsPath || !readOnly ? <th className="p-2 text-left">Ações</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleItems.map((it) => (
-                <tr
-                  key={it.id}
-                  className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
-                  onClick={(event) => onRowClick(event, it.id)}
-                >
-                  {fields.map((f) => (
-                    <td key={f.key} className="p-2 text-slate-700">
-                      {getCellValue(it, f.key)}
-                    </td>
-                  ))}
-                  {detailsPath || !readOnly ? (
-                    <td className="p-2">
-                      <div className="flex items-center justify-end gap-2" data-row-action-menu="true">
+          <>
+            {isClientsPage ? (
+              <div className="space-y-3 p-3 md:hidden">
+                {visibleItems.map((it) => (
+                  <article
+                    key={it.id}
+                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                    onClick={(event) => onRowClick(event, it.id)}
+                  >
+                    <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
+                    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-slate-500">Cidade</dt>
+                        <dd className="font-medium text-slate-800">{String(getCellValue(it, "city") || "-")}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">UF</dt>
+                        <dd className="font-medium text-slate-800">{String(getCellValue(it, "state") || "-")}</dd>
+                      </div>
+                      <div className="col-span-2">
+                        <dt className="text-slate-500">Região</dt>
+                        <dd className="font-medium text-slate-800">{String(getCellValue(it, "region") || "-")}</dd>
+                      </div>
+                    </dl>
+                    {(detailsPath || !readOnly) && (
+                      <div className="mt-4 flex items-center justify-end gap-2" data-row-action-menu="true">
                         {detailsPath ? (
                           <button
                             type="button"
-                            className="rounded-md border border-brand-200 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50 sm:text-sm"
+                            className="rounded-md border border-brand-200 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
                             onClick={() => onOpenDetails(it.id)}
                           >
                             Abrir
@@ -1727,23 +1727,114 @@ export default function CrudSimplePage({
                           </div>
                         ) : null}
                       </div>
-                    </td>
-                  ) : null}
-                </tr>
-              ))}
+                    )}
+                  </article>
+                ))}
 
-              {visibleItems.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={fields.length + (detailsPath || !readOnly ? 1 : 0)}
-                    className="p-8 text-center text-slate-500"
-                  >
+                {visibleItems.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">
                     Nenhum registro encontrado com os filtros atuais.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className={isClientsPage ? "hidden overflow-auto md:block" : "overflow-auto"}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
+                    {fields.map((f) => (
+                      <th className="p-2 text-left" key={f.key}>
+                        {f.label}
+                      </th>
+                    ))}
+                    {detailsPath || !readOnly ? <th className="p-2 text-left">Ações</th> : null}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleItems.map((it) => (
+                    <tr
+                      key={it.id}
+                      className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                      onClick={(event) => onRowClick(event, it.id)}
+                    >
+                      {fields.map((f) => (
+                        <td key={f.key} className="p-2 text-slate-700">
+                          {getCellValue(it, f.key)}
+                        </td>
+                      ))}
+                      {detailsPath || !readOnly ? (
+                        <td className="p-2">
+                          <div className="flex items-center justify-end gap-2" data-row-action-menu="true">
+                            {detailsPath ? (
+                              <button
+                                type="button"
+                                className="rounded-md border border-brand-200 px-2.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50 sm:text-sm"
+                                onClick={() => onOpenDetails(it.id)}
+                              >
+                                Abrir
+                              </button>
+                            ) : null}
+
+                            {!readOnly ? (
+                              <div className="relative">
+                                <button
+                                  type="button"
+                                  className="rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
+                                  aria-label="Abrir ações"
+                                  onClick={() => setOpenActionsMenuId((current) => (current === it.id ? null : it.id))}
+                                  disabled={saving || deletingId === it.id}
+                                >
+                                  <MoreHorizontal size={16} />
+                                </button>
+
+                                {openActionsMenuId === it.id ? (
+                                  <div className="absolute right-0 z-10 mt-1 min-w-28 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                    <button
+                                      type="button"
+                                      className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100"
+                                      onClick={() => {
+                                        setOpenActionsMenuId(null);
+                                        onEdit(it);
+                                      }}
+                                    >
+                                      Editar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50"
+                                      onClick={() => {
+                                        setOpenActionsMenuId(null);
+                                        void onDelete(it.id);
+                                      }}
+                                      disabled={saving || deletingId === it.id}
+                                    >
+                                      Excluir
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                      ) : null}
+                    </tr>
+                  ))}
+
+                  {visibleItems.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={fields.length + (detailsPath || !readOnly ? 1 : 0)}
+                        className="p-8 text-center text-slate-500"
+                      >
+                        Nenhum registro encontrado com os filtros atuais.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : null}
       </div>
 
