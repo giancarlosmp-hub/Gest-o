@@ -234,7 +234,7 @@ export default function OpportunityDetailsPage() {
         <p className="text-sm"><strong>Última interação:</strong> {item.lastContactAt ? formatDateBR(item.lastContactAt) : "Sem interação registrada"}</p>
         <form className="mt-3 space-y-2" onSubmit={onRegisterInteraction}>
           <textarea className="w-full rounded-lg border border-slate-200 p-2 text-sm" rows={3} placeholder="Escreva um resumo da interação" value={interactionNote} onChange={(event) => setInteractionNote(event.target.value)} />
-          <button type="submit" disabled={saving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500">Salvar</button>
+          <button type="submit" disabled={saving} className="mobile-primary-button rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500">Salvar</button>
         </form>
 
         <h3 className="mt-5 mb-3 text-lg font-semibold">Linha do Tempo</h3>
@@ -254,10 +254,10 @@ export default function OpportunityDetailsPage() {
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Ações</h3>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={saving} onClick={onAdvanceStage} className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Avançar etapa</button>
-          <button type="button" disabled={saving} onClick={onMarkWon} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-50">Marcar como ganho</button>
-          <button type="button" disabled={saving} onClick={() => setShowLossModal(true)} className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50">Marcar como perdido</button>
+        <div className="mobile-action-stack">
+          <button type="button" disabled={saving} onClick={onAdvanceStage} className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:opacity-50">Avançar etapa</button>
+          <button type="button" disabled={saving} onClick={onMarkWon} className="mobile-primary-button rounded-lg bg-emerald-600 px-3 py-2 text-sm text-white disabled:opacity-50">Marcar como ganho</button>
+          <button type="button" disabled={saving} onClick={() => setShowLossModal(true)} className="mobile-primary-button rounded-lg bg-red-600 px-3 py-2 text-sm text-white disabled:opacity-50">Marcar como perdido</button>
         </div>
       </section>
 
@@ -266,9 +266,9 @@ export default function OpportunityDetailsPage() {
           <form className="w-full max-w-lg space-y-3 rounded-2xl bg-white p-5" onSubmit={onMarkLost} onClick={(event) => event.stopPropagation()}>
             <h4 className="text-lg font-semibold text-slate-900">Motivo da perda</h4>
             <textarea className="w-full rounded-lg border border-slate-200 p-2 text-sm" rows={4} placeholder="Descreva o motivo" value={lossReason} onChange={(event) => setLossReason(event.target.value)} />
-            <div className="flex justify-end gap-2">
-              <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => setShowLossModal(false)}>Cancelar</button>
-              <button type="submit" className="rounded-lg bg-red-600 px-3 py-2 text-sm text-white">Confirmar perda</button>
+            <div className="mobile-action-stack justify-end">
+              <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => setShowLossModal(false)}>Cancelar</button>
+              <button type="submit" className="mobile-primary-button rounded-lg bg-red-600 px-3 py-2 text-sm text-white">Confirmar perda</button>
             </div>
           </form>
         </div>
