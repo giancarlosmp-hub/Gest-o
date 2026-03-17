@@ -178,3 +178,47 @@ textarea:focus {
     border-radius: 0.875rem;
   }
 }
+
+@media (max-width: 767px) {
+  form {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  form .grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+  }
+
+  form > * + *,
+  form fieldset > * + * {
+    margin-top: 12px;
+  }
+
+  form label {
+    display: block;
+    width: 100%;
+  }
+
+  form label > span,
+  form label > strong {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  form input:not([type="checkbox"]):not([type="radio"]),
+  form select,
+  form textarea {
+    width: 100%;
+    max-width: 100%;
+    min-height: 48px;
+  }
+
+  form textarea {
+    min-height: 96px;
+  }
+
+  form * {
+    min-width: 0;
+  }
+}
