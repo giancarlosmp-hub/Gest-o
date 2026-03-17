@@ -8,6 +8,7 @@ import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activi
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
+import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 
 type Seller = { id: string; name: string };
 type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
@@ -34,7 +35,7 @@ type DraftStop = {
   notes: string;
 };
 
-type ClientOption = { id: string; name: string };
+type ClientOption = SearchableClientOption;
 
 type FollowUpForm = {
   type: "followup";
@@ -454,7 +455,13 @@ export default function AgendaPage() {
         if (!active) return;
         const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
         const mappedClients = Array.isArray(payload)
-          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: String(item.id), name: String(item.name) }))
+          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({
+              id: String(item.id),
+              name: String(item.name),
+              city: item?.city ? String(item.city) : null,
+              state: item?.state ? String(item.state) : null,
+              cnpj: item?.cnpj ? String(item.cnpj) : null
+            }))
           : [];
         setActivityClients(mappedClients);
       } catch {
@@ -1594,18 +1601,13 @@ export default function AgendaPage() {
               {createForm.type !== "roteiro_visita" ? (
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                  <select
+                  <ClientSearchSelect
+                    clients={activityClients}
                     value={createForm.clientId}
-                    onChange={(event) => setCreateForm((current) => ({ ...current, clientId: event.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                  >
-                    <option value="">Sem vínculo</option>
-                    {activityClients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(clientId) => setCreateForm((current) => ({ ...current, clientId }))}
+                    emptyLabel="Nenhum cliente encontrado."
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Deixe em branco para criar sem vínculo com cliente.</p>
                 </div>
               ) : null}
 
@@ -1628,10 +1630,13 @@ export default function AgendaPage() {
                   </div>
                   {draftStops.map((stop, index) => (
                     <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-5">
-                      <select value={stop.clientId} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId: event.target.value } : item))} className="rounded border px-2 py-1 text-xs">
-                        <option value="">Cliente</option>
-                        {activityClients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-                      </select>
+                      <ClientSearchSelect
+                        clients={activityClients}
+                        value={stop.clientId}
+                        onChange={(clientId) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, clientId } : item))}
+                        className="w-full rounded border px-2 py-1 text-xs"
+                        emptyLabel="Nenhum cliente encontrado."
+                      />
                       <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-1 text-xs" />
                       <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-1 text-xs" />
                       <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-1 text-xs" />
