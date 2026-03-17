@@ -6,8 +6,9 @@ import api from "../lib/apiClient";
 import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
+import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 
-type Client = { id: string; name: string };
+type Client = SearchableClientOption;
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
 type ActivityStatus = "agendado" | "vencido" | "realizado";
@@ -87,7 +88,6 @@ export default function ActivitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [form, setForm] = useState(initialForm);
-  const [clientSearch, setClientSearch] = useState("");
   const [opportunitySearch, setOpportunitySearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -105,12 +105,6 @@ export default function ActivitiesPage() {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [duplicateDate, setDuplicateDate] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
-
-  const filteredClients = useMemo(() => {
-    const search = clientSearch.trim().toLowerCase();
-    if (!search) return clients;
-    return clients.filter((item) => item.name.toLowerCase().includes(search));
-  }, [clients, clientSearch]);
 
   const opportunitiesByClient = useMemo(
     () => (form.clientId ? opportunities.filter((item) => item.clientId === form.clientId) : []),
@@ -151,7 +145,7 @@ export default function ActivitiesPage() {
       const [clientsRes, opportunitiesRes, usersRes] = await Promise.all(requests);
 
       const clientsPayload = Array.isArray(clientsRes.data?.items) ? clientsRes.data.items : clientsRes.data;
-      setClients(Array.isArray(clientsPayload) ? clientsPayload.map((item: any) => ({ id: String(item.id), name: String(item.name) })) : []);
+      setClients(Array.isArray(clientsPayload) ? clientsPayload.map((item: any) => ({ id: String(item.id), name: String(item.name), city: item.city ? String(item.city) : null, state: item.state ? String(item.state) : null, cnpj: item.cnpj ? String(item.cnpj) : null })) : []);
       setOpportunities(
         Array.isArray(opportunitiesRes.data)
           ? opportunitiesRes.data.map((item: any) => ({ id: String(item.id), title: String(item.title || ""), clientId: String(item.clientId || "") }))
@@ -254,7 +248,6 @@ export default function ActivitiesPage() {
 
   const openCreateModal = () => {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
-    setClientSearch("");
     setOpportunitySearch("");
     setIsModalOpen(true);
   };
@@ -492,14 +485,13 @@ export default function ActivitiesPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Cliente</label>
-            <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.clientId} onChange={(event) => setFilters((previous) => ({ ...previous, clientId: event.target.value }))}>
-              <option value="">Todos</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
+            <ClientSearchSelect
+              clients={clients}
+              value={filters.clientId}
+              onChange={(clientId) => setFilters((previous) => ({ ...previous, clientId }))}
+              placeholder="Todos os clientes"
+              emptyLabel="Nenhum cliente encontrado."
+            />
           </div>
 
           <div className="flex items-end">
@@ -767,24 +759,18 @@ export default function ActivitiesPage() {
                   </div>
                 ) : null}
                 <div className="md:col-span-2">
-                  <label className="text-sm">Buscar cliente por nome</label>
-                  <input className="w-full rounded-lg border border-slate-300 p-2" value={clientSearch} onChange={(event) => setClientSearch(event.target.value)} placeholder="Digite para filtrar clientes" />
-                  <select
-                    required
-                    className="mt-1 w-full rounded-lg border border-slate-300 p-2"
+                  <label className="text-sm">Cliente</label>
+                  <ClientSearchSelect
+                    clients={clients}
                     value={form.clientId}
-                    onChange={(event) => {
-                      setForm((previous) => ({ ...previous, clientId: event.target.value, opportunityId: "" }));
+                    onChange={(clientId) => {
+                      setForm((previous) => ({ ...previous, clientId, opportunityId: "" }));
                       setOpportunitySearch("");
                     }}
-                  >
-                    <option value="">Selecione o cliente</option>
-                    {filteredClients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
+                    required
+                    emptyLabel="Nenhum cliente encontrado."
+                    className="mt-1 w-full rounded-lg border border-slate-300 p-2"
+                  />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Buscar oportunidade por título (opcional)</label>
