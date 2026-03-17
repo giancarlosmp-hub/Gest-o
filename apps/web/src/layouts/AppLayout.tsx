@@ -138,7 +138,7 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <div className="p-3 sm:p-4">
+        <div className="crm-page-shell p-4 sm:p-4">
           <Outlet />
         </div>
       </main>

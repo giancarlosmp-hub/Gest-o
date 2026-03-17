@@ -15,13 +15,58 @@
   --warning: #f59e0b;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   @apply bg-[color:var(--bg-app)] text-[color:var(--text-main)] antialiased;
-  overflow-x: hidden;
 }
 
 #root {
   min-height: 100vh;
+}
+
+
+.crm-page-shell {
+  width: 100%;
+  max-width: 100%;
+}
+
+.crm-page-shell > * {
+  width: 100%;
+  max-width: 100%;
+}
+
+@media (max-width: 767px) {
+  .crm-page-shell {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .crm-page-shell > * {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .crm-page-shell section,
+  .crm-page-shell article,
+  .crm-page-shell .rounded-xl,
+  .crm-page-shell .rounded-2xl {
+    width: 100%;
+    max-width: 100%;
+  }
 }
 
 @keyframes dashboard-card-enter {
