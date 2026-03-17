@@ -1634,14 +1634,14 @@ export default function AgendaPage() {
                 </div>
               ) : null}
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeCreate} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              <div className="mobile-action-stack justify-end pt-2">
+                <button type="button" onClick={closeCreate} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : createModalMode === "roteiro" ? "Salvar roteiro" : "Salvar agenda"}
                 </button>
@@ -1711,9 +1711,9 @@ export default function AgendaPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeFollowUpModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={isFollowUpSubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+              <div className="mobile-action-stack justify-end pt-2">
+                <button type="button" onClick={closeFollowUpModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={isFollowUpSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
                   {isFollowUpSubmitting ? "Criando..." : "Criar follow-up"}
                 </button>
               </div>
@@ -1746,9 +1746,9 @@ export default function AgendaPage() {
                   <input type="date" value={quickOpportunityForm.followUpDate} onChange={(event) => setQuickOpportunityForm((current) => ({ ...current, followUpDate: event.target.value }))} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
                 </label>
               </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setIsQuickOpportunityModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
-                <button type="submit" disabled={isQuickOpportunitySubmitting} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+              <div className="mobile-action-stack justify-end pt-2">
+                <button type="button" onClick={() => setIsQuickOpportunityModalOpen(false)} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
+                <button type="submit" disabled={isQuickOpportunitySubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
                   {isQuickOpportunitySubmitting ? "Salvando..." : "Salvar oportunidade"}
                 </button>
               </div>
@@ -1791,14 +1791,14 @@ export default function AgendaPage() {
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={closeRescheduleModal} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
+              <div className="mobile-action-stack justify-end pt-2">
+                <button type="button" onClick={closeRescheduleModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={isRescheduleSubmitting}
-                  className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isRescheduleSubmitting ? "Salvando..." : "Salvar reagendamento"}
                 </button>

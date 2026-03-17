@@ -37,6 +37,46 @@ body {
   min-height: 100vh;
 }
 
+@layer components {
+  .mobile-action-stack {
+    @apply flex flex-wrap items-center gap-2;
+  }
+
+  .mobile-action-stack > button,
+  .mobile-action-stack > a,
+  .mobile-action-stack > [role="button"] {
+    white-space: normal;
+  }
+
+  .mobile-primary-button {
+    @apply w-full sm:w-auto;
+  }
+
+  .mobile-secondary-half {
+    @apply w-full sm:w-auto;
+  }
+
+  @media (max-width: 767px) {
+    .mobile-action-stack {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .mobile-action-stack > button,
+    .mobile-action-stack > a,
+    .mobile-action-stack > [role="button"] {
+      width: 100%;
+      min-height: 48px;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .mobile-action-stack > .mobile-secondary-half {
+      width: calc(50% - 0.25rem);
+    }
+  }
+}
+
 
 .crm-page-shell {
   width: 100%;
@@ -121,7 +161,9 @@ textarea:focus {
   button,
   [role="button"],
   a.inline-flex {
-    min-height: 40px;
+    min-height: 48px;
+    white-space: normal;
+    word-break: break-word;
   }
 
   .overflow-x-auto {
