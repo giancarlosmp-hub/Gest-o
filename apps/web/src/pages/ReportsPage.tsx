@@ -163,6 +163,7 @@ export default function ReportsPage() {
   const [editingClosed, setEditingClosed] = useState<ClosedOpportunity | null>(null);
   const [closedEditForm, setClosedEditForm] = useState<ClosedEditForm | null>(null);
   const [isSavingClosedEdit, setIsSavingClosedEdit] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   const canEditClosedOpportunities = user?.role === "diretor" || user?.role === "gerente" || user?.role === "vendedor";
 
@@ -228,6 +229,15 @@ export default function ReportsPage() {
       setClientOptions(clients.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: item.id, name: item.name })));
     });
   }, [searchParams]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const media = window.matchMedia("(max-width: 767px)");
+    const sync = () => setIsMobile(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
 
 
   useEffect(() => {
@@ -300,7 +310,7 @@ export default function ReportsPage() {
       }
     },
     scales: {
-      x: { ticks: { color: "#4b5563" }, grid: { color: "#d1d5db" } },
+      x: { ticks: { color: "#4b5563", maxRotation: 0, autoSkip: true, maxTicksLimit: isMobile ? 5 : 10 }, grid: { color: "#d1d5db" } },
       y: { ticks: { color: "#4b5563" }, grid: { color: "#d1d5db" } }
     }
   };
@@ -361,7 +371,7 @@ export default function ReportsPage() {
       <div className="grid gap-4 xl:grid-cols-2">
         <section className={cardClass}>
           <h3 className="text-base font-semibold text-slate-900">Pipeline por cultura</h3>
-          <div className="mt-4 h-72">
+          <div className="mt-4 h-64 sm:h-72">
             <Bar
               options={barOptions}
               data={{
@@ -374,13 +384,14 @@ export default function ReportsPage() {
 
         <section className={cardClass}>
           <h3 className="text-base font-semibold text-slate-900">Pipeline por safra</h3>
-          <div className="mt-4 h-72">
+          <div className="mt-4 h-64 sm:h-72">
             <Doughnut
               options={{
                 ...baseChartOptions,
                 cutout: "58%",
                 plugins: {
                   ...baseChartOptions.plugins,
+                  legend: { display: !isMobile },
                   tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${formatCurrencyBRL(Number(ctx.raw || 0))}` } }
                 }
               }}
@@ -394,7 +405,7 @@ export default function ReportsPage() {
 
         <section className={cardClass}>
           <h3 className="text-base font-semibold text-slate-900">Oportunidades atrasadas por vendedor</h3>
-          <div className="mt-4 h-72">
+          <div className="mt-4 h-64 sm:h-72">
             <Bar
               options={overdueOptions}
               data={{
@@ -426,7 +437,7 @@ export default function ReportsPage() {
 
       <section className={cardClass}>
         <h3 className="mb-4 text-base font-semibold text-slate-900">Top 10 clientes por valor ponderado</h3>
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -448,12 +459,24 @@ export default function ReportsPage() {
             </tbody>
           </table>
         </div>
+        <div className="space-y-3 md:hidden">
+          {report.kpis.topClientsByWeightedValue.map((row) => (
+            <article key={row.clientId} className="rounded-xl border border-slate-200 p-3">
+              <h4 className="font-semibold text-slate-900">{row.clientName}</h4>
+              <dl className="mt-2 space-y-1 text-sm">
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor ponderado</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(row.weightedValue)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Pipeline bruto</dt><dd className="text-slate-700">{formatCurrencyBRL(row.value)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Oportunidades</dt><dd className="text-slate-700">{formatNumberBR(row.opportunities)}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div>
       </section>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <section className={cardClass}>
           <h3 className="mb-4 text-base font-semibold text-slate-900">Carteira por potencial (ha)</h3>
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -475,11 +498,23 @@ export default function ReportsPage() {
               </tbody>
             </table>
           </div>
+          <div className="space-y-3 md:hidden">
+            {report.tables.portfolioByPotentialHa.map((row) => (
+              <article key={row.clientId} className="rounded-xl border border-slate-200 p-3 text-sm">
+                <h4 className="font-semibold text-slate-900">{row.clientName}</h4>
+                <dl className="mt-2 space-y-1">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Potencial (ha)</dt><dd className="text-slate-700">{formatNumberBR(row.potentialHa)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Área total (ha)</dt><dd className="text-slate-700">{formatNumberBR(row.farmSizeHa)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Cobertura</dt><dd className="font-semibold text-slate-900">{formatPercentBR(row.potentialCoveragePercent)}</dd></div>
+                </dl>
+              </article>
+            ))}
+          </div>
         </section>
 
         <section className={cardClass}>
           <h3 className="mb-4 text-base font-semibold text-slate-900">Oportunidades por janela de plantio</h3>
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -500,6 +535,18 @@ export default function ReportsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="space-y-3 md:hidden">
+            {report.tables.opportunitiesByPlantingWindow.map((row) => (
+              <article key={row.month} className="rounded-xl border border-slate-200 p-3 text-sm">
+                <h4 className="font-semibold text-slate-900">{monthLabel(row.month)}</h4>
+                <dl className="mt-2 space-y-1">
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Qtd oportunidades</dt><dd className="text-slate-700">{formatNumberBR(row.opportunities)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Pipeline bruto</dt><dd className="text-slate-700">{formatCurrencyBRL(row.pipelineValue)}</dd></div>
+                  <div className="flex justify-between gap-3"><dt className="text-slate-500">Pipeline ponderado</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(row.weightedValue)}</dd></div>
+                </dl>
+              </article>
+            ))}
           </div>
         </section>
       </div>
@@ -544,7 +591,7 @@ export default function ReportsPage() {
           <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Ticket médio ganho</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatCurrencyBRL(closedKpis.averageWonTicket)}</div></div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="hidden overflow-x-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
@@ -589,6 +636,35 @@ export default function ReportsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+        <div className="space-y-3 md:hidden">
+          {closedLoading ? <div className="rounded-xl border border-slate-200 p-4 text-sm text-slate-500">Carregando oportunidades encerradas...</div> : null}
+          {!closedLoading && closedItems.length === 0 ? <div className="rounded-xl border border-slate-200 p-4 text-sm text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</div> : null}
+          {!closedLoading && closedItems.map((item) => (
+            <article key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm">
+              <h4 className="font-semibold text-slate-900">{item.title}</h4>
+              <dl className="mt-2 space-y-1">
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Cliente</dt><dd className="text-slate-700 text-right">{item.client}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Vendedor</dt><dd className="text-slate-700 text-right">{item.owner}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Cultura / Safra</dt><dd className="text-slate-700 text-right">{item.crop || "—"} · {item.season || "—"}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Etapa</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</dd></div>
+              </dl>
+              <div className="mt-3 flex justify-end">
+                {canEditClosedOpportunities ? (
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    onClick={() => openClosedEditModal(item)}
+                  >
+                    ✏️ Editar
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-400">Sem permissão</span>
+                )}
+              </div>
+            </article>
+          ))}
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-2">
