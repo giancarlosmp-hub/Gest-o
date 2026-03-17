@@ -441,7 +441,7 @@ export default function ActivitiesPage() {
           <div className="md:col-span-2 xl:col-span-2">
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Busca</label>
             <input
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               placeholder="Buscar por nota, cliente, oportunidade…"
               value={filters.q}
               onChange={(event) => setFilters((previous) => ({ ...previous, q: event.target.value }))}
@@ -450,7 +450,7 @@ export default function ActivitiesPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Tipo</label>
-            <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.type} onChange={(event) => setFilters((previous) => ({ ...previous, type: event.target.value }))}>
+            <select className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.type} onChange={(event) => setFilters((previous) => ({ ...previous, type: event.target.value }))}>
               <option value="">Todos</option>
               {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
                 <option key={activityType.value} value={activityType.value}>
@@ -462,7 +462,7 @@ export default function ActivitiesPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Status</label>
-            <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.done} onChange={(event) => setFilters((previous) => ({ ...previous, done: event.target.value as ActivityFilters["done"] }))}>
+            <select className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.done} onChange={(event) => setFilters((previous) => ({ ...previous, done: event.target.value as ActivityFilters["done"] }))}>
               <option value="">Todas</option>
               <option value="false">Pendentes</option>
               <option value="true">Concluídas</option>
@@ -473,7 +473,7 @@ export default function ActivitiesPage() {
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Mês</label>
             <input
               type="month"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+              className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
               value={filters.month}
               onChange={(event) => setFilters((previous) => ({ ...previous, month: event.target.value }))}
             />
@@ -497,7 +497,7 @@ export default function ActivitiesPage() {
           {canChooseSeller ? (
             <div>
               <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Vendedor</label>
-              <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.sellerId} onChange={(event) => setFilters((previous) => ({ ...previous, sellerId: event.target.value }))}>
+              <select className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" value={filters.sellerId} onChange={(event) => setFilters((previous) => ({ ...previous, sellerId: event.target.value }))}>
                 <option value="">Todos</option>
                 {sellers.map((seller) => (
                   <option key={seller.id} value={seller.id}>
@@ -516,13 +516,13 @@ export default function ActivitiesPage() {
         </div>
       </section>
 
-      <div className="overflow-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (
           <div className="p-4 text-slate-500">Carregando...</div>
         ) : !activities.length ? (
           <div className="p-8 text-center text-slate-500">Nenhuma atividade encontrada para os filtros atuais.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-brand-50 text-left text-brand-800">
                 <th className="p-2">Tipo</th>
@@ -580,8 +580,8 @@ export default function ActivitiesPage() {
       </div>
 
       {selectedActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setSelectedActivity(null)}>
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedActivity(null)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-xl font-semibold">Detalhes da atividade</h3>
               <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setSelectedActivity(null)}>✕</button>
@@ -602,21 +602,21 @@ export default function ActivitiesPage() {
       ) : null}
 
       {executionActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setExecutionActivity(null)}>
-          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setExecutionActivity(null)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <h3 className="mb-4 text-xl font-semibold">Executar atividade</h3>
             <form className="space-y-3" onSubmit={executeActivity}>
               <div>
                 <label className="text-sm">Resultado</label>
-                <input className="w-full rounded-lg border border-slate-300 p-2" value={executionForm.result} onChange={(event) => setExecutionForm((previous) => ({ ...previous, result: event.target.value }))} />
+                <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.result} onChange={(event) => setExecutionForm((previous) => ({ ...previous, result: event.target.value }))} />
               </div>
               <div>
                 <label className="text-sm">Observações</label>
-                <textarea className="min-h-20 w-full rounded-lg border border-slate-300 p-2" value={executionForm.observations} onChange={(event) => setExecutionForm((previous) => ({ ...previous, observations: event.target.value }))} />
+                <textarea className="min-h-20 w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.observations} onChange={(event) => setExecutionForm((previous) => ({ ...previous, observations: event.target.value }))} />
               </div>
               <div>
                 <label className="text-sm">Duração real (minutos)</label>
-                <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={executionForm.duration} onChange={(event) => setExecutionForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                <input type="number" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.duration} onChange={(event) => setExecutionForm((previous) => ({ ...previous, duration: event.target.value }))} />
               </div>
               <div className="flex justify-end gap-2">
                 <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setExecutionActivity(null)}>Cancelar</button>
@@ -628,11 +628,11 @@ export default function ActivitiesPage() {
       ) : null}
 
       {rescheduleActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setRescheduleActivity(null)}>
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setRescheduleActivity(null)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <h3 className="mb-4 text-xl font-semibold">Reagendar atividade</h3>
             <form className="space-y-3" onSubmit={reschedule}>
-              <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
+              <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
               <div className="flex justify-end gap-2">
                 <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setRescheduleActivity(null)}>Cancelar</button>
                 <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
@@ -643,12 +643,12 @@ export default function ActivitiesPage() {
       ) : null}
 
       {duplicateActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setDuplicateActivity(null)}>
-          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDuplicateActivity(null)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <h3 className="mb-4 text-xl font-semibold">Duplicar atividade</h3>
             <form className="space-y-3" onSubmit={duplicate}>
               <label className="text-sm">Nova data de vencimento</label>
-              <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
+              <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
               <div className="flex justify-end gap-2">
                 <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
                 <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Duplicar</button>
@@ -659,13 +659,13 @@ export default function ActivitiesPage() {
       ) : null}
 
       {editActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setEditActivity(null)}>
-          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditActivity(null)}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <h3 className="mb-4 text-xl font-semibold">Editar atividade</h3>
             <form className="space-y-3" onSubmit={edit}>
               <div>
                 <label className="text-sm">Tipo</label>
-                <select className="w-full rounded-lg border border-slate-300 p-2" value={editForm.type} onChange={(event) => setEditForm((previous) => ({ ...previous, type: event.target.value }))}>
+                <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.type} onChange={(event) => setEditForm((previous) => ({ ...previous, type: event.target.value }))}>
                   {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
                     <option key={activityType.value} value={activityType.value}>{activityType.label}</option>
                   ))}
@@ -673,16 +673,16 @@ export default function ActivitiesPage() {
               </div>
               <div>
                 <label className="text-sm">Notas</label>
-                <textarea required className="min-h-20 w-full rounded-lg border border-slate-300 p-2" value={editForm.notes} onChange={(event) => setEditForm((previous) => ({ ...previous, notes: event.target.value }))} />
+                <textarea required className="min-h-20 w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.notes} onChange={(event) => setEditForm((previous) => ({ ...previous, notes: event.target.value }))} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm">Vencimento</label>
-                  <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={editForm.dueDate} onChange={(event) => setEditForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
+                  <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.dueDate} onChange={(event) => setEditForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Duração (min)</label>
-                  <input type="number" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={editForm.duration} onChange={(event) => setEditForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                  <input type="number" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.duration} onChange={(event) => setEditForm((previous) => ({ ...previous, duration: event.target.value }))} />
                 </div>
               </div>
               <div className="flex justify-end gap-2">
@@ -695,8 +695,8 @@ export default function ActivitiesPage() {
       ) : null}
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCreateModal}>
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-slate-200 bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeCreateModal}>
+          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
             <div className="mb-4 flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-xl font-semibold">Nova atividade</h3>
@@ -710,7 +710,7 @@ export default function ActivitiesPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="text-sm">Tipo</label>
-                  <select className="w-full rounded-lg border border-slate-300 p-2" value={form.type} onChange={(event) => setForm((previous) => ({ ...previous, type: event.target.value }))}>
+                  <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.type} onChange={(event) => setForm((previous) => ({ ...previous, type: event.target.value }))}>
                     {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
                       <option key={activityType.value} value={activityType.value}>
                         {activityType.label}
@@ -720,7 +720,7 @@ export default function ActivitiesPage() {
                 </div>
                 <div>
                   <label className="text-sm">Vencimento</label>
-                  <input type="date" required className="w-full rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
+                  <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.dueDate} onChange={(event) => setForm((previous) => ({ ...previous, dueDate: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
                   <label className="inline-flex items-center gap-2 text-sm">
@@ -741,7 +741,7 @@ export default function ActivitiesPage() {
                 {canChooseSeller ? (
                   <div className="md:col-span-2">
                     <label className="text-sm">Vendedor responsável</label>
-                    <select required className="w-full rounded-lg border border-slate-300 p-2" value={form.ownerSellerId} onChange={(event) => setForm((previous) => ({ ...previous, ownerSellerId: event.target.value }))}>
+                    <select required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.ownerSellerId} onChange={(event) => setForm((previous) => ({ ...previous, ownerSellerId: event.target.value }))}>
                       <option value="">Selecione o vendedor</option>
                       {sellers.map((seller) => (
                         <option key={seller.id} value={seller.id}>
@@ -763,7 +763,7 @@ export default function ActivitiesPage() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Buscar oportunidade por título (opcional)</label>
-                  <input className="w-full rounded-lg border border-slate-300 p-2" value={opportunitySearch} disabled={!form.clientId} onChange={(event) => setOpportunitySearch(event.target.value)} placeholder="Digite para filtrar oportunidades" />
+                  <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={opportunitySearch} disabled={!form.clientId} onChange={(event) => setOpportunitySearch(event.target.value)} placeholder="Digite para filtrar oportunidades" />
                   <select className="mt-1 w-full rounded-lg border border-slate-300 p-2" value={form.opportunityId} onChange={(event) => setForm((previous) => ({ ...previous, opportunityId: event.target.value }))}>
                     <option value="">Sem oportunidade vinculada</option>
                     {filteredOpportunities.map((opportunity) => (
@@ -783,15 +783,15 @@ export default function ActivitiesPage() {
                 </div>
                 <div>
                   <label className="text-sm">Cultura (opcional)</label>
-                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.crop} onChange={(event) => setForm((previous) => ({ ...previous, crop: event.target.value }))} />
+                  <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.crop} onChange={(event) => setForm((previous) => ({ ...previous, crop: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Área estimada (opcional)</label>
-                  <input type="number" step="0.01" min={0} className="w-full rounded-lg border border-slate-300 p-2" value={form.areaEstimated} onChange={(event) => setForm((previous) => ({ ...previous, areaEstimated: event.target.value }))} />
+                  <input type="number" step="0.01" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.areaEstimated} onChange={(event) => setForm((previous) => ({ ...previous, areaEstimated: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Produto (opcional)</label>
-                  <input className="w-full rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
+                  <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Observações {form.executed ? "" : "(opcional)"}</label>

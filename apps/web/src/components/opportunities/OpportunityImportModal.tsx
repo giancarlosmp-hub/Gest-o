@@ -763,7 +763,7 @@ export default function OpportunityImportModal({
             </div>
           ) : null}
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <div className="w-full overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[780px] text-sm">
               <thead className="bg-slate-100 text-left text-slate-700">
                 <tr>

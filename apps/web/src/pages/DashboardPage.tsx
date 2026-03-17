@@ -1206,7 +1206,7 @@ export default function DashboardPage() {
           <div className="xl:col-span-4">
             <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Meta mensal por tipo</h4>
             <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-100">
-              <table className="min-w-full text-sm">
+              <table className="min-w-[600px] w-full text-sm">
                 <thead className="sticky top-0 bg-slate-50">
                   <tr className="text-left text-slate-500">
                     <th className="px-3 py-2">Tipo</th>
@@ -1242,8 +1242,8 @@ export default function DashboardPage() {
         {user?.role !== "vendedor" && (
           <div className="mt-5">
             <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Ranking por vendedor</h4>
-            <div className="overflow-x-auto rounded-lg border border-slate-100">
-              <table className="min-w-full text-sm">
+            <div className="w-full overflow-x-auto rounded-lg border border-slate-100">
+              <table className="min-w-[600px] w-full text-sm">
                 <thead className="bg-slate-50">
                   <tr className="text-left text-slate-500">
                     <th className="px-3 py-2">Ranking</th>
@@ -1282,8 +1282,8 @@ export default function DashboardPage() {
           <h3 className="font-semibold text-slate-800">Ranking Disciplina</h3>
           <span className="text-xs text-slate-500">Agenda + Roteiro</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2.5 pr-3">Posição</th>
@@ -1385,8 +1385,8 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2.5 pr-3">Posição</th>
@@ -1441,8 +1441,8 @@ export default function DashboardPage() {
           </div>
           <span className="text-xs text-slate-500">Dashboard &gt; Consistência</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
+        <div className="w-full overflow-x-auto">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2.5 pr-3">Posição</th>
@@ -1558,7 +1558,7 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="flex flex-1 items-center overflow-x-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-[600px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
                   <th className="py-2.5 pr-3">Ranking</th>

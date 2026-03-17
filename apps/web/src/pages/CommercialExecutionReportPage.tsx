@@ -201,7 +201,7 @@ export default function CommercialExecutionReportPage() {
       <section className={cardClass}>
         <h3 className="mb-4 text-base font-semibold text-slate-900">Detalhamento por vendedor</h3>
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2 pr-3 font-medium">Vendedor</th>

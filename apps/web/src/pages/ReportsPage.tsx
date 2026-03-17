@@ -438,7 +438,7 @@ export default function ReportsPage() {
       <section className={cardClass}>
         <h3 className="mb-4 text-base font-semibold text-slate-900">Top 10 clientes por valor ponderado</h3>
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2 pr-3 font-medium">Cliente</th>
@@ -477,7 +477,7 @@ export default function ReportsPage() {
         <section className={cardClass}>
           <h3 className="mb-4 text-base font-semibold text-slate-900">Carteira por potencial (ha)</h3>
           <div className="hidden overflow-x-auto md:block">
-            <table className="min-w-full text-sm">
+            <table className="min-w-[600px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
                   <th className="py-2 pr-3 font-medium">Cliente</th>
@@ -515,7 +515,7 @@ export default function ReportsPage() {
         <section className={cardClass}>
           <h3 className="mb-4 text-base font-semibold text-slate-900">Oportunidades por janela de plantio</h3>
           <div className="hidden overflow-x-auto md:block">
-            <table className="min-w-full text-sm">
+            <table className="min-w-[600px] w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-slate-500">
                   <th className="py-2 pr-3 font-medium">Mês</th>
@@ -592,7 +592,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="hidden overflow-x-auto md:block">
-          <table className="min-w-full text-sm">
+          <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
                 <th className="py-2 pr-3 font-medium">Oportunidade</th>
