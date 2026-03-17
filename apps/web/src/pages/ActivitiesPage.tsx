@@ -6,9 +6,8 @@ import api from "../lib/apiClient";
 import { ACTIVITY_TYPE_OPTIONS, toLabel } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
-import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
+import ClientSelect from "../components/ClientSelect";
 
-type Client = SearchableClientOption;
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
 type ActivityStatus = "agendado" | "vencido" | "realizado";
@@ -84,7 +83,6 @@ export default function ActivitiesPage() {
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
 
   const [activities, setActivities] = useState<Activity[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [form, setForm] = useState(initialForm);
@@ -140,12 +138,10 @@ export default function ActivitiesPage() {
 
   const loadLookups = async () => {
     try {
-      const requests: Promise<any>[] = [api.get("/clients"), api.get("/opportunities")];
+      const requests: Promise<any>[] = [api.get("/opportunities")];
       if (canChooseSeller) requests.push(api.get("/users"));
-      const [clientsRes, opportunitiesRes, usersRes] = await Promise.all(requests);
+      const [opportunitiesRes, usersRes] = await Promise.all(requests);
 
-      const clientsPayload = Array.isArray(clientsRes.data?.items) ? clientsRes.data.items : clientsRes.data;
-      setClients(Array.isArray(clientsPayload) ? clientsPayload.map((item: any) => ({ id: String(item.id), name: String(item.name), city: item.city ? String(item.city) : null, state: item.state ? String(item.state) : null, cnpj: item.cnpj ? String(item.cnpj) : null })) : []);
       setOpportunities(
         Array.isArray(opportunitiesRes.data)
           ? opportunitiesRes.data.map((item: any) => ({ id: String(item.id), title: String(item.title || ""), clientId: String(item.clientId || "") }))
@@ -485,12 +481,9 @@ export default function ActivitiesPage() {
 
           <div>
             <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Cliente</label>
-            <ClientSearchSelect
-              clients={clients}
+            <ClientSelect
               value={filters.clientId}
-              onChange={(clientId) => setFilters((previous) => ({ ...previous, clientId }))}
-              placeholder="Todos os clientes"
-              emptyLabel="Nenhum cliente encontrado."
+              onChange={(client) => setFilters((previous) => ({ ...previous, clientId: client?.id || "" }))}
             />
           </div>
 
@@ -760,16 +753,12 @@ export default function ActivitiesPage() {
                 ) : null}
                 <div className="md:col-span-2">
                   <label className="text-sm">Cliente</label>
-                  <ClientSearchSelect
-                    clients={clients}
+                  <ClientSelect
                     value={form.clientId}
-                    onChange={(clientId) => {
-                      setForm((previous) => ({ ...previous, clientId, opportunityId: "" }));
+                    onChange={(client) => {
+                      setForm((previous) => ({ ...previous, clientId: client?.id || "", opportunityId: "" }));
                       setOpportunitySearch("");
                     }}
-                    required
-                    emptyLabel="Nenhum cliente encontrado."
-                    className="mt-1 w-full rounded-lg border border-slate-300 p-2"
                   />
                 </div>
                 <div className="md:col-span-2">
