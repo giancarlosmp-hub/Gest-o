@@ -57,6 +57,7 @@ JWT_REFRESH_SECRET=<segredo-forte-diferente>
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
 - O serviço `web` depende de `api` com `condition: service_started` para não bloquear a stack por falso `unhealthy` quando apenas o healthcheck do backend oscilar.
+- O PostgreSQL deve permanecer acessível apenas internamente na rede do Docker; para administração, use `docker compose exec db psql -U postgres -d salesforce_pro` ou um túnel SSH controlado. Veja `docs/ops/postgresql-access.md`.
 
 ### Publicar CRM com Nginx no VPS
 Para configurar o domínio `crm.demetraagronegocios.com.br` com proxy para o frontend em `127.0.0.1:5173` e API em `127.0.0.1:4000` via `/api`, execute:
@@ -124,6 +125,7 @@ Proteções rígidas aplicadas em produção:
 - o `backup.sh` rejeita backup inconsistente e não aceita dump vazio como backup válido;
 - o script `scripts/check-prod-health.sh` faz pré-checagem manual em modo somente leitura;
 - seed automático segue desabilitado em produção por padrão.
+- o PostgreSQL não deve ter a porta `5432` exposta publicamente; o acesso administrativo deve ser feito por `docker compose exec` no container `db` ou via túnel SSH controlado.
 
 ## Trava rígida do deploy
 O `deploy.sh` executa o seguinte fluxo defensivo:
