@@ -31,7 +31,6 @@ type DraftStop = {
   id: string;
   clientId: string;
   city: string;
-  plannedTime: string;
   notes: string;
 };
 
@@ -253,6 +252,23 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function createEmptyDraftStop(): DraftStop {
+  return {
+    id: String(Date.now() + Math.random()),
+    clientId: "",
+    city: "",
+    notes: ""
+  };
+}
+
+function toIsoStartOfDay(dateValue: string) {
+  return new Date(`${dateValue}T00:00:00`).toISOString();
+}
+
+function toIsoEndOfDay(dateValue: string) {
+  return new Date(`${dateValue}T23:59:59`).toISOString();
 }
 
 function formatStopPlannedTime(value: AgendaStop["plannedTime"]) {
@@ -1176,7 +1192,7 @@ export default function AgendaPage() {
       clientId: "",
       notes: ""
     });
-    setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", city: "", plannedTime: "", notes: "" }] : []);
+    setDraftStops(isRouteMode ? [createEmptyDraftStop()] : []);
 
     setIsCreateOpen(true);
   };
@@ -1185,6 +1201,24 @@ export default function AgendaPage() {
     setIsCreateOpen(false);
     setCreateModalMode("agenda");
     setDraftStops([]);
+  };
+
+  const updateDraftStop = (stopId: string, patch: Partial<DraftStop>) => {
+    setDraftStops((current) => current.map((stop) => (stop.id === stopId ? { ...stop, ...patch } : stop)));
+  };
+
+  const moveDraftStop = (index: number, direction: -1 | 1) => {
+    setDraftStops((current) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const removeDraftStop = (stopId: string) => {
+    setDraftStops((current) => (current.length === 1 ? current : current.filter((stop) => stop.id !== stopId)));
   };
 
   const resolveAgendaOwnerId = () => {
@@ -1201,25 +1235,29 @@ export default function AgendaPage() {
       return;
     }
 
-    if (new Date(createForm.startDateTime).getTime() >= new Date(createForm.endDateTime).getTime()) {
+    const isRoute = createForm.type === "roteiro_visita";
+    const startDateTimeIso = isRoute ? toIsoStartOfDay(createForm.startDateTime) : new Date(createForm.startDateTime).toISOString();
+    const endDateTimeIso = isRoute ? toIsoEndOfDay(createForm.endDateTime) : new Date(createForm.endDateTime).toISOString();
+
+    if (new Date(startDateTimeIso).getTime() >= new Date(endDateTimeIso).getTime()) {
       toast.error("A data de fim deve ser maior que a data de início.");
       return;
     }
 
-    if (createForm.type !== "roteiro_visita" && !createForm.clientId) {
+    if (!isRoute && !createForm.clientId) {
       toast.error("Selecione um cliente");
       return;
     }
 
-    if (createForm.type === "roteiro_visita") {
+    if (isRoute) {
       if (!draftStops.length) {
         toast.error("Adicione ao menos uma parada no roteiro.");
         return;
       }
 
-      const hasInvalidStop = draftStops.some((stop) => !stop.clientId && !stop.city.trim());
+      const hasInvalidStop = draftStops.some((stop) => !stop.clientId);
       if (hasInvalidStop) {
-        toast.error("Cada parada deve ter cliente ou cidade informada.");
+        toast.error("Selecione um cliente para cada parada.");
         return;
       }
     }
@@ -1235,15 +1273,14 @@ export default function AgendaPage() {
       const payload: Record<string, any> = {
         title: createForm.title.trim(),
         type: createForm.type,
-        startDateTime: new Date(createForm.startDateTime).toISOString(),
-        endDateTime: new Date(createForm.endDateTime).toISOString(),
+        startDateTime: startDateTimeIso,
+        endDateTime: endDateTimeIso,
         ...(createForm.clientId ? { clientId: createForm.clientId } : {}),
-        ...(createForm.type === "roteiro_visita"
+        ...(isRoute
           ? {
               stops: draftStops.map((stop) => ({
                 clientId: stop.clientId || undefined,
-                city: stop.city.trim() || undefined,
-                plannedTime: stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined,
+                city: clientById.get(stop.clientId)?.city?.trim() || undefined,
                 notes: stop.notes.trim() || undefined
               }))
             }
@@ -1274,8 +1311,7 @@ export default function AgendaPage() {
                 order: matchedResponseStop?.order || index + 1,
                 clientId: matchedResponseStop?.clientId || stop.clientId || undefined,
                 clientName: matchedResponseStop?.clientName || selectedClient?.name || null,
-                city: matchedResponseStop?.city || stop.city.trim() || selectedClient?.city || null,
-                plannedTime: matchedResponseStop?.plannedTime || (stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined),
+                city: matchedResponseStop?.city || selectedClient?.city || stop.city.trim() || null,
                 notes: matchedResponseStop?.notes || stop.notes.trim() || undefined
               };
             })
@@ -1655,7 +1691,7 @@ export default function AgendaPage() {
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
-                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje paradas por cliente/cidade para execução do vendedor." : "Informe os dados básicos para criar um compromisso."}</p>
+                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje as paradas do roteiro com cliente, cidade automática e observações." : "Informe os dados básicos para criar um compromisso."}</p>
               </div>
               <button type="button" onClick={closeCreate} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
                 ✕
@@ -1721,7 +1757,7 @@ export default function AgendaPage() {
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
                   <input
-                    type="datetime-local"
+                    type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.startDateTime}
                     onChange={(event) => setCreateForm((current) => ({ ...current, startDateTime: event.target.value }))}
                     className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1730,7 +1766,7 @@ export default function AgendaPage() {
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
                   <input
-                    type="datetime-local"
+                    type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.endDateTime}
                     onChange={(event) => setCreateForm((current) => ({ ...current, endDateTime: event.target.value }))}
                     className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1768,52 +1804,45 @@ export default function AgendaPage() {
 
               {createForm.type === "roteiro_visita" ? (
                 <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-                  <p className="text-xs text-emerald-700">Paradas são obrigatórias no roteiro.</p>
+                  <p className="text-xs text-emerald-700">Paradas são obrigatórias no roteiro e usam a cidade do cadastro do cliente.</p>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-emerald-800">Paradas</p>
-                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", city: "", plannedTime: "", notes: "" }])}>Adicionar parada</button>
+                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, createEmptyDraftStop()])}>Adicionar parada</button>
                   </div>
                   {draftStops.map((stop, index) => (
-                    <div key={stop.id} className="grid gap-2 rounded bg-white p-3 md:grid-cols-5">
-                      <div className="space-y-1 md:col-span-2">
+                    <div key={stop.id} className="grid gap-3 rounded bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+                      <div className="space-y-3">
                         <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Cliente</label>
                         <ClientSearchSelect
                           clients={activityClients}
                           value={stop.clientId}
-                          onChange={(clientId) =>
-                            setDraftStops((current) =>
-                              current.map((item) => {
-                                if (item.id !== stop.id) return item;
-                                const selectedClient = clientById.get(clientId);
-                                return {
-                                  ...item,
-                                  clientId,
-                                  city: item.city || selectedClient?.city || ""
-                                };
-                              })
-                            )
-                          }
+                          onChange={(clientId) => updateDraftStop(stop.id, { clientId, city: clientById.get(clientId)?.city || "" })}
                           placeholder="Pesquisar por nome, cidade, UF ou CNPJ"
                           emptyLabel="Nenhum cliente encontrado."
                           maxListHeightClassName="max-h-40"
                         />
+                        <label className="block space-y-1">
+                          <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Cidade</span>
+                          <input
+                            value={stop.city || "Não informada"}
+                            readOnly
+                            className="w-full rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+                          />
+                        </label>
+                        <label className="block space-y-1">
+                          <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Observação da parada</span>
+                          <textarea
+                            value={stop.notes}
+                            onChange={(event) => updateDraftStop(stop.id, { notes: event.target.value })}
+                            placeholder="Adicionar observação"
+                            className="min-h-20 w-full rounded border border-slate-200 px-3 py-2 text-sm"
+                          />
+                        </label>
                       </div>
-                      <label className="space-y-1">
-                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Cidade</span>
-                        <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="w-full rounded border px-2 py-2 text-sm" />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Horário</span>
-                        <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="w-full rounded border px-2 py-2 text-sm" />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Observações</span>
-                        <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="w-full rounded border px-2 py-2 text-sm" />
-                      </label>
-                      <div className="flex items-end justify-end gap-1">
-                        <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
-                        <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
-                        <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => setDraftStops((current) => current.filter((item) => item.id !== stop.id))}>✕</button>
+                      <div className="flex items-center justify-end gap-1 md:self-start">
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index === 0} onClick={() => moveDraftStop(index, -1)}>↑</button>
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index === draftStops.length - 1} onClick={() => moveDraftStop(index, 1)}>↓</button>
+                        <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length === 1} onClick={() => removeDraftStop(stop.id)}>✕</button>
                       </div>
                     </div>
                   ))}
