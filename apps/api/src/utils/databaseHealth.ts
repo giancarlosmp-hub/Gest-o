@@ -25,12 +25,22 @@ function formatSnapshot(snapshot: DatabaseHealthSnapshot) {
   return `user=${snapshot.user}, client=${snapshot.client}, opportunity=${snapshot.opportunity}, timelineEvent=${snapshot.timelineEvent}`;
 }
 
+function buildEnvironmentMetadata(environment = process.env) {
+  return {
+    nodeEnv: environment.NODE_ENV ?? "undefined",
+    ci: toBoolean(environment.CI) || toBoolean(environment.GITHUB_ACTIONS),
+    smoke:
+      toBoolean(environment.ENABLE_SMOKE_BOOTSTRAP) || toBoolean(environment.COMPOSE_SMOKE) || toBoolean(environment.SMOKE_TEST)
+  };
+}
+
 function isEmptySnapshot(snapshot: DatabaseHealthSnapshot) {
   return snapshot.user === 0 && snapshot.client === 0 && snapshot.opportunity === 0 && snapshot.timelineEvent === 0;
 }
 
 export async function validateDatabaseHealth() {
   const isRealProduction = isRealProductionEnvironment();
+  const environmentMetadata = buildEnvironmentMetadata();
 
   try {
     const [user, client, opportunity, timelineEvent] = await Promise.all([
@@ -42,26 +52,28 @@ export async function validateDatabaseHealth() {
 
     const snapshot = { user, client, opportunity, timelineEvent };
     const formattedSnapshot = formatSnapshot(snapshot);
-    console.log(`[SAFEGUARD] Database snapshot: ${formattedSnapshot}`);
+
+    console.log("[SAFEGUARD] Database snapshot:", snapshot);
 
     if (!isEmptySnapshot(snapshot)) {
       return;
     }
 
-    const message = `[SAFEGUARD] ${isRealProduction ? "Banco inconsistente detectado em produção real; bootstrap abortado." : "Banco vazio detectado em ambiente não produtivo; inicialização permitida."} Snapshot: ${formattedSnapshot}`;
-
     if (isRealProduction) {
-      throw new Error(message);
+      throw new Error(`[CRITICAL] Banco inconsistente detectado. Snapshot: ${formattedSnapshot}`);
     }
 
-    console.warn(message);
+    console.warn(`[SAFEGUARD] Banco vazio permitido em ambiente não produtivo. Snapshot: ${formattedSnapshot}`);
   } catch (error) {
     if (isRealProduction) {
-      const safeguardError = new Error("[SAFEGUARD] Falha ao validar integridade do banco em produção real; bootstrap abortado.");
+      const safeguardError = new Error("[CRITICAL] Falha ao validar integridade do banco em produção real; bootstrap abortado.");
       (safeguardError as Error & { cause?: unknown }).cause = error;
       throw safeguardError;
     }
 
-    console.warn("[SAFEGUARD] Tabelas críticas indisponíveis em ambiente não produtivo; inicialização permitida.", error);
+    console.warn("[SAFEGUARD] Falha de conexão ou tabelas críticas indisponíveis em ambiente não produtivo; inicialização permitida.", {
+      environment: environmentMetadata,
+      error
+    });
   }
 }
