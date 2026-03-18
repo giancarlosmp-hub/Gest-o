@@ -1348,13 +1348,13 @@ export default function AgendaPage() {
 
   return (
     <section className="space-y-4">
-      <header className="flex justify-between rounded-xl border bg-white p-4 shadow-sm">
-        <div>
+      <header className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-xl font-semibold">Agenda</h2>
           <p className="text-sm text-slate-600">Roteiro de visitas / compromissos</p>
         </div>
 
-        <button type="button" onClick={() => openCreate("agenda")} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white">
+        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white sm:w-auto">
           Nova agenda
         </button>
       </header>
@@ -1423,8 +1423,23 @@ export default function AgendaPage() {
         </div>
       ) : null}
 
-      <div className="rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm">
-        <span className="font-semibold">Reuniões:</span> {summary.meetings} | <span className="font-semibold">Roteiros:</span> {summary.routes} | <span className="font-semibold">Follow-ups:</span> {summary.followups} | <span className="font-semibold">Atrasados:</span> {summary.overdue}
+      <div className="grid gap-3 rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Reuniões</p>
+          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.meetings}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Roteiros</p>
+          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.routes}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Follow-ups</p>
+          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.followups}</p>
+        </div>
+        <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-3">
+          <p className="text-xs font-medium uppercase tracking-wide text-rose-600">Atrasados</p>
+          <p className="mt-1 text-lg font-semibold text-rose-700">{summary.overdue}</p>
+        </div>
       </div>
 
 
@@ -1445,12 +1460,12 @@ export default function AgendaPage() {
       </div>
 
       <div className="rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900">Roteiro de Visitas (dia)</h3>
             <p className="text-sm text-slate-500">Planeje múltiplas paradas e acompanhe execução no dia.</p>
           </div>
-          <button type="button" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white" onClick={() => openCreate("roteiro")}>
+          <button type="button" className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white sm:w-auto" onClick={() => openCreate("roteiro")}>
             Criar roteiro
           </button>
         </div>
@@ -1564,7 +1579,7 @@ export default function AgendaPage() {
                     <p className="truncate font-medium text-slate-900">{event.title}</p>
                     <p className="text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
                       <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}>{TYPE_LABEL[normalizeAgendaEventType(event.type)]}</span>
                       {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                       <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
@@ -1595,7 +1610,7 @@ export default function AgendaPage() {
                           <p className="break-words font-medium text-slate-900">{event.title}</p>
                           <p className="mt-1 text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
                             <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
                             {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
                             <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
@@ -1636,7 +1651,7 @@ export default function AgendaPage() {
                           </button>
                           <button
                             type="button"
-                            className="rounded-md border border-brand-300 px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            className="rounded-md border border-brand-300 px-3 py-2 text-center text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
                             disabled={Boolean(event.hasLinkedActivity || event.linkedActivityId)}
                             onClick={() => void openActivityModal(event)}
                           >
@@ -1869,9 +1884,9 @@ export default function AgendaPage() {
       ) : null}
 
       {isFollowUpModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeFollowUpModal}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mobile-modal-shell" onClick={closeFollowUpModal}>
+          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Criar follow-up</h3>
                 <p className="text-sm text-slate-500">Dados pré-preenchidos a partir do evento selecionado.</p>
@@ -1879,7 +1894,8 @@ export default function AgendaPage() {
               <button type="button" onClick={closeFollowUpModal} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">✕</button>
             </div>
 
-            <form className="space-y-3" onSubmit={onSubmitFollowUp}>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmitFollowUp}>
+              <div className="mobile-modal-body space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
                 <input value="Follow-up" readOnly className="w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
@@ -1930,7 +1946,9 @@ export default function AgendaPage() {
                 />
               </div>
 
-              <div className="mobile-action-stack justify-end pt-2">
+              </div>
+
+              <div className="mobile-modal-footer">
                 <button type="button" onClick={closeFollowUpModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">Cancelar</button>
                 <button type="submit" disabled={isFollowUpSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
                   {isFollowUpSubmitting ? "Criando..." : "Criar follow-up"}
@@ -1977,9 +1995,9 @@ export default function AgendaPage() {
       ) : null}
 
       {isRescheduleOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeRescheduleModal}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(e) => e.stopPropagation()}>
-            <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mobile-modal-shell" onClick={closeRescheduleModal}>
+          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">Reagendar compromisso</h3>
                 <p className="text-sm text-slate-500">Ajuste início e fim do evento selecionado.</p>
@@ -1989,7 +2007,8 @@ export default function AgendaPage() {
               </button>
             </div>
 
-            <form className="space-y-3" onSubmit={onSubmitReschedule}>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSubmitReschedule}>
+              <div className="mobile-modal-body space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
                 <input
@@ -2010,7 +2029,9 @@ export default function AgendaPage() {
                 />
               </div>
 
-              <div className="mobile-action-stack justify-end pt-2">
+              </div>
+
+              <div className="mobile-modal-footer">
                 <button type="button" onClick={closeRescheduleModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                   Cancelar
                 </button>

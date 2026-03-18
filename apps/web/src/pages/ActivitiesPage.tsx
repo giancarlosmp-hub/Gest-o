@@ -429,9 +429,12 @@ export default function ActivitiesPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-slate-900">Atividades</h2>
-        <button type="button" onClick={openCreateModal} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800">
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-2xl font-bold text-slate-900">Atividades</h2>
+          <p className="text-sm text-slate-500">Acompanhe pendências e registre execuções com mais conforto no mobile.</p>
+        </div>
+        <button type="button" onClick={openCreateModal} className="w-full rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 sm:w-auto">
           Nova atividade
         </button>
       </div>
@@ -510,83 +513,138 @@ export default function ActivitiesPage() {
         </div>
 
         <div className="mt-3 flex justify-end">
-          <button type="button" onClick={clearFilters} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+          <button type="button" onClick={clearFilters} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 sm:w-auto">
             Limpar filtros
           </button>
         </div>
       </section>
 
-      <div className="w-full overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
         {loading ? (
           <div className="p-4 text-slate-500">Carregando...</div>
         ) : !activities.length ? (
           <div className="p-8 text-center text-slate-500">Nenhuma atividade encontrada para os filtros atuais.</div>
         ) : (
-          <table className="min-w-[600px] w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 bg-brand-50 text-left text-brand-800">
-                <th className="p-2">Tipo</th>
-                <th className="p-2">Cliente</th>
-                <th className="p-2">Oportunidade</th>
-                <th className="p-2">Vencimento</th>
-                <th className="p-2">Status</th>
-                <th className="p-2">Notas</th>
-                <th className="p-2 text-right">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <div className="space-y-3 p-3 md:hidden">
               {activities.map((item) => {
                 const status = item.status || (item.done ? "realizado" : "agendado");
                 return (
-                  <tr key={item.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => setSelectedActivity(item)}>
-                    <td className="p-2">{toLabel(item.type)}</td>
-                    <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
-                    <td className="p-2">{item.opportunity?.title || "—"}</td>
-                    <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
-                    <td className="p-2">
-                      <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
-                    </td>
-                    <td className="p-2">{item.notes}</td>
-                    <td className="p-2">
-                      <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
-                        {status === "agendado" ? (
-                          <>
-                            <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
-                            <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
-                            <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
-                          </>
-                        ) : null}
-                        {status === "vencido" ? (
-                          <>
-                            <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
-                            <button type="button" className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
-                            <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
-                          </>
-                        ) : null}
-                        {status === "realizado" ? (
-                          <>
-                            <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
-                            <button type="button" className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
-                          </>
-                        ) : null}
+                  <article key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-900">{item.opportunity?.client?.name || item.client?.name || "Cliente não informado"}</p>
+                        <p className="mt-1 text-xs text-slate-500">{toLabel(item.type)} • {new Date(item.dueDate).toLocaleDateString("pt-BR")}</p>
                       </div>
-                    </td>
-                  </tr>
+                      <span className={`rounded-full border px-2 py-1 text-center text-xs font-medium leading-5 ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                    </div>
+
+                    <dl className="mt-3 space-y-2 text-sm text-slate-700">
+                      <div>
+                        <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Oportunidade</dt>
+                        <dd className="break-words text-slate-800">{item.opportunity?.title || "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Notas</dt>
+                        <dd className="break-words text-slate-800">{item.notes || "—"}</dd>
+                      </div>
+                    </dl>
+
+                    <div className="mobile-action-stack mt-4" onClick={(event) => event.stopPropagation()}>
+                      {status === "agendado" ? (
+                        <>
+                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                          <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
+                          <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                        </>
+                      ) : null}
+                      {status === "vencido" ? (
+                        <>
+                          <button type="button" className="rounded-md border border-brand-200 px-3 py-2 text-center text-xs font-medium text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                          <button type="button" className="rounded-md border border-amber-200 px-3 py-2 text-center text-xs font-medium text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
+                          <button type="button" className="rounded-md border border-rose-200 px-3 py-2 text-center text-xs font-medium text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                        </>
+                      ) : null}
+                      {status === "realizado" ? (
+                        <>
+                          <button type="button" className="rounded-md border border-slate-300 px-3 py-2 text-center text-xs font-medium text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
+                          <button type="button" className="rounded-md border border-emerald-200 px-3 py-2 text-center text-xs font-medium text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
+                        </>
+                      ) : null}
+                    </div>
+                  </article>
                 );
               })}
-            </tbody>
-          </table>
+            </div>
+
+            <div className="hidden w-full overflow-x-auto md:block">
+              <table className="min-w-[720px] w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-brand-50 text-left text-brand-800">
+                    <th className="p-2">Tipo</th>
+                    <th className="p-2">Cliente</th>
+                    <th className="p-2">Oportunidade</th>
+                    <th className="p-2">Vencimento</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2">Notas</th>
+                    <th className="p-2 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activities.map((item) => {
+                    const status = item.status || (item.done ? "realizado" : "agendado");
+                    return (
+                      <tr key={item.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => setSelectedActivity(item)}>
+                        <td className="p-2">{toLabel(item.type)}</td>
+                        <td className="p-2">{item.opportunity?.client?.name || item.client?.name || "—"}</td>
+                        <td className="p-2">{item.opportunity?.title || "—"}</td>
+                        <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
+                        <td className="p-2">
+                          <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+                        </td>
+                        <td className="p-2">{item.notes}</td>
+                        <td className="p-2">
+                          <div className="flex justify-end gap-1" onClick={(event) => event.stopPropagation()}>
+                            {status === "agendado" ? (
+                              <>
+                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                                <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => openEditModal(item)}>Editar</button>
+                                <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                              </>
+                            ) : null}
+                            {status === "vencido" ? (
+                              <>
+                                <button type="button" className="rounded-md border border-brand-200 px-2 py-1 text-xs text-brand-700" onClick={() => openExecutionModal(item)}>Executar</button>
+                                <button type="button" className="rounded-md border border-amber-200 px-2 py-1 text-xs text-amber-700" onClick={() => openRescheduleModal(item)}>Reagendar</button>
+                                <button type="button" className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-700" disabled={removingId === item.id} onClick={() => void deleteActivity(item.id)}>Excluir</button>
+                              </>
+                            ) : null}
+                            {status === "realizado" ? (
+                              <>
+                                <button type="button" className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => setSelectedActivity(item)}>Visualizar</button>
+                                <button type="button" className="rounded-md border border-emerald-200 px-2 py-1 text-xs text-emerald-700" onClick={() => openDuplicateModal(item)}>Duplicar</button>
+                              </>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {selectedActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedActivity(null)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-4 flex items-center justify-between">
+        <div className="mobile-modal-shell" onClick={() => setSelectedActivity(null)}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <h3 className="text-xl font-semibold">Detalhes da atividade</h3>
               <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setSelectedActivity(null)}>✕</button>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="mobile-modal-body grid gap-3 md:grid-cols-2">
               <p><strong>Tipo:</strong> {toLabel(selectedActivity.type)}</p>
               <p><strong>Status:</strong> {STATUS_LABEL[selectedActivity.status || (selectedActivity.done ? "realizado" : "agendado")]}</p>
               <p><strong>Cliente:</strong> {selectedActivity.opportunity?.client?.name || selectedActivity.client?.name || "—"}</p>
@@ -602,10 +660,14 @@ export default function ActivitiesPage() {
       ) : null}
 
       {executionActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setExecutionActivity(null)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <h3 className="mb-4 text-xl font-semibold">Executar atividade</h3>
-            <form className="space-y-3" onSubmit={executeActivity}>
+        <div className="mobile-modal-shell" onClick={() => setExecutionActivity(null)}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <h3 className="text-xl font-semibold">Executar atividade</h3>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setExecutionActivity(null)}>✕</button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={executeActivity}>
+              <div className="mobile-modal-body space-y-3">
               <div>
                 <label className="text-sm">Resultado</label>
                 <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.result} onChange={(event) => setExecutionForm((previous) => ({ ...previous, result: event.target.value }))} />
@@ -618,9 +680,10 @@ export default function ActivitiesPage() {
                 <label className="text-sm">Duração real (minutos)</label>
                 <input type="number" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.duration} onChange={(event) => setExecutionForm((previous) => ({ ...previous, duration: event.target.value }))} />
               </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setExecutionActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">{savingAction ? "Salvando..." : "Concluir execução"}</button>
+              </div>
+              <div className="mobile-modal-footer">
+                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setExecutionActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">{savingAction ? "Salvando..." : "Concluir execução"}</button>
               </div>
             </form>
           </div>
@@ -628,14 +691,19 @@ export default function ActivitiesPage() {
       ) : null}
 
       {rescheduleActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setRescheduleActivity(null)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <h3 className="mb-4 text-xl font-semibold">Reagendar atividade</h3>
-            <form className="space-y-3" onSubmit={reschedule}>
+        <div className="mobile-modal-shell" onClick={() => setRescheduleActivity(null)}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <h3 className="text-xl font-semibold">Reagendar atividade</h3>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setRescheduleActivity(null)}>✕</button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={reschedule}>
+              <div className="mobile-modal-body space-y-3">
               <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setRescheduleActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
+              </div>
+              <div className="mobile-modal-footer">
+                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setRescheduleActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
               </div>
             </form>
           </div>
@@ -643,15 +711,20 @@ export default function ActivitiesPage() {
       ) : null}
 
       {duplicateActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDuplicateActivity(null)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <h3 className="mb-4 text-xl font-semibold">Duplicar atividade</h3>
-            <form className="space-y-3" onSubmit={duplicate}>
+        <div className="mobile-modal-shell" onClick={() => setDuplicateActivity(null)}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <h3 className="text-xl font-semibold">Duplicar atividade</h3>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setDuplicateActivity(null)}>✕</button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={duplicate}>
+              <div className="mobile-modal-body space-y-3">
               <label className="text-sm">Nova data de vencimento</label>
               <input type="date" required className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={duplicateDate} onChange={(event) => setDuplicateDate(event.target.value)} />
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Duplicar</button>
+              </div>
+              <div className="mobile-modal-footer">
+                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setDuplicateActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">Duplicar</button>
               </div>
             </form>
           </div>
@@ -659,10 +732,14 @@ export default function ActivitiesPage() {
       ) : null}
 
       {editActivity ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setEditActivity(null)}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <h3 className="mb-4 text-xl font-semibold">Editar atividade</h3>
-            <form className="space-y-3" onSubmit={edit}>
+        <div className="mobile-modal-shell" onClick={() => setEditActivity(null)}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <h3 className="text-xl font-semibold">Editar atividade</h3>
+              <button type="button" className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-500" onClick={() => setEditActivity(null)}>✕</button>
+            </div>
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={edit}>
+              <div className="mobile-modal-body space-y-3">
               <div>
                 <label className="text-sm">Tipo</label>
                 <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.type} onChange={(event) => setEditForm((previous) => ({ ...previous, type: event.target.value }))}>
@@ -685,9 +762,10 @@ export default function ActivitiesPage() {
                   <input type="number" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={editForm.duration} onChange={(event) => setEditForm((previous) => ({ ...previous, duration: event.target.value }))} />
                 </div>
               </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" className="rounded-lg border border-slate-300 px-4 py-2" onClick={() => setEditActivity(null)}>Cancelar</button>
-                <button type="submit" disabled={savingAction} className="rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
+              </div>
+              <div className="mobile-modal-footer">
+                <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2" onClick={() => setEditActivity(null)}>Cancelar</button>
+                <button type="submit" disabled={savingAction} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">Salvar</button>
               </div>
             </form>
           </div>
@@ -695,9 +773,9 @@ export default function ActivitiesPage() {
       ) : null}
 
       {isModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={closeCreateModal}>
-          <div className="bg-white w-full max-w-lg rounded-lg shadow max-h-[90vh] overflow-y-auto px-4 py-4 md:px-6" onClick={(event) => event.stopPropagation()}>
-            <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="mobile-modal-shell" onClick={closeCreateModal}>
+          <div className="mobile-modal-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-xl font-semibold">Nova atividade</h3>
                 <p className="text-sm text-slate-500">Registre uma próxima ação com cliente e mantenha o funil atualizado.</p>
@@ -706,8 +784,9 @@ export default function ActivitiesPage() {
                 ✕
               </button>
             </div>
-            <form onSubmit={onSubmit} className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
+            <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+              <div className="mobile-modal-body">
+                <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="text-sm">Tipo</label>
                   <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.type} onChange={(event) => setForm((previous) => ({ ...previous, type: event.target.value }))}>
@@ -807,12 +886,13 @@ export default function ActivitiesPage() {
                   <label className="text-sm">Notas</label>
                   <textarea required className="min-h-24 w-full rounded-lg border border-slate-300 p-2" value={form.notes} onChange={(event) => setForm((previous) => ({ ...previous, notes: event.target.value }))} />
                 </div>
+                </div>
               </div>
-              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
-                <button type="button" onClick={closeCreateModal} className="rounded-lg border border-slate-300 px-4 py-2">
+              <div className="mobile-modal-footer">
+                <button type="button" onClick={closeCreateModal} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2">
                   Cancelar
                 </button>
-                <button type="submit" disabled={saving} className="rounded-lg bg-brand-700 px-4 py-2 text-white">
+                <button type="submit" disabled={saving} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-white">
                   {saving ? "Salvando..." : "Salvar"}
                 </button>
               </div>
