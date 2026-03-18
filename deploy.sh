@@ -32,6 +32,37 @@ log() {
   echo "[$(ts)] $*" | tee -a "$LOG_FILE"
 }
 
+format_commit_ref() {
+  local ref="$1"
+  local commit_hash=""
+  local subject=""
+
+  commit_hash="$(git rev-parse --short "$ref")"
+  subject="$(git log -1 --pretty=%s "$ref")"
+  printf '%s (%s)' "$commit_hash" "$subject"
+}
+
+sync_repository() {
+  local before_commit=""
+  local target_commit=""
+
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    log "ERRO: diretório atual não é um repositório Git."
+    exit 1
+  fi
+
+  before_commit="$(format_commit_ref HEAD)"
+  log "[GIT] Commit atual antes da sincronização: $before_commit"
+  log "[GIT] Sincronizando repositório com origin/main ..."
+
+  git fetch origin 2>&1 | tee -a "$LOG_FILE"
+  target_commit="$(format_commit_ref origin/main)"
+  log "[GIT] Commit de referência em origin/main: $target_commit"
+
+  git reset --hard origin/main 2>&1 | tee -a "$LOG_FILE"
+  log "[GIT] Commit final deployado após reset: $(format_commit_ref HEAD)"
+}
+
 require_check_script() {
   if [[ ! -x "$CHECK_SCRIPT" ]]; then
     log "ERRO: script de checagem não encontrado ou sem permissão de execução: $CHECK_SCRIPT"
@@ -165,8 +196,12 @@ validate_data_safety() {
 }
 
 main() {
+  log "=== Deploy Gest-o iniciado ==="
   log "Log do deploy: $LOG_FILE"
-  log "Fazendo backup antes do deploy..."
+
+  sync_repository
+
+  log "[BACKUP] Fazendo backup antes do deploy..."
 
   if [[ -x /apps/gest-o/backup.sh ]]; then
     bash /apps/gest-o/backup.sh | tee -a "$LOG_FILE"
@@ -179,18 +214,18 @@ main() {
 
   collect_counts "antes"
 
-  log "Iniciando deploy..."
+  log "[DEPLOY] Iniciando rebuild dos containers com código sincronizado de origin/main..."
   docker compose down | tee -a "$LOG_FILE"
   docker compose up -d --build | tee -a "$LOG_FILE"
 
-  log "Status dos serviços:"
+  log "[DEPLOY] Status dos serviços após rebuild:"
   docker compose ps | tee -a "$LOG_FILE"
 
   wait_for_api_healthcheck
   collect_counts "depois"
   validate_data_safety
 
-  log "Deploy concluído com sucesso!"
+  log "=== Deploy concluído com sucesso! ==="
 }
 
 main "$@"
