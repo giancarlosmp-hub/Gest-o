@@ -1,38 +1,29 @@
-import { useState } from "react";
+type LogoVariant = "light" | "dark";
 
 type BrandLogoProps = {
   size?: "login" | "sidebar" | "header";
-  textClassName?: string;
+  variant?: LogoVariant;
   className?: string;
 };
 
 const sizeClasses = {
-  login: "h-12",
-  sidebar: "h-8",
-  header: "h-8",
+  login: "h-12 w-auto object-contain",
+  sidebar: "h-9 w-auto object-contain",
+  header: "h-8 w-auto object-contain",
+} as const;
+
+const logoSources: Record<LogoVariant, string> = {
+  light: "/logo-demetra-light.svg",
+  dark: "/logo-demetra-dark.svg",
 };
 
-export default function BrandLogo({ size = "sidebar", textClassName = "text-current", className = "" }: BrandLogoProps) {
-  const [hasError, setHasError] = useState(false);
-
+export default function BrandLogo({ size = "sidebar", variant = "dark", className = "" }: BrandLogoProps) {
   return (
-    <div className={`inline-flex items-center gap-3 ${className}`.trim()}>
-      {hasError ? (
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-700 text-lg font-bold text-white" aria-label="Demetra">
-          D
-        </div>
-      ) : (
-        <img
-          src="/logo-demetra.png"
-          alt="Logo Demetra Agro Performance"
-          className={`${sizeClasses[size]} w-auto object-contain`}
-          onError={() => setHasError(true)}
-        />
-      )}
-      <div className={`leading-tight ${textClassName}`.trim()}>
-        <p className="text-sm font-semibold">Demetra</p>
-        <p className="text-xs">Agro Performance</p>
-      </div>
-    </div>
+    <img
+      src={logoSources[variant]}
+      alt="Demetra Agro Performance"
+      className={`${sizeClasses[size]} ${className}`.trim()}
+      draggable={false}
+    />
   );
 }

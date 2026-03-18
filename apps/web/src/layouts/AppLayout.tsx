@@ -74,7 +74,7 @@ export default function AppLayout() {
   const sidebar = (
     <aside className="bg-brand-700 text-white w-64 min-h-screen p-4 space-y-3">
       <h1 className="mb-6">
-        <BrandLogo size="sidebar" textClassName="text-white" />
+        <BrandLogo size="sidebar" variant="dark" />
       </h1>
 
       {items
@@ -124,11 +124,7 @@ export default function AppLayout() {
             </button>
 
             <div className="min-w-0 flex-1 pt-0.5">
-              <BrandLogo
-                size="header"
-                textClassName="text-brand-700"
-                className="min-w-0 md:hidden"
-              />
+              <BrandLogo size="header" variant="light" className="min-w-0 md:hidden" />
             </div>
 
             <button
