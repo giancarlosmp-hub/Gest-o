@@ -46,7 +46,6 @@ export default function LoginPage() {
           name="email"
           autoComplete="username"
           placeholder="Email"
-          defaultValue=""
           onChange={(e) => setEmail(e.target.value)}
         />
         <input
