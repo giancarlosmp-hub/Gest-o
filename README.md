@@ -53,6 +53,7 @@ JWT_ACCESS_SECRET=<segredo-forte>
 JWT_REFRESH_SECRET=<segredo-forte-diferente>
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
+- A consulta de CNPJ deve ser habilitada somente no backend com `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY`; não exponha essa credencial no frontend.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).

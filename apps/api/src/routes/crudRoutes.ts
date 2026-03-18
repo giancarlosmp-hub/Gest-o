@@ -24,6 +24,9 @@ import {
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
+import { parseCnpj } from "../utils/cnpj.js";
+import { CnpjLookupError, cnpjLookupService } from "../services/cnpjLookupService.js";
+import { env } from "../config/env.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
@@ -3530,6 +3533,41 @@ router.get("/clients", async (req, res) => {
     page,
     pageSize
   });
+});
+
+router.get("/clients/cnpj-lookup/:cnpj", async (req, res) => {
+  const parsedCnpj = parseCnpj(req.params.cnpj);
+
+  if (!parsedCnpj.ok) {
+    return res.status(400).json({
+      message: "CNPJ inválido. Informe um CNPJ com 14 dígitos válidos.",
+      code: "INVALID_CNPJ"
+    });
+  }
+
+  try {
+    const result = await cnpjLookupService.lookup(parsedCnpj.digits);
+
+    return res.status(200).json({
+      data: result.payload,
+      meta: {
+        provider: env.cnpjLookupProvider || undefined,
+        normalizedCnpj: parsedCnpj.digits
+      }
+    });
+  } catch (error) {
+    if (error instanceof CnpjLookupError) {
+      return res.status(error.statusCode).json({
+        message: error.message,
+        code: error.code
+      });
+    }
+
+    return res.status(502).json({
+      message: "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.",
+      code: "CNPJ_LOOKUP_PROVIDER_ERROR"
+    });
+  }
 });
 
 router.get("/clients/:id", async (req, res) => {

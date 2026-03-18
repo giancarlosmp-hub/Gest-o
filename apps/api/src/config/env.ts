@@ -31,5 +31,11 @@ export const env = {
   adminBootstrapRegion: process.env.ADMIN_BOOTSTRAP_REGION,
   smokeDirectorEmail: process.env.SMOKE_DIRECTOR_EMAIL || "diretor@empresa.com",
   smokeDirectorPassword: process.env.SMOKE_DIRECTOR_PASSWORD || "123456",
-  smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com"
+  smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com",
+  cnpjLookupProvider: process.env.CNPJ_LOOKUP_PROVIDER || "",
+  cnpjLookupBaseUrl: process.env.CNPJ_LOOKUP_BASE_URL || "",
+  cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || "",
+  cnpjLookupEnabled: Boolean(
+    process.env.CNPJ_LOOKUP_PROVIDER && process.env.CNPJ_LOOKUP_BASE_URL && process.env.CNPJ_LOOKUP_API_KEY
+  )
 };
