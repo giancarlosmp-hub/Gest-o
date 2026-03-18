@@ -1,32 +1,39 @@
-type LogoVariant = "light" | "dark";
-
 type BrandLogoProps = {
   size?: "login" | "sidebar" | "header";
-  variant?: LogoVariant;
+  textClassName?: string;
   className?: string;
 };
 
 const sizeClasses = {
-  login: "h-12 w-auto object-contain",
-  sidebar: "h-9 w-auto object-contain",
-  header: "h-8 w-auto object-contain",
-} as const;
-
-const getLogoSrc = (size: BrandLogoProps["size"], variant?: LogoVariant) => {
-  const backgroundVariant = variant ?? (size === "sidebar" ? "dark" : "light");
-
-  return backgroundVariant === "dark"
-    ? "/logo-demetra-light.svg"
-    : "/logo-demetra-dark.svg";
+  login: "h-12",
+  sidebar: "h-8",
+  header: "h-8",
 };
 
-export default function BrandLogo({ size = "sidebar", variant, className = "" }: BrandLogoProps) {
+const logoSrcBySize: Record<NonNullable<BrandLogoProps["size"]>, string> = {
+  login: "/logo-demetra-dark.svg",
+  header: "/logo-demetra-dark.svg",
+  sidebar: "/brand/demetra-logo-light.svg",
+};
+
+export default function BrandLogo({
+  size = "sidebar",
+  textClassName = "text-current",
+  className = "",
+}: BrandLogoProps) {
+  const logoSrc = logoSrcBySize[size];
+
   return (
-    <img
-      src={getLogoSrc(size, variant)}
-      alt="Demetra Agro Performance"
-      className={`${sizeClasses[size]} ${className}`.trim()}
-      draggable={false}
-    />
+    <div className={`inline-flex items-center gap-3 ${className}`.trim()}>
+      <img
+        src={logoSrc}
+        alt="Logo Demetra Agro Performance"
+        className={`${sizeClasses[size]} w-auto object-contain`}
+      />
+      <div className={`leading-tight ${textClassName}`.trim()}>
+        <p className="text-sm font-semibold">Demetra</p>
+        <p className="text-xs">Agro Performance</p>
+      </div>
+    </div>
   );
 }

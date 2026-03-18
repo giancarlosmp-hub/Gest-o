@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "sonner";
@@ -10,25 +10,10 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  useEffect(() => {
-    if (sessionStorage.getItem("session-expired") === "1") {
-      sessionStorage.removeItem("session-expired");
-      toast.error("Sua sessão expirou. Faça login novamente.");
-    }
-  }, []);
-
-  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-
-    const formData = new FormData(e.currentTarget);
-    const submittedEmail = String(formData.get("email") ?? "");
-    const submittedPassword = String(formData.get("password") ?? "");
-
-    setEmail(submittedEmail);
-    setPassword(submittedPassword);
-
     try {
-      await login(submittedEmail, submittedPassword);
+      await login(email, password);
       nav("/");
     } catch {
       toast.error("Login inválido");
@@ -38,7 +23,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-700 p-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-3 rounded-2xl bg-white p-6 shadow-lg">
-        <BrandLogo size="login" variant="light" className="mb-1" />
+        <BrandLogo size="login" textClassName="text-slate-800" className="mb-1" />
         <p className="text-sm text-slate-600">Acesse o painel comercial.</p>
         <input
           className="w-full rounded-lg border p-2"
@@ -46,6 +31,7 @@ export default function LoginPage() {
           name="email"
           autoComplete="username"
           placeholder="Email"
+          value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <input
@@ -54,10 +40,12 @@ export default function LoginPage() {
           name="password"
           autoComplete="current-password"
           placeholder="Senha"
-          defaultValue=""
+          value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <button className="w-full rounded-lg bg-brand-700 py-2 font-medium text-white hover:bg-brand-800">Entrar</button>
+        <button className="w-full rounded-lg bg-brand-700 py-2 font-medium text-white hover:bg-brand-800">
+          Entrar
+        </button>
       </form>
     </div>
   );
