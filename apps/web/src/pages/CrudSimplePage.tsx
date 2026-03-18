@@ -2233,19 +2233,27 @@ export default function CrudSimplePage({
                           onLookupApply={(fields) => {
                             setFormError(null);
                             setCnpjLookupError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, cnpj: undefined, name: undefined, city: undefined, state: undefined }));
+                            setFormFieldErrors((prev) => ({
+                              ...prev,
+                              cnpj: undefined,
+                              name: undefined,
+                              city: undefined,
+                              state: undefined,
+                            }));
                             setForm((prev: any) => ({
                               ...prev,
                               cnpj: String(fields.cnpj ?? prev.cnpj ?? ""),
                               name: String(fields.name ?? prev.name ?? ""),
                               city: String(fields.city ?? prev.city ?? ""),
                               state: String(fields.state ?? prev.state ?? ""),
-                              clientType: prev.clientType || "PJ"
+                              clientType: prev.clientType || "PJ",
                             }));
                           }}
                           onLookupErrorChange={setCnpjLookupError}
                         />
-                        {fieldError ? <p className="text-xs text-rose-600">{fieldError}</p> : null}
+                        {fieldError ? (
+                          <p className="text-xs text-rose-600">{fieldError}</p>
+                        ) : null}
                         {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
                       </div>
                     );
@@ -2292,7 +2300,10 @@ export default function CrudSimplePage({
                         />
                       )}
 
-                      {fieldError ? <p className="text-xs text-rose-600">{fieldError}</p> : null}
+                      {fieldError ? (
+                        <p className="text-xs text-rose-600">{fieldError}</p>
+                      ) : null}
+                      {isCnpjField && cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
                     </div>
                   );
                 })}
