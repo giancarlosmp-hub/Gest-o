@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
+import ClientCnpjLookupField from "../components/clients/ClientCnpjLookupField";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
@@ -2205,48 +2206,83 @@ export default function CrudSimplePage({
 
                   return (
                     <div key={f.key} className="space-y-1">
-                      <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                        {f.label}
-                      </label>
-
-                      {f.type === "select" ? (
-                        <select
+                      {f.key === "cnpj" ? (
+                        <ClientCnpjLookupField
                           id={`modal-${f.key}`}
+                          label={f.label}
                           required={isRequired}
                           className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                          value={form[f.key] ?? ""}
-                          onChange={(e) => {
+                          value={String(form[f.key] ?? "")}
+                          error={formFieldErrors[f.key as keyof ClientPayloadInput]}
+                          helperText="Ao informar um CNPJ válido, nome, cidade e UF podem ser preenchidos automaticamente."
+                          onChange={(cnpj) => {
                             setFormError(null);
                             setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: e.target.value });
+                            setForm({ ...form, [f.key]: cnpj });
                           }}
-                        >
-                          <option value="">Selecione {f.label.toLowerCase()}</option>
-                          {(f.options ?? []).map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          id={`modal-${f.key}`}
-                          required={isRequired}
-                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                          type={f.type || "text"}
-                          placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
-                          value={form[f.key] ?? ""}
-                          onChange={(e) => {
+                          onLookupApply={(fields) => {
                             setFormError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                            setFormFieldErrors((prev) => ({ ...prev, cnpj: undefined, name: undefined, city: undefined, state: undefined }));
+                            setForm((prev: any) => ({
+                              ...prev,
+                              cnpj: String(fields.cnpj ?? prev.cnpj ?? ""),
+                              name: String(fields.name ?? prev.name ?? ""),
+                              city: String(fields.city ?? prev.city ?? ""),
+                              state: String(fields.state ?? prev.state ?? ""),
+                              clientType: prev.clientType || "PJ"
+                            }));
                           }}
                         />
+                      ) : f.type === "select" ? (
+                        <>
+                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                            {f.label}
+                          </label>
+                          <select
+                            id={`modal-${f.key}`}
+                            required={isRequired}
+                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                            value={form[f.key] ?? ""}
+                            onChange={(e) => {
+                              setFormError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                              setForm({ ...form, [f.key]: e.target.value });
+                            }}
+                          >
+                            <option value="">Selecione {f.label.toLowerCase()}</option>
+                            {(f.options ?? []).map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
+                            <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                            {f.label}
+                          </label>
+                          <input
+                            id={`modal-${f.key}`}
+                            required={isRequired}
+                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                            type={f.type || "text"}
+                            placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
+                            value={form[f.key] ?? ""}
+                            onChange={(e) => {
+                              setFormError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                            }}
+                          />
+                          {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
+                            <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
+                          ) : null}
+                        </>
                       )}
-
-                      {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
-                        <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
-                      ) : null}
                     </div>
                   );
                 })}
