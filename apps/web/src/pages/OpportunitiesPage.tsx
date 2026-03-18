@@ -682,13 +682,15 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
-  const onQuickCreateClient = async (payload: { name: string; city: string; state: string; region: string }) => {
+  const onQuickCreateClient = async (payload: { name: string; city: string; state: string; region: string; cnpj?: string }) => {
     const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
 
     try {
       const response = await api.post("/clients", {
         ...payload,
+        cnpj: payload.cnpj ? String(payload.cnpj).replace(/\D/g, "") : undefined,
         state: payload.state.toUpperCase(),
+        clientType: payload.cnpj ? "PJ" : undefined,
         ownerSellerId
       });
 

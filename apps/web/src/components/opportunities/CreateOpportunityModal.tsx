@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import ClientCnpjLookupField from "../clients/ClientCnpjLookupField";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -49,7 +50,7 @@ type CreateOpportunityModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFormChange: (next: FormState) => void;
   sanitizeNumericInput: (value: string, allowDecimal?: boolean) => string;
-  onQuickCreateClient: (payload: { name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
+  onQuickCreateClient: (payload: { name: string; city: string; state: string; region: string; cnpj?: string }) => Promise<ClientOption>;
 };
 
 export default function CreateOpportunityModal({
@@ -81,6 +82,7 @@ export default function CreateOpportunityModal({
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
   const [quickClient, setQuickClient] = useState({
+    cnpj: "",
     name: "",
     city: "",
     state: "",
@@ -97,11 +99,12 @@ export default function CreateOpportunityModal({
     setIsQuickCreateOpen(false);
     setIsCreatingClient(false);
     setQuickCreateError(null);
-    setQuickClient({ name: "", city: "", state: "", region: "" });
+    setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
   }, [open]);
 
   const handleQuickCreateClient = async () => {
     const payload = {
+      cnpj: quickClient.cnpj.trim(),
       name: quickClient.name.trim(),
       city: quickClient.city.trim(),
       state: quickClient.state.trim(),
@@ -120,7 +123,7 @@ export default function CreateOpportunityModal({
       const createdClient = await onQuickCreateClient(payload);
       onFormChange({ ...form, clientId: createdClient.id });
       setIsQuickCreateOpen(false);
-      setQuickClient({ name: "", city: "", state: "", region: "" });
+      setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
     } catch (error: any) {
       setQuickCreateError(error?.message || "Não foi possível criar cliente");
     } finally {
@@ -177,9 +180,25 @@ export default function CreateOpportunityModal({
                   {isQuickCreateOpen ? (
                     <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
                       <div className="grid gap-2">
+                        <ClientCnpjLookupField
+                          label="CNPJ"
+                          value={quickClient.cnpj}
+                          className={fieldClassName}
+                          helperText="Ao informar um CNPJ válido, os campos abaixo podem ser preenchidos automaticamente."
+                          onChange={(cnpj) => setQuickClient((prev) => ({ ...prev, cnpj }))}
+                          onLookupApply={(fields) =>
+                            setQuickClient((prev) => ({
+                              ...prev,
+                              cnpj: String(fields.cnpj ?? prev.cnpj ?? ""),
+                              name: String(fields.name ?? prev.name ?? ""),
+                              city: String(fields.city ?? prev.city ?? ""),
+                              state: String(fields.state ?? prev.state ?? "")
+                            }))
+                          }
+                        />
                         <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => setQuickClient((prev) => ({ ...prev, name: e.target.value }))} />
                         <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => setQuickClient((prev) => ({ ...prev, city: e.target.value }))} />
-                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value }))} />
+                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value.toUpperCase() }))} maxLength={2} />
                         <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => setQuickClient((prev) => ({ ...prev, region: e.target.value }))} />
                         {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
                         <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">

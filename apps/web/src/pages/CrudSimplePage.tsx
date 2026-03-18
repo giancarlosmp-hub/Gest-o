@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import type { AxiosError } from "axios";
 import { MoreHorizontal } from "lucide-react";
+import ClientCnpjLookupField from "../components/clients/ClientCnpjLookupField";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
@@ -218,6 +219,7 @@ export default function CrudSimplePage({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
   const [formFieldErrors, setFormFieldErrors] = useState<
     Partial<Record<keyof ClientPayloadInput, string>>
   >({});
@@ -1419,6 +1421,7 @@ export default function CrudSimplePage({
     setEditing(null);
     setForm({});
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
     setIsLookingUpCnpj(false);
@@ -1432,6 +1435,7 @@ export default function CrudSimplePage({
       setForm({});
     }
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
     setIsLookingUpCnpj(false);
@@ -1449,6 +1453,7 @@ export default function CrudSimplePage({
       });
 
       setFormFieldErrors(fieldErrors);
+      setCnpjLookupError(null);
 
       const firstError = Object.values(fieldErrors).find(Boolean);
       if (firstError) {
@@ -1467,6 +1472,7 @@ export default function CrudSimplePage({
 
         setForm({});
         setEditing(null);
+        setCnpjLookupError(null);
         setFormFieldErrors({});
         if (isClientsPage) await loadClients();
         else await load();
@@ -1522,6 +1528,7 @@ export default function CrudSimplePage({
 
   const onEdit = (item: any) => {
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
     setIsLookingUpCnpj(false);
@@ -2340,6 +2347,52 @@ export default function CrudSimplePage({
 
                   const isCnpjField = isClientsPage && f.key === "cnpj";
                   const fieldError = formFieldErrors[f.key as keyof ClientPayloadInput];
+
+                  if (isCnpjField) {
+                    return (
+                      <div key={f.key} className="space-y-1">
+                        <ClientCnpjLookupField
+                          id={`modal-${f.key}`}
+                          label={f.label}
+                          required={isRequired}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                          value={String(form[f.key] ?? "")}
+                          error={fieldError}
+                          helperText="Ao informar um CNPJ válido, nome, cidade e UF podem ser preenchidos automaticamente."
+                          onChange={(cnpj) => {
+                            setFormError(null);
+                            setCnpjLookupError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                            setForm((prev: any) => ({ ...prev, [f.key]: cnpj }));
+                          }}
+                          onLookupApply={(fields) => {
+                            setFormError(null);
+                            setCnpjLookupError(null);
+                            setFormFieldErrors((prev) => ({
+                              ...prev,
+                              cnpj: undefined,
+                              name: undefined,
+                              city: undefined,
+                              state: undefined,
+                            }));
+                            setForm((prev: any) => ({
+                              ...prev,
+                              cnpj: String(fields.cnpj ?? prev.cnpj ?? ""),
+                              name: String(fields.name ?? prev.name ?? ""),
+                              city: String(fields.city ?? prev.city ?? ""),
+                              state: String(fields.state ?? prev.state ?? ""),
+                              clientType: prev.clientType || "PJ",
+                            }));
+                          }}
+                          onLookupErrorChange={setCnpjLookupError}
+                        />
+                        {fieldError ? (
+                          <p className="text-xs text-rose-600">{fieldError}</p>
+                        ) : null}
+                        {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
+                      </div>
+                    );
+                  }
 
                   return (
                     <div key={f.key} className={`space-y-1 ${isCnpjField ? "md:col-span-2" : ""}`}>
