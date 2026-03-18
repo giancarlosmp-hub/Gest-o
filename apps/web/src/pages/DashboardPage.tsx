@@ -1569,7 +1569,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {summary.performance.map((row, index) => {
+                {summary.performance.map((row: DashboardSummary["performance"][number], index: number) => {
                   const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "";
                   return (
                     <tr key={row.sellerId} className="border-b border-slate-100">
