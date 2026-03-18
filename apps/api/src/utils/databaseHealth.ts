@@ -31,6 +31,10 @@ async function resolveMissingTables() {
   return checks.filter((check) => !check.exists).map((check) => check.table);
 }
 
+function isCompletelyEmpty(snapshot: DatabaseHealthSnapshot) {
+  return snapshot.user === 0 && snapshot.client === 0 && snapshot.opportunity === 0 && snapshot.timelineEvent === 0;
+}
+
 function evaluateHealth(snapshot: DatabaseHealthSnapshot) {
   const reasons: string[] = [];
 
@@ -87,6 +91,7 @@ export async function checkDatabaseHealth() {
   };
 
   const reasons = evaluateHealth(snapshot);
+  const databaseIsCompletelyEmpty = isCompletelyEmpty(snapshot);
 
   logApiEvent("INFO", "[SAFEGUARD] Snapshot de sanidade do banco coletado", snapshot);
 
@@ -106,7 +111,15 @@ export async function checkDatabaseHealth() {
     throw new Error(`${message}. Motivos: ${details}`);
   }
 
-  logApiEvent("WARN", `[CRITICAL] ${message} (ignorado fora de produção)`, {
+  if (databaseIsCompletelyEmpty) {
+    logApiEvent("WARN", "[SAFEGUARD] Banco vazio permitido em ambiente não produtivo", {
+      snapshot,
+      reasons,
+    });
+    return snapshot;
+  }
+
+  logApiEvent("WARN", `[SAFEGUARD] ${message} (ignorado fora de produção)`, {
     snapshot,
     reasons,
   });
