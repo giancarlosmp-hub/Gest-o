@@ -31,7 +31,7 @@ bash deploy-reset.sh
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
 
-> Após aplicar esta mudança no servidor, **não** use `docker compose down -v`. Preserve o volume do PostgreSQL e utilize apenas `bash deploy.sh` ou `docker compose down && docker compose up -d`.
+> Após aplicar esta mudança no servidor, **não** use `docker compose down -v`. Preserve o volume do PostgreSQL `gest-o_pgdata` e utilize apenas `bash deploy.sh` ou `docker compose down && docker compose up -d`.
 
 Valide os serviços:
 ```bash
@@ -85,6 +85,12 @@ Esperado:
 Sempre usar: `bash deploy.sh`
 Para reset completo quando necessário: `bash deploy-reset.sh`
 
+### Volume oficial do PostgreSQL em produção
+- volume correto de produção: `gest-o_pgdata`;
+- o `docker-compose.yml` referencia esse volume explicitamente via `volumes.postgres_data.name`;
+- **nunca** alternar produção para `pgdata`;
+- **nunca** recriar/trocar o volume como forma de "corrigir" deploy.
+
 ## ⚠️ Segurança rígida de produção
 
 Em ambiente de produção, **nunca** execute:
@@ -96,6 +102,7 @@ docker compose down -v
 Motivo:
 - esse comando remove os volumes Docker;
 - ao remover os volumes, o banco de dados pode ser apagado;
+- em produção, o volume oficial do PostgreSQL é `gest-o_pgdata`;
 - a blindagem do projeto assume preservação total do volume do PostgreSQL.
 
 Use apenas os comandos corretos para reiniciar ou publicar o sistema com segurança:
