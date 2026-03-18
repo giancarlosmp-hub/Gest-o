@@ -2204,21 +2204,23 @@ export default function CrudSimplePage({
                     );
                   }
 
-                  return (
-                    <div key={f.key} className="space-y-1">
-                      {f.key === "cnpj" ? (
+                  const fieldError = formFieldErrors[f.key as keyof ClientPayloadInput];
+
+                  if (f.key === "cnpj") {
+                    return (
+                      <div key={f.key} className="space-y-1">
                         <ClientCnpjLookupField
                           id={`modal-${f.key}`}
                           label={f.label}
                           required={isRequired}
                           className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
                           value={String(form[f.key] ?? "")}
-                          error={formFieldErrors[f.key as keyof ClientPayloadInput]}
+                          error={fieldError}
                           helperText="Ao informar um CNPJ válido, nome, cidade e UF podem ser preenchidos automaticamente."
                           onChange={(cnpj) => {
                             setFormError(null);
                             setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: cnpj });
+                            setForm((prev: any) => ({ ...prev, [f.key]: cnpj }));
                           }}
                           onLookupApply={(fields) => {
                             setFormError(null);
@@ -2233,56 +2235,52 @@ export default function CrudSimplePage({
                             }));
                           }}
                         />
-                      ) : f.type === "select" ? (
-                        <>
-                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                            {f.label}
-                          </label>
-                          <select
-                            id={`modal-${f.key}`}
-                            required={isRequired}
-                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                            value={form[f.key] ?? ""}
-                            onChange={(e) => {
-                              setFormError(null);
-                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              setForm({ ...form, [f.key]: e.target.value });
-                            }}
-                          >
-                            <option value="">Selecione {f.label.toLowerCase()}</option>
-                            {(f.options ?? []).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                          {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
-                            <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
-                          ) : null}
-                        </>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={f.key} className="space-y-1">
+                      <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                        {f.label}
+                      </label>
+
+                      {f.type === "select" ? (
+                        <select
+                          id={`modal-${f.key}`}
+                          required={isRequired}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                          value={form[f.key] ?? ""}
+                          onChange={(e) => {
+                            setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                            setForm({ ...form, [f.key]: e.target.value });
+                          }}
+                        >
+                          <option value="">Selecione {f.label.toLowerCase()}</option>
+                          {(f.options ?? []).map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       ) : (
-                        <>
-                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                            {f.label}
-                          </label>
-                          <input
-                            id={`modal-${f.key}`}
-                            required={isRequired}
-                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                            type={f.type || "text"}
-                            placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
-                            value={form[f.key] ?? ""}
-                            onChange={(e) => {
-                              setFormError(null);
-                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
-                            }}
-                          />
-                          {formFieldErrors[f.key as keyof ClientPayloadInput] ? (
-                            <p className="text-xs text-rose-600">{formFieldErrors[f.key as keyof ClientPayloadInput]}</p>
-                          ) : null}
-                        </>
+                        <input
+                          id={`modal-${f.key}`}
+                          required={isRequired}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                          type={f.type || "text"}
+                          placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
+                          value={form[f.key] ?? ""}
+                          onChange={(e) => {
+                            setFormError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                          }}
+                        />
                       )}
+
+                      {fieldError ? <p className="text-xs text-rose-600">{fieldError}</p> : null}
                     </div>
                   );
                 })}

@@ -63,6 +63,7 @@ export default function ClientCnpjLookupField({
   const digits = useMemo(() => normalizeCnpjDigits(value), [value]);
   const formattedValue = useMemo(() => formatCnpj(value), [value]);
   const canLookup = digits.length === 14;
+  const shouldShowFieldError = Boolean(error && error !== lookupError);
 
   useEffect(() => {
     latestDigitsRef.current = digits;
@@ -167,7 +168,7 @@ export default function ClientCnpjLookupField({
       {!lookupError && lookupMessage ? <p className="text-xs text-emerald-700">{lookupMessage}</p> : null}
       {!lookupError && !lookupMessage && helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
       {!lookupError && !lookupMessage && isLookingUp ? <p className="text-xs text-slate-500">Consultando dados do CNPJ...</p> : null}
-      {error ? <p className="text-xs text-rose-600">{error}</p> : null}
+      {shouldShowFieldError ? <p className="text-xs text-rose-600">{error}</p> : null}
     </div>
   );
 }
