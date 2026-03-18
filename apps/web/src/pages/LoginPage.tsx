@@ -17,10 +17,18 @@ export default function LoginPage() {
     }
   }, []);
 
-  const onSubmit = async (e: FormEvent) => {
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    const formData = new FormData(e.currentTarget);
+    const submittedEmail = String(formData.get("email") ?? "");
+    const submittedPassword = String(formData.get("password") ?? "");
+
+    setEmail(submittedEmail);
+    setPassword(submittedPassword);
+
     try {
-      await login(email, password);
+      await login(submittedEmail, submittedPassword);
       nav("/");
     } catch {
       toast.error("Login inválido");
@@ -38,7 +46,7 @@ export default function LoginPage() {
           name="email"
           autoComplete="username"
           placeholder="Email"
-          value={email}
+          defaultValue=""
           onChange={(e) => setEmail(e.target.value)}
         />
         <input
@@ -47,7 +55,7 @@ export default function LoginPage() {
           name="password"
           autoComplete="current-password"
           placeholder="Senha"
-          value={password}
+          defaultValue=""
           onChange={(e) => setPassword(e.target.value)}
         />
         <button className="w-full rounded-lg bg-brand-700 py-2 font-medium text-white hover:bg-brand-800">Entrar</button>
