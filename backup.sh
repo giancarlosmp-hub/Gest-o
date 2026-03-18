@@ -16,58 +16,45 @@ log() {
   printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$message" | tee -a "$LOG_FILE"
 }
 
-# Execute SQL inside the database container and return only the numeric result.
 query_count() {
   local table_name="$1"
   docker compose exec -T db psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'
 }
 
-# Validate if the source database has minimum business content before creating a trusted backup.
-# Rules:
-# 1) User table cannot be empty.
-# 2) Client + Opportunity + TimelineEvent cannot all be zero simultaneously.
-validate_database_content() {
-  local client_count opportunity_count timeline_event_count user_count
+cleanup_rejected_backup() {
+  local rejected_file="$1"
+  rm -f "$rejected_file" "${rejected_file}.gz"
+  log "ERROR" "Backup rejeitado: banco inconsistente"
+}
 
+validate_database_after_dump() {
+  local user_count client_count opportunity_count
+
+  user_count="$(query_count "User")"
   client_count="$(query_count "Client")"
   opportunity_count="$(query_count "Opportunity")"
-  timeline_event_count="$(query_count "TimelineEvent")"
-  user_count="$(query_count "User")"
 
-  log "INFO" "Validation counts | User=${user_count} | Client=${client_count} | Opportunity=${opportunity_count} | TimelineEvent=${timeline_event_count}"
+  log "INFO" "[SAFEGUARD] Pós-dump | User=${user_count} | Client=${client_count} | Opportunity=${opportunity_count}"
 
-  if [ -z "$user_count" ] || [ -z "$client_count" ] || [ -z "$opportunity_count" ] || [ -z "$timeline_event_count" ]; then
-    log "ERROR" "Backup rejected: failed to obtain validation counts from database."
-    return 1
-  fi
-
-  if ! [[ "$user_count" =~ ^[0-9]+$ && "$client_count" =~ ^[0-9]+$ && "$opportunity_count" =~ ^[0-9]+$ && "$timeline_event_count" =~ ^[0-9]+$ ]]; then
-    log "ERROR" "Backup rejected: validation counts are not numeric."
+  if ! [[ "$user_count" =~ ^[0-9]+$ && "$client_count" =~ ^[0-9]+$ && "$opportunity_count" =~ ^[0-9]+$ ]]; then
+    log "ERROR" "[CRITICAL] Contagens inválidas detectadas na validação pós-dump"
     return 1
   fi
 
   if [ "$user_count" -eq 0 ]; then
-    log "ERROR" "Backup rejected: table 'User' has zero records."
+    log "ERROR" "[CRITICAL] User == 0 na validação pós-dump"
     return 1
   fi
 
-  if [ "$client_count" -eq 0 ] && [ "$opportunity_count" -eq 0 ] && [ "$timeline_event_count" -eq 0 ]; then
-    log "ERROR" "Backup rejected: tables 'Client', 'Opportunity' and 'TimelineEvent' are all zero simultaneously."
+  if [ "$client_count" -eq 0 ] && [ "$opportunity_count" -eq 0 ]; then
+    log "ERROR" "[CRITICAL] Client == 0 e Opportunity == 0 na validação pós-dump"
     return 1
   fi
 
   return 0
 }
 
-cleanup_rejected_backup() {
-  local rejected_file="$1"
-  rm -f "$rejected_file" "${rejected_file}.gz"
-  log "ERROR" "Rejected backup file removed: ${rejected_file}"
-}
-
 rotate_backups() {
-  # Rotation only runs after a valid backup is finalized.
-  # This prevents recent good backups from being removed due to a failed run.
   find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}_*.sql.gz" -printf '%T@ %p\n' \
     | sort -rn \
     | tail -n +$((MAX_BACKUPS + 1)) \
@@ -86,14 +73,14 @@ rotate_backups() {
 mkdir -p "$BACKUP_DIR"
 cd /apps/gest-o
 
-if ! validate_database_content; then
-  cleanup_rejected_backup "$BACKUP_FILE"
-  exit 1
-fi
-
 if ! docker compose exec -T db pg_dump -U postgres "$DB_NAME" > "$BACKUP_FILE"; then
   cleanup_rejected_backup "$BACKUP_FILE"
   log "ERROR" "Backup failed: pg_dump command failed for database '$DB_NAME'."
+  exit 1
+fi
+
+if ! validate_database_after_dump; then
+  cleanup_rejected_backup "$BACKUP_FILE"
   exit 1
 fi
 
