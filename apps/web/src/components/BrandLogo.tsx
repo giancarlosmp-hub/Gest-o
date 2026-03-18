@@ -4,16 +4,22 @@ type BrandLogoProps = {
   className?: string;
 };
 
-const sizeClasses = {
-  login: "h-12",
-  sidebar: "h-8",
-  header: "h-8",
-};
-
-const logoSrcBySize: Record<NonNullable<BrandLogoProps["size"]>, string> = {
-  login: "/logo-demetra-dark.svg",
-  header: "/logo-demetra-dark.svg",
-  sidebar: "/brand/demetra-logo-light.svg",
+const brandLogoBySize: Record<
+  NonNullable<BrandLogoProps["size"]>,
+  { src: string; className: string }
+> = {
+  login: {
+    src: "/logo-demetra-dark.svg",
+    className: "h-12 w-auto object-contain",
+  },
+  header: {
+    src: "/logo-demetra-dark.svg",
+    className: "h-8 w-auto object-contain",
+  },
+  sidebar: {
+    src: "/brand/demetra-logo-light.svg",
+    className: "h-8 w-auto object-contain",
+  },
 };
 
 export default function BrandLogo({
@@ -21,14 +27,14 @@ export default function BrandLogo({
   textClassName = "text-current",
   className = "",
 }: BrandLogoProps) {
-  const logoSrc = logoSrcBySize[size];
+  const logo = brandLogoBySize[size];
 
   return (
     <div className={`inline-flex items-center gap-3 ${className}`.trim()}>
       <img
-        src={logoSrc}
+        src={logo.src}
         alt="Logo Demetra Agro Performance"
-        className={`${sizeClasses[size]} w-auto object-contain`}
+        className={logo.className}
       />
       <div className={`leading-tight ${textClassName}`.trim()}>
         <p className="text-sm font-semibold">Demetra</p>
