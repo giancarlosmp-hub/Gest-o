@@ -690,6 +690,31 @@ export default function AgendaPage() {
     return "";
   };
 
+  const createEmptyDraftStop = (): DraftStop => ({
+    id: String(Date.now() + Math.random()),
+    clientId: "",
+    notes: ""
+  });
+
+  const updateDraftStop = (stopId: string, patch: Partial<DraftStop>) => {
+    setDraftStops((current) => current.map((item) => (item.id === stopId ? { ...item, ...patch } : item)));
+  };
+
+  const moveDraftStop = (index: number, direction: -1 | 1) => {
+    setDraftStops((current) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= current.length) return current;
+
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      return next;
+    });
+  };
+
+  const removeDraftStop = (stopId: string) => {
+    setDraftStops((current) => (current.length === 1 ? current : current.filter((item) => item.id !== stopId)));
+  };
+
   useEffect(() => {
     const shouldHighlightNext = searchParams.get("highlight") === "next";
     if (!shouldHighlightNext || !filteredEvents.length) {
@@ -1119,7 +1144,7 @@ export default function AgendaPage() {
       clientId: "",
       notes: ""
     });
-    setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", notes: "" }] : []);
+    setDraftStops(isRouteMode ? [createEmptyDraftStop()] : []);
 
     setIsCreateOpen(true);
   };
@@ -1721,7 +1746,7 @@ export default function AgendaPage() {
                   <p className="text-xs text-emerald-700">Paradas são obrigatórias no roteiro.</p>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-emerald-800">Paradas</p>
-                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", notes: "" }])}>Adicionar parada</button>
+                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, createEmptyDraftStop()])}>Adicionar parada</button>
                   </div>
                   {draftStops.map((stop, index) => (
                     <div key={stop.id} className="grid gap-2 rounded bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
@@ -1730,11 +1755,7 @@ export default function AgendaPage() {
                           <label className="mb-1 block text-[11px] font-medium uppercase text-slate-500">Cliente</label>
                           <ClientSelect
                             value={stop.clientId}
-                            onChange={(client) =>
-                              setDraftStops((current) =>
-                                current.map((item) => (item.id === stop.id ? { ...item, clientId: client?.id || "" } : item))
-                              )
-                            }
+                            onChange={(client) => updateDraftStop(stop.id, { clientId: client?.id || "" })}
                           />
                         </div>
                         <div>
@@ -1747,18 +1768,16 @@ export default function AgendaPage() {
                           <label className="mb-1 block text-[11px] font-medium uppercase text-slate-500">Observação da parada</label>
                           <textarea
                             value={stop.notes}
-                            onChange={(event) =>
-                              setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))
-                            }
+                            onChange={(event) => updateDraftStop(stop.id, { notes: event.target.value })}
                             placeholder="Adicionar observação"
                             className="min-h-20 w-full rounded border px-3 py-2 text-sm"
                           />
                         </div>
                       </div>
                       <div className="flex gap-1 justify-end md:flex-col">
-                        <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
-                        <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
-                        <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => setDraftStops((current) => current.filter((item) => item.id !== stop.id))}>✕</button>
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => moveDraftStop(index, -1)}>↑</button>
+                        <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => moveDraftStop(index, 1)}>↓</button>
+                        <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => removeDraftStop(stop.id)}>✕</button>
                       </div>
                     </div>
                   ))}
