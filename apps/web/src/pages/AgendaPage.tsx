@@ -30,8 +30,6 @@ type CreateAgendaForm = {
 type DraftStop = {
   id: string;
   clientId: string;
-  city: string;
-  plannedTime: string;
   notes: string;
 };
 
@@ -250,6 +248,14 @@ function getEndsAt(event: AgendaEvent): string {
 
 function formatLocalDateParam(value: Date) {
   return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
+function normalizeRouteDateStart(value: string) {
+  return new Date(`${value}T00:00:00`);
+}
+
+function normalizeRouteDateEnd(value: string) {
+  return new Date(`${value}T23:59:59.999`);
 }
 
 function formatTime(value: string) {
@@ -670,6 +676,18 @@ export default function AgendaPage() {
     }
 
     return "Não informada";
+  };
+
+  const getDraftStopClientCity = (stop: DraftStop) => {
+    if (!stop.clientId) return "";
+    const linkedClient = clientById.get(String(stop.clientId));
+    const city = linkedClient?.city?.trim();
+    const state = linkedClient?.state?.trim();
+
+    if (city && state) return `${city} - ${state}`;
+    if (city) return city;
+    if (state) return state;
+    return "";
   };
 
   useEffect(() => {
@@ -1101,7 +1119,7 @@ export default function AgendaPage() {
       clientId: "",
       notes: ""
     });
-    setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", city: "", plannedTime: "", notes: "" }] : []);
+    setDraftStops(isRouteMode ? [{ id: String(Date.now()), clientId: "", notes: "" }] : []);
 
     setIsCreateOpen(true);
   };
@@ -1118,6 +1136,11 @@ export default function AgendaPage() {
   };
 
   const mapCreatedAgendaEvent = (data: any): AgendaEvent => {
+    const fallbackStartDate =
+      createForm.type === "roteiro_visita" ? normalizeRouteDateStart(createForm.startDateTime) : new Date(createForm.startDateTime);
+    const fallbackEndDate =
+      createForm.type === "roteiro_visita" ? normalizeRouteDateEnd(createForm.endDateTime) : new Date(createForm.endDateTime);
+
     return {
       id: String(data?.id || `event-${Date.now()}`),
       ownerId: String(data?.ownerId || data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
@@ -1125,8 +1148,8 @@ export default function AgendaPage() {
       title: String(data?.title || createForm.title.trim()),
       notes: String(data?.notes || "Compromisso criado manualmente."),
       type: (data?.type as AgendaEventType) || createForm.type,
-      startsAt: new Date(data?.startsAt || data?.startDateTime || createForm.startDateTime).toISOString(),
-      endsAt: new Date(data?.endsAt || data?.endDateTime || createForm.endDateTime).toISOString(),
+      startsAt: new Date(data?.startsAt || data?.startDateTime || fallbackStartDate).toISOString(),
+      endsAt: new Date(data?.endsAt || data?.endDateTime || fallbackEndDate).toISOString(),
       status: (data?.status as AgendaEvent["status"]) || "planned",
       clientId: String(data?.clientId || createForm.clientId || "") || undefined
     };
@@ -1140,8 +1163,11 @@ export default function AgendaPage() {
       return;
     }
 
-    if (new Date(createForm.startDateTime).getTime() >= new Date(createForm.endDateTime).getTime()) {
-      toast.error("A data de fim deve ser maior que a data de início.");
+    const routeStartDate = createForm.type === "roteiro_visita" ? normalizeRouteDateStart(createForm.startDateTime) : new Date(createForm.startDateTime);
+    const routeEndDate = createForm.type === "roteiro_visita" ? normalizeRouteDateEnd(createForm.endDateTime) : new Date(createForm.endDateTime);
+
+    if (routeStartDate.getTime() > routeEndDate.getTime()) {
+      toast.error("A data de fim não pode ser anterior à data de início.");
       return;
     }
 
@@ -1156,9 +1182,9 @@ export default function AgendaPage() {
         return;
       }
 
-      const hasInvalidStop = draftStops.some((stop) => !stop.clientId && !stop.city.trim());
+      const hasInvalidStop = draftStops.some((stop) => !stop.clientId);
       if (hasInvalidStop) {
-        toast.error("Cada parada deve ter cliente ou cidade informada.");
+        toast.error("Selecione um cliente para cada parada.");
         return;
       }
     }
@@ -1174,15 +1200,14 @@ export default function AgendaPage() {
       const payload: Record<string, any> = {
         title: createForm.title.trim(),
         type: createForm.type,
-        startDateTime: new Date(createForm.startDateTime).toISOString(),
-        endDateTime: new Date(createForm.endDateTime).toISOString(),
+        startDateTime: routeStartDate.toISOString(),
+        endDateTime: routeEndDate.toISOString(),
         ...(createForm.clientId ? { clientId: createForm.clientId } : {}),
         ...(createForm.type === "roteiro_visita"
           ? {
               stops: draftStops.map((stop) => ({
                 clientId: stop.clientId || undefined,
-                city: stop.city.trim() || undefined,
-                plannedTime: stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined,
+                city: clientById.get(String(stop.clientId))?.city?.trim() || undefined,
                 notes: stop.notes.trim() || undefined
               }))
             }
@@ -1574,7 +1599,7 @@ export default function AgendaPage() {
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
-                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje paradas por cliente/cidade para execução do vendedor." : "Informe os dados básicos para criar um compromisso."}</p>
+                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje paradas por cliente para execução do vendedor." : "Informe os dados básicos para criar um compromisso."}</p>
               </div>
               <button type="button" onClick={closeCreate} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
                 ✕
@@ -1640,16 +1665,25 @@ export default function AgendaPage() {
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Início</label>
                   <input
-                    type="datetime-local"
+                    type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.startDateTime}
-                    onChange={(event) => setCreateForm((current) => ({ ...current, startDateTime: event.target.value }))}
+                    onChange={(event) =>
+                      setCreateForm((current) => ({
+                        ...current,
+                        startDateTime: event.target.value,
+                        endDateTime:
+                          current.type === "roteiro_visita" && (!current.endDateTime || current.endDateTime < event.target.value)
+                            ? event.target.value
+                            : current.endDateTime
+                      }))
+                    }
                     className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
                   />
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Fim</label>
                   <input
-                    type="datetime-local"
+                    type={createForm.type === "roteiro_visita" ? "date" : "datetime-local"}
                     value={createForm.endDateTime}
                     onChange={(event) => setCreateForm((current) => ({ ...current, endDateTime: event.target.value }))}
                     className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -1687,22 +1721,41 @@ export default function AgendaPage() {
                   <p className="text-xs text-emerald-700">Paradas são obrigatórias no roteiro.</p>
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-semibold text-emerald-800">Paradas</p>
-                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", city: "", plannedTime: "", notes: "" }])}>Adicionar parada</button>
+                    <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", notes: "" }])}>Adicionar parada</button>
                   </div>
                   {draftStops.map((stop, index) => (
-                    <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-5">
-                      <ClientSelect
-                        value={stop.clientId}
-                        onChange={(client) =>
-                          setDraftStops((current) =>
-                            current.map((item) => (item.id === stop.id ? { ...item, clientId: client?.id || "" } : item))
-                          )
-                        }
-                      />
-                      <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-2 text-sm" />
-                      <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-2 text-sm" />
-                      <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-2 text-sm" />
-                      <div className="flex gap-1 justify-end">
+                    <div key={stop.id} className="grid gap-2 rounded bg-white p-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                      <div className="space-y-2">
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium uppercase text-slate-500">Cliente</label>
+                          <ClientSelect
+                            value={stop.clientId}
+                            onChange={(client) =>
+                              setDraftStops((current) =>
+                                current.map((item) => (item.id === stop.id ? { ...item, clientId: client?.id || "" } : item))
+                              )
+                            }
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium uppercase text-slate-500">Cidade do cliente</label>
+                          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            {getDraftStopClientCity(stop) || "Selecione um cliente para preencher a cidade automaticamente."}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[11px] font-medium uppercase text-slate-500">Observação da parada</label>
+                          <textarea
+                            value={stop.notes}
+                            onChange={(event) =>
+                              setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))
+                            }
+                            placeholder="Adicionar observação"
+                            className="min-h-20 w-full rounded border px-3 py-2 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex gap-1 justify-end md:flex-col">
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
                         <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => setDraftStops((current) => current.filter((item) => item.id !== stop.id))}>✕</button>
