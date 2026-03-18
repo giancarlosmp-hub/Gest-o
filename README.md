@@ -84,6 +84,37 @@ Esperado:
 Sempre usar: `bash deploy.sh`
 Para reset completo quando necessário: `bash deploy-reset.sh`
 
+## ⚠️ Segurança de Dados em Produção
+
+Em ambiente de produção, **nunca** execute:
+
+```bash
+docker compose down -v
+```
+
+Motivo:
+- esse comando remove os volumes Docker;
+- ao remover os volumes, o banco de dados pode ser apagado.
+
+Use apenas os comandos corretos para reiniciar ou publicar o sistema com segurança:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+ou:
+
+```bash
+bash deploy.sh
+```
+
+Proteções aplicadas em produção:
+- o sistema bloqueia deploy com risco de perda de dados;
+- banco vazio não é aceito em produção;
+- backup inválido é rejeitado;
+- seed não roda em produção.
+
 ## Trava de segurança do deploy
 O `deploy.sh` agora inclui uma validação defensiva de integridade de dados para evitar que uma atualização finalize com banco vazio/inconsistente.
 
