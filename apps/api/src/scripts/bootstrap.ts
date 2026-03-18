@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
+import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
@@ -43,6 +44,7 @@ async function start() {
   ensureDatabaseUrlFromEnvironment();
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+  await validateDatabaseHealth();
   await ensureAdminBootstrap();
   if (env.enableSmokeBootstrap) {
     await ensureSmokeBootstrap();
