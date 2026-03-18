@@ -31,7 +31,7 @@ bash deploy-reset.sh
 
 > O startup da API aplica apenas `prisma db push`. O seed padrão **não** roda automaticamente no compose para preservar dados já existentes.
 
-> Após aplicar esta mudança no servidor, rode **uma vez**: `docker compose down -v && docker compose up -d` para limpar volume antigo e iniciar com a nova configuração.
+> Após aplicar esta mudança no servidor, **não** use `docker compose down -v`. Preserve o volume do PostgreSQL e utilize apenas `bash deploy.sh` ou `docker compose down && docker compose up -d`.
 
 Valide os serviços:
 ```bash
@@ -68,7 +68,8 @@ bash scripts/setup-ssl-crm.sh
 
 ### Validação no Windows (CMD)
 ```cmd
-docker compose down -v
+REM apenas em ambiente local descartável, nunca em produção
+docker compose down
 bash deploy.sh
 docker compose ps
 curl http://localhost:4000/health
@@ -84,7 +85,7 @@ Esperado:
 Sempre usar: `bash deploy.sh`
 Para reset completo quando necessário: `bash deploy-reset.sh`
 
-## ⚠️ Segurança de Dados em Produção
+## ⚠️ Segurança rígida de produção
 
 Em ambiente de produção, **nunca** execute:
 
@@ -94,7 +95,8 @@ docker compose down -v
 
 Motivo:
 - esse comando remove os volumes Docker;
-- ao remover os volumes, o banco de dados pode ser apagado.
+- ao remover os volumes, o banco de dados pode ser apagado;
+- a blindagem do projeto assume preservação total do volume do PostgreSQL.
 
 Use apenas os comandos corretos para reiniciar ou publicar o sistema com segurança:
 
@@ -109,34 +111,66 @@ ou:
 bash deploy.sh
 ```
 
-Proteções aplicadas em produção:
-- o sistema bloqueia deploy com risco de perda de dados;
-- banco vazio não é aceito em produção;
-- backup inválido é rejeitado;
-- seed não roda em produção.
+Proteções rígidas aplicadas em produção:
+- o `deploy.sh` tira snapshot antes e depois do rebuild, aguarda healthcheck real da API e aborta se detectar perda de dados;
+- a API valida as contagens críticas no startup e **não sobe** normalmente se o banco estiver inconsistente;
+- o `backup.sh` rejeita backup inconsistente e não aceita dump vazio como backup válido;
+- o script `scripts/check-prod-health.sh` faz pré-checagem manual em modo somente leitura;
+- seed automático segue desabilitado em produção por padrão.
 
-## Trava de segurança do deploy
-O `deploy.sh` agora inclui uma validação defensiva de integridade de dados para evitar que uma atualização finalize com banco vazio/inconsistente.
+## Trava rígida do deploy
+O `deploy.sh` executa o seguinte fluxo defensivo:
 
-Fluxo aplicado automaticamente:
-1. executa o backup antes do deploy (comportamento preservado);
-2. coleta snapshot de contagem das tabelas críticas antes de subir os novos containers:
+1. executa o backup antes do deploy;
+2. coleta snapshot das tabelas críticas antes de derrubar os containers:
    - `User`
    - `Client`
    - `Opportunity`
    - `TimelineEvent`
    - `AgendaEvent`
    - `Activity`
-3. registra essas contagens em log (`logs/deploy-YYYYMMDD-HHMMSS.log`);
-4. sobe os containers, valida healthcheck e coleta novo snapshot;
-5. aplica trava de segurança e aborta com erro (`exit 1`) se detectar:
-   - `User` zerada em qualquer cenário;
-   - `Client` zerada após ter dados antes;
-   - `Opportunity` zerada após ter dados antes;
-   - `TimelineEvent` zerada após ter dados antes;
+3. registra as contagens em log (`logs/deploy-YYYYMMDD-HHMMSS.log`);
+4. sobe os containers novamente, aguarda healthcheck real da API e coleta o snapshot pós-start;
+5. bloqueia o deploy com log obrigatório `[CRITICAL] DEPLOY BLOQUEADO: perda de dados detectada` se detectar, por exemplo:
+   - qualquer tabela crítica que tinha dados antes e foi para zero depois;
+   - `Client` zerada;
+   - `Opportunity` zerada quando antes era maior que zero;
+   - `TimelineEvent` zerada quando antes era maior que zero;
    - múltiplas tabelas críticas zeradas ao mesmo tempo.
 
-Quando a trava aciona, o deploy **não** é marcado como concluído e o motivo fica explícito no log.
+Quando a trava aciona, o deploy termina com `exit 1` e o sistema não considera a publicação como concluída.
+
+## Trava rígida no startup da API
+Na inicialização da API, em **produção real** (`NODE_ENV=production`, fora de smoke/CI), o backend consulta as tabelas críticas e aborta o processo com o log obrigatório `[CRITICAL] Banco inconsistente detectado — inicialização abortada` quando detectar qualquer um dos cenários abaixo:
+
+- `User == 0`;
+- `Client == 0`;
+- `Client == 0` e `Opportunity == 0`;
+- múltiplas tabelas críticas zeradas ao mesmo tempo.
+
+Isso impede que a API fique saudável/publicável quando houver forte sinal de banco vazio ou inconsistente.
+
+## Blindagem do backup
+O `backup.sh` passou a validar o banco antes de aceitar o backup como válido. A verificação confere contagens de:
+
+- `User`;
+- `Client`;
+- `Opportunity`;
+- `TimelineEvent`.
+
+Se o banco estiver inconsistente, o script registra `[CRITICAL] Backup rejeitado: banco inconsistente`, aborta e não mantém dump vazio/inválido como backup confiável.
+
+## Pré-checagem manual (somente leitura)
+Antes de um deploy ou auditoria operacional, execute:
+
+```bash
+bash scripts/check-prod-health.sh
+```
+
+Comportamento:
+- consulta as contagens das tabelas críticas em modo somente leitura;
+- imprime relatório legível no terminal;
+- retorna `exit 1` se detectar banco inconsistente.
 
 ## Variáveis obrigatórias no .env
 ```bash

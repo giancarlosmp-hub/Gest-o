@@ -1,8 +1,9 @@
 import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
-import { logApiEvent } from "./utils/logger.js";
 import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
+import { validateDatabaseHealth } from "./utils/databaseHealth.js";
+import { logApiEvent } from "./utils/logger.js";
 
 process.on("unhandledRejection", (reason) => {
   logApiEvent("ERROR", "[process] Promise rejeitada sem tratamento", {
@@ -32,6 +33,7 @@ async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
 
 async function start() {
   await waitForDatabase();
+  await validateDatabaseHealth();
   await ensureAdminBootstrap();
   app.listen(env.port, () => {
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });
