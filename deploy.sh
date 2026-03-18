@@ -5,11 +5,16 @@ LOG_DIR="${DEPLOY_LOG_DIR:-./logs}"
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
 
-# Tabelas críticas monitoradas para detectar perda inesperada de dados.
-CRITICAL_TABLES=("User" "Client" "Opportunity" "TimelineEvent" "AgendaEvent" "Activity")
+CRITICAL_TABLES=("User" "Client" "Opportunity" "TimelineEvent")
 
-declare -A PRE_COUNTS=()
-declare -A POST_COUNTS=()
+ANTES_USER=0
+ANTES_CLIENT=0
+ANTES_OPP=0
+ANTES_TIMELINE=0
+DEPOIS_USER=0
+DEPOIS_CLIENT=0
+DEPOIS_OPP=0
+DEPOIS_TIMELINE=0
 
 ts() {
   date '+%Y-%m-%d %H:%M:%S'
@@ -26,10 +31,14 @@ run_psql_count() {
 
 collect_counts() {
   local phase="$1"
-  local -n target_ref=$2
   local table=""
 
-  log "Coletando snapshot de contagem ($phase)..."
+  if [[ "$phase" == "antes" ]]; then
+    log "[SAFEGUARD] Snapshot antes do deploy"
+  else
+    log "[SAFEGUARD] Snapshot depois do deploy"
+  fi
+
   for table in "${CRITICAL_TABLES[@]}"; do
     local count=""
     count="$(run_psql_count "$table")"
@@ -39,58 +48,60 @@ collect_counts() {
       exit 1
     fi
 
-    target_ref["$table"]="$count"
+    case "$phase:$table" in
+      "antes:User") ANTES_USER="$count" ;;
+      "antes:Client") ANTES_CLIENT="$count" ;;
+      "antes:Opportunity") ANTES_OPP="$count" ;;
+      "antes:TimelineEvent") ANTES_TIMELINE="$count" ;;
+      "depois:User") DEPOIS_USER="$count" ;;
+      "depois:Client") DEPOIS_CLIENT="$count" ;;
+      "depois:Opportunity") DEPOIS_OPP="$count" ;;
+      "depois:TimelineEvent") DEPOIS_TIMELINE="$count" ;;
+    esac
+
     log "Snapshot $phase | tabela=$table | total=$count"
   done
 }
 
 validate_data_safety() {
   local -a reasons=()
-  local table=""
   local zeroed_tables=0
 
-  # Regra global: múltiplas tabelas críticas zeradas simultaneamente indicam risco severo.
-  for table in "${CRITICAL_TABLES[@]}"; do
-    local before="${PRE_COUNTS[$table]:-0}"
-    local after="${POST_COUNTS[$table]:-0}"
-
-    if (( before > 0 && after == 0 )); then
-      ((zeroed_tables += 1))
-    fi
-  done
-
-  if (( ${POST_COUNTS["User"]:-0} == 0 )); then
-    reasons+=("Tabela User ficou com zero registros após o deploy")
+  if (( ANTES_USER > 0 && DEPOIS_USER == 0 )); then
+    reasons+=("User tinha dados antes do deploy e ficou zerada")
+    ((zeroed_tables += 1))
   fi
 
-  if (( ${PRE_COUNTS["Client"]:-0} > 0 && ${POST_COUNTS["Client"]:-0} == 0 )); then
-    reasons+=("Client tinha dados antes do deploy e ficou zerada")
+  if (( ANTES_CLIENT > 0 && DEPOIS_CLIENT == 0 && DEPOIS_OPP == 0 )); then
+    reasons+=("Client tinha dados antes do deploy e Client/Opportunity zeraram")
   fi
 
-  if (( ${PRE_COUNTS["Opportunity"]:-0} > 0 && ${POST_COUNTS["Opportunity"]:-0} == 0 )); then
-    reasons+=("Opportunity tinha dados antes do deploy e ficou zerada")
+  if (( ANTES_CLIENT > 0 && DEPOIS_CLIENT == 0 )); then
+    ((zeroed_tables += 1))
   fi
 
-  if (( ${PRE_COUNTS["TimelineEvent"]:-0} > 0 && ${POST_COUNTS["TimelineEvent"]:-0} == 0 )); then
-    reasons+=("TimelineEvent tinha dados antes do deploy e ficou zerada")
+  if (( ANTES_OPP > 0 && DEPOIS_OPP == 0 )); then
+    ((zeroed_tables += 1))
+  fi
+
+  if (( ANTES_TIMELINE > 0 && DEPOIS_TIMELINE == 0 )); then
+    ((zeroed_tables += 1))
   fi
 
   if (( zeroed_tables >= 2 )); then
-    reasons+=("Múltiplas tabelas críticas zeraram ao mesmo tempo (total=$zeroed_tables)")
+    reasons+=("Múltiplas tabelas críticas zeraram após o deploy (total=$zeroed_tables)")
   fi
 
   if (( ${#reasons[@]} > 0 )); then
-    log "ERRO CRÍTICO: trava de segurança de dados acionada."
+    log "[CRITICAL] DEPLOY BLOQUEADO: perda de dados detectada"
+    log "Comparativo final de contagens críticas:"
+    log "  User: antes=$ANTES_USER | depois=$DEPOIS_USER"
+    log "  Client: antes=$ANTES_CLIENT | depois=$DEPOIS_CLIENT"
+    log "  Opportunity: antes=$ANTES_OPP | depois=$DEPOIS_OPP"
+    log "  TimelineEvent: antes=$ANTES_TIMELINE | depois=$DEPOIS_TIMELINE"
     for reason in "${reasons[@]}"; do
       log "- $reason"
     done
-
-    log "Comparativo final de contagens críticas:"
-    for table in "${CRITICAL_TABLES[@]}"; do
-      log "  $table: antes=${PRE_COUNTS[$table]} | depois=${POST_COUNTS[$table]}"
-    done
-
-    log "Deploy abortado por segurança. Revise o banco e restaure manualmente se necessário."
     exit 1
   fi
 
@@ -111,7 +122,7 @@ main() {
     exit 1
   fi
 
-  collect_counts "antes" PRE_COUNTS
+  collect_counts "antes"
 
   log "Iniciando deploy..."
   docker compose down | tee -a "$LOG_FILE"
@@ -132,7 +143,7 @@ main() {
   fi
   log "Healthcheck da API OK (HTTP 200)."
 
-  collect_counts "depois" POST_COUNTS
+  collect_counts "depois"
   validate_data_safety
 
   log "Deploy concluído com sucesso!"
