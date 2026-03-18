@@ -78,4 +78,4 @@ services:
 
 volumes:
   postgres_data:
-    name: pgdata
+    name: gest-o_pgdata
