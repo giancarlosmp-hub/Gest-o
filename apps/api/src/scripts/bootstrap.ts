@@ -52,7 +52,6 @@ async function start() {
     console.warn("[SAFEGUARD] Seed/Bootstrap ignorado em produção por segurança (SEED_ON_BOOTSTRAP)");
   }
 
-  await checkDatabaseHealth();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
   await ensureAdminBootstrap();
   if (runtimeGuards.enableSmokeBootstrap) {
@@ -66,6 +65,8 @@ async function start() {
   } else {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }
+
+  await checkDatabaseHealth();
 
   app.listen(env.port, () => {
     console.log(`API on http://localhost:${env.port}`);

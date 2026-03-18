@@ -1,5 +1,5 @@
-import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
+import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "./logger.js";
 
 export type DatabaseHealthSnapshot = {
@@ -8,6 +8,28 @@ export type DatabaseHealthSnapshot = {
   opportunity: number;
   timelineEvent: number;
 };
+
+const CRITICAL_TABLES = ["User", "Client", "Opportunity", "TimelineEvent"] as const;
+
+type TableName = (typeof CRITICAL_TABLES)[number];
+
+async function tableExists(table: TableName) {
+  const rows = await prisma.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = ${table}
+    ) AS "exists"
+  `;
+
+  return rows[0]?.exists === true;
+}
+
+async function resolveMissingTables() {
+  const checks = await Promise.all(CRITICAL_TABLES.map(async (table) => ({ table, exists: await tableExists(table) })));
+  return checks.filter((check) => !check.exists).map((check) => check.table);
+}
 
 function evaluateHealth(snapshot: DatabaseHealthSnapshot) {
   const reasons: string[] = [];
@@ -32,6 +54,24 @@ function evaluateHealth(snapshot: DatabaseHealthSnapshot) {
 }
 
 export async function checkDatabaseHealth() {
+  const missingTables = await resolveMissingTables();
+
+  if (missingTables.length > 0) {
+    const schemaMessage = `Schema incompleto: tabelas ausentes (${missingTables.join(", ")})`;
+
+    if (env.isProduction) {
+      logApiEvent("ERROR", `[CRITICAL] ${schemaMessage}`, {
+        missingTables,
+      });
+      throw new Error(`${schemaMessage}. Inicialização abortada para evitar operação sem blindagem.`);
+    }
+
+    logApiEvent("WARN", "[SAFEGUARD] Checagem de sanidade adiada: schema ainda não está pronto em ambiente não produção", {
+      missingTables,
+    });
+    return null;
+  }
+
   const [user, client, opportunity, timelineEvent] = await Promise.all([
     prisma.user.count(),
     prisma.client.count(),
