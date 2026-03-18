@@ -8,7 +8,7 @@ import { ACTIVITY_TYPE_OPTIONS, type ActivityTypeKey } from "../constants/activi
 import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
-import ClientSelect from "../components/ClientSelect";
+import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 
 type Seller = { id: string; name: string };
 type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
@@ -35,13 +35,7 @@ type DraftStop = {
   notes: string;
 };
 
-type ClientOption = {
-  id: string;
-  name: string;
-  city?: string | null;
-  state?: string | null;
-  cnpj?: string | null;
-};
+type ClientOption = SearchableClientOption;
 
 type FollowUpForm = {
   type: "followup";
@@ -81,7 +75,9 @@ const NEXT_STEP_LABEL: Record<VisitResultForm["nextStep"], string> = {
   reagendar: "Reagendar"
 };
 
-const TYPE_LABEL: Record<SharedAgendaEventType, string> = AGENDA_EVENT_TYPE_OPTIONS.reduce((acc, option) => {
+const typedAgendaEventOptions = AGENDA_EVENT_TYPE_OPTIONS as readonly { id: string; value: SharedAgendaEventType; label: string }[];
+
+const TYPE_LABEL: Record<SharedAgendaEventType, string> = typedAgendaEventOptions.reduce<Record<SharedAgendaEventType, string>>((acc, option) => {
   acc[option.value] = option.label;
   return acc;
 }, {} as Record<SharedAgendaEventType, string>);
@@ -94,7 +90,7 @@ const TYPE_COLOR_CLASS: Record<SharedAgendaEventType, string> = {
 };
 
 const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
-  new Map(AGENDA_EVENT_TYPE_OPTIONS.map((option) => [option.value, option])).values()
+  new Map(typedAgendaEventOptions.map((option) => [option.value, option])).values()
 );
 
 const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
@@ -304,6 +300,19 @@ function getCurrentPositionOptional(timeoutMs = 5000): Promise<StopGeolocationPa
 
 
 function mapApiAgendaEvent(item: any): AgendaEvent {
+  const mappedStops = Array.isArray(item.stops)
+    ? item.stops.map((stop: any, index: number) => ({
+        ...stop,
+        id: String(stop?.id || `stop-${item.id}-${index}`),
+        order: Number(stop?.order || index + 1),
+        clientId: stop?.clientId ? String(stop.clientId) : null,
+        clientName: stop?.clientName || stop?.client?.name || null,
+        city: stop?.city || stop?.client?.city || null,
+        checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
+        checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
+      }))
+    : [];
+
   return {
     id: String(item.id),
     ownerId: String(item.ownerId || item.userId || item.ownerSellerId || item.sellerId || ""),
@@ -317,19 +326,11 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
     endsAt: new Date(item.endsAt || item.endDateTime).toISOString(),
     status: (item.status as AgendaEvent["status"]) || "planned",
     isOverdue: Boolean(item.isOverdue),
-    city: item.city ? String(item.city) : undefined,
+    city: item.city ? String(item.city) : mappedStops.find((stop: AgendaStop) => stop.city?.trim())?.city || undefined,
     notes: item.notes ? String(item.notes) : null,
     linkedActivityId: item.linkedActivityId ? String(item.linkedActivityId) : null,
     hasLinkedActivity: Boolean(item.hasLinkedActivity),
-    stops: Array.isArray(item.stops)
-      ? item.stops.map((stop: any) => ({
-          ...stop,
-          clientId: stop?.clientId ? String(stop.clientId) : null,
-          clientName: stop?.clientName || stop?.client?.name || null,
-          checkInAt: stop.checkInAt ?? stop.arrivedAt ?? null,
-          checkOutAt: stop.checkOutAt ?? stop.completedAt ?? null
-        }))
-      : []
+    stops: mappedStops
   };
 }
 
@@ -354,6 +355,7 @@ export default function AgendaPage() {
   const [createModalMode, setCreateModalMode] = useState<CreateModalMode>("agenda");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
+  const loadedClientIdsRef = useRef<Set<string>>(new Set());
   const [isFollowUpModalOpen, setIsFollowUpModalOpen] = useState(false);
   const [isFollowUpSubmitting, setIsFollowUpSubmitting] = useState(false);
   const [followUpSourceEvent, setFollowUpSourceEvent] = useState<AgendaEvent | null>(null);
@@ -471,22 +473,38 @@ export default function AgendaPage() {
 
   useEffect(() => {
     let active = true;
+
+    const mergeClients = (clients: ClientOption[]) => {
+      if (!clients.length) return;
+      setActivityClients((current) => {
+        const next = new Map(current.map((client) => [client.id, client]));
+        clients.forEach((client) => {
+          next.set(client.id, { ...next.get(client.id), ...client });
+          loadedClientIdsRef.current.add(client.id);
+        });
+        return Array.from(next.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+    };
+
+    const mapClientOption = (item: any): ClientOption | null => {
+      if (!item?.id || !item?.name) return null;
+      return {
+        id: String(item.id),
+        name: String(item.name),
+        city: item?.city ? String(item.city) : null,
+        state: item?.state ? String(item.state) : null,
+        cnpj: item?.cnpj ? String(item.cnpj) : null
+      };
+    };
+
     const loadClients = async () => {
       if (activityClients.length) return;
       try {
         const response = await api.get("/clients");
         if (!active) return;
         const payload = Array.isArray(response.data?.items) ? response.data.items : response.data;
-        const mappedClients = Array.isArray(payload)
-          ? payload.filter((item: any) => item?.id && item?.name).map((item: any) => ({
-              id: String(item.id),
-              name: String(item.name),
-              city: item?.city ? String(item.city) : null,
-              state: item?.state ? String(item.state) : null,
-              cnpj: item?.cnpj ? String(item.cnpj) : null
-            }))
-          : [];
-        setActivityClients(mappedClients);
+        const mappedClients = Array.isArray(payload) ? payload.map(mapClientOption).filter(Boolean) as ClientOption[] : [];
+        mergeClients(mappedClients);
       } catch {
         // silencioso: fluxo principal da agenda não depende desta lista
       }
@@ -646,6 +664,63 @@ export default function AgendaPage() {
   }, [roleScopedEvents, customFrom, customTo]);
 
   const clientById = useMemo(() => new Map(activityClients.map((client) => [client.id, client])), [activityClients]);
+
+  useEffect(() => {
+    const missingClientIds = Array.from(
+      new Set(
+        events.flatMap((event) => [
+          event.clientId,
+          ...(event.stops?.map((stop) => stop.clientId || "") || [])
+        ])
+      )
+    )
+      .filter((clientId): clientId is string => typeof clientId === "string" && clientId.trim().length > 0)
+      .filter((clientId) => !clientById.has(clientId) && !loadedClientIdsRef.current.has(clientId));
+
+    if (!missingClientIds.length) return;
+
+    let active = true;
+
+    const loadMissingClients = async () => {
+      try {
+        const responses = await Promise.allSettled(missingClientIds.map((clientId) => api.get(`/clients/${clientId}`)));
+        if (!active) return;
+
+        const nextClients = responses
+          .map((response) => (response.status === "fulfilled" ? response.value.data : null))
+          .filter((item: any) => item?.id && item?.name)
+          .map((item: any) => ({
+            id: String(item.id),
+            name: String(item.name),
+            city: item?.city ? String(item.city) : null,
+            state: item?.state ? String(item.state) : null,
+            cnpj: item?.cnpj ? String(item.cnpj) : null
+          }));
+
+        if (!nextClients.length) {
+          missingClientIds.forEach((clientId) => loadedClientIdsRef.current.add(clientId));
+          return;
+        }
+
+        setActivityClients((current) => {
+          const merged = new Map(current.map((client) => [client.id, client]));
+          nextClients.forEach((client) => {
+            merged.set(client.id, { ...merged.get(client.id), ...client });
+            loadedClientIdsRef.current.add(client.id);
+          });
+          return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        });
+      } catch {
+        missingClientIds.forEach((clientId) => loadedClientIdsRef.current.add(clientId));
+      }
+    };
+
+    void loadMissingClients();
+
+    return () => {
+      active = false;
+    };
+  }, [clientById, events]);
 
   const getStopClientDisplayName = (stop: AgendaStop) => {
     const explicitName = stop.clientName?.trim();
@@ -1117,20 +1192,6 @@ export default function AgendaPage() {
     return createForm.sellerId || user?.id || "";
   };
 
-  const mapCreatedAgendaEvent = (data: any): AgendaEvent => {
-    return {
-      id: String(data?.id || `event-${Date.now()}`),
-      ownerId: String(data?.ownerId || data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
-      userId: String(data?.ownerId || data?.userId || data?.ownerSellerId || resolveAgendaOwnerId()),
-      title: String(data?.title || createForm.title.trim()),
-      notes: String(data?.notes || "Compromisso criado manualmente."),
-      type: (data?.type as AgendaEventType) || createForm.type,
-      startsAt: new Date(data?.startsAt || data?.startDateTime || createForm.startDateTime).toISOString(),
-      endsAt: new Date(data?.endsAt || data?.endDateTime || createForm.endDateTime).toISOString(),
-      status: (data?.status as AgendaEvent["status"]) || "planned",
-      clientId: String(data?.clientId || createForm.clientId || "") || undefined
-    };
-  };
 
   const onCreateAgenda = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1199,7 +1260,27 @@ export default function AgendaPage() {
 
       const response = await api.post("/agenda/events", { ...payload, notes: createForm.notes.trim() || undefined });
 
-      const createdEvent = mapCreatedAgendaEvent(response.data);
+      const responseStops = Array.isArray(response.data?.stops) ? response.data.stops : [];
+      const createdEvent = mapApiAgendaEvent({
+        ...response.data,
+        clientId: response.data?.clientId || createForm.clientId || undefined,
+        stops: createForm.type === "roteiro_visita"
+          ? draftStops.map((stop, index) => {
+              const matchedResponseStop = responseStops[index] || {};
+              const selectedClient = stop.clientId ? clientById.get(stop.clientId) : null;
+              return {
+                ...matchedResponseStop,
+                id: matchedResponseStop?.id || stop.id,
+                order: matchedResponseStop?.order || index + 1,
+                clientId: matchedResponseStop?.clientId || stop.clientId || undefined,
+                clientName: matchedResponseStop?.clientName || selectedClient?.name || null,
+                city: matchedResponseStop?.city || stop.city.trim() || selectedClient?.city || null,
+                plannedTime: matchedResponseStop?.plannedTime || (stop.plannedTime ? new Date(stop.plannedTime).toISOString() : undefined),
+                notes: matchedResponseStop?.notes || stop.notes.trim() || undefined
+              };
+            })
+          : response.data?.stops
+      });
       const range = getRangeFromFilter(periodFilter, customFrom, customTo);
       const createdEventInSelectedRange = isEventOverlappingRange(getStartsAt(createdEvent), getEndsAt(createdEvent), range.start, range.end);
 
@@ -1569,8 +1650,8 @@ export default function AgendaPage() {
       </div>
 
       {isCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/60 p-2 sm:items-center sm:p-4" onClick={closeCreate}>
-          <div className="my-2 flex h-[calc(100dvh-1rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)]" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/60 p-0 sm:items-center sm:p-4" onClick={closeCreate}>
+          <div className="flex h-[100dvh] w-full max-w-xl flex-col overflow-hidden bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
@@ -1582,7 +1663,7 @@ export default function AgendaPage() {
             </div>
 
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={onCreateAgenda}>
-              <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6">
+              <div className="flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4 pb-24 sm:px-6 sm:pb-6">
                 <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Título</label>
                 <input
@@ -1660,14 +1741,17 @@ export default function AgendaPage() {
               {createForm.type !== "roteiro_visita" ? (
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                  <ClientSelect
+                  <ClientSearchSelect
+                    clients={activityClients}
                     value={createForm.clientId}
-                    onChange={(client) =>
+                    onChange={(clientId) =>
                       setCreateForm((current) => ({
                         ...current,
-                        clientId: client?.id || ""
+                        clientId
                       }))
                     }
+                    required
+                    emptyLabel="Nenhum cliente encontrado."
                   />
                 </div>
               ) : null}
@@ -1690,19 +1774,43 @@ export default function AgendaPage() {
                     <button type="button" className="rounded border border-emerald-300 px-2 py-1 text-xs" onClick={() => setDraftStops((current) => [...current, { id: String(Date.now()+Math.random()), clientId: "", city: "", plannedTime: "", notes: "" }])}>Adicionar parada</button>
                   </div>
                   {draftStops.map((stop, index) => (
-                    <div key={stop.id} className="grid gap-2 rounded bg-white p-2 md:grid-cols-5">
-                      <ClientSelect
-                        value={stop.clientId}
-                        onChange={(client) =>
-                          setDraftStops((current) =>
-                            current.map((item) => (item.id === stop.id ? { ...item, clientId: client?.id || "" } : item))
-                          )
-                        }
-                      />
-                      <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="rounded border px-2 py-2 text-sm" />
-                      <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="rounded border px-2 py-2 text-sm" />
-                      <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="rounded border px-2 py-2 text-sm" />
-                      <div className="flex gap-1 justify-end">
+                    <div key={stop.id} className="grid gap-2 rounded bg-white p-3 md:grid-cols-5">
+                      <div className="space-y-1 md:col-span-2">
+                        <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Cliente</label>
+                        <ClientSearchSelect
+                          clients={activityClients}
+                          value={stop.clientId}
+                          onChange={(clientId) =>
+                            setDraftStops((current) =>
+                              current.map((item) => {
+                                if (item.id !== stop.id) return item;
+                                const selectedClient = clientById.get(clientId);
+                                return {
+                                  ...item,
+                                  clientId,
+                                  city: item.city || selectedClient?.city || ""
+                                };
+                              })
+                            )
+                          }
+                          placeholder="Pesquisar por nome, cidade, UF ou CNPJ"
+                          emptyLabel="Nenhum cliente encontrado."
+                          maxListHeightClassName="max-h-40"
+                        />
+                      </div>
+                      <label className="space-y-1">
+                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Cidade</span>
+                        <input value={stop.city} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, city: event.target.value } : item))} placeholder="Cidade" className="w-full rounded border px-2 py-2 text-sm" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Horário</span>
+                        <input type="datetime-local" value={stop.plannedTime} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, plannedTime: event.target.value } : item))} className="w-full rounded border px-2 py-2 text-sm" />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">Observações</span>
+                        <input value={stop.notes} onChange={(event) => setDraftStops((current) => current.map((item) => item.id === stop.id ? { ...item, notes: event.target.value } : item))} placeholder="Observações" className="w-full rounded border px-2 py-2 text-sm" />
+                      </label>
+                      <div className="flex items-end justify-end gap-1">
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===0} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index-1],next[index]]=[next[index],next[index-1]]; return next; })}>↑</button>
                         <button type="button" className="rounded border px-2 text-xs" disabled={index===draftStops.length-1} onClick={() => setDraftStops((current) => { const next=[...current]; [next[index+1],next[index]]=[next[index],next[index+1]]; return next; })}>↓</button>
                         <button type="button" className="rounded border border-rose-200 px-2 text-xs text-rose-700" disabled={draftStops.length===1} onClick={() => setDraftStops((current) => current.filter((item) => item.id !== stop.id))}>✕</button>
@@ -1714,7 +1822,7 @@ export default function AgendaPage() {
 
               </div>
 
-              <div className="mobile-action-stack shrink-0 justify-end border-t border-slate-100 bg-white px-4 py-3 sm:px-6">
+              <div className="mobile-action-stack sticky bottom-0 shrink-0 justify-end border-t border-slate-100 bg-white px-4 py-3 shadow-[0_-8px_24px_rgba(15,23,42,0.06)] sm:px-6">
                 <button type="button" onClick={closeCreate} className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100">
                   Cancelar
                 </button>
@@ -1760,14 +1868,17 @@ export default function AgendaPage() {
 
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Cliente</label>
-                <ClientSelect
+                <ClientSearchSelect
+                  clients={activityClients}
                   value={followUpForm.clientId}
-                  onChange={(client) =>
+                  onChange={(clientId) =>
                     setFollowUpForm((current) => ({
                       ...current,
-                      clientId: client?.id || ""
+                      clientId
                     }))
                   }
+                  required
+                  emptyLabel="Nenhum cliente encontrado."
                 />
               </div>
 
