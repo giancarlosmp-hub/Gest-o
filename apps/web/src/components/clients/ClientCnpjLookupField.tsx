@@ -22,6 +22,7 @@ type ClientCnpjLookupFieldProps = {
   helperText?: string;
   onChange: (value: string) => void;
   onLookupApply: (fields: Record<string, unknown>, payload: CnpjLookupPayload) => void;
+  onLookupErrorChange?: (error: string | null) => void;
   mapLookupToFields?: (payload: CnpjLookupPayload) => Record<string, unknown>;
 };
 
@@ -52,6 +53,7 @@ export default function ClientCnpjLookupField({
   helperText,
   onChange,
   onLookupApply,
+  onLookupErrorChange,
   mapLookupToFields
 }: ClientCnpjLookupFieldProps) {
   const [isLookingUp, setIsLookingUp] = useState(false);
@@ -63,7 +65,8 @@ export default function ClientCnpjLookupField({
   const digits = useMemo(() => normalizeCnpjDigits(value), [value]);
   const formattedValue = useMemo(() => formatCnpj(value), [value]);
   const canLookup = digits.length === 14;
-  const shouldShowFieldError = Boolean(error && error !== lookupError);
+  const shouldRenderLookupErrorInline = !onLookupErrorChange;
+  const shouldShowFieldError = shouldRenderLookupErrorInline && Boolean(error && error !== lookupError);
 
   useEffect(() => {
     latestDigitsRef.current = digits;
@@ -71,6 +74,7 @@ export default function ClientCnpjLookupField({
     if (digits.length === 0) {
       setLookupError(null);
       setLookupMessage(null);
+      onLookupErrorChange?.(null);
       lastAutoLookupDigitsRef.current = null;
       return;
     }
@@ -78,6 +82,7 @@ export default function ClientCnpjLookupField({
     if (digits.length < 14) {
       setLookupError(null);
       setLookupMessage(null);
+      onLookupErrorChange?.(null);
       return;
     }
 
@@ -92,13 +97,16 @@ export default function ClientCnpjLookupField({
 
   const performLookup = async (targetDigits: string, isAutomatic = false) => {
     if (targetDigits.length !== 14) {
-      setLookupError("Informe um CNPJ com 14 dígitos para consultar.");
+      const errorMessage = "Informe um CNPJ com 14 dígitos para consultar.";
+      setLookupError(errorMessage);
       setLookupMessage(null);
+      onLookupErrorChange?.(errorMessage);
       return;
     }
 
     setIsLookingUp(true);
     setLookupError(null);
+    onLookupErrorChange?.(null);
     if (!isAutomatic) setLookupMessage(null);
 
     try {
@@ -117,11 +125,13 @@ export default function ClientCnpjLookupField({
       onLookupApply(autoFilledFields, payload);
       setLookupMessage("Dados do CNPJ preenchidos automaticamente. Você ainda pode editar os campos manualmente.");
       setLookupError(null);
+      onLookupErrorChange?.(null);
       lastAutoLookupDigitsRef.current = targetDigits;
     } catch (lookupError: any) {
       const errorMessage = lookupError?.response?.data?.message || lookupError?.message || "Não foi possível consultar o CNPJ.";
       setLookupError(errorMessage);
       setLookupMessage(null);
+      onLookupErrorChange?.(errorMessage);
       if (!isAutomatic) lastAutoLookupDigitsRef.current = null;
     } finally {
       if (latestDigitsRef.current === targetDigits) {
@@ -150,6 +160,7 @@ export default function ClientCnpjLookupField({
             onChange(nextValue);
             setLookupError(null);
             setLookupMessage(null);
+            onLookupErrorChange?.(null);
             if (normalizeCnpjDigits(nextValue) !== lastAutoLookupDigitsRef.current) {
               lastAutoLookupDigitsRef.current = null;
             }
@@ -164,7 +175,7 @@ export default function ClientCnpjLookupField({
           {isLookingUp ? "Buscando..." : lookupMessage ? "Buscar novamente" : "Buscar CNPJ"}
         </button>
       </div>
-      {lookupError ? <p className="text-xs text-rose-600">{lookupError}</p> : null}
+      {shouldRenderLookupErrorInline && lookupError ? <p className="text-xs text-rose-600">{lookupError}</p> : null}
       {!lookupError && lookupMessage ? <p className="text-xs text-emerald-700">{lookupMessage}</p> : null}
       {!lookupError && !lookupMessage && helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
       {!lookupError && !lookupMessage && isLookingUp ? <p className="text-xs text-slate-500">Consultando dados do CNPJ...</p> : null}

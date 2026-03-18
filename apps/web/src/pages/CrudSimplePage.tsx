@@ -199,6 +199,7 @@ export default function CrudSimplePage({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
+  const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
   const [formFieldErrors, setFormFieldErrors] = useState<
     Partial<Record<keyof ClientPayloadInput, string>>
   >({});
@@ -1291,6 +1292,7 @@ export default function CrudSimplePage({
     setEditing(null);
     setForm({});
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
   };
 
@@ -1302,6 +1304,7 @@ export default function CrudSimplePage({
       setForm({});
     }
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
     setIsCreateModalOpen(true);
   };
@@ -1317,6 +1320,7 @@ export default function CrudSimplePage({
       });
 
       setFormFieldErrors(fieldErrors);
+      setCnpjLookupError(null);
 
       const firstError = Object.values(fieldErrors).find(Boolean);
       if (firstError) {
@@ -1335,6 +1339,7 @@ export default function CrudSimplePage({
 
         setForm({});
         setEditing(null);
+        setCnpjLookupError(null);
         setFormFieldErrors({});
         if (isClientsPage) await loadClients();
         else await load();
@@ -1390,6 +1395,7 @@ export default function CrudSimplePage({
 
   const onEdit = (item: any) => {
     setFormError(null);
+    setCnpjLookupError(null);
     setFormFieldErrors({});
     const nextForm = endpoint === "/users" ? { ...item, password: "" } : item;
 
@@ -2204,9 +2210,10 @@ export default function CrudSimplePage({
                     );
                   }
 
+                  const isCnpjField = isClientsPage && f.key === "cnpj";
                   const fieldError = formFieldErrors[f.key as keyof ClientPayloadInput];
 
-                  if (f.key === "cnpj") {
+                  if (isCnpjField) {
                     return (
                       <div key={f.key} className="space-y-1">
                         <ClientCnpjLookupField
@@ -2219,11 +2226,13 @@ export default function CrudSimplePage({
                           helperText="Ao informar um CNPJ válido, nome, cidade e UF podem ser preenchidos automaticamente."
                           onChange={(cnpj) => {
                             setFormError(null);
+                            setCnpjLookupError(null);
                             setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
                             setForm((prev: any) => ({ ...prev, [f.key]: cnpj }));
                           }}
                           onLookupApply={(fields) => {
                             setFormError(null);
+                            setCnpjLookupError(null);
                             setFormFieldErrors((prev) => ({ ...prev, cnpj: undefined, name: undefined, city: undefined, state: undefined }));
                             setForm((prev: any) => ({
                               ...prev,
@@ -2234,7 +2243,10 @@ export default function CrudSimplePage({
                               clientType: prev.clientType || "PJ"
                             }));
                           }}
+                          onLookupErrorChange={setCnpjLookupError}
                         />
+                        {fieldError ? <p className="text-xs text-rose-600">{fieldError}</p> : null}
+                        {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
                       </div>
                     );
                   }
