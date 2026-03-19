@@ -27,10 +27,14 @@ type ClientCnpjLookupFieldProps = {
 };
 
 const resolveCnpjLookupErrorMessage = (error: AxiosError<{ message?: string; code?: string }>) => {
+  const status = error.response?.status;
   const backendMessage = String(error.response?.data?.message || "").trim();
   const errorCode = error.response?.data?.code;
   const normalizedMessage = backendMessage.toLowerCase();
 
+  if (status === 401) {
+    return "Sua sessão expirou ou não foi autenticada. Faça login novamente para consultar o CNPJ.";
+  }
   if (errorCode === "INVALID_CNPJ") return "Informe um CNPJ válido para realizar a busca automática.";
   if (errorCode === "CNPJ_LOOKUP_NOT_FOUND") return "Empresa não encontrada para o CNPJ informado.";
   if (normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada") || normalizedMessage.includes("not found")) {
