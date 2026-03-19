@@ -891,8 +891,12 @@ export default function ActivitiesPage() {
                       ownerSellerId={isSeller && user?.id ? user.id : form.ownerSellerId || undefined}
                       requireOwnerSeller={canChooseSeller}
                       requireRegion={false}
-                      onClientCreated={selectExistingClient}
-                      onSelectExisting={selectExistingClient}
+                      onClientCreated={(client) => {
+                        selectExistingClient(client);
+                      }}
+                      onSelectExisting={(client) => {
+                        selectExistingClient(client);
+                      }}
                     />
                   </div>
                 </div>
