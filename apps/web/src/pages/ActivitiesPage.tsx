@@ -8,7 +8,8 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
-import ClientCnpjLookupField from "../components/opportunities/ClientCnpjLookupField";
+import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
+import { DuplicateClientCheckError, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
@@ -368,6 +369,64 @@ export default function ActivitiesPage() {
       return null;
     } finally {
       setIsCreatingClient(false);
+    }
+  };
+
+  const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+    const clientOption = {
+      id: client.id,
+      name: client.name,
+      city: client.city,
+      state: client.state,
+      cnpj: client.cnpj
+    };
+
+    setClients((current) => {
+      const withoutDuplicate = current.filter((item) => item.id !== clientOption.id);
+      return [...withoutDuplicate, clientOption].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    });
+
+    setForm((current) => ({ ...current, clientId: clientOption.id, opportunityId: "" }));
+    setOpportunitySearch("");
+    return clientOption;
+  };
+
+  const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
+    const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
+
+    if (String(payload.cnpj || "").trim()) {
+      const duplicateCheck = await checkClientDuplicate(payload);
+
+      if (duplicateCheck.exists) {
+        throw new DuplicateClientCheckError(duplicateCheck);
+      }
+    }
+
+    try {
+      const response = await api.post("/clients", {
+        ...payload,
+        state: payload.state.toUpperCase(),
+        ownerSellerId
+      });
+
+      const createdClient = {
+        id: response.data.id,
+        name: response.data.name,
+        city: response.data.city,
+        state: response.data.state,
+        cnpj: response.data.cnpj
+      };
+
+      setClients((current) => {
+        const next = [...current.filter((item) => item.id !== createdClient.id), createdClient];
+        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+
+      toast.success("Cliente criado e selecionado");
+      return createdClient;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || "Não foi possível criar cliente";
+      throw new Error(errorMessage);
     }
   };
 
@@ -961,95 +1020,18 @@ export default function ActivitiesPage() {
                     emptyLabel="Nenhum cliente encontrado."
                     className="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
                   />
-                  <button
-                    type="button"
-                    className="text-sm font-medium text-brand-700 hover:text-brand-800"
-                    onClick={() => {
-                      setIsQuickCreateClientOpen((current) => !current);
-                      setQuickClientError(null);
-                      setCnpjLookupError(null);
-                    }}
-                  >
-                    {isQuickCreateClientOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
-                  </button>
-                  {isQuickCreateClientOpen ? (
-                    <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <ClientCnpjLookupField
-                        value={quickClientForm.cnpj}
-                        onChange={(cnpj) => {
-                          setQuickClientError(null);
-                          updateQuickClientForm({ cnpj });
-                        }}
-                        onLookupSuccess={({ cnpj, name, city, state }) => {
-                          setQuickClientError(null);
-                          updateQuickClientForm({
-                            cnpj,
-                            name: quickClientFormRef.current.name || name,
-                            city: quickClientFormRef.current.city || city,
-                            state: quickClientFormRef.current.state || state
-                          });
-                        }}
-                        cnpjLookupError={cnpjLookupError}
-                        setCnpjLookupError={setCnpjLookupError}
-                        disabled={isCreatingClient}
-                        className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
-                      />
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
-                          placeholder="Nome do cliente"
-                          value={quickClientForm.name}
-                          onChange={(event) => {
-                            setQuickClientError(null);
-                            updateQuickClientForm({ name: event.target.value });
-                          }}
-                        />
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
-                          placeholder="Cidade"
-                          value={quickClientForm.city}
-                          onChange={(event) => {
-                            setQuickClientError(null);
-                            updateQuickClientForm({ city: event.target.value });
-                          }}
-                        />
-                        <input
-                          type="text"
-                          maxLength={2}
-                          className="w-full rounded-lg border border-slate-300 p-2 text-sm uppercase"
-                          placeholder="UF"
-                          value={quickClientForm.state}
-                          onChange={(event) => {
-                            setQuickClientError(null);
-                            updateQuickClientForm({ state: event.target.value.toUpperCase() });
-                          }}
-                        />
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
-                          placeholder="Região (opcional)"
-                          value={quickClientForm.region}
-                          onChange={(event) => {
-                            setQuickClientError(null);
-                            updateQuickClientForm({ region: event.target.value });
-                          }}
-                        />
-                      </div>
-                      {quickClientError ? <p className="text-sm text-rose-600">{quickClientError}</p> : null}
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
-                          onClick={() => void createClientFromActivity()}
-                          disabled={isCreatingClient}
-                          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                        >
-                          {isCreatingClient ? "Salvando cliente..." : "Salvar cliente"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
+                  <div className="mt-2">
+                    <QuickCreateClientSection
+                      open={isModalOpen}
+                      fieldClassName="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
+                      onClientSelected={(clientId) => {
+                        setForm((previous) => ({ ...previous, clientId, opportunityId: "" }));
+                        setOpportunitySearch("");
+                      }}
+                      onQuickCreateClient={onQuickCreateClient}
+                      onSelectExistingClient={selectExistingClient}
+                    />
+                  </div>
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Buscar oportunidade por título (opcional)</label>
