@@ -19,7 +19,7 @@ export type ClientDuplicateCheckPayload = {
   ignoreClientId?: string;
 };
 
-type ClientDuplicateCheckResponse = {
+export type ClientDuplicateCheckResponse = {
   exists: boolean;
   matchType: DuplicateClientMatchType | null;
   message?: string;
@@ -52,4 +52,28 @@ export const checkClientDuplicate = async (payload: ClientDuplicateCheckPayload)
   });
 
   return response.data;
+};
+
+
+export class DuplicateClientCheckError extends Error {
+  existingClient: ExistingClientSummary | null;
+  matchType: DuplicateClientMatchType | null;
+
+  constructor(response: Pick<ClientDuplicateCheckResponse, "existingClient" | "matchType" | "message">) {
+    super(buildDuplicateClientMessage(response));
+    this.name = "DuplicateClientCheckError";
+    this.existingClient = response.existingClient ?? null;
+    this.matchType = response.matchType ?? null;
+  }
+}
+
+export const findDuplicateClientByLookupPayload = async (payload: { cnpj: string; name?: string; city?: string; state?: string }) => {
+  const duplicateCheck = await checkClientDuplicate({
+    cnpj: payload.cnpj,
+    name: payload.name,
+    city: payload.city,
+    state: payload.state
+  });
+
+  return duplicateCheck.exists ? duplicateCheck : null;
 };
