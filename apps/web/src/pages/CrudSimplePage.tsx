@@ -2253,146 +2253,148 @@ export default function CrudSimplePage({
       ) : null}
 
       {createInModal && isCreateModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="mb-4">
+        <div className="mobile-modal-shell" role="dialog" aria-modal="true">
+          <div className="mobile-modal-panel w-full max-w-4xl border border-slate-200 shadow-xl">
+            <div className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-4 sm:px-6">
               <h3 className="text-xl font-semibold text-slate-900">{createModalTitle}</h3>
               <p className="text-sm text-slate-500">Preencha os dados para cadastrar um cliente.</p>
             </div>
 
-            <form onSubmit={submit} className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                {fields.map((f) => {
-                  const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
+            <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+              <div className="mobile-modal-body space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                  {fields.map((f) => {
+                    const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
 
-                  const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
+                    const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
 
-                  if (isOwnerSellerField) {
-                    const sellerOptions = canChooseOwnerSeller
-                      ? users
-                      : user?.id && user?.name
-                        ? [{ id: user.id, name: user.name }]
-                        : [];
+                    if (isOwnerSellerField) {
+                      const sellerOptions = canChooseOwnerSeller
+                        ? users
+                        : user?.id && user?.name
+                          ? [{ id: user.id, name: user.name }]
+                          : [];
 
-                    const selectedOwnerSellerId = form.ownerSellerId ?? (isSeller && user?.id ? user.id : "");
+                      const selectedOwnerSellerId = form.ownerSellerId ?? (isSeller && user?.id ? user.id : "");
+
+                      return (
+                        <div key={f.key} className="space-y-1 md:col-span-2">
+                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                            {f.label}
+                          </label>
+                          <select
+                            id={`modal-${f.key}`}
+                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
+                            value={selectedOwnerSellerId}
+                            disabled={isSeller}
+                            onChange={(e) => {
+                              setFormError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, ownerSellerId: undefined }));
+                              setForm({ ...form, ownerSellerId: e.target.value });
+                            }}
+                          >
+                            {canChooseOwnerSeller ? <option value="">Selecione o vendedor responsável</option> : null}
+                            {sellerOptions.map((seller) => (
+                              <option key={seller.id} value={seller.id}>
+                                {seller.name}
+                              </option>
+                            ))}
+                          </select>
+                          <p className="text-xs text-slate-500">
+                            {isSeller
+                              ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
+                              : "Defina o vendedor responsável para acompanhar este cliente."}
+                          </p>
+                          {formFieldErrors.ownerSellerId ? <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p> : null}
+                        </div>
+                      );
+                    }
+
+                    const isCnpjField = isClientsPage && f.key === "cnpj";
+                    const fieldError = formFieldErrors[f.key as keyof ClientPayloadInput];
 
                     return (
-                      <div key={f.key} className="space-y-1 md:col-span-2">
-                        <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                          {f.label}
-                        </label>
-                        <select
-                          id={`modal-${f.key}`}
-                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
-                          value={selectedOwnerSellerId}
-                          disabled={isSeller}
-                          onChange={(e) => {
-                            setFormError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, ownerSellerId: undefined }));
-                            setForm({ ...form, ownerSellerId: e.target.value });
-                          }}
-                        >
-                          {canChooseOwnerSeller ? <option value="">Selecione o vendedor responsável</option> : null}
-                          {sellerOptions.map((seller) => (
-                            <option key={seller.id} value={seller.id}>
-                              {seller.name}
-                            </option>
-                          ))}
-                        </select>
-                        <p className="text-xs text-slate-500">
-                          {isSeller
-                            ? "Este cliente será vinculado automaticamente ao seu usuário vendedor."
-                            : "Defina o vendedor responsável para acompanhar este cliente."}
-                        </p>
-                        {formFieldErrors.ownerSellerId ? <p className="text-xs text-rose-600">{formFieldErrors.ownerSellerId}</p> : null}
+                      <div key={f.key} className={`space-y-1 ${isCnpjField ? "md:col-span-2" : ""}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                            {f.label}
+                          </label>
+                        </div>
+
+                        {f.type === "select" ? (
+                          <select
+                            id={`modal-${f.key}`}
+                            required={isRequired}
+                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                            value={form[f.key] ?? ""}
+                            onChange={(e) => {
+                              setFormError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                              setForm({ ...form, [f.key]: e.target.value });
+                            }}
+                          >
+                            <option value="">Selecione {f.label.toLowerCase()}</option>
+                            {(f.options ?? []).map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : isCnpjField ? (
+                          <ClientCnpjLookupField
+                            value={String(form[f.key] ?? "")}
+                            onChange={(cnpj) => {
+                              setFormError(null);
+                              setCnpjLookupError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, cnpj) });
+                            }}
+                            onLookupSuccess={applyCnpjLookupResult}
+                            cnpjLookupError={cnpjLookupError}
+                            setCnpjLookupError={setCnpjLookupError}
+                            disabled={saving}
+                            className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                            helperTitle="Use CNPJ para preenchimento automático"
+                          />
+                        ) : (
+                          <input
+                            id={`modal-${f.key}`}
+                            required={isRequired}
+                            className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                            type={f.type || "text"}
+                            placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
+                            value={form[f.key] ?? ""}
+                            onChange={(e) => {
+                              setFormError(null);
+                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                            }}
+                          />
+                        )}
+
+                        {fieldError ? (
+                          <p className="text-xs text-rose-600">{fieldError}</p>
+                        ) : null}
                       </div>
                     );
-                  }
+                  })}
+                </div>
 
-                  const isCnpjField = isClientsPage && f.key === "cnpj";
-                  const fieldError = formFieldErrors[f.key as keyof ClientPayloadInput];
-
-                  return (
-                    <div key={f.key} className={`space-y-1 ${isCnpjField ? "md:col-span-2" : ""}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                          {f.label}
-                        </label>
-                      </div>
-
-                      {f.type === "select" ? (
-                        <select
-                          id={`modal-${f.key}`}
-                          required={isRequired}
-                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                          value={form[f.key] ?? ""}
-                          onChange={(e) => {
-                            setFormError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: e.target.value });
-                          }}
-                        >
-                          <option value="">Selecione {f.label.toLowerCase()}</option>
-                          {(f.options ?? []).map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : isCnpjField ? (
-                        <ClientCnpjLookupField
-                          value={String(form[f.key] ?? "")}
-                          onChange={(cnpj) => {
-                            setFormError(null);
-                            setCnpjLookupError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, cnpj) });
-                          }}
-                          onLookupSuccess={applyCnpjLookupResult}
-                          cnpjLookupError={cnpjLookupError}
-                          setCnpjLookupError={setCnpjLookupError}
-                          disabled={saving}
-                          className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                          helperTitle="Use CNPJ para preenchimento automático"
-                        />
-                      ) : (
-                        <input
-                          id={`modal-${f.key}`}
-                          required={isRequired}
-                          className="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
-                          type={f.type || "text"}
-                          placeholder={f.placeholder ?? `Informe ${f.label.toLowerCase()}`}
-                          value={form[f.key] ?? ""}
-                          onChange={(e) => {
-                            setFormError(null);
-                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
-                          }}
-                        />
-                      )}
-
-                      {fieldError ? (
-                        <p className="text-xs text-rose-600">{fieldError}</p>
-                      ) : null}
-                    </div>
-                  );
-                })}
+                {formError ? <p className="text-sm text-rose-600">{formError}</p> : null}
               </div>
 
-              {formError ? <p className="text-sm text-rose-600">{formError}</p> : null}
-
-              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+              <div className="mobile-modal-footer sticky bottom-0 z-10 border-t border-slate-200 bg-white shadow-[0_-8px_24px_rgba(15,23,42,0.06)] sm:shadow-none">
                 <button
                   type="button"
                   onClick={closeCreateModal}
-                  className="rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
+                  className="mobile-secondary-half rounded-lg border border-slate-300 px-4 py-2 font-medium text-slate-700 hover:bg-slate-100"
                   disabled={saving}
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100"
+                  className="mobile-primary-button rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:text-slate-100 disabled:opacity-100"
                   disabled={saving}
                 >
                   {saving ? "Salvando..." : "Salvar"}
