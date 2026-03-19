@@ -11,7 +11,6 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
-import { DuplicateClientCheckError, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -704,44 +703,6 @@ export default function OpportunitiesPage() {
     return clientOption;
   };
 
-  const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
-    const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
-
-    if (String(payload.cnpj || "").trim()) {
-      const duplicateCheck = await checkClientDuplicate(payload);
-
-      if (duplicateCheck.exists) {
-        throw new DuplicateClientCheckError(duplicateCheck);
-      }
-    }
-
-    try {
-      const response = await api.post("/clients", {
-        ...payload,
-        state: payload.state.toUpperCase(),
-        ownerSellerId
-      });
-
-      const createdClient = {
-        id: response.data.id,
-        name: response.data.name,
-        city: response.data.city,
-        state: response.data.state,
-        cnpj: response.data.cnpj
-      };
-      setClients((current) => {
-        const next = [...current.filter((item) => item.id !== createdClient.id), createdClient];
-        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-      });
-
-      toast.success("Cliente criado e selecionado");
-      return createdClient;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Não foi possível criar cliente";
-      throw new Error(errorMessage);
-    }
-  };
-
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
     setIsPipelineDrawerOpen(true);
@@ -1067,8 +1028,10 @@ export default function OpportunitiesPage() {
         onSubmit={submit}
         onFormChange={setForm}
         sanitizeNumericInput={sanitizeNumericInput}
-        onQuickCreateClient={onQuickCreateClient}
-        onSelectExistingClient={selectExistingClient}
+        ownerSellerId={isSeller && user?.id ? user.id : form.ownerSellerId || undefined}
+        requireOwnerSeller={user?.role === "diretor" || user?.role === "gerente"}
+        onClientCreated={selectExistingClient}
+        onSelectExisting={selectExistingClient}
       />
 
       <OpportunityImportModal

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import api from "../../lib/apiClient";
 import {
   DuplicateClientCheckError,
   ExistingClientSummary,
   buildDuplicateClientMessage,
+  checkClientDuplicate,
   findDuplicateClientByLookupPayload
 } from "../../lib/clientDuplicateCheck";
 import ClientCnpjLookupField from "../opportunities/ClientCnpjLookupField";
@@ -18,17 +21,21 @@ type ClientOption = {
 type QuickCreateClientSectionProps = {
   open: boolean;
   fieldClassName?: string;
-  onClientSelected: (clientId: string) => void;
-  onQuickCreateClient: (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
-  onSelectExistingClient: (client: ExistingClientSummary) => ClientOption;
+  ownerSellerId?: string;
+  requireOwnerSeller?: boolean;
+  requireRegion?: boolean;
+  onClientCreated: (client: ClientOption) => void | Promise<void>;
+  onSelectExisting: (client: ExistingClientSummary) => void | Promise<void>;
 };
 
 export default function QuickCreateClientSection({
   open,
   fieldClassName = "w-full rounded-lg border border-slate-200 p-2",
-  onClientSelected,
-  onQuickCreateClient,
-  onSelectExistingClient
+  ownerSellerId,
+  requireOwnerSeller = false,
+  requireRegion = true,
+  onClientCreated,
+  onSelectExisting
 }: QuickCreateClientSectionProps) {
   const [isQuickCreateOpen, setIsQuickCreateOpen] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
@@ -44,6 +51,16 @@ export default function QuickCreateClientSection({
   });
   const quickClientRef = useRef(quickClient);
 
+  const resetQuickClient = () => {
+    setIsQuickCreateOpen(false);
+    setIsCreatingClient(false);
+    setQuickCreateError(null);
+    setCnpjLookupError(null);
+    setDuplicateClient(null);
+    setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+    quickClientRef.current = { cnpj: "", name: "", city: "", state: "", region: "" };
+  };
+
   const updateQuickClient = (patch: Partial<typeof quickClient>) => {
     setQuickClient((currentQuickClient) => {
       const nextQuickClient = { ...currentQuickClient, ...patch };
@@ -58,12 +75,7 @@ export default function QuickCreateClientSection({
 
   useEffect(() => {
     if (!open) return;
-    setIsQuickCreateOpen(false);
-    setIsCreatingClient(false);
-    setQuickCreateError(null);
-    setCnpjLookupError(null);
-    setDuplicateClient(null);
-    updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+    resetQuickClient();
   }, [open]);
 
   const handleQuickClientLookupSuccess = async ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
@@ -89,29 +101,31 @@ export default function QuickCreateClientSection({
     setQuickCreateError(buildDuplicateClientMessage(duplicateCheck));
   };
 
-  const handleSelectExistingClient = () => {
+  const handleSelectExistingClient = async () => {
     if (!duplicateClient) return;
 
-    const selectedClient = onSelectExistingClient(duplicateClient);
-    onClientSelected(selectedClient.id);
-    setIsQuickCreateOpen(false);
-    setQuickCreateError(null);
-    setCnpjLookupError(null);
-    setDuplicateClient(null);
-    updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+    await onSelectExisting(duplicateClient);
+    resetQuickClient();
   };
 
   const handleQuickCreateClient = async () => {
     const payload = {
-      cnpj: quickClientRef.current.cnpj.trim(),
+      cnpj: quickClientRef.current.cnpj.trim() || undefined,
       name: quickClientRef.current.name.trim(),
       city: quickClientRef.current.city.trim(),
-      state: quickClientRef.current.state.trim(),
-      region: quickClientRef.current.region.trim()
+      state: quickClientRef.current.state.trim().toUpperCase(),
+      region: quickClientRef.current.region.trim() || undefined,
+      clientType: "PJ",
+      ownerSellerId: ownerSellerId?.trim() || undefined
     };
 
-    if (!payload.name || !payload.city || !payload.state || !payload.region) {
-      setQuickCreateError("Preencha nome, cidade, UF e região");
+    if (!payload.name || !payload.city || !payload.state || (requireRegion && !payload.region)) {
+      setQuickCreateError(requireRegion ? "Preencha nome, cidade, UF e região" : "Preencha nome, cidade e UF");
+      return;
+    }
+
+    if (requireOwnerSeller && !payload.ownerSellerId) {
+      setQuickCreateError("Selecione o vendedor responsável antes de criar o cliente.");
       return;
     }
 
@@ -120,17 +134,30 @@ export default function QuickCreateClientSection({
     setIsCreatingClient(true);
 
     try {
-      const createdClient = await onQuickCreateClient(payload);
-      onClientSelected(createdClient.id);
-      setIsQuickCreateOpen(false);
-      setQuickCreateError(null);
-      setCnpjLookupError(null);
-      updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+      if (payload.cnpj) {
+        const duplicateCheck = await checkClientDuplicate(payload);
+        if (duplicateCheck.exists) {
+          throw new DuplicateClientCheckError(duplicateCheck);
+        }
+      }
+
+      const response = await api.post("/clients", payload);
+      const createdClient = {
+        id: String(response.data.id),
+        name: String(response.data.name || payload.name),
+        city: response.data?.city ? String(response.data.city) : payload.city,
+        state: response.data?.state ? String(response.data.state) : payload.state,
+        cnpj: response.data?.cnpj ? String(response.data.cnpj) : payload.cnpj || null
+      } satisfies ClientOption;
+
+      await onClientCreated(createdClient);
+      toast.success("Cliente criado e selecionado");
+      resetQuickClient();
     } catch (error: any) {
       if (error instanceof DuplicateClientCheckError && error.existingClient) {
         setDuplicateClient(error.existingClient);
       }
-      setQuickCreateError(error?.message || "Não foi possível criar cliente");
+      setQuickCreateError(error?.response?.data?.message || error?.message || "Não foi possível criar cliente");
     } finally {
       setIsCreatingClient(false);
     }
@@ -148,7 +175,7 @@ export default function QuickCreateClientSection({
           setDuplicateClient(null);
         }}
       >
-        {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
+        {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente via CNPJ"}
       </button>
       {isQuickCreateOpen ? (
         <div className="grid gap-2 rounded-lg border border-slate-200 bg-white p-3">
@@ -169,7 +196,7 @@ export default function QuickCreateClientSection({
             <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ name: e.target.value }); }} />
             <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ city: e.target.value }); }} />
             <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ state: e.target.value.toUpperCase() }); }} maxLength={2} />
-            <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ region: e.target.value }); }} />
+            <input className={fieldClassName} placeholder={`Região${requireRegion ? " *" : " (opcional)"}`} value={quickClient.region} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ region: e.target.value }); }} />
             {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
             {duplicateClient ? (
               <button

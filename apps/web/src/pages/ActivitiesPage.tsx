@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -9,19 +9,11 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
-import { DuplicateClientCheckError, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
 type ClientOption = SearchableClientOption;
 
-type QuickClientForm = {
-  cnpj: string;
-  name: string;
-  city: string;
-  state: string;
-  region: string;
-};
 type ActivityStatus = "agendado" | "vencido" | "realizado";
 
 type Activity = {
@@ -76,13 +68,6 @@ const initialForm = {
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
-const initialQuickClientForm: QuickClientForm = {
-  cnpj: "",
-  name: "",
-  city: "",
-  state: "",
-  region: ""
-};
 
 const STATUS_LABEL: Record<ActivityStatus, string> = {
   agendado: "Agendado",
@@ -121,12 +106,6 @@ export default function ActivitiesPage() {
   const [filters, setFilters] = useState<ActivityFilters>(initialFilters);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [executionForm, setExecutionForm] = useState({ result: "", observations: "", duration: "" });
-  const [isQuickCreateClientOpen, setIsQuickCreateClientOpen] = useState(false);
-  const [isCreatingClient, setIsCreatingClient] = useState(false);
-  const [quickClientError, setQuickClientError] = useState<string | null>(null);
-  const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
-  const [quickClientForm, setQuickClientForm] = useState<QuickClientForm>(initialQuickClientForm);
-  const quickClientFormRef = useRef<QuickClientForm>(initialQuickClientForm);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [duplicateDate, setDuplicateDate] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
@@ -141,23 +120,6 @@ export default function ActivitiesPage() {
     if (!search) return opportunitiesByClient;
     return opportunitiesByClient.filter((item) => item.title.toLowerCase().includes(search));
   }, [opportunitiesByClient, opportunitySearch]);
-
-  const updateQuickClientForm = (patch: Partial<QuickClientForm>) => {
-    setQuickClientForm((current) => {
-      const next = { ...current, ...patch };
-      quickClientFormRef.current = next;
-      return next;
-    });
-  };
-
-  const resetQuickCreateClient = () => {
-    setIsQuickCreateClientOpen(false);
-    setIsCreatingClient(false);
-    setQuickClientError(null);
-    setCnpjLookupError(null);
-    quickClientFormRef.current = initialQuickClientForm;
-    setQuickClientForm(initialQuickClientForm);
-  };
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -269,7 +231,6 @@ export default function ActivitiesPage() {
     const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
 
-    resetQuickCreateClient();
     setForm((current) => ({
       ...current,
       type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
@@ -305,7 +266,6 @@ export default function ActivitiesPage() {
   const openCreateModal = () => {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
-    resetQuickCreateClient();
     setIsModalOpen(true);
   };
 
@@ -313,63 +273,6 @@ export default function ActivitiesPage() {
     setIsModalOpen(false);
     setForm(initialForm);
     setOpportunitySearch("");
-    resetQuickCreateClient();
-  };
-
-  const createClientFromActivity = async () => {
-    const payload = {
-      cnpj: quickClientFormRef.current.cnpj.trim(),
-      name: quickClientFormRef.current.name.trim(),
-      city: quickClientFormRef.current.city.trim(),
-      state: quickClientFormRef.current.state.trim().toUpperCase(),
-      region: quickClientFormRef.current.region.trim() || undefined,
-      clientType: "PJ",
-      ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
-    };
-
-    if (!payload.name || !payload.city || !payload.state) {
-      setQuickClientError("Preencha nome, cidade e UF para criar o cliente.");
-      return;
-    }
-
-    if (canChooseSeller && !payload.ownerSellerId) {
-      setQuickClientError("Selecione o vendedor responsável antes de criar o cliente.");
-      return;
-    }
-
-    setIsCreatingClient(true);
-    setQuickClientError(null);
-
-    try {
-      const response = await api.post("/clients", payload);
-      const newClient = {
-        id: String(response.data.id),
-        name: String(response.data.name || payload.name),
-        city: response.data?.city ? String(response.data.city) : payload.city,
-        state: response.data?.state ? String(response.data.state) : payload.state,
-        cnpj: response.data?.cnpj ? String(response.data.cnpj) : payload.cnpj || null
-      } satisfies ClientOption;
-
-      setClients((current) => {
-        const next = [...current.filter((item) => item.id !== newClient.id), newClient];
-        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-      });
-
-      setForm((current) => ({
-        ...current,
-        clientId: newClient.id,
-        opportunityId: ""
-      }));
-      setOpportunitySearch("");
-      resetQuickCreateClient();
-      toast.success("Cliente criado e selecionado");
-      return newClient;
-    } catch (error) {
-      setQuickClientError(getApiErrorMessage(error, "Não foi possível criar o cliente."));
-      return null;
-    } finally {
-      setIsCreatingClient(false);
-    }
   };
 
   const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
@@ -389,45 +292,6 @@ export default function ActivitiesPage() {
     setForm((current) => ({ ...current, clientId: clientOption.id, opportunityId: "" }));
     setOpportunitySearch("");
     return clientOption;
-  };
-
-  const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
-    const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
-
-    if (String(payload.cnpj || "").trim()) {
-      const duplicateCheck = await checkClientDuplicate(payload);
-
-      if (duplicateCheck.exists) {
-        throw new DuplicateClientCheckError(duplicateCheck);
-      }
-    }
-
-    try {
-      const response = await api.post("/clients", {
-        ...payload,
-        state: payload.state.toUpperCase(),
-        ownerSellerId
-      });
-
-      const createdClient = {
-        id: response.data.id,
-        name: response.data.name,
-        city: response.data.city,
-        state: response.data.state,
-        cnpj: response.data.cnpj
-      };
-
-      setClients((current) => {
-        const next = [...current.filter((item) => item.id !== createdClient.id), createdClient];
-        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-      });
-
-      toast.success("Cliente criado e selecionado");
-      return createdClient;
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Não foi possível criar cliente";
-      throw new Error(errorMessage);
-    }
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -1024,12 +888,11 @@ export default function ActivitiesPage() {
                     <QuickCreateClientSection
                       open={isModalOpen}
                       fieldClassName="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
-                      onClientSelected={(clientId) => {
-                        setForm((previous) => ({ ...previous, clientId, opportunityId: "" }));
-                        setOpportunitySearch("");
-                      }}
-                      onQuickCreateClient={onQuickCreateClient}
-                      onSelectExistingClient={selectExistingClient}
+                      ownerSellerId={isSeller && user?.id ? user.id : form.ownerSellerId || undefined}
+                      requireOwnerSeller={canChooseSeller}
+                      requireRegion={false}
+                      onClientCreated={selectExistingClient}
+                      onSelectExisting={selectExistingClient}
                     />
                   </div>
                 </div>

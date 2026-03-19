@@ -12,8 +12,8 @@ import {
   type ClientImportFieldDefinition,
   type ClientImportFieldKey
 } from "../components/ClientImportColumnMappingStep";
-import ClientCnpjLookupField from "../components/opportunities/ClientCnpjLookupField";
-import { buildDuplicateClientMessage, checkClientDuplicate, findDuplicateClientByLookupPayload } from "../lib/clientDuplicateCheck";
+import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
+import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -222,7 +222,6 @@ export default function CrudSimplePage({
   const [formFieldErrors, setFormFieldErrors] = useState<
     Partial<Record<keyof ClientPayloadInput, string>>
   >({});
-  const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [quickFilters, setQuickFilters] = useState({
@@ -458,73 +457,6 @@ export default function CrudSimplePage({
       ...currentForm,
       [fieldKey]: parseFormValue(fieldKey, fieldType, rawValue)
     }));
-  };
-
-  const applyCnpjLookupResult = async ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
-    setCnpjLookupError(null);
-    setFormError(null);
-
-    const updatedFields: string[] = [];
-    const preservedFields: string[] = [];
-
-    setForm((currentForm: ClientPayloadInput) => {
-      const nextForm = { ...currentForm } as Record<string, unknown>;
-
-      const mergeIfEmpty = (field: keyof ClientPayloadInput, value?: string) => {
-        if (!value) return;
-        const currentValue = String(currentForm[field] ?? "").trim();
-        if (currentValue) {
-          preservedFields.push(String(field));
-          return;
-        }
-        nextForm[field] = value;
-        updatedFields.push(String(field));
-      };
-
-      if (!String(currentForm.cnpj ?? "").trim()) {
-        nextForm.cnpj = cnpj;
-        updatedFields.push("cnpj");
-      } else if (String(currentForm.cnpj ?? "").trim() !== cnpj) {
-        nextForm.cnpj = cnpj;
-      }
-
-      mergeIfEmpty("name", name || undefined);
-      mergeIfEmpty("city", city || undefined);
-      mergeIfEmpty("state", state || undefined);
-
-      const currentClientType = String(currentForm.clientType ?? "").trim().toUpperCase();
-      if (!currentClientType) {
-        nextForm.clientType = "PJ";
-        updatedFields.push("clientType");
-      }
-
-      return nextForm;
-    });
-
-    setFormFieldErrors((currentErrors) => ({
-      ...currentErrors,
-      cnpj: undefined,
-      name: undefined,
-      city: undefined,
-      state: undefined,
-      clientType: undefined
-    }));
-
-    if (updatedFields.length > 0) {
-      toast.success(`Dados do CNPJ carregados. Campos preenchidos: ${updatedFields.join(", ")}.`);
-    } else if (preservedFields.length > 0) {
-      toast.info("Consulta concluída. Mantivemos os dados que você já havia digitado.");
-    } else {
-      toast.info("Consulta concluída, mas não havia novos campos para preencher automaticamente.");
-    }
-
-    const duplicateCheck = await findDuplicateClientByLookupPayload({ cnpj, name, city, state });
-    if (!duplicateCheck) return;
-
-    const duplicateMessage = buildDuplicateClientMessage(duplicateCheck);
-    setFormFieldErrors((currentErrors) => ({ ...currentErrors, cnpj: duplicateMessage }));
-    setFormError(duplicateMessage);
-    toast.error(duplicateMessage);
   };
 
   const downloadImportTemplate = async () => {
@@ -1391,7 +1323,6 @@ export default function CrudSimplePage({
     setForm({});
     setFormError(null);
     setFormFieldErrors({});
-    setCnpjLookupError(null);
   };
 
   const openCreateModal = () => {
@@ -1403,7 +1334,6 @@ export default function CrudSimplePage({
     }
     setFormError(null);
     setFormFieldErrors({});
-    setCnpjLookupError(null);
     setIsCreateModalOpen(true);
   };
 
@@ -1510,7 +1440,6 @@ export default function CrudSimplePage({
   const onEdit = (item: any) => {
     setFormError(null);
     setFormFieldErrors({});
-    setCnpjLookupError(null);
     const nextForm = endpoint === "/users" ? { ...item, password: "" } : item;
 
     if (createInModal) {
@@ -1521,6 +1450,24 @@ export default function CrudSimplePage({
     }
     setEditing(item.id);
     setForm(nextForm);
+  };
+
+  const handleClientCreatedViaCnpj = async (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+    closeCreateModal();
+    await loadClients();
+    setSearch(client.name);
+  };
+
+  const handleSelectExistingClientViaCnpj = async (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+    const existingItem = items.find((item) => String(item.id) === client.id);
+    if (existingItem) {
+      onEdit(existingItem);
+      return;
+    }
+
+    closeCreateModal();
+    setSearch(client.name);
+    toast.info("Cliente já existente localizado. Filtramos a lista para facilitar a conferência.");
   };
 
   const onDelete = async (id: string) => {
@@ -2277,6 +2224,22 @@ export default function CrudSimplePage({
 
             <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
               <div className="mobile-modal-body space-y-4">
+                {isClientsPage && !editing ? (
+                  <div className="mb-4 space-y-2 rounded-xl border border-brand-200 bg-brand-50/50 p-4">
+                    <p className="text-sm font-semibold text-brand-800">Criação rápida via CNPJ</p>
+                    <p className="text-xs text-slate-600">Use o mesmo fluxo reutilizável de CNPJ para criar um cliente PJ ou abrir um cadastro já existente.</p>
+                    <QuickCreateClientSection
+                      open={isCreateModalOpen}
+                      fieldClassName="w-full rounded-lg border border-slate-300 p-2 text-slate-800"
+                      ownerSellerId={isSeller && user?.id ? user.id : typeof form.ownerSellerId === "string" ? form.ownerSellerId : undefined}
+                      requireOwnerSeller={!editing && canChooseOwnerSeller}
+                      requireRegion={false}
+                      onClientCreated={handleClientCreatedViaCnpj}
+                      onSelectExisting={handleSelectExistingClientViaCnpj}
+                    />
+                  </div>
+                ) : null}
+
                 <div className="grid gap-3 md:grid-cols-2">
                   {fields.map((f) => {
                     const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
@@ -2355,22 +2318,6 @@ export default function CrudSimplePage({
                               </option>
                             ))}
                           </select>
-                        ) : isCnpjField ? (
-                          <ClientCnpjLookupField
-                            value={String(form[f.key] ?? "")}
-                            onChange={(cnpj) => {
-                              setFormError(null);
-                              setCnpjLookupError(null);
-                              setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              updateClientForm(f.key, f.type, cnpj);
-                            }}
-                            onLookupSuccess={applyCnpjLookupResult}
-                            cnpjLookupError={cnpjLookupError}
-                            setCnpjLookupError={setCnpjLookupError}
-                            disabled={saving}
-                            className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                            helperTitle="Use CNPJ para preenchimento automático"
-                          />
                         ) : (
                           <input
                             id={`modal-${f.key}`}
