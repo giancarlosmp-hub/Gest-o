@@ -1,18 +1,19 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
-import type { AxiosError } from "axios";
 import { MoreHorizontal } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
 import { validateClientPayload, type ClientPayloadInput } from "../lib/validateClientPayload";
-import { formatCnpj, isValidCnpj, normalizeCnpjDigits } from "../lib/cnpj";
+import { formatCnpj, normalizeCnpjDigits } from "../lib/cnpj";
 import { loadXlsxLibrary, normalizeHeader, normalizeTextValue, parseDecimalValue, parseImportFile } from "../lib/import/parsers";
 import {
   ImportColumnMappingStep,
   type ClientImportFieldDefinition,
   type ClientImportFieldKey
 } from "../components/ClientImportColumnMappingStep";
+import ClientCnpjLookupField from "../components/opportunities/ClientCnpjLookupField";
+import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -221,7 +222,6 @@ export default function CrudSimplePage({
   const [formFieldErrors, setFormFieldErrors] = useState<
     Partial<Record<keyof ClientPayloadInput, string>>
   >({});
-  const [isLookingUpCnpj, setIsLookingUpCnpj] = useState(false);
   const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -453,106 +453,62 @@ export default function CrudSimplePage({
     return rawValue;
   };
 
-  const cnpjDigits = useMemo(() => normalizeCnpjDigits(String(form.cnpj ?? "")), [form.cnpj]);
-  const canLookupCnpj = isClientsPage && !editing && isValidCnpj(cnpjDigits);
-  const showInvalidCnpjHint = isClientsPage && !editing && cnpjDigits.length === 14 && !canLookupCnpj;
-
-  const resolveCnpjLookupErrorMessage = (error: AxiosError<{ message?: string; code?: string }>) => {
-    const backendMessage = String(error.response?.data?.message || "").trim();
-    const errorCode = error.response?.data?.code;
-    const normalizedMessage = backendMessage.toLowerCase();
-
-    if (errorCode === "INVALID_CNPJ") return "Informe um CNPJ válido para realizar a busca automática.";
-    if (normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada") || normalizedMessage.includes("not found")) {
-      return "Empresa não encontrada para o CNPJ informado.";
-    }
-    if (errorCode === "CNPJ_LOOKUP_DISABLED" || errorCode === "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER") {
-      return "A integração de CNPJ está indisponível no momento. Tente novamente mais tarde.";
-    }
-    if (errorCode === "CNPJ_LOOKUP_PROVIDER_ERROR") {
-      return normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada")
-        ? "Empresa não encontrada para o CNPJ informado."
-        : "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
-    }
-
-    return backendMessage || "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
-  };
-
-  const handleCnpjLookup = async () => {
-    if (!canLookupCnpj || isLookingUpCnpj) return;
-
+  const applyCnpjLookupResult = ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
     setCnpjLookupError(null);
     setFormError(null);
-    setIsLookingUpCnpj(true);
 
-    try {
-      const response = await api.get<CnpjLookupResponse>(`/clients/cnpj-lookup/${cnpjDigits}`);
-      const lookupData = response.data?.data;
-      const nextName = lookupData?.razaoSocial || lookupData?.nomeFantasia || lookupData?.nome || undefined;
-      const nextCity = lookupData?.cidade || undefined;
-      const nextState = lookupData?.uf ? String(lookupData.uf).toUpperCase() : undefined;
-      const nextCnpj = lookupData?.cnpj ? formatCnpj(lookupData.cnpj) : formatCnpj(cnpjDigits);
+    const updatedFields: string[] = [];
+    const preservedFields: string[] = [];
 
-      const updatedFields: string[] = [];
-      const preservedFields: string[] = [];
+    setForm((currentForm: ClientPayloadInput) => {
+      const nextForm = { ...currentForm } as Record<string, unknown>;
 
-      setForm((currentForm: ClientPayloadInput) => {
-        const nextForm = { ...currentForm } as Record<string, unknown>;
-
-        const mergeIfEmpty = (field: keyof ClientPayloadInput, value?: string) => {
-          if (!value) return;
-          const currentValue = String(currentForm[field] ?? "").trim();
-          if (currentValue) {
-            preservedFields.push(String(field));
-            return;
-          }
-          nextForm[field] = value;
-          updatedFields.push(String(field));
-        };
-
-        if (!String(currentForm.cnpj ?? "").trim()) {
-          nextForm.cnpj = nextCnpj;
-          updatedFields.push("cnpj");
-        } else if (String(currentForm.cnpj ?? "").trim() !== nextCnpj) {
-          nextForm.cnpj = nextCnpj;
+      const mergeIfEmpty = (field: keyof ClientPayloadInput, value?: string) => {
+        if (!value) return;
+        const currentValue = String(currentForm[field] ?? "").trim();
+        if (currentValue) {
+          preservedFields.push(String(field));
+          return;
         }
+        nextForm[field] = value;
+        updatedFields.push(String(field));
+      };
 
-        mergeIfEmpty("name", nextName);
-        mergeIfEmpty("city", nextCity);
-        mergeIfEmpty("state", nextState);
-
-        const currentClientType = String(currentForm.clientType ?? "").trim().toUpperCase();
-        if (!currentClientType) {
-          nextForm.clientType = "PJ";
-          updatedFields.push("clientType");
-        }
-
-        return nextForm;
-      });
-
-      setFormFieldErrors((currentErrors) => ({
-        ...currentErrors,
-        cnpj: undefined,
-        name: undefined,
-        city: undefined,
-        state: undefined,
-        clientType: undefined
-      }));
-
-      if (updatedFields.length > 0) {
-        toast.success(`Dados do CNPJ carregados. Campos preenchidos: ${updatedFields.join(", ")}.`);
-      } else if (preservedFields.length > 0) {
-        toast.info("Consulta concluída. Mantivemos os dados que você já havia digitado.");
-      } else {
-        toast.info("Consulta concluída, mas não havia novos campos para preencher automaticamente.");
+      if (!String(currentForm.cnpj ?? "").trim()) {
+        nextForm.cnpj = cnpj;
+        updatedFields.push("cnpj");
+      } else if (String(currentForm.cnpj ?? "").trim() !== cnpj) {
+        nextForm.cnpj = cnpj;
       }
-    } catch (error) {
-      const typedError = error as AxiosError<{ message?: string; code?: string }>;
-      const message = resolveCnpjLookupErrorMessage(typedError);
-      setCnpjLookupError(message);
-      toast.error(message);
-    } finally {
-      setIsLookingUpCnpj(false);
+
+      mergeIfEmpty("name", name || undefined);
+      mergeIfEmpty("city", city || undefined);
+      mergeIfEmpty("state", state || undefined);
+
+      const currentClientType = String(currentForm.clientType ?? "").trim().toUpperCase();
+      if (!currentClientType) {
+        nextForm.clientType = "PJ";
+        updatedFields.push("clientType");
+      }
+
+      return nextForm;
+    });
+
+    setFormFieldErrors((currentErrors) => ({
+      ...currentErrors,
+      cnpj: undefined,
+      name: undefined,
+      city: undefined,
+      state: undefined,
+      clientType: undefined
+    }));
+
+    if (updatedFields.length > 0) {
+      toast.success(`Dados do CNPJ carregados. Campos preenchidos: ${updatedFields.join(", ")}.`);
+    } else if (preservedFields.length > 0) {
+      toast.info("Consulta concluída. Mantivemos os dados que você já havia digitado.");
+    } else {
+      toast.info("Consulta concluída, mas não havia novos campos para preencher automaticamente.");
     }
   };
 
@@ -1421,7 +1377,6 @@ export default function CrudSimplePage({
     setFormError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
-    setIsLookingUpCnpj(false);
   };
 
   const openCreateModal = () => {
@@ -1434,7 +1389,6 @@ export default function CrudSimplePage({
     setFormError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
-    setIsLookingUpCnpj(false);
     setIsCreateModalOpen(true);
   };
 
@@ -1460,6 +1414,24 @@ export default function CrudSimplePage({
       setFormError(null);
       setSaving(true);
       try {
+        if (String(sanitizedPayload.cnpj || "").trim()) {
+          const duplicateCheck = await checkClientDuplicate({
+            name: typeof sanitizedPayload.name === "string" ? sanitizedPayload.name : undefined,
+            city: typeof sanitizedPayload.city === "string" ? sanitizedPayload.city : undefined,
+            state: typeof sanitizedPayload.state === "string" ? sanitizedPayload.state : undefined,
+            cnpj: typeof sanitizedPayload.cnpj === "string" ? sanitizedPayload.cnpj : undefined,
+            ignoreClientId: editing || undefined
+          });
+
+          if (duplicateCheck.exists) {
+            const duplicateMessage = buildDuplicateClientMessage(duplicateCheck);
+            setFormFieldErrors((currentErrors) => ({ ...currentErrors, cnpj: duplicateMessage }));
+            setFormError(duplicateMessage);
+            toast.error(duplicateMessage);
+            return;
+          }
+        }
+
         if (editing) await api.put(`${endpoint}/${editing}`, sanitizedPayload);
         else await api.post(endpoint, sanitizedPayload);
 
@@ -1524,7 +1496,6 @@ export default function CrudSimplePage({
     setFormError(null);
     setFormFieldErrors({});
     setCnpjLookupError(null);
-    setIsLookingUpCnpj(false);
     const nextForm = endpoint === "/users" ? { ...item, password: "" } : item;
 
     if (createInModal) {
@@ -2370,40 +2341,20 @@ export default function CrudSimplePage({
                           ))}
                         </select>
                       ) : isCnpjField ? (
-                        <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3">
-                          <div className="flex flex-col gap-2 sm:flex-row">
-                            <input
-                              id={`modal-${f.key}`}
-                              required={isRequired}
-                              className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-                              type={f.type || "text"}
-                              placeholder={f.placeholder ?? "Informe o CNPJ para preencher automaticamente"}
-                              value={form[f.key] ?? ""}
-                              onChange={(e) => {
-                                setFormError(null);
-                                setCnpjLookupError(null);
-                                setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                                setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
-                              }}
-                            />
-                            {canLookupCnpj ? (
-                              <button
-                                type="button"
-                                className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
-                                onClick={handleCnpjLookup}
-                                disabled={saving || isLookingUpCnpj}
-                              >
-                                {isLookingUpCnpj ? "Buscando..." : "Buscar CNPJ"}
-                              </button>
-                            ) : null}
-                          </div>
-                          <p className="mt-2 text-xs text-slate-600">
-                            A busca automática funciona apenas para CNPJ válido. CPF continua com preenchimento manual.
-                          </p>
-                          {showInvalidCnpjHint ? (
-                            <p className="mt-1 text-xs text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p>
-                          ) : null}
-                        </div>
+                        <ClientCnpjLookupField
+                          value={String(form[f.key] ?? "")}
+                          onChange={(cnpj) => {
+                            setFormError(null);
+                            setCnpjLookupError(null);
+                            setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
+                            setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, cnpj) });
+                          }}
+                          onLookupSuccess={applyCnpjLookupResult}
+                          cnpjLookupError={cnpjLookupError}
+                          setCnpjLookupError={setCnpjLookupError}
+                          disabled={saving}
+                          className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                        />
                       ) : (
                         <input
                           id={`modal-${f.key}`}
@@ -2423,7 +2374,6 @@ export default function CrudSimplePage({
                       {fieldError ? (
                         <p className="text-xs text-rose-600">{fieldError}</p>
                       ) : null}
-                      {isCnpjField && cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
                     </div>
                   );
                 })}

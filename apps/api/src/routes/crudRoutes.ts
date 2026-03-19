@@ -823,13 +823,29 @@ const isDatabaseForeignKeyViolation = (error: unknown) => {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";
 };
 
+type DuplicateClientMatchType = "cnpj" | "identity";
+
+type DuplicateClientSummary = {
+  id: string;
+  name: string;
+  city: string | null;
+  state: string | null;
+  cnpj: string | null;
+};
+
 class DuplicateClientError extends Error {
   statusCode: number;
+  existingClient: DuplicateClientSummary;
+  matchType: DuplicateClientMatchType;
 
-  constructor(message = DUPLICATE_CLIENT_MESSAGE) {
-    super(message);
+  constructor(existingClient: DuplicateClientSummary, matchType: DuplicateClientMatchType, message?: string) {
+    super(message ?? (matchType === "cnpj"
+      ? `Já existe um cliente com este CNPJ: ${existingClient.name}${existingClient.city && existingClient.state ? ` (${existingClient.city}/${existingClient.state})` : ""}. Use o cadastro existente.`
+      : DUPLICATE_CLIENT_MESSAGE));
     this.name = "DuplicateClientError";
     this.statusCode = 409;
+    this.existingClient = existingClient;
+    this.matchType = matchType;
   }
 }
 
@@ -845,7 +861,7 @@ const normalizeClientForComparison = (client: {
   cnpjNormalized: normalizeCnpj(client.cnpj)
 });
 
-const ensureClientIsNotDuplicate = async ({
+const findDuplicateClient = async ({
   candidate,
   scope,
   ignoreClientId
@@ -878,8 +894,20 @@ const ensureClientIsNotDuplicate = async ({
       return existingCnpjNormalized === normalized.cnpjNormalized;
     });
 
-    if (existingByCnpj) throw new DuplicateClientError();
-    return;
+    if (existingByCnpj) {
+      return {
+        matchType: "cnpj" as const,
+        existingClient: {
+          id: existingByCnpj.id,
+          name: existingByCnpj.name,
+          city: existingByCnpj.city,
+          state: existingByCnpj.state,
+          cnpj: existingByCnpj.cnpj
+        }
+      };
+    }
+
+    return null;
   }
 
   const existingByIdentity = existingClients.find((existing) => {
@@ -894,7 +922,27 @@ const ensureClientIsNotDuplicate = async ({
     );
   });
 
-  if (existingByIdentity) throw new DuplicateClientError();
+  if (!existingByIdentity) return null;
+
+  return {
+    matchType: "identity" as const,
+    existingClient: {
+      id: existingByIdentity.id,
+      name: existingByIdentity.name,
+      city: existingByIdentity.city,
+      state: existingByIdentity.state,
+      cnpj: existingByIdentity.cnpj
+    }
+  };
+};
+
+const ensureClientIsNotDuplicate = async (params: {
+  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null };
+  scope: Prisma.ClientWhereInput;
+  ignoreClientId?: string;
+}) => {
+  const duplicate = await findDuplicateClient(params);
+  if (duplicate) throw new DuplicateClientError(duplicate.existingClient, duplicate.matchType);
 };
 
 const withClientNormalizedFields = <T extends { name?: string; city?: string; state?: string; cnpj?: string | null }>(payload: T) => {
@@ -3582,6 +3630,38 @@ router.get("/clients/:id", async (req, res) => {
   res.json(data);
 });
 
+const clientDuplicateCheckSchema = z.object({
+  name: z.string().optional(),
+  city: z.string().optional(),
+  state: z.string().optional(),
+  cnpj: z.string().optional(),
+  ignoreClientId: z.string().optional()
+});
+
+router.post("/clients/check-duplicate", async (req, res) => {
+  const parsed = clientDuplicateCheckSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido para validação de cliente." });
+  }
+
+  const duplicate = await findDuplicateClient({
+    candidate: parsed.data,
+    scope: sellerWhere(req),
+    ignoreClientId: parsed.data.ignoreClientId
+  });
+
+  if (!duplicate) {
+    return res.json({ exists: false, existingClient: null, matchType: null });
+  }
+
+  return res.json({
+    exists: true,
+    matchType: duplicate.matchType,
+    message: new DuplicateClientError(duplicate.existingClient, duplicate.matchType).message,
+    existingClient: duplicate.existingClient
+  });
+});
+
 router.post("/clients/exists-bulk", async (req, res) => {
   const parsed = clientExistsBulkRequestSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -3703,7 +3783,7 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
     res.status(201).json(data);
   } catch (error) {
     if (error instanceof DuplicateClientError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
     }
     if (isDatabaseUniqueViolation(error)) {
       return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
@@ -3953,7 +4033,7 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
     res.json(data);
   } catch (error) {
     if (error instanceof DuplicateClientError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
     }
     if (isDatabaseUniqueViolation(error)) {
       return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
@@ -4146,7 +4226,7 @@ router.post("/companies", validateBody(companySchema), async (req, res) => {
     res.status(201).json(data);
   } catch (error) {
     if (error instanceof DuplicateClientError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
     }
     if (isDatabaseUniqueViolation(error)) {
       return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });
@@ -4192,7 +4272,7 @@ router.put("/companies/:id", validateBody(companySchema.partial()), async (req, 
     res.json(data);
   } catch (error) {
     if (error instanceof DuplicateClientError) {
-      return res.status(error.statusCode).json({ message: error.message });
+      return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
     }
     if (isDatabaseUniqueViolation(error)) {
       return res.status(409).json({ message: DUPLICATE_CLIENT_MESSAGE });

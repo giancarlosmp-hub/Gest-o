@@ -11,6 +11,7 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
+import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -682,8 +683,30 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
-  const onQuickCreateClient = async (payload: { name: string; city: string; state: string; region: string }) => {
+  const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
     const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
+
+    if (String(payload.cnpj || "").trim()) {
+      const duplicateCheck = await checkClientDuplicate(payload);
+
+      if (duplicateCheck.exists && duplicateCheck.existingClient) {
+        const existingClient = {
+          id: duplicateCheck.existingClient.id,
+          name: duplicateCheck.existingClient.name,
+          city: duplicateCheck.existingClient.city,
+          state: duplicateCheck.existingClient.state,
+          cnpj: duplicateCheck.existingClient.cnpj
+        };
+
+        setClients((current) => {
+          const withoutDuplicate = current.filter((item) => item.id !== existingClient.id);
+          return [...withoutDuplicate, existingClient].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+        });
+
+        toast.info(`${buildDuplicateClientMessage(duplicateCheck)} Selecionamos o cadastro existente.`);
+        return existingClient;
+      }
+    }
 
     try {
       const response = await api.post("/clients", {
@@ -700,7 +723,7 @@ export default function OpportunitiesPage() {
         cnpj: response.data.cnpj
       };
       setClients((current) => {
-        const next = [...current, createdClient];
+        const next = [...current.filter((item) => item.id !== createdClient.id), createdClient];
         return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
       });
 
