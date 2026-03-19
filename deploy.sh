@@ -136,6 +136,83 @@ wait_for_api_healthcheck() {
   exit 1
 }
 
+inspect_cnpj_lookup_config() {
+  local resolved_config=""
+  local provider_line=""
+  local base_url_line=""
+  local api_key_line=""
+  local provider=""
+  local base_url=""
+  local api_key=""
+
+  if ! resolved_config="$(docker compose config 2>/dev/null)"; then
+    log "ERRO: não foi possível resolver o docker compose para validar a configuração de CNPJ."
+    exit 1
+  fi
+
+  provider_line="$(printf '%s\n' "$resolved_config" | awk '
+    $0 ~ /^  api:$/ { in_api=1; next }
+    in_api && $0 ~ /^  [^ ]/ { in_api=0; in_env=0 }
+    in_api && $0 ~ /^    environment:$/ { in_env=1; next }
+    in_env && $0 ~ /^    [^ ]/ && $0 !~ /^      / { in_env=0 }
+    in_env && $0 ~ /^      CNPJ_LOOKUP_PROVIDER: / { print; exit }
+  ' )"
+  base_url_line="$(printf '%s\n' "$resolved_config" | awk '
+    $0 ~ /^  api:$/ { in_api=1; next }
+    in_api && $0 ~ /^  [^ ]/ { in_api=0; in_env=0 }
+    in_api && $0 ~ /^    environment:$/ { in_env=1; next }
+    in_env && $0 ~ /^    [^ ]/ && $0 !~ /^      / { in_env=0 }
+    in_env && $0 ~ /^      CNPJ_LOOKUP_BASE_URL: / { print; exit }
+  ' )"
+  api_key_line="$(printf '%s\n' "$resolved_config" | awk '
+    $0 ~ /^  api:$/ { in_api=1; next }
+    in_api && $0 ~ /^  [^ ]/ { in_api=0; in_env=0 }
+    in_api && $0 ~ /^    environment:$/ { in_env=1; next }
+    in_env && $0 ~ /^    [^ ]/ && $0 !~ /^      / { in_env=0 }
+    in_env && $0 ~ /^      CNPJ_LOOKUP_API_KEY: / { print; exit }
+  ' )"
+
+  provider="${provider_line#*: }"
+  base_url="${base_url_line#*: }"
+  api_key="${api_key_line#*: }"
+
+  if [[ -z "$provider" ]]; then
+    log "ERRO: o serviço api não recebeu CNPJ_LOOKUP_PROVIDER na configuração resolvida do docker compose."
+    exit 1
+  fi
+
+  case "$provider" in
+    brasilapi)
+      if [[ -z "$base_url" ]]; then
+        log "ERRO: o serviço api não recebeu CNPJ_LOOKUP_BASE_URL para o provider brasilapi."
+        exit 1
+      fi
+      log "[CONFIG] CNPJ lookup habilitado no serviço api com provider=brasilapi e base_url=$base_url"
+      if [[ -n "$api_key" ]]; then
+        log "[CONFIG] CNPJ_LOOKUP_API_KEY também foi resolvida para o serviço api (valor mascarado)."
+      else
+        log "[CONFIG] CNPJ_LOOKUP_API_KEY não configurada, conforme esperado para BrasilAPI."
+      fi
+      ;;
+    generic)
+      if [[ -z "$base_url" ]]; then
+        log "ERRO: provider generic exige CNPJ_LOOKUP_BASE_URL no serviço api."
+        exit 1
+      fi
+      log "[CONFIG] CNPJ lookup habilitado no serviço api com provider=generic e base_url=$base_url"
+      if [[ -n "$api_key" ]]; then
+        log "[CONFIG] CNPJ_LOOKUP_API_KEY configurada para provider generic (valor mascarado)."
+      else
+        log "[CONFIG] CNPJ_LOOKUP_API_KEY não configurada; confirme se o provider generic realmente não exige autenticação."
+      fi
+      ;;
+    *)
+      log "ERRO: provider de CNPJ não suportado na configuração resolvida do docker compose: $provider"
+      exit 1
+      ;;
+  esac
+}
+
 validate_data_safety() {
   local -a reasons=()
   local zeroed_tables_after=0
@@ -213,6 +290,7 @@ main() {
   fi
 
   collect_counts "antes"
+  inspect_cnpj_lookup_config
 
   log "[DEPLOY] Iniciando rebuild dos containers com código sincronizado de origin/main..."
   docker compose down | tee -a "$LOG_FILE"
