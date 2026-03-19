@@ -6,6 +6,8 @@ const maskCnpjForLogs = (value: string) => `***${value.slice(-4)}`;
 
 type UnknownRecord = Record<string, unknown>;
 
+type CnpjLookupSource = "brasilapi" | "receitaws";
+
 type CnpjLookupErrorCode =
   | "CNPJ_LOOKUP_DISABLED"
   | "CNPJ_LOOKUP_MISCONFIGURED"
@@ -15,6 +17,12 @@ type CnpjLookupErrorCode =
   | "CNPJ_LOOKUP_PROVIDER_ERROR";
 
 export type CnpjLookupPayload = {
+  name: string | null;
+  tradeName: string | null;
+  city: string | null;
+  state: string | null;
+  status: string | null;
+  source: CnpjLookupSource | null;
   cnpj: string;
   razaoSocial: string | null;
   nome: string | null;
@@ -35,6 +43,7 @@ export type CnpjLookupPayload = {
 type CnpjLookupProviderResult = {
   payload: CnpjLookupPayload;
   raw: unknown;
+  provider: string;
 };
 
 type CnpjLookupProvider = {
@@ -43,6 +52,8 @@ type CnpjLookupProvider = {
 
 const DEFAULT_PROVIDER = "generic";
 const BRASIL_API_PROVIDER = "brasilapi";
+const RECEITA_WS_PROVIDER = "receitaws";
+const CNPJ_LOOKUP_PROVIDER_TIMEOUT_MS = 3_000;
 
 export class CnpjLookupError extends Error {
   constructor(
@@ -146,28 +157,50 @@ const isNotFoundMessage = (value: string | null) => {
   );
 };
 
-const buildStandardPayload = (cnpj: string, payload: UnknownRecord): CnpjLookupPayload => {
+const isReceitaWsDeclaredError = (payload: UnknownRecord) => {
+  const providerStatus = getFirstScalarString(payload, [["status"]]);
+  return providerStatus?.trim().toUpperCase() === "ERROR";
+};
+
+const buildStandardPayload = (
+  cnpj: string,
+  payload: UnknownRecord,
+  source: CnpjLookupSource | null = null
+): CnpjLookupPayload => {
   const normalizedCnpj = normalizeCnpjDigits(
     getFirstScalarString(payload, [["cnpj"], ["documento"], ["document"], ["taxId"], ["company", "document"]]) || cnpj
   );
 
+  const razaoSocial = getFirstScalarString(payload, [["razao_social"], ["razaoSocial"], ["nome"], ["name"], ["company", "name"]]);
+  const nome = getFirstScalarString(payload, [["nome"], ["name"], ["razao_social"], ["razaoSocial"], ["company", "name"]]);
+  const nomeFantasia = getFirstScalarString(payload, [
+    ["nome_fantasia"],
+    ["nomeFantasia"],
+    ["fantasia"],
+    ["tradeName"],
+    ["company", "tradeName"],
+  ]);
+  const cidade = getFirstScalarString(payload, [["cidade"], ["municipio"], ["city"], ["address", "city"], ["address", "municipio"]]);
+  const uf = getFirstScalarString(payload, [["uf"], ["estado"], ["state"], ["address", "state"], ["address", "uf"]]);
+  const situacao = getFirstScalarString(payload, [["situacao"], ["descricao_situacao_cadastral"], ["status"], ["company", "status"]]);
+
   return {
+    name: razaoSocial || nome,
+    tradeName: nomeFantasia,
+    city: cidade,
+    state: uf,
+    status: situacao,
+    source,
     cnpj: formatCnpj(normalizedCnpj || cnpj),
-    razaoSocial: getFirstScalarString(payload, [["razao_social"], ["razaoSocial"], ["nome"], ["name"], ["company", "name"]]),
-    nome: getFirstScalarString(payload, [["nome"], ["name"], ["razao_social"], ["razaoSocial"], ["company", "name"]]),
-    nomeFantasia: getFirstScalarString(payload, [
-      ["nome_fantasia"],
-      ["nomeFantasia"],
-      ["fantasia"],
-      ["tradeName"],
-      ["company", "tradeName"],
-    ]),
+    razaoSocial,
+    nome,
+    nomeFantasia,
     logradouro: getFirstScalarString(payload, [["logradouro"], ["street"], ["address", "street"], ["address", "logradouro"]]),
     numero: getFirstScalarString(payload, [["numero"], ["addressNumber"], ["address", "number"], ["address", "numero"]]),
     complemento: getFirstScalarString(payload, [["complemento"], ["address", "details"], ["address", "complemento"]]),
     bairro: getFirstScalarString(payload, [["bairro"], ["district"], ["address", "district"], ["address", "bairro"]]),
-    cidade: getFirstScalarString(payload, [["cidade"], ["municipio"], ["city"], ["address", "city"], ["address", "municipio"]]),
-    uf: getFirstScalarString(payload, [["uf"], ["estado"], ["state"], ["address", "state"], ["address", "uf"]]),
+    cidade,
+    uf,
     cep: getFirstScalarString(payload, [["cep"], ["postalCode"], ["address", "zip"], ["address", "cep"]]),
     telefone: getFirstJoinedString(payload, [
       ["telefone"],
@@ -179,7 +212,7 @@ const buildStandardPayload = (cnpj: string, payload: UnknownRecord): CnpjLookupP
       ["contact", "phone"],
     ]),
     email: getFirstJoinedString(payload, [["email"], ["emails"], ["contato", "email"], ["contact", "email"]]),
-    situacao: getFirstScalarString(payload, [["situacao"], ["descricao_situacao_cadastral"], ["status"], ["company", "status"]]),
+    situacao,
     inscricaoEstadual: getFirstJoinedString(payload, [
       ["inscricao_estadual"],
       ["inscricaoEstadual"],
@@ -266,7 +299,7 @@ const fetchProviderPayload = async (
         Accept: "application/json",
         ...requestHeaders,
       },
-      signal: AbortSignal.timeout(env.apiRequestTimeoutMs),
+      signal: AbortSignal.timeout(CNPJ_LOOKUP_PROVIDER_TIMEOUT_MS),
     });
   } catch (error) {
     throw new CnpjLookupError(
@@ -300,6 +333,15 @@ const fetchProviderPayload = async (
     );
   }
 
+  if (providerName === RECEITA_WS_PROVIDER && isReceitaWsDeclaredError(raw)) {
+    throw createProviderErrorFromResponse(
+      providerName,
+      isNotFoundMessage(extractErrorMessage(raw)) ? 404 : 502,
+      raw,
+      cnpj
+    );
+  }
+
   return raw;
 };
 
@@ -318,6 +360,7 @@ const createGenericProvider = (): CnpjLookupProvider => ({
     return {
       payload: buildStandardPayload(cnpj, raw),
       raw,
+      provider: DEFAULT_PROVIDER,
     };
   },
 });
@@ -328,8 +371,22 @@ const createBrasilApiProvider = (): CnpjLookupProvider => ({
     const raw = await fetchProviderPayload(BRASIL_API_PROVIDER, requestUrl, cnpj);
 
     return {
-      payload: buildStandardPayload(cnpj, raw),
+      payload: buildStandardPayload(cnpj, raw, BRASIL_API_PROVIDER),
       raw,
+      provider: BRASIL_API_PROVIDER,
+    };
+  },
+});
+
+const createReceitaWsProvider = (): CnpjLookupProvider => ({
+  async lookup(cnpj: string) {
+    const requestUrl = `https://www.receitaws.com.br/v1/cnpj/${encodeURIComponent(cnpj)}`;
+    const raw = await fetchProviderPayload(RECEITA_WS_PROVIDER, requestUrl, cnpj);
+
+    return {
+      payload: buildStandardPayload(cnpj, raw, RECEITA_WS_PROVIDER),
+      raw,
+      provider: RECEITA_WS_PROVIDER,
     };
   },
 });
@@ -337,6 +394,7 @@ const createBrasilApiProvider = (): CnpjLookupProvider => ({
 const providerFactories: Record<string, () => CnpjLookupProvider> = {
   [DEFAULT_PROVIDER]: createGenericProvider,
   [BRASIL_API_PROVIDER]: createBrasilApiProvider,
+  [RECEITA_WS_PROVIDER]: createReceitaWsProvider,
 };
 
 const getProvider = () => {
@@ -373,9 +431,46 @@ const getProvider = () => {
   return providerFactory();
 };
 
+const shouldFallbackFromBrasilApi = (error: CnpjLookupError) => {
+  if (error.code === "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE") return true;
+
+  const providerStatus = typeof error.details?.providerStatus === "number" ? error.details.providerStatus : null;
+  return providerStatus === 403 || providerStatus === 429;
+};
+
 export const cnpjLookupService = {
   async lookup(cnpj: string) {
+    const providerName = env.cnpjLookupProvider.trim().toLowerCase();
     const provider = getProvider();
-    return provider.lookup(cnpj);
+
+    if (providerName !== BRASIL_API_PROVIDER) {
+      return provider.lookup(cnpj);
+    }
+
+    try {
+      const result = await provider.lookup(cnpj);
+      console.info("[cnpj-lookup] provider=brasilapi success", {
+        cnpjSuffix: cnpj.slice(-4),
+      });
+      return result;
+    } catch (error) {
+      if (!(error instanceof CnpjLookupError) || !shouldFallbackFromBrasilApi(error)) {
+        throw error;
+      }
+
+      const providerStatus = typeof error.details?.providerStatus === "number" ? error.details.providerStatus : null;
+      console.warn(`[cnpj-lookup] provider=brasilapi failed ${providerStatus ?? "network"} → fallback=receitaws`, {
+        cnpjSuffix: cnpj.slice(-4),
+        code: error.code,
+        details: error.details,
+      });
+
+      const fallbackProvider = createReceitaWsProvider();
+      const fallbackResult = await fallbackProvider.lookup(cnpj);
+      console.info("[cnpj-lookup] provider=receitaws success", {
+        cnpjSuffix: cnpj.slice(-4),
+      });
+      return fallbackResult;
+    }
   },
 };
