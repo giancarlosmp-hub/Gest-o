@@ -54,6 +54,7 @@ JWT_REFRESH_SECRET=<segredo-forte-diferente>
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
 - A consulta de CNPJ deve ser habilitada somente no backend; suporte nativo a `CNPJ_LOOKUP_PROVIDER=brasilapi` (sem chave) ou `CNPJ_LOOKUP_PROVIDER=generic` com `CNPJ_LOOKUP_BASE_URL` e, se necessário, `CNPJ_LOOKUP_API_KEY`. Não exponha essa credencial no frontend.
+- O `docker-compose.yml` já repassa `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY` para o serviço `api` usando variáveis do `.env` com fallback seguro para BrasilAPI.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
@@ -87,21 +88,33 @@ A busca automática por CNPJ do frontend chama apenas o backend (`GET /clients/c
 
 Variáveis suportadas:
 - `CNPJ_LOOKUP_PROVIDER`
-  - `brasilapi`: usa `https://brasilapi.com.br/api/cnpj/v1/{cnpj}` por padrão e **não** exige chave.
+  - `brasilapi`: usa `https://brasilapi.com.br/api/cnpj/v1` por padrão no `docker-compose` e **não** exige chave.
   - `generic`: exige `CNPJ_LOOKUP_BASE_URL`; a URL pode conter `{cnpj}` (ex.: `https://api.exemplo.com/v1/cnpj/{cnpj}`) ou, se não contiver placeholder, a API anexará `/<cnpj>` automaticamente.
 - `CNPJ_LOOKUP_BASE_URL`
   - obrigatório para `generic`;
-  - opcional para `brasilapi`.
+  - opcional para `brasilapi` no código;
+  - no `docker-compose`, o fallback padrão já define `https://brasilapi.com.br/api/cnpj/v1`.
 - `CNPJ_LOOKUP_API_KEY`
   - opcional;
   - use apenas quando o provedor exigir autenticação.
 
-Exemplos:
+Como habilitar no ambiente com Docker Compose/VPS:
 ```bash
-# opção 1: BrasilAPI
+# opção 1: usar o padrão do projeto com BrasilAPI
+# basta manter ou definir no .env:
 CNPJ_LOOKUP_PROVIDER=brasilapi
+CNPJ_LOOKUP_BASE_URL=https://brasilapi.com.br/api/cnpj/v1
+CNPJ_LOOKUP_API_KEY=
 
-# opção 2: provedor próprio/terceiro
+# depois do ajuste no .env, publique sem apagar volumes:
+bash deploy.sh
+
+# validação opcional da configuração aplicada ao serviço api
+docker compose config | grep CNPJ_LOOKUP
+```
+
+Exemplo com provedor próprio/terceiro:
+```bash
 CNPJ_LOOKUP_PROVIDER=generic
 CNPJ_LOOKUP_BASE_URL=https://api.seu-provedor.com/cnpj/{cnpj}
 CNPJ_LOOKUP_API_KEY=seu-token-aqui
