@@ -31,16 +31,21 @@ const resolveCnpjLookupErrorMessage = (error: AxiosError<{ message?: string; cod
   const normalizedMessage = backendMessage.toLowerCase();
 
   if (errorCode === "INVALID_CNPJ") return "Informe um CNPJ válido para realizar a busca automática.";
+  if (errorCode === "CNPJ_LOOKUP_NOT_FOUND") return "Empresa não encontrada para o CNPJ informado.";
   if (normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada") || normalizedMessage.includes("not found")) {
     return "Empresa não encontrada para o CNPJ informado.";
   }
-  if (errorCode === "CNPJ_LOOKUP_DISABLED" || errorCode === "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER") {
-    return "A integração de CNPJ está indisponível no momento. Tente novamente mais tarde.";
+  if (errorCode === "CNPJ_LOOKUP_DISABLED") {
+    return "A integração de CNPJ não está habilitada no backend.";
+  }
+  if (errorCode === "CNPJ_LOOKUP_MISCONFIGURED" || errorCode === "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER") {
+    return backendMessage || "A integração de CNPJ está configurada incorretamente no backend.";
+  }
+  if (errorCode === "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE") {
+    return "O provedor de CNPJ está indisponível no momento. Tente novamente em instantes.";
   }
   if (errorCode === "CNPJ_LOOKUP_PROVIDER_ERROR") {
-    return normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada")
-      ? "Empresa não encontrada para o CNPJ informado."
-      : "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
+    return backendMessage || "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
   }
 
   return backendMessage || "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";

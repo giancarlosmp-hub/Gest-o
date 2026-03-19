@@ -3605,11 +3605,25 @@ router.get("/clients/cnpj-lookup/:cnpj", async (req, res) => {
     });
   } catch (error) {
     if (error instanceof CnpjLookupError) {
+      console.warn("[cnpj-lookup] lookup failed", {
+        code: error.code,
+        statusCode: error.statusCode,
+        provider: env.cnpjLookupProvider || undefined,
+        cnpjSuffix: parsedCnpj.digits.slice(-4),
+        details: error.details
+      });
+
       return res.status(error.statusCode).json({
         message: error.message,
         code: error.code
       });
     }
+
+    console.error("[cnpj-lookup] unexpected lookup failure", {
+      provider: env.cnpjLookupProvider || undefined,
+      cnpjSuffix: parsedCnpj.digits.slice(-4),
+      error: error instanceof Error ? error.message : String(error)
+    });
 
     return res.status(502).json({
       message: "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.",
