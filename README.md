@@ -51,9 +51,12 @@ CORS_ALLOWED_ORIGINS=https://crm.seudominio.com
 VITE_API_URL=/api
 JWT_ACCESS_SECRET=<segredo-forte>
 JWT_REFRESH_SECRET=<segredo-forte-diferente>
+CNPJ_LOOKUP_PROVIDER=brasilapi
+CNPJ_LOOKUP_BASE_URL=https://brasilapi.com.br/api/cnpj/v1
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
 - A consulta de CNPJ deve ser habilitada somente no backend; suporte nativo a `CNPJ_LOOKUP_PROVIDER=brasilapi` (sem chave) ou `CNPJ_LOOKUP_PROVIDER=generic` com `CNPJ_LOOKUP_BASE_URL` e, se necessário, `CNPJ_LOOKUP_API_KEY`. Não exponha essa credencial no frontend.
+- O serviço `api` recebe `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY` explicitamente pelo `docker-compose.yml`; o Compose lê o arquivo `.env` da raiz para interpolar esses valores no container.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
@@ -85,6 +88,12 @@ Esperado:
 ### Consulta de CNPJ no backend
 A busca automática por CNPJ do frontend chama apenas o backend (`GET /clients/cnpj-lookup/:cnpj`). A configuração deve ficar **somente** na API.
 
+Como a configuração entra em produção:
+1. o `docker compose` lê o `.env` da raiz do projeto (ou variáveis exportadas no shell/systemd);
+2. o serviço `api` injeta `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY` no container;
+3. a API lê essas variáveis em `apps/api/src/config/env.ts`;
+4. após atualizar o `.env`, faça um redeploy não destrutivo com `bash deploy.sh` ou `docker compose up -d --build`.
+
 Variáveis suportadas:
 - `CNPJ_LOOKUP_PROVIDER`
   - `brasilapi`: usa `https://brasilapi.com.br/api/cnpj/v1/{cnpj}` por padrão e **não** exige chave.
@@ -98,14 +107,20 @@ Variáveis suportadas:
 
 Exemplos:
 ```bash
-# opção 1: BrasilAPI
+# opção 1: BrasilAPI (recomendado)
 CNPJ_LOOKUP_PROVIDER=brasilapi
+CNPJ_LOOKUP_BASE_URL=https://brasilapi.com.br/api/cnpj/v1
 
 # opção 2: provedor próprio/terceiro
 CNPJ_LOOKUP_PROVIDER=generic
 CNPJ_LOOKUP_BASE_URL=https://api.seu-provedor.com/cnpj/{cnpj}
 CNPJ_LOOKUP_API_KEY=seu-token-aqui
 ```
+
+Notas operacionais:
+- `CNPJ_LOOKUP_PROVIDER` é a única env necessária para habilitar o fluxo; no padrão BrasilAPI, `CNPJ_LOOKUP_BASE_URL` pode ficar com o valor default acima e `CNPJ_LOOKUP_API_KEY` deve ficar vazio.
+- Não há qualquer mudança de banco, migration, seed ou schema para ativar essa integração.
+- Não exponha `CNPJ_LOOKUP_API_KEY` no frontend, em `VITE_*` ou em arquivos servidos pelo Nginx.
 
 Mensagens de erro retornadas pelo backend agora distinguem:
 - integração desabilitada;

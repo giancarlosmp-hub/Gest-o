@@ -29,6 +29,9 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://crm.demetraagronegocios.com.br}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super-access}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super-refresh}
+      CNPJ_LOOKUP_PROVIDER: ${CNPJ_LOOKUP_PROVIDER:-brasilapi}
+      CNPJ_LOOKUP_BASE_URL: ${CNPJ_LOOKUP_BASE_URL:-https://brasilapi.com.br/api/cnpj/v1}
+      CNPJ_LOOKUP_API_KEY: ${CNPJ_LOOKUP_API_KEY:-}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}
       ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-false}
