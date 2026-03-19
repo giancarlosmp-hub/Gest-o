@@ -22,6 +22,7 @@ type ClientCnpjLookupFieldProps = {
   setCnpjLookupError: (value: string | null) => void;
   disabled?: boolean;
   className?: string;
+  helperTitle?: string | null;
   lookupButtonLabel?: string;
 };
 
@@ -59,6 +60,7 @@ export default function ClientCnpjLookupField({
   setCnpjLookupError,
   disabled = false,
   className = "w-full rounded-lg border border-slate-200 p-2",
+  helperTitle = null,
   lookupButtonLabel = "Buscar dados"
 }: ClientCnpjLookupFieldProps) {
   const cnpjDigits = normalizeCnpjDigits(value);
@@ -105,17 +107,17 @@ export default function ClientCnpjLookupField({
   }
 
   return (
-    <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3">
-      <div className="mb-2 space-y-1">
-        <p className="text-sm font-semibold text-slate-800">Buscar dados pelo CNPJ</p>
+    <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-3 sm:p-4">
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-slate-800">{helperTitle || "Buscar dados pelo CNPJ"}</p>
         <p className="text-xs leading-5 text-slate-600">
           Digite um CNPJ válido para preencher automaticamente razão social, cidade e UF.
         </p>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
-          className={className}
+          className={`${className} min-w-0 flex-1`}
           placeholder="Digite o CNPJ para buscar os dados"
           value={value}
           onChange={(event) => {
@@ -127,7 +129,7 @@ export default function ClientCnpjLookupField({
         />
         <button
           type="button"
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70 sm:min-w-[140px] sm:self-stretch"
+          className="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
           onClick={handleCnpjLookup}
           disabled={disabled || isLookingUpCnpj || !canLookupCnpj}
         >
@@ -135,7 +137,7 @@ export default function ClientCnpjLookupField({
         </button>
       </div>
 
-      <div className="mt-3 space-y-1">
+      <div className="space-y-1">
         <p className="text-xs leading-5 text-slate-600">Preenchemos os dados disponíveis automaticamente após a consulta.</p>
         {isLookingUpCnpj ? <p className="text-xs leading-5 text-brand-700">Buscando dados do CNPJ...</p> : null}
         {showInvalidCnpjHint ? <p className="text-xs leading-5 text-amber-700">Digite um CNPJ válido para liberar a busca.</p> : null}
