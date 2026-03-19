@@ -4,6 +4,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
+import clientLookupRoutes from "./routes/clientLookupRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import { env } from "./config/env.js";
@@ -117,12 +118,19 @@ app.get("/technical-cultures", async (_req, res) => {
 });
 app.use("/auth", authRoutes);
 app.use("/dashboard", dashboardRoutes);
+app.use("/", clientLookupRoutes);
 app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
 app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api", clientLookupRoutes);
 app.use("/api", crudRoutes);
+
+logApiEvent("INFO", "[boot] cnpj lookup route registered", {
+  routes: ["/clients/cnpj-lookup/:cnpj", "/api/clients/cnpj-lookup/:cnpj"],
+  source: "clientLookupRoutes"
+});
 
 app.use((err: any, req: any, res: any, next: any) => {
   logApiEvent("ERROR", "[express error] Internal server error", {
