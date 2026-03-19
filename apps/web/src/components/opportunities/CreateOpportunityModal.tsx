@@ -51,8 +51,10 @@ type CreateOpportunityModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFormChange: (next: FormState) => void;
   sanitizeNumericInput: (value: string, allowDecimal?: boolean) => string;
-  onQuickCreateClient: (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
-  onSelectExistingClient: (client: ExistingClientSummary) => ClientOption;
+  ownerSellerId?: string;
+  requireOwnerSeller?: boolean;
+  onClientCreated: (client: ClientOption) => void;
+  onSelectExisting: (client: ExistingClientSummary) => void;
 };
 
 export default function CreateOpportunityModal({
@@ -73,8 +75,10 @@ export default function CreateOpportunityModal({
   onSubmit,
   onFormChange,
   sanitizeNumericInput,
-  onQuickCreateClient,
-  onSelectExistingClient
+  ownerSellerId,
+  requireOwnerSeller = false,
+  onClientCreated,
+  onSelectExisting
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -127,9 +131,10 @@ export default function CreateOpportunityModal({
                   <QuickCreateClientSection
                     open={open}
                     fieldClassName={fieldClassName}
-                    onClientSelected={(clientId) => onFormChange({ ...form, clientId })}
-                    onQuickCreateClient={onQuickCreateClient}
-                    onSelectExistingClient={onSelectExistingClient}
+                    ownerSellerId={ownerSellerId}
+                    requireOwnerSeller={requireOwnerSeller}
+                    onClientCreated={onClientCreated}
+                    onSelectExisting={onSelectExisting}
                   />
                 </div>
                 <label className="space-y-1">
