@@ -54,7 +54,7 @@ JWT_REFRESH_SECRET=<segredo-forte-diferente>
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
 - A consulta de CNPJ deve ser habilitada somente no backend; suporte nativo a `CNPJ_LOOKUP_PROVIDER=brasilapi` (sem chave) ou `CNPJ_LOOKUP_PROVIDER=generic` com `CNPJ_LOOKUP_BASE_URL` e, se necessário, `CNPJ_LOOKUP_API_KEY`. Não exponha essa credencial no frontend.
-- O `docker-compose.yml` já repassa `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY` para o serviço `api` usando variáveis do `.env` com fallback seguro para BrasilAPI.
+- O `docker-compose.yml` já repassa `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY` para o serviço `api` usando variáveis do `.env` com fallback seguro para BrasilAPI; o `deploy.sh` agora valida a configuração resolvida antes do rebuild para evitar subir a API sem o provider esperado.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
@@ -101,15 +101,16 @@ Variáveis suportadas:
 Como habilitar no ambiente com Docker Compose/VPS:
 ```bash
 # opção 1: usar o padrão do projeto com BrasilAPI
-# basta manter ou definir no .env:
+# basta manter ou definir no .env da stack:
 CNPJ_LOOKUP_PROVIDER=brasilapi
 CNPJ_LOOKUP_BASE_URL=https://brasilapi.com.br/api/cnpj/v1
 CNPJ_LOOKUP_API_KEY=
 
-# depois do ajuste no .env, publique sem apagar volumes:
+# depois do ajuste no .env, publique sem apagar volumes nem resetar banco:
 bash deploy.sh
 
 # validação opcional da configuração aplicada ao serviço api
+# (o deploy.sh também faz uma checagem automática antes do rebuild)
 docker compose config | grep CNPJ_LOOKUP
 ```
 
@@ -119,6 +120,12 @@ CNPJ_LOOKUP_PROVIDER=generic
 CNPJ_LOOKUP_BASE_URL=https://api.seu-provedor.com/cnpj/{cnpj}
 CNPJ_LOOKUP_API_KEY=seu-token-aqui
 ```
+
+Checklist operacional para VPS:
+- editar apenas o `.env` da stack/compose;
+- confirmar `docker compose config | grep CNPJ_LOOKUP` antes do redeploy, se quiser validar manualmente;
+- executar `bash deploy.sh` ou `docker compose down && docker compose up -d --build`;
+- **não** usar `docker compose down -v`, `migrate reset` ou qualquer ação destrutiva no banco.
 
 Mensagens de erro retornadas pelo backend agora distinguem:
 - integração desabilitada;
