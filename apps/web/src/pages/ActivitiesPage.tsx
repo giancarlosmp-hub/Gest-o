@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -8,10 +8,19 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
+import ClientCnpjLookupField from "../components/opportunities/ClientCnpjLookupField";
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
 type ClientOption = SearchableClientOption;
+
+type QuickClientForm = {
+  cnpj: string;
+  name: string;
+  city: string;
+  state: string;
+  region: string;
+};
 type ActivityStatus = "agendado" | "vencido" | "realizado";
 
 type Activity = {
@@ -66,6 +75,14 @@ const initialForm = {
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
 
+const initialQuickClientForm: QuickClientForm = {
+  cnpj: "",
+  name: "",
+  city: "",
+  state: "",
+  region: ""
+};
+
 const STATUS_LABEL: Record<ActivityStatus, string> = {
   agendado: "Agendado",
   vencido: "Vencido",
@@ -103,6 +120,12 @@ export default function ActivitiesPage() {
   const [filters, setFilters] = useState<ActivityFilters>(initialFilters);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [executionForm, setExecutionForm] = useState({ result: "", observations: "", duration: "" });
+  const [isQuickCreateClientOpen, setIsQuickCreateClientOpen] = useState(false);
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const [quickClientError, setQuickClientError] = useState<string | null>(null);
+  const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
+  const [quickClientForm, setQuickClientForm] = useState<QuickClientForm>(initialQuickClientForm);
+  const quickClientFormRef = useRef<QuickClientForm>(initialQuickClientForm);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [duplicateDate, setDuplicateDate] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
@@ -117,6 +140,23 @@ export default function ActivitiesPage() {
     if (!search) return opportunitiesByClient;
     return opportunitiesByClient.filter((item) => item.title.toLowerCase().includes(search));
   }, [opportunitiesByClient, opportunitySearch]);
+
+  const updateQuickClientForm = (patch: Partial<QuickClientForm>) => {
+    setQuickClientForm((current) => {
+      const next = { ...current, ...patch };
+      quickClientFormRef.current = next;
+      return next;
+    });
+  };
+
+  const resetQuickCreateClient = () => {
+    setIsQuickCreateClientOpen(false);
+    setIsCreatingClient(false);
+    setQuickClientError(null);
+    setCnpjLookupError(null);
+    quickClientFormRef.current = initialQuickClientForm;
+    setQuickClientForm(initialQuickClientForm);
+  };
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -228,6 +268,7 @@ export default function ActivitiesPage() {
     const title = searchParams.get("title") || "";
     const city = searchParams.get("city") || "";
 
+    resetQuickCreateClient();
     setForm((current) => ({
       ...current,
       type: ACTIVITY_TYPE_OPTIONS.some((option) => option.value === type) ? type : current.type,
@@ -263,12 +304,71 @@ export default function ActivitiesPage() {
   const openCreateModal = () => {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
+    resetQuickCreateClient();
     setIsModalOpen(true);
   };
 
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setForm(initialForm);
+    setOpportunitySearch("");
+    resetQuickCreateClient();
+  };
+
+  const createClientFromActivity = async () => {
+    const payload = {
+      cnpj: quickClientFormRef.current.cnpj.trim(),
+      name: quickClientFormRef.current.name.trim(),
+      city: quickClientFormRef.current.city.trim(),
+      state: quickClientFormRef.current.state.trim().toUpperCase(),
+      region: quickClientFormRef.current.region.trim() || undefined,
+      clientType: "PJ",
+      ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
+    };
+
+    if (!payload.name || !payload.city || !payload.state) {
+      setQuickClientError("Preencha nome, cidade e UF para criar o cliente.");
+      return;
+    }
+
+    if (canChooseSeller && !payload.ownerSellerId) {
+      setQuickClientError("Selecione o vendedor responsável antes de criar o cliente.");
+      return;
+    }
+
+    setIsCreatingClient(true);
+    setQuickClientError(null);
+
+    try {
+      const response = await api.post("/clients", payload);
+      const newClient = {
+        id: String(response.data.id),
+        name: String(response.data.name || payload.name),
+        city: response.data?.city ? String(response.data.city) : payload.city,
+        state: response.data?.state ? String(response.data.state) : payload.state,
+        cnpj: response.data?.cnpj ? String(response.data.cnpj) : payload.cnpj || null
+      } satisfies ClientOption;
+
+      setClients((current) => {
+        const next = [...current.filter((item) => item.id !== newClient.id), newClient];
+        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+
+      setForm((current) => ({
+        ...current,
+        clientId: newClient.id,
+        opportunityId: ""
+      }));
+      setOpportunitySearch("");
+      resetQuickCreateClient();
+      toast.success("Cliente criado e selecionado");
+      return newClient;
+    } catch (error) {
+      setQuickClientError(getApiErrorMessage(error, "Não foi possível criar o cliente."));
+      return null;
+    } finally {
+      setIsCreatingClient(false);
+    }
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -848,7 +948,7 @@ export default function ActivitiesPage() {
                     </select>
                   </div>
                 ) : null}
-                <div className="md:col-span-2">
+                <div className="md:col-span-2 space-y-2">
                   <label className="text-sm">Cliente</label>
                   <ClientSearchSelect
                     clients={clients}
@@ -861,6 +961,95 @@ export default function ActivitiesPage() {
                     emptyLabel="Nenhum cliente encontrado."
                     className="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
                   />
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-brand-700 hover:text-brand-800"
+                    onClick={() => {
+                      setIsQuickCreateClientOpen((current) => !current);
+                      setQuickClientError(null);
+                      setCnpjLookupError(null);
+                    }}
+                  >
+                    {isQuickCreateClientOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
+                  </button>
+                  {isQuickCreateClientOpen ? (
+                    <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <ClientCnpjLookupField
+                        value={quickClientForm.cnpj}
+                        onChange={(cnpj) => {
+                          setQuickClientError(null);
+                          updateQuickClientForm({ cnpj });
+                        }}
+                        onLookupSuccess={({ cnpj, name, city, state }) => {
+                          setQuickClientError(null);
+                          updateQuickClientForm({
+                            cnpj,
+                            name: quickClientFormRef.current.name || name,
+                            city: quickClientFormRef.current.city || city,
+                            state: quickClientFormRef.current.state || state
+                          });
+                        }}
+                        cnpjLookupError={cnpjLookupError}
+                        setCnpjLookupError={setCnpjLookupError}
+                        disabled={isCreatingClient}
+                        className="w-full rounded-lg border border-slate-300 bg-white p-2 text-sm"
+                      />
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
+                          placeholder="Nome do cliente"
+                          value={quickClientForm.name}
+                          onChange={(event) => {
+                            setQuickClientError(null);
+                            updateQuickClientForm({ name: event.target.value });
+                          }}
+                        />
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
+                          placeholder="Cidade"
+                          value={quickClientForm.city}
+                          onChange={(event) => {
+                            setQuickClientError(null);
+                            updateQuickClientForm({ city: event.target.value });
+                          }}
+                        />
+                        <input
+                          type="text"
+                          maxLength={2}
+                          className="w-full rounded-lg border border-slate-300 p-2 text-sm uppercase"
+                          placeholder="UF"
+                          value={quickClientForm.state}
+                          onChange={(event) => {
+                            setQuickClientError(null);
+                            updateQuickClientForm({ state: event.target.value.toUpperCase() });
+                          }}
+                        />
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-slate-300 p-2 text-sm"
+                          placeholder="Região (opcional)"
+                          value={quickClientForm.region}
+                          onChange={(event) => {
+                            setQuickClientError(null);
+                            updateQuickClientForm({ region: event.target.value });
+                          }}
+                        />
+                      </div>
+                      {quickClientError ? <p className="text-sm text-rose-600">{quickClientError}</p> : null}
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => void createClientFromActivity()}
+                          disabled={isCreatingClient}
+                          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                        >
+                          {isCreatingClient ? "Salvando cliente..." : "Salvar cliente"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Buscar oportunidade por título (opcional)</label>
