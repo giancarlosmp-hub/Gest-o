@@ -89,6 +89,15 @@ export default function CreateOpportunityModal({
     state: "",
     region: ""
   });
+  const quickClientRef = useRef(quickClient);
+
+  const updateQuickClient = (patch: Partial<typeof quickClient>) => {
+    setQuickClient((currentQuickClient) => {
+      const nextQuickClient = { ...currentQuickClient, ...patch };
+      quickClientRef.current = nextQuickClient;
+      return nextQuickClient;
+    });
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -96,21 +105,25 @@ export default function CreateOpportunityModal({
   }, [open]);
 
   useEffect(() => {
+    quickClientRef.current = quickClient;
+  }, [quickClient]);
+
+  useEffect(() => {
     if (!open) return;
     setIsQuickCreateOpen(false);
     setIsCreatingClient(false);
     setQuickCreateError(null);
     setCnpjLookupError(null);
-    setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+    updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
   }, [open]);
 
   const handleQuickCreateClient = async () => {
     const payload = {
-      cnpj: quickClient.cnpj.trim(),
-      name: quickClient.name.trim(),
-      city: quickClient.city.trim(),
-      state: quickClient.state.trim(),
-      region: quickClient.region.trim()
+      cnpj: quickClientRef.current.cnpj.trim(),
+      name: quickClientRef.current.name.trim(),
+      city: quickClientRef.current.city.trim(),
+      state: quickClientRef.current.state.trim(),
+      region: quickClientRef.current.region.trim()
     };
 
     if (!payload.name || !payload.city || !payload.state || !payload.region) {
@@ -127,7 +140,7 @@ export default function CreateOpportunityModal({
       setIsQuickCreateOpen(false);
       setQuickCreateError(null);
       setCnpjLookupError(null);
-      setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+      updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
     } catch (error: any) {
       setQuickCreateError(error?.message || "Não foi possível criar cliente");
     } finally {
@@ -187,25 +200,29 @@ export default function CreateOpportunityModal({
                       <div className="grid gap-2">
                         <ClientCnpjLookupField
                           value={quickClient.cnpj}
-                          onChange={(cnpj) => setQuickClient((prev) => ({ ...prev, cnpj }))}
+                          onChange={(cnpj) => updateQuickClient({ cnpj })}
                           onLookupSuccess={({ cnpj, name, city, state }) => {
-                            setQuickClient((prev) => ({
-                              ...prev,
-                              cnpj,
-                              name: prev.name || name,
-                              city: prev.city || city,
-                              state: prev.state || state
-                            }));
+                            setQuickClient((currentQuickClient) => {
+                              const nextQuickClient = {
+                                ...currentQuickClient,
+                                cnpj,
+                                name: currentQuickClient.name || name,
+                                city: currentQuickClient.city || city,
+                                state: currentQuickClient.state || state
+                              };
+                              quickClientRef.current = nextQuickClient;
+                              return nextQuickClient;
+                            });
                           }}
                           cnpjLookupError={cnpjLookupError}
                           setCnpjLookupError={setCnpjLookupError}
                           disabled={isCreatingClient}
                           className={fieldClassName}
                         />
-                        <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => setQuickClient((prev) => ({ ...prev, name: e.target.value }))} />
-                        <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => setQuickClient((prev) => ({ ...prev, city: e.target.value }))} />
-                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => setQuickClient((prev) => ({ ...prev, state: e.target.value.toUpperCase() }))} maxLength={2} />
-                        <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => setQuickClient((prev) => ({ ...prev, region: e.target.value }))} />
+                        <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => updateQuickClient({ name: e.target.value })} />
+                        <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => updateQuickClient({ city: e.target.value })} />
+                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => updateQuickClient({ state: e.target.value.toUpperCase() })} maxLength={2} />
+                        <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => updateQuickClient({ region: e.target.value })} />
                         {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
                         <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
                           {isCreatingClient ? "Criando cliente..." : "Salvar cliente"}
