@@ -8,6 +8,8 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
+import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
+import { DuplicateClientCheckError, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
@@ -269,6 +271,64 @@ export default function ActivitiesPage() {
   const closeCreateModal = () => {
     setIsModalOpen(false);
     setForm(initialForm);
+  };
+
+  const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+    const clientOption = {
+      id: client.id,
+      name: client.name,
+      city: client.city,
+      state: client.state,
+      cnpj: client.cnpj
+    };
+
+    setClients((current) => {
+      const withoutDuplicate = current.filter((item) => item.id !== clientOption.id);
+      return [...withoutDuplicate, clientOption].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    });
+
+    setForm((current) => ({ ...current, clientId: clientOption.id, opportunityId: "" }));
+    setOpportunitySearch("");
+    return clientOption;
+  };
+
+  const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
+    const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
+
+    if (String(payload.cnpj || "").trim()) {
+      const duplicateCheck = await checkClientDuplicate(payload);
+
+      if (duplicateCheck.exists) {
+        throw new DuplicateClientCheckError(duplicateCheck);
+      }
+    }
+
+    try {
+      const response = await api.post("/clients", {
+        ...payload,
+        state: payload.state.toUpperCase(),
+        ownerSellerId
+      });
+
+      const createdClient = {
+        id: response.data.id,
+        name: response.data.name,
+        city: response.data.city,
+        state: response.data.state,
+        cnpj: response.data.cnpj
+      };
+
+      setClients((current) => {
+        const next = [...current.filter((item) => item.id !== createdClient.id), createdClient];
+        return next.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+      });
+
+      toast.success("Cliente criado e selecionado");
+      return createdClient;
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || "Não foi possível criar cliente";
+      throw new Error(errorMessage);
+    }
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -861,6 +921,18 @@ export default function ActivitiesPage() {
                     emptyLabel="Nenhum cliente encontrado."
                     className="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
                   />
+                  <div className="mt-2">
+                    <QuickCreateClientSection
+                      open={isModalOpen}
+                      fieldClassName="w-full min-w-0 rounded-lg border border-slate-300 p-2 text-sm"
+                      onClientSelected={(clientId) => {
+                        setForm((previous) => ({ ...previous, clientId, opportunityId: "" }));
+                        setOpportunitySearch("");
+                      }}
+                      onQuickCreateClient={onQuickCreateClient}
+                      onSelectExistingClient={selectExistingClient}
+                    />
+                  </div>
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm">Buscar oportunidade por título (opcional)</label>
