@@ -453,6 +453,13 @@ export default function CrudSimplePage({
     return rawValue;
   };
 
+  const updateClientForm = (fieldKey: string, fieldType: string | undefined, rawValue: string) => {
+    setForm((currentForm: ClientPayloadInput) => ({
+      ...currentForm,
+      [fieldKey]: parseFormValue(fieldKey, fieldType, rawValue)
+    }));
+  };
+
   const applyCnpjLookupResult = ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
     setCnpjLookupError(null);
     setFormError(null);
@@ -2290,7 +2297,7 @@ export default function CrudSimplePage({
                             onChange={(e) => {
                               setFormError(null);
                               setFormFieldErrors((prev) => ({ ...prev, ownerSellerId: undefined }));
-                              setForm({ ...form, ownerSellerId: e.target.value });
+                              setForm((currentForm: ClientPayloadInput) => ({ ...currentForm, ownerSellerId: e.target.value }));
                             }}
                           >
                             {canChooseOwnerSeller ? <option value="">Selecione o vendedor responsável</option> : null}
@@ -2330,7 +2337,7 @@ export default function CrudSimplePage({
                             onChange={(e) => {
                               setFormError(null);
                               setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              setForm({ ...form, [f.key]: e.target.value });
+                              setForm((currentForm: ClientPayloadInput) => ({ ...currentForm, [f.key]: e.target.value }));
                             }}
                           >
                             <option value="">Selecione {f.label.toLowerCase()}</option>
@@ -2347,7 +2354,7 @@ export default function CrudSimplePage({
                               setFormError(null);
                               setCnpjLookupError(null);
                               setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, cnpj) });
+                              updateClientForm(f.key, f.type, cnpj);
                             }}
                             onLookupSuccess={applyCnpjLookupResult}
                             cnpjLookupError={cnpjLookupError}
@@ -2367,7 +2374,7 @@ export default function CrudSimplePage({
                             onChange={(e) => {
                               setFormError(null);
                               setFormFieldErrors((prev) => ({ ...prev, [f.key]: undefined }));
-                              setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) });
+                              updateClientForm(f.key, f.type, e.target.value);
                             }}
                           />
                         )}
