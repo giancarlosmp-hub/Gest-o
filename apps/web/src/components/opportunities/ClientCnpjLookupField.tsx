@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AxiosError } from "axios";
 import api from "../../lib/apiClient";
 import { formatCnpj, isValidCnpj, normalizeCnpjDigits } from "../../lib/cnpj";
@@ -22,6 +22,7 @@ type ClientCnpjLookupFieldProps = {
   setCnpjLookupError: (value: string | null) => void;
   disabled?: boolean;
   className?: string;
+  lookupButtonLabel?: string;
 };
 
 const resolveCnpjLookupErrorMessage = (error: AxiosError<{ message?: string; code?: string }>) => {
@@ -52,17 +53,26 @@ export default function ClientCnpjLookupField({
   cnpjLookupError,
   setCnpjLookupError,
   disabled = false,
-  className = "w-full rounded-lg border border-slate-200 p-2"
+  className = "w-full rounded-lg border border-slate-200 p-2",
+  lookupButtonLabel = "Buscar CNPJ"
 }: ClientCnpjLookupFieldProps) {
   const cnpjDigits = normalizeCnpjDigits(value);
   const canLookupCnpj = isValidCnpj(cnpjDigits);
   const showInvalidCnpjHint = cnpjDigits.length === 14 && !canLookupCnpj;
   const [isLookingUpCnpj, setIsLookingUpCnpj] = useState(false);
+  const [lookupSuccessMessage, setLookupSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!value) {
+      setLookupSuccessMessage(null);
+    }
+  }, [value]);
 
   async function handleCnpjLookup() {
     if (!canLookupCnpj || isLookingUpCnpj || disabled) return;
 
     setCnpjLookupError(null);
+    setLookupSuccessMessage(null);
     setIsLookingUpCnpj(true);
 
     try {
@@ -79,7 +89,10 @@ export default function ClientCnpjLookupField({
         city: nextCity,
         state: nextState
       });
+
+      setLookupSuccessMessage("CNPJ localizado com sucesso. Revise os dados preenchidos automaticamente.");
     } catch (error) {
+      setLookupSuccessMessage(null);
       setCnpjLookupError(resolveCnpjLookupErrorMessage(error as AxiosError<{ message?: string; code?: string }>));
     } finally {
       setIsLookingUpCnpj(false);
@@ -96,6 +109,7 @@ export default function ClientCnpjLookupField({
           onChange={(event) => {
             const digits = normalizeCnpjDigits(event.target.value);
             setCnpjLookupError(null);
+            setLookupSuccessMessage(null);
             onChange(digits.length <= 14 ? formatCnpj(digits) : event.target.value);
           }}
         />
@@ -105,12 +119,16 @@ export default function ClientCnpjLookupField({
           onClick={handleCnpjLookup}
           disabled={disabled || isLookingUpCnpj || !canLookupCnpj}
         >
-          {isLookingUpCnpj ? "Buscando..." : "Buscar CNPJ"}
+          {isLookingUpCnpj ? "Buscando..." : lookupButtonLabel}
         </button>
       </div>
-      <p className="mt-2 text-xs text-slate-600">A busca automática funciona apenas para CNPJ válido.</p>
-      {showInvalidCnpjHint ? <p className="mt-1 text-xs text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p> : null}
-      {cnpjLookupError ? <p className="mt-1 text-xs text-rose-600">{cnpjLookupError}</p> : null}
+      <div className="mt-2 space-y-1">
+        <p className="text-xs text-slate-600">A busca automática funciona apenas para CNPJ válido.</p>
+        {isLookingUpCnpj ? <p className="text-xs text-brand-700">Consultando os dados do CNPJ...</p> : null}
+        {showInvalidCnpjHint ? <p className="text-xs text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p> : null}
+        {lookupSuccessMessage ? <p className="text-xs text-emerald-700">{lookupSuccessMessage}</p> : null}
+        {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
+      </div>
     </div>
   );
 }

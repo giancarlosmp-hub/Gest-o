@@ -50,7 +50,7 @@ type CreateOpportunityModalProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onFormChange: (next: FormState) => void;
   sanitizeNumericInput: (value: string, allowDecimal?: boolean) => string;
-  onQuickCreateClient: (payload: { name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
+  onQuickCreateClient: (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
 };
 
 export default function CreateOpportunityModal({
@@ -106,6 +106,7 @@ export default function CreateOpportunityModal({
 
   const handleQuickCreateClient = async () => {
     const payload = {
+      cnpj: quickClient.cnpj.trim(),
       name: quickClient.name.trim(),
       city: quickClient.city.trim(),
       state: quickClient.state.trim(),
@@ -124,6 +125,7 @@ export default function CreateOpportunityModal({
       const createdClient = await onQuickCreateClient(payload);
       onFormChange({ ...form, clientId: createdClient.id });
       setIsQuickCreateOpen(false);
+      setQuickCreateError(null);
       setCnpjLookupError(null);
       setQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
     } catch (error: any) {
