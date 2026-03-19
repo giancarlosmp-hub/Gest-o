@@ -34,8 +34,5 @@ export const env = {
   smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com",
   cnpjLookupProvider: process.env.CNPJ_LOOKUP_PROVIDER || "",
   cnpjLookupBaseUrl: process.env.CNPJ_LOOKUP_BASE_URL || "",
-  cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || "",
-  cnpjLookupEnabled: Boolean(
-    process.env.CNPJ_LOOKUP_PROVIDER && process.env.CNPJ_LOOKUP_BASE_URL && process.env.CNPJ_LOOKUP_API_KEY
-  )
+  cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || ""
 };

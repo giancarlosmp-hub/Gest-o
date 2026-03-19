@@ -53,7 +53,7 @@ JWT_ACCESS_SECRET=<segredo-forte>
 JWT_REFRESH_SECRET=<segredo-forte-diferente>
 ```
 - `VITE_API_URL` é injetada no build do frontend Docker.
-- A consulta de CNPJ deve ser habilitada somente no backend com `CNPJ_LOOKUP_PROVIDER`, `CNPJ_LOOKUP_BASE_URL` e `CNPJ_LOOKUP_API_KEY`; não exponha essa credencial no frontend.
+- A consulta de CNPJ deve ser habilitada somente no backend; suporte nativo a `CNPJ_LOOKUP_PROVIDER=brasilapi` (sem chave) ou `CNPJ_LOOKUP_PROVIDER=generic` com `CNPJ_LOOKUP_BASE_URL` e, se necessário, `CNPJ_LOOKUP_API_KEY`. Não exponha essa credencial no frontend.
 - Sem `VITE_API_URL`, o frontend usa `/api` em produção e `http://localhost:4000` apenas em desenvolvimento (`npm run dev`).
 - Em produção, mantenha o proxy reverso do Nginx para `location /api/` -> `http://127.0.0.1:4000/`.
 - No `docker compose`, os healthchecks usam endpoints reais: API em `/health` (HTTP 200) e Web em `/healthz` servido pelo Nginx (sem dependência do backend).
@@ -81,6 +81,38 @@ Esperado:
 - `bash deploy.sh` finaliza sem erro.
 - `curl http://localhost:4000/health` retorna HTTP 200.
 - Login retorna HTTP 200 com usuário `diretor@empresa.com`.
+
+### Consulta de CNPJ no backend
+A busca automática por CNPJ do frontend chama apenas o backend (`GET /clients/cnpj-lookup/:cnpj`). A configuração deve ficar **somente** na API.
+
+Variáveis suportadas:
+- `CNPJ_LOOKUP_PROVIDER`
+  - `brasilapi`: usa `https://brasilapi.com.br/api/cnpj/v1/{cnpj}` por padrão e **não** exige chave.
+  - `generic`: exige `CNPJ_LOOKUP_BASE_URL`; a URL pode conter `{cnpj}` (ex.: `https://api.exemplo.com/v1/cnpj/{cnpj}`) ou, se não contiver placeholder, a API anexará `/<cnpj>` automaticamente.
+- `CNPJ_LOOKUP_BASE_URL`
+  - obrigatório para `generic`;
+  - opcional para `brasilapi`.
+- `CNPJ_LOOKUP_API_KEY`
+  - opcional;
+  - use apenas quando o provedor exigir autenticação.
+
+Exemplos:
+```bash
+# opção 1: BrasilAPI
+CNPJ_LOOKUP_PROVIDER=brasilapi
+
+# opção 2: provedor próprio/terceiro
+CNPJ_LOOKUP_PROVIDER=generic
+CNPJ_LOOKUP_BASE_URL=https://api.seu-provedor.com/cnpj/{cnpj}
+CNPJ_LOOKUP_API_KEY=seu-token-aqui
+```
+
+Mensagens de erro retornadas pelo backend agora distinguem:
+- integração desabilitada;
+- configuração inválida/incompleta;
+- CNPJ inválido;
+- empresa não encontrada;
+- indisponibilidade temporária do provedor.
 
 
 ## Deploy em Produção

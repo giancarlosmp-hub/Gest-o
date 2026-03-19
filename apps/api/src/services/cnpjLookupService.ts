@@ -2,8 +2,17 @@ import { env } from "../config/env.js";
 import { formatCnpj, normalizeCnpjDigits } from "../utils/cnpj.js";
 
 const ensureTrailingSlash = (value: string) => (value.endsWith("/") ? value : `${value}/`);
+const maskCnpjForLogs = (value: string) => `***${value.slice(-4)}`;
 
 type UnknownRecord = Record<string, unknown>;
+
+type CnpjLookupErrorCode =
+  | "CNPJ_LOOKUP_DISABLED"
+  | "CNPJ_LOOKUP_MISCONFIGURED"
+  | "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER"
+  | "CNPJ_LOOKUP_NOT_FOUND"
+  | "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE"
+  | "CNPJ_LOOKUP_PROVIDER_ERROR";
 
 export type CnpjLookupPayload = {
   cnpj: string;
@@ -33,11 +42,12 @@ type CnpjLookupProvider = {
 };
 
 const DEFAULT_PROVIDER = "generic";
+const BRASIL_API_PROVIDER = "brasilapi";
 
 export class CnpjLookupError extends Error {
   constructor(
     message: string,
-    readonly code: "CNPJ_LOOKUP_DISABLED" | "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER" | "CNPJ_LOOKUP_PROVIDER_ERROR",
+    readonly code: CnpjLookupErrorCode,
     readonly statusCode: number,
     readonly details?: Record<string, unknown>
   ) {
@@ -103,7 +113,13 @@ const getFirstJoinedString = (payload: UnknownRecord, paths: string[][]) => {
 };
 
 const extractErrorMessage = (payload: unknown) => {
-  if (!isRecord(payload)) return null;
+  if (!isRecord(payload)) {
+    if (typeof payload === "string") {
+      const trimmed = payload.trim();
+      return trimmed || null;
+    }
+    return null;
+  }
 
   return getFirstScalarString(payload, [
     ["message"],
@@ -112,7 +128,22 @@ const extractErrorMessage = (payload: unknown) => {
     ["detail"],
     ["descricao"],
     ["status", "text"],
+    ["status"],
   ]);
+};
+
+const isNotFoundMessage = (value: string | null) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return Boolean(
+    normalized &&
+      (normalized.includes("não encontrada") ||
+        normalized.includes("nao encontrada") ||
+        normalized.includes("não encontrado") ||
+        normalized.includes("nao encontrado") ||
+        normalized.includes("not found") ||
+        normalized.includes("não localizado") ||
+        normalized.includes("nao localizado"))
+  );
 };
 
 const buildStandardPayload = (cnpj: string, payload: UnknownRecord): CnpjLookupPayload => {
@@ -142,11 +173,13 @@ const buildStandardPayload = (cnpj: string, payload: UnknownRecord): CnpjLookupP
       ["telefone"],
       ["phone"],
       ["phones"],
+      ["ddd_telefone_1"],
+      ["ddd_telefone_2"],
       ["contato", "telefone"],
       ["contact", "phone"],
     ]),
     email: getFirstJoinedString(payload, [["email"], ["emails"], ["contato", "email"], ["contact", "email"]]),
-    situacao: getFirstScalarString(payload, [["situacao"], ["status"], ["company", "status"]]),
+    situacao: getFirstScalarString(payload, [["situacao"], ["descricao_situacao_cadastral"], ["status"], ["company", "status"]]),
     inscricaoEstadual: getFirstJoinedString(payload, [
       ["inscricao_estadual"],
       ["inscricaoEstadual"],
@@ -157,46 +190,142 @@ const buildStandardPayload = (cnpj: string, payload: UnknownRecord): CnpjLookupP
   };
 };
 
+const resolveRequestUrl = (baseUrl: string, cnpj: string) => {
+  const trimmedBaseUrl = baseUrl.trim();
+  if (!trimmedBaseUrl) {
+    throw new CnpjLookupError(
+      "Integração de consulta de CNPJ incompleta. Configure CNPJ_LOOKUP_BASE_URL no backend.",
+      "CNPJ_LOOKUP_MISCONFIGURED",
+      503
+    );
+  }
+
+  if (trimmedBaseUrl.includes("{{cnpj}}")) {
+    return trimmedBaseUrl.split("{{cnpj}}").join(encodeURIComponent(cnpj));
+  }
+
+  if (trimmedBaseUrl.includes("{cnpj}")) {
+    return trimmedBaseUrl.split("{cnpj}").join(encodeURIComponent(cnpj));
+  }
+
+  return new URL(cnpj, ensureTrailingSlash(trimmedBaseUrl)).toString();
+};
+
+const createProviderErrorFromResponse = (
+  providerName: string,
+  providerStatus: number,
+  raw: unknown,
+  cnpj: string
+) => {
+  const message = extractErrorMessage(raw);
+
+  if (providerStatus === 404 || isNotFoundMessage(message)) {
+    return new CnpjLookupError("Empresa não encontrada para o CNPJ informado.", "CNPJ_LOOKUP_NOT_FOUND", 404, {
+      provider: providerName,
+      providerStatus,
+      cnpj: maskCnpjForLogs(cnpj),
+    });
+  }
+
+  if (providerStatus === 429 || providerStatus >= 500) {
+    return new CnpjLookupError(
+      "O provedor de CNPJ está indisponível no momento. Tente novamente em instantes.",
+      "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE",
+      502,
+      {
+        provider: providerName,
+        providerStatus,
+        cnpj: maskCnpjForLogs(cnpj),
+      }
+    );
+  }
+
+  return new CnpjLookupError(
+    message || "A consulta de CNPJ falhou no provedor externo.",
+    "CNPJ_LOOKUP_PROVIDER_ERROR",
+    502,
+    {
+      provider: providerName,
+      providerStatus,
+      cnpj: maskCnpjForLogs(cnpj),
+    }
+  );
+};
+
+const fetchProviderPayload = async (
+  providerName: string,
+  requestUrl: string,
+  cnpj: string,
+  requestHeaders: Record<string, string> = {}
+) => {
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        ...requestHeaders,
+      },
+      signal: AbortSignal.timeout(env.apiRequestTimeoutMs),
+    });
+  } catch (error) {
+    throw new CnpjLookupError(
+      "Não foi possível consultar o provedor de CNPJ no momento.",
+      "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE",
+      502,
+      {
+        provider: providerName,
+        cnpj: maskCnpjForLogs(cnpj),
+        cause: error instanceof Error ? error.message : String(error),
+      }
+    );
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const raw = contentType.includes("application/json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    throw createProviderErrorFromResponse(providerName, response.status, raw, cnpj);
+  }
+
+  if (!isRecord(raw)) {
+    throw new CnpjLookupError(
+      "O provedor de CNPJ retornou um formato inesperado.",
+      "CNPJ_LOOKUP_PROVIDER_ERROR",
+      502,
+      {
+        provider: providerName,
+        cnpj: maskCnpjForLogs(cnpj),
+      }
+    );
+  }
+
+  return raw;
+};
+
 const createGenericProvider = (): CnpjLookupProvider => ({
   async lookup(cnpj: string) {
-    const requestUrl = new URL(cnpj, ensureTrailingSlash(env.cnpjLookupBaseUrl));
+    const requestUrl = resolveRequestUrl(env.cnpjLookupBaseUrl, cnpj);
+    const headers: Record<string, string> = {};
 
-    let response: Response;
-    try {
-      response = await fetch(requestUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `Bearer ${env.cnpjLookupApiKey}`,
-          "X-API-Key": env.cnpjLookupApiKey,
-        },
-        signal: AbortSignal.timeout(env.apiRequestTimeoutMs),
-      });
-    } catch (error) {
-      throw new CnpjLookupError("Não foi possível consultar o provedor de CNPJ no momento.", "CNPJ_LOOKUP_PROVIDER_ERROR", 502, {
-        cause: error instanceof Error ? error.message : String(error),
-      });
+    if (env.cnpjLookupApiKey) {
+      headers.Authorization = `Bearer ${env.cnpjLookupApiKey}`;
+      headers["X-API-Key"] = env.cnpjLookupApiKey;
     }
 
-    const contentType = response.headers.get("content-type") || "";
-    const raw = contentType.includes("application/json") ? await response.json() : await response.text();
+    const raw = await fetchProviderPayload(DEFAULT_PROVIDER, requestUrl, cnpj, headers);
 
-    if (!response.ok) {
-      throw new CnpjLookupError(
-        extractErrorMessage(raw) || "A consulta de CNPJ falhou no provedor externo.",
-        "CNPJ_LOOKUP_PROVIDER_ERROR",
-        502,
-        { providerStatus: response.status }
-      );
-    }
+    return {
+      payload: buildStandardPayload(cnpj, raw),
+      raw,
+    };
+  },
+});
 
-    if (!isRecord(raw)) {
-      throw new CnpjLookupError(
-        "O provedor de CNPJ retornou um formato inesperado.",
-        "CNPJ_LOOKUP_PROVIDER_ERROR",
-        502
-      );
-    }
+const createBrasilApiProvider = (): CnpjLookupProvider => ({
+  async lookup(cnpj: string) {
+    const requestUrl = resolveRequestUrl(env.cnpjLookupBaseUrl || "https://brasilapi.com.br/api/cnpj/v1/{cnpj}", cnpj);
+    const raw = await fetchProviderPayload(BRASIL_API_PROVIDER, requestUrl, cnpj);
 
     return {
       payload: buildStandardPayload(cnpj, raw),
@@ -207,18 +336,20 @@ const createGenericProvider = (): CnpjLookupProvider => ({
 
 const providerFactories: Record<string, () => CnpjLookupProvider> = {
   [DEFAULT_PROVIDER]: createGenericProvider,
+  [BRASIL_API_PROVIDER]: createBrasilApiProvider,
 };
 
 const getProvider = () => {
-  if (!env.cnpjLookupEnabled) {
+  const providerName = env.cnpjLookupProvider.trim().toLowerCase();
+
+  if (!providerName) {
     throw new CnpjLookupError(
-      "Integração de consulta de CNPJ não está habilitada. Configure as variáveis CNPJ_LOOKUP_PROVIDER, CNPJ_LOOKUP_BASE_URL e CNPJ_LOOKUP_API_KEY.",
+      "Integração de consulta de CNPJ não está habilitada. Configure CNPJ_LOOKUP_PROVIDER no backend.",
       "CNPJ_LOOKUP_DISABLED",
       503
     );
   }
 
-  const providerName = env.cnpjLookupProvider.toLowerCase();
   const providerFactory = providerFactories[providerName];
 
   if (!providerFactory) {
@@ -227,6 +358,15 @@ const getProvider = () => {
       "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER",
       503,
       { supportedProviders: Object.keys(providerFactories) }
+    );
+  }
+
+  if (providerName === DEFAULT_PROVIDER && !env.cnpjLookupBaseUrl.trim()) {
+    throw new CnpjLookupError(
+      "Integração de consulta de CNPJ incompleta. Configure CNPJ_LOOKUP_BASE_URL no backend.",
+      "CNPJ_LOOKUP_MISCONFIGURED",
+      503,
+      { provider: providerName }
     );
   }
 
