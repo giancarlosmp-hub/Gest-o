@@ -22,6 +22,7 @@ type ClientCnpjLookupFieldProps = {
   setCnpjLookupError: (value: string | null) => void;
   disabled?: boolean;
   className?: string;
+  helperTitle?: string | null;
   lookupButtonLabel?: string;
 };
 
@@ -54,6 +55,7 @@ export default function ClientCnpjLookupField({
   setCnpjLookupError,
   disabled = false,
   className = "w-full rounded-lg border border-slate-200 p-2",
+  helperTitle = null,
   lookupButtonLabel = "Buscar CNPJ"
 }: ClientCnpjLookupFieldProps) {
   const cnpjDigits = normalizeCnpjDigits(value);
@@ -100,10 +102,11 @@ export default function ClientCnpjLookupField({
   }
 
   return (
-    <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
+    <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-3 sm:p-4">
+      {helperTitle ? <p className="max-w-full text-xs font-medium leading-5 text-brand-700">{helperTitle}</p> : null}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
         <input
-          className={className}
+          className={`${className} min-w-0 flex-1`}
           placeholder="Informe o CNPJ para preencher automaticamente"
           value={value}
           onChange={(event) => {
@@ -115,19 +118,19 @@ export default function ClientCnpjLookupField({
         />
         <button
           type="button"
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto sm:min-w-[9.5rem]"
           onClick={handleCnpjLookup}
           disabled={disabled || isLookingUpCnpj || !canLookupCnpj}
         >
           {isLookingUpCnpj ? "Buscando..." : lookupButtonLabel}
         </button>
       </div>
-      <div className="mt-2 space-y-1">
-        <p className="text-xs text-slate-600">A busca automática funciona apenas para CNPJ válido.</p>
-        {isLookingUpCnpj ? <p className="text-xs text-brand-700">Consultando os dados do CNPJ...</p> : null}
-        {showInvalidCnpjHint ? <p className="text-xs text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p> : null}
-        {lookupSuccessMessage ? <p className="text-xs text-emerald-700">{lookupSuccessMessage}</p> : null}
-        {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
+      <div className="space-y-1">
+        <p className="text-xs leading-5 text-slate-600">A busca automática funciona apenas para CNPJ válido.</p>
+        {isLookingUpCnpj ? <p className="text-xs leading-5 text-brand-700">Consultando os dados do CNPJ...</p> : null}
+        {showInvalidCnpjHint ? <p className="text-xs leading-5 text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p> : null}
+        {lookupSuccessMessage ? <p className="text-xs leading-5 text-emerald-700">{lookupSuccessMessage}</p> : null}
+        {cnpjLookupError ? <p className="text-xs leading-5 text-rose-600">{cnpjLookupError}</p> : null}
       </div>
     </div>
   );

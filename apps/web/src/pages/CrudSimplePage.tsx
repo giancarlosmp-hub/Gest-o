@@ -2318,7 +2318,6 @@ export default function CrudSimplePage({
                         <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
                           {f.label}
                         </label>
-                        {isCnpjField ? <span className="text-xs font-medium text-brand-700">Use CNPJ para preenchimento automático</span> : null}
                       </div>
 
                       {f.type === "select" ? (
@@ -2354,6 +2353,7 @@ export default function CrudSimplePage({
                           setCnpjLookupError={setCnpjLookupError}
                           disabled={saving}
                           className="w-full rounded-lg border border-brand-300 bg-white p-2 text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                          helperTitle="Use CNPJ para preenchimento automático"
                         />
                       ) : (
                         <input
