@@ -837,7 +837,7 @@ class DuplicateClientError extends Error {
 
   constructor(existingClient: DuplicateClientSummary, matchType: DuplicateClientMatchType, message?: string) {
     super(message ?? (matchType === "cnpj"
-      ? `Já existe um cliente com este CNPJ: ${existingClient.name}${existingClient.city && existingClient.state ? ` (${existingClient.city}/${existingClient.state})` : ""}. Use o cadastro existente.`
+      ? `Já existe um cliente com este CNPJ: ${existingClient.name}${existingClient.city && existingClient.state ? ` (${existingClient.city}/${existingClient.state})` : ""}.`
       : DUPLICATE_CLIENT_MESSAGE));
     this.name = "DuplicateClientError";
     this.statusCode = 409;

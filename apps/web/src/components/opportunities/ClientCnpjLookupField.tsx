@@ -14,10 +14,14 @@ type CnpjLookupResponse = {
   };
 };
 
+type ClientCnpjLookupFieldLookupResult = {
+  suppressSuccessMessage?: boolean;
+};
+
 type ClientCnpjLookupFieldProps = {
   value: string;
   onChange: (value: string) => void;
-  onLookupSuccess: (payload: { cnpj: string; name: string; city: string; state: string }) => void | Promise<void>;
+  onLookupSuccess: (payload: { cnpj: string; name: string; city: string; state: string }) => ClientCnpjLookupFieldLookupResult | void | Promise<ClientCnpjLookupFieldLookupResult | void>;
   cnpjLookupError: string | null;
   setCnpjLookupError: (value: string | null) => void;
   disabled?: boolean;
@@ -94,12 +98,17 @@ export default function ClientCnpjLookupField({
       const nextCity = String(lookupData?.cidade || "").trim();
       const nextState = String(lookupData?.uf || "").trim().toUpperCase();
 
-      await onLookupSuccess({
+      const lookupResult = await onLookupSuccess({
         cnpj: nextCnpj,
         name: nextName,
         city: nextCity,
         state: nextState
       });
+
+      if (lookupResult?.suppressSuccessMessage) {
+        setLookupSuccessMessage(null);
+        return;
+      }
 
       setLookupSuccessMessage("CNPJ localizado com sucesso. Revise os dados preenchidos automaticamente.");
     } catch (error) {

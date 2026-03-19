@@ -1,5 +1,5 @@
 import api from "./apiClient";
-import { formatCnpj, normalizeCnpjDigits } from "./cnpj";
+import { normalizeCnpjDigits } from "./cnpj";
 
 export type DuplicateClientMatchType = "cnpj" | "identity";
 
@@ -28,8 +28,7 @@ export type ClientDuplicateCheckResponse = {
 
 const formatExistingClientLabel = (client: ExistingClientSummary) => {
   const location = client.city && client.state ? ` (${client.city}/${client.state})` : "";
-  const document = client.cnpj ? ` · CNPJ ${formatCnpj(client.cnpj)}` : "";
-  return `${client.name}${location}${document}`;
+  return `${client.name}${location}`;
 };
 
 export const buildDuplicateClientMessage = (response: Pick<ClientDuplicateCheckResponse, "existingClient" | "matchType" | "message">) => {
@@ -38,7 +37,7 @@ export const buildDuplicateClientMessage = (response: Pick<ClientDuplicateCheckR
 
   const clientLabel = formatExistingClientLabel(response.existingClient);
   if (response.matchType === "cnpj") {
-    return `Já existe um cliente com este CNPJ: ${clientLabel}. Use o cadastro existente.`;
+    return `Já existe um cliente com este CNPJ: ${clientLabel}.`;
   }
 
   return `Já existe um cliente compatível: ${clientLabel}. Revise o cadastro antes de salvar.`;
