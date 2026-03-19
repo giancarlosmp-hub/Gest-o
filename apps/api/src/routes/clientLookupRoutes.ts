@@ -26,7 +26,7 @@ router.get("/clients/cnpj-lookup/:cnpj", async (req, res) => {
     return res.status(200).json({
       data: result.payload,
       meta: {
-        provider: env.cnpjLookupProvider || undefined,
+        provider: result.provider || result.payload.source || env.cnpjLookupProvider || undefined,
         normalizedCnpj: parsedCnpj.digits
       }
     });
@@ -35,7 +35,7 @@ router.get("/clients/cnpj-lookup/:cnpj", async (req, res) => {
       console.warn("[cnpj-lookup] lookup failed", {
         code: error.code,
         statusCode: error.statusCode,
-        provider: env.cnpjLookupProvider || undefined,
+        provider: (typeof error.details?.provider === "string" ? error.details.provider : env.cnpjLookupProvider) || undefined,
         cnpjSuffix: parsedCnpj.digits.slice(-4),
         details: error.details
       });
