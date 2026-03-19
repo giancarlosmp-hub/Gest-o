@@ -30,25 +30,25 @@ const resolveCnpjLookupErrorMessage = (error: AxiosError<{ message?: string; cod
   const errorCode = error.response?.data?.code;
   const normalizedMessage = backendMessage.toLowerCase();
 
-  if (errorCode === "INVALID_CNPJ") return "Informe um CNPJ válido para realizar a busca automática.";
-  if (errorCode === "CNPJ_LOOKUP_NOT_FOUND") return "Empresa não encontrada para o CNPJ informado.";
+  if (errorCode === "INVALID_CNPJ") return "Digite um CNPJ válido para buscar os dados.";
+  if (errorCode === "CNPJ_LOOKUP_NOT_FOUND") return "Nenhuma empresa foi encontrada para este CNPJ.";
   if (normalizedMessage.includes("não encontrada") || normalizedMessage.includes("nao encontrada") || normalizedMessage.includes("not found")) {
-    return "Empresa não encontrada para o CNPJ informado.";
+    return "Nenhuma empresa foi encontrada para este CNPJ.";
   }
   if (errorCode === "CNPJ_LOOKUP_DISABLED") {
-    return "A integração de CNPJ não está habilitada no backend.";
+    return "A consulta por CNPJ não está disponível no momento.";
   }
   if (errorCode === "CNPJ_LOOKUP_MISCONFIGURED" || errorCode === "CNPJ_LOOKUP_UNSUPPORTED_PROVIDER") {
-    return backendMessage || "A integração de CNPJ está configurada incorretamente no backend.";
+    return backendMessage || "A consulta por CNPJ está indisponível no momento.";
   }
   if (errorCode === "CNPJ_LOOKUP_PROVIDER_UNAVAILABLE") {
-    return "O provedor de CNPJ está indisponível no momento. Tente novamente em instantes.";
+    return "Não foi possível consultar o CNPJ agora. Tente novamente em instantes.";
   }
   if (errorCode === "CNPJ_LOOKUP_PROVIDER_ERROR") {
-    return backendMessage || "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
+    return backendMessage || "Não foi possível consultar o CNPJ agora. Tente novamente em instantes.";
   }
 
-  return backendMessage || "Não foi possível consultar o CNPJ no momento. Tente novamente em instantes.";
+  return backendMessage || "Não foi possível consultar o CNPJ agora. Tente novamente em instantes.";
 };
 
 export default function ClientCnpjLookupField({
@@ -59,7 +59,7 @@ export default function ClientCnpjLookupField({
   setCnpjLookupError,
   disabled = false,
   className = "w-full rounded-lg border border-slate-200 p-2",
-  lookupButtonLabel = "Buscar CNPJ"
+  lookupButtonLabel = "Buscar dados"
 }: ClientCnpjLookupFieldProps) {
   const cnpjDigits = normalizeCnpjDigits(value);
   const canLookupCnpj = isValidCnpj(cnpjDigits);
@@ -95,7 +95,7 @@ export default function ClientCnpjLookupField({
         state: nextState
       });
 
-      setLookupSuccessMessage("CNPJ localizado com sucesso. Revise os dados preenchidos automaticamente.");
+      setLookupSuccessMessage("Dados encontrados. Confira os campos preenchidos automaticamente.");
     } catch (error) {
       setLookupSuccessMessage(null);
       setCnpjLookupError(resolveCnpjLookupErrorMessage(error as AxiosError<{ message?: string; code?: string }>));
@@ -106,10 +106,17 @@ export default function ClientCnpjLookupField({
 
   return (
     <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="mb-2 space-y-1">
+        <p className="text-sm font-semibold text-slate-800">Buscar dados pelo CNPJ</p>
+        <p className="text-xs leading-5 text-slate-600">
+          Digite um CNPJ válido para preencher automaticamente razão social, cidade e UF.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
         <input
           className={className}
-          placeholder="Informe o CNPJ para preencher automaticamente"
+          placeholder="Digite o CNPJ para buscar os dados"
           value={value}
           onChange={(event) => {
             const digits = normalizeCnpjDigits(event.target.value);
@@ -120,19 +127,20 @@ export default function ClientCnpjLookupField({
         />
         <button
           type="button"
-          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70"
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-70 sm:min-w-[140px] sm:self-stretch"
           onClick={handleCnpjLookup}
           disabled={disabled || isLookingUpCnpj || !canLookupCnpj}
         >
           {isLookingUpCnpj ? "Buscando..." : lookupButtonLabel}
         </button>
       </div>
-      <div className="mt-2 space-y-1">
-        <p className="text-xs text-slate-600">A busca automática funciona apenas para CNPJ válido.</p>
-        {isLookingUpCnpj ? <p className="text-xs text-brand-700">Consultando os dados do CNPJ...</p> : null}
-        {showInvalidCnpjHint ? <p className="text-xs text-amber-700">Informe um CNPJ válido para habilitar a busca automática.</p> : null}
-        {lookupSuccessMessage ? <p className="text-xs text-emerald-700">{lookupSuccessMessage}</p> : null}
-        {cnpjLookupError ? <p className="text-xs text-rose-600">{cnpjLookupError}</p> : null}
+
+      <div className="mt-3 space-y-1">
+        <p className="text-xs leading-5 text-slate-600">Preenchemos os dados disponíveis automaticamente após a consulta.</p>
+        {isLookingUpCnpj ? <p className="text-xs leading-5 text-brand-700">Buscando dados do CNPJ...</p> : null}
+        {showInvalidCnpjHint ? <p className="text-xs leading-5 text-amber-700">Digite um CNPJ válido para liberar a busca.</p> : null}
+        {lookupSuccessMessage ? <p className="text-xs leading-5 text-emerald-700">{lookupSuccessMessage}</p> : null}
+        {cnpjLookupError ? <p className="text-xs leading-5 text-rose-600">{cnpjLookupError}</p> : null}
       </div>
     </div>
   );
