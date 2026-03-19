@@ -2318,7 +2318,7 @@ export default function CrudSimplePage({
                         <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
                           {f.label}
                         </label>
-                        {isCnpjField ? <span className="text-xs font-medium text-brand-700">Preenchimento automático</span> : null}
+                        {isCnpjField ? <span className="text-xs font-medium text-brand-700">Use CNPJ para preenchimento automático</span> : null}
                       </div>
 
                       {f.type === "select" ? (
