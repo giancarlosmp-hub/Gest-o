@@ -2,6 +2,8 @@ import axios from "axios";
 import { toast } from "sonner";
 import type { AxiosRequestConfig, AxiosResponse } from "axios";
 
+type RetryableAxiosRequestConfig = AxiosRequestConfig & { _retry?: boolean };
+
 const resolveApiBaseUrl = () => {
   const configuredBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
   if (configuredBaseUrl) {
@@ -79,6 +81,7 @@ const releaseRequestSlot = () => {
 };
 
 const requestWithoutDedup = api.request.bind(api);
+const authApi = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true, timeout: apiTimeoutMs });
 
 const requestWithGuards = <T = unknown, R = AxiosResponse<T>, D = unknown>(
   config: AxiosRequestConfig<D>
@@ -109,6 +112,7 @@ export const clearAccessToken = () => { accessToken = ""; localStorage.removeIte
 
 const AUTH_COOKIE_NAMES = ["accessToken", "refreshToken", "token", "authToken", "crm_auth"];
 let isHandlingUnauthorized = false;
+let refreshRequest: Promise<string> | null = null;
 
 const clearAuthCookies = () => {
   if (typeof document === "undefined") return;
@@ -163,6 +167,27 @@ const redirectToLoginOnce = () => {
   }, 500);
 };
 
+const refreshAccessToken = async () => {
+  if (!refreshRequest) {
+    refreshRequest = authApi
+      .post<{ accessToken?: string }>("/auth/refresh")
+      .then(({ data }) => {
+        const nextAccessToken = String(data?.accessToken || "").trim();
+        if (!nextAccessToken) {
+          throw new Error("Refresh sem access token");
+        }
+
+        setAccessToken(nextAccessToken);
+        return nextAccessToken;
+      })
+      .finally(() => {
+        refreshRequest = null;
+      });
+  }
+
+  return refreshRequest;
+};
+
 
 const withApiErrorDetails = (error: any) => {
   const status = error?.response?.status;
@@ -186,10 +211,30 @@ api.interceptors.response.use((r) => r, async (error) => {
   withApiErrorDetails(error);
   const status = error.response?.status;
   const isNetworkError = !error.response;
-  const requestUrl = String(error.config?.url || "");
+  const requestConfig = (error.config || {}) as RetryableAxiosRequestConfig;
+  const requestUrl = String(requestConfig.url || "");
   const isAuthLoginRoute = requestUrl.includes("/auth/login");
+  const isAuthRefreshRoute = requestUrl.includes("/auth/refresh");
+  const authHeader = requestConfig.headers?.Authorization || requestConfig.headers?.authorization;
+  const hasAuthenticatedContext = Boolean(authHeader || accessToken);
+  const shouldRetryWithRefresh =
+    status === 401 &&
+    hasAuthenticatedContext &&
+    !isAuthLoginRoute &&
+    !isAuthRefreshRoute &&
+    !requestConfig._retry;
 
-  if (status === 401 && !isAuthLoginRoute) {
+  if (shouldRetryWithRefresh) {
+    try {
+      const nextAccessToken = await refreshAccessToken();
+      requestConfig._retry = true;
+      requestConfig.headers = requestConfig.headers || {};
+      requestConfig.headers.Authorization = `Bearer ${nextAccessToken}`;
+      return await requestWithoutDedup(requestConfig);
+    } catch {
+      redirectToLoginOnce();
+    }
+  } else if (status === 401 && !isAuthLoginRoute) {
     redirectToLoginOnce();
   }
 
