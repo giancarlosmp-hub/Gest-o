@@ -87,6 +87,7 @@ export default function QuickCreateClientSection({
 
     setDuplicateClient(duplicateCheck.existingClient);
     setQuickCreateError(buildDuplicateClientMessage(duplicateCheck));
+    return { suppressSuccessMessage: true };
   };
 
   const handleSelectExistingClient = () => {
