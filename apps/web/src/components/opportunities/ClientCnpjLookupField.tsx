@@ -17,7 +17,7 @@ type CnpjLookupResponse = {
 type ClientCnpjLookupFieldProps = {
   value: string;
   onChange: (value: string) => void;
-  onLookupSuccess: (payload: { cnpj: string; name: string; city: string; state: string }) => void;
+  onLookupSuccess: (payload: { cnpj: string; name: string; city: string; state: string }) => void | Promise<void>;
   cnpjLookupError: string | null;
   setCnpjLookupError: (value: string | null) => void;
   disabled?: boolean;
@@ -94,7 +94,7 @@ export default function ClientCnpjLookupField({
       const nextCity = String(lookupData?.cidade || "").trim();
       const nextState = String(lookupData?.uf || "").trim().toUpperCase();
 
-      onLookupSuccess({
+      await onLookupSuccess({
         cnpj: nextCnpj,
         name: nextName,
         city: nextCity,

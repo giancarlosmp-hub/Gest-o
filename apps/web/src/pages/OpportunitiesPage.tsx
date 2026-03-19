@@ -11,7 +11,7 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
-import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
+import { DuplicateClientCheckError, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -118,6 +118,15 @@ const stageLabel: Record<Stage, string> = {
   ganho: "Ganho",
   perdido: "Perdido"
 };
+
+
+const toClientOption = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }): Client => ({
+  id: client.id,
+  name: client.name,
+  city: client.city,
+  state: client.state,
+  cnpj: client.cnpj
+});
 
 const statusLabel: Record<OpportunityStatus, string> = {
   open: "Abertas",
@@ -683,28 +692,26 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
+  const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+    const clientOption = toClientOption(client);
+
+    setClients((current) => {
+      const withoutDuplicate = current.filter((item) => item.id !== clientOption.id);
+      return [...withoutDuplicate, clientOption].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    });
+
+    setForm((current) => ({ ...current, clientId: clientOption.id }));
+    return clientOption;
+  };
+
   const onQuickCreateClient = async (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => {
     const ownerSellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
 
     if (String(payload.cnpj || "").trim()) {
       const duplicateCheck = await checkClientDuplicate(payload);
 
-      if (duplicateCheck.exists && duplicateCheck.existingClient) {
-        const existingClient = {
-          id: duplicateCheck.existingClient.id,
-          name: duplicateCheck.existingClient.name,
-          city: duplicateCheck.existingClient.city,
-          state: duplicateCheck.existingClient.state,
-          cnpj: duplicateCheck.existingClient.cnpj
-        };
-
-        setClients((current) => {
-          const withoutDuplicate = current.filter((item) => item.id !== existingClient.id);
-          return [...withoutDuplicate, existingClient].sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
-        });
-
-        toast.info(`${buildDuplicateClientMessage(duplicateCheck)} Selecionamos o cadastro existente.`);
-        return existingClient;
+      if (duplicateCheck.exists) {
+        throw new DuplicateClientCheckError(duplicateCheck);
       }
     }
 
@@ -1061,6 +1068,7 @@ export default function OpportunitiesPage() {
         onFormChange={setForm}
         sanitizeNumericInput={sanitizeNumericInput}
         onQuickCreateClient={onQuickCreateClient}
+        onSelectExistingClient={selectExistingClient}
       />
 
       <OpportunityImportModal

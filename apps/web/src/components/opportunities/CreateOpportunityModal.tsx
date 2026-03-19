@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { DuplicateClientCheckError, ExistingClientSummary, buildDuplicateClientMessage, findDuplicateClientByLookupPayload } from "../../lib/clientDuplicateCheck";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 import ClientCnpjLookupField from "./ClientCnpjLookupField";
 
@@ -51,6 +52,7 @@ type CreateOpportunityModalProps = {
   onFormChange: (next: FormState) => void;
   sanitizeNumericInput: (value: string, allowDecimal?: boolean) => string;
   onQuickCreateClient: (payload: { cnpj?: string; name: string; city: string; state: string; region: string }) => Promise<ClientOption>;
+  onSelectExistingClient: (client: ExistingClientSummary) => ClientOption;
 };
 
 export default function CreateOpportunityModal({
@@ -71,7 +73,8 @@ export default function CreateOpportunityModal({
   onSubmit,
   onFormChange,
   sanitizeNumericInput,
-  onQuickCreateClient
+  onQuickCreateClient,
+  onSelectExistingClient
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -82,6 +85,7 @@ export default function CreateOpportunityModal({
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const [quickCreateError, setQuickCreateError] = useState<string | null>(null);
   const [cnpjLookupError, setCnpjLookupError] = useState<string | null>(null);
+  const [duplicateClient, setDuplicateClient] = useState<ExistingClientSummary | null>(null);
   const [quickClient, setQuickClient] = useState({
     cnpj: "",
     name: "",
@@ -114,8 +118,44 @@ export default function CreateOpportunityModal({
     setIsCreatingClient(false);
     setQuickCreateError(null);
     setCnpjLookupError(null);
+    setDuplicateClient(null);
     updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
   }, [open]);
+
+  const handleQuickClientLookupSuccess = async ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
+    setDuplicateClient(null);
+    setQuickCreateError(null);
+
+    setQuickClient((currentQuickClient) => {
+      const nextQuickClient = {
+        ...currentQuickClient,
+        cnpj,
+        name: currentQuickClient.name || name,
+        city: currentQuickClient.city || city,
+        state: currentQuickClient.state || state
+      };
+      quickClientRef.current = nextQuickClient;
+      return nextQuickClient;
+    });
+
+    const duplicateCheck = await findDuplicateClientByLookupPayload({ cnpj, name, city, state });
+    if (!duplicateCheck?.existingClient) return;
+
+    setDuplicateClient(duplicateCheck.existingClient);
+    setQuickCreateError(buildDuplicateClientMessage(duplicateCheck));
+  };
+
+  const handleSelectExistingClient = () => {
+    if (!duplicateClient) return;
+
+    const selectedClient = onSelectExistingClient(duplicateClient);
+    onFormChange({ ...form, clientId: selectedClient.id });
+    setIsQuickCreateOpen(false);
+    setQuickCreateError(null);
+    setCnpjLookupError(null);
+    setDuplicateClient(null);
+    updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
+  };
 
   const handleQuickCreateClient = async () => {
     const payload = {
@@ -132,6 +172,7 @@ export default function CreateOpportunityModal({
     }
 
     setQuickCreateError(null);
+    setDuplicateClient(null);
     setIsCreatingClient(true);
 
     try {
@@ -142,6 +183,9 @@ export default function CreateOpportunityModal({
       setCnpjLookupError(null);
       updateQuickClient({ cnpj: "", name: "", city: "", state: "", region: "" });
     } catch (error: any) {
+      if (error instanceof DuplicateClientCheckError && error.existingClient) {
+        setDuplicateClient(error.existingClient);
+      }
       setQuickCreateError(error?.message || "Não foi possível criar cliente");
     } finally {
       setIsCreatingClient(false);
@@ -191,6 +235,7 @@ export default function CreateOpportunityModal({
                       setIsQuickCreateOpen((current) => !current);
                       setQuickCreateError(null);
                       setCnpjLookupError(null);
+                      setDuplicateClient(null);
                     }}
                   >
                     {isQuickCreateOpen ? "Cancelar novo cliente" : "+ Criar cliente"}
@@ -200,31 +245,32 @@ export default function CreateOpportunityModal({
                       <div className="grid gap-2">
                         <ClientCnpjLookupField
                           value={quickClient.cnpj}
-                          onChange={(cnpj) => updateQuickClient({ cnpj })}
-                          onLookupSuccess={({ cnpj, name, city, state }) => {
-                            setQuickClient((currentQuickClient) => {
-                              const nextQuickClient = {
-                                ...currentQuickClient,
-                                cnpj,
-                                name: currentQuickClient.name || name,
-                                city: currentQuickClient.city || city,
-                                state: currentQuickClient.state || state
-                              };
-                              quickClientRef.current = nextQuickClient;
-                              return nextQuickClient;
-                            });
+                          onChange={(cnpj) => {
+                            setDuplicateClient(null);
+                            setQuickCreateError(null);
+                            updateQuickClient({ cnpj });
                           }}
+                          onLookupSuccess={handleQuickClientLookupSuccess}
                           cnpjLookupError={cnpjLookupError}
                           setCnpjLookupError={setCnpjLookupError}
                           disabled={isCreatingClient}
                           className={fieldClassName}
                         />
-                        <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => updateQuickClient({ name: e.target.value })} />
-                        <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => updateQuickClient({ city: e.target.value })} />
-                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => updateQuickClient({ state: e.target.value.toUpperCase() })} maxLength={2} />
-                        <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => updateQuickClient({ region: e.target.value })} />
+                        <input required className={fieldClassName} placeholder="Nome do cliente" value={quickClient.name} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ name: e.target.value }); }} />
+                        <input required className={fieldClassName} placeholder="Cidade" value={quickClient.city} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ city: e.target.value }); }} />
+                        <input required className={fieldClassName} placeholder="UF" value={quickClient.state} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ state: e.target.value.toUpperCase() }); }} maxLength={2} />
+                        <input required className={fieldClassName} placeholder="Região" value={quickClient.region} onChange={(e) => { setDuplicateClient(null); setQuickCreateError(null); updateQuickClient({ region: e.target.value }); }} />
                         {quickCreateError ? <p className="text-xs text-red-600">{quickCreateError}</p> : null}
-                        <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
+                        {duplicateClient ? (
+                          <button
+                            type="button"
+                            onClick={handleSelectExistingClient}
+                            className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-100"
+                          >
+                            Selecionar cliente existente
+                          </button>
+                        ) : null}
+                        <button type="button" onClick={handleQuickCreateClient} disabled={isCreatingClient || Boolean(duplicateClient)} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
                           {isCreatingClient ? "Criando cliente..." : "Salvar cliente"}
                         </button>
                       </div>

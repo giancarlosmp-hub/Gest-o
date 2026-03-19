@@ -13,7 +13,7 @@ import {
   type ClientImportFieldKey
 } from "../components/ClientImportColumnMappingStep";
 import ClientCnpjLookupField from "../components/opportunities/ClientCnpjLookupField";
-import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
+import { buildDuplicateClientMessage, checkClientDuplicate, findDuplicateClientByLookupPayload } from "../lib/clientDuplicateCheck";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -460,7 +460,7 @@ export default function CrudSimplePage({
     }));
   };
 
-  const applyCnpjLookupResult = ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
+  const applyCnpjLookupResult = async ({ cnpj, name, city, state }: { cnpj: string; name: string; city: string; state: string }) => {
     setCnpjLookupError(null);
     setFormError(null);
 
@@ -517,6 +517,14 @@ export default function CrudSimplePage({
     } else {
       toast.info("Consulta concluída, mas não havia novos campos para preencher automaticamente.");
     }
+
+    const duplicateCheck = await findDuplicateClientByLookupPayload({ cnpj, name, city, state });
+    if (!duplicateCheck) return;
+
+    const duplicateMessage = buildDuplicateClientMessage(duplicateCheck);
+    setFormFieldErrors((currentErrors) => ({ ...currentErrors, cnpj: duplicateMessage }));
+    setFormError(duplicateMessage);
+    toast.error(duplicateMessage);
   };
 
   const downloadImportTemplate = async () => {
