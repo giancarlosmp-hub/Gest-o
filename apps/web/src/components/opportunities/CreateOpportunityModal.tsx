@@ -138,9 +138,9 @@ export default function CreateOpportunityModal({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/60 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="mobile-modal-shell" role="dialog" aria-modal="true" onClick={onClose}>
       <div
-        className="flex h-full w-full max-w-full flex-col bg-white sm:h-auto sm:max-h-[calc(100vh-2rem)] sm:max-w-3xl sm:rounded-2xl"
+        className="mobile-modal-panel h-full max-w-full sm:max-w-3xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
@@ -151,7 +151,7 @@ export default function CreateOpportunityModal({
         </div>
 
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 space-y-6 overflow-y-auto overscroll-contain p-4 sm:p-6">
+          <div className="mobile-modal-body space-y-6 overscroll-contain">
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Identificação</h4>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -317,11 +317,11 @@ export default function CreateOpportunityModal({
             {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
           </div>
 
-          <div className="sticky bottom-0 z-10 flex shrink-0 justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
-            <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={onClose}>
+          <div className="mobile-modal-footer sticky bottom-0 z-10 border-t border-slate-200 bg-white shadow-[0_-8px_24px_rgba(15,23,42,0.06)] sm:shadow-none">
+            <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={onClose}>
               Cancelar
             </button>
-            <button type="submit" disabled={isSaving} className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
+            <button type="submit" disabled={isSaving} className="mobile-primary-button rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
               {isSaving ? "Salvando..." : submitLabel}
             </button>
           </div>

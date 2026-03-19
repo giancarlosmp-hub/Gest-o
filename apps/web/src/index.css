@@ -63,7 +63,7 @@ body {
   }
 
   .mobile-modal-panel {
-    @apply flex w-full max-w-lg flex-col bg-white shadow-xl sm:max-h-[90vh] sm:rounded-2xl;
+    @apply flex max-h-[90vh] w-full max-w-lg flex-col bg-white shadow-xl sm:rounded-2xl;
   }
 
   .mobile-modal-body {
