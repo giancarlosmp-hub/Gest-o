@@ -2981,19 +2981,27 @@ router.get("/reports/weekly-highlights", async (req, res) => {
 
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
-  const [sellers, currentSales, previousSales, executionActivities, opportunitiesCreated] = await Promise.all([
+  const [sellers, currentWonOpportunities, previousWonOpportunities, executionActivities, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
       where: { role: "vendedor" },
       select: { id: true, name: true }
     }),
-    prisma.sale.groupBy({
-      by: ["sellerId"],
-      where: { date: { gte: range.start, lte: range.end } },
+    prisma.opportunity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        stage: "ganho",
+        ...sellerWhere(req),
+        ...buildWonOpportunityDateRangeFilter(range.start, range.end)
+      },
       _sum: { value: true }
     }),
-    prisma.sale.groupBy({
-      by: ["sellerId"],
-      where: { date: { gte: range.previousStart, lte: range.previousEnd } },
+    prisma.opportunity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        stage: "ganho",
+        ...sellerWhere(req),
+        ...buildWonOpportunityDateRangeFilter(range.previousStart, range.previousEnd)
+      },
       _sum: { value: true }
     }),
     prisma.activity.findMany({
@@ -3017,13 +3025,15 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     })
   ]);
 
-  const currentSalesMap = currentSales.reduce<Record<string, number>>((acc, row) => {
-    acc[row.sellerId] = row._sum.value ?? 0;
+  const currentSalesMap = currentWonOpportunities.reduce<Record<string, number>>((acc, row) => {
+    if (!row.ownerSellerId) return acc;
+    acc[row.ownerSellerId] = row._sum.value ?? 0;
     return acc;
   }, {});
 
-  const previousSalesMap = previousSales.reduce<Record<string, number>>((acc, row) => {
-    acc[row.sellerId] = row._sum.value ?? 0;
+  const previousSalesMap = previousWonOpportunities.reduce<Record<string, number>>((acc, row) => {
+    if (!row.ownerSellerId) return acc;
+    acc[row.ownerSellerId] = row._sum.value ?? 0;
     return acc;
   }, {});
 
