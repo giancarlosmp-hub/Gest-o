@@ -1,10 +1,12 @@
 import { Router } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
+import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sellerWhere } from "../utils/access.js";
 
 const router = Router();
 router.use(authMiddleware);
+router.use(appUsageRateLimit);
 
 const getMonthRange = (month: string) => {
   const [year, monthN] = month.split("-").map(Number);

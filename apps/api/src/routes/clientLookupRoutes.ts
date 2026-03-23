@@ -1,12 +1,14 @@
 import { Router } from "express";
 import { env } from "../config/env.js";
 import { authMiddleware } from "../middlewares/auth.js";
+import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { CnpjLookupError, cnpjLookupService } from "../services/cnpjLookupService.js";
 import { parseCnpj } from "../utils/cnpj.js";
 
 const router = Router();
 
 router.use(authMiddleware);
+router.use(appUsageRateLimit);
 
 // Esta rota precisa ficar registrada fora do CRUD genérico para garantir
 // disponibilidade explícita no boot e precedência sobre qualquer matching futuro.
