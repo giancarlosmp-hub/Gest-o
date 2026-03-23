@@ -1,7 +1,6 @@
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import clientLookupRoutes from "./routes/clientLookupRoutes.js";
@@ -10,6 +9,7 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
+import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./middlewares/rateLimit.js";
 
 export const app = express();
 
@@ -39,34 +39,7 @@ app.use(
     credentials: true,
   })
 );
-const isProduction = env.isProduction;
-
-const apiRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: isProduction ? 200 : 5_000,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => req.path === "/health",
-  handler: (req, res) => {
-    const details = req.rateLimit;
-    const userId = req.user?.id ?? "anonymous";
-
-    logApiEvent("WARN", "[rate-limit] 429", {
-      requestId: req.requestId,
-      route: req.originalUrl,
-      ip: req.ip,
-      userId,
-      current: details?.used,
-      limit: details?.limit,
-      remaining: details?.remaining,
-    });
-
-    res.status(429).json({ message: "Muitas requisições. Tente novamente em instantes." });
-  },
-});
-
 app.use(requestContextMiddleware);
-app.use(apiRateLimit);
 app.use((req, res, next) => {
   req.setTimeout(env.apiRequestTimeoutMs);
   res.setTimeout(env.apiRequestTimeoutMs, () => {
@@ -87,6 +60,11 @@ app.get("/health", (_req, res) => {
     version: env.appVersion,
   });
 });
+
+app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);
+app.use(["/auth/refresh", "/api/auth/refresh"], authRefreshRateLimit);
+app.use(["/auth/me", "/api/auth/me", "/auth/logout", "/api/auth/logout"], appUsageRateLimit);
+app.use("/technical-cultures", appUsageRateLimit);
 
 app.get("/technical-cultures", async (_req, res) => {
   try {
@@ -117,12 +95,14 @@ app.get("/technical-cultures", async (_req, res) => {
   }
 });
 app.use("/auth", authRoutes);
+app.use("/api/auth", authRoutes);
+
+
 app.use("/dashboard", dashboardRoutes);
 app.use("/", clientLookupRoutes);
 app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
-app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", clientLookupRoutes);
 app.use("/api", crudRoutes);

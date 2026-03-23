@@ -1,6 +1,7 @@
 import express, { Router, type Request } from "express";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
+import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { validateBody } from "../middlewares/validate.js";
 import {
   activityKpiUpsertSchema,
@@ -33,6 +34,7 @@ import { hashPassword } from "../utils/password.js";
 
 const router = Router();
 router.use(authMiddleware);
+router.use(appUsageRateLimit);
 
 
 type CultureGoalRange = { min: number; max: number };
