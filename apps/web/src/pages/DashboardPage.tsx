@@ -389,7 +389,7 @@ export default function DashboardPage() {
       api.get<DashboardSalesSeries>(`/dashboard/sales-series?month=${month}${querySeller}`, { signal }),
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`, { signal }),
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
-      api.get<Activity[]>(`/activities?month=${month}${querySeller}`, { signal }),
+      api.get<Activity[]>(`/activities?month=${month}${querySeller}&done=true`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
       api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}`, { signal }),
@@ -779,10 +779,11 @@ export default function DashboardPage() {
     }
 
     for (const item of activities) {
+      if (!item.done) continue;
+      if (!item.date || !item.date.startsWith(`${month}-`)) continue;
       const normalizedType = normalizeActivityType(item.type);
       realizedByType.set(normalizedType, (realizedByType.get(normalizedType) ?? 0) + 1);
-      const executionDate = item.date || item.createdAt || item.dueDate;
-      const day = executionDate.slice(0, 10);
+      const day = item.date.slice(0, 10);
       realizedByDay.set(day, (realizedByDay.get(day) ?? 0) + 1);
     }
 
