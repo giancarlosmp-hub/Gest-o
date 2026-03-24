@@ -52,6 +52,8 @@ export default function ClientSearchSelect({
   const [searchValue, setSearchValue] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const isPointerDraggingRef = useRef(false);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedClient = useMemo(() => clients.find((client) => client.id === value) || null, [clients, value]);
 
@@ -102,7 +104,9 @@ export default function ClientSearchSelect({
       />
       {required ? <input required tabIndex={-1} className="sr-only" value={value} onChange={() => undefined} aria-hidden /> : null}
       {isOpen ? (
-        <div className={`absolute z-20 mt-1 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg ${maxListHeightClassName}`}>
+        <div
+          className={`absolute z-20 mt-1 w-full overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white shadow-lg [touch-action:pan-y] [-webkit-overflow-scrolling:touch] ${maxListHeightClassName}`}
+        >
           {filteredClients.length ? (
             filteredClients.map((client) => (
               <button
@@ -110,7 +114,27 @@ export default function ClientSearchSelect({
                 type="button"
                 className="block w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0 hover:bg-slate-50"
                 onPointerDown={(event) => {
-                  event.preventDefault();
+                  pointerStartRef.current = { x: event.clientX, y: event.clientY };
+                  isPointerDraggingRef.current = false;
+                }}
+                onPointerMove={(event) => {
+                  if (!pointerStartRef.current) return;
+                  const deltaX = Math.abs(event.clientX - pointerStartRef.current.x);
+                  const deltaY = Math.abs(event.clientY - pointerStartRef.current.y);
+                  if (deltaX > 6 || deltaY > 6) isPointerDraggingRef.current = true;
+                }}
+                onPointerCancel={() => {
+                  pointerStartRef.current = null;
+                  isPointerDraggingRef.current = false;
+                }}
+                onPointerUp={() => {
+                  pointerStartRef.current = null;
+                }}
+                onClick={() => {
+                  if (isPointerDraggingRef.current) {
+                    isPointerDraggingRef.current = false;
+                    return;
+                  }
                   onChange(client.id);
                   setSearchValue(formatClientLabel(client));
                   setIsOpen(false);
