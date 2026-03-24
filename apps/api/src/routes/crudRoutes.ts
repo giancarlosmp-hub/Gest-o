@@ -2585,9 +2585,9 @@ router.get("/reports/weekly-missions", async (req, res) => {
     prisma.activity.groupBy({
       by: ["ownerSellerId"],
       where: {
-        type: "visita",
+        ...resolveActivityTypeFilters("visita"),
         done: true,
-        dueDate: { gte: range.start, lte: range.end }
+        ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
       _count: { _all: true }
     }),
@@ -2596,7 +2596,7 @@ router.get("/reports/weekly-missions", async (req, res) => {
       where: {
         ...resolveActivityTypeFilters("followup", "follow_up"),
         done: true,
-        dueDate: { gte: range.start, lte: range.end }
+        ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
       _count: { _all: true }
     }),
@@ -2605,7 +2605,7 @@ router.get("/reports/weekly-missions", async (req, res) => {
       where: {
         ...resolveActivityTypeFilters("proposta_enviada", "envio_proposta"),
         done: true,
-        dueDate: { gte: range.start, lte: range.end }
+        ...resolveExecutionActivityDateFilter(range.start, range.end)
       },
       _count: { _all: true }
     }),
