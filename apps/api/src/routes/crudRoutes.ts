@@ -542,6 +542,8 @@ const resolveActivityTypeFilters = (...types: string[]) => {
   return normalized.length === 1 ? { type: normalized[0] } : { type: { in: normalized } };
 };
 
+const VISIT_TYPES = ["visita", "visita_tecnica"] as const;
+
 const ACTIVITY_EXECUTED_LABEL: Partial<Record<ActivityType, string>> = {
   ligacao: "Ligação realizada",
   visita: "Visita realizada",
@@ -5902,7 +5904,7 @@ router.get("/activity-kpis", async (req, res) => {
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
   const { start, end } = getMonthRangeFromKey(month);
 
-  const [activityKpis, monthActivityCounts] = await Promise.all([
+  const [activityKpis, monthActivityCounts, visitCountsBySeller] = await Promise.all([
     prisma.activityKPI.findMany({
       where: {
         month,
@@ -5923,17 +5925,30 @@ router.get("/activity-kpis", async (req, res) => {
         ...resolveExecutionActivityDateFilter(start, end)
       },
       _count: { _all: true }
+    }),
+    prisma.activity.groupBy({
+      by: ["ownerSellerId"],
+      where: {
+        ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
+        done: true,
+        type: { in: [...VISIT_TYPES] },
+        date: { gte: start, lte: end }
+      },
+      _count: { _all: true }
     })
   ]);
 
   const logicalCountBySellerAndType = new Map(
     monthActivityCounts.map((countEntry) => [`${countEntry.ownerSellerId}:${countEntry.type}`, countEntry._count._all])
   );
+  const visitLogicalCountBySeller = new Map(visitCountsBySeller.map((countEntry) => [countEntry.ownerSellerId, countEntry._count._all]));
 
   return res.json(
     activityKpis.map((activityKpi) => ({
       ...activityKpi,
-      logicalCount: logicalCountBySellerAndType.get(`${activityKpi.sellerId}:${activityKpi.type}`) ?? 0
+      logicalCount: VISIT_TYPES.includes(activityKpi.type as (typeof VISIT_TYPES)[number])
+        ? (visitLogicalCountBySeller.get(activityKpi.sellerId) ?? 0)
+        : (logicalCountBySellerAndType.get(`${activityKpi.sellerId}:${activityKpi.type}`) ?? 0)
     }))
   );
 });
