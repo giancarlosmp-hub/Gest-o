@@ -5664,6 +5664,13 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
   if (req.body.status === "nao_realizada" && !req.body.reason) {
     return res.status(400).json({ message: "Motivo é obrigatório quando a visita não é realizada." });
   }
+  const ownerSellerIdForAutoActivity = stop.agendaEvent.sellerId || req.user!.id;
+  if (req.body.status === "realizada" && !stop.clientId) {
+    return res.status(400).json({ message: "clientId é obrigatório para registrar atividade automática da parada." });
+  }
+  if (req.body.status === "realizada" && !ownerSellerIdForAutoActivity) {
+    return res.status(400).json({ message: "ownerSellerId é obrigatório para registrar atividade automática da parada." });
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const completionAt = req.body.status === "realizada" ? (stop.checkOutAt ?? new Date()) : null;
@@ -5680,6 +5687,12 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     });
 
     if (req.body.status === "realizada") {
+      const executionDate = updatedStop.checkOutAt ?? completionAt;
+      if (!executionDate) {
+        throw new Error("Não foi possível determinar o horário de conclusão da parada.");
+      }
+      const ownerSellerId = ownerSellerIdForAutoActivity!;
+      const clientId = updatedStop.clientId || stop.clientId!;
       const stopRefToken = `[AUTO_AGENDA_STOP:${updatedStop.id}]`;
       const summary = (req.body.summary || "").trim();
       const agendaTitle = stop.agendaEvent.title?.trim() || "Roteiro de visita";
@@ -5692,17 +5705,17 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
         notes,
         result,
         description,
-        dueDate: completionAt ?? new Date(),
-        date: completionAt ?? new Date(),
+        dueDate: executionDate,
+        date: executionDate,
         agendaEventId: updatedStop.agendaEventId,
-        ownerSellerId: stop.agendaEvent.sellerId,
-        clientId: updatedStop.clientId
+        ownerSellerId,
+        clientId
       };
 
       const existingAutoActivity = await tx.activity.findFirst({
         where: {
           agendaEventId: updatedStop.agendaEventId,
-          ownerSellerId: stop.agendaEvent.sellerId,
+          ownerSellerId,
           type: ActivityType.visita,
           description: { contains: stopRefToken }
         },
