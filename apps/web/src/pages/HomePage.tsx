@@ -12,6 +12,7 @@ type Activity = {
   id: string;
   type: string;
   notes: string;
+  date?: string;
   dueDate: string;
   createdAt: string;
   done: boolean;
@@ -318,13 +319,17 @@ export default function HomePage() {
 
   const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();
+    const eligibleActivityTypes = new Set(["visita", "visita_tecnica"]);
+
     const plannedAppointments = agendaEventsToday
       .filter((item) => (item.status ?? "planned") === "planned")
       .filter((item) => isSameDay(String(item.startsAt || item.startDateTime || ""), start, end));
 
 
     const dayActivities = activities
-      .filter((item) => isSameDay(getActivityExecutionDate(item), start, end))
+      .filter((item) => item.done)
+      .filter((item) => eligibleActivityTypes.has(normalizeActivityType(item.type)))
+      .filter((item) => item.date && isSameDay(item.date, start, end))
       .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
 
     const toFollowUpDate = (value?: string | null) => {
