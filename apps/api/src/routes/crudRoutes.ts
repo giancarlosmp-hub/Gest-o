@@ -583,11 +583,7 @@ const buildActivityExecutedDescription = (activity: {
 const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "reuniao", "followup", "follow_up"];
 
 const resolveExecutionActivityDateFilter = (from: Date, to: Date): Prisma.ActivityWhereInput => ({
-  OR: [
-    { date: { gte: from, lte: to } },
-    { createdAt: { gte: from, lte: to } },
-    { dueDate: { gte: from, lte: to } }
-  ]
+  date: { gte: from, lte: to }
 });
 
 const getActivityCountByTypeInMonth = async (ownerSellerId: string, type: ActivityType, monthKey: string) => {
@@ -4945,7 +4941,11 @@ router.get("/activities", async (req, res) => {
       ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
       ...(type ? resolveActivityTypeFilters(type) : {}),
       ...(doneQuery !== undefined ? { done: doneQuery } : {}),
-      ...(monthRange ? { dueDate: { gte: monthRange.start, lte: monthRange.end } } : {}),
+      ...(monthRange
+        ? (doneQuery === true
+            ? { date: { gte: monthRange.start, lte: monthRange.end } }
+            : { dueDate: { gte: monthRange.start, lte: monthRange.end } })
+        : {}),
       ...(clientId
         ? {
             OR: [
