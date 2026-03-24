@@ -465,6 +465,21 @@ const getWeekRangeFromMonday = (weekStartRaw: string) => {
   return { start, end };
 };
 
+const getCurrentWeekRangeFromBrazilNow = () => {
+  const now = getBrazilNow();
+  const start = new Date(now);
+  const day = start.getUTCDay();
+  const diffToMonday = (day + 6) % 7;
+  start.setUTCDate(start.getUTCDate() - diffToMonday);
+  start.setUTCHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  end.setUTCHours(23, 59, 59, 999);
+
+  return { start, end };
+};
+
 const DEFAULT_WEEKLY_VISIT_GOAL = 25;
 const WEEKLY_VISIT_GOAL_KEY = "weeklyVisitGoal";
 const APP_CONFIG_CACHE_TTL_MS = 60_000;
@@ -2436,15 +2451,9 @@ router.get("/reports/planned-vs-realized", async (req, res) => {
 });
 
 router.get("/reports/weekly-discipline", async (req, res) => {
-  const weekStart = String(req.query.weekStart || "").trim();
-  const range = getWeekRangeFromMonday(weekStart);
-
-  if (!range) {
-    return res.status(400).json({ message: "weekStart deve estar no formato YYYY-MM-DD e ser uma segunda-feira." });
-  }
-
-  const scopedSellerId = undefined;
-  const [minimumRequired, sellers, plannedBySeller, executedBySeller] = await Promise.all([
+  const range = getCurrentWeekRangeFromBrazilNow();
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : undefined;
+  const [minimumRequired, sellers, visitsBySeller] = await Promise.all([
     getWeeklyVisitGoal(),
     prisma.user.findMany({
       where: {
@@ -2455,47 +2464,33 @@ router.get("/reports/weekly-discipline", async (req, res) => {
       select: { id: true, name: true },
       orderBy: { name: "asc" }
     }),
-    prisma.agendaEvent.groupBy({
-      by: ["sellerId"],
-      where: {
-        type: "roteiro_visita",
-        startDateTime: { gte: range.start, lte: range.end },
-        ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
-      },
-      _count: { _all: true }
-    }),
     prisma.activity.groupBy({
       by: ["ownerSellerId"],
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
+        type: "visita",
         done: true,
-        ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
-        ...resolveExecutionActivityDateFilter(range.start, range.end)
+        date: { gte: range.start, lte: range.end }
       },
       _count: { _all: true }
     })
   ]);
 
-  const plannedMap = plannedBySeller.reduce<Record<string, number>>((acc, item) => {
-    acc[item.sellerId] = item._count._all;
-    return acc;
-  }, {});
-
-  const executedMap = executedBySeller.reduce<Record<string, number>>((acc, item) => {
+  const executedMap = visitsBySeller.reduce<Record<string, number>>((acc, item) => {
     acc[item.ownerSellerId] = item._count._all;
     return acc;
   }, {});
 
   return res.json(
     sellers.map((seller) => {
-      const planned = plannedMap[seller.id] || 0;
+      const executed = executedMap[seller.id] || 0;
       return {
         sellerId: seller.id,
         sellerName: seller.name,
-        planned,
-        executed: executedMap[seller.id] || 0,
+        planned: executed,
+        executed,
         minimumRequired,
-        belowMinimum: planned < minimumRequired
+        belowMinimum: executed < minimumRequired
       };
     })
   );
@@ -2974,16 +2969,15 @@ router.get("/reports/score-monthly", async (req, res) => {
 });
 
 router.get("/reports/weekly-highlights", async (req, res) => {
-  const weekStartRaw = String(req.query.weekStart || "").trim();
-  const range = getWeekRangeFromStart(weekStartRaw);
-
-  if (!range) {
-    return res.status(400).json({ message: "Parâmetro weekStart inválido. Use YYYY-MM-DD." });
-  }
+  const range = getCurrentWeekRangeFromBrazilNow();
+  const previousStart = new Date(range.start);
+  previousStart.setUTCDate(previousStart.getUTCDate() - 7);
+  const previousEnd = new Date(range.end);
+  previousEnd.setUTCDate(previousEnd.getUTCDate() - 7);
 
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
-  const [sellers, currentWonOpportunities, previousWonOpportunities, executionActivities, opportunitiesCreated] = await Promise.all([
+  const [sellers, currentWonOpportunities, previousWonOpportunities, visitActivities, followUpActivities, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
       where: { role: "vendedor" },
       select: { id: true, name: true }
@@ -3002,7 +2996,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       where: {
         stage: "ganho",
         ...sellerWhere(req),
-        ...buildWonOpportunityDateRangeFilter(range.previousStart, range.previousEnd)
+        ...buildWonOpportunityDateRangeFilter(previousStart, previousEnd)
       },
       _sum: { value: true }
     }),
@@ -3010,15 +3004,23 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       where: {
         ...sellerWhere(req),
         done: true,
-        ...resolveActivityTypeFilters(...EXECUTION_ACTIVITY_TYPES),
-        ...resolveExecutionActivityDateFilter(range.start, range.end)
+        type: "visita",
+        date: { gte: range.start, lte: range.end }
       },
       select: {
         ownerSellerId: true,
-        type: true,
-        opportunityId: true,
-        createdAt: true,
-        dueDate: true
+        opportunityId: true
+      }
+    }),
+    prisma.activity.findMany({
+      where: {
+        ...sellerWhere(req),
+        done: true,
+        ...resolveActivityTypeFilters("followup", "follow_up"),
+        date: { gte: range.start, lte: range.end }
+      },
+      select: {
+        ownerSellerId: true
       }
     }),
     prisma.opportunity.findMany({
@@ -3044,13 +3046,12 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     return acc;
   }, {});
 
-  const executedBySeller = executionActivities.reduce<Record<string, number>>((acc, item) => {
+  const executedBySeller = visitActivities.reduce<Record<string, number>>((acc, item) => {
     acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
 
-  const followUpsBySeller = executionActivities.reduce<Record<string, number>>((acc, item) => {
-    if (normalizeActivityType(item.type) !== "followup") return acc;
+  const followUpsBySeller = followUpActivities.reduce<Record<string, number>>((acc, item) => {
     acc[item.ownerSellerId] = (acc[item.ownerSellerId] || 0) + 1;
     return acc;
   }, {});
