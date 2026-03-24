@@ -580,7 +580,7 @@ const buildActivityExecutedDescription = (activity: {
   return `${baseLabel}. ${details.join(" | ")}`;
 };
 
-const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "reuniao", "followup", "follow_up"];
+const EXECUTION_ACTIVITY_TYPES: ActivityType[] = ["visita", "visita_tecnica", "reuniao", "followup", "follow_up"];
 
 const resolveExecutionActivityDateFilter = (from: Date, to: Date): Prisma.ActivityWhereInput => ({
   date: { gte: from, lte: to }
@@ -2746,8 +2746,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
         ownerSellerId: true,
         opportunityId: true,
         type: true,
-        createdAt: true,
-        dueDate: true
+        date: true
       }
     }),
     prisma.activity.groupBy({
@@ -2755,7 +2754,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
       where: {
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : sellerWhere(req)),
         done: true,
-        ...resolveActivityTypeFilters("visita", "reuniao"),
+        ...resolveActivityTypeFilters("visita", "visita_tecnica", "reuniao"),
         ...resolveExecutionActivityDateFilter(inactivityWindow.start, inactivityWindow.end)
       },
       _count: { _all: true }
@@ -2774,7 +2773,9 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     .reduce<Record<string, Date[]>>((acc, item) => {
       const key = `${item.ownerSellerId}:${item.opportunityId}`;
       if (!acc[key]) acc[key] = [];
-      acc[key].push(item.createdAt);
+      if (item.date) {
+        acc[key].push(item.date);
+      }
       return acc;
     }, {});
 
@@ -2809,9 +2810,10 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     sellerStats.punctual += 1;
 
     const normalizedType = normalizeActivityType(activity.type);
-    if ((normalizedType === "visita" || normalizedType === "reuniao") && activity.opportunityId) {
+    if ((normalizedType === "visita" || normalizedType === "visita_tecnica" || normalizedType === "reuniao") && activity.opportunityId) {
+      if (!activity.date) continue;
       const key = `${activity.ownerSellerId}:${activity.opportunityId}`;
-      const executionDate = activity.createdAt || activity.dueDate;
+      const executionDate = activity.date;
       const hasFollowUpAfterVisit = (followUpsIndex[key] || []).some((createdAt) => createdAt.getTime() >= executionDate.getTime());
       if (hasFollowUpAfterVisit) {
         sellerStats.followUpAfterVisit += 1;
