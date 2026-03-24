@@ -5665,16 +5665,62 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
     return res.status(400).json({ message: "Motivo é obrigatório quando a visita não é realizada." });
   }
 
-  const updated = await prisma.agendaStop.update({
-    where: { id: req.params.id },
-    data: {
-      resultStatus: req.body.status,
-      resultReason: req.body.reason,
-      resultSummary: req.body.summary,
-      nextStep: req.body.nextStep,
-      nextStepDate: req.body.nextStepDate ? new Date(req.body.nextStepDate) : null
+  const updated = await prisma.$transaction(async (tx) => {
+    const completionAt = req.body.status === "realizada" ? (stop.checkOutAt ?? new Date()) : null;
+    const updatedStop = await tx.agendaStop.update({
+      where: { id: req.params.id },
+      data: {
+        resultStatus: req.body.status,
+        resultReason: req.body.reason,
+        resultSummary: req.body.summary,
+        nextStep: req.body.nextStep,
+        nextStepDate: req.body.nextStepDate ? new Date(req.body.nextStepDate) : null,
+        ...(completionAt && !stop.checkOutAt ? { checkOutAt: completionAt } : {})
+      }
+    });
+
+    if (req.body.status === "realizada") {
+      const stopRefToken = `[AUTO_AGENDA_STOP:${updatedStop.id}]`;
+      const summary = (req.body.summary || "").trim();
+      const agendaTitle = stop.agendaEvent.title?.trim() || "Roteiro de visita";
+      const notes = summary || `Parada do roteiro "${agendaTitle}" concluída.`;
+      const result = summary || "Visita realizada em parada de roteiro.";
+      const description = `Visita em roteiro (${agendaTitle}) ${stopRefToken}`;
+      const activityData = {
+        type: ActivityType.visita,
+        done: true,
+        notes,
+        result,
+        description,
+        dueDate: completionAt ?? new Date(),
+        date: completionAt ?? new Date(),
+        agendaEventId: updatedStop.agendaEventId,
+        ownerSellerId: stop.agendaEvent.sellerId,
+        clientId: updatedStop.clientId
+      };
+
+      const existingAutoActivity = await tx.activity.findFirst({
+        where: {
+          agendaEventId: updatedStop.agendaEventId,
+          ownerSellerId: stop.agendaEvent.sellerId,
+          type: ActivityType.visita,
+          description: { contains: stopRefToken }
+        },
+        orderBy: { createdAt: "asc" }
+      });
+
+      if (existingAutoActivity) {
+        await tx.activity.update({
+          where: { id: existingAutoActivity.id },
+          data: activityData
+        });
+      } else {
+        await tx.activity.create({ data: activityData });
+      }
     }
-  });
+
+    return updatedStop;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
   if (updated.clientId) {
     const statusLabel = updated.resultStatus === "realizada" ? "Compromisso concluído" : "Compromisso cancelado";
