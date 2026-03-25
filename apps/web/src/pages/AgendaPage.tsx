@@ -876,7 +876,7 @@ export default function AgendaPage() {
       updateStopState(activeStopId, response.data);
       closeResultModal();
       setEventsRefreshToken((current) => current + 1);
-      toast.success("Resultado da visita salvo.");
+      toast.success("Visita registrada com sucesso");
       triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
@@ -984,7 +984,7 @@ export default function AgendaPage() {
         )
       );
       setEventsRefreshToken((current) => current + 1);
-      toast.success(response.data?.message || "Follow-up criado com sucesso.");
+      toast.success("Follow-up criado");
       closeFollowUpModal();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
@@ -1037,7 +1037,7 @@ export default function AgendaPage() {
         );
       }
 
-      toast.success("Oportunidade criada e vinculada ao roteiro.");
+      toast.success("Oportunidade criada com sucesso");
       setIsQuickOpportunityModalOpen(false);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar oportunidade."));
