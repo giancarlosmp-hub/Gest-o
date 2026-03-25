@@ -59,6 +59,8 @@ type ExistingClientOption = {
   cnpj?: string | null;
 };
 
+type PreviewStatusFilter = "all" | "valid" | "error" | "duplicate";
+
 
 type ImportDictionaryColumn = {
   key: string;
@@ -102,6 +104,7 @@ type OpportunityImportResponse = {
 const REQUIRED_FIELDS: OpportunityImportFieldKey[] = ["title", "clientNameOrId", "value", "stage", "probability"];
 const VALID_STAGES = new Set(["prospeccao", "negociacao", "proposta", "ganho"]);
 const VALID_STATUS = new Set(["open", "closed"]);
+const PAGE_SIZE = 20;
 
 const FALLBACK_DICTIONARY: OpportunityImportDictionary = {
   columns: [
@@ -464,6 +467,9 @@ export default function OpportunityImportModal({
   const [dictionary, setDictionary] = useState<OpportunityImportDictionary>(FALLBACK_DICTIONARY);
   const [clients, setClients] = useState<ExistingClientOption[]>([]);
   const [selectingClientForLine, setSelectingClientForLine] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<PreviewStatusFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [expandedLines, setExpandedLines] = useState<Record<number, boolean>>({});
 
   // ✅ Mantém as duas opções (resolve o conflito)
   const [isDryRun, setIsDryRun] = useState(false);
@@ -515,6 +521,28 @@ export default function OpportunityImportModal({
     [previewRows]
   );
 
+  const filteredPreviewRows = useMemo(() => {
+    if (statusFilter === "all") return previewRows;
+    if (statusFilter === "valid") return previewRows.filter((row) => row.status === "new" || row.status === "update");
+    if (statusFilter === "error") return previewRows.filter((row) => row.status === "error");
+    return previewRows.filter((row) => row.status === "ignored" || row.status === "update");
+  }, [previewRows, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredPreviewRows.length / PAGE_SIZE));
+
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredPreviewRows.slice(start, start + PAGE_SIZE);
+  }, [currentPage, filteredPreviewRows]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, previewRows.length]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   const reset = () => {
     setFileName("");
     setDetectedHeaders([]);
@@ -528,6 +556,10 @@ export default function OpportunityImportModal({
     setDedupeWindowDays(30);
     setDedupeCompareStatuses("open_only");
     setDedupeMode("skip");
+    setStatusFilter("all");
+    setCurrentPage(1);
+    setExpandedLines({});
+    setSelectingClientForLine(null);
     onClose();
   };
 
@@ -769,6 +801,24 @@ export default function OpportunityImportModal({
     );
   };
 
+  const toggleExpandLine = (line: number) => {
+    setExpandedLines((current) => ({ ...current, [line]: !current[line] }));
+  };
+
+  const getRowStatusLabel = (row: OpportunityPreviewRow) => {
+    if (row.status === "new") return "NOVO";
+    if (row.status === "update") return "ATUALIZAR";
+    if (row.status === "ignored") return "IGNORADO";
+    return "ERRO";
+  };
+
+  const getRowStatusClassName = (row: OpportunityPreviewRow) => {
+    if (row.status === "error") return "bg-rose-50";
+    if (row.status === "ignored") return "bg-amber-50";
+    if (row.status === "update") return "bg-blue-50";
+    return "bg-emerald-50";
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -822,6 +872,14 @@ export default function OpportunityImportModal({
             <span className="font-semibold text-amber-700">{counters.duplicate} duplicadas</span> ·{" "}
             <span className="font-semibold text-rose-700">{counters.error} com erro</span>
           </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filtro do preview:</span>
+            <button type="button" onClick={() => setStatusFilter("all")} className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}>Todos</button>
+            <button type="button" onClick={() => setStatusFilter("valid")} className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === "valid" ? "bg-emerald-700 text-white" : "bg-emerald-100 text-emerald-800"}`}>Válidas</button>
+            <button type="button" onClick={() => setStatusFilter("error")} className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === "error" ? "bg-rose-700 text-white" : "bg-rose-100 text-rose-800"}`}>Com erro</button>
+            <button type="button" onClick={() => setStatusFilter("duplicate")} className={`rounded-full px-3 py-1 text-xs font-medium ${statusFilter === "duplicate" ? "bg-amber-700 text-white" : "bg-amber-100 text-amber-800"}`}>Duplicadas</button>
+          </div>
 
           <div className="flex flex-wrap gap-4">
             <label className="inline-flex items-center gap-2 text-sm text-slate-700">
@@ -924,9 +982,9 @@ export default function OpportunityImportModal({
                 </tr>
               </thead>
               <tbody>
-                {previewRows.length ? (
-                  previewRows.slice(0, 20).map((row) => (
-                    <tr key={row.line} className="border-t border-slate-200">
+                {paginatedRows.length ? (
+                  paginatedRows.map((row) => (
+                    <tr key={row.line} className={`border-t border-slate-200 ${getRowStatusClassName(row)}`}>
                       <td className="px-3 py-2">{row.line}</td>
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>
@@ -993,10 +1051,26 @@ export default function OpportunityImportModal({
                             </option>
                           ))}
                         </select>
+                        <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{getRowStatusLabel(row)}</p>
                       </td>
                       <td className="px-3 py-2">
                         <div className="space-y-1">
-                          <p>{row.reason || "OK"}</p>
+                          <p>
+                            {row.reason
+                              ? expandedLines[row.line] || row.reason.length <= 80
+                                ? row.reason
+                                : `${row.reason.slice(0, 80)}...`
+                              : "OK"}
+                          </p>
+                          {row.reason && row.reason.length > 80 ? (
+                            <button
+                              type="button"
+                              className="text-[11px] font-medium text-brand-700 hover:underline"
+                              onClick={() => toggleExpandLine(row.line)}
+                            >
+                              {expandedLines[row.line] ? "Ocultar erro" : "Expandir erro"}
+                            </button>
+                          ) : null}
                           {row.manuallyCorrected ? (
                             <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
                               corrigido manualmente
@@ -1017,8 +1091,31 @@ export default function OpportunityImportModal({
             </table>
           </div>
 
-          {previewRows.length > 20 ? (
-            <p className="text-xs text-slate-500">Mostrando 20 de {previewRows.length} linhas no preview.</p>
+          {filteredPreviewRows.length ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">
+                Mostrando {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredPreviewRows.length)} de {filteredPreviewRows.length} linha(s) filtradas.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                  disabled={currentPage === 1}
+                  className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 disabled:opacity-50"
+                >
+                  Anterior
+                </button>
+                <span className="text-xs text-slate-600">Página {currentPage} de {totalPages}</span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                  disabled={currentPage === totalPages}
+                  className="rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 disabled:opacity-50"
+                >
+                  Próxima
+                </button>
+              </div>
+            </div>
           ) : null}
         </div>
 
