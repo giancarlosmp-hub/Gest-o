@@ -54,24 +54,7 @@ type QuickOpportunityForm = {
 
 type VisitResultForm = {
   status: "realizada" | "nao_realizada";
-  reason: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro";
   summary: string;
-  nextStep: "criar_followup" | "criar_oportunidade" | "reagendar";
-  nextStepDate: string;
-};
-
-const VISIT_REASON_LABEL: Record<VisitResultForm["reason"], string> = {
-  cliente_ausente: "Cliente ausente",
-  chuva: "Chuva",
-  estrada: "Estrada",
-  reagendar: "Reagendar",
-  outro: "Outro"
-};
-
-const NEXT_STEP_LABEL: Record<VisitResultForm["nextStep"], string> = {
-  criar_followup: "Criar follow-up",
-  criar_oportunidade: "Criar oportunidade",
-  reagendar: "Reagendar"
 };
 
 const typedAgendaEventOptions = AGENDA_EVENT_TYPE_OPTIONS as readonly { id: string; value: SharedAgendaEventType; label: string }[];
@@ -108,6 +91,18 @@ const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   cancelled: "border-slate-200 bg-slate-100 text-slate-700"
 };
 
+const STOP_MOBILE_STATUS_LABEL: Record<StopMobileStatus, string> = {
+  pendente: "Pendente",
+  realizada: "Realizada",
+  nao_realizada: "Não realizada"
+};
+
+const STOP_MOBILE_STATUS_CLASS: Record<StopMobileStatus, string> = {
+  pendente: "border-amber-200 bg-amber-100 text-amber-800",
+  realizada: "border-green-200 bg-green-100 text-green-800",
+  nao_realizada: "border-rose-200 bg-rose-100 text-rose-800"
+};
+
 const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
   today: "Hoje",
   this_week: "Esta semana",
@@ -120,6 +115,8 @@ type DateRange = {
   start: Date;
   end: Date;
 };
+
+type StopMobileStatus = "pendente" | "realizada" | "nao_realizada";
 
 function normalizeEventType(type: string | undefined): string {
   return String(type || "")
@@ -252,6 +249,12 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function getStopMobileStatus(stop: AgendaStop): StopMobileStatus {
+  if (stop.resultStatus === "realizada") return "realizada";
+  if (stop.resultStatus === "nao_realizada") return "nao_realizada";
+  return "pendente";
 }
 
 function createEmptyDraftStop(): DraftStop {
@@ -419,12 +422,10 @@ export default function AgendaPage() {
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [activeStopId, setActiveStopId] = useState("");
   const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
-    reason: "cliente_ausente",
-    summary: "",
-    nextStep: "criar_followup",
-    nextStepDate: ""
+    summary: ""
   });
 
   const dateRange = useMemo(() => getRangeFromFilter(periodFilter, customFrom, customTo), [periodFilter, customFrom, customTo]);
@@ -445,6 +446,14 @@ export default function AgendaPage() {
   }, [dateRange, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -840,6 +849,10 @@ export default function AgendaPage() {
         checkOutLng: response.data?.checkOutLng ?? null,
         checkOutAccuracy: response.data?.checkOutAccuracy ?? null
       });
+      setVisitResultForm({
+        status: "realizada",
+        summary: ""
+      });
       setActiveStopId(stopId);
       setIsResultModalOpen(true);
     } catch (error) {
@@ -852,19 +865,12 @@ export default function AgendaPage() {
   const onSaveVisitResult = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeStopId) return;
-    if (visitResultForm.status === "nao_realizada" && !visitResultForm.reason) {
-      toast.error("Selecione o motivo da não realização.");
-      return;
-    }
 
     setIsExecutionSubmitting(true);
     try {
       const payload = {
         status: visitResultForm.status,
-        reason: visitResultForm.status === "nao_realizada" ? visitResultForm.reason : undefined,
-        summary: visitResultForm.summary,
-        nextStep: visitResultForm.nextStep,
-        nextStepDate: visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate).toISOString() : undefined
+        summary: visitResultForm.summary
       };
       const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
       updateStopState(activeStopId, response.data);
@@ -903,6 +909,15 @@ export default function AgendaPage() {
     } finally {
       setIsExecutionSubmitting(false);
     }
+  };
+
+  const closeResultModal = () => {
+    setIsResultModalOpen(false);
+    setActiveStopId("");
+    setVisitResultForm({
+      status: "realizada",
+      summary: ""
+    });
   };
 
   const closeExecutionMode = async () => {
@@ -1682,6 +1697,49 @@ export default function AgendaPage() {
                         <div className="border-t border-emerald-100 bg-emerald-50 px-4 py-3">
                           {!event.stops?.length ? (
                             <p className="text-xs text-emerald-700">Sem paradas cadastradas.</p>
+                          ) : isMobile ? (
+                            <div className="max-h-[70vh] space-y-3 overflow-y-auto overscroll-contain scroll-smooth pr-1 select-none touch-pan-y">
+                              {event.stops.map((stop) => {
+                                const stopStatus = getStopMobileStatus(stop);
+                                return (
+                                  <article key={stop.id} className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+                                    <div className="space-y-2">
+                                      <p className="text-sm font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
+                                      <p className="text-sm text-slate-600">{getStopCityDisplayName(stop)}</p>
+                                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${STOP_MOBILE_STATUS_CLASS[stopStatus]}`}>
+                                        {STOP_MOBILE_STATUS_LABEL[stopStatus]}
+                                      </span>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-3">
+                                      {stop.clientId ? (
+                                        <Link
+                                          to={`/clientes/${stop.clientId}`}
+                                          className="rounded-lg border border-brand-300 px-4 py-3 text-center text-sm font-semibold text-brand-700 active:bg-brand-50"
+                                        >
+                                          Abrir
+                                        </Link>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          disabled
+                                          className="rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-400"
+                                        >
+                                          Abrir
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting}
+                                        onClick={() => void onCheckOutStop(stop.id)}
+                                        className="rounded-lg border border-green-300 px-4 py-3 text-sm font-semibold text-green-700 active:bg-green-50 disabled:opacity-50"
+                                      >
+                                        Concluir
+                                      </button>
+                                    </div>
+                                  </article>
+                                );
+                              })}
+                            </div>
                           ) : (
                             <ul className="space-y-2">
                               {event.stops.map((stop) => (
@@ -1884,6 +1942,80 @@ export default function AgendaPage() {
                   className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : createModalMode === "roteiro" ? "Salvar roteiro" : "Salvar agenda"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isResultModalOpen ? (
+        <div className="mobile-modal-shell" onClick={closeResultModal}>
+          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Resultado da visita</h3>
+                <p className="text-sm text-slate-500">Informe o resultado e, se quiser, adicione uma observação.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeResultModal}
+                className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSaveVisitResult}>
+              <div className="mobile-modal-body space-y-4">
+                <fieldset className="space-y-2">
+                  <legend className="mb-1 block text-xs font-medium uppercase text-slate-500">Resultado</legend>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="visit-result-status"
+                      value="realizada"
+                      checked={visitResultForm.status === "realizada"}
+                      onChange={(event) =>
+                        setVisitResultForm((current) => ({
+                          ...current,
+                          status: event.target.value as VisitResultForm["status"]
+                        }))
+                      }
+                    />
+                    Realizada
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="visit-result-status"
+                      value="nao_realizada"
+                      checked={visitResultForm.status === "nao_realizada"}
+                      onChange={(event) =>
+                        setVisitResultForm((current) => ({
+                          ...current,
+                          status: event.target.value as VisitResultForm["status"]
+                        }))
+                      }
+                    />
+                    Não realizada
+                  </label>
+                </fieldset>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Observação (opcional)</label>
+                  <textarea
+                    value={visitResultForm.summary}
+                    onChange={(event) => setVisitResultForm((current) => ({ ...current, summary: event.target.value }))}
+                    placeholder="Escreva uma observação rápida"
+                    className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mobile-modal-footer">
+                <button type="submit" disabled={isExecutionSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+                  {isExecutionSubmitting ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </form>
