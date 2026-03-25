@@ -1,4 +1,4 @@
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, Fragment, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { normalizeHeader, normalizeTextValue, parseDecimalValue, parseImportFile } from "../../lib/import/parsers";
 import api from "../../lib/apiClient";
@@ -50,6 +50,8 @@ type ImportErrorItem = {
   message?: string;
 };
 
+const PAGE_SIZE = 20;
+type PreviewStatusFilter = "all" | "valid" | "error" | "duplicate";
 
 
 type ImportDictionaryColumn = {
@@ -371,6 +373,9 @@ export default function OpportunityImportModal({
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
   const [mapping, setMapping] = useState<Partial<Record<OpportunityImportFieldKey, string>>>({});
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState<PreviewStatusFilter>("all");
+  const [expandedLines, setExpandedLines] = useState<number[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [dictionary, setDictionary] = useState<OpportunityImportDictionary>(FALLBACK_DICTIONARY);
 
@@ -424,12 +429,36 @@ export default function OpportunityImportModal({
     [previewRows]
   );
 
+  const filteredRows = useMemo(() => {
+    if (statusFilter === "valid") {
+      return previewRows.filter((row) => row.status === "new");
+    }
+    if (statusFilter === "error") {
+      return previewRows.filter((row) => row.status === "error");
+    }
+    if (statusFilter === "duplicate") {
+      return previewRows.filter((row) => row.status === "ignored" || row.status === "update");
+    }
+    return previewRows;
+  }, [previewRows, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const page = Math.min(currentPage, totalPages);
+  const paginatedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const toggleExpandLine = (line: number) => {
+    setExpandedLines((current) => (current.includes(line) ? current.filter((item) => item !== line) : [...current, line]));
+  };
+
   const reset = () => {
     setFileName("");
     setDetectedHeaders([]);
     setRawRows([]);
     setMapping({});
     setPreviewRows([]);
+    setCurrentPage(1);
+    setStatusFilter("all");
+    setExpandedLines([]);
     setIsImporting(false);
     setIsDryRun(false);
     setCreateClientIfMissing(false);
@@ -453,6 +482,14 @@ export default function OpportunityImportModal({
 
     loadDictionary();
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, previewRows.length]);
+
+  useEffect(() => {
+    setExpandedLines([]);
+  }, [statusFilter, currentPage]);
 
   useEffect(() => {
     if (!detectedHeaders.length) return;
@@ -764,6 +801,16 @@ export default function OpportunityImportModal({
           ) : null}
 
           <div className="w-full overflow-x-auto rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+                <span className="font-medium text-slate-600">Filtrar:</span>
+                <button type="button" onClick={() => setStatusFilter("all")} className={`rounded-md px-2 py-1 ${statusFilter === "all" ? "bg-slate-700 text-white" : "bg-white text-slate-700 border border-slate-300"}`}>Todos</button>
+                <button type="button" onClick={() => setStatusFilter("valid")} className={`rounded-md px-2 py-1 ${statusFilter === "valid" ? "bg-emerald-700 text-white" : "bg-white text-slate-700 border border-slate-300"}`}>Válidos</button>
+                <button type="button" onClick={() => setStatusFilter("error")} className={`rounded-md px-2 py-1 ${statusFilter === "error" ? "bg-rose-700 text-white" : "bg-white text-slate-700 border border-slate-300"}`}>Erro</button>
+                <button type="button" onClick={() => setStatusFilter("duplicate")} className={`rounded-md px-2 py-1 ${statusFilter === "duplicate" ? "bg-amber-700 text-white" : "bg-white text-slate-700 border border-slate-300"}`}>Duplicados</button>
+              </div>
+              <p className="text-xs text-slate-500">{filteredRows.length} linha(s)</p>
+            </div>
             <table className="w-full min-w-[780px] text-sm">
               <thead className="bg-slate-100 text-left text-slate-700">
                 <tr>
@@ -774,24 +821,51 @@ export default function OpportunityImportModal({
                   <th className="px-3 py-2">Etapa</th>
                   <th className="px-3 py-2">Status</th>
                   <th className="px-3 py-2">Motivo</th>
+                  <th className="px-3 py-2">Detalhes</th>
                 </tr>
               </thead>
               <tbody>
-                {previewRows.length ? (
-                  previewRows.slice(0, 20).map((row) => (
-                    <tr key={row.line} className="border-t border-slate-200">
-                      <td className="px-3 py-2">{row.line}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</td>
-                      <td className="px-3 py-2">{row.reason || "OK"}</td>
-                    </tr>
+                {paginatedRows.length ? (
+                  paginatedRows.map((row) => (
+                    <Fragment key={row.line}>
+                      <tr
+                        className={`border-t border-slate-200 ${
+                          row.status === "error"
+                            ? "bg-rose-50"
+                            : row.status === "ignored" || row.status === "update"
+                              ? "bg-amber-50"
+                              : "bg-emerald-50"
+                        }`}
+                      >
+                        <td className="px-3 py-2">{row.line}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</td>
+                        <td className="px-3 py-2">{row.reason || "OK"}</td>
+                        <td className="px-3 py-2">
+                          {row.reason ? (
+                            <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => toggleExpandLine(row.line)}>
+                              {expandedLines.includes(row.line) ? "Ocultar" : "Expandir"}
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                      </tr>
+                      {expandedLines.includes(row.line) ? (
+                        <tr className="border-t border-slate-200 bg-slate-100">
+                          <td colSpan={8} className="px-3 py-2 text-xs text-slate-700">
+                            <span className="font-semibold">Detalhe do erro:</span> {row.reason}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                       Envie um arquivo para visualizar o preview.
                     </td>
                   </tr>
@@ -800,8 +874,26 @@ export default function OpportunityImportModal({
             </table>
           </div>
 
-          {previewRows.length > 20 ? (
-            <p className="text-xs text-slate-500">Mostrando 20 de {previewRows.length} linhas no preview.</p>
+          {filteredRows.length > 0 ? (
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={page === 1}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Anterior
+              </button>
+              <span className="text-xs text-slate-600">Página {page} de {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={page === totalPages}
+                className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Próxima
+              </button>
+            </div>
           ) : null}
         </div>
 
