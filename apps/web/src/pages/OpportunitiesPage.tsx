@@ -210,7 +210,7 @@ export default function OpportunitiesPage() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("pipeline");
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState<Filters>({
     status: "open",
     stage: "",
@@ -271,6 +271,25 @@ export default function OpportunitiesPage() {
       setDebouncedSearch(urlSearch);
     }
   }, [searchParams]);
+
+
+
+  useEffect(() => {
+    if (searchParams.get("open") !== "create") return;
+
+    setEditing(null);
+    setOpportunityModalMode("create");
+    setForm({
+      ...emptyForm,
+      ownerSellerId: isSeller && user?.id ? user.id : ""
+    });
+    setSubmitError(null);
+    setIsOpportunityModalOpen(true);
+
+    const params = new URLSearchParams(searchParams);
+    params.delete("open");
+    setSearchParams(params, { replace: true });
+  }, [isSeller, searchParams, setSearchParams, user?.id]);
 
   useEffect(() => {
     if (!isSeller || !user?.id) return;

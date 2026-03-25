@@ -6,6 +6,7 @@ import BrandLogo from "../components/BrandLogo";
 import { canAccessRoute, type AppRoute } from "../lib/authorization";
 import { useReminders } from "../hooks/useReminders";
 import SidebarNavItem from "../components/sidebar/SidebarNavItem";
+import MobileActionBar from "../components/mobile/MobileActionBar";
 
 type SidebarItem = {
   id: string;
@@ -154,9 +155,10 @@ export default function AppLayout() {
           </div>
         </header>
 
-        <div className="crm-page-shell min-w-0 px-4 py-4 md:px-6">
+        <div className="crm-page-shell min-w-0 px-4 py-4 pb-28 md:px-6 md:pb-4">
           <Outlet />
         </div>
+        <MobileActionBar />
       </main>
     </div>
   );
