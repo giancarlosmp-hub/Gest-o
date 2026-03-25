@@ -4,6 +4,7 @@ import { normalizeHeader, normalizeTextValue, parseDecimalValue, parseImportFile
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
 import { useAuth } from "../../context/AuthContext";
+import ClientSearchSelect from "../clients/ClientSearchSelect";
 
 type OpportunityPreviewRow = {
   line: number;
@@ -58,6 +59,7 @@ type ExistingClientOption = {
   id: string;
   name: string;
   city?: string | null;
+  state?: string | null;
   cnpj?: string | null;
 };
 
@@ -594,6 +596,7 @@ export default function OpportunityImportModal({
             id: client.id,
             name: client.name,
             city: client.city,
+            state: client.state,
             cnpj: client.cnpj
           }))
         );
@@ -966,18 +969,28 @@ export default function OpportunityImportModal({
                             <span>{row.clientId || "—"}</span>
                             {isAmbiguousClientError(row) ? (
                               selectingClientForLine === row.line ? (
-                                <select
-                                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
-                                  value=""
-                                  onChange={(event) => handleClientSelection(row.line, event.target.value)}
-                                >
-                                  <option value="">Selecione um cliente…</option>
-                                  {clients.map((client) => (
-                                    <option key={client.id} value={client.id}>
-                                      {client.name} {client.city ? `· ${client.city}` : ""} {client.cnpj ? `· ${client.cnpj}` : ""}
-                                    </option>
-                                  ))}
-                                </select>
+                                <div className="flex max-w-sm items-start gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <ClientSearchSelect
+                                      clients={clients}
+                                      value=""
+                                      onChange={(clientId) => {
+                                        if (clientId) handleClientSelection(row.line, clientId);
+                                      }}
+                                      placeholder="Buscar cliente..."
+                                      emptyLabel="Nenhum cliente encontrado."
+                                      maxListHeightClassName="max-h-44"
+                                      className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                                    onClick={() => setSelectingClientForLine(null)}
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
                               ) : (
                                 <button
                                   type="button"
