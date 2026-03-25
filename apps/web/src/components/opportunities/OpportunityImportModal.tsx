@@ -15,6 +15,7 @@ type OpportunityPreviewRow = {
   status: "new" | "update" | "ignored" | "error";
   reason?: string;
   invalidFields?: string[];
+  manuallyCorrected?: boolean;
 };
 
 type OpportunityImportFieldKey =
@@ -52,6 +53,13 @@ type ImportErrorItem = {
 
 const PAGE_SIZE = 20;
 type PreviewStatusFilter = "all" | "valid" | "error" | "duplicate";
+
+type ExistingClientOption = {
+  id: string;
+  name: string;
+  city?: string | null;
+  cnpj?: string | null;
+};
 
 
 type ImportDictionaryColumn = {
@@ -376,6 +384,8 @@ export default function OpportunityImportModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<PreviewStatusFilter>("all");
   const [expandedLines, setExpandedLines] = useState<number[]>([]);
+  const [clients, setClients] = useState<ExistingClientOption[]>([]);
+  const [selectingClientForLine, setSelectingClientForLine] = useState<number | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [dictionary, setDictionary] = useState<OpportunityImportDictionary>(FALLBACK_DICTIONARY);
 
@@ -419,25 +429,34 @@ export default function OpportunityImportModal({
     downloadCsvFile("opportunities-import-example.csv", [TEMPLATE_HEADERS, ...TEMPLATE_EXAMPLE_ROWS]);
   };
 
+  const isDuplicateRow = (row: OpportunityPreviewRow) => row.status === "ignored" || row.status === "update";
+  const isValidRow = (row: OpportunityPreviewRow) => row.status !== "error" && !isDuplicateRow(row);
+  const isAmbiguousClientError = (row: OpportunityPreviewRow) => {
+    if (row.status !== "error" || !row.reason) return false;
+    const reason = row.reason.toLowerCase();
+    return reason.includes("cliente amb") || reason.includes("cliente duplic") || reason.includes("múltiplos clientes") || reason.includes("multiplos clientes");
+  };
+
   const counters = useMemo(
     () => ({
       totalRead: previewRows.length,
-      valid: previewRows.filter((row) => row.status === "new" || row.status === "update").length,
-      duplicate: previewRows.filter((row) => row.status === "ignored" || row.status === "update").length,
-      error: previewRows.filter((row) => row.status === "error").length
+      valid: previewRows.filter((row) => isValidRow(row)).length,
+      duplicate: previewRows.filter((row) => isDuplicateRow(row)).length,
+      error: previewRows.filter((row) => row.status === "error").length,
+      importable: previewRows.filter((row) => row.status === "new" || row.status === "update").length
     }),
     [previewRows]
   );
 
   const filteredRows = useMemo(() => {
     if (statusFilter === "valid") {
-      return previewRows.filter((row) => row.status === "new");
+      return previewRows.filter((row) => isValidRow(row));
     }
     if (statusFilter === "error") {
       return previewRows.filter((row) => row.status === "error");
     }
     if (statusFilter === "duplicate") {
-      return previewRows.filter((row) => row.status === "ignored" || row.status === "update");
+      return previewRows.filter((row) => isDuplicateRow(row));
     }
     return previewRows;
   }, [previewRows, statusFilter]);
@@ -450,6 +469,84 @@ export default function OpportunityImportModal({
     setExpandedLines((current) => (current.includes(line) ? current.filter((item) => item !== line) : [...current, line]));
   };
 
+  const handleEditableFieldChange = (line: number, field: "value" | "stage" | "status", value: string) => {
+    setPreviewRows((currentRows) =>
+      currentRows.map((row) => {
+        if (row.line !== line) return row;
+
+        const nextInvalidFields = new Set(row.invalidFields || []);
+        const nextPayload = { ...row.payload };
+        const nextRow: OpportunityPreviewRow = { ...row };
+
+        if (field === "value") {
+          const parsed = parseDecimalValue(value);
+          const isInvalidValue = parsed.isInvalid || parsed.parsedValue === undefined || Number(parsed.parsedValue) <= 0;
+          nextRow.value = isInvalidValue ? Number.NaN : parsed.parsedValue;
+          nextPayload.value = isInvalidValue ? undefined : parsed.parsedValue;
+          if (isInvalidValue) nextInvalidFields.add("value");
+          else nextInvalidFields.delete("value");
+        }
+
+        if (field === "stage") {
+          const normalizedStage = normalizeTextValue(value).toLowerCase();
+          nextRow.stage = normalizedStage;
+          nextPayload.stage = normalizedStage || undefined;
+          if (!normalizedStage || !VALID_STAGES.has(normalizedStage)) nextInvalidFields.add("stage");
+          else nextInvalidFields.delete("stage");
+        }
+
+        if (field === "status") {
+          const normalizedStatus = normalizeTextValue(value).toLowerCase();
+          nextPayload.status = normalizedStatus || undefined;
+          if (normalizedStatus && !VALID_STATUS.has(normalizedStatus)) nextInvalidFields.add("status");
+          else nextInvalidFields.delete("status");
+        }
+
+        const nextReasonParts = (row.reason || "")
+          .split(" · ")
+          .filter((reason) => reason && reason !== "valor inválido" && reason !== "etapa inválida" && reason !== "status inválido");
+        if (nextInvalidFields.has("value")) nextReasonParts.push("valor inválido");
+        if (nextInvalidFields.has("stage")) nextReasonParts.push("etapa inválida");
+        if (nextInvalidFields.has("status")) nextReasonParts.push("status inválido");
+        nextRow.reason = nextReasonParts.length ? nextReasonParts.join(" · ") : undefined;
+        nextRow.status = nextReasonParts.length ? "error" : "new";
+        nextRow.invalidFields = Array.from(nextInvalidFields);
+        nextRow.payload = nextPayload;
+        return nextRow;
+      })
+    );
+  };
+
+  const handleClientSelection = (rowLine: number, clientId: string) => {
+    const selectedClient = clients.find((client) => client.id === clientId);
+    if (!selectedClient) return;
+
+    setPreviewRows((currentRows) =>
+      currentRows.map((row) => {
+        if (row.line !== rowLine) return row;
+
+        const nextPayload = { ...row.payload, clientNameOrId: selectedClient.id, clientId: selectedClient.id };
+        const nextInvalidFields = (row.invalidFields || []).filter((field) => field !== "clientNameOrId");
+        const nextReason = (row.reason || "")
+          .split(" · ")
+          .filter((reason) => reason && !reason.toLowerCase().includes("cliente amb") && reason !== "cliente obrigatório")
+          .join(" · ");
+
+        return {
+          ...row,
+          clientId: selectedClient.id,
+          payload: nextPayload,
+          invalidFields: nextInvalidFields,
+          reason: nextReason || undefined,
+          status: nextReason ? "error" : "new",
+          manuallyCorrected: true
+        };
+      })
+    );
+
+    setSelectingClientForLine(null);
+  };
+
   const reset = () => {
     setFileName("");
     setDetectedHeaders([]);
@@ -459,6 +556,8 @@ export default function OpportunityImportModal({
     setCurrentPage(1);
     setStatusFilter("all");
     setExpandedLines([]);
+    setClients([]);
+    setSelectingClientForLine(null);
     setIsImporting(false);
     setIsDryRun(false);
     setCreateClientIfMissing(false);
@@ -484,8 +583,31 @@ export default function OpportunityImportModal({
   }, []);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    const loadClients = async () => {
+      try {
+        const { data } = await api.get<{ clients?: ExistingClientOption[] } | ExistingClientOption[]>("/clients");
+        const loadedClients = Array.isArray(data) ? data : data?.clients || [];
+        setClients(
+          loadedClients.map((client) => ({
+            id: client.id,
+            name: client.name,
+            city: client.city,
+            cnpj: client.cnpj
+          }))
+        );
+      } catch {
+        setClients([]);
+      }
+    };
+
+    loadClients();
+  }, [isOpen]);
+
+  useEffect(() => {
     setCurrentPage(1);
-  }, [statusFilter, previewRows.length]);
+  }, [statusFilter, previewRows]);
 
   useEffect(() => {
     setExpandedLines([]);
@@ -839,13 +961,82 @@ export default function OpportunityImportModal({
                       >
                         <td className="px-3 py-2">{row.line}</td>
                         <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
-                        <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
-                        <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
-                        <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
-                        <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>
+                          <div className="flex flex-col gap-1">
+                            <span>{row.clientId || "—"}</span>
+                            {isAmbiguousClientError(row) ? (
+                              selectingClientForLine === row.line ? (
+                                <select
+                                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                                  value=""
+                                  onChange={(event) => handleClientSelection(row.line, event.target.value)}
+                                >
+                                  <option value="">Selecione um cliente…</option>
+                                  {clients.map((client) => (
+                                    <option key={client.id} value={client.id}>
+                                      {client.name} {client.city ? `· ${client.city}` : ""} {client.cnpj ? `· ${client.cnpj}` : ""}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="w-fit rounded border border-brand-300 bg-white px-2 py-1 text-xs text-brand-700 hover:bg-brand-50"
+                                  onClick={() => setSelectingClientForLine(row.line)}
+                                >
+                                  Selecionar cliente
+                                </button>
+                              )
+                            ) : null}
+                            {row.manuallyCorrected ? (
+                              <span className="w-fit rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                                corrigido manualmente
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>
+                          <input
+                            type="number"
+                            className="w-28 rounded border border-slate-300 bg-white px-2 py-1"
+                            value={row.value ?? ""}
+                            onChange={(event) => handleEditableFieldChange(row.line, "value", event.target.value)}
+                          />
+                        </td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>
+                          <select
+                            className="rounded border border-slate-300 bg-white px-2 py-1"
+                            value={row.stage || ""}
+                            onChange={(event) => handleEditableFieldChange(row.line, "stage", event.target.value)}
+                          >
+                            <option value="">Selecione</option>
+                            {Array.from(VALID_STAGES).map((stageOption) => (
+                              <option key={stageOption} value={stageOption}>
+                                {stageOption}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>
+                          <div className="flex flex-col gap-1">
+                            <span>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</span>
+                            <select
+                              className="rounded border border-slate-300 bg-white px-2 py-1 text-xs"
+                              value={String((row.payload as { status?: string }).status || "")}
+                              onChange={(event) => handleEditableFieldChange(row.line, "status", event.target.value)}
+                            >
+                              <option value="">—</option>
+                              {Array.from(VALID_STATUS).map((statusOption) => (
+                                <option key={statusOption} value={statusOption}>
+                                  {statusOption}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
                         <td className="px-3 py-2">{row.reason || "OK"}</td>
                         <td className="px-3 py-2">
-                          {row.reason ? (
+                          {row.status === "error" && row.reason ? (
                             <button type="button" className="text-xs font-medium text-brand-700 hover:underline" onClick={() => toggleExpandLine(row.line)}>
                               {expandedLines.includes(row.line) ? "Ocultar" : "Expandir"}
                             </button>
@@ -854,7 +1045,7 @@ export default function OpportunityImportModal({
                           )}
                         </td>
                       </tr>
-                      {expandedLines.includes(row.line) ? (
+                      {row.status === "error" && expandedLines.includes(row.line) ? (
                         <tr className="border-t border-slate-200 bg-slate-100">
                           <td colSpan={8} className="px-3 py-2 text-xs text-slate-700">
                             <span className="font-semibold">Detalhe do erro:</span> {row.reason}
@@ -911,7 +1102,7 @@ export default function OpportunityImportModal({
             type="button"
             onClick={handleImport}
             className="rounded-lg bg-brand-700 px-4 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isImporting || counters.totalRead === 0 || counters.valid === 0}
+            disabled={isImporting || counters.totalRead === 0 || counters.importable === 0}
           >
             {isImporting ? (isDryRun ? "Simulando..." : "Importando...") : isDryRun ? "Simular" : "Importar"}
           </button>
