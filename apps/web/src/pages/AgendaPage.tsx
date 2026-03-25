@@ -869,14 +869,18 @@ export default function AgendaPage() {
       const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
       updateStopState(activeStopId, response.data);
       const activeStop = executionStops.find((stop) => stop.id === activeStopId);
+
       setIsResultModalOpen(false);
       setActiveStopId("");
       setEventsRefreshToken((current) => current + 1);
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+
       toast.success("Visita registrada com sucesso");
 
       if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
-        const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
+        const nextStepDate = visitResultForm.nextStepDate
+          ? new Date(visitResultForm.nextStepDate)
+          : new Date(Date.now() + 2 * 86400000);
+
         await api.post("/activities", {
           type: "followup",
           dueDate: nextStepDate.toISOString(),
@@ -885,12 +889,15 @@ export default function AgendaPage() {
           opportunityId: executionEvent.opportunityId || undefined,
           ownerSellerId: executionEvent.userId
         });
+
         toast.success("Follow-up criado");
       }
 
       if (visitResultForm.nextStep === "criar_oportunidade" && executionEvent) {
         openQuickOpportunityModal(executionEvent, activeStop?.clientName);
       }
+
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
     } finally {
