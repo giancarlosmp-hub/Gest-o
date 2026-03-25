@@ -871,6 +871,8 @@ export default function AgendaPage() {
       const activeStop = executionStops.find((stop) => stop.id === activeStopId);
       setIsResultModalOpen(false);
       setActiveStopId("");
+      setEventsRefreshToken((current) => current + 1);
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
       toast.success("Visita registrada com sucesso");
 
       if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
@@ -884,7 +886,6 @@ export default function AgendaPage() {
           ownerSellerId: executionEvent.userId
         });
         toast.success("Follow-up criado");
-        triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
       }
 
       if (visitResultForm.nextStep === "criar_oportunidade" && executionEvent) {
