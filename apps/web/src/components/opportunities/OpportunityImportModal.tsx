@@ -14,7 +14,9 @@ type OpportunityPreviewRow = {
   payload: Record<string, unknown>;
   status: "new" | "update" | "ignored" | "error";
   reason?: string;
+  backendReason?: string;
   invalidFields?: string[];
+  manuallyCorrected?: boolean;
 };
 
 type OpportunityImportFieldKey =
@@ -50,6 +52,12 @@ type ImportErrorItem = {
   message?: string;
 };
 
+type ExistingClientOption = {
+  id: string;
+  name: string;
+  city?: string | null;
+  cnpj?: string | null;
+};
 
 
 type ImportDictionaryColumn = {
@@ -356,6 +364,87 @@ const buildPreviewRows = (rows: Record<string, unknown>[], mapping: Partial<Reco
   return previewRows;
 };
 
+const validateEditableRow = (row: OpportunityPreviewRow): OpportunityPreviewRow => {
+  const payload = row.payload as {
+    status?: string;
+    ownerEmail?: string;
+    ownerSellerName?: string;
+    followUpDate?: string;
+    proposalDate?: string;
+    expectedCloseDate?: string;
+    lastContactAt?: string;
+    probability?: number;
+  };
+  const errors: string[] = [];
+  const invalidFields = new Set<string>();
+  const normalizedStatus = normalizeTextValue(payload.status).toLowerCase();
+  const valueNumber = Number(row.value);
+  const probability = Number(payload.probability);
+
+  if (!row.title) {
+    errors.push("título obrigatório");
+    invalidFields.add("title");
+  }
+  if (!row.clientId) {
+    errors.push("cliente obrigatório");
+    invalidFields.add("clientNameOrId");
+  }
+  if (!payload.ownerEmail && !payload.ownerSellerName) {
+    errors.push("vendedor não encontrado");
+    invalidFields.add("ownerEmail");
+    invalidFields.add("ownerSellerName");
+  }
+  if (!Number.isFinite(valueNumber) || valueNumber <= 0) {
+    errors.push("valor inválido");
+    invalidFields.add("value");
+  }
+  if (!row.stage || !VALID_STAGES.has(row.stage)) {
+    errors.push("etapa inválida");
+    invalidFields.add("stage");
+  }
+  if (normalizedStatus && !VALID_STATUS.has(normalizedStatus)) {
+    errors.push("status inválido");
+    invalidFields.add("status");
+  }
+  if (!Number.isFinite(probability) || probability < 0 || probability > 100) {
+    errors.push("probabilidade inválida");
+    invalidFields.add("probability");
+  }
+  if (payload.followUpDate && !/^\d{4}-\d{2}-\d{2}$/.test(payload.followUpDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(payload.followUpDate)) {
+    errors.push("data inválida");
+    invalidFields.add("followUpDate");
+  }
+  if (payload.proposalDate && !/^\d{4}-\d{2}-\d{2}$/.test(payload.proposalDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(payload.proposalDate)) {
+    errors.push("data inválida");
+    invalidFields.add("proposalDate");
+  }
+  if (payload.expectedCloseDate && !/^\d{4}-\d{2}-\d{2}$/.test(payload.expectedCloseDate) && !/^\d{2}\/\d{2}\/\d{4}$/.test(payload.expectedCloseDate)) {
+    errors.push("data inválida");
+    invalidFields.add("expectedCloseDate");
+  }
+  if (payload.lastContactAt && !/^\d{4}-\d{2}-\d{2}$/.test(payload.lastContactAt) && !/^\d{2}\/\d{2}\/\d{4}$/.test(payload.lastContactAt)) {
+    errors.push("data inválida");
+    invalidFields.add("lastContactAt");
+  }
+
+  if (errors.length) {
+    return {
+      ...row,
+      status: "error",
+      reason: errors.join(" · "),
+      invalidFields: Array.from(invalidFields)
+    };
+  }
+
+  return {
+    ...row,
+    status: "new",
+    reason: undefined,
+    backendReason: undefined,
+    invalidFields: []
+  };
+};
+
 export default function OpportunityImportModal({
   isOpen,
   onClose,
@@ -373,6 +462,8 @@ export default function OpportunityImportModal({
   const [previewRows, setPreviewRows] = useState<OpportunityPreviewRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [dictionary, setDictionary] = useState<OpportunityImportDictionary>(FALLBACK_DICTIONARY);
+  const [clients, setClients] = useState<ExistingClientOption[]>([]);
+  const [selectingClientForLine, setSelectingClientForLine] = useState<number | null>(null);
 
   // ✅ Mantém as duas opções (resolve o conflito)
   const [isDryRun, setIsDryRun] = useState(false);
@@ -453,6 +544,19 @@ export default function OpportunityImportModal({
 
     loadDictionary();
   }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadClients = async () => {
+      try {
+        const { data } = await api.get<ExistingClientOption[]>("/clients");
+        setClients(Array.isArray(data) ? data : []);
+      } catch {
+        setClients([]);
+      }
+    };
+    loadClients();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!detectedHeaders.length) return;
@@ -540,7 +644,8 @@ export default function OpportunityImportModal({
         return {
           ...row,
           status: "error" as const,
-          reason: result.message || "Erro de validação"
+          reason: result.message || "Erro de validação",
+          backendReason: result.reason
         };
       });
     } catch {
@@ -620,6 +725,48 @@ export default function OpportunityImportModal({
     } finally {
       setIsImporting(false);
     }
+  };
+
+  const isClientAmbiguousRow = (row: OpportunityPreviewRow) =>
+    row.status === "error" &&
+    (row.backendReason === "client_ambiguous" || (row.reason || "").toLowerCase().includes("cliente ambíguo"));
+
+  const handleClientSelection = (line: number, clientId: string) => {
+    if (!clientId) return;
+    setPreviewRows((current) =>
+      current.map((row) => {
+        if (row.line !== line) return row;
+        const updatedRow: OpportunityPreviewRow = {
+          ...row,
+          clientId,
+          payload: { ...row.payload, clientNameOrId: clientId },
+          manuallyCorrected: true
+        };
+        return validateEditableRow(updatedRow);
+      })
+    );
+    setSelectingClientForLine(null);
+  };
+
+  const handleEditableFieldChange = (line: number, field: "value" | "stage" | "status", value: string) => {
+    setPreviewRows((current) =>
+      current.map((row) => {
+        if (row.line !== line) return row;
+        const nextRow: OpportunityPreviewRow = {
+          ...row,
+          value: field === "value" ? Number(value) : row.value,
+          stage: field === "stage" ? value.toLowerCase() : row.stage,
+          payload: {
+            ...row.payload,
+            value: field === "value" ? Number(value) : row.payload.value,
+            stage: field === "stage" ? value.toLowerCase() : row.payload.stage,
+            status: field === "status" ? value.toLowerCase() || undefined : row.payload.status
+          },
+          manuallyCorrected: true
+        };
+        return validateEditableRow(nextRow);
+      })
+    );
   };
 
   if (!isOpen) return null;
@@ -782,11 +929,81 @@ export default function OpportunityImportModal({
                     <tr key={row.line} className="border-t border-slate-200">
                       <td className="px-3 py-2">{row.line}</td>
                       <td className={`px-3 py-2 ${row.invalidFields?.includes("title") ? "bg-rose-100" : ""}`}>{row.title || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>{row.clientId || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>{row.value ?? "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>{row.stage || "—"}</td>
-                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>{row.status === "new" ? "NOVO" : row.status === "update" ? "ATUALIZAR" : row.status === "ignored" ? "IGNORADO" : "ERRO"}</td>
-                      <td className="px-3 py-2">{row.reason || "OK"}</td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("clientNameOrId") ? "bg-rose-100" : ""}`}>
+                        <p>{row.clientId || "—"}</p>
+                        {isClientAmbiguousRow(row) ? (
+                          <div className="mt-2 space-y-2">
+                            <button
+                              type="button"
+                              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                              onClick={() => setSelectingClientForLine((current) => (current === row.line ? null : row.line))}
+                            >
+                              Selecionar cliente
+                            </button>
+                            {selectingClientForLine === row.line ? (
+                              <select
+                                className="w-full rounded-lg border border-slate-300 p-2 text-xs text-slate-800"
+                                defaultValue=""
+                                onChange={(event) => handleClientSelection(row.line, event.target.value)}
+                              >
+                                <option value="">— Escolha um cliente —</option>
+                                {clients.map((client) => (
+                                  <option key={`${row.line}-${client.id}`} value={client.id}>
+                                    {client.name} · {client.city || "Cidade não informada"}{client.cnpj ? ` · CNPJ: ${client.cnpj}` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("value") ? "bg-rose-100" : ""}`}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          className="w-28 rounded border border-slate-300 px-2 py-1 text-xs"
+                          value={Number.isFinite(Number(row.value)) ? Number(row.value) : ""}
+                          onChange={(event) => handleEditableFieldChange(row.line, "value", event.target.value)}
+                        />
+                      </td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("stage") ? "bg-rose-100" : ""}`}>
+                        <select
+                          className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          value={row.stage || ""}
+                          onChange={(event) => handleEditableFieldChange(row.line, "stage", event.target.value)}
+                        >
+                          <option value="">—</option>
+                          {Array.from(VALID_STAGES).map((stageOption) => (
+                            <option key={`${row.line}-${stageOption}`} value={stageOption}>
+                              {stageOption}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className={`px-3 py-2 ${row.invalidFields?.includes("status") ? "bg-rose-100" : ""}`}>
+                        <select
+                          className="rounded border border-slate-300 px-2 py-1 text-xs"
+                          value={String((row.payload as { status?: string }).status || "")}
+                          onChange={(event) => handleEditableFieldChange(row.line, "status", event.target.value)}
+                        >
+                          <option value="">—</option>
+                          {Array.from(VALID_STATUS).map((statusOption) => (
+                            <option key={`${row.line}-${statusOption}`} value={statusOption}>
+                              {statusOption}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="space-y-1">
+                          <p>{row.reason || "OK"}</p>
+                          {row.manuallyCorrected ? (
+                            <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
+                              corrigido manualmente
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                     </tr>
                   ))
                 ) : (
