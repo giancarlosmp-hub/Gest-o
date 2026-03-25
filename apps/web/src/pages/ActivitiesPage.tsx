@@ -326,7 +326,7 @@ export default function ActivitiesPage() {
         agendaEventId: form.agendaEventId || undefined,
         ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
       });
-      toast.success(form.agendaEventId ? "Atividade registrada com sucesso" : "Atividade criada com sucesso.");
+      toast.success("Atividade criada");
       if (form.agendaEventId) {
         toast.success("Compromisso concluído automaticamente");
       }

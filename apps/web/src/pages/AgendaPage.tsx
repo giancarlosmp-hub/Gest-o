@@ -871,7 +871,7 @@ export default function AgendaPage() {
       const activeStop = executionStops.find((stop) => stop.id === activeStopId);
       setIsResultModalOpen(false);
       setActiveStopId("");
-      toast.success("Resultado da visita salvo.");
+      toast.success("Visita registrada com sucesso");
 
       if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
         const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
@@ -883,7 +883,7 @@ export default function AgendaPage() {
           opportunityId: executionEvent.opportunityId || undefined,
           ownerSellerId: executionEvent.userId
         });
-        toast.success("Follow-up criado na lista de atividades.");
+        toast.success("Follow-up criado");
         triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
       }
 
@@ -987,7 +987,7 @@ export default function AgendaPage() {
         )
       );
       setEventsRefreshToken((current) => current + 1);
-      toast.success(response.data?.message || "Follow-up criado com sucesso.");
+      toast.success("Follow-up criado");
       closeFollowUpModal();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar follow-up."));
@@ -1040,7 +1040,7 @@ export default function AgendaPage() {
         );
       }
 
-      toast.success("Oportunidade criada e vinculada ao roteiro.");
+      toast.success("Oportunidade criada com sucesso");
       setIsQuickOpportunityModalOpen(false);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível criar oportunidade."));
