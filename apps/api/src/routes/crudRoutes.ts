@@ -1042,6 +1042,12 @@ const opportunityImportRowSchema = z
     status: opportunityImportStatusSchema,
     ownerEmail: z.string().email().optional(),
     ownerSellerName: z.string().optional(),
+    cnpj: z.string().optional(),
+    cnpj_cliente: z.string().optional(),
+    documento_cliente: z.string().optional(),
+    city: z.string().optional(),
+    cidade: z.string().optional(),
+    cidade_cliente: z.string().optional(),
     vendedor_responsavel: z.string().optional(),
     email_responsavel: z.string().email().optional(),
     responsavelEmail: z.string().email().optional(),
@@ -1070,6 +1076,8 @@ const opportunityImportRowSchema = z
     ...row,
     ownerEmail: row.ownerEmail ?? row.email_responsavel ?? row.responsavelEmail,
     ownerSellerName: row.ownerSellerName ?? row.vendedor_responsavel,
+    cnpj: row.cnpj ?? row.cnpj_cliente ?? row.documento_cliente,
+    city: row.city ?? row.cidade ?? row.cidade_cliente,
     followUpDate: row.followUpDate ?? row.followUp,
     proposalDate: row.proposalDate ?? row.data_entrada,
     expectedCloseDate: row.expectedCloseDate ?? row.fechamento_previsto,
@@ -1153,34 +1161,61 @@ const normalizeClientLookup = (value?: string | null) =>
     .replace(/\s+/g, " ")
     .trim();
 
-const resolveClientByName = ({
-  clientName,
-  clientsByNormalizedName,
-  rowNumber,
-  dryRun
-}: {
-  clientName: string;
-  clientsByNormalizedName: Map<string, Array<{ id: string; name: string }>>;
-  rowNumber: number;
-  dryRun: boolean;
-}) => {
-  const normalizedClientName = normalizeClientLookup(clientName);
-  const matches = normalizedClientName ? clientsByNormalizedName.get(normalizedClientName) ?? [] : [];
-  const resolved = matches.length === 1 ? matches[0] : null;
+type ImportClientCandidate = {
+  id: string;
+  name: string;
+  city: string | null;
+  cnpj: string | null;
+  normalizedName: string;
+  normalizedCity: string;
+  normalizedCnpj: string;
+};
 
-  console.info("[opportunities/import][client-resolver]", {
-    phase: dryRun ? "preview" : "import",
-    rowNumber,
-    originalName: clientName,
-    normalizedName: normalizedClientName,
-    matchesCount: matches.length,
-    resolvedClientId: resolved?.id,
-    resolvedClientName: resolved?.name
-  });
+const toImportClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }): ImportClientCandidate => ({
+  id: client.id,
+  name: client.name,
+  city: client.city ?? null,
+  cnpj: client.cnpj ?? null,
+  normalizedName: normalizeClientLookup(client.name),
+  normalizedCity: normalizeClientLookup(client.city),
+  normalizedCnpj: normalizeCnpj(client.cnpj)
+});
 
-  if (!matches.length) return { status: "missing" as const };
-  if (matches.length > 1) return { status: "ambiguous" as const, matches };
-  return { status: "resolved" as const, client: resolved };
+const resolveClientSmart = (
+  input: { clientNameOrId: string; cnpj?: string; city?: string },
+  clients: ImportClientCandidate[]
+) => {
+  const rawLookup = input.clientNameOrId.trim();
+  const normalizedLookup = normalizeClientLookup(rawLookup);
+  const normalizedInputCity = normalizeClientLookup(input.city);
+  const normalizedInputCnpj = normalizeCnpj(input.cnpj);
+
+  if (UUID_V4_REGEX.test(rawLookup)) {
+    const uuidMatches = clients.filter((client) => client.id === rawLookup);
+    if (uuidMatches.length === 1) return { status: "resolved" as const, reason: "match_uuid" as const, client: uuidMatches[0] };
+    if (uuidMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: uuidMatches };
+    return { status: "missing" as const, reason: "not_found" as const };
+  }
+
+  if (normalizedInputCnpj) {
+    const cnpjMatches = clients.filter((client) => client.normalizedCnpj && client.normalizedCnpj === normalizedInputCnpj);
+    if (cnpjMatches.length === 1) return { status: "resolved" as const, reason: "match_cnpj" as const, client: cnpjMatches[0] };
+    if (cnpjMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: cnpjMatches };
+    return { status: "missing" as const, reason: "not_found" as const };
+  }
+
+  const nameMatches = normalizedLookup ? clients.filter((client) => client.normalizedName === normalizedLookup) : [];
+  if (normalizedInputCity) {
+    const nameAndCityMatches = nameMatches.filter((client) => client.normalizedCity === normalizedInputCity);
+    if (nameAndCityMatches.length === 1) {
+      return { status: "resolved" as const, reason: "match_nome_cidade" as const, client: nameAndCityMatches[0] };
+    }
+    if (nameAndCityMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameAndCityMatches };
+  }
+
+  if (!nameMatches.length) return { status: "missing" as const, reason: "not_found" as const };
+  if (nameMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameMatches };
+  return { status: "resolved" as const, reason: "match_nome" as const, client: nameMatches[0] };
 };
 
 const resolveOpportunityOwner = ({
@@ -1693,8 +1728,19 @@ const processOpportunityImport = async ({
     }
   }
 
-  const clientsById = new Map<string, { id: string; name: string }>();
-  const clientsByNormalizedName = new Map<string, Array<{ id: string; name: string }>>();
+  const clientsById = new Map<string, ImportClientCandidate>();
+  const clientCandidates: ImportClientCandidate[] = [];
+  const upsertClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }) => {
+    const candidate = toImportClientCandidate(client);
+    if (clientsById.has(candidate.id)) {
+      clientsById.set(candidate.id, candidate);
+      const existingIndex = clientCandidates.findIndex((item) => item.id === candidate.id);
+      if (existingIndex >= 0) clientCandidates[existingIndex] = candidate;
+      return;
+    }
+    clientsById.set(candidate.id, candidate);
+    clientCandidates.push(candidate);
+  };
 
   if (clientIds.size || clientNames.size) {
     const clients = await prisma.client.findMany({
@@ -1702,20 +1748,32 @@ const processOpportunityImport = async ({
         ...sellerWhere(req),
         ...(clientIds.size && !clientNames.size ? { id: { in: Array.from(clientIds) } } : {})
       },
-      select: { id: true, name: true }
+      select: { id: true, name: true, city: true, cnpj: true }
     });
 
     for (const client of clients) {
-      clientsById.set(client.id, { id: client.id, name: client.name });
-      const normalizedName = normalizeClientLookup(client.name);
-      if (!normalizedName) continue;
-      const bucket = clientsByNormalizedName.get(normalizedName) ?? [];
-      bucket.push({ id: client.id, name: client.name });
-      clientsByNormalizedName.set(normalizedName, bucket);
+      upsertClientCandidate(client);
     }
   }
 
   const dedupeCandidatesCache = new Map<string, Array<{ id: string; title: string; createdAt: Date; ownerSellerId: string; client: { name: string } }>>();
+  const logClientResolution = (
+    rowNumber: number,
+    rowInput: { clientNameOrId: string; cnpj?: string; city?: string },
+    resolution: ReturnType<typeof resolveClientSmart>
+  ) => {
+    console.info("[opportunities/import][client-resolver]", {
+      phase: dryRun ? "preview" : "import",
+      rowNumber,
+      clientNameOrId: rowInput.clientNameOrId,
+      cnpj: rowInput.cnpj,
+      city: rowInput.city,
+      reason: resolution.reason,
+      matchesCount: resolution.status === "ambiguous" ? resolution.matches.length : resolution.status === "resolved" ? 1 : 0,
+      resolvedClientId: resolution.status === "resolved" ? resolution.client.id : undefined,
+      resolvedClientName: resolution.status === "resolved" ? resolution.client.name : undefined
+    });
+  };
   const validatedRows = parsedRows.filter(
     (item): item is { rowNumber: number; parsed: { success: true; data: z.infer<typeof opportunityImportRowSchema> } } => item.parsed.success
   );
@@ -1819,18 +1877,13 @@ const processOpportunityImport = async ({
         }
 
         if (dryRun) {
-          const resolvedClient = isUuid
-            ? (clientsById.get(clientLookup) ? { status: "resolved" as const, client: clientsById.get(clientLookup)! } : { status: "missing" as const })
-            : resolveClientByName({
-                clientName: clientLookup,
-                clientsByNormalizedName,
-                rowNumber,
-                dryRun
-              });
+          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
+          const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
+          logClientResolution(rowNumber, resolverInput, resolvedClient);
 
           let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
           if (!client && createClientIfMissing && resolvedClient.status !== "ambiguous") {
-            client = { id: "dry-run-client", name: clientLookup };
+            client = toImportClientCandidate({ id: "dry-run-client", name: clientLookup, city: row.city, cnpj: row.cnpj });
           }
           if (resolvedClient.status === "ambiguous") {
             const message = "cliente ambíguo";
@@ -1864,37 +1917,34 @@ const processOpportunityImport = async ({
         }
 
         const rowExecutionResult = await prisma.$transaction(async (tx) => {
-          const resolvedClient = isUuid
-            ? (clientsById.get(clientLookup) ? { status: "resolved" as const, client: clientsById.get(clientLookup)! } : { status: "missing" as const })
-            : resolveClientByName({
-                clientName: clientLookup,
-                clientsByNormalizedName,
-                rowNumber,
-                dryRun
-              });
+          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
+          const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
+          logClientResolution(rowNumber, resolverInput, resolvedClient);
 
           let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
 
           if (!client && resolvedClient.status !== "ambiguous") {
+            const normalizedLookup = normalizeClientLookup(clientLookup);
+            const normalizedCity = normalizeClientLookup(row.city);
+            const normalizedCnpj = normalizeCnpj(row.cnpj);
             const existingClient = await tx.client.findFirst({
               where: {
                 ...sellerWhere(req),
-                ...(isUuid ? { id: clientLookup } : { name: clientLookup })
+                ...(isUuid
+                  ? { id: clientLookup }
+                  : normalizedCnpj
+                    ? { cnpjNormalized: normalizedCnpj }
+                    : {
+                        nameNormalized: normalizedLookup,
+                        ...(normalizedCity ? { cityNormalized: normalizedCity } : {})
+                      })
               },
-              select: { id: true, name: true }
+              select: { id: true, name: true, city: true, cnpj: true }
             });
 
             if (existingClient) {
-              client = { id: existingClient.id, name: existingClient.name };
-              clientsById.set(existingClient.id, { id: existingClient.id, name: existingClient.name });
-              const normalizedExistingName = normalizeClientLookup(existingClient.name);
-              if (normalizedExistingName) {
-                const bucket = clientsByNormalizedName.get(normalizedExistingName) ?? [];
-                if (!bucket.some((entry) => entry.id === existingClient.id)) {
-                  bucket.push({ id: existingClient.id, name: existingClient.name });
-                  clientsByNormalizedName.set(normalizedExistingName, bucket);
-                }
-              }
+              upsertClientCandidate(existingClient);
+              client = clientsById.get(existingClient.id);
             }
           }
 
@@ -1911,16 +1961,10 @@ const processOpportunityImport = async ({
                 region: "Importação",
                 ownerSellerId
               },
-              select: { id: true, name: true }
+              select: { id: true, name: true, city: true, cnpj: true }
             });
-            client = { id: createdClient.id, name: createdClient.name };
-            clientsById.set(createdClient.id, { id: createdClient.id, name: createdClient.name });
-            const normalizedCreatedName = normalizeClientLookup(createdClient.name);
-            if (normalizedCreatedName) {
-              const bucket = clientsByNormalizedName.get(normalizedCreatedName) ?? [];
-              bucket.push({ id: createdClient.id, name: createdClient.name });
-              clientsByNormalizedName.set(normalizedCreatedName, bucket);
-            }
+            upsertClientCandidate(createdClient);
+            client = clientsById.get(createdClient.id);
           }
 
           if (!client) {
