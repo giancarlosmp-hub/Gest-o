@@ -157,6 +157,10 @@ function normalizePanelOrder(value: unknown): PanelId[] {
 
 export default function HomePage() {
   const { user } = useAuth();
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768;
+  });
   const startRouteSearch = useMemo(() => {
     const params = new URLSearchParams({
       date: new Date().toISOString().slice(0, 10),
@@ -273,6 +277,17 @@ export default function HomePage() {
     };
   }, [loadCentralData]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const onViewportChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+    setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onViewportChange);
+    return () => {
+      mediaQuery.removeEventListener("change", onViewportChange);
+    };
+  }, []);
+
 
   useEffect(() => {
     let active = true;
@@ -357,6 +372,18 @@ export default function HomePage() {
       pendingFollowUps: pending
     };
   }, [activities, agendaEventsToday, opportunities]);
+
+  const completedActivitiesTodayCount = useMemo(() => {
+    const { start, end } = getTodayBoundaries();
+    return activities.filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end)).length;
+  }, [activities]);
+
+  const activitiesForMobileList = useMemo(() => {
+    const { start, end } = getTodayBoundaries();
+    return activities
+      .filter((item) => isSameDay(getActivityExecutionDate(item), start, end))
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }, [activities]);
 
   const routineMetrics = useMemo(() => {
     const now = new Date();
@@ -632,6 +659,111 @@ export default function HomePage() {
       Prioridade do painel
     </button>
   );
+
+  if (isMobile) {
+    return (
+      <div className="flex flex-col gap-5 pb-4">
+        <section className="rounded-2xl border border-brand-100 bg-brand-50 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Hoje</p>
+          <h1 className="mt-2 text-3xl font-bold text-brand-900">Hoje</h1>
+          <p className="mt-2 text-base text-slate-700 capitalize">{todayDateLabel}</p>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Resumo do dia</h2>
+          <div className="mt-4 grid gap-3">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Atividades concluídas hoje</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{completedActivitiesTodayCount}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Compromissos do dia</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Visitas realizadas</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{activitiesToday.length}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Lista operacional</h2>
+
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Atividades do dia</h3>
+            <div className="mt-2 space-y-2">
+              {loading ? (
+                <p className="text-sm text-slate-500">Carregando atividades...</p>
+              ) : activitiesForMobileList.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhuma atividade para hoje.</p>
+              ) : (
+                activitiesForMobileList.slice(0, 8).map((activity) => (
+                  <div key={activity.id} className="rounded-xl border border-slate-200 p-3">
+                    <p className="text-base font-medium text-slate-900">{activity.notes || "Atividade"}</p>
+                    <p className="mt-1 text-sm text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {activity.done ? "Concluída" : "Pendente"} ·{" "}
+                      {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.createdAt || activity.dueDate))}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Agenda do dia</h3>
+            <div className="mt-2 space-y-2">
+              {loading ? (
+                <p className="text-sm text-slate-500">Carregando agenda...</p>
+              ) : plannedAppointmentsToday.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhum compromisso para hoje.</p>
+              ) : (
+                plannedAppointmentsToday.map((item) => {
+                  const startsAt = item.startsAt || item.startDateTime;
+                  return (
+                    <div key={item.id} className="rounded-xl border border-slate-200 p-3">
+                      <p className="text-base font-medium text-slate-900">
+                        {startsAt
+                          ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(startsAt))
+                          : "Sem horário"}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">{item.title || "Compromisso"}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Ações rápidas</h2>
+          <div className="mt-4 grid gap-3">
+            <Link
+              to={`/agenda?${startRouteSearch}`}
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand-700 px-4 py-3 text-base font-semibold text-white"
+            >
+              Nova visita
+            </Link>
+            <Link
+              to="/oportunidades?status=open&actionToday=true"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-base font-semibold text-brand-800"
+            >
+              Novo follow-up
+            </Link>
+            <Link
+              to="/oportunidades"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-800"
+            >
+              Nova oportunidade
+            </Link>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
