@@ -54,24 +54,7 @@ type QuickOpportunityForm = {
 
 type VisitResultForm = {
   status: "realizada" | "nao_realizada";
-  reason: "cliente_ausente" | "chuva" | "estrada" | "reagendar" | "outro";
   summary: string;
-  nextStep: "criar_followup" | "criar_oportunidade" | "reagendar";
-  nextStepDate: string;
-};
-
-const VISIT_REASON_LABEL: Record<VisitResultForm["reason"], string> = {
-  cliente_ausente: "Cliente ausente",
-  chuva: "Chuva",
-  estrada: "Estrada",
-  reagendar: "Reagendar",
-  outro: "Outro"
-};
-
-const NEXT_STEP_LABEL: Record<VisitResultForm["nextStep"], string> = {
-  criar_followup: "Criar follow-up",
-  criar_oportunidade: "Criar oportunidade",
-  reagendar: "Reagendar"
 };
 
 const typedAgendaEventOptions = AGENDA_EVENT_TYPE_OPTIONS as readonly { id: string; value: SharedAgendaEventType; label: string }[];
@@ -442,10 +425,7 @@ export default function AgendaPage() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
-    reason: "cliente_ausente",
-    summary: "",
-    nextStep: "criar_followup",
-    nextStepDate: ""
+    summary: ""
   });
 
   const dateRange = useMemo(() => getRangeFromFilter(periodFilter, customFrom, customTo), [periodFilter, customFrom, customTo]);
@@ -869,6 +849,10 @@ export default function AgendaPage() {
         checkOutLng: response.data?.checkOutLng ?? null,
         checkOutAccuracy: response.data?.checkOutAccuracy ?? null
       });
+      setVisitResultForm({
+        status: "realizada",
+        summary: ""
+      });
       setActiveStopId(stopId);
       setIsResultModalOpen(true);
     } catch (error) {
@@ -881,49 +865,33 @@ export default function AgendaPage() {
   const onSaveVisitResult = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!activeStopId) return;
-    if (visitResultForm.status === "nao_realizada" && !visitResultForm.reason) {
-      toast.error("Selecione o motivo da não realização.");
-      return;
-    }
 
     setIsExecutionSubmitting(true);
     try {
       const payload = {
         status: visitResultForm.status,
-        reason: visitResultForm.status === "nao_realizada" ? visitResultForm.reason : undefined,
-        summary: visitResultForm.summary,
-        nextStep: visitResultForm.nextStep,
-        nextStepDate: visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate).toISOString() : undefined
+        summary: visitResultForm.summary
       };
       const response = await api.patch(`/agenda-events/${activeStopId}/result`, payload);
       updateStopState(activeStopId, response.data);
-      const activeStop = executionStops.find((stop) => stop.id === activeStopId);
-      setIsResultModalOpen(false);
-      setActiveStopId("");
+      closeResultModal();
+      setEventsRefreshToken((current) => current + 1);
       toast.success("Resultado da visita salvo.");
-
-      if (visitResultForm.nextStep === "criar_followup" && executionEvent) {
-        const nextStepDate = visitResultForm.nextStepDate ? new Date(visitResultForm.nextStepDate) : new Date(Date.now() + 2 * 86400000);
-        await api.post("/activities", {
-          type: "followup",
-          dueDate: nextStepDate.toISOString(),
-          notes: `Follow-up da visita: ${activeStop?.clientName || executionEvent.title} — ${visitResultForm.summary || "Sem resumo informado"}`,
-          clientId: activeStop?.clientId || executionEvent.clientId,
-          opportunityId: executionEvent.opportunityId || undefined,
-          ownerSellerId: executionEvent.userId
-        });
-        toast.success("Follow-up criado na lista de atividades.");
-        triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
-      }
-
-      if (visitResultForm.nextStep === "criar_oportunidade" && executionEvent) {
-        openQuickOpportunityModal(executionEvent, activeStop?.clientName);
-      }
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
     } finally {
       setIsExecutionSubmitting(false);
     }
+  };
+
+  const closeResultModal = () => {
+    setIsResultModalOpen(false);
+    setActiveStopId("");
+    setVisitResultForm({
+      status: "realizada",
+      summary: ""
+    });
   };
 
   const closeExecutionMode = async () => {
@@ -1948,6 +1916,80 @@ export default function AgendaPage() {
                   className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSubmitting ? "Salvando..." : createModalMode === "roteiro" ? "Salvar roteiro" : "Salvar agenda"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {isResultModalOpen ? (
+        <div className="mobile-modal-shell" onClick={closeResultModal}>
+          <div className="mobile-modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Resultado da visita</h3>
+                <p className="text-sm text-slate-500">Informe o resultado e, se quiser, adicione uma observação.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeResultModal}
+                className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form className="flex min-h-0 flex-1 flex-col" onSubmit={onSaveVisitResult}>
+              <div className="mobile-modal-body space-y-4">
+                <fieldset className="space-y-2">
+                  <legend className="mb-1 block text-xs font-medium uppercase text-slate-500">Resultado</legend>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="visit-result-status"
+                      value="realizada"
+                      checked={visitResultForm.status === "realizada"}
+                      onChange={(event) =>
+                        setVisitResultForm((current) => ({
+                          ...current,
+                          status: event.target.value as VisitResultForm["status"]
+                        }))
+                      }
+                    />
+                    Realizada
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="radio"
+                      name="visit-result-status"
+                      value="nao_realizada"
+                      checked={visitResultForm.status === "nao_realizada"}
+                      onChange={(event) =>
+                        setVisitResultForm((current) => ({
+                          ...current,
+                          status: event.target.value as VisitResultForm["status"]
+                        }))
+                      }
+                    />
+                    Não realizada
+                  </label>
+                </fieldset>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Observação (opcional)</label>
+                  <textarea
+                    value={visitResultForm.summary}
+                    onChange={(event) => setVisitResultForm((current) => ({ ...current, summary: event.target.value }))}
+                    placeholder="Escreva uma observação rápida"
+                    className="min-h-20 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div className="mobile-modal-footer">
+                <button type="submit" disabled={isExecutionSubmitting} className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-70">
+                  {isExecutionSubmitting ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </form>
