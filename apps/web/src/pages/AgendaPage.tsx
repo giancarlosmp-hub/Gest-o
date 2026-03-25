@@ -108,6 +108,18 @@ const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   cancelled: "border-slate-200 bg-slate-100 text-slate-700"
 };
 
+const STOP_MOBILE_STATUS_LABEL: Record<StopMobileStatus, string> = {
+  pendente: "Pendente",
+  realizada: "Realizada",
+  nao_realizada: "Não realizada"
+};
+
+const STOP_MOBILE_STATUS_CLASS: Record<StopMobileStatus, string> = {
+  pendente: "border-amber-200 bg-amber-100 text-amber-800",
+  realizada: "border-green-200 bg-green-100 text-green-800",
+  nao_realizada: "border-rose-200 bg-rose-100 text-rose-800"
+};
+
 const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
   today: "Hoje",
   this_week: "Esta semana",
@@ -120,6 +132,8 @@ type DateRange = {
   start: Date;
   end: Date;
 };
+
+type StopMobileStatus = "pendente" | "realizada" | "nao_realizada";
 
 function normalizeEventType(type: string | undefined): string {
   return String(type || "")
@@ -252,6 +266,12 @@ function formatTime(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function getStopMobileStatus(stop: AgendaStop): StopMobileStatus {
+  if (stop.resultStatus === "realizada") return "realizada";
+  if (stop.resultStatus === "nao_realizada") return "nao_realizada";
+  return "pendente";
 }
 
 function createEmptyDraftStop(): DraftStop {
@@ -419,6 +439,7 @@ export default function AgendaPage() {
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [activeStopId, setActiveStopId] = useState("");
   const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
     reason: "cliente_ausente",
@@ -445,6 +466,14 @@ export default function AgendaPage() {
   }, [dateRange, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -1674,6 +1703,49 @@ export default function AgendaPage() {
                         <div className="border-t border-emerald-100 bg-emerald-50 px-4 py-3">
                           {!event.stops?.length ? (
                             <p className="text-xs text-emerald-700">Sem paradas cadastradas.</p>
+                          ) : isMobile ? (
+                            <div className="max-h-[70vh] space-y-3 overflow-y-auto overscroll-contain scroll-smooth pr-1 select-none touch-pan-y">
+                              {event.stops.map((stop) => {
+                                const stopStatus = getStopMobileStatus(stop);
+                                return (
+                                  <article key={stop.id} className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
+                                    <div className="space-y-2">
+                                      <p className="text-sm font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
+                                      <p className="text-sm text-slate-600">{getStopCityDisplayName(stop)}</p>
+                                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${STOP_MOBILE_STATUS_CLASS[stopStatus]}`}>
+                                        {STOP_MOBILE_STATUS_LABEL[stopStatus]}
+                                      </span>
+                                    </div>
+                                    <div className="mt-4 grid grid-cols-2 gap-3">
+                                      {stop.clientId ? (
+                                        <Link
+                                          to={`/clientes/${stop.clientId}`}
+                                          className="rounded-lg border border-brand-300 px-4 py-3 text-center text-sm font-semibold text-brand-700 active:bg-brand-50"
+                                        >
+                                          Abrir
+                                        </Link>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          disabled
+                                          className="rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-400"
+                                        >
+                                          Abrir
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting}
+                                        onClick={() => void onCheckOutStop(stop.id)}
+                                        className="rounded-lg border border-green-300 px-4 py-3 text-sm font-semibold text-green-700 active:bg-green-50 disabled:opacity-50"
+                                      >
+                                        Concluir
+                                      </button>
+                                    </div>
+                                  </article>
+                                );
+                              })}
+                            </div>
                           ) : (
                             <ul className="space-y-2">
                               {event.stops.map((stop) => (
