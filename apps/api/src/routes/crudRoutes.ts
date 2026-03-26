@@ -4371,6 +4371,80 @@ router.post("/ai/opportunity-insight", async (req, res) => {
   return res.json(insight);
 });
 
+type TodayPriorityRisk = "alto" | "medio" | "baixo";
+
+const todayPriorityRiskWeight: Record<TodayPriorityRisk, number> = {
+  alto: 3,
+  medio: 2,
+  baixo: 1
+};
+
+router.get("/ai/today-priorities", async (req, res) => {
+  if (!req.user?.id) {
+    return res.status(401).json({ message: "Não autenticado" });
+  }
+
+  const todayStart = getUtcTodayStart();
+  const openOpportunities = await prisma.opportunity.findMany({
+    where: {
+      ownerSellerId: req.user.id,
+      stage: { notIn: [...CLOSED_STAGE_VALUES] }
+    },
+    select: {
+      id: true,
+      value: true,
+      followUpDate: true,
+      createdAt: true,
+      lastContactAt: true,
+      stage: true,
+      client: { select: { name: true } },
+      timelineEvents: {
+        select: { createdAt: true },
+        orderBy: { createdAt: "desc" },
+        take: 25
+      }
+    }
+  });
+
+  const priorities = openOpportunities
+    .map((opportunity) => {
+      const insight = generateOpportunityInsight(opportunity);
+      const risk = insight.risk as TodayPriorityRisk;
+      const isFollowUpOverdue = opportunity.followUpDate < todayStart;
+      const overdueReason = isFollowUpOverdue
+        ? "Follow-up vencido."
+        : "Follow-up em dia.";
+
+      return {
+        opportunityId: opportunity.id,
+        clientName: opportunity.client?.name || "Cliente não informado",
+        value: Number(opportunity.value || 0),
+        risk,
+        reason: `${overdueReason} ${insight.message}`.trim(),
+        _sort: {
+          riskWeight: todayPriorityRiskWeight[risk] || 0,
+          overdueWeight: isFollowUpOverdue ? 1 : 0,
+          followUpDate: opportunity.followUpDate.getTime()
+        }
+      };
+    })
+    .sort((a, b) => {
+      const byRisk = b._sort.riskWeight - a._sort.riskWeight;
+      if (byRisk !== 0) return byRisk;
+
+      const byOverdue = b._sort.overdueWeight - a._sort.overdueWeight;
+      if (byOverdue !== 0) return byOverdue;
+
+      const byValue = b.value - a.value;
+      if (byValue !== 0) return byValue;
+
+      return a._sort.followUpDate - b._sort.followUpDate;
+    })
+    .map(({ _sort, ...item }) => item);
+
+  return res.json(priorities);
+});
+
 router.get("/opportunities", async (req, res) => {
   const parsedFilters = parseOpportunityFilterParams(req);
   if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
