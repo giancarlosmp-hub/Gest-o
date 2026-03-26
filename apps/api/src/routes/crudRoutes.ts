@@ -1757,6 +1757,7 @@ const processOpportunityImport = async ({
   }
 
   const dedupeCandidatesCache = new Map<string, Array<{ id: string; title: string; createdAt: Date; ownerSellerId: string; client: { name: string } }>>();
+  const previewCreatedClientsCache = new Map<string, ImportClientCandidate>();
   const logClientResolution = (
     rowNumber: number,
     rowInput: { clientNameOrId: string; cnpj?: string; city?: string },
@@ -1876,46 +1877,7 @@ const processOpportunityImport = async ({
           continue;
         }
 
-        if (dryRun) {
-          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
-          const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
-          logClientResolution(rowNumber, resolverInput, resolvedClient);
-
-          let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
-          if (!client && createClientIfMissing && resolvedClient.status !== "ambiguous") {
-            client = toImportClientCandidate({ id: "dry-run-client", name: clientLookup, city: row.city, cnpj: row.cnpj });
-          }
-          if (resolvedClient.status === "ambiguous") {
-            const message = "cliente ambíguo";
-            failed += 1;
-            errors.push({ row: rowNumber, message });
-            skippedDetails.push({ row: rowNumber, reason: "client_ambiguous" });
-            rowResults.push({ row: rowNumber, status: "error", reason: "client_ambiguous", message });
-            continue;
-          }
-          if (!client) {
-            const message = "cliente não encontrado";
-            failed += 1;
-            errors.push({ row: rowNumber, message });
-            skippedDetails.push({ row: rowNumber, reason: "client_missing" });
-            rowResults.push({ row: rowNumber, status: "error", reason: "client_missing", message });
-            continue;
-          }
-
-          const duplicateFileKey = [client.id, normalizeOpportunityTitle(row.title), stage, ownerSellerId].join("|");
-          if (duplicateFileKeySeen.has(duplicateFileKey)) {
-            ignored += 1;
-            skippedDetails.push({ row: rowNumber, reason: "duplicate_file" });
-            rowResults.push({ row: rowNumber, status: "ignored", reason: "duplicate_file", message: "linha duplicada no arquivo" });
-            continue;
-          }
-
-          duplicateFileKeySeen.add(duplicateFileKey);
-          created += 1;
-          rowResults.push({ row: rowNumber, status: "created" });
-          continue;
-        }
-
+        const shouldPersist = !dryRun;
         const rowExecutionResult = await prisma.$transaction(async (tx) => {
           const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
           const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
@@ -1953,18 +1915,33 @@ const processOpportunityImport = async ({
           }
 
           if (!client && createClientIfMissing) {
-            const createdClient = await tx.client.create({
-              data: {
-                name: clientLookup,
-                city: "N/A",
-                state: "NA",
-                region: "Importação",
-                ownerSellerId
-              },
-              select: { id: true, name: true, city: true, cnpj: true }
-            });
-            upsertClientCandidate(createdClient);
-            client = clientsById.get(createdClient.id);
+            if (shouldPersist) {
+              const createdClient = await tx.client.create({
+                data: {
+                  name: clientLookup,
+                  city: "N/A",
+                  state: "NA",
+                  region: "Importação",
+                  ownerSellerId
+                },
+                select: { id: true, name: true, city: true, cnpj: true }
+              });
+              upsertClientCandidate(createdClient);
+              client = clientsById.get(createdClient.id);
+            } else {
+              const previewClientKey = [normalizeClientLookup(clientLookup), normalizeCnpj(row.cnpj), normalizeClientLookup(row.city)].join("|");
+              if (!previewCreatedClientsCache.has(previewClientKey)) {
+                const previewClient = toImportClientCandidate({
+                  id: `preview-client-${previewCreatedClientsCache.size + 1}`,
+                  name: clientLookup,
+                  city: row.city ?? "N/A",
+                  cnpj: row.cnpj
+                });
+                previewCreatedClientsCache.set(previewClientKey, previewClient);
+                upsertClientCandidate(previewClient);
+              }
+              client = previewCreatedClientsCache.get(previewClientKey);
+            }
           }
 
           if (!client) {
@@ -2029,65 +2006,69 @@ const processOpportunityImport = async ({
           }
 
           if (dedupe.enabled && duplicateOpportunity && dedupe.mode === "upsert") {
-            const existingOpportunity = await tx.opportunity.findFirst({
-              where: {
-                id: duplicateOpportunity.id,
-                ...sellerWhere(req)
-              },
-              select: { id: true, notes: true, ownerSellerId: true }
-            });
+            if (shouldPersist) {
+              const existingOpportunity = await tx.opportunity.findFirst({
+                where: {
+                  id: duplicateOpportunity.id,
+                  ...sellerWhere(req)
+                },
+                select: { id: true, notes: true, ownerSellerId: true }
+              });
 
-            if (!existingOpportunity) throw new Error("Oportunidade duplicada não encontrada para atualização.");
+              if (!existingOpportunity) throw new Error("Oportunidade duplicada não encontrada para atualização.");
 
-            const notesWithTimestamp = row.notes
-              ? `${existingOpportunity.notes ? `${existingOpportunity.notes}
+              const notesWithTimestamp = row.notes
+                ? `${existingOpportunity.notes ? `${existingOpportunity.notes}
 
 ` : ""}[Import ${new Date().toISOString()}] ${row.notes}`
-              : existingOpportunity.notes;
+                : existingOpportunity.notes;
 
-            await tx.opportunity.update({
-              where: { id: existingOpportunity.id },
+              await tx.opportunity.update({
+                where: { id: existingOpportunity.id },
+                data: {
+                  ...(typeof row.value === "number" ? { value: row.value } : {}),
+                  ...(stage ? { stage } : {}),
+                  ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
+                  ...(followUpDate ? { followUpDate } : {}),
+                  ...(proposalDate ? { proposalDate } : {}),
+                  ...(expectedCloseDate ? { expectedCloseDate } : {}),
+                  ...(lastContactAt ? { lastContactAt } : {}),
+                  ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
+                  ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
+                  ...(row.crop ? { crop: row.crop } : {}),
+                  ...(row.season ? { season: row.season } : {}),
+                  ...(row.productOffered ? { productOffered: row.productOffered } : {}),
+                  ...(notesWithTimestamp !== undefined ? { notes: notesWithTimestamp } : {}),
+                  ...(req.user?.role !== "vendedor" || existingOpportunity.ownerSellerId === req.user.id ? { ownerSellerId } : {})
+                }
+              });
+            }
+
+            return { outcome: "updated" } as const;
+          }
+
+          if (shouldPersist) {
+            await tx.opportunity.create({
               data: {
-                ...(typeof row.value === "number" ? { value: row.value } : {}),
-                ...(stage ? { stage } : {}),
-                ...(typeof row.probability === "number" ? { probability: row.probability } : {}),
-                ...(followUpDate ? { followUpDate } : {}),
-                ...(proposalDate ? { proposalDate } : {}),
-                ...(expectedCloseDate ? { expectedCloseDate } : {}),
+                title: row.title,
+                value: row.value,
+                stage,
+                probability: row.probability,
+                notes: row.notes,
+                proposalDate,
+                followUpDate,
+                expectedCloseDate,
                 ...(lastContactAt ? { lastContactAt } : {}),
                 ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
                 ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
                 ...(row.crop ? { crop: row.crop } : {}),
                 ...(row.season ? { season: row.season } : {}),
                 ...(row.productOffered ? { productOffered: row.productOffered } : {}),
-                ...(notesWithTimestamp !== undefined ? { notes: notesWithTimestamp } : {}),
-                ...(req.user?.role !== "vendedor" || existingOpportunity.ownerSellerId === req.user.id ? { ownerSellerId } : {})
+                clientId: client.id,
+                ownerSellerId
               }
             });
-
-            return { outcome: "updated" } as const;
           }
-
-          await tx.opportunity.create({
-            data: {
-              title: row.title,
-              value: row.value,
-              stage,
-              probability: row.probability,
-              notes: row.notes,
-              proposalDate,
-              followUpDate,
-              expectedCloseDate,
-              ...(lastContactAt ? { lastContactAt } : {}),
-              ...(typeof row.areaHa === "number" ? { areaHa: row.areaHa } : {}),
-              ...(typeof row.expectedTicketPerHa === "number" ? { expectedTicketPerHa: row.expectedTicketPerHa } : {}),
-              ...(row.crop ? { crop: row.crop } : {}),
-              ...(row.season ? { season: row.season } : {}),
-              ...(row.productOffered ? { productOffered: row.productOffered } : {}),
-              clientId: client.id,
-              ownerSellerId
-            }
-          });
 
           return { outcome: "created" } as const;
         });
