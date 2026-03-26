@@ -31,7 +31,7 @@ import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
-import { generateOpportunityInsight } from "../services/opportunityInsight.js";
+import { calculateOpportunityRisk, generateOpportunityInsight } from "../services/opportunityInsight.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -401,7 +401,8 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   clientState: opportunity.client?.state || null,
   owner: opportunity.ownerSeller?.name,
   daysOverdue: opportunity.expectedCloseDate ? getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart) : null,
-  weightedValue: getWeightedValue(opportunity.value, opportunity.probability)
+  weightedValue: getWeightedValue(opportunity.value, opportunity.probability),
+  risk: calculateOpportunityRisk(opportunity)
 });
 
 const parseObjectivePeriod = (monthQuery?: string, yearQuery?: string) => {
