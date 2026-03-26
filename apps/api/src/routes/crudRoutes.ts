@@ -1165,57 +1165,66 @@ type ImportClientCandidate = {
   id: string;
   name: string;
   city: string | null;
+  state: string | null;
   cnpj: string | null;
   normalizedName: string;
   normalizedCity: string;
+  normalizedState: string;
   normalizedCnpj: string;
 };
 
-const toImportClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }): ImportClientCandidate => ({
+const toImportClientCandidate = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }): ImportClientCandidate => ({
   id: client.id,
   name: client.name,
   city: client.city ?? null,
+  state: client.state ?? null,
   cnpj: client.cnpj ?? null,
   normalizedName: normalizeClientLookup(client.name),
   normalizedCity: normalizeClientLookup(client.city),
+  normalizedState: normalizeClientLookup(client.state),
   normalizedCnpj: normalizeCnpj(client.cnpj)
 });
 
 const resolveClientSmart = (
-  input: { clientNameOrId: string; cnpj?: string; city?: string },
+  input: { clientNameOrId: string; cnpj?: string; city?: string; state?: string },
   clients: ImportClientCandidate[]
 ) => {
   const rawLookup = input.clientNameOrId.trim();
   const normalizedLookup = normalizeClientLookup(rawLookup);
   const normalizedInputCity = normalizeClientLookup(input.city);
+  const normalizedInputState = normalizeClientLookup(input.state);
   const normalizedInputCnpj = normalizeCnpj(input.cnpj);
 
   if (UUID_V4_REGEX.test(rawLookup)) {
     const uuidMatches = clients.filter((client) => client.id === rawLookup);
-    if (uuidMatches.length === 1) return { status: "resolved" as const, reason: "match_uuid" as const, client: uuidMatches[0] };
-    if (uuidMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: uuidMatches };
-    return { status: "missing" as const, reason: "not_found" as const };
+    if (uuidMatches.length === 1) return { status: "resolved" as const, client: uuidMatches[0] };
+    if (uuidMatches.length > 1) return { status: "ambiguous" as const, candidates: uuidMatches };
+    return { status: "not_found" as const };
   }
 
   if (normalizedInputCnpj) {
     const cnpjMatches = clients.filter((client) => client.normalizedCnpj && client.normalizedCnpj === normalizedInputCnpj);
-    if (cnpjMatches.length === 1) return { status: "resolved" as const, reason: "match_cnpj" as const, client: cnpjMatches[0] };
-    if (cnpjMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: cnpjMatches };
-    return { status: "missing" as const, reason: "not_found" as const };
+    if (cnpjMatches.length === 1) return { status: "resolved" as const, client: cnpjMatches[0] };
+    if (cnpjMatches.length > 1) return { status: "ambiguous" as const, candidates: cnpjMatches };
+    return { status: "not_found" as const };
   }
 
   const nameMatches = normalizedLookup ? clients.filter((client) => client.normalizedName === normalizedLookup) : [];
   if (normalizedInputCity) {
     const nameAndCityMatches = nameMatches.filter((client) => client.normalizedCity === normalizedInputCity);
-    if (nameAndCityMatches.length === 1) {
-      return { status: "resolved" as const, reason: "match_nome_cidade" as const, client: nameAndCityMatches[0] };
-    }
-    if (nameAndCityMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameAndCityMatches };
+    if (nameAndCityMatches.length === 1) return { status: "resolved" as const, client: nameAndCityMatches[0] };
+    if (nameAndCityMatches.length > 1) return { status: "ambiguous" as const, candidates: nameAndCityMatches };
   }
 
-  if (!nameMatches.length) return { status: "missing" as const, reason: "not_found" as const };
-  if (nameMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameMatches };
-  return { status: "resolved" as const, reason: "match_nome" as const, client: nameMatches[0] };
+  if (normalizedInputState) {
+    const nameAndStateMatches = nameMatches.filter((client) => client.normalizedState === normalizedInputState);
+    if (nameAndStateMatches.length === 1) return { status: "resolved" as const, client: nameAndStateMatches[0] };
+    if (nameAndStateMatches.length > 1) return { status: "ambiguous" as const, candidates: nameAndStateMatches };
+  }
+
+  if (!nameMatches.length) return { status: "not_found" as const };
+  if (nameMatches.length > 1) return { status: "ambiguous" as const, candidates: nameMatches };
+  return { status: "resolved" as const, client: nameMatches[0] };
 };
 
 const resolveOpportunityOwner = ({
@@ -1730,7 +1739,7 @@ const processOpportunityImport = async ({
 
   const clientsById = new Map<string, ImportClientCandidate>();
   const clientCandidates: ImportClientCandidate[] = [];
-  const upsertClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }) => {
+  const upsertClientCandidate = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
     const candidate = toImportClientCandidate(client);
     if (clientsById.has(candidate.id)) {
       clientsById.set(candidate.id, candidate);
@@ -1748,7 +1757,7 @@ const processOpportunityImport = async ({
         ...sellerWhere(req),
         ...(clientIds.size && !clientNames.size ? { id: { in: Array.from(clientIds) } } : {})
       },
-      select: { id: true, name: true, city: true, cnpj: true }
+      select: { id: true, name: true, city: true, state: true, cnpj: true }
     });
 
     for (const client of clients) {
@@ -1760,7 +1769,7 @@ const processOpportunityImport = async ({
   const previewCreatedClientsCache = new Map<string, ImportClientCandidate>();
   const logClientResolution = (
     rowNumber: number,
-    rowInput: { clientNameOrId: string; cnpj?: string; city?: string },
+    rowInput: { clientNameOrId: string; cnpj?: string; city?: string; state?: string },
     resolution: ReturnType<typeof resolveClientSmart>
   ) => {
     console.info("[opportunities/import][client-resolver]", {
@@ -1769,8 +1778,8 @@ const processOpportunityImport = async ({
       clientNameOrId: rowInput.clientNameOrId,
       cnpj: rowInput.cnpj,
       city: rowInput.city,
-      reason: resolution.reason,
-      matchesCount: resolution.status === "ambiguous" ? resolution.matches.length : resolution.status === "resolved" ? 1 : 0,
+      state: rowInput.state,
+      matchesCount: resolution.status === "ambiguous" ? resolution.candidates.length : resolution.status === "resolved" ? 1 : 0,
       resolvedClientId: resolution.status === "resolved" ? resolution.client.id : undefined,
       resolvedClientName: resolution.status === "resolved" ? resolution.client.name : undefined
     });
@@ -1901,7 +1910,7 @@ const processOpportunityImport = async ({
                         ...(normalizedCity ? { cityNormalized: normalizedCity } : {})
                       })
               },
-              select: { id: true, name: true, city: true, cnpj: true }
+              select: { id: true, name: true, city: true, state: true, cnpj: true }
             });
 
             if (existingClient) {
@@ -1924,7 +1933,7 @@ const processOpportunityImport = async ({
                   region: "Importação",
                   ownerSellerId
                 },
-                select: { id: true, name: true, city: true, cnpj: true }
+                select: { id: true, name: true, city: true, state: true, cnpj: true }
               });
               upsertClientCandidate(createdClient);
               client = clientsById.get(createdClient.id);
