@@ -92,6 +92,8 @@ export default function OpportunityDetailsPage() {
   const [lossReason, setLossReason] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
   const [insight, setInsight] = useState<OpportunityInsight | null>(null);
+  const [salesMessage, setSalesMessage] = useState("");
+  const [loadingSalesMessage, setLoadingSalesMessage] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -203,6 +205,35 @@ export default function OpportunityDetailsPage() {
     setShowLossModal(false);
   };
 
+  const onGenerateSalesMessage = async () => {
+    if (!item?.id) return;
+    setLoadingSalesMessage(true);
+    try {
+      const response = await api.get("/ai/opportunity-message", { params: { opportunityId: item.id } });
+      const generatedMessage = response.data?.message;
+      if (!generatedMessage) {
+        toast.error("Não foi possível gerar a mensagem");
+        return;
+      }
+      setSalesMessage(generatedMessage);
+      toast.success("Mensagem gerada");
+    } catch {
+      toast.error("Erro ao gerar mensagem comercial");
+    } finally {
+      setLoadingSalesMessage(false);
+    }
+  };
+
+  const onCopySalesMessage = async () => {
+    if (!salesMessage) return;
+    try {
+      await navigator.clipboard.writeText(salesMessage);
+      toast.success("Mensagem copiada");
+    } catch {
+      toast.error("Não foi possível copiar a mensagem");
+    }
+  };
+
   if (loading) {
     return <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-500">Carregando detalhes da oportunidade...</div>;
   }
@@ -261,6 +292,34 @@ export default function OpportunityDetailsPage() {
             <p><strong>Mensagem:</strong> {insight.message}</p>
           </div>
         ) : <p className="text-sm text-slate-500">Sem sugestão disponível no momento.</p>}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-lg font-semibold">📩 Mensagem comercial</h3>
+        <div className="mobile-action-stack">
+          <button
+            type="button"
+            disabled={loadingSalesMessage}
+            onClick={onGenerateSalesMessage}
+            className="mobile-primary-button rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:bg-slate-500"
+          >
+            📩 Gerar mensagem
+          </button>
+          {salesMessage ? (
+            <button
+              type="button"
+              onClick={onCopySalesMessage}
+              className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              Copiar
+            </button>
+          ) : null}
+        </div>
+        {salesMessage ? (
+          <p className="mt-3 whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{salesMessage}</p>
+        ) : (
+          <p className="text-sm text-slate-500">Gere um texto rápido para contato com o cliente.</p>
+        )}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

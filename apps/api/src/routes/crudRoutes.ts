@@ -32,6 +32,7 @@ import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/clie
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk, generateOpportunityInsight } from "../services/opportunityInsight.js";
+import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -4369,6 +4370,54 @@ router.post("/ai/opportunity-insight", async (req, res) => {
   const insight = generateOpportunityInsight(opportunity);
 
   return res.json(insight);
+});
+
+const opportunityMessageQuerySchema = z.object({
+  opportunityId: z.string().trim().min(1, "opportunityId é obrigatório")
+});
+
+router.get("/ai/opportunity-message", async (req, res) => {
+  const parsed = opportunityMessageQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Query inválida", errors: parsed.error.issues });
+  }
+
+  const opportunity = await prisma.opportunity.findUnique({
+    where: { id: parsed.data.opportunityId },
+    select: {
+      id: true,
+      stage: true,
+      crop: true,
+      productOffered: true,
+      client: {
+        select: {
+          name: true
+        }
+      },
+      timelineEvents: {
+        select: {
+          description: true,
+          createdAt: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 2
+      }
+    }
+  });
+
+  if (!opportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const message = generateSalesMessage({
+    clientName: opportunity.client?.name || null,
+    crop: opportunity.crop,
+    productOffered: opportunity.productOffered,
+    stage: opportunity.stage,
+    timelineEvents: opportunity.timelineEvents
+  });
+
+  return res.json({ message });
 });
 
 type TodayPriorityRisk = "alto" | "medio" | "baixo";
