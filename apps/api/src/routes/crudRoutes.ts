@@ -31,6 +31,7 @@ import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
+import { generateOpportunityInsight } from "../services/opportunityInsight.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -1088,6 +1089,11 @@ const opportunityImportRowSchema = z
     season: row.season ?? row.safra,
     productOffered: row.productOffered ?? row.produto_ofertado
   }));
+
+
+const opportunityInsightRequestSchema = z.object({
+  opportunityId: z.string().min(1)
+});
 
 const opportunityImportPayloadSchema = z.object({
   rows: z.array(z.unknown()).default([]),
@@ -4318,6 +4324,50 @@ router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, r
 router.delete("/contacts/:id", async (req, res) => {
   await prisma.contact.delete({ where: { id: req.params.id } });
   res.status(204).send();
+});
+
+
+router.post("/ai/opportunity-insight", async (req, res) => {
+  const parsed = opportunityInsightRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
+  }
+
+  const opportunity = await prisma.opportunity.findUnique({
+    where: { id: parsed.data.opportunityId },
+    select: {
+      id: true,
+      stage: true,
+      value: true,
+      createdAt: true,
+      lastContactAt: true,
+      followUpDate: true,
+      client: {
+        select: {
+          id: true,
+          name: true
+        }
+      },
+      timelineEvents: {
+        select: {
+          id: true,
+          createdAt: true,
+          type: true,
+          description: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 25
+      }
+    }
+  });
+
+  if (!opportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const insight = generateOpportunityInsight(opportunity);
+
+  return res.json(insight);
 });
 
 router.get("/opportunities", async (req, res) => {
