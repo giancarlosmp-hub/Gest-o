@@ -4386,9 +4386,13 @@ router.get("/ai/opportunity-message", async (req, res) => {
     where: { id: parsed.data.opportunityId },
     select: {
       id: true,
+      title: true,
       stage: true,
       crop: true,
       productOffered: true,
+      followUpDate: true,
+      lastContactAt: true,
+      createdAt: true,
       client: {
         select: {
           name: true
@@ -4411,9 +4415,13 @@ router.get("/ai/opportunity-message", async (req, res) => {
 
   const message = generateSalesMessage({
     clientName: opportunity.client?.name || null,
+    title: opportunity.title,
     crop: opportunity.crop,
     productOffered: opportunity.productOffered,
     stage: opportunity.stage,
+    followUpDate: opportunity.followUpDate,
+    lastContactAt: opportunity.lastContactAt,
+    createdAt: opportunity.createdAt,
     timelineEvents: opportunity.timelineEvents
   });
 
