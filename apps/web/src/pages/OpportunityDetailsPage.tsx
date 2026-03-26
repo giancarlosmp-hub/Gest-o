@@ -8,6 +8,12 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
 
+type OpportunityInsight = {
+  risk: "baixo" | "medio" | "alto";
+  nextAction: string;
+  message: string;
+};
+
 type EventItem = {
   id: string;
   type: EventType;
@@ -57,6 +63,19 @@ const eventLabel: Record<EventType, string> = {
   status: "Status"
 };
 
+
+const riskLabel: Record<OpportunityInsight["risk"], string> = {
+  baixo: "Baixo",
+  medio: "Médio",
+  alto: "Alto"
+};
+
+const riskClassName: Record<OpportunityInsight["risk"], string> = {
+  baixo: "text-emerald-700",
+  medio: "text-amber-700",
+  alto: "text-red-700"
+};
+
 const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
   timeStyle: "short"
@@ -72,17 +91,20 @@ export default function OpportunityDetailsPage() {
   const [showLossModal, setShowLossModal] = useState(false);
   const [lossReason, setLossReason] = useState("");
   const [events, setEvents] = useState<EventItem[]>([]);
+  const [insight, setInsight] = useState<OpportunityInsight | null>(null);
 
   const load = async () => {
     if (!id) return;
     setLoading(true);
     try {
-      const [opportunityResponse, eventsResponse] = await Promise.all([
+      const [opportunityResponse, eventsResponse, insightResponse] = await Promise.all([
         api.get(`/opportunities/${id}`),
-        api.get(`/events?opportunityId=${id}`)
+        api.get(`/events?opportunityId=${id}`),
+        api.post("/ai/opportunity-insight", { opportunityId: id })
       ]);
       setItem(opportunityResponse.data);
       setEvents(eventsResponse.data?.items || []);
+      setInsight(insightResponse.data || null);
     } catch {
       toast.error("Não foi possível carregar a oportunidade");
       navigate("/oportunidades");
@@ -227,6 +249,18 @@ export default function OpportunityDetailsPage() {
           <p><strong>Valor/ha:</strong> {valuePerHa ? formatCurrencyBRL(valuePerHa) : "-"}</p>
           <p><strong>Ticket estimado total:</strong> {estimatedTicketTotal ? formatCurrencyBRL(estimatedTicketTotal) : "-"}</p>
         </div>
+      </section>
+
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-lg font-semibold">🧠 Sugestão do sistema</h3>
+        {insight ? (
+          <div className="space-y-2 text-sm">
+            <p><strong>Risco:</strong> <span className={riskClassName[insight.risk]}>{riskLabel[insight.risk]}</span></p>
+            <p><strong>Próxima ação:</strong> {insight.nextAction}</p>
+            <p><strong>Mensagem:</strong> {insight.message}</p>
+          </div>
+        ) : <p className="text-sm text-slate-500">Sem sugestão disponível no momento.</p>}
       </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
