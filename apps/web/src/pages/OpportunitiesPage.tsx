@@ -17,6 +17,7 @@ type OpportunityStatus = "open" | "closed" | "all";
 type ReturnStatus = "overdue" | "dueSoon" | "ok";
 type ViewMode = "list" | "pipeline";
 type OpportunityModalMode = "create" | "edit";
+type OpportunityRisk = "alto" | "medio" | "baixo";
 
 type Opportunity = {
   id: string;
@@ -43,6 +44,7 @@ type Opportunity = {
   productOffered?: string | null;
   plantingForecastDate?: string | null;
   expectedTicketPerHa?: number | null;
+  risk?: OpportunityRisk;
 };
 
 type Client = {
@@ -141,6 +143,24 @@ const stageWeight: Record<Stage, number> = {
   perdido: 0
 };
 
+const riskLabel: Record<OpportunityRisk, string> = {
+  alto: "Alto",
+  medio: "Médio",
+  baixo: "Baixo"
+};
+
+const riskBadgeClassName: Record<OpportunityRisk, string> = {
+  alto: "bg-red-100 text-red-700 border-red-200",
+  medio: "bg-amber-100 text-amber-700 border-amber-200",
+  baixo: "bg-emerald-100 text-emerald-700 border-emerald-200"
+};
+
+const riskRowClassName: Record<OpportunityRisk, string> = {
+  alto: "bg-red-50/40",
+  medio: "bg-amber-50/40",
+  baixo: "bg-emerald-50/30"
+};
+
 const emptyForm: FormState = {
   title: "",
   value: "",
@@ -191,6 +211,11 @@ function toDayStart(dateLike?: string | null) {
   const date = new Date(dateLike);
   if (Number.isNaN(date.getTime())) return null;
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function normalizeRisk(value?: string | null): OpportunityRisk {
+  if (value === "alto" || value === "medio") return value;
+  return "baixo";
 }
 
 export default function OpportunitiesPage() {
@@ -443,6 +468,9 @@ export default function OpportunitiesPage() {
   const statusPriority: Record<ReturnStatus, number> = { overdue: 0, dueSoon: 1, ok: 2 };
 
   const sortByPipelinePriority = (a: Opportunity, b: Opportunity) => {
+    const riskOrder: Record<OpportunityRisk, number> = { alto: 0, medio: 1, baixo: 2 };
+    const byRisk = riskOrder[normalizeRisk(a.risk)] - riskOrder[normalizeRisk(b.risk)];
+    if (byRisk !== 0) return byRisk;
     const byStatus = statusPriority[getReturnStatus(a)] - statusPriority[getReturnStatus(b)];
     if (byStatus !== 0) return byStatus;
     return Number(b.value || 0) - Number(a.value || 0);
@@ -1067,21 +1095,27 @@ export default function OpportunitiesPage() {
           <table className="min-w-[1500px] w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">
-                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
+                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Risco</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
               </tr>
             </thead>
             <tbody>
               {loading ? Array.from({ length: 6 }).map((_, index) => (
                 <tr key={`skeleton-${index}`} className="border-t border-slate-100">
-                  <td className="p-2" colSpan={15}><div className="h-8 animate-pulse rounded bg-slate-100" /></td>
+                  <td className="p-2" colSpan={16}><div className="h-8 animate-pulse rounded bg-slate-100" /></td>
                 </tr>
               )) : sortedItems.length ? sortedItems.map((item) => {
                 const weighted = getWeightedValue(item);
+                const risk = normalizeRisk(item.risk);
                 return (
-                  <tr key={item.id} className="border-t border-slate-100">
+                  <tr key={item.id} className={`border-t border-slate-100 ${riskRowClassName[risk]}`}>
                     <td className="p-2 font-medium text-slate-800">{item.title}</td>
                     <td className="p-2">{getClientName(item)}</td>
                     <td className="p-2">{getSellerName(item)}</td>
+                    <td className="p-2">
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeClassName[risk]}`}>
+                        {riskLabel[risk]}
+                      </span>
+                    </td>
                     <td className="p-2">{stageLabel[item.stage]}</td>
                     <td className="p-2">{formatCurrencyBRL(item.value)}</td>
                     <td className="p-2">{item.probability ?? 0}%</td>
@@ -1119,7 +1153,7 @@ export default function OpportunitiesPage() {
                 );
               }) : (
                 <tr>
-                  <td colSpan={15} className="p-8 text-center text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</td>
+                  <td colSpan={16} className="p-8 text-center text-slate-500">Nenhuma oportunidade encontrada com os filtros aplicados. Tente ajustar os critérios para visualizar resultados.</td>
                 </tr>
               )}
             </tbody>
@@ -1174,10 +1208,12 @@ export default function OpportunitiesPage() {
                     <div className="flex-1 space-y-2 overflow-y-auto p-3">
                       {loading ? Array.from({ length: 3 }).map((_, index) => (
                         <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
-                      )) : stageItems.length ? stageItems.map((item) => (
+                      )) : stageItems.length ? stageItems.map((item) => {
+                        const risk = normalizeRisk(item.risk);
+                        return (
                         <div
                           key={item.id}
-                          className={`space-y-2 rounded-lg border p-3 shadow-sm ${getReturnStatus(item) === "overdue" ? "border-red-200 bg-red-50/40" : "border-slate-200 bg-white"}`}
+                          className={`space-y-2 rounded-lg border p-3 shadow-sm ${risk === "alto" ? "border-red-300 bg-red-50/40" : risk === "medio" ? "border-amber-300 bg-amber-50/40" : "border-emerald-200 bg-emerald-50/30"}`}
                           draggable
                           onDragStart={(event) => handlePipelineCardDragStart(event, item)}
                           onClick={() => openPipelineDrawer(item)}
@@ -1199,7 +1235,12 @@ export default function OpportunitiesPage() {
                               <div className="text-base font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</div>
                               <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
                             </div>
-                            <ReturnStatusBadge status={getReturnStatus(item)} />
+                            <div className="flex flex-col items-end gap-1">
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClassName[risk]}`}>
+                                Risco {riskLabel[risk]}
+                              </span>
+                              <ReturnStatusBadge status={getReturnStatus(item)} />
+                            </div>
                           </div>
                           {!["ganho", "perdido"].includes(item.stage) ? (
                             <div className="relative flex justify-end" onClick={(event) => event.stopPropagation()}>
@@ -1223,7 +1264,8 @@ export default function OpportunitiesPage() {
                             </div>
                           ) : null}
                         </div>
-                      )) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
+                        );
+                      }) : <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center text-xs text-slate-500">Sem oportunidades</div>}
                     </div>
                     <div className="mt-auto border-t border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
                       <div className="flex items-center justify-between"><span>Total</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
