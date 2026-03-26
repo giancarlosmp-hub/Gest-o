@@ -50,6 +50,7 @@ export default function ClientSearchSelect({
   className = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
 }: ClientSearchSelectProps) {
   const [searchValue, setSearchValue] = useState("");
+  const [debouncedSearchValue, setDebouncedSearchValue] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const isPointerDraggingRef = useRef(false);
@@ -66,6 +67,13 @@ export default function ClientSearchSelect({
   }, [selectedClient]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchValue(searchValue);
+    }, 200);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchValue]);
+
+  useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       if (!containerRef.current) return;
       if (!containerRef.current.contains(event.target as Node)) setIsOpen(false);
@@ -76,7 +84,7 @@ export default function ClientSearchSelect({
   }, []);
 
   const filteredClients = useMemo(() => {
-    const term = normalizeText(searchValue.trim());
+    const term = normalizeText(debouncedSearchValue.trim());
     if (!term) return clients;
 
     const termDigits = term.replace(/\D/g, "");
@@ -87,7 +95,7 @@ export default function ClientSearchSelect({
       const hasCnpjMatch = Boolean(termDigits) && cnpjDigits.includes(termDigits);
       return hasTextMatch || hasCnpjMatch;
     });
-  }, [clients, searchValue]);
+  }, [clients, debouncedSearchValue]);
 
   return (
     <div ref={containerRef} className="relative">

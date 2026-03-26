@@ -27,6 +27,9 @@ type OpportunityPreviewRow = {
 type OpportunityImportFieldKey =
   | "title"
   | "clientNameOrId"
+  | "cnpj"
+  | "city"
+  | "state"
   | "value"
   | "stage"
   | "status"
@@ -220,6 +223,24 @@ const IMPORT_FIELDS: OpportunityImportField[] = [
       "nome do cliente",
       "cliente nome",
     ],
+  },
+  {
+    key: "cnpj",
+    label: "CNPJ do cliente",
+    required: false,
+    aliases: ["cnpj", "cnpj_cliente", "documento_cliente", "documento"],
+  },
+  {
+    key: "city",
+    label: "Cidade do cliente",
+    required: false,
+    aliases: ["city", "cidade", "cidade_cliente"],
+  },
+  {
+    key: "state",
+    label: "UF do cliente",
+    required: false,
+    aliases: ["state", "uf", "estado", "uf_cliente", "estado_cliente"],
   },
   {
     key: "value",
@@ -578,6 +599,9 @@ const buildPreviewRows = (
     const followUpDate = normalizeTextValue(
       getMappedValue(row, "followUpDate"),
     );
+    const cnpj = normalizeTextValue(getMappedValue(row, "cnpj"));
+    const city = normalizeTextValue(getMappedValue(row, "city"));
+    const state = normalizeTextValue(getMappedValue(row, "state"));
 
     const title = normalizeTextValue(getMappedValue(row, "title"));
     const clientNameOrId = normalizeTextValue(
@@ -615,6 +639,9 @@ const buildPreviewRows = (
         status: status || undefined,
         ownerEmail: ownerEmail || undefined,
         ownerSellerName: ownerSellerName || undefined,
+        cnpj: cnpj || undefined,
+        city: city || undefined,
+        state: state || undefined,
         followUpDate: followUpDate || undefined,
         proposalDate: proposalDate || undefined,
         expectedCloseDate: expectedCloseDate || undefined,
@@ -952,6 +979,14 @@ export default function OpportunityImportModal({
       reason.includes("multiplos clientes")
     );
   };
+  const isMissingClientError = (row: OpportunityPreviewRow) => {
+    if (row.status !== "error" || !row.reason) return false;
+    const reason = row.reason.toLowerCase();
+    return (
+      reason.includes("cliente não encontrado") ||
+      reason.includes("cliente nao encontrado")
+    );
+  };
 
   const counters = useMemo(
     () => ({
@@ -1284,6 +1319,13 @@ export default function OpportunityImportModal({
           ...row,
           status: "error" as const,
           reason: result.message || "Erro de validação",
+          invalidFields:
+            result.reason === "client_ambiguous" ||
+            result.reason === "client_missing"
+              ? Array.from(
+                  new Set([...(row.invalidFields || []), "clientNameOrId"]),
+                )
+              : row.invalidFields,
         };
       });
     } catch {
@@ -1792,7 +1834,8 @@ export default function OpportunityImportModal({
                             >
                               <div className="flex flex-col gap-1">
                                 <span>{row.clientId || "—"}</span>
-                                {isAmbiguousClientError(row) ? (
+                                {isAmbiguousClientError(row) ||
+                                isMissingClientError(row) ? (
                                   selectingClientForLine === row.line ? (
                                     <div className="flex max-w-sm items-start gap-2">
                                       <div className="min-w-0 flex-1">
@@ -1825,7 +1868,11 @@ export default function OpportunityImportModal({
                                   ) : (
                                     <button
                                       type="button"
-                                      className="w-fit rounded border border-brand-300 bg-white px-2 py-1 text-xs text-brand-700 hover:bg-brand-50"
+                                      className={`w-fit rounded border px-2 py-1 text-xs ${
+                                        isAmbiguousClientError(row)
+                                          ? "border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                                          : "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100"
+                                      }`}
                                       onClick={() =>
                                         setSelectingClientForLine(row.line)
                                       }

@@ -1048,6 +1048,11 @@ const opportunityImportRowSchema = z
     city: z.string().optional(),
     cidade: z.string().optional(),
     cidade_cliente: z.string().optional(),
+    state: z.string().optional(),
+    uf: z.string().optional(),
+    estado: z.string().optional(),
+    uf_cliente: z.string().optional(),
+    estado_cliente: z.string().optional(),
     vendedor_responsavel: z.string().optional(),
     email_responsavel: z.string().email().optional(),
     responsavelEmail: z.string().email().optional(),
@@ -1078,6 +1083,7 @@ const opportunityImportRowSchema = z
     ownerSellerName: row.ownerSellerName ?? row.vendedor_responsavel,
     cnpj: row.cnpj ?? row.cnpj_cliente ?? row.documento_cliente,
     city: row.city ?? row.cidade ?? row.cidade_cliente,
+    state: row.state ?? row.uf ?? row.estado ?? row.uf_cliente ?? row.estado_cliente,
     followUpDate: row.followUpDate ?? row.followUp,
     proposalDate: row.proposalDate ?? row.data_entrada,
     expectedCloseDate: row.expectedCloseDate ?? row.fechamento_previsto,
@@ -1165,29 +1171,34 @@ type ImportClientCandidate = {
   id: string;
   name: string;
   city: string | null;
+  state: string | null;
   cnpj: string | null;
   normalizedName: string;
   normalizedCity: string;
+  normalizedState: string;
   normalizedCnpj: string;
 };
 
-const toImportClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }): ImportClientCandidate => ({
+const toImportClientCandidate = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }): ImportClientCandidate => ({
   id: client.id,
   name: client.name,
   city: client.city ?? null,
+  state: client.state ?? null,
   cnpj: client.cnpj ?? null,
   normalizedName: normalizeClientLookup(client.name),
   normalizedCity: normalizeClientLookup(client.city),
+  normalizedState: normalizeState(client.state),
   normalizedCnpj: normalizeCnpj(client.cnpj)
 });
 
 const resolveClientSmart = (
-  input: { clientNameOrId: string; cnpj?: string; city?: string },
+  input: { clientNameOrId: string; cnpj?: string; city?: string; state?: string },
   clients: ImportClientCandidate[]
 ) => {
   const rawLookup = input.clientNameOrId.trim();
   const normalizedLookup = normalizeClientLookup(rawLookup);
   const normalizedInputCity = normalizeClientLookup(input.city);
+  const normalizedInputState = normalizeState(input.state);
   const normalizedInputCnpj = normalizeCnpj(input.cnpj);
 
   if (UUID_V4_REGEX.test(rawLookup)) {
@@ -1211,6 +1222,13 @@ const resolveClientSmart = (
       return { status: "resolved" as const, reason: "match_nome_cidade" as const, client: nameAndCityMatches[0] };
     }
     if (nameAndCityMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameAndCityMatches };
+  }
+  if (normalizedInputState) {
+    const nameAndStateMatches = nameMatches.filter((client) => client.normalizedState === normalizedInputState);
+    if (nameAndStateMatches.length === 1) {
+      return { status: "resolved" as const, reason: "match_nome_uf" as const, client: nameAndStateMatches[0] };
+    }
+    if (nameAndStateMatches.length > 1) return { status: "ambiguous" as const, reason: "ambiguous" as const, matches: nameAndStateMatches };
   }
 
   if (!nameMatches.length) return { status: "missing" as const, reason: "not_found" as const };
@@ -1730,7 +1748,7 @@ const processOpportunityImport = async ({
 
   const clientsById = new Map<string, ImportClientCandidate>();
   const clientCandidates: ImportClientCandidate[] = [];
-  const upsertClientCandidate = (client: { id: string; name: string; city?: string | null; cnpj?: string | null }) => {
+  const upsertClientCandidate = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
     const candidate = toImportClientCandidate(client);
     if (clientsById.has(candidate.id)) {
       clientsById.set(candidate.id, candidate);
@@ -1748,7 +1766,7 @@ const processOpportunityImport = async ({
         ...sellerWhere(req),
         ...(clientIds.size && !clientNames.size ? { id: { in: Array.from(clientIds) } } : {})
       },
-      select: { id: true, name: true, city: true, cnpj: true }
+      select: { id: true, name: true, city: true, state: true, cnpj: true }
     });
 
     for (const client of clients) {
@@ -1759,7 +1777,7 @@ const processOpportunityImport = async ({
   const dedupeCandidatesCache = new Map<string, Array<{ id: string; title: string; createdAt: Date; ownerSellerId: string; client: { name: string } }>>();
   const logClientResolution = (
     rowNumber: number,
-    rowInput: { clientNameOrId: string; cnpj?: string; city?: string },
+    rowInput: { clientNameOrId: string; cnpj?: string; city?: string; state?: string },
     resolution: ReturnType<typeof resolveClientSmart>
   ) => {
     console.info("[opportunities/import][client-resolver]", {
@@ -1768,6 +1786,7 @@ const processOpportunityImport = async ({
       clientNameOrId: rowInput.clientNameOrId,
       cnpj: rowInput.cnpj,
       city: rowInput.city,
+      state: rowInput.state,
       reason: resolution.reason,
       matchesCount: resolution.status === "ambiguous" ? resolution.matches.length : resolution.status === "resolved" ? 1 : 0,
       resolvedClientId: resolution.status === "resolved" ? resolution.client.id : undefined,
@@ -1877,13 +1896,13 @@ const processOpportunityImport = async ({
         }
 
         if (dryRun) {
-          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
+          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city, state: row.state };
           const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
           logClientResolution(rowNumber, resolverInput, resolvedClient);
 
           let client = resolvedClient.status === "resolved" ? resolvedClient.client : undefined;
           if (!client && createClientIfMissing && resolvedClient.status !== "ambiguous") {
-            client = toImportClientCandidate({ id: "dry-run-client", name: clientLookup, city: row.city, cnpj: row.cnpj });
+            client = toImportClientCandidate({ id: "dry-run-client", name: clientLookup, city: row.city, state: row.state, cnpj: row.cnpj });
           }
           if (resolvedClient.status === "ambiguous") {
             const message = "cliente ambíguo";
@@ -1917,7 +1936,7 @@ const processOpportunityImport = async ({
         }
 
         const rowExecutionResult = await prisma.$transaction(async (tx) => {
-          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city };
+          const resolverInput = { clientNameOrId: clientLookup, cnpj: row.cnpj, city: row.city, state: row.state };
           const resolvedClient = resolveClientSmart(resolverInput, clientCandidates);
           logClientResolution(rowNumber, resolverInput, resolvedClient);
 
@@ -1926,6 +1945,7 @@ const processOpportunityImport = async ({
           if (!client && resolvedClient.status !== "ambiguous") {
             const normalizedLookup = normalizeClientLookup(clientLookup);
             const normalizedCity = normalizeClientLookup(row.city);
+            const normalizedState = normalizeState(row.state);
             const normalizedCnpj = normalizeCnpj(row.cnpj);
             const existingClient = await tx.client.findFirst({
               where: {
@@ -1936,10 +1956,11 @@ const processOpportunityImport = async ({
                     ? { cnpjNormalized: normalizedCnpj }
                     : {
                         nameNormalized: normalizedLookup,
-                        ...(normalizedCity ? { cityNormalized: normalizedCity } : {})
+                        ...(normalizedCity ? { cityNormalized: normalizedCity } : {}),
+                        ...(normalizedState ? { state: normalizedState } : {})
                       })
               },
-              select: { id: true, name: true, city: true, cnpj: true }
+              select: { id: true, name: true, city: true, state: true, cnpj: true }
             });
 
             if (existingClient) {
@@ -1961,7 +1982,7 @@ const processOpportunityImport = async ({
                 region: "Importação",
                 ownerSellerId
               },
-              select: { id: true, name: true, city: true, cnpj: true }
+              select: { id: true, name: true, city: true, state: true, cnpj: true }
             });
             upsertClientCandidate(createdClient);
             client = clientsById.get(createdClient.id);
