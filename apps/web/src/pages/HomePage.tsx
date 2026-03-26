@@ -93,6 +93,14 @@ type PipelineOpportunity = Opportunity & {
   daysLate: number;
 };
 
+type TodayPriority = {
+  opportunityId: string;
+  clientName: string;
+  value: number;
+  risk: "alto" | "medio" | "baixo";
+  reason: string;
+};
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour <= 11) return "Bom dia";
@@ -180,6 +188,7 @@ export default function HomePage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [todayPriorities, setTodayPriorities] = useState<TodayPriority[]>([]);
   const [agendaEventsToday, setAgendaEventsToday] = useState<AgendaEventLite[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
@@ -206,11 +215,12 @@ export default function HomePage() {
       try {
         setPipelineError(null);
         const today = new Date().toISOString().slice(0, 10);
-        const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse] = await Promise.all([
+        const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse, prioritiesResponse] = await Promise.all([
           api.get("/activities", { signal }),
           api.get("/opportunities?status=open", { signal }),
           api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal }),
-          api.get(`/agenda/events?from=${today}&to=${today}`, { signal })
+          api.get(`/agenda/events?from=${today}&to=${today}`, { signal }),
+          api.get("/ai/today-priorities", { signal })
         ]);
         setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
         const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
@@ -220,6 +230,7 @@ export default function HomePage() {
         setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
         const agendaPayload = Array.isArray(agendaResponse.data?.items) ? agendaResponse.data.items : agendaResponse.data;
         setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
+        setTodayPriorities(Array.isArray(prioritiesResponse.data) ? prioritiesResponse.data : []);
 
         try {
           const coolingResponse = await api.get("/clients/alerts/cooling", { signal });
@@ -245,6 +256,7 @@ export default function HomePage() {
       } catch (error) {
         if ((error as { code?: string })?.code === "ERR_CANCELED") return;
         setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
+        setTodayPriorities([]);
       } finally {
         if (!signal?.aborted) {
           setLoading(false);
@@ -622,6 +634,18 @@ export default function HomePage() {
     return "Proposta sem retorno";
   };
 
+  const getRiskLabel = (risk: TodayPriority["risk"]) => {
+    if (risk === "alto") return "Alto";
+    if (risk === "medio") return "Médio";
+    return "Baixo";
+  };
+
+  const getRiskClassName = (risk: TodayPriority["risk"]) => {
+    if (risk === "alto") return "bg-red-100 text-red-700";
+    if (risk === "medio") return "bg-amber-100 text-amber-700";
+    return "bg-emerald-100 text-emerald-700";
+  };
+
   useEffect(() => {
     window.localStorage.setItem(PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
   }, [panelOrder]);
@@ -684,6 +708,39 @@ export default function HomePage() {
               <p className="text-sm text-slate-600">Visitas realizadas</p>
               <p className="mt-1 text-3xl font-bold text-slate-900">{activitiesToday.length}</p>
             </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
+              <h2 className="text-lg font-semibold text-slate-900">🔥 Prioridades do dia</h2>
+            </div>
+            <Link
+              to="/oportunidades?status=open&actionToday=true"
+              className="rounded-md border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700"
+            >
+              Ver todas
+            </Link>
+          </div>
+          <div className="mt-3 space-y-2">
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando prioridades...</p>
+            ) : todayPriorities.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma prioridade crítica para hoje.</p>
+            ) : (
+              todayPriorities.slice(0, 5).map((item) => (
+                <Link key={item.opportunityId} to={`/oportunidades/${item.opportunityId}`} className="block rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">{item.clientName}</p>
+                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRiskClassName(item.risk)}`}>{getRiskLabel(item.risk)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-700">R$ {Number(item.value || 0).toLocaleString("pt-BR")}</p>
+                  <p className="mt-1 text-xs text-slate-500">{item.reason}</p>
+                </Link>
+              ))
+            )}
           </div>
         </section>
 
@@ -916,7 +973,7 @@ export default function HomePage() {
           <div className="mb-4 flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
-              <h2 className="text-lg font-semibold text-slate-900">Pipeline do Dia</h2>
+              <h2 className="text-lg font-semibold text-slate-900">🔥 Prioridades do dia</h2>
             </div>
             <Link
               to="/oportunidades?status=open&actionToday=true"
@@ -927,28 +984,27 @@ export default function HomePage() {
           </div>
 
           <div className="rounded-lg bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">Oportunidades com ação hoje</p>
-            <p className="text-2xl font-bold text-slate-900">{pipelineOfDay.total}</p>
+            <p className="text-xs text-slate-500">Oportunidades priorizadas</p>
+            <p className="text-2xl font-bold text-slate-900">{todayPriorities.length}</p>
           </div>
 
-          <div className={`mt-3 space-y-2 ${pipelineOfDay.topFive.length > 3 ? scrollablePanelClass : ""}`}>
+          <div className={`mt-3 space-y-2 ${todayPriorities.slice(0, 5).length > 3 ? scrollablePanelClass : ""}`}>
             {pipelineError ? (
               <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>
             ) : loading ? (
-              <p className="text-sm text-slate-500">Carregando pipeline do dia...</p>
-            ) : pipelineOfDay.topFive.length === 0 ? (
-              <p className="text-sm text-slate-500">Nenhuma oportunidade com ação pendente hoje.</p>
+              <p className="text-sm text-slate-500">Carregando prioridades do dia...</p>
+            ) : todayPriorities.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma prioridade crítica para hoje.</p>
             ) : (
-              pipelineOfDay.topFive.map((item) => (
-                <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-2">
-                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
-                  <p className="text-xs text-slate-600">
-                    {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {getPipelinePriorityLabel(item.priorityType)} · {item.daysLate} dia(s)
-                  </p>
-                </div>
+              todayPriorities.slice(0, 5).map((item) => (
+                <Link key={item.opportunityId} to={`/oportunidades/${item.opportunityId}`} className="block rounded-lg border border-slate-200 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-900">{item.clientName}</p>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getRiskClassName(item.risk)}`}>{getRiskLabel(item.risk)}</span>
+                  </div>
+                  <p className="text-xs text-slate-600">R$ {Number(item.value || 0).toLocaleString("pt-BR")}</p>
+                  <p className="text-xs text-slate-500">{item.reason}</p>
+                </Link>
               ))
             )}
           </div>
