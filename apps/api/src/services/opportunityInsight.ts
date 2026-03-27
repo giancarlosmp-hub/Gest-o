@@ -1,4 +1,5 @@
 import { OpportunityStage } from "@prisma/client";
+import type { ParsedActivityObservation } from "./activityObservationParser.js";
 
 export type OpportunityInsightRisk = "baixo" | "medio" | "alto";
 
@@ -6,6 +7,7 @@ export type OpportunityInsight = {
   risk: OpportunityInsightRisk;
   nextAction: string;
   message: string;
+  observationInsight: ParsedActivityObservation;
 };
 
 export type OpportunityInsightInput = {
@@ -15,6 +17,7 @@ export type OpportunityInsightInput = {
   value?: number | null;
   lastContactAt?: Date | null;
   timelineEvents?: Array<{ createdAt: Date; type?: string }>;
+  observationInsight?: ParsedActivityObservation;
 };
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -49,6 +52,8 @@ export const calculateOpportunityRisk = (
   opportunity: OpportunityInsightInput,
   now: Date = new Date()
 ): OpportunityInsightRisk => {
+  if (opportunity.observationInsight?.detectedIntent === "sem_interesse") return "alto";
+
   const daysWithoutInteraction = getDaysSinceLastInteraction(opportunity, now);
   const hasNoRecentInteraction = daysWithoutInteraction > 10;
   const followUpOverdue = Boolean(opportunity.followUpDate && opportunity.followUpDate.getTime() < now.getTime());
@@ -65,12 +70,69 @@ export const generateOpportunityInsight = (
   now: Date = new Date()
 ): OpportunityInsight => {
   const risk = calculateOpportunityRisk(opportunity, now);
+  const observationInsight: ParsedActivityObservation = opportunity.observationInsight || {
+    sentiment: "neutro",
+    interestLevel: "medio",
+    detectedIntent: "indefinido",
+    suggestedNextAction: "Manter acompanhamento padrão da oportunidade.",
+    suggestedFollowUpDays: null,
+    keywords: []
+  };
+
+  if (observationInsight.detectedIntent === "sem_interesse") {
+    return {
+      risk: "alto",
+      nextAction: "confirmar encerramento e registrar motivo",
+      message: "A observação mais recente indica desinteresse. Trate a oportunidade como alto risco e valide encerramento.",
+      observationInsight
+    };
+  }
+
+  if (observationInsight.detectedIntent === "pediu_proposta") {
+    return {
+      risk,
+      nextAction: "enviar proposta comercial",
+      message: "A observação mais recente indica pedido de proposta. Priorize o envio com condições comerciais objetivas.",
+      observationInsight
+    };
+  }
+
+  if (observationInsight.detectedIntent === "negociacao_preco") {
+    return {
+      risk,
+      nextAction: "negociar condições e ajustar proposta",
+      message: "O cliente trouxe pontos de preço. Prepare alternativas de negociação para avançar o fechamento.",
+      observationInsight
+    };
+  }
+
+  if (observationInsight.detectedIntent === "aguardando_decisao") {
+    return {
+      risk,
+      nextAction: "retomar em prazo curto",
+      message: "O cliente está em análise interna. Programe retorno de curto prazo para não perder tração.",
+      observationInsight
+    };
+  }
+
+  if (observationInsight.detectedIntent === "quer_retorno") {
+    const followUpWindow = observationInsight.suggestedFollowUpDays
+      ? ` em ${observationInsight.suggestedFollowUpDays} dia(s)`
+      : "";
+    return {
+      risk,
+      nextAction: "agendar follow-up na janela solicitada",
+      message: `A observação indica pedido de retorno${followUpWindow}. Respeite o timing combinado com o cliente.`,
+      observationInsight
+    };
+  }
 
   if (risk === "alto" && opportunity.followUpDate && opportunity.followUpDate.getTime() < now.getTime()) {
     return {
       risk,
       nextAction: "realizar contato imediato",
-      message: "O follow-up está vencido. Faça contato com o cliente ainda hoje para reduzir risco de perda."
+      message: "O follow-up está vencido. Faça contato com o cliente ainda hoje para reduzir risco de perda.",
+      observationInsight
     };
   }
 
@@ -79,7 +141,8 @@ export const generateOpportunityInsight = (
     return {
       risk,
       nextAction: "reativar com prioridade",
-      message: `A oportunidade está há ${daysWithoutInteraction} dias sem interação. Priorize contato imediato para evitar perda.`
+      message: `A oportunidade está há ${daysWithoutInteraction} dias sem interação. Priorize contato imediato para evitar perda.`,
+      observationInsight
     };
   }
 
@@ -87,7 +150,8 @@ export const generateOpportunityInsight = (
     return {
       risk,
       nextAction: "destravar etapa atual",
-      message: "A oportunidade está com etapa parada. Defina um próximo passo para voltar a avançar."
+      message: "A oportunidade está com etapa parada. Defina um próximo passo para voltar a avançar.",
+      observationInsight
     };
   }
 
@@ -95,7 +159,8 @@ export const generateOpportunityInsight = (
     return {
       risk,
       nextAction: "negociar fechamento",
-      message: "A oportunidade está em proposta. Priorize alinhamento de condições e fechamento."
+      message: "A oportunidade está em proposta. Priorize alinhamento de condições e fechamento.",
+      observationInsight
     };
   }
 
@@ -103,13 +168,15 @@ export const generateOpportunityInsight = (
     return {
       risk,
       nextAction: "avançar para qualificação",
-      message: "A oportunidade está em prospecção. Busque qualificar dor, potencial e prazo de compra."
+      message: "A oportunidade está em prospecção. Busque qualificar dor, potencial e prazo de compra.",
+      observationInsight
     };
   }
 
   return {
     risk,
     nextAction: "manter acompanhamento",
-    message: "A oportunidade está dentro do esperado. Mantenha o acompanhamento do plano comercial."
+    message: "A oportunidade está dentro do esperado. Mantenha o acompanhamento do plano comercial.",
+    observationInsight
   };
 };

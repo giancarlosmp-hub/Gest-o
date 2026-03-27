@@ -12,6 +12,20 @@ type OpportunityInsight = {
   risk: "baixo" | "medio" | "alto";
   nextAction: string;
   message: string;
+  observationInsight?: {
+    sentiment: "positivo" | "neutro" | "negativo";
+    interestLevel: "alto" | "medio" | "baixo";
+    detectedIntent:
+      | "pediu_proposta"
+      | "negociacao_preco"
+      | "aguardando_decisao"
+      | "sem_interesse"
+      | "quer_retorno"
+      | "indefinido";
+    suggestedNextAction: string;
+    suggestedFollowUpDays: number | null;
+    keywords: string[];
+  };
 };
 
 type EventItem = {
@@ -290,6 +304,11 @@ export default function OpportunityDetailsPage() {
             <p><strong>Risco:</strong> <span className={riskClassName[insight.risk]}>{riskLabel[insight.risk]}</span></p>
             <p><strong>Próxima ação:</strong> {insight.nextAction}</p>
             <p><strong>Mensagem:</strong> {insight.message}</p>
+            <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <p><strong>Intenção detectada:</strong> {insight.observationInsight?.detectedIntent || "indefinido"}</p>
+              <p><strong>Interesse:</strong> {insight.observationInsight?.interestLevel || "medio"}</p>
+              <p><strong>Palavras-chave:</strong> {insight.observationInsight?.keywords?.length ? insight.observationInsight.keywords.join(", ") : "-"}</p>
+            </div>
           </div>
         ) : <p className="text-sm text-slate-500">Sem sugestão disponível no momento.</p>}
       </section>

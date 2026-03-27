@@ -33,6 +33,7 @@ import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk, generateOpportunityInsight } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
+import { parseActivityObservation } from "../services/activityObservationParser.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -4359,6 +4360,18 @@ router.post("/ai/opportunity-insight", async (req, res) => {
         },
         orderBy: { createdAt: "desc" },
         take: 25
+      },
+      activities: {
+        select: {
+          id: true,
+          createdAt: true,
+          date: true,
+          notes: true,
+          description: true,
+          result: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 15
       }
     }
   });
@@ -4367,7 +4380,35 @@ router.post("/ai/opportunity-insight", async (req, res) => {
     return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
 
-  const insight = generateOpportunityInsight(opportunity);
+  const recentTimelineObservation = opportunity.timelineEvents
+    .find((event) => event.description?.trim())
+    ?.description
+    ?.trim();
+
+  const recentActivityWithObservation = opportunity.activities.find((activity) => {
+    const texts = [activity.notes, activity.description, activity.result].map((text) => text?.trim() || "");
+    return texts.some(Boolean);
+  });
+
+  const recentActivityObservation = recentActivityWithObservation
+    ? [recentActivityWithObservation.notes, recentActivityWithObservation.description, recentActivityWithObservation.result]
+      .map((text) => text?.trim() || "")
+      .find(Boolean) || null
+    : null;
+
+  const recentActivityDate = recentActivityWithObservation
+    ? (recentActivityWithObservation.date || recentActivityWithObservation.createdAt).getTime()
+    : 0;
+  const recentTimelineDate = opportunity.timelineEvents.find((event) => event.description?.trim())?.createdAt.getTime() || 0;
+
+  const latestObservation = recentActivityDate >= recentTimelineDate
+    ? recentActivityObservation
+    : (recentTimelineObservation || recentActivityObservation);
+
+  const insight = generateOpportunityInsight({
+    ...opportunity,
+    observationInsight: parseActivityObservation(latestObservation)
+  });
 
   return res.json(insight);
 });
