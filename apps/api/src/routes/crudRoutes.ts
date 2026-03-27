@@ -5237,10 +5237,7 @@ router.get("/activities/monthly-counts", async (req, res) => {
 });
 router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const ownerSellerId = resolveOwnerId(req, req.body.ownerSellerId || req.body.ownerId);
-  const notes = (req.body.notes || req.body.description || "").trim();
-  if (!notes) {
-    return res.status(400).json({ message: "Descrição/notas da atividade é obrigatória." });
-  }
+  const notes = (req.body.notes || req.body.description || "Sem notas").trim();
 
   const relatedOpportunity = req.body.opportunityId
     ? await prisma.opportunity.findFirst({
@@ -5288,8 +5285,8 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
   const executionDate = req.body.date ? new Date(req.body.date) : dueDate;
   const isExecuted = Boolean(req.body.done);
 
-  if (isExecuted && (!req.body.result || !String(req.body.result).trim() || !req.body.description || !String(req.body.description).trim() || req.body.duration == null)) {
-    return res.status(400).json({ message: "Atividades concluídas exigem resultado, observações e duração." });
+  if (isExecuted && (!req.body.description || !String(req.body.description).trim())) {
+    return res.status(400).json({ message: "Atividades concluídas exigem o resumo da visita." });
   }
 
   const createdActivity = await prisma.$transaction(async (tx) => {
@@ -5387,6 +5384,12 @@ router.put("/activities/:id", validateBody(activitySchema.partial()), async (req
 
   if (!existingActivity) {
     return res.status(404).json({ message: "Atividade não encontrada" });
+  }
+
+  const nextDone = req.body.done ?? existingActivity.done;
+  const nextDescription = req.body.description !== undefined ? req.body.description : existingActivity.description;
+  if (nextDone && !String(nextDescription || "").trim()) {
+    return res.status(400).json({ message: "Atividades concluídas exigem o resumo da visita." });
   }
 
   const updatedActivity = await prisma.$transaction(async (tx) => {

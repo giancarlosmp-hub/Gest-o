@@ -363,12 +363,12 @@ export default function ActivitiesPage() {
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
     const requiresExecutionFields = form.executed;
-    if (!form.clientId || !form.notes.trim() || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
-      toast.error(canChooseSeller ? "Preencha vendedor, cliente, notas e vencimento." : "Preencha cliente, notas e vencimento.");
+    if (!form.clientId || !form.dueDate || (canChooseSeller && !form.ownerSellerId)) {
+      toast.error(canChooseSeller ? "Preencha vendedor, cliente e vencimento." : "Preencha cliente e vencimento.");
       return;
     }
-    if (requiresExecutionFields && (!form.result.trim() || !form.observations.trim() || !form.duration)) {
-      toast.error("Para atividades já realizadas, preencha resultado, observações e duração.");
+    if (requiresExecutionFields && !form.observations.trim()) {
+      toast.error("Para atividades já realizadas, preencha o resumo da visita.");
       return;
     }
     if (form.type === "visita" && !visitCheckIn) {
@@ -379,12 +379,12 @@ export default function ActivitiesPage() {
     try {
       await api.post("/activities", {
         type: form.type,
-        notes: form.notes.trim(),
-        description: requiresExecutionFields ? form.observations.trim() : form.notes.trim(),
+        notes: form.notes.trim() || undefined,
+        description: requiresExecutionFields ? form.observations.trim() : form.notes.trim() || undefined,
         result: requiresExecutionFields ? form.result.trim() : undefined,
         dueDate: new Date(form.dueDate).toISOString(),
         date: requiresExecutionFields ? new Date().toISOString() : new Date(form.dueDate).toISOString(),
-        duration: requiresExecutionFields ? Number(form.duration) : undefined,
+        duration: requiresExecutionFields && form.duration ? Number(form.duration) : undefined,
         done: requiresExecutionFields,
         city: form.city || undefined,
         crop: form.crop.trim() || undefined,
@@ -433,6 +433,10 @@ export default function ActivitiesPage() {
   const executeActivity = async (event: FormEvent) => {
     event.preventDefault();
     if (!executionActivity) return;
+    if (!executionForm.observations.trim()) {
+      toast.error("Preencha o resumo da visita para concluir.");
+      return;
+    }
     setSavingAction(true);
     try {
       await api.put(`/activities/${executionActivity.id}`, {
@@ -787,15 +791,21 @@ export default function ActivitiesPage() {
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={executeActivity}>
               <div className="mobile-modal-body space-y-3">
               <div>
-                <label className="text-sm">Resultado</label>
+                <label className="text-sm font-semibold text-slate-900">Resumo da visita (obrigatório)</label>
+                <textarea
+                  required
+                  className="min-h-24 w-full min-w-0 rounded-lg border-2 border-brand-200 bg-brand-50 p-2 focus:border-brand-500 focus:outline-none"
+                  value={executionForm.observations}
+                  onChange={(event) => setExecutionForm((previous) => ({ ...previous, observations: event.target.value }))}
+                  placeholder="Ex: cliente interessado, pediu proposta"
+                />
+              </div>
+              <div>
+                <label className="text-sm">Resultado (opcional)</label>
                 <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.result} onChange={(event) => setExecutionForm((previous) => ({ ...previous, result: event.target.value }))} />
               </div>
               <div>
-                <label className="text-sm">Observações</label>
-                <textarea className="min-h-20 w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.observations} onChange={(event) => setExecutionForm((previous) => ({ ...previous, observations: event.target.value }))} />
-              </div>
-              <div>
-                <label className="text-sm">Duração real (minutos)</label>
+                <label className="text-sm">Duração real (minutos) (opcional)</label>
                 <input type="number" min={0} className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={executionForm.duration} onChange={(event) => setExecutionForm((previous) => ({ ...previous, duration: event.target.value }))} />
               </div>
               </div>
@@ -1026,12 +1036,12 @@ export default function ActivitiesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-sm">Resultado {form.executed ? "" : "(opcional)"}</label>
-                  <input required={form.executed} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
+                  <label className="text-sm">Resultado (opcional)</label>
+                  <input disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.result} onChange={(event) => setForm((previous) => ({ ...previous, result: event.target.value }))} />
                 </div>
                 <div>
-                  <label className="text-sm">Duração em minutos {form.executed ? "" : "(opcional)"}</label>
-                  <input type="number" min={0} required={form.executed} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
+                  <label className="text-sm">Duração em minutos (opcional)</label>
+                  <input type="number" min={0} disabled={!form.executed} className="w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100" value={form.duration} onChange={(event) => setForm((previous) => ({ ...previous, duration: event.target.value }))} />
                 </div>
                 <div>
                   <label className="text-sm">Cultura (opcional)</label>
@@ -1046,18 +1056,19 @@ export default function ActivitiesPage() {
                   <input className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.product} onChange={(event) => setForm((previous) => ({ ...previous, product: event.target.value }))} />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-sm">Observações {form.executed ? "" : "(opcional)"}</label>
+                  <label className="text-sm font-semibold text-slate-900">Resumo da visita {form.executed ? "(obrigatório)" : "(opcional)"}</label>
                   <textarea
                     required={form.executed}
                     disabled={!form.executed}
-                    className="min-h-24 w-full rounded-lg border border-slate-300 p-2 disabled:bg-slate-100"
+                    className="min-h-24 w-full rounded-lg border-2 border-brand-200 bg-brand-50 p-2 focus:border-brand-500 focus:outline-none disabled:bg-slate-100"
                     value={form.observations}
                     onChange={(event) => setForm((previous) => ({ ...previous, observations: event.target.value }))}
+                    placeholder={"Ex: cliente interessado, pediu proposta\nEx: não vai plantar agora\nEx: fechamos pedido de 50 ha"}
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-sm">Notas</label>
-                  <textarea required className="min-h-24 w-full rounded-lg border border-slate-300 p-2" value={form.notes} onChange={(event) => setForm((previous) => ({ ...previous, notes: event.target.value }))} />
+                  <label className="text-sm">Notas (opcional)</label>
+                  <textarea className="min-h-24 w-full rounded-lg border border-slate-300 p-2" value={form.notes} onChange={(event) => setForm((previous) => ({ ...previous, notes: event.target.value }))} />
                 </div>
                 </div>
               </div>
