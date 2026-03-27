@@ -248,6 +248,10 @@ model Activity {
   crop          String?
   areaEstimated Float?
   product       String?
+  checkInAt     DateTime?
+  checkInLat    Float?
+  checkInLng    Float?
+  checkInAccuracy Float?
   done          Boolean      @default(false)
   clientId      String?
   client        Client?      @relation(fields: [clientId], references: [id])
