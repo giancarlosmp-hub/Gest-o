@@ -439,13 +439,21 @@ export default function ActivitiesPage() {
     }
     setSavingAction(true);
     try {
-      await api.put(`/activities/${executionActivity.id}`, {
+      const payload: any = {
         done: true,
         date: new Date().toISOString(),
-        result: executionForm.result.trim() || null,
-        description: executionForm.observations.trim() || null,
-        duration: executionForm.duration ? Number(executionForm.duration) : null
-      });
+        description: executionForm.observations.trim()
+      };
+
+      if (executionForm.result?.trim()) {
+        payload.result = executionForm.result.trim();
+      }
+
+      if (executionForm.duration) {
+        payload.duration = Number(executionForm.duration);
+      }
+
+      await api.put(`/activities/${executionActivity.id}`, payload);
       toast.success("Atividade executada com sucesso.");
       setExecutionActivity(null);
       await refreshAfterMutation();
