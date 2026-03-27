@@ -16,7 +16,7 @@ export type OpportunityInsightInput = {
   createdAt: Date;
   value?: number | null;
   lastContactAt?: Date | null;
-  timelineEvents?: Array<{ createdAt: Date; type?: string }>;
+  timelineEvents?: Array<{ createdAt: Date; type?: string; description?: string | null }>;
   observationInsight?: ParsedActivityObservation;
 };
 

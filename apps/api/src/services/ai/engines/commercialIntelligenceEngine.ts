@@ -7,6 +7,17 @@ export type TodayPrioritiesInput = (OpportunityInsightInput & {
   client?: {
     name?: string | null;
   } | null;
+  timelineEvents: Array<{
+    createdAt: Date;
+    description?: string | null;
+  }>;
+  activities: Array<{
+    createdAt: Date;
+    date?: Date | null;
+    notes?: string | null;
+    description?: string | null;
+    result?: string | null;
+  }>;
 })[];
 
 export interface CommercialIntelligenceEngine {
