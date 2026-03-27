@@ -31,10 +31,14 @@ import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
-import { calculateOpportunityRisk, generateOpportunityInsight } from "../services/opportunityInsight.js";
+import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
-import { generateClientSummary } from "../services/clientSummary.js";
-import { parseActivityObservation } from "../services/activityObservationParser.js";
+import {
+  calculateTodayPriorities,
+  generateClientSummary,
+  generateOpportunityInsight,
+  parseActivityObservation
+} from "../services/ai/index.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -4597,14 +4601,6 @@ router.get("/ai/opportunity-message", async (req, res) => {
   return res.json({ message });
 });
 
-type TodayPriorityRisk = "alto" | "medio" | "baixo";
-
-const todayPriorityRiskWeight: Record<TodayPriorityRisk, number> = {
-  alto: 3,
-  medio: 2,
-  baixo: 1
-};
-
 router.get("/ai/today-priorities", async (req, res) => {
   if (!req.user?.id) {
     return res.status(401).json({ message: "Não autenticado" });
@@ -4632,41 +4628,7 @@ router.get("/ai/today-priorities", async (req, res) => {
     }
   });
 
-  const priorities = openOpportunities
-    .map((opportunity) => {
-      const insight = generateOpportunityInsight(opportunity);
-      const risk = insight.risk as TodayPriorityRisk;
-      const isFollowUpOverdue = opportunity.followUpDate < todayStart;
-      const overdueReason = isFollowUpOverdue
-        ? "Follow-up vencido."
-        : "Follow-up em dia.";
-
-      return {
-        opportunityId: opportunity.id,
-        clientName: opportunity.client?.name || "Cliente não informado",
-        value: Number(opportunity.value || 0),
-        risk,
-        reason: `${overdueReason} ${insight.message}`.trim(),
-        _sort: {
-          riskWeight: todayPriorityRiskWeight[risk] || 0,
-          overdueWeight: isFollowUpOverdue ? 1 : 0,
-          followUpDate: opportunity.followUpDate.getTime()
-        }
-      };
-    })
-    .sort((a, b) => {
-      const byRisk = b._sort.riskWeight - a._sort.riskWeight;
-      if (byRisk !== 0) return byRisk;
-
-      const byOverdue = b._sort.overdueWeight - a._sort.overdueWeight;
-      if (byOverdue !== 0) return byOverdue;
-
-      const byValue = b.value - a.value;
-      if (byValue !== 0) return byValue;
-
-      return a._sort.followUpDate - b._sort.followUpDate;
-    })
-    .map(({ _sort, ...item }) => item);
+  const priorities = calculateTodayPriorities(openOpportunities, todayStart);
 
   return res.json(priorities);
 });
