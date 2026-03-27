@@ -33,6 +33,7 @@ import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk, generateOpportunityInsight } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
+import { generateClientSummary } from "../services/clientSummary.js";
 import { parseActivityObservation } from "../services/activityObservationParser.js";
 
 const router = Router();
@@ -4415,6 +4416,133 @@ router.post("/ai/opportunity-insight", async (req, res) => {
 
 const opportunityMessageQuerySchema = z.object({
   opportunityId: z.string().trim().min(1, "opportunityId é obrigatório")
+});
+
+const clientSummaryParamsSchema = z.object({
+  clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+router.get("/ai/client-summary/:clientId", async (req, res) => {
+  const parsed = clientSummaryParamsSchema.safeParse(req.params);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.error.issues });
+  }
+
+  const { clientId } = parsed.data;
+
+  const client = await prisma.client.findFirst({
+    where: {
+      id: clientId,
+      ...sellerWhere(req)
+    },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      state: true
+    }
+  });
+
+  if (!client) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const [recentActivities, openOpportunities, lastWonOpportunity] = await Promise.all([
+    prisma.activity.findMany({
+      where: { clientId: client.id },
+      orderBy: [{ dueDate: "desc" }, { createdAt: "desc" }],
+      take: 20,
+      select: {
+        type: true,
+        notes: true,
+        done: true,
+        dueDate: true,
+        createdAt: true,
+        date: true
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        clientId: client.id,
+        stage: { notIn: [...CLOSED_STAGE_VALUES] }
+      },
+      orderBy: [{ followUpDate: "asc" }, { createdAt: "desc" }],
+      take: 20,
+      select: {
+        title: true,
+        stage: true,
+        followUpDate: true,
+        value: true,
+        notes: true,
+        createdAt: true,
+        lastContactAt: true
+      }
+    }),
+    prisma.opportunity.findFirst({
+      where: {
+        clientId: client.id,
+        stage: "ganho"
+      },
+      orderBy: [{ closedAt: "desc" }, { createdAt: "desc" }],
+      select: {
+        title: true,
+        value: true,
+        closedAt: true,
+        createdAt: true
+      }
+    })
+  ]);
+
+  const recentObservations = recentActivities
+    .map((activity) => ({ text: activity.notes?.trim() || "", createdAt: activity.createdAt }))
+    .filter((activity) => Boolean(activity.text))
+    .slice(0, 10);
+
+  const lastContactCandidates = [
+    ...recentActivities.map((activity) => activity.date || activity.dueDate || activity.createdAt),
+    ...openOpportunities.map((opportunity) => opportunity.lastContactAt).filter(Boolean) as Date[],
+    lastWonOpportunity?.closedAt || null,
+    lastWonOpportunity?.createdAt || null
+  ].filter(Boolean) as Date[];
+
+  const lastContact = lastContactCandidates.length
+    ? new Date(Math.max(...lastContactCandidates.map((value) => value.getTime())))
+    : null;
+
+  const payload = generateClientSummary({
+    client: {
+      name: client.name,
+      city: client.city,
+      state: client.state
+    },
+    recentActivities: recentActivities.map((activity) => ({
+      type: activity.type,
+      notes: activity.notes,
+      done: activity.done,
+      dueDate: activity.dueDate,
+      createdAt: activity.createdAt
+    })),
+    recentObservations,
+    openOpportunities: openOpportunities.map((opportunity) => ({
+      title: opportunity.title,
+      stage: opportunity.stage,
+      followUpDate: opportunity.followUpDate,
+      value: opportunity.value,
+      notes: opportunity.notes,
+      createdAt: opportunity.createdAt
+    })),
+    lastWonOpportunity: lastWonOpportunity
+      ? {
+          title: lastWonOpportunity.title,
+          value: lastWonOpportunity.value,
+          closedAt: lastWonOpportunity.closedAt,
+          updatedAt: lastWonOpportunity.createdAt
+        }
+      : null,
+    lastContact
+  });
+
+  return res.json(payload);
 });
 
 router.get("/ai/opportunity-message", async (req, res) => {

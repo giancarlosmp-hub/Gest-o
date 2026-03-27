@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
+import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 
 type Client = {
   id: string;
@@ -256,6 +257,8 @@ export default function ClientDetailsPage() {
           Voltar
         </button>
       </div>
+
+      <ClientAutoSummaryCard clientId={id} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
