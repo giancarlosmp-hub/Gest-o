@@ -5498,7 +5498,11 @@ router.post("/activities", validateBody(activitySchema), async (req, res) => {
     }
   });
 });
-router.put("/activities/:id", validateBody(activitySchema.partial()), async (req, res) => {
+const activityUpdateSchema = activitySchema.partial().extend({
+  description: z.string().optional()
+});
+
+router.put("/activities/:id", validateBody(activityUpdateSchema), async (req, res) => {
   const normalizedType = req.body.type ? normalizeActivityType(req.body.type) : undefined;
   const notes = req.body.notes ?? req.body.description;
 
