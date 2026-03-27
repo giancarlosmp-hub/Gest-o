@@ -1349,12 +1349,13 @@ const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any
         ? payload.ownerSellerId.trim()
         : resolveOwnerId(req);
 
+  const fantasyName = payload.fantasyName?.trim();
+  const code = payload.code?.trim();
+
   const data = {
     name: payload.name.trim(),
-    ...(typeof payload.fantasyName === "string" && isMeaningfulImportString(payload.fantasyName)
-      ? { fantasyName: payload.fantasyName.trim() }
-      : {}),
-    ...(typeof payload.code === "string" && isMeaningfulImportString(payload.code) ? { code: payload.code.trim() } : {}),
+    ...(fantasyName ? { fantasyName } : {}),
+    ...(code ? { code } : {}),
     city: payload.city.trim(),
     state: payload.state.trim(),
     region: payload.region.trim(),
@@ -1392,12 +1393,14 @@ const getImportPersistenceErrorMessage = (error: unknown) => {
 
 const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
+  const fantasyName = payload.fantasyName?.trim();
+  const code = payload.code?.trim();
 
   if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
   if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
   if (isMeaningfulImportString(payload.region)) data.region = payload.region.trim();
-  if (isMeaningfulImportString(payload.fantasyName) && isEmptyValue(existingClient.fantasyName)) data.fantasyName = payload.fantasyName.trim();
-  if (isMeaningfulImportString(payload.code) && isEmptyValue(existingClient.code)) data.code = payload.code.trim();
+  if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
+  if (code && isEmptyValue(existingClient.code)) data.code = code;
   const segmentValue = payload.segment;
   if (typeof segmentValue === "string" && isMeaningfulImportString(segmentValue)) data.segment = segmentValue.trim();
 
