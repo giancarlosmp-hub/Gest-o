@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
+import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -252,6 +253,8 @@ export default function OpportunityDetailsPage() {
           Atenção: oportunidade atrasada há {item.daysOverdue} dia(s).
         </div>
       ) : null}
+
+      <ClientAutoSummaryCard clientId={item.clientId} />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
