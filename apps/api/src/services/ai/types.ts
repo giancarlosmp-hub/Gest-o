@@ -12,6 +12,8 @@ export type TodayPriorityItem = {
   opportunityId: string;
   clientName: string;
   value: number;
+  priorityScore: number;
   risk: TodayPriorityRisk;
   reason: string;
+  suggestedAction: string;
 };

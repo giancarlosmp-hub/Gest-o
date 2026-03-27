@@ -4607,7 +4607,6 @@ router.get("/ai/today-priorities", async (req, res) => {
   }
 
   const todayStart = getUtcTodayStart();
-  const now = new Date();
   const openOpportunities = await prisma.opportunity.findMany({
     where: {
       ownerSellerId: req.user.id,
