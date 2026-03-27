@@ -377,11 +377,10 @@ export default function ActivitiesPage() {
 
     setSaving(true);
     try {
-      await api.post("/activities", {
+      const payload: any = {
         type: form.type,
         notes: form.notes.trim() || undefined,
         description: requiresExecutionFields ? form.observations.trim() : form.notes.trim() || undefined,
-        result: requiresExecutionFields ? form.result.trim() : undefined,
         dueDate: new Date(form.dueDate).toISOString(),
         date: requiresExecutionFields ? new Date().toISOString() : new Date(form.dueDate).toISOString(),
         duration: requiresExecutionFields && form.duration ? Number(form.duration) : undefined,
@@ -398,7 +397,13 @@ export default function ActivitiesPage() {
         opportunityId: form.opportunityId || undefined,
         agendaEventId: form.agendaEventId || undefined,
         ownerSellerId: isSeller && user?.id ? user.id : form.ownerSellerId || undefined
-      });
+      };
+
+      if (requiresExecutionFields && form.result.trim().length > 0) {
+        payload.result = form.result.trim();
+      }
+
+      await api.post("/activities", payload);
       toast.success("Atividade criada");
       if (form.agendaEventId) {
         toast.success("Compromisso concluído automaticamente");
