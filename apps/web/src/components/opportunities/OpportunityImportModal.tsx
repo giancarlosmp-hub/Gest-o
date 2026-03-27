@@ -63,6 +63,8 @@ type PreviewStatusFilter = "all" | "valid" | "error" | "duplicate";
 type ExistingClientOption = {
   id: string;
   name: string;
+  fantasyName?: string | null;
+  code?: string | null;
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
@@ -1156,6 +1158,8 @@ export default function OpportunityImportModal({
           loadedClients.map((client) => ({
             id: client.id,
             name: client.name,
+            fantasyName: client.fantasyName,
+            code: client.code,
             city: client.city,
             state: client.state,
             cnpj: client.cnpj,

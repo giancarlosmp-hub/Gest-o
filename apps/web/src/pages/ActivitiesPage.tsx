@@ -184,6 +184,8 @@ export default function ActivitiesPage() {
               .map((item: any) => ({
                 id: String(item.id),
                 name: String(item.name),
+                fantasyName: item?.fantasyName ? String(item.fantasyName) : null,
+                code: item?.code ? String(item.code) : null,
                 city: item?.city ? String(item.city) : null,
                 state: item?.state ? String(item.state) : null,
                 cnpj: item?.cnpj ? String(item.cnpj) : null
@@ -341,10 +343,20 @@ export default function ActivitiesPage() {
     }
   };
 
-  const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+  const selectExistingClient = (client: {
+    id: string;
+    name: string;
+    fantasyName?: string | null;
+    code?: string | null;
+    city?: string | null;
+    state?: string | null;
+    cnpj?: string | null;
+  }) => {
     const clientOption = {
       id: client.id,
       name: client.name,
+      fantasyName: client.fantasyName,
+      code: client.code,
       city: client.city,
       state: client.state,
       cnpj: client.cnpj

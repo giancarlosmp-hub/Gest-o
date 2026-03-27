@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 export type SearchableClientOption = {
   id: string;
   name: string;
+  fantasyName?: string | null;
+  code?: string | null;
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
@@ -44,7 +46,7 @@ export default function ClientSearchSelect({
   value,
   onChange,
   required = false,
-  placeholder = "Pesquisar por nome, cidade, UF ou CNPJ",
+  placeholder = "Pesquisar por razão social, fantasia, código, cidade, UF ou CNPJ",
   emptyLabel = "Nenhum cliente encontrado.",
   maxListHeightClassName = "max-h-56",
   className = "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -83,7 +85,9 @@ export default function ClientSearchSelect({
 
     return clients.filter((client) => {
       const cnpjDigits = (client.cnpj || "").replace(/\D/g, "");
-      const hasTextMatch = [client.name, client.city, client.state, client.cnpj].some((field) => normalizeText(field).includes(term));
+      const hasTextMatch = [client.name, client.fantasyName, client.code, client.city, client.state, client.cnpj].some((field) =>
+        normalizeText(field).includes(term)
+      );
       const hasCnpjMatch = Boolean(termDigits) && cnpjDigits.includes(termDigits);
       return hasTextMatch || hasCnpjMatch;
     });
@@ -141,7 +145,9 @@ export default function ClientSearchSelect({
                 }}
               >
                 <p className="text-sm text-slate-900">{formatClientLabel(client)}</p>
+                {client.fantasyName ? <p className="text-xs text-slate-600">({client.fantasyName})</p> : null}
                 {client.cnpj ? <p className="text-xs text-slate-500">CNPJ: {client.cnpj}</p> : null}
+                {client.code ? <p className="text-xs text-slate-500">Código: {client.code}</p> : null}
               </button>
             ))
           ) : (
