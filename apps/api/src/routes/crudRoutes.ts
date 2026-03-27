@@ -4607,6 +4607,7 @@ router.get("/ai/today-priorities", async (req, res) => {
   }
 
   const todayStart = getUtcTodayStart();
+  const now = new Date();
   const openOpportunities = await prisma.opportunity.findMany({
     where: {
       ownerSellerId: req.user.id,
@@ -4621,9 +4622,20 @@ router.get("/ai/today-priorities", async (req, res) => {
       stage: true,
       client: { select: { name: true } },
       timelineEvents: {
-        select: { createdAt: true },
+        select: { createdAt: true, description: true },
         orderBy: { createdAt: "desc" },
         take: 25
+      },
+      activities: {
+        select: {
+          createdAt: true,
+          date: true,
+          notes: true,
+          description: true,
+          result: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 15
       }
     }
   });
