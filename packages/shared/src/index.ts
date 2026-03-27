@@ -113,6 +113,10 @@ export const activitySchema = z.object({
   opportunityId: z.string().optional(),
   clientId: z.string().optional(),
   agendaEventId: z.string().optional(),
+  checkInAt: z.string().optional(),
+  checkInLat: z.number().finite().optional(),
+  checkInLng: z.number().finite().optional(),
+  checkInAccuracy: z.number().nonnegative().optional(),
   ownerId: z.string().optional(),
   ownerSellerId: z.string().optional()
 });

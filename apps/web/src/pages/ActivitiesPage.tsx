@@ -29,6 +29,10 @@ type Activity = {
   crop?: string | null;
   areaEstimated?: number | null;
   product?: string | null;
+  checkInAt?: string | null;
+  checkInLat?: number | null;
+  checkInLng?: number | null;
+  checkInAccuracy?: number | null;
   agendaEventId?: string | null;
   done: boolean;
   status?: ActivityStatus;
@@ -67,6 +71,13 @@ const initialForm = {
   executed: false
 };
 const initialFilters: ActivityFilters = { q: "", type: "", done: "", month: "", clientId: "", sellerId: "", overdueOnly: false };
+
+type VisitCheckIn = {
+  checkInAt: string;
+  checkInLat: number;
+  checkInLng: number;
+  checkInAccuracy?: number | null;
+};
 
 
 const STATUS_LABEL: Record<ActivityStatus, string> = {
@@ -109,6 +120,9 @@ export default function ActivitiesPage() {
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [duplicateDate, setDuplicateDate] = useState("");
   const [editForm, setEditForm] = useState({ type: "ligacao", notes: "", dueDate: "", duration: "" });
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+  const [visitCheckIn, setVisitCheckIn] = useState<VisitCheckIn | null>(null);
+  const [capturingLocation, setCapturingLocation] = useState(false);
 
   const opportunitiesByClient = useMemo(
     () => (form.clientId ? opportunities.filter((item) => item.clientId === form.clientId) : []),
@@ -128,6 +142,14 @@ export default function ActivitiesPage() {
 
     return () => clearTimeout(timeout);
   }, [filters.q]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+    setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onChange);
+    return () => mediaQuery.removeEventListener("change", onChange);
+  }, []);
 
   useEffect(() => {
     if (!isModalOpen) return;
@@ -242,6 +264,7 @@ export default function ActivitiesPage() {
       notes: notes || title || current.notes,
       city: city || current.city
     }));
+    setVisitCheckIn(null);
     setIsModalOpen(true);
 
     const params = new URLSearchParams(searchParams);
@@ -266,6 +289,7 @@ export default function ActivitiesPage() {
   const openCreateModal = () => {
     setForm({ ...initialForm, ownerSellerId: isSeller && user?.id ? user.id : "" });
     setOpportunitySearch("");
+    setVisitCheckIn(null);
     setIsModalOpen(true);
   };
 
@@ -273,6 +297,48 @@ export default function ActivitiesPage() {
     setIsModalOpen(false);
     setForm(initialForm);
     setOpportunitySearch("");
+    setVisitCheckIn(null);
+  };
+
+  const captureVisitCheckIn = async () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      toast.error("Geolocalização não suportada neste dispositivo.");
+      return;
+    }
+
+    setCapturingLocation(true);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        });
+      });
+
+      const payload: VisitCheckIn = {
+        checkInAt: new Date(position.timestamp || Date.now()).toISOString(),
+        checkInLat: position.coords.latitude,
+        checkInLng: position.coords.longitude,
+        checkInAccuracy: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null
+      };
+
+      setVisitCheckIn(payload);
+      toast.success("Localização registrada com sucesso");
+    } catch (error) {
+      const code = (error as GeolocationPositionError | undefined)?.code;
+      if (code === 1) {
+        toast.error("Permissão de localização negada.");
+      } else if (code === 2) {
+        toast.error("Não foi possível obter sua localização.");
+      } else if (code === 3) {
+        toast.error("Tempo esgotado ao capturar localização.");
+      } else {
+        toast.error("Falha ao capturar localização.");
+      }
+    } finally {
+      setCapturingLocation(false);
+    }
   };
 
   const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
@@ -305,6 +371,9 @@ export default function ActivitiesPage() {
       toast.error("Para atividades já realizadas, preencha resultado, observações e duração.");
       return;
     }
+    if (form.type === "visita" && !visitCheckIn) {
+      toast.warning("Você ainda não capturou a localização desta visita");
+    }
 
     setSaving(true);
     try {
@@ -321,6 +390,10 @@ export default function ActivitiesPage() {
         crop: form.crop.trim() || undefined,
         areaEstimated: form.areaEstimated ? Number(form.areaEstimated) : undefined,
         product: form.product.trim() || undefined,
+        checkInAt: form.type === "visita" ? visitCheckIn?.checkInAt : undefined,
+        checkInLat: form.type === "visita" ? visitCheckIn?.checkInLat : undefined,
+        checkInLng: form.type === "visita" ? visitCheckIn?.checkInLng : undefined,
+        checkInAccuracy: form.type === "visita" ? visitCheckIn?.checkInAccuracy : undefined,
         clientId: form.clientId,
         opportunityId: form.opportunityId || undefined,
         agendaEventId: form.agendaEventId || undefined,
@@ -576,6 +649,7 @@ export default function ActivitiesPage() {
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-slate-900">{item.opportunity?.client?.name || item.client?.name || "Cliente não informado"}</p>
                         <p className="mt-1 text-xs text-slate-500">{toLabel(item.type)} • {new Date(item.dueDate).toLocaleDateString("pt-BR")}</p>
+                        {item.type === "visita" && item.checkInAt ? <p className="mt-1 inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">Check-in realizado</p> : null}
                       </div>
                       <span className={`rounded-full border px-2 py-1 text-center text-xs font-medium leading-5 ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
                     </div>
@@ -641,6 +715,7 @@ export default function ActivitiesPage() {
                         <td className="p-2">{item.opportunity?.title || "—"}</td>
                         <td className="p-2">{new Date(item.dueDate).toLocaleDateString("pt-BR")}</td>
                         <td className="p-2">
+                          {item.type === "visita" && item.checkInAt ? <span className="mr-2 rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-medium text-emerald-700">Check-in realizado</span> : null}
                           <span className={`rounded-full border px-2 py-1 text-xs font-medium ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
                         </td>
                         <td className="p-2">{item.notes}</td>
@@ -692,6 +767,8 @@ export default function ActivitiesPage() {
               <p><strong>Oportunidade:</strong> {selectedActivity.opportunity?.title || "—"}</p>
               <p><strong>Vencimento:</strong> {new Date(selectedActivity.dueDate).toLocaleString("pt-BR")}</p>
               <p><strong>Executada em:</strong> {selectedActivity.date ? new Date(selectedActivity.date).toLocaleString("pt-BR") : "—"}</p>
+              <p><strong>Check-in:</strong> {selectedActivity.checkInAt ? new Date(selectedActivity.checkInAt).toLocaleString("pt-BR") : "—"}</p>
+              <p><strong>Precisão GPS:</strong> {selectedActivity.checkInAccuracy != null ? `${Math.round(selectedActivity.checkInAccuracy)} m` : "—"}</p>
               <p className="md:col-span-2"><strong>Notas:</strong> {selectedActivity.notes || "—"}</p>
               <p className="md:col-span-2"><strong>Resultado:</strong> {selectedActivity.result || "—"}</p>
               <p className="md:col-span-2"><strong>Observações:</strong> {selectedActivity.description || "—"}</p>
@@ -827,10 +904,46 @@ export default function ActivitiesPage() {
             </div>
             <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
               <div className="mobile-modal-body">
+                {isMobile && form.type === "visita" ? (
+                  <section className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-emerald-900">Check-in da visita</h4>
+                        <p className="text-xs text-emerald-700">Capture sua localização para registrar o check-in no momento da visita.</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-xs font-medium ${visitCheckIn ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                        {visitCheckIn ? "Check-in realizado" : "Check-in pendente"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void captureVisitCheckIn()}
+                      disabled={capturingLocation}
+                      className="mt-3 w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {capturingLocation ? "Capturando localização..." : "Capturar localização"}
+                    </button>
+                    <div className="mt-3 space-y-1 text-xs text-emerald-800">
+                      <p>Status: {visitCheckIn ? "Check-in realizado" : "Aguardando captura"}</p>
+                      <p>Horário: {visitCheckIn ? new Date(visitCheckIn.checkInAt).toLocaleTimeString("pt-BR") : "—"}</p>
+                      <p>Precisão do GPS: {visitCheckIn?.checkInAccuracy != null ? `${Math.round(visitCheckIn.checkInAccuracy)} m` : "—"}</p>
+                    </div>
+                  </section>
+                ) : null}
                 <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="text-sm">Tipo</label>
-                  <select className="w-full min-w-0 rounded-lg border border-slate-300 p-2" value={form.type} onChange={(event) => setForm((previous) => ({ ...previous, type: event.target.value }))}>
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 p-2"
+                    value={form.type}
+                    onChange={(event) => {
+                      const nextType = event.target.value;
+                      setForm((previous) => ({ ...previous, type: nextType }));
+                      if (nextType !== "visita") {
+                        setVisitCheckIn(null);
+                      }
+                    }}
+                  >
                     {ACTIVITY_TYPE_OPTIONS.map((activityType) => (
                       <option key={activityType.value} value={activityType.value}>
                         {activityType.label}
