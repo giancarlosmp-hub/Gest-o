@@ -83,6 +83,8 @@ model User {
 
 model Client {
   id             String        @id @default(cuid())
+  code           String?
+  fantasyName    String?
   name           String
   nameNormalized String?       @db.VarChar(255)
   city           String
@@ -104,6 +106,9 @@ model Client {
   agendaEvents   AgendaEvent[]
   agendaStops    AgendaStop[]
   activities     Activity[]
+
+  @@index([code])
+  @@index([fantasyName])
 }
 
 model AgendaEvent {

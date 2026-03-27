@@ -50,6 +50,8 @@ type Opportunity = {
 type Client = {
   id: string;
   name: string;
+  fantasyName?: string | null;
+  code?: string | null;
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
@@ -121,9 +123,19 @@ const stageLabel: Record<Stage, string> = {
 };
 
 
-const toClientOption = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }): Client => ({
+const toClientOption = (client: {
+  id: string;
+  name: string;
+  fantasyName?: string | null;
+  code?: string | null;
+  city?: string | null;
+  state?: string | null;
+  cnpj?: string | null;
+}): Client => ({
   id: client.id,
   name: client.name,
+  fantasyName: client.fantasyName,
+  code: client.code,
   city: client.city,
   state: client.state,
   cnpj: client.cnpj
@@ -738,7 +750,15 @@ export default function OpportunitiesPage() {
     toast.success("Oportunidade excluída");
   };
 
-  const selectExistingClient = (client: { id: string; name: string; city?: string | null; state?: string | null; cnpj?: string | null }) => {
+  const selectExistingClient = (client: {
+    id: string;
+    name: string;
+    fantasyName?: string | null;
+    code?: string | null;
+    city?: string | null;
+    state?: string | null;
+    cnpj?: string | null;
+  }) => {
     const clientOption = toClientOption(client);
 
     setClients((current) => {

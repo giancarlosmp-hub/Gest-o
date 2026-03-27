@@ -38,6 +38,8 @@ export const ClientTypeEnum = z.enum(["PJ", "PF"]);
 
 export const clientSchema = z.object({
   name: z.string().min(2),
+  fantasyName: z.string().min(2).optional(),
+  code: z.string().min(1).optional(),
   city: z.string().min(2),
   state: z.string().min(2),
   region: z.string().min(2),

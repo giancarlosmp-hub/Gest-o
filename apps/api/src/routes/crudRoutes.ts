@@ -984,6 +984,10 @@ const clientImportRowSchema = clientSchema
     sourceRowNumber: z.number().int().positive().optional(),
     existingClientId: z.string().optional(),
     action: clientImportActionSchema,
+    code_erp: z.string().optional(),
+    codigo_erp: z.string().optional(),
+    nome_fantasia: z.string().optional(),
+    fantasia: z.string().optional(),
     ownerSellerName: z.string().optional(),
     vendedor_responsavel: z.string().optional(),
     vendedor_responsavel_id: z.string().optional()
@@ -995,7 +999,9 @@ const clientImportRowSchema = clientSchema
 
     return {
       ...row,
-      ownerSellerId: row.ownerSellerId ?? ownerFromName ?? ownerFromLabel ?? ownerFromLegacy
+      ownerSellerId: row.ownerSellerId ?? ownerFromName ?? ownerFromLabel ?? ownerFromLegacy,
+      code: row.code ?? row.code_erp ?? row.codigo_erp,
+      fantasyName: row.fantasyName ?? row.nome_fantasia ?? row.fantasia
     };
   });
 
@@ -1322,6 +1328,13 @@ const buildDuplicateFingerprint = (payload: { cnpj?: string | null; name?: strin
   return `n:${name}|c:${city}|s:${uf}`;
 };
 
+const normalizeClientCode = (value?: string | null) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+const isEmptyValue = (value?: string | null) => !value || !String(value).trim();
+
 const isMeaningfulImportString = (value: unknown) => {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
@@ -1338,6 +1351,10 @@ const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any
 
   const data = {
     name: payload.name.trim(),
+    ...(typeof payload.fantasyName === "string" && isMeaningfulImportString(payload.fantasyName)
+      ? { fantasyName: payload.fantasyName.trim() }
+      : {}),
+    ...(typeof payload.code === "string" && isMeaningfulImportString(payload.code) ? { code: payload.code.trim() } : {}),
     city: payload.city.trim(),
     state: payload.state.trim(),
     region: payload.region.trim(),
@@ -1376,10 +1393,11 @@ const getImportPersistenceErrorMessage = (error: unknown) => {
 const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
 
-  if (isMeaningfulImportString(payload.name)) data.name = payload.name.trim();
-  if (isMeaningfulImportString(payload.city)) data.city = payload.city.trim();
-  if (isMeaningfulImportString(payload.state)) data.state = payload.state.trim();
+  if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
+  if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
   if (isMeaningfulImportString(payload.region)) data.region = payload.region.trim();
+  if (isMeaningfulImportString(payload.fantasyName) && isEmptyValue(existingClient.fantasyName)) data.fantasyName = payload.fantasyName.trim();
+  if (isMeaningfulImportString(payload.code) && isEmptyValue(existingClient.code)) data.code = payload.code.trim();
   const segmentValue = payload.segment;
   if (typeof segmentValue === "string" && isMeaningfulImportString(segmentValue)) data.segment = segmentValue.trim();
 
@@ -1387,9 +1405,6 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any
   if (typeof clientTypeValue === "string" && isMeaningfulImportString(clientTypeValue)) {
     data.clientType = clientTypeValue.trim().toUpperCase();
   }
-
-  const cnpjValue = payload.cnpj;
-  if (typeof cnpjValue === "string" && isMeaningfulImportString(cnpjValue)) data.cnpj = cnpjValue.trim();
 
   if (typeof payload.potentialHa === "number" && Number.isFinite(payload.potentialHa) && payload.potentialHa >= 0) {
     data.potentialHa = payload.potentialHa;
@@ -1405,10 +1420,10 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any
   }
 
   const mergedClientForValidation = {
-    name: (data.name as string | undefined) ?? existingClient.name,
+    name: existingClient.name,
     city: (data.city as string | undefined) ?? existingClient.city,
     state: (data.state as string | undefined) ?? existingClient.state,
-    cnpj: (data.cnpj as string | undefined) ?? existingClient.cnpj
+    cnpj: existingClient.cnpj
   };
 
   const normalized = normalizeClientForComparison(mergedClientForValidation);
@@ -1425,30 +1440,60 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any
   };
 };
 
+const findImportExistingClient = (params: {
+  payload: z.infer<typeof clientSchema>;
+  byCnpj: Map<string, any>;
+  byCode: Map<string, any>;
+  byName: Map<string, any[]>;
+}) => {
+  const { payload, byCnpj, byCode, byName } = params;
+  const normalizedCnpj = normalizeCnpj(payload.cnpj);
+  if (normalizedCnpj) {
+    const match = byCnpj.get(normalizedCnpj);
+    if (match) return { match, reason: "cnpj" as const };
+  }
+
+  const normalizedCode = normalizeClientCode(payload.code);
+  if (normalizedCode) {
+    const match = byCode.get(normalizedCode);
+    if (match) return { match, reason: "code" as const };
+  }
+
+  const normalizedName = normalizeText(payload.name);
+  if (normalizedName) {
+    const nameMatches = byName.get(normalizedName) || [];
+    if (nameMatches.length === 1) return { match: nameMatches[0], reason: "name" as const };
+  }
+
+  return { match: null, reason: null as null };
+};
+
 const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRowSchema>[]): Promise<ImportPreviewItem[]> => {
   const scopedWhere = sellerWhere(req);
 
   // Carrega o mínimo necessário para deduplicação
   const existingClients = await prisma.client.findMany({
     where: scopedWhere,
-    select: { id: true, cnpj: true, name: true, city: true, state: true }
+    select: { id: true, cnpj: true, code: true, name: true, nameNormalized: true, city: true, state: true }
   });
 
-  // Indexa base por doc e por fingerprint name/city/state
+  // Indexa base por cnpj, código ERP e nome (fallback cuidadoso)
   const existingByDoc = new Map<string, string>();
-  const existingByFingerprint = new Map<string, string>();
+  const existingByCode = new Map<string, string>();
+  const existingByName = new Map<string, string[]>();
 
   existingClients.forEach((c) => {
     const doc = normalizeCnpj(c.cnpj);
     if (doc) existingByDoc.set(doc, c.id);
 
-    const fp = buildDuplicateFingerprint({
-      cnpj: null,
-      name: c.name,
-      city: c.city,
-      state: c.state
-    });
-    existingByFingerprint.set(fp, c.id);
+    const code = normalizeClientCode(c.code);
+    if (code) existingByCode.set(code, c.id);
+
+    const normalizedName = c.nameNormalized || normalizeText(c.name);
+    if (!normalizedName) return;
+    const bucket = existingByName.get(normalizedName) || [];
+    bucket.push(c.id);
+    existingByName.set(normalizedName, bucket);
   });
 
   // Dedup dentro do arquivo
@@ -1545,36 +1590,30 @@ const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRow
     }
 
     const doc = normalizeCnpj(p.payload.cnpj);
-    if (doc) {
-      const existingId = existingByDoc.get(doc);
-      if (existingId) {
-        return {
-          rowNumber: p.rowNumber,
-          row: p.row,
-          status: "duplicate" as const,
-          existingClientId: existingId,
-          payload: p.payload,
-          reason: "Cliente já existe (documento)"
-        };
-      }
-    } else {
-      const fp = buildDuplicateFingerprint({
-        cnpj: null,
-        name: p.payload.name,
-        city: p.payload.city,
-        state: p.payload.state
-      });
-      const existingId = existingByFingerprint.get(fp);
-      if (existingId) {
-        return {
-          rowNumber: p.rowNumber,
-          row: p.row,
-          status: "duplicate" as const,
-          existingClientId: existingId,
-          payload: p.payload,
-          reason: "Cliente já existe (nome/cidade/UF)"
-        };
-      }
+    const code = normalizeClientCode(p.payload.code);
+    const normalizedName = normalizeText(p.payload.name);
+
+    const matchedByCnpj = doc ? existingByDoc.get(doc) : null;
+    const matchedByCode = !matchedByCnpj && code ? existingByCode.get(code) : null;
+    const nameCandidates = !matchedByCnpj && !matchedByCode && normalizedName ? existingByName.get(normalizedName) || [] : [];
+    const matchedByName = nameCandidates.length === 1 ? nameCandidates[0] : null;
+
+    const existingId = matchedByCnpj || matchedByCode || matchedByName;
+    if (existingId) {
+      const reason = matchedByCnpj
+        ? "Cliente já existe (CNPJ)"
+        : matchedByCode
+          ? "Cliente já existe (código ERP)"
+          : "Cliente já existe (nome)";
+
+      return {
+        rowNumber: p.rowNumber,
+        row: p.row,
+        status: "duplicate" as const,
+        existingClientId: existingId,
+        payload: p.payload,
+        reason
+      };
     }
 
     return { rowNumber: p.rowNumber, row: p.row, status: "new" as const, payload: p.payload };
@@ -3586,6 +3625,9 @@ router.get("/clients", async (req, res) => {
       ? {
           OR: [
             { name: { contains: search, mode: "insensitive" } },
+            { fantasyName: { contains: search, mode: "insensitive" } },
+            { code: { contains: search, mode: "insensitive" } },
+            { cnpj: { contains: search, mode: "insensitive" } },
             { city: { contains: search, mode: "insensitive" } },
             { state: { contains: search, mode: "insensitive" } },
             { region: { contains: search, mode: "insensitive" } },
@@ -3859,12 +3901,47 @@ router.post("/clients/import/simulate", async (req, res) => {
   res.json({ simulated: true, summary });
 });
 
-// ✅ Import (com ações por linha)
+// ✅ Import (upsert inteligente)
 router.post("/clients/import", async (req, res) => {
   const { rows, isValid } = resolveImportRows(req.body);
   if (!isValid) return res.status(400).json({ message: "Payload de importação inválido." });
 
   const preview = await buildImportPreview(req, rows);
+  const scopedWhere = sellerWhere(req);
+
+  const existingClients = await prisma.client.findMany({
+    where: scopedWhere,
+    select: {
+      id: true,
+      name: true,
+      nameNormalized: true,
+      fantasyName: true,
+      code: true,
+      city: true,
+      state: true,
+      cnpj: true
+    }
+  });
+
+  const byCnpj = new Map<string, (typeof existingClients)[number]>();
+  const byCode = new Map<string, (typeof existingClients)[number]>();
+  const byName = new Map<string, (typeof existingClients)[number][]>();
+
+  const indexClient = (client: (typeof existingClients)[number]) => {
+    const cnpj = normalizeCnpj(client.cnpj);
+    if (cnpj) byCnpj.set(cnpj, client);
+
+    const code = normalizeClientCode(client.code);
+    if (code) byCode.set(code, client);
+
+    const normalizedName = client.nameNormalized || normalizeText(client.name);
+    if (!normalizedName) return;
+    const bucket = byName.get(normalizedName) || [];
+    bucket.push(client);
+    byName.set(normalizedName, bucket);
+  };
+
+  existingClients.forEach(indexClient);
 
   let totalImportados = 0;
   let totalAtualizados = 0;
@@ -3900,81 +3977,6 @@ router.post("/clients/import", async (req, res) => {
       continue;
     }
 
-    // Se for duplicado dentro do arquivo, existingClientId pode vir vazio.
-    // Regra:
-    // - update exige existingClientId válido
-    // - skip ignora
-    // - import_anyway cria novo
-    if (item.status === "duplicate") {
-      if (rowAction === "skip") {
-        totalIgnorados += 1;
-        results.push({
-          rowNumber: item.rowNumber,
-          clientName,
-          status: "IGNORED",
-          category: "ignored",
-          reason: item.reason || "Linha ignorada por decisão do usuário."
-        });
-        continue;
-      }
-
-      if (rowAction === "update") {
-        if (!item.existingClientId) {
-          registerApiFailure(
-            item.rowNumber,
-            clientName,
-            "Cliente duplicado no arquivo sem vínculo com cliente existente para atualização.",
-            "duplicate"
-          );
-          continue;
-        }
-
-        try {
-          const existingClient = await prisma.client.findUnique({ where: { id: item.existingClientId } });
-          if (!existingClient) throw new Error("existing_client_not_found");
-
-          const { data: resolvedUpdateData, mergedClientForValidation } = resolveImportUpdateData(
-            item.payload,
-            req,
-            existingClient
-          );
-
-          await ensureClientIsNotDuplicate({
-            candidate: mergedClientForValidation,
-            scope: sellerWhere(req),
-            ignoreClientId: item.existingClientId
-          });
-
-          await prisma.client.update({
-            where: { id: item.existingClientId },
-            data: resolvedUpdateData
-          });
-          totalAtualizados += 1;
-          results.push({
-            rowNumber: item.rowNumber,
-            clientName,
-            status: "UPDATED",
-            category: "updated",
-            reason: "Cliente atualizado com sucesso."
-          });
-        } catch (error) {
-          if (isDatabaseUniqueViolation(error)) {
-            registerApiFailure(item.rowNumber, clientName, "Cliente duplicado.", "duplicate");
-            continue;
-          }
-          registerApiFailure(item.rowNumber, clientName, "Erro interno ao atualizar cliente.");
-        }
-        continue;
-      }
-
-      // import_anyway ou ação vazia -> cria novo (ação vazia é erro, para forçar decisão)
-      if (!rowAction) {
-        registerApiFailure(item.rowNumber, clientName, "Cliente duplicado sem ação definida.", "duplicate");
-        continue;
-      }
-    }
-
-    // New ou Duplicate com import_anyway
     if (rowAction === "skip") {
       totalIgnorados += 1;
       results.push({
@@ -3988,9 +3990,63 @@ router.post("/clients/import", async (req, res) => {
     }
 
     try {
+      const existingResolution = findImportExistingClient({
+        payload: item.payload,
+        byCnpj,
+        byCode,
+        byName
+      });
+
+      if (existingResolution.match) {
+        const { data: resolvedUpdateData, mergedClientForValidation } = resolveImportUpdateData(item.payload, req, existingResolution.match);
+
+        if (Object.keys(resolvedUpdateData).length <= 4) {
+          totalIgnorados += 1;
+          results.push({
+            rowNumber: item.rowNumber,
+            clientName,
+            status: "IGNORED",
+            category: "ignored",
+            reason: "Cliente já existe e não há campos vazios para enriquecer."
+          });
+          continue;
+        }
+
+        await ensureClientIsNotDuplicate({
+          candidate: mergedClientForValidation,
+          scope: scopedWhere,
+          ignoreClientId: existingResolution.match.id
+        });
+
+        const updated = await prisma.client.update({
+          where: { id: existingResolution.match.id },
+          data: resolvedUpdateData
+        });
+
+        const updatedIndex = existingClients.findIndex((client) => client.id === updated.id);
+        if (updatedIndex >= 0) existingClients[updatedIndex] = { ...existingClients[updatedIndex], ...updated };
+        byCnpj.clear();
+        byCode.clear();
+        byName.clear();
+        existingClients.forEach(indexClient);
+
+        totalAtualizados += 1;
+        const reasonByMatch = existingResolution.reason === "cnpj" ? "CNPJ" : existingResolution.reason === "code" ? "código ERP" : "nome";
+        results.push({
+          rowNumber: item.rowNumber,
+          clientName,
+          status: "UPDATED",
+          category: "updated",
+          reason: `Cliente existente identificado por ${reasonByMatch}; campos vazios atualizados.`
+        });
+        continue;
+      }
+
       const payload = resolveImportCreateData(item.payload, req);
-      await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
-      await prisma.client.create({ data: payload });
+      await ensureClientIsNotDuplicate({ candidate: payload, scope: scopedWhere });
+      const created = await prisma.client.create({ data: payload });
+      existingClients.push(created as (typeof existingClients)[number]);
+      indexClient(created as (typeof existingClients)[number]);
       totalImportados += 1;
       results.push({
         rowNumber: item.rowNumber,

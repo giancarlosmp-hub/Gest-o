@@ -516,6 +516,8 @@ export default function AgendaPage() {
       return {
         id: String(item.id),
         name: String(item.name),
+        fantasyName: item?.fantasyName ? String(item.fantasyName) : null,
+        code: item?.code ? String(item.code) : null,
         city: item?.city ? String(item.city) : null,
         state: item?.state ? String(item.state) : null,
         cnpj: item?.cnpj ? String(item.cnpj) : null
@@ -717,6 +719,8 @@ export default function AgendaPage() {
           .map((item: any) => ({
             id: String(item.id),
             name: String(item.name),
+            fantasyName: item?.fantasyName ? String(item.fantasyName) : null,
+            code: item?.code ? String(item.code) : null,
             city: item?.city ? String(item.city) : null,
             state: item?.state ? String(item.state) : null,
             cnpj: item?.cnpj ? String(item.cnpj) : null
@@ -1872,7 +1876,7 @@ export default function AgendaPage() {
                           clients={activityClients}
                           value={stop.clientId}
                           onChange={(clientId) => updateDraftStop(stop.id, { clientId, city: clientById.get(clientId)?.city || "" })}
-                          placeholder="Pesquisar por nome, cidade, UF ou CNPJ"
+                          placeholder="Pesquisar por razão social, fantasia, código, cidade, UF ou CNPJ"
                           emptyLabel="Nenhum cliente encontrado."
                           maxListHeightClassName="max-h-40"
                         />
