@@ -134,6 +134,9 @@ export type ClientImportFieldKey =
   | "farmSizeHa"
   | "cnpj"
   | "segment"
-  | "ownerSellerId";
+  | "ownerSellerId"
+  | "lastPurchaseDate"
+  | "lastPurchaseValue"
+  | "erpUpdatedAt";
 export type ClientImportFieldDefinition = ImportFieldDefinition<ClientImportFieldKey>;
 export const ClientImportColumnMappingStep = ImportColumnMappingStep<ClientImportFieldKey>;

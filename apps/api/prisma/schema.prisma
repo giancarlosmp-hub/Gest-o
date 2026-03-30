@@ -97,6 +97,9 @@ model Client {
   cnpj           String?
   cnpjNormalized String?       @db.VarChar(32)
   segment        String?
+  lastPurchaseDate DateTime?
+  lastPurchaseValue Float?
+  erpUpdatedAt   DateTime?
   ownerSellerId  String
   ownerSeller    User          @relation(fields: [ownerSellerId], references: [id])
   contacts       Contact[]
