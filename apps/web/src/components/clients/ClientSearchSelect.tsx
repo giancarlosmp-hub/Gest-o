@@ -38,7 +38,13 @@ function formatClientLocation(client: SearchableClientOption) {
 }
 
 function formatClientLabel(client: SearchableClientOption) {
-  return `${client.name} — ${formatClientLocation(client)}`;
+  return `${client.fantasyName?.trim() || client.name} — ${formatClientLocation(client)}`;
+}
+
+function formatClientSecondary(client: SearchableClientOption) {
+  const location = formatClientLocation(client);
+  const code = client.code?.trim();
+  return code ? `${location} • Cod: ${code}` : location;
 }
 
 export default function ClientSearchSelect({
@@ -145,9 +151,11 @@ export default function ClientSearchSelect({
                 }}
               >
                 <p className="text-sm text-slate-900">{formatClientLabel(client)}</p>
-                {client.fantasyName ? <p className="text-xs text-slate-600">({client.fantasyName})</p> : null}
+                <p className="text-xs text-slate-600">
+                  {client.fantasyName ? client.name : formatClientSecondary(client)}
+                </p>
+                {client.fantasyName ? <p className="text-xs text-slate-500">{formatClientSecondary(client)}</p> : null}
                 {client.cnpj ? <p className="text-xs text-slate-500">CNPJ: {client.cnpj}</p> : null}
-                {client.code ? <p className="text-xs text-slate-500">Código: {client.code}</p> : null}
               </button>
             ))
           ) : (
