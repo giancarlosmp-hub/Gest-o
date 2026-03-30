@@ -5118,7 +5118,17 @@ router.post("/opportunities/import", async (req, res) => {
     dryRun
   });
 
-  return res.status(200).json(result);
+  return res.status(200).json({
+    ...result,
+    message: "Importação concluída",
+    summary: {
+      ...result.summary,
+      created: result.summary.created,
+      updated: result.summary.updated,
+      ignored: result.summary.ignored,
+      conflicts: result.summary.failed
+    }
+  });
 });
 
 router.post("/opportunities/import/preview", async (req, res) => {
