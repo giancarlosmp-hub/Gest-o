@@ -1398,6 +1398,7 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: an
 
   if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
   if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
+  if (isMeaningfulImportString(payload.region) && isEmptyValue(existingClient.region)) data.region = payload.region.trim();
   if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
   if (code && isEmptyValue(existingClient.code)) data.code = code;
 
@@ -1409,15 +1410,19 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: an
   };
 
   const normalized = normalizeClientForComparison(mergedClientForValidation);
+  const hasMeaningfulChanges = Object.keys(data).length > 0;
 
   return {
-    data: {
-      ...data,
-      state: normalized.state,
-      nameNormalized: normalized.nameNormalized,
-      cityNormalized: normalized.cityNormalized,
-      cnpjNormalized: normalized.cnpjNormalized || null
-    },
+    data: hasMeaningfulChanges
+      ? {
+          ...data,
+          state: normalized.state,
+          nameNormalized: normalized.nameNormalized,
+          cityNormalized: normalized.cityNormalized,
+          cnpjNormalized: normalized.cnpjNormalized || null
+        }
+      : {},
+    hasMeaningfulChanges,
     mergedClientForValidation
   };
 };
@@ -1426,9 +1431,8 @@ const findImportExistingClient = (params: {
   payload: z.infer<typeof clientSchema>;
   byCnpj: Map<string, any>;
   byCode: Map<string, any>;
-  byName: Map<string, any[]>;
 }) => {
-  const { payload, byCnpj, byCode, byName } = params;
+  const { payload, byCnpj, byCode } = params;
   const normalizedCnpj = normalizeCnpj(payload.cnpj);
   if (normalizedCnpj) {
     const match = byCnpj.get(normalizedCnpj);
@@ -1439,12 +1443,6 @@ const findImportExistingClient = (params: {
   if (normalizedCode) {
     const match = byCode.get(normalizedCode);
     if (match) return { match, reason: "code" as const };
-  }
-
-  const normalizedName = normalizeText(payload.name);
-  if (normalizedName) {
-    const nameMatches = byName.get(normalizedName) || [];
-    if (nameMatches.length === 1) return { match: nameMatches[0], reason: "name" as const };
   }
 
   return { match: null, reason: null as null };
@@ -3907,7 +3905,6 @@ router.post("/clients/import", async (req, res) => {
 
   const byCnpj = new Map<string, (typeof existingClients)[number]>();
   const byCode = new Map<string, (typeof existingClients)[number]>();
-  const byName = new Map<string, (typeof existingClients)[number][]>();
 
   const indexClient = (client: (typeof existingClients)[number]) => {
     const cnpj = normalizeCnpj(client.cnpj);
@@ -3916,19 +3913,14 @@ router.post("/clients/import", async (req, res) => {
     const code = normalizeClientCode(client.code);
     if (code) byCode.set(code, client);
 
-    const normalizedName = client.nameNormalized || normalizeText(client.name);
-    if (!normalizedName) return;
-    const bucket = byName.get(normalizedName) || [];
-    bucket.push(client);
-    byName.set(normalizedName, bucket);
   };
 
   existingClients.forEach(indexClient);
 
-  let totalImportados = 0;
-  let totalAtualizados = 0;
-  let totalIgnorados = 0;
-  let totalErros = 0;
+  let created = 0;
+  let updated = 0;
+  let ignored = 0;
+  let conflicts = 0;
   const errors: Array<{ rowNumber: number; clientName: string; message: string }> = [];
   const results: Array<{
     rowNumber: number;
@@ -3939,7 +3931,7 @@ router.post("/clients/import", async (req, res) => {
   }> = [];
 
   const registerApiFailure = (rowNumber: number, clientName: string, message: string, category: "duplicate" | "validation" | "api_error" = "api_error") => {
-    totalErros += 1;
+    conflicts += 1;
     errors.push({ rowNumber, clientName, message });
     results.push({
       rowNumber,
@@ -3960,7 +3952,7 @@ router.post("/clients/import", async (req, res) => {
     }
 
     if (rowAction === "skip") {
-      totalIgnorados += 1;
+      ignored += 1;
       results.push({
         rowNumber: item.rowNumber,
         clientName,
@@ -3975,15 +3967,18 @@ router.post("/clients/import", async (req, res) => {
       const existingResolution = findImportExistingClient({
         payload: item.payload,
         byCnpj,
-        byCode,
-        byName
+        byCode
       });
 
       if (existingResolution.match) {
-        const { data: resolvedUpdateData, mergedClientForValidation } = resolveImportUpdateData(item.payload, req, existingResolution.match);
+        const { data: resolvedUpdateData, hasMeaningfulChanges, mergedClientForValidation } = resolveImportUpdateData(
+          item.payload,
+          req,
+          existingResolution.match
+        );
 
-        if (Object.keys(resolvedUpdateData).length <= 4) {
-          totalIgnorados += 1;
+        if (!hasMeaningfulChanges) {
+          ignored += 1;
           results.push({
             rowNumber: item.rowNumber,
             clientName,
@@ -4000,20 +3995,19 @@ router.post("/clients/import", async (req, res) => {
           ignoreClientId: existingResolution.match.id
         });
 
-        const updated = await prisma.client.update({
+        const updatedClient = await prisma.client.update({
           where: { id: existingResolution.match.id },
           data: resolvedUpdateData
         });
 
-        const updatedIndex = existingClients.findIndex((client) => client.id === updated.id);
-        if (updatedIndex >= 0) existingClients[updatedIndex] = { ...existingClients[updatedIndex], ...updated };
+        const updatedIndex = existingClients.findIndex((client) => client.id === updatedClient.id);
+        if (updatedIndex >= 0) existingClients[updatedIndex] = { ...existingClients[updatedIndex], ...updatedClient };
         byCnpj.clear();
         byCode.clear();
-        byName.clear();
         existingClients.forEach(indexClient);
 
-        totalAtualizados += 1;
-        const reasonByMatch = existingResolution.reason === "cnpj" ? "CNPJ" : existingResolution.reason === "code" ? "código ERP" : "nome";
+        updated += 1;
+        const reasonByMatch = existingResolution.reason === "cnpj" ? "CNPJ/CPF" : "código ERP";
         results.push({
           rowNumber: item.rowNumber,
           clientName,
@@ -4026,10 +4020,10 @@ router.post("/clients/import", async (req, res) => {
 
       const payload = resolveImportCreateData(item.payload, req);
       await ensureClientIsNotDuplicate({ candidate: payload, scope: scopedWhere });
-      const created = await prisma.client.create({ data: payload });
-      existingClients.push(created as (typeof existingClients)[number]);
-      indexClient(created as (typeof existingClients)[number]);
-      totalImportados += 1;
+      const createdClient = await prisma.client.create({ data: payload });
+      existingClients.push(createdClient as (typeof existingClients)[number]);
+      indexClient(createdClient as (typeof existingClients)[number]);
+      created += 1;
       results.push({
         rowNumber: item.rowNumber,
         clientName,
@@ -4055,7 +4049,7 @@ router.post("/clients/import", async (req, res) => {
     }
   }
 
-  res.json({ totalImportados, totalAtualizados, totalIgnorados, totalErros, errors, results });
+  res.json({ created, updated, ignored, conflicts, errors, results });
 });
 
 router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
