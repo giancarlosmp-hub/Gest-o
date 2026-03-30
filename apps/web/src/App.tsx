@@ -78,6 +78,8 @@ export default function App() {
               createModalTitle="Novo cliente"
               fields={[
                 { key: "name", label: "Nome" },
+                { key: "fantasyName", label: "Nome fantasia", placeholder: "Ex: Agro Rural" },
+                { key: "code", label: "Código do cliente", placeholder: "Ex: 12345 (ERP)" },
                 { key: "city", label: "Cidade" },
                 { key: "state", label: "UF" },
                 { key: "region", label: "Região" },
