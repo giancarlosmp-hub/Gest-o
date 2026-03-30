@@ -1391,36 +1391,15 @@ const getImportPersistenceErrorMessage = (error: unknown) => {
   return "Erro interno ao criar cliente.";
 };
 
-const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, req: any, existingClient: any) => {
+const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
   const fantasyName = payload.fantasyName?.trim();
   const code = payload.code?.trim();
 
   if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
   if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
-  if (isMeaningfulImportString(payload.region)) data.region = payload.region.trim();
   if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
   if (code && isEmptyValue(existingClient.code)) data.code = code;
-  const segmentValue = payload.segment;
-  if (typeof segmentValue === "string" && isMeaningfulImportString(segmentValue)) data.segment = segmentValue.trim();
-
-  const clientTypeValue = payload.clientType;
-  if (typeof clientTypeValue === "string" && isMeaningfulImportString(clientTypeValue)) {
-    data.clientType = clientTypeValue.trim().toUpperCase();
-  }
-
-  if (typeof payload.potentialHa === "number" && Number.isFinite(payload.potentialHa) && payload.potentialHa >= 0) {
-    data.potentialHa = payload.potentialHa;
-  }
-
-  if (typeof payload.farmSizeHa === "number" && Number.isFinite(payload.farmSizeHa) && payload.farmSizeHa >= 0) {
-    data.farmSizeHa = payload.farmSizeHa;
-  }
-
-  const ownerSellerValue = payload.ownerSellerId;
-  if (req.user?.role !== "vendedor" && typeof ownerSellerValue === "string" && isMeaningfulImportString(ownerSellerValue)) {
-    data.ownerSellerId = ownerSellerValue.trim();
-  }
 
   const mergedClientForValidation = {
     name: existingClient.name,
