@@ -108,6 +108,21 @@ type OpportunityImportResponse = {
     reason?: string;
     message?: string;
   }>;
+  summary?: {
+    created?: number;
+    updated?: number;
+    ignored?: number;
+    conflicts?: number;
+    totalCreated?: number;
+    totalUpdated?: number;
+    totalIgnored?: number;
+    totalConflicts?: number;
+    totalImportados?: number;
+    totalAtualizados?: number;
+    totalIgnorados?: number;
+    totalConflitos?: number;
+    conflitos?: number;
+  };
 };
 
 type OpportunityImportResultRow = {
@@ -1350,6 +1365,18 @@ export default function OpportunityImportModal({
       const errors = data?.errors ?? [];
       const rowResults = data?.rowResults ?? [];
       const failed = data?.failed ?? errors.length;
+      const summary = data?.summary;
+      const summaryCreated =
+        summary?.created ?? summary?.totalCreated ?? summary?.totalImportados;
+      const summaryUpdated =
+        summary?.updated ?? summary?.totalUpdated ?? summary?.totalAtualizados;
+      const summaryIgnored =
+        summary?.ignored ?? summary?.totalIgnored ?? summary?.totalIgnorados;
+      const summaryConflicts =
+        summary?.conflicts ??
+        summary?.conflitos ??
+        summary?.totalConflicts ??
+        summary?.totalConflitos;
 
       const resultRows: OpportunityImportResultRow[] = rowResults.length
         ? rowResults.map((result, index) => {
@@ -1424,6 +1451,12 @@ export default function OpportunityImportModal({
 
       if (errors.length) {
         toast.message(`${errors.length} linha(s) com erro na importação.`);
+      }
+
+      if (summary) {
+        toast.message(
+          `Importação concluída:\n\nCriados: ${summaryCreated ?? 0}\nAtualizados: ${summaryUpdated ?? 0}\nIgnorados: ${summaryIgnored ?? 0}\nConflitos: ${summaryConflicts ?? 0}`,
+        );
       }
 
       await onImported?.();
