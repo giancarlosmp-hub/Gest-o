@@ -46,6 +46,8 @@ type ClientListItem = {
 type ClientImportRow = {
   sourceRowNumber: number;
   name: string;
+  fantasyName?: string;
+  code?: string;
   city?: string;
   state?: string;
   region?: string;
@@ -153,6 +155,8 @@ type ImportValidationSummary = {
 
 const clientImportColumns = [
   "name",
+  "fantasyName",
+  "code",
   "city",
   "state",
   "region",
@@ -166,6 +170,8 @@ const clientImportColumns = [
 
 const clientImportTemplateColumns = [
   "nome",
+  "fantasy_name",
+  "code",
   "cidade",
   "uf",
   "regiao",
@@ -182,6 +188,8 @@ const importTemplatesStorageKey = "clientsImport.templates.v1";
 
 const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
   { key: "name", label: "nome", required: true },
+  { key: "fantasyName", label: "fantasy_name", required: false },
+  { key: "code", label: "code", required: false },
   { key: "city", label: "cidade", required: true },
   { key: "state", label: "uf", required: true },
   { key: "clientType", label: "tipo_cliente", required: true },
@@ -462,7 +470,7 @@ export default function CrudSimplePage({
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportTemplateColumns],
-      ["Fazenda Santa Rita", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", "Ana Souza"]
+      ["Fazenda Santa Rita", "Santa Rita Agro", "ERP-000123", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", "Ana Souza"]
     ];
 
     const xlsx = await loadXlsxLibrary();
@@ -476,6 +484,8 @@ export default function CrudSimplePage({
   const autoMapColumns = (headers: string[]) => {
     const synonyms: Record<ClientImportFieldKey, string[]> = {
       name: ["name", "nome", "cliente", "razaosocial", "produtor", "nomedocliente"],
+      fantasyName: ["fantasyname", "fantasy_name", "nomefantasia", "nome_fantasia"],
+      code: ["code", "codigo", "codcliente", "codigocliente", "codigoerp", "erpcode", "codigo_cliente", "codigo_cliente_erp"],
       city: ["city", "cidade", "municipio"],
       state: ["state", "uf", "estado"],
       clientType: ["clienttype", "tipo", "pjpf", "pessoa", "tipocliente"],
@@ -633,6 +643,8 @@ export default function CrudSimplePage({
     return {
       sourceRowNumber: rowIndex + 2,
       name: mapping.name ? normalizeTextValue(row[mapping.name]) : "",
+      fantasyName: mapping.fantasyName ? normalizeTextValue(row[mapping.fantasyName]) : "",
+      code: mapping.code ? normalizeTextValue(row[mapping.code]) : "",
       city: mapping.city ? normalizeTextValue(row[mapping.city]) : "",
       state: mapping.state ? normalizeTextValue(row[mapping.state]) : "",
       region: mapping.region ? normalizeTextValue(row[mapping.region]) : "",
@@ -657,6 +669,8 @@ export default function CrudSimplePage({
       .filter((row) =>
         [
           row.name,
+          row.fantasyName,
+          row.code,
           row.city,
           row.state,
           row.region,
