@@ -104,17 +104,17 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
 
   const sanitizedPayload: Record<string, unknown> = {
     name,
-    fantasyName,
-    code,
     city,
     state,
     clientType,
-    region,
-    potentialHa: potentialHa === "invalid" ? undefined : potentialHa,
-    farmSizeHa: farmSizeHa === "invalid" ? undefined : farmSizeHa,
-    cnpj,
-    segment,
-    ownerSellerId: resolvedOwnerSellerId || undefined
+    ...(fantasyName ? { fantasyName } : {}),
+    ...(code ? { code } : {}),
+    ...(region ? { region } : {}),
+    ...(typeof potentialHa === "number" ? { potentialHa } : {}),
+    ...(typeof farmSizeHa === "number" ? { farmSizeHa } : {}),
+    ...(cnpj ? { cnpj } : {}),
+    ...(segment ? { segment } : {}),
+    ...(resolvedOwnerSellerId ? { ownerSellerId: resolvedOwnerSellerId } : {})
   };
 
   return { sanitizedPayload, fieldErrors };
