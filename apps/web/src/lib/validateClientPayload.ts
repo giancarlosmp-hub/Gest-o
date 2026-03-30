@@ -1,5 +1,7 @@
 export type ClientPayloadInput = {
   name?: unknown;
+  fantasyName?: unknown;
+  code?: unknown;
   city?: unknown;
   state?: unknown;
   region?: unknown;
@@ -47,6 +49,8 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
   const name = toTrimmedString(payload.name);
   const city = toTrimmedString(payload.city);
   const state = toTrimmedString(payload.state).toUpperCase();
+  const fantasyName = normalizeOptionalString(payload.fantasyName);
+  const code = normalizeOptionalString(payload.code);
   const clientTypeRaw = toTrimmedString(payload.clientType);
   const clientType = clientTypeRaw.toUpperCase();
   const region = normalizeOptionalString(payload.region);
@@ -100,6 +104,8 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
 
   const sanitizedPayload: Record<string, unknown> = {
     name,
+    fantasyName,
+    code,
     city,
     state,
     clientType,

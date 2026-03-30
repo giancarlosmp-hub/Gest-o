@@ -124,6 +124,8 @@ export function ImportColumnMappingStep<FieldKey extends string>({
 
 export type ClientImportFieldKey =
   | "name"
+  | "fantasyName"
+  | "code"
   | "city"
   | "state"
   | "clientType"
