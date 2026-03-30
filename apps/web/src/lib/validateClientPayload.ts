@@ -1,5 +1,7 @@
 export type ClientPayloadInput = {
   name?: unknown;
+  fantasyName?: unknown;
+  code?: unknown;
   city?: unknown;
   state?: unknown;
   region?: unknown;
@@ -51,6 +53,8 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
   const clientType = clientTypeRaw.toUpperCase();
   const region = normalizeOptionalString(payload.region);
   const segment = normalizeOptionalString(payload.segment);
+  const fantasyName = normalizeOptionalString(payload.fantasyName);
+  const code = normalizeOptionalString(payload.code);
   const ownerSellerIdInput = normalizeOptionalString(payload.ownerSellerId);
 
   const potentialHa = normalizeOptionalNumber(payload.potentialHa);
@@ -100,6 +104,8 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
 
   const sanitizedPayload: Record<string, unknown> = {
     name,
+    fantasyName,
+    code,
     city,
     state,
     clientType,
