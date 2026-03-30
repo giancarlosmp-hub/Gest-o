@@ -59,6 +59,9 @@ type ClientImportRow = {
   ownerSellerId?: string;
   ownerSellerName?: string;
   ownerSellerLookupError?: string;
+  lastPurchaseDate?: string;
+  lastPurchaseValue?: number;
+  erpUpdatedAt?: string;
 };
 
 type ClientImportErrorItem = {
@@ -165,7 +168,10 @@ const clientImportColumns = [
   "clientType",
   "cnpj",
   "segment",
-  "ownerSellerId"
+  "ownerSellerId",
+  "lastPurchaseDate",
+  "lastPurchaseValue",
+  "erpUpdatedAt"
 ] as const;
 
 const clientImportTemplateColumns = [
@@ -180,7 +186,10 @@ const clientImportTemplateColumns = [
   "tipo_cliente",
   "cnpj_cpf",
   "segmento",
-  "vendedor_responsavel"
+  "vendedor_responsavel",
+  "last_purchase_date",
+  "last_purchase_value",
+  "erp_updated_at"
 ] as const;
 
 const importMappingStorageKey = "clientsImport.columnMapping.v1";
@@ -198,7 +207,10 @@ const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
   { key: "farmSizeHa", label: "area_total_ha", required: false },
   { key: "cnpj", label: "cnpj_cpf", required: false },
   { key: "segment", label: "segmento", required: false },
-  { key: "ownerSellerId", label: "vendedor_responsavel", required: false }
+  { key: "ownerSellerId", label: "vendedor_responsavel", required: false },
+  { key: "lastPurchaseDate", label: "last_purchase_date", required: false },
+  { key: "lastPurchaseValue", label: "last_purchase_value", required: false },
+  { key: "erpUpdatedAt", label: "erp_updated_at", required: false }
 ];
 
 const getImportColumnLabel = (key: (typeof clientImportColumns)[number]) =>
@@ -494,7 +506,10 @@ export default function CrudSimplePage({
       farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal", "areatotalha"],
       cnpj: ["cnpj", "cpf", "cnpjcpf", "documento", "cnpj_cpf"],
       segment: ["segment", "segmento", "atividade", "perfil"],
-      ownerSellerId: ["ownersellerid", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid", "vendedor_responsavel_id"]
+      ownerSellerId: ["ownersellerid", "ownerseller", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid", "vendedor_responsavel_id", "vendedor_responsavel"],
+      lastPurchaseDate: ["lastpurchasedate", "last_purchase_date", "ultimacompra", "dataultimacompra", "ultima_compra_data"],
+      lastPurchaseValue: ["lastpurchasevalue", "last_purchase_value", "valorultimacompra", "valor_ultima_compra"],
+      erpUpdatedAt: ["erpupdatedat", "erp_updated_at", "dataatualizacaoerp", "erp_atualizado_em"]
     };
 
     const normalizedHeaders = headers.map((header) => ({ header, normalized: normalizeHeader(header) }));
@@ -591,6 +606,7 @@ export default function CrudSimplePage({
 
     const potentialHaResult = parseDecimalValue(potentialValue);
     const farmSizeHaResult = parseDecimalValue(farmValue);
+    const lastPurchaseValueResult = parseDecimalValue(mapping.lastPurchaseValue ? row[mapping.lastPurchaseValue] : undefined);
 
     const normalizeSellerName = (value?: string) =>
       String(value ?? "")
@@ -655,7 +671,10 @@ export default function CrudSimplePage({
       segment: mapping.segment ? normalizeTextValue(row[mapping.segment]) : "",
       ownerSellerId: resolvedOwnerSellerId ? normalizeTextValue(resolvedOwnerSellerId) : "",
       ownerSellerName: resolvedOwnerSellerName,
-      ownerSellerLookupError
+      ownerSellerLookupError,
+      lastPurchaseDate: mapping.lastPurchaseDate ? normalizeTextValue(row[mapping.lastPurchaseDate]) : "",
+      lastPurchaseValue: lastPurchaseValueResult.isInvalid ? Number.NaN : lastPurchaseValueResult.parsedValue,
+      erpUpdatedAt: mapping.erpUpdatedAt ? normalizeTextValue(row[mapping.erpUpdatedAt]) : ""
     };
   };
 
@@ -679,7 +698,10 @@ export default function CrudSimplePage({
           row.clientType,
           row.cnpj,
           row.segment,
-          row.ownerSellerId
+          row.ownerSellerId,
+          row.lastPurchaseDate,
+          row.lastPurchaseValue,
+          row.erpUpdatedAt
         ].some((value) => value !== "" && value !== undefined)
       );
 
@@ -734,6 +756,9 @@ export default function CrudSimplePage({
       }
       if (row.ownerSellerLookupError) {
         rowErrors.push(row.ownerSellerLookupError);
+      }
+      if (typeof row.lastPurchaseValue === "number" && Number.isNaN(row.lastPurchaseValue)) {
+        rowErrors.push("Valor da última compra inválido");
       }
       if (rowErrors.length === 0) {
         const normalizedDocument = String(row.cnpj ?? "").replace(/\D/g, "");
@@ -809,7 +834,12 @@ export default function CrudSimplePage({
       sellerId: user?.id
     });
 
-    return sanitizedPayload;
+    return {
+      ...sanitizedPayload,
+      ...(row.lastPurchaseDate ? { lastPurchaseDate: row.lastPurchaseDate } : {}),
+      ...(typeof row.lastPurchaseValue === "number" && Number.isFinite(row.lastPurchaseValue) ? { lastPurchaseValue: row.lastPurchaseValue } : {}),
+      ...(row.erpUpdatedAt ? { erpUpdatedAt: row.erpUpdatedAt } : {})
+    };
   };
 
   const buildFallbackDuplicateKey = (row: Pick<ClientImportRow, "name" | "city" | "state">) => {

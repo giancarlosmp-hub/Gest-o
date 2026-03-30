@@ -987,32 +987,47 @@ const clientImportRowSchema = clientSchema
     code_erp: z.string().optional(),
     codigo_erp: z.string().optional(),
     nome_fantasia: z.string().optional(),
+    fantasy_name: z.string().optional(),
     fantasia: z.string().optional(),
+    cnpj_cpf: z.string().optional(),
+    cnpjCpf: z.string().optional(),
     ownerSellerName: z.string().optional(),
+    ownerSeller: z.string().optional(),
     vendedor_responsavel: z.string().optional(),
-    vendedor_responsavel_id: z.string().optional()
+    vendedor_responsavel_id: z.string().optional(),
+    lastPurchaseDate: z.string().optional(),
+    last_purchase_date: z.string().optional(),
+    lastPurchaseValue: z.union([z.number(), z.string()]).optional(),
+    last_purchase_value: z.union([z.number(), z.string()]).optional(),
+    erpUpdatedAt: z.string().optional(),
+    erp_updated_at: z.string().optional()
   })
   .transform((row) => {
     const ownerFromName = typeof row.ownerSellerName === "string" ? row.ownerSellerName : undefined;
+    const ownerFromAlias = typeof row.ownerSeller === "string" ? row.ownerSeller : undefined;
     const ownerFromLabel = typeof row.vendedor_responsavel === "string" ? row.vendedor_responsavel : undefined;
     const ownerFromLegacy = typeof row.vendedor_responsavel_id === "string" ? row.vendedor_responsavel_id : undefined;
 
     return {
       ...row,
-      ownerSellerId: row.ownerSellerId ?? ownerFromName ?? ownerFromLabel ?? ownerFromLegacy,
+      ownerSellerId: row.ownerSellerId ?? ownerFromName ?? ownerFromAlias ?? ownerFromLabel ?? ownerFromLegacy,
       code: row.code ?? row.code_erp ?? row.codigo_erp,
-      fantasyName: row.fantasyName ?? row.nome_fantasia ?? row.fantasia
+      fantasyName: row.fantasyName ?? row.nome_fantasia ?? row.fantasy_name ?? row.fantasia,
+      cnpj: row.cnpj ?? row.cnpj_cpf ?? row.cnpjCpf,
+      lastPurchaseDate: row.lastPurchaseDate ?? row.last_purchase_date,
+      lastPurchaseValue: row.lastPurchaseValue ?? row.last_purchase_value,
+      erpUpdatedAt: row.erpUpdatedAt ?? row.erp_updated_at
     };
   });
 
 const clientImportRequestSchema = z.object({
-  rows: z.array(clientImportRowSchema).optional(),
-  clients: z.array(clientImportRowSchema).optional()
+  rows: z.array(z.unknown()).optional(),
+  clients: z.array(z.unknown()).optional()
 });
 
 const resolveImportRows = (body: unknown) => {
   const parsed = clientImportRequestSchema.safeParse(body);
-  if (!parsed.success) return { rows: [] as z.infer<typeof clientImportRowSchema>[], isValid: false };
+  if (!parsed.success) return { rows: [] as unknown[], isValid: false };
   const rows = parsed.data.rows ?? parsed.data.clients ?? [];
   return { rows, isValid: true };
 };
@@ -1341,7 +1356,39 @@ const isMeaningfulImportString = (value: unknown) => {
   return trimmed !== "" && trimmed !== "-";
 };
 
-const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any) => {
+const parseImportOptionalNumber = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseImportOptionalDate = (value: unknown): Date | null => {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isoDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (isoDate) {
+    const parsed = new Date(`${isoDate[1]}-${isoDate[2]}-${isoDate[3]}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const brDate = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(trimmed);
+  if (brDate) {
+    const parsed = new Date(`${brDate[3]}-${brDate[2]}-${brDate[1]}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const resolveImportCreateData = (payload: z.infer<typeof clientImportRowSchema>, req: any) => {
   const ownerSellerId =
     req.user?.role === "vendedor"
       ? req.user.id
@@ -1351,6 +1398,9 @@ const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any
 
   const fantasyName = payload.fantasyName?.trim();
   const code = payload.code?.trim();
+  const lastPurchaseDate = parseImportOptionalDate(payload.lastPurchaseDate);
+  const lastPurchaseValue = parseImportOptionalNumber(payload.lastPurchaseValue);
+  const erpUpdatedAt = parseImportOptionalDate(payload.erpUpdatedAt);
 
   const data = {
     name: payload.name.trim(),
@@ -1370,7 +1420,10 @@ const resolveImportCreateData = (payload: z.infer<typeof clientSchema>, req: any
       : {}),
     ...(typeof payload.farmSizeHa === "number" && Number.isFinite(payload.farmSizeHa) && payload.farmSizeHa >= 0
       ? { farmSizeHa: payload.farmSizeHa }
-      : {})
+      : {}),
+    ...(lastPurchaseDate ? { lastPurchaseDate } : {}),
+    ...(typeof lastPurchaseValue === "number" ? { lastPurchaseValue } : {}),
+    ...(erpUpdatedAt ? { erpUpdatedAt } : {})
   };
 
   return withClientNormalizedFields(data);
@@ -1391,7 +1444,7 @@ const getImportPersistenceErrorMessage = (error: unknown) => {
   return "Erro interno ao criar cliente.";
 };
 
-const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: any, existingClient: any) => {
+const resolveImportUpdateData = (payload: z.infer<typeof clientImportRowSchema>, _req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
   const fantasyName = payload.fantasyName?.trim();
   const code = payload.code?.trim();
@@ -1400,6 +1453,18 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: an
   if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
   if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
   if (code && isEmptyValue(existingClient.code)) data.code = code;
+  if (!existingClient.lastPurchaseDate) {
+    const parsedLastPurchaseDate = parseImportOptionalDate(payload.lastPurchaseDate);
+    if (parsedLastPurchaseDate) data.lastPurchaseDate = parsedLastPurchaseDate;
+  }
+  if (existingClient.lastPurchaseValue === null || existingClient.lastPurchaseValue === undefined) {
+    const parsedLastPurchaseValue = parseImportOptionalNumber(payload.lastPurchaseValue);
+    if (typeof parsedLastPurchaseValue === "number") data.lastPurchaseValue = parsedLastPurchaseValue;
+  }
+  if (!existingClient.erpUpdatedAt) {
+    const parsedErpUpdatedAt = parseImportOptionalDate(payload.erpUpdatedAt);
+    if (parsedErpUpdatedAt) data.erpUpdatedAt = parsedErpUpdatedAt;
+  }
 
   const mergedClientForValidation = {
     name: existingClient.name,
@@ -1423,7 +1488,7 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientSchema>, _req: an
 };
 
 const findImportExistingClient = (params: {
-  payload: z.infer<typeof clientSchema>;
+  payload: z.infer<typeof clientImportRowSchema>;
   byCnpj: Map<string, any>;
   byCode: Map<string, any>;
   byName: Map<string, any[]>;
@@ -1450,7 +1515,7 @@ const findImportExistingClient = (params: {
   return { match: null, reason: null as null };
 };
 
-const buildImportPreview = async (req: any, rows: z.infer<typeof clientImportRowSchema>[]): Promise<ImportPreviewItem[]> => {
+const buildImportPreview = async (req: any, rows: unknown[]): Promise<ImportPreviewItem[]> => {
   const scopedWhere = sellerWhere(req);
 
   // Carrega o mínimo necessário para deduplicação

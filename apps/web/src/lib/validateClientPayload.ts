@@ -11,6 +11,9 @@ export type ClientPayloadInput = {
   cnpj?: unknown;
   segment?: unknown;
   ownerSellerId?: unknown;
+  lastPurchaseDate?: unknown;
+  lastPurchaseValue?: unknown;
+  erpUpdatedAt?: unknown;
 };
 
 export type ClientValidationOptions = {
@@ -59,6 +62,7 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
 
   const potentialHa = normalizeOptionalNumber(payload.potentialHa);
   const farmSizeHa = normalizeOptionalNumber(payload.farmSizeHa);
+  const lastPurchaseValue = normalizeOptionalNumber(payload.lastPurchaseValue);
 
   const cnpjDigits = toTrimmedString(payload.cnpj).replace(/\D/g, "");
   const cnpj = cnpjDigits || undefined;
@@ -94,6 +98,12 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
     fieldErrors.farmSizeHa = "Área total (ha) não pode ser negativa.";
   }
 
+  if (lastPurchaseValue === "invalid") {
+    fieldErrors.lastPurchaseValue = "Última compra (valor) deve ser um número válido.";
+  } else if (typeof lastPurchaseValue === "number" && lastPurchaseValue < 0) {
+    fieldErrors.lastPurchaseValue = "Última compra (valor) não pode ser negativa.";
+  }
+
   if (!options.isSeller && options.canChooseOwnerSeller && !resolvedOwnerSellerId) {
     fieldErrors.ownerSellerId = "Vendedor responsável é obrigatório.";
   }
@@ -114,6 +124,7 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
     ...(typeof farmSizeHa === "number" ? { farmSizeHa } : {}),
     ...(cnpj ? { cnpj } : {}),
     ...(segment ? { segment } : {}),
+    ...(typeof lastPurchaseValue === "number" ? { lastPurchaseValue } : {}),
     ...(resolvedOwnerSellerId ? { ownerSellerId: resolvedOwnerSellerId } : {})
   };
 
