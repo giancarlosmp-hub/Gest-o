@@ -4,37 +4,46 @@ type OpenAiResponseCreatePayload = Record<string, unknown>;
 
 export type OpenAiClient = {
   responses: {
-    create: (payload: OpenAiResponseCreatePayload) => Promise<unknown>;
+    create: (payload: OpenAiResponseCreatePayload, timeoutMs?: number) => Promise<unknown>;
   };
 };
 
 let openAiClientInstance: OpenAiClient | null | undefined;
 
-const canInitializeOpenAiClient = () => env.openAiEnabled && Boolean(env.openAiApiKey);
+const canInitializeOpenAiClient = () =>
+  env.openAiEnabled && Boolean(env.openAiApiKey);
 
 const createOpenAiClient = () => {
   if (!canInitializeOpenAiClient()) return null;
 
   return {
     responses: {
-      create: async (payload: OpenAiResponseCreatePayload) => {
-        const response = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${env.openAiApiKey}`
-          },
-          body: JSON.stringify({
-            model: env.openAiModel,
-            ...payload
-          })
-        });
+      create: async (payload: OpenAiResponseCreatePayload, timeoutMs = 4000) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-        if (!response.ok) {
-          throw new Error(`OpenAI request failed with status ${response.status}`);
+        try {
+          const response = await fetch("https://api.openai.com/v1/responses", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${env.openAiApiKey}`
+            },
+            body: JSON.stringify({
+              model: env.openAiModel,
+              ...payload
+            }),
+            signal: controller.signal
+          });
+
+          if (!response.ok) {
+            throw new Error(`OpenAI request failed with status ${response.status}`);
+          }
+
+          return response.json();
+        } finally {
+          clearTimeout(timeout);
         }
-
-        return response.json();
       }
     }
   } satisfies OpenAiClient;
