@@ -6,11 +6,14 @@ import TimelineEventList, { TimelineEventItem } from "../components/TimelineEven
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 
 type CommercialSummary = {
-  openOpportunitiesCount?: number | null;
-  lastActivityAt?: string | null;
-  lastPurchaseDate?: string | null;
-  lastPurchaseValue?: number | null;
-  totalCompletedActivities?: number | null;
+  openOpportunitiesCount: number;
+  lastActivityAt: string | null;
+  lastPurchaseDate: string | null;
+  lastPurchaseValue: number | null;
+  totalCompletedActivities: number;
+  clientCode?: string | null;
+  fantasyName?: string | null;
+  erpUpdatedAt?: string | null;
 };
 
 type Client = {
@@ -200,6 +203,35 @@ export default function ClientDetailsPage() {
 
   if (!client) return null;
 
+  const formatPtBrDate = (value?: string | null) => {
+    if (!value) return "-";
+
+    const normalizedValue = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value;
+    const parsedDate = new Date(normalizedValue);
+    if (Number.isNaN(parsedDate.getTime())) return "-";
+
+    return new Intl.DateTimeFormat("pt-BR").format(parsedDate);
+  };
+
+  const formatPtBrCurrency = (value?: number | null) => {
+    if (typeof value !== "number") return "-";
+
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL"
+    }).format(value);
+  };
+
+  const erpData = {
+    clientCode: client.commercialSummary?.clientCode,
+    fantasyName: client.commercialSummary?.fantasyName,
+    lastPurchaseDate: client.commercialSummary?.lastPurchaseDate,
+    lastPurchaseValue: client.commercialSummary?.lastPurchaseValue,
+    erpUpdatedAt: client.commercialSummary?.erpUpdatedAt
+  };
+
+  const hasErpData = Object.values(erpData).some((value) => value !== null && value !== undefined && value !== "");
+
   const openAddContactModal = () => {
     setEditingContactId(null);
     setContactForm(emptyContactForm);
@@ -341,6 +373,19 @@ export default function ClientDetailsPage() {
           <p><strong>Área total (ha):</strong> {client.farmSizeHa ?? "-"}</p>
         </div>
       </section>
+
+      {hasErpData ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <h3 className="mb-3 text-lg font-semibold">Dados ERP</h3>
+          <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-3">
+            <p><strong>Código:</strong> {erpData.clientCode || "-"}</p>
+            <p><strong>Nome fantasia:</strong> {erpData.fantasyName || "-"}</p>
+            <p><strong>Última compra:</strong> {formatPtBrDate(erpData.lastPurchaseDate)}</p>
+            <p><strong>Valor:</strong> {formatPtBrCurrency(erpData.lastPurchaseValue)}</p>
+            <p><strong>Atualizado em:</strong> {formatPtBrDate(erpData.erpUpdatedAt)}</p>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
