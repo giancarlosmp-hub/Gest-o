@@ -5,6 +5,14 @@ import api from "../lib/apiClient";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 
+type CommercialSummary = {
+  openOpportunitiesCount?: number | null;
+  lastActivityAt?: string | null;
+  lastPurchaseDate?: string | null;
+  lastPurchaseValue?: number | null;
+  totalCompletedActivities?: number | null;
+};
+
 type Client = {
   id: string;
   name: string;
@@ -13,6 +21,7 @@ type Client = {
   region: string;
   potentialHa?: number | null;
   farmSizeHa?: number | null;
+  commercialSummary?: CommercialSummary | null;
 };
 
 type Contact = {
@@ -41,6 +50,27 @@ const emptyContactForm: ContactFormState = {
 };
 
 type DetailsTab = "timeline" | "contacts";
+
+const brDateFormatter = new Intl.DateTimeFormat("pt-BR");
+const brlCurrencyFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL"
+});
+
+const formatDate = (value?: string | null) => {
+  if (!value) return "-";
+
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return "-";
+
+  return brDateFormatter.format(parsedDate);
+};
+
+const formatCurrency = (value?: number | null) => {
+  if (value == null) return "-";
+
+  return brlCurrencyFormatter.format(value);
+};
 
 export default function ClientDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -259,6 +289,46 @@ export default function ClientDetailsPage() {
       </div>
 
       <ClientAutoSummaryCard clientId={id} />
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-lg font-semibold">Resumo comercial</h3>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Oportunidades abertas</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">
+              {client.commercialSummary?.openOpportunitiesCount ?? "-"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Última atividade</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">
+              {formatDate(client.commercialSummary?.lastActivityAt)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Última compra</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">
+              {formatDate(client.commercialSummary?.lastPurchaseDate)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Valor última compra</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">
+              {formatCurrency(client.commercialSummary?.lastPurchaseValue)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Atividades concluídas</p>
+            <p className="mt-2 text-xl font-semibold text-slate-900">
+              {client.commercialSummary?.totalCompletedActivities ?? "-"}
+            </p>
+          </div>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Resumo</h3>
