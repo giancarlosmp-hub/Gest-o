@@ -34,5 +34,8 @@ export const env = {
   smokeSellerEmail: process.env.SMOKE_SELLER_EMAIL || "vendedor-smoke@empresa.com",
   cnpjLookupProvider: process.env.CNPJ_LOOKUP_PROVIDER || "",
   cnpjLookupBaseUrl: process.env.CNPJ_LOOKUP_BASE_URL || "",
-  cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || ""
+  cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || "",
+  openAiApiKey: process.env.OPENAI_API_KEY || "",
+  openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+  openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false)
 };
