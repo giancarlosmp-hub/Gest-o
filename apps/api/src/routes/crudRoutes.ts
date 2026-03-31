@@ -34,6 +34,7 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
+import { buildClientSuggestion } from "../services/clientSuggestion.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -3799,6 +3800,29 @@ router.get("/clients/:id/ai-context", async (req, res) => {
   }
 
   return res.json(payload);
+});
+
+const clientSuggestionBodySchema = z.object({
+  clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+router.post("/ai/client-suggestion", async (req, res) => {
+  const parsed = clientSuggestionBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
+  }
+
+  const context = await buildClientAiContext({
+    clientId: parsed.data.clientId,
+    scope: sellerWhere(req)
+  });
+
+  if (!context) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const suggestion = buildClientSuggestion(context);
+  return res.json(suggestion);
 });
 
 const clientDuplicateCheckSchema = z.object({
