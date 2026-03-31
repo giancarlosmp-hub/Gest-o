@@ -44,6 +44,26 @@ type ContactFormState = {
   isPrimary: boolean;
 };
 
+type ClientSuggestion = {
+  status?: string | null;
+  summary?: string | null;
+  recommendation?: string | null;
+  nextAction?: string | null;
+  risk?: string | null;
+} | null;
+
+const isValidSuggestion = (
+  data: unknown
+): data is { status?: string | null; summary?: string | null; recommendation?: string | null; nextAction?: string | null; risk?: string | null } => {
+  if (!data || typeof data !== "object") return false;
+
+  const value = data as Record<string, unknown>;
+  return (
+    "status" in value &&
+    (value.status === null || value.status === undefined || typeof value.status === "string")
+  );
+};
+
 const emptyContactForm: ContactFormState = {
   name: "",
   roleSector: "",
@@ -93,6 +113,34 @@ export default function ClientDetailsPage() {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [savingContact, setSavingContact] = useState(false);
   const [removingContactId, setRemovingContactId] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<ClientSuggestion>(null);
+  const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+
+  const fetchSuggestion = useCallback(async (clientId: string) => {
+    setSuggestion(null);
+    setLoadingSuggestion(true);
+
+    try {
+      const response = await api.post("/ai/client-suggestion", { clientId });
+      const data: unknown = response?.data;
+
+      if (!isValidSuggestion(data) || !data.status) {
+        setSuggestion(null);
+        return;
+      }
+
+      setSuggestion(data);
+    } catch (err) {
+      console.error("[ClientDetailsPage] Falha ao carregar sugestão inteligente do cliente", {
+        clientId,
+        endpoint: "/ai/client-suggestion",
+        err
+      });
+      setSuggestion(null);
+    } finally {
+      setLoadingSuggestion(false);
+    }
+  }, []);
 
   const loadContacts = useCallback(async () => {
     if (!id) return;
@@ -170,6 +218,11 @@ export default function ClientDetailsPage() {
   useEffect(() => {
     void loadContacts();
   }, [loadContacts]);
+
+  useEffect(() => {
+    if (!id) return;
+    void fetchSuggestion(id);
+  }, [id, fetchSuggestion]);
 
   const loadMoreEvents = async () => {
     if (!id || !eventsCursor) return;
@@ -386,6 +439,30 @@ export default function ClientDetailsPage() {
           </div>
         </section>
       ) : null}
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="mb-3 text-lg font-semibold">Sugestão inteligente</h3>
+
+        {loadingSuggestion ? (
+          <div className="space-y-3 animate-pulse">
+            <div className="h-4 w-1/3 rounded bg-slate-200" />
+            <div className="h-4 w-4/5 rounded bg-slate-200" />
+            <div className="h-4 w-3/5 rounded bg-slate-200" />
+            <div className="h-4 w-2/3 rounded bg-slate-200" />
+            <div className="h-4 w-1/4 rounded bg-slate-200" />
+          </div>
+        ) : suggestion ? (
+          <div className="grid gap-2 text-sm md:grid-cols-2">
+            <p><strong>Status:</strong> {suggestion.status || "-"}</p>
+            <p><strong>Risco:</strong> {suggestion.risk || "-"}</p>
+            <p className="md:col-span-2"><strong>Resumo:</strong> {suggestion.summary || "-"}</p>
+            <p className="md:col-span-2"><strong>Recomendação:</strong> {suggestion.recommendation || "-"}</p>
+            <p className="md:col-span-2"><strong>Próxima ação:</strong> {suggestion.nextAction || "-"}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500">Sem sugestão disponível</p>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
