@@ -1,22 +1,48 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "../../lib/apiClient";
 
-type ClientSummary = {
-  summary: string;
-  profileTags: string[];
-  currentMoment: string;
-  recommendedApproach: string;
-  lastRelevantSignals: string[];
+type ClientCommercialSummary = {
+  openOpportunitiesCount?: number | null;
+  lastActivityAt?: string | null;
+  lastPurchaseDate?: string | null;
+  lastPurchaseValue?: number | null;
+  totalCompletedActivities?: number | null;
+};
+
+type ClientSummaryPayload = {
+  potentialHa?: number | null;
+  commercialSummary?: ClientCommercialSummary | null;
 };
 
 type ClientAutoSummaryCardProps = {
   clientId?: string;
 };
 
+const formatDatePtBr = (value?: string | null) => {
+  if (!value) return "não informada";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "não informada";
+  return new Intl.DateTimeFormat("pt-BR").format(date);
+};
+
+const formatCurrencyPtBr = (value?: number | null) => {
+  if (typeof value !== "number" || Number.isNaN(value)) return "não informado";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+};
+
+const daysSince = (value?: string | null) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  return Math.floor(diffMs / (1000 * 60 * 60 * 24));
+};
+
 export default function ClientAutoSummaryCard({ clientId }: ClientAutoSummaryCardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ClientSummary | null>(null);
+  const [data, setData] = useState<ClientSummaryPayload | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -31,7 +57,7 @@ export default function ClientAutoSummaryCard({ clientId }: ClientAutoSummaryCar
       setError(null);
 
       try {
-        const response = await api.get(`/ai/client-summary/${clientId}`);
+        const response = await api.get(`/clients/${clientId}`);
         setData(response.data || null);
       } catch {
         setData(null);
@@ -44,6 +70,60 @@ export default function ClientAutoSummaryCard({ clientId }: ClientAutoSummaryCar
     void load();
   }, [clientId]);
 
+  const summaryText = useMemo(() => {
+    const summary = data?.commercialSummary;
+    if (!summary) {
+      return "Sem dados comerciais suficientes para gerar o resumo inteligente deste cliente.";
+    }
+
+    const openOpportunitiesCount = summary.openOpportunitiesCount ?? 0;
+    const lastActivityDays = daysSince(summary.lastActivityAt);
+    const lastPurchaseDays = daysSince(summary.lastPurchaseDate);
+
+    const isInNegotiation = openOpportunitiesCount > 0;
+    const isActive = !isInNegotiation && lastPurchaseDays !== null && lastPurchaseDays < 60;
+    const isStopped = !isInNegotiation && openOpportunitiesCount === 0 && lastActivityDays !== null && lastActivityDays > 30;
+
+    const currentStatus = isInNegotiation
+      ? "cliente em fase de negociação"
+      : isActive
+        ? "cliente ativo"
+        : isStopped
+          ? "cliente parado"
+          : "cliente em acompanhamento";
+
+    const recommendation = isInNegotiation
+      ? "Focar no fechamento das negociações abertas"
+      : isActive
+        ? "Manter acompanhamento"
+        : isStopped
+          ? "Recomendado retomar contato"
+          : "Acompanhar novas interações e atualizar dados comerciais";
+
+    const potential = typeof data?.potentialHa === "number" ? `${data.potentialHa} ha` : "potencial não informado";
+
+    const hasAnySignal =
+      typeof summary.openOpportunitiesCount === "number" ||
+      Boolean(summary.lastActivityAt) ||
+      Boolean(summary.lastPurchaseDate) ||
+      typeof summary.lastPurchaseValue === "number" ||
+      typeof summary.totalCompletedActivities === "number" ||
+      typeof data?.potentialHa === "number";
+
+    if (!hasAnySignal) {
+      return "Sem dados comerciais suficientes para gerar o resumo inteligente deste cliente.";
+    }
+
+    return [
+      `Cliente com potencial de ${potential}, atualmente com ${openOpportunitiesCount} oportunidade(s) aberta(s).`,
+      `Última interação realizada em ${formatDatePtBr(summary.lastActivityAt)}.`,
+      `Última compra registrada em ${formatDatePtBr(summary.lastPurchaseDate)} no valor de ${formatCurrencyPtBr(summary.lastPurchaseValue)}.`,
+      `Atividades concluídas: ${summary.totalCompletedActivities ?? 0}.`,
+      `Situação atual: ${currentStatus}.`,
+      `Recomendação: ${recommendation}.`
+    ].join("\n");
+  }, [data]);
+
   if (!clientId) return null;
 
   return (
@@ -54,38 +134,9 @@ export default function ClientAutoSummaryCard({ clientId }: ClientAutoSummaryCar
         <p className="text-sm text-slate-500">Gerando resumo automático...</p>
       ) : error ? (
         <p className="text-sm text-rose-600">{error}</p>
-      ) : !data ? (
-        <p className="text-sm text-slate-500">Resumo indisponível para este cliente no momento.</p>
       ) : (
         <div className="space-y-3 text-sm text-slate-700">
-          <p className="whitespace-pre-line leading-relaxed text-slate-800">{data.summary}</p>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <p><strong>Momento atual:</strong> {data.currentMoment || "-"}</p>
-            <p><strong>Abordagem recomendada:</strong> {data.recommendedApproach || "-"}</p>
-          </div>
-
-          <div>
-            <p className="mb-2 font-semibold text-slate-800">Tags de perfil</p>
-            <div className="flex flex-wrap gap-2">
-              {data.profileTags?.length ? data.profileTags.map((tag) => (
-                <span key={tag} className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700">
-                  {tag}
-                </span>
-              )) : <span className="text-slate-500">Sem tags geradas.</span>}
-            </div>
-          </div>
-
-          <div>
-            <p className="mb-2 font-semibold text-slate-800">Sinais relevantes</p>
-            {data.lastRelevantSignals?.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-slate-700">
-                {data.lastRelevantSignals.map((signal) => <li key={signal}>{signal}</li>)}
-              </ul>
-            ) : (
-              <p className="text-slate-500">Sem sinais relevantes identificados.</p>
-            )}
-          </div>
+          <p className="whitespace-pre-line leading-relaxed text-slate-800">{summaryText}</p>
         </div>
       )}
     </section>
