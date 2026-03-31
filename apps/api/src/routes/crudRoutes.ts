@@ -34,6 +34,7 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
+import { buildClientSuggestion } from "../services/clientSuggestion.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -4582,6 +4583,29 @@ const opportunityMessageQuerySchema = z.object({
 
 const clientSummaryParamsSchema = z.object({
   clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+const clientSuggestionBodySchema = z.object({
+  clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+router.post("/ai/client-suggestion", async (req, res) => {
+  const parsed = clientSuggestionBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
+  }
+
+  const clientContext = await buildClientAiContext({
+    clientId: parsed.data.clientId,
+    ownerSellerId: req.user?.id
+  });
+
+  if (!clientContext) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const suggestion = buildClientSuggestion(clientContext);
+  return res.json(suggestion);
 });
 
 router.get("/ai/client-summary/:clientId", async (req, res) => {
