@@ -3737,7 +3737,45 @@ router.get("/clients/:id", async (req, res) => {
   });
 
   if (!data) return res.status(404).json({ message: "Não encontrado" });
-  res.json(data);
+
+  const [openOpportunitiesCount, lastActivityAggregate, totalCompletedActivities] = await Promise.all([
+    prisma.opportunity.count({
+      where: {
+        clientId: data.id,
+        stage: {
+          notIn: [OpportunityStage.ganho, OpportunityStage.perdido]
+        }
+      }
+    }),
+    prisma.activity.aggregate({
+      where: {
+        clientId: data.id
+      },
+      _max: {
+        date: true,
+        createdAt: true
+      }
+    }),
+    prisma.activity.count({
+      where: {
+        clientId: data.id,
+        done: true
+      }
+    })
+  ]);
+
+  const commercialSummary = {
+    openOpportunitiesCount,
+    lastActivityAt: lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null,
+    lastPurchaseDate: data.lastPurchaseDate ?? null,
+    lastPurchaseValue: data.lastPurchaseValue ?? null,
+    totalCompletedActivities
+  };
+
+  res.json({
+    ...data,
+    commercialSummary
+  });
 });
 
 const clientDuplicateCheckSchema = z.object({
