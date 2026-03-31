@@ -3780,6 +3780,28 @@ router.get("/clients/:id", async (req, res) => {
   });
 });
 
+const clientAiContextParamsSchema = z.object({
+  id: z.string().trim().min(1, "id é obrigatório")
+});
+
+router.get("/clients/:id/ai-context", async (req, res) => {
+  const parsed = clientAiContextParamsSchema.safeParse(req.params);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.error.issues });
+  }
+
+  const payload = await buildClientAiContext({
+    clientId: parsed.data.id,
+    scope: sellerWhere(req)
+  });
+
+  if (!payload) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  return res.json(payload);
+});
+
 const clientDuplicateCheckSchema = z.object({
   name: z.string().optional(),
   city: z.string().optional(),
