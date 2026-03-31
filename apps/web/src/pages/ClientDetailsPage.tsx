@@ -50,17 +50,30 @@ type ClientSuggestion = {
   recommendation?: string | null;
   nextAction?: string | null;
   risk?: string | null;
+  source?: "ai" | "deterministic" | null;
 } | null;
 
 const isValidSuggestion = (
   data: unknown
-): data is { status?: string | null; summary?: string | null; recommendation?: string | null; nextAction?: string | null; risk?: string | null } => {
+): data is {
+  status?: string | null;
+  summary?: string | null;
+  recommendation?: string | null;
+  nextAction?: string | null;
+  risk?: string | null;
+  source?: "ai" | "deterministic" | null;
+} => {
   if (!data || typeof data !== "object") return false;
 
   const value = data as Record<string, unknown>;
   return (
     "status" in value &&
-    (value.status === null || value.status === undefined || typeof value.status === "string")
+    (value.status === null || value.status === undefined || typeof value.status === "string") &&
+    (!("source" in value) ||
+      value.source === null ||
+      value.source === undefined ||
+      value.source === "ai" ||
+      value.source === "deterministic")
   );
 };
 
@@ -441,7 +454,14 @@ export default function ClientDetailsPage() {
       ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h3 className="mb-3 text-lg font-semibold">Sugestão inteligente</h3>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <h3 className="text-lg font-semibold">Sugestão inteligente</h3>
+          {!loadingSuggestion && suggestion?.source ? (
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+              Fonte: {suggestion.source === "ai" ? "IA" : "sistema"}
+            </span>
+          ) : null}
+        </div>
 
         {loadingSuggestion ? (
           <div className="space-y-3 animate-pulse">
