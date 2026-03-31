@@ -5,7 +5,7 @@ type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhament
 type ClientSuggestionRiskLevel = "baixo" | "medio" | "alto";
 
 export type ClientSuggestionPayload = {
-  source: "deterministic";
+  source: "ai" | "deterministic";
   status: ClientSuggestionStatus;
   summary: string;
   recommendation: string;
@@ -97,7 +97,7 @@ const isClientSuggestionPayload = (value: unknown): value is ClientSuggestionPay
 
   const candidate = value as Partial<ClientSuggestionPayload>;
   return (
-    candidate.source === "deterministic" &&
+    (candidate.source === "deterministic" || candidate.source === "ai") &&
     typeof candidate.summary === "string" &&
     typeof candidate.recommendation === "string" &&
     typeof candidate.nextAction === "string" &&
@@ -126,7 +126,7 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
     "- NÃO escrever nada fora do JSON.",
     "Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto extra.",
     "Use exatamente a estrutura abaixo (sem adicionar ou remover campos):",
-    '{"source":"deterministic","status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
+    '{"status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
     "Contexto do cliente:",
     JSON.stringify(clientContext),
     "Base determinística esperada (pode refinar texto, mas mantenha estrutura e valores válidos):",
@@ -134,8 +134,36 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
   ].join("\n");
 };
 
+const extractResponseText = (response: unknown): string => {
+  if (!response || typeof response !== "object") return "";
+
+  const responseRecord = response as Record<string, unknown>;
+  const outputText = responseRecord.output_text;
+  if (typeof outputText === "string") return outputText;
+
+  const output = responseRecord.output;
+  if (!Array.isArray(output) || output.length === 0) return "";
+
+  const firstOutput = output[0];
+  if (!firstOutput || typeof firstOutput !== "object") return "";
+
+  const firstOutputRecord = firstOutput as Record<string, unknown>;
+  const content = firstOutputRecord.content;
+  if (!Array.isArray(content) || content.length === 0) return "";
+
+  const firstContent = content[0];
+  if (!firstContent || typeof firstContent !== "object") return "";
+
+  const firstContentRecord = firstContent as Record<string, unknown>;
+  const text = firstContentRecord.text;
+  return typeof text === "string" ? text : "";
+};
+
 export const generateClientSuggestion = async (clientContext: ClientAiContextPayload): Promise<ClientSuggestionPayload> => {
-  const fallbackSuggestion = buildClientSuggestion(clientContext);
+  const fallbackSuggestion = {
+    ...buildClientSuggestion(clientContext),
+    source: "deterministic" as const
+  };
   const openai = getOpenAiClient();
 
   if (!openai) return fallbackSuggestion;
@@ -148,18 +176,22 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
       4000
     );
 
-    const text =
-      (response as any)?.output?.[0]?.content?.[0]?.text ||
-      (response as any)?.output_text ||
-      "";
+    const text = extractResponseText(response);
 
     if (!text?.trim()) return fallbackSuggestion;
 
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(text) as unknown;
 
-    if (!isClientSuggestionPayload(parsed)) return fallbackSuggestion;
+    if (!parsed || typeof parsed !== "object") return fallbackSuggestion;
 
-    return parsed;
+    const suggestionFromAi = {
+      ...(parsed as Omit<ClientSuggestionPayload, "source">),
+      source: "ai" as const
+    };
+
+    if (!isClientSuggestionPayload(suggestionFromAi)) return fallbackSuggestion;
+
+    return suggestionFromAi;
   } catch {
     return fallbackSuggestion;
   }
