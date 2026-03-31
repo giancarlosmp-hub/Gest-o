@@ -13,3 +13,5 @@ export {
   generateClientSummary,
   calculateTodayPriorities
 } from "./commercialIntelligenceService.js";
+
+export { getOpenAiClient, getOpenAiDefaultModel } from "./openaiClient.js";
