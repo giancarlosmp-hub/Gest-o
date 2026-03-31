@@ -4,7 +4,7 @@ type OpenAiResponseCreatePayload = Record<string, unknown>;
 
 export type OpenAiClient = {
   responses: {
-    create: (payload: OpenAiResponseCreatePayload) => Promise<unknown>;
+    create: (payload: OpenAiResponseCreatePayload, timeoutMs?: number) => Promise<unknown>;
   };
 };
 
@@ -17,8 +17,9 @@ const createOpenAiClient = () => {
 
   return {
     responses: {
-      create: async (payload: OpenAiResponseCreatePayload) => {
+      create: async (payload: OpenAiResponseCreatePayload, timeoutMs = 10_000) => {
         const response = await fetch("https://api.openai.com/v1/responses", {
+          signal: AbortSignal.timeout(timeoutMs),
           method: "POST",
           headers: {
             "Content-Type": "application/json",

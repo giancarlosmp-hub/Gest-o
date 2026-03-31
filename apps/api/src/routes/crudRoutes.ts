@@ -34,7 +34,7 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
-import { buildClientSuggestion } from "../services/clientSuggestion.js";
+import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -3821,7 +3821,7 @@ router.post("/ai/client-suggestion", async (req, res) => {
     return res.status(404).json({ message: "Cliente não encontrado" });
   }
 
-  const suggestion = buildClientSuggestion(context);
+  const suggestion = await generateClientSuggestion(context);
   return res.json(suggestion);
 });
 
