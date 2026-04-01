@@ -456,7 +456,7 @@ export default function ClientDetailsPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <h3 className="text-lg font-semibold">Sugestão inteligente</h3>
-          {!loadingSuggestion && suggestion?.source ? (
+          {!loadingSuggestion && suggestion ? (
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
               Fonte: {suggestion.source === "ai" ? "IA" : "sistema"}
             </span>
