@@ -35,6 +35,9 @@ services:
       CNPJ_LOOKUP_PROVIDER: ${CNPJ_LOOKUP_PROVIDER:-brasilapi}
       CNPJ_LOOKUP_BASE_URL: ${CNPJ_LOOKUP_BASE_URL:-https://brasilapi.com.br/api/cnpj/v1}
       CNPJ_LOOKUP_API_KEY: ${CNPJ_LOOKUP_API_KEY:-}
+      OPENAI_ENABLED: ${OPENAI_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
