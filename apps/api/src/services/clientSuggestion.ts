@@ -164,9 +164,30 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     ...buildClientSuggestion(clientContext),
     source: "deterministic" as const
   };
+  const finalizeSuggestion = ({
+    suggestion,
+    fallbackReason
+  }: {
+    suggestion: ClientSuggestionPayload;
+    fallbackReason: string | null;
+  }): ClientSuggestionPayload => {
+    console.info("[ai/client-suggestion] final-result", {
+      source: suggestion.source,
+      status: suggestion.status,
+      usedFallback: fallbackReason != null,
+      fallbackReason
+    });
+
+    return suggestion;
+  };
   const openai = getOpenAiClient();
 
-  if (!openai) return fallbackSuggestion;
+  if (!openai) {
+    return finalizeSuggestion({
+      suggestion: fallbackSuggestion,
+      fallbackReason: "openai_client_unavailable"
+    });
+  }
 
   const prompt = buildSuggestionPrompt(clientContext);
 
@@ -178,21 +199,42 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
 
     const text = extractResponseText(response);
 
-    if (!text?.trim()) return fallbackSuggestion;
+    if (!text?.trim()) {
+      return finalizeSuggestion({
+        suggestion: fallbackSuggestion,
+        fallbackReason: "openai_empty_response"
+      });
+    }
 
     const parsed = JSON.parse(text) as unknown;
 
-    if (!parsed || typeof parsed !== "object") return fallbackSuggestion;
+    if (!parsed || typeof parsed !== "object") {
+      return finalizeSuggestion({
+        suggestion: fallbackSuggestion,
+        fallbackReason: "openai_invalid_json_shape"
+      });
+    }
 
     const suggestionFromAi = {
       ...(parsed as Omit<ClientSuggestionPayload, "source">),
       source: "ai" as const
     };
 
-    if (!isClientSuggestionPayload(suggestionFromAi)) return fallbackSuggestion;
+    if (!isClientSuggestionPayload(suggestionFromAi)) {
+      return finalizeSuggestion({
+        suggestion: fallbackSuggestion,
+        fallbackReason: "openai_payload_validation_failed"
+      });
+    }
 
-    return suggestionFromAi;
+    return finalizeSuggestion({
+      suggestion: suggestionFromAi,
+      fallbackReason: null
+    });
   } catch {
-    return fallbackSuggestion;
+    return finalizeSuggestion({
+      suggestion: fallbackSuggestion,
+      fallbackReason: "openai_request_failed"
+    });
   }
 };
