@@ -173,7 +173,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
   try {
     const response = await openai.responses.create(
       { input: prompt },
-      4000
+      8000
     );
 
     const text = extractResponseText(response);
