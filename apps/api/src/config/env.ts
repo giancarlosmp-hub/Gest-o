@@ -4,7 +4,8 @@ dotenv.config();
 
 function toBoolean(value: string | undefined, defaultValue = false) {
   if (value == null) return defaultValue;
-  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  const normalizedValue = value.trim().toLowerCase().replace(/^['\"]|['\"]$/g, "");
+  return ["1", "true", "yes", "on"].includes(normalizedValue);
 }
 
 export const env = {
@@ -35,7 +36,7 @@ export const env = {
   cnpjLookupProvider: process.env.CNPJ_LOOKUP_PROVIDER || "",
   cnpjLookupBaseUrl: process.env.CNPJ_LOOKUP_BASE_URL || "",
   cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || "",
-  openAiApiKey: process.env.OPENAI_API_KEY || "",
+  openAiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
   openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false)
 };

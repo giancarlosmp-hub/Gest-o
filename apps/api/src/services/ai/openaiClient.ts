@@ -10,10 +10,25 @@ export type OpenAiClient = {
 
 let openAiClientInstance: OpenAiClient | null | undefined;
 
-const canInitializeOpenAiClient = () => env.openAiEnabled && Boolean(env.openAiApiKey);
+const hasOpenAiApiKey = () => env.openAiApiKey.trim().length > 0;
+
+const getOpenAiUnavailableReason = () => {
+  if (!env.openAiEnabled) return "OPENAI_ENABLED is false";
+  if (!hasOpenAiApiKey()) return "OPENAI_API_KEY is empty";
+  return null;
+};
 
 const createOpenAiClient = () => {
-  if (!canInitializeOpenAiClient()) return null;
+  const unavailableReason = getOpenAiUnavailableReason();
+
+  if (unavailableReason) {
+    console.info("[openai] client unavailable", {
+      openAiEnabled: env.openAiEnabled,
+      hasApiKey: hasOpenAiApiKey(),
+      reason: unavailableReason
+    });
+    return null;
+  }
 
   return {
     responses: {
@@ -44,7 +59,15 @@ const createOpenAiClient = () => {
 export const getOpenAiClient = () => {
   if (openAiClientInstance !== undefined) return openAiClientInstance;
 
+  console.info("[openai] getOpenAiClient", {
+    openAiEnabled: env.openAiEnabled,
+    hasApiKey: hasOpenAiApiKey()
+  });
+
   openAiClientInstance = createOpenAiClient();
+  if (openAiClientInstance) {
+    console.info("OpenAI client initialized successfully");
+  }
   return openAiClientInstance;
 };
 
