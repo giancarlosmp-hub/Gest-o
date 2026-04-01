@@ -180,6 +180,11 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
 
     return suggestion;
   };
+  console.info("[ai] runtime check", {
+    enabled: process.env.OPENAI_ENABLED,
+    hasKey: !!process.env.OPENAI_API_KEY
+  });
+
   const openai = getOpenAiClient();
 
   if (!openai) {

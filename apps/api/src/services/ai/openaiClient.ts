@@ -8,13 +8,15 @@ export type OpenAiClient = {
   };
 };
 
-let openAiClientInstance: OpenAiClient | null | undefined;
+let openAiClientInstance: OpenAiClient | null = null;
 
-const hasOpenAiApiKey = () => env.openAiApiKey.trim().length > 0;
+const isOpenAiEnabled = () => process.env.OPENAI_ENABLED === "true";
+
+const getOpenAiApiKey = () => process.env.OPENAI_API_KEY?.trim() || "";
 
 const getOpenAiUnavailableReason = () => {
-  if (!env.openAiEnabled) return "OPENAI_ENABLED is false";
-  if (!hasOpenAiApiKey()) return "OPENAI_API_KEY is empty";
+  if (!isOpenAiEnabled()) return "OPENAI_ENABLED is false";
+  if (!getOpenAiApiKey()) return "OPENAI_API_KEY is empty";
   return null;
 };
 
@@ -23,12 +25,14 @@ const createOpenAiClient = () => {
 
   if (unavailableReason) {
     console.info("[openai] client unavailable", {
-      openAiEnabled: env.openAiEnabled,
-      hasApiKey: hasOpenAiApiKey(),
+      openAiEnabled: isOpenAiEnabled(),
+      hasApiKey: Boolean(getOpenAiApiKey()),
       reason: unavailableReason
     });
     return null;
   }
+
+  const apiKey = getOpenAiApiKey();
 
   return {
     responses: {
@@ -38,7 +42,7 @@ const createOpenAiClient = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${env.openAiApiKey}`
+            Authorization: `Bearer ${apiKey}`
           },
           body: JSON.stringify({
             model: env.openAiModel,
@@ -57,17 +61,19 @@ const createOpenAiClient = () => {
 };
 
 export const getOpenAiClient = () => {
-  if (openAiClientInstance !== undefined) return openAiClientInstance;
+  if (openAiClientInstance) return openAiClientInstance;
 
   console.info("[openai] getOpenAiClient", {
-    openAiEnabled: env.openAiEnabled,
-    hasApiKey: hasOpenAiApiKey()
+    openAiEnabled: isOpenAiEnabled(),
+    hasApiKey: Boolean(getOpenAiApiKey())
   });
 
-  openAiClientInstance = createOpenAiClient();
-  if (openAiClientInstance) {
-    console.info("OpenAI client initialized successfully");
-  }
+  const client = createOpenAiClient();
+
+  if (!client) return null;
+
+  openAiClientInstance = client;
+  console.info("[openai] client created (singleton)");
   return openAiClientInstance;
 };
 
