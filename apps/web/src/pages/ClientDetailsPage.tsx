@@ -49,7 +49,7 @@ type ClientSuggestion = {
   summary?: string | null;
   recommendation?: string | null;
   nextAction?: string | null;
-  risk?: string | null;
+  riskLevel?: string | null;
   source?: "ai" | "deterministic" | null;
 } | null;
 
@@ -60,7 +60,7 @@ const isValidSuggestion = (
   summary?: string | null;
   recommendation?: string | null;
   nextAction?: string | null;
-  risk?: string | null;
+  riskLevel?: string | null;
   source?: "ai" | "deterministic" | null;
 } => {
   if (!data || typeof data !== "object") return false;
@@ -73,8 +73,35 @@ const isValidSuggestion = (
       value.source === null ||
       value.source === undefined ||
       value.source === "ai" ||
-      value.source === "deterministic")
+      value.source === "deterministic") &&
+    (!("riskLevel" in value) ||
+      value.riskLevel === null ||
+      value.riskLevel === undefined ||
+      typeof value.riskLevel === "string")
   );
+};
+
+const normalizeSuggestionResponse = (payload: unknown): ClientSuggestion => {
+  if (!payload || typeof payload !== "object") return null;
+
+  const payloadRecord = payload as Record<string, unknown>;
+  const candidate =
+    payloadRecord.suggestion && typeof payloadRecord.suggestion === "object"
+      ? payloadRecord.suggestion
+      : payload;
+
+  if (!isValidSuggestion(candidate) || !candidate.status) {
+    return null;
+  }
+
+  return {
+    status: candidate.status ?? null,
+    summary: candidate.summary ?? null,
+    recommendation: candidate.recommendation ?? null,
+    nextAction: candidate.nextAction ?? null,
+    riskLevel: candidate.riskLevel ?? null,
+    source: candidate.source ?? null
+  };
 };
 
 const emptyContactForm: ContactFormState = {
@@ -135,14 +162,8 @@ export default function ClientDetailsPage() {
 
     try {
       const response = await api.post("/ai/client-suggestion", { clientId });
-      const data: unknown = response?.data;
-
-      if (!isValidSuggestion(data) || !data.status) {
-        setSuggestion(null);
-        return;
-      }
-
-      setSuggestion(data);
+      const normalizedSuggestion = normalizeSuggestionResponse(response?.data);
+      setSuggestion(normalizedSuggestion);
     } catch (err) {
       console.error("[ClientDetailsPage] Falha ao carregar sugestão inteligente do cliente", {
         clientId,
@@ -474,7 +495,7 @@ export default function ClientDetailsPage() {
         ) : suggestion ? (
           <div className="grid gap-2 text-sm md:grid-cols-2">
             <p><strong>Status:</strong> {suggestion.status || "-"}</p>
-            <p><strong>Risco:</strong> {suggestion.risk || "-"}</p>
+            <p><strong>Risco:</strong> {suggestion.riskLevel || "-"}</p>
             <p className="md:col-span-2"><strong>Resumo:</strong> {suggestion.summary || "-"}</p>
             <p className="md:col-span-2"><strong>Recomendação:</strong> {suggestion.recommendation || "-"}</p>
             <p className="md:col-span-2"><strong>Próxima ação:</strong> {suggestion.nextAction || "-"}</p>

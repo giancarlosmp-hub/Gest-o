@@ -1,5 +1,6 @@
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { getOpenAiClient } from "./ai/openaiClient.js";
+import { logApiEvent } from "../utils/logger.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
 type ClientSuggestionRiskLevel = "baixo" | "medio" | "alto";
@@ -159,6 +160,28 @@ const extractResponseText = (response: unknown): string => {
   return typeof text === "string" ? text : "";
 };
 
+const sanitizeJsonText = (value: string): string => {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("```")) {
+    return trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  }
+  return trimmed;
+};
+
+const parseSuggestionPayload = (rawText: string): unknown => {
+  const sanitizedText = sanitizeJsonText(rawText);
+
+  try {
+    return JSON.parse(sanitizedText) as unknown;
+  } catch {
+    const objectMatch = sanitizedText.match(/\{[\s\S]*\}/);
+    if (!objectMatch) {
+      throw new Error("openai_invalid_json");
+    }
+    return JSON.parse(objectMatch[0]) as unknown;
+  }
+};
+
 export const generateClientSuggestion = async (clientContext: ClientAiContextPayload): Promise<ClientSuggestionPayload> => {
   const fallbackSuggestion = {
     ...buildClientSuggestion(clientContext),
@@ -171,7 +194,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     suggestion: ClientSuggestionPayload;
     fallbackReason: string | null;
   }): ClientSuggestionPayload => {
-    console.info("[ai/client-suggestion] final-result", {
+    logApiEvent("INFO", "[ai/client-suggestion] final-result", {
       source: suggestion.source,
       status: suggestion.status,
       usedFallback: fallbackReason != null,
@@ -206,7 +229,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
       });
     }
 
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = parseSuggestionPayload(text);
 
     if (!parsed || typeof parsed !== "object") {
       return finalizeSuggestion({
