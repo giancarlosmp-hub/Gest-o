@@ -35,12 +35,29 @@ async function waitForDatabase() {
   }
 }
 
+function logRuntimeContext() {
+  console.log("[bootstrap] runtime context", {
+    cwd: process.cwd(),
+    script: import.meta.url,
+    nodeEnv: process.env.NODE_ENV ?? null,
+    hasDistServer: (() => {
+      try {
+        execSync("test -f /app/apps/api/dist/server.js");
+        return true;
+      } catch {
+        return false;
+      }
+    })()
+  });
+}
+
 function runStep(command: string, label: string) {
   console.log(`Executando ${label}...`);
   execSync(command, { stdio: "inherit" });
 }
 
 async function start() {
+  logRuntimeContext();
   ensureDatabaseUrlFromEnvironment();
   await waitForDatabase();
   runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
