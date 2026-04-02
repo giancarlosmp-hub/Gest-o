@@ -1,9 +1,10 @@
-import { BriefcaseBusiness, CalendarPlus, ClipboardCheck } from "lucide-react";
+import { CalendarPlus, ClipboardCheck, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
-const actionButtonBaseClass = "flex min-h-14 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold transition active:scale-[0.99]";
+const actionButtonBaseClass =
+  "flex min-w-0 min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-tight transition active:scale-[0.99]";
 
-const actions = [
+const primaryActions = [
   {
     id: "visita",
     label: "Visita",
@@ -17,10 +18,10 @@ const actions = [
     icon: ClipboardCheck
   },
   {
-    id: "oportunidade",
-    label: "Oportunidade",
-    to: "/oportunidades?open=create",
-    icon: BriefcaseBusiness
+    id: "whatsapp",
+    label: "WhatsApp",
+    to: "/whatsapp",
+    icon: MessageCircle
   }
 ] as const;
 
@@ -29,8 +30,8 @@ export default function MobileActionBar() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-      <div className="mx-auto flex w-full max-w-3xl items-center gap-2">
-        {actions.map((action) => {
+      <div className="mx-auto flex w-full max-w-3xl items-stretch gap-2">
+        {primaryActions.map((action) => {
           const Icon = action.icon;
           const isActive = location.pathname.startsWith(action.to.split("?")[0]);
 
@@ -41,7 +42,7 @@ export default function MobileActionBar() {
               className={`${actionButtonBaseClass} ${isActive ? "bg-brand-700 text-white" : "bg-slate-100 text-slate-700"}`}
             >
               <Icon size={18} />
-              <span>{action.label}</span>
+              <span className="truncate">{action.label}</span>
             </Link>
           );
         })}
