@@ -104,6 +104,14 @@ const normalizeSuggestionResponse = (payload: unknown): ClientSuggestion => {
   };
 };
 
+const getSuggestionPayloadLayer = (payload: unknown): "data" | "data.suggestion" | "invalid" => {
+  if (!payload || typeof payload !== "object") return "invalid";
+  const record = payload as Record<string, unknown>;
+  if (record.suggestion && typeof record.suggestion === "object") return "data.suggestion";
+  if (isValidSuggestion(record)) return "data";
+  return "invalid";
+};
+
 const emptyContactForm: ContactFormState = {
   name: "",
   roleSector: "",
@@ -162,7 +170,16 @@ export default function ClientDetailsPage() {
 
     try {
       const response = await api.post("/ai/client-suggestion", { clientId });
+      const payloadLayer = getSuggestionPayloadLayer(response?.data);
       const normalizedSuggestion = normalizeSuggestionResponse(response?.data);
+      console.info("[ClientDetailsPage] Sugestão recebida", {
+        clientId,
+        endpoint: "/ai/client-suggestion",
+        payloadLayer,
+        apiSource: (response?.data as Record<string, unknown> | undefined)?.source ?? null,
+        normalizedSource: normalizedSuggestion?.source ?? null,
+        hasSuggestion: Boolean(normalizedSuggestion)
+      });
       setSuggestion(normalizedSuggestion);
     } catch (err) {
       console.error("[ClientDetailsPage] Falha ao carregar sugestão inteligente do cliente", {
