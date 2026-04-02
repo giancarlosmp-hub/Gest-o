@@ -1,4 +1,4 @@
-import { LogOut, Menu, Ruler } from "lucide-react";
+import { LogOut, Menu, MessageCircle, Ruler } from "lucide-react";
 import { Outlet, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth, type UserRole } from "../context/AuthContext";
@@ -24,6 +24,7 @@ const items: SidebarItem[] = [
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades" },
   { id: "atividades", label: "Atividades", path: "/atividades" },
   { id: "agenda", label: "Agenda", path: "/agenda" },
+  { id: "whatsapp", label: "WhatsApp", path: "/whatsapp", icon: MessageCircle },
   {
     id: "assistente-tecnico",
     label: "Assistente Técnico",

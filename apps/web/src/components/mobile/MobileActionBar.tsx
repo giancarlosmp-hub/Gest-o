@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, CalendarPlus, ClipboardCheck } from "lucide-react";
+import { BriefcaseBusiness, CalendarPlus, ClipboardCheck, MessageCircle } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 const actionButtonBaseClass = "flex min-h-14 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold transition active:scale-[0.99]";
@@ -15,6 +15,12 @@ const actions = [
     label: "Follow-up",
     to: `/atividades?${new URLSearchParams({ open: "create", type: "followup", date: new Date().toISOString().slice(0, 10) }).toString()}`,
     icon: ClipboardCheck
+  },
+  {
+    id: "whatsapp",
+    label: "WhatsApp",
+    to: "/whatsapp",
+    icon: MessageCircle
   },
   {
     id: "oportunidade",
