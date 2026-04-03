@@ -39,7 +39,8 @@ jobs:
             set -euo pipefail
 
             PREVIEW_DIR="/apps/previews/pr-${PR_NUMBER}"
-            PORT="60${PR_NUMBER}"
+            API_PORT="60${PR_NUMBER}"
+            WEB_PORT="61${PR_NUMBER}"
 
             if [ -d "${PREVIEW_DIR}/.git" ]; then
               cd "${PREVIEW_DIR}"
@@ -58,8 +59,9 @@ jobs:
             fi
 
             printf "VITE_API_URL=/api
-PORT=%s
-" "${PORT}" > .env
+API_PORT=%s
+WEB_PORT=%s
+" "${API_PORT}" "${WEB_PORT}" > .env
 
             docker compose down || true
             docker compose up -d --build
