@@ -41,7 +41,7 @@ services:
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
-      - "4000:4000"
+      - "${API_PORT:-4000}:4000"
     restart: always
     depends_on:
       db:
@@ -69,7 +69,7 @@ services:
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
     ports:
-      - "5173:80"
+      - "${WEB_PORT:-5173}:80"
     depends_on:
       api:
         condition: service_started
