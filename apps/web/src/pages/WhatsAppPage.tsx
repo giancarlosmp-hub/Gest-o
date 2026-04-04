@@ -173,7 +173,7 @@ export default function WhatsAppPage() {
     <section className="space-y-4">
       <header className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h1 className="text-2xl font-bold text-slate-900">WhatsApp</h1>
-        <p className="mt-1 text-sm text-slate-600">Canal visual de comunicação pronto para futura integração oficial.</p>
+        <p className="mt-1 text-sm text-slate-600">Preview ativo — integração WhatsApp em evolução 🚀</p>
       </header>
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
