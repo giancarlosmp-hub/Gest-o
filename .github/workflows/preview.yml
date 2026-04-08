@@ -38,28 +38,32 @@ jobs:
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
             set -x
+            echo "===== DEBUG START ====="
 
-            echo "=== DEBUG START ==="
-            whoami
-            hostname
-            pwd
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "PR_BRANCH=$PR_BRANCH"
+            echo "PWD=$(pwd)"
 
-            echo "=== TESTE DIRETÓRIO ==="
-            mkdir -p /tmp/test-preview
-            cd /tmp/test-preview
-            pwd
+            echo "===== TESTE DOCKER ====="
+            docker ps || echo "ERRO DOCKER PS"
 
-            echo "=== TESTE GIT ==="
-            git --version
+            echo "===== TESTE DIRETORIO ====="
+            PREVIEW_DIR="/apps/previews/pr-${PR_NUMBER}"
+            echo "DIR: $PREVIEW_DIR"
+            ls -la /apps || echo "ERRO LISTAR /apps"
 
-            echo "=== TESTE DOCKER ==="
-            docker --version || echo "Docker não encontrado"
-            docker compose version || echo "Docker Compose não encontrado"
+            echo "===== TESTE GIT ====="
+            if [ -d "$PREVIEW_DIR/.git" ]; then
+              cd "$PREVIEW_DIR"
+              git status || echo "ERRO GIT STATUS"
+            else
+              echo "DIRETORIO NÃO EXISTE"
+            fi
 
-            echo "=== TESTE FINAL ==="
-            ls -la
+            echo "===== TESTE DOCKER COMPOSE ====="
+            docker compose version || echo "ERRO DOCKER COMPOSE"
 
-            echo "=== DEBUG END ==="
+            echo "===== FIM DEBUG ====="
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
