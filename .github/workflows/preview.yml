@@ -28,11 +28,12 @@ jobs:
           PR_NUMBER: ${{ env.PR_NUMBER }}
           PR_BRANCH: ${{ env.PR_BRANCH }}
           GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
-          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
+          port: 22022
           script_stop: true
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
@@ -59,9 +60,9 @@ jobs:
             fi
 
             printf "VITE_API_URL=/api
-API_PORT=%s
-WEB_PORT=%s
-" "${API_PORT}" "${WEB_PORT}" > .env
+            API_PORT=%s
+            WEB_PORT=%s
+            " "${API_PORT}" "${WEB_PORT}" > .env
 
             docker compose down || true
             docker compose up -d --build
