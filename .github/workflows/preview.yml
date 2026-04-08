@@ -56,13 +56,14 @@ jobs:
               mkdir -p "${PREVIEW_DIR}"
               git clone "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "${PREVIEW_DIR}"
               cd "${PREVIEW_DIR}"
-              git checkout "${PR_BRANCH}"
+              git checkout -b "${PR_BRANCH}" "origin/${PR_BRANCH}"
             fi
 
-            printf "VITE_API_URL=/api
-            API_PORT=%s
-            WEB_PORT=%s
-            " "${API_PORT}" "${WEB_PORT}" > .env
+            cat > .env <<EOF
+            VITE_API_URL=/api
+            API_PORT=${API_PORT}
+            WEB_PORT=${WEB_PORT}
+            EOF
 
             docker compose down || true
             docker compose up -d --build
