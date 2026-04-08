@@ -25,9 +25,9 @@ jobs:
       - name: Deploy preview on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
-          PR_NUMBER: ${{ env.PR_NUMBER }}
-          PR_BRANCH: ${{ env.PR_BRANCH }}
-          GITHUB_REPOSITORY: ${{ env.GITHUB_REPOSITORY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -38,6 +38,10 @@ jobs:
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
             set -x
+
+            echo "PR_NUMBER=$PR_NUMBER"
+            echo "PR_BRANCH=$PR_BRANCH"
+            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
 
             echo "=== DEBUG START ==="
             whoami
