@@ -33,6 +33,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
+          port: 22022
           script_stop: true
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
