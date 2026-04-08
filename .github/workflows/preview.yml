@@ -37,29 +37,24 @@ jobs:
           script_stop: true
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
+            set -e
             set -x
 
-            echo "=== DEBUG START ==="
-            whoami
-            hostname
-            pwd
+            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
 
-            echo "=== TESTE DIRETÓRIO ==="
-            mkdir -p /tmp/test-preview
-            cd /tmp/test-preview
-            pwd
-
-            echo "=== TESTE GIT ==="
-            git --version
-
-            echo "=== TESTE DOCKER ==="
-            docker --version || echo "Docker não encontrado"
-            docker compose version || echo "Docker Compose não encontrado"
-
-            echo "=== TESTE FINAL ==="
-            ls -la
-
-            echo "=== DEBUG END ==="
+            if [ -d "$PREVIEW_DIR/.git" ]; then
+              echo "Atualizando repositório existente..."
+              cd "$PREVIEW_DIR"
+              git fetch origin
+              git checkout "$PR_BRANCH"
+              git reset --hard "origin/$PR_BRANCH"
+            else
+              echo "Clonando repositório novo..."
+              rm -rf "$PREVIEW_DIR"
+              git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git "$PREVIEW_DIR"
+              cd "$PREVIEW_DIR"
+              git checkout "$PR_BRANCH"
+            fi
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
