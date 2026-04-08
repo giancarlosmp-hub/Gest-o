@@ -58,10 +58,7 @@ jobs:
               git checkout "${PR_BRANCH}"
             fi
 
-            printf "VITE_API_URL=/api
-API_PORT=%s
-WEB_PORT=%s
-" "${API_PORT}" "${WEB_PORT}" > .env
+            printf "VITE_API_URL=/api\nAPI_PORT=%s\nWEB_PORT=%s\n" "${API_PORT}" "${WEB_PORT}" > .env
 
             docker compose down || true
             docker compose up -d --build
