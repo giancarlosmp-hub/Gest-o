@@ -31,6 +31,7 @@ jobs:
           GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
+          port: 22022
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           script_stop: true
