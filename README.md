@@ -361,3 +361,6 @@ curl "http://localhost:4000/opportunities?overdue=true" \\
 curl "http://localhost:4000/opportunities/summary" \\
   -H "Authorization: Bearer <token>"
 ```
+
+## Teste de preview automático
+Esta alteração serve apenas para validar o deploy preview via GitHub Actions.
