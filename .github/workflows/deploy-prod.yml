@@ -1,0 +1,43 @@
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy seguro em produção
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          port: 22022
+          script_stop: true
+
+          script: |
+            set -e
+
+            APP_DIR="/apps/production"
+
+            echo "Iniciando deploy seguro..."
+
+            if [ -d "$APP_DIR/.git" ]; then
+              cd "$APP_DIR"
+              git fetch origin
+              git checkout main
+              git reset --hard origin/main
+            else
+              mkdir -p "$APP_DIR"
+              git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "$APP_DIR"
+              cd "$APP_DIR"
+            fi
+
+            echo "Atualizando containers sem afetar banco..."
+
+            docker compose pull || true
+            docker compose up -d --no-deps --build api web
+
+            echo "Deploy concluído com segurança"
