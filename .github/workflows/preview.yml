@@ -17,7 +17,7 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-      PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}.crm.demetraagronegocios.com.br
+      PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}-crm.demetraagronegocios.com.br
       GITHUB_REPOSITORY: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
