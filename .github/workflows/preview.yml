@@ -43,6 +43,11 @@ jobs:
             echo "PR_BRANCH=$PR_BRANCH"
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
 
+            mkdir -p "$PREVIEW_DIR"
+            cat > "$PREVIEW_DIR/.env" <<EOF
+            ADMIN_BOOTSTRAP_ENABLED=true
+            EOF
+
             echo "=== DEBUG START ==="
             whoami
             hostname
