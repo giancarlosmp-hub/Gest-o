@@ -35,6 +35,7 @@ jobs:
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
+          command_timeout: 30m
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,PREVIEW_URL,GITHUB_TOKEN
           script: |
             set -euo pipefail
