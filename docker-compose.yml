@@ -82,4 +82,4 @@ services:
 
 volumes:
   postgres_data:
-    name: gest-o_pgdata
+    name: ${POSTGRES_VOLUME_NAME:-gest-o_pgdata}
