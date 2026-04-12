@@ -76,11 +76,46 @@ jobs:
             docker compose --env-file .env pull || true
             docker compose --env-file .env up -d --build
 
-            # validações rápidas para evitar publicar preview quebrado
-            docker compose --env-file .env ps
+            # validações robustas: aguarda stack sair de "health: starting" antes de falhar
             docker compose --env-file .env exec -T api sh -lc 'echo "$ADMIN_BOOTSTRAP_ENABLED" | grep -q "true"'
-            curl --fail --silent --show-error "http://127.0.0.1:${WEB_PORT}/healthz" >/dev/null
-            curl --fail --silent --show-error "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null
+
+            MAX_ATTEMPTS=36
+            SLEEP_SECONDS=5
+            ATTEMPT=1
+            READY=0
+
+            while [ "$ATTEMPT" -le "$MAX_ATTEMPTS" ]; do
+              echo "[preview] readiness attempt ${ATTEMPT}/${MAX_ATTEMPTS}"
+              docker compose --env-file .env ps || true
+
+              WEB_OK=0
+              API_OK=0
+
+              if curl --fail --silent --show-error "http://127.0.0.1:${WEB_PORT}/healthz" >/dev/null; then
+                WEB_OK=1
+              fi
+
+              if curl --fail --silent --show-error "http://127.0.0.1:${API_PORT}/health" >/dev/null; then
+                API_OK=1
+              fi
+
+              if [ "$WEB_OK" -eq 1 ] && [ "$API_OK" -eq 1 ]; then
+                READY=1
+                echo "[preview] stack ready (web + api saudáveis)"
+                break
+              fi
+
+              ATTEMPT=$((ATTEMPT + 1))
+              sleep "$SLEEP_SECONDS"
+            done
+
+            if [ "$READY" -ne 1 ]; then
+              echo "[preview] stack não ficou pronta dentro do timeout"
+              docker compose --env-file .env ps || true
+              docker compose --env-file .env logs api --tail=100 || true
+              docker compose --env-file .env logs web --tail=100 || true
+              exit 1
+            fi
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
