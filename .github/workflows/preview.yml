@@ -53,10 +53,20 @@ jobs:
             hostname
             pwd
 
-            echo "=== TESTE DIRETÓRIO ==="
-            mkdir -p /tmp/test-preview
-            cd /tmp/test-preview
-            pwd
+            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
+
+            if [ -d "$PREVIEW_DIR/.git" ]; then
+              cd "$PREVIEW_DIR"
+              git fetch origin
+              git checkout "$PR_BRANCH"
+              git reset --hard "origin/$PR_BRANCH"
+            else
+              echo "Clonando repo novo..."
+              rm -rf "$PREVIEW_DIR"
+              git clone https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git "$PREVIEW_DIR"
+              cd "$PREVIEW_DIR"
+              git checkout "$PR_BRANCH"
+            fi
 
             echo "=== TESTE GIT ==="
             git --version
