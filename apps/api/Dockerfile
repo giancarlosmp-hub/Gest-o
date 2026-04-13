@@ -12,7 +12,9 @@ COPY apps/api/prisma ./apps/api/prisma
 COPY . .
 RUN npm run build -w @salesforce-pro/shared \
   && npx prisma generate --schema=apps/api/prisma/schema.prisma \
-  && npm run build -w @salesforce-pro/api
+  && npm run build -w @salesforce-pro/api \
+  && test -f /app/apps/api/dist/server.js \
+  && test -f /app/apps/api/dist/scripts/bootstrap.js
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
