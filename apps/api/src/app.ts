@@ -54,11 +54,11 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.get("/health", (_req, res) => {
-  res.status(200).json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    version: env.appVersion,
-  });
+  res.status(200).json({ status: "ok" });
+});
+
+app.get("/api/health", (_req, res) => {
+  res.status(200).json({ status: "ok" });
 });
 
 app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);

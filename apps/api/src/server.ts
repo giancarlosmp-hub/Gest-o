@@ -1,4 +1,5 @@
 import { app } from "./app.js";
+import { execSync } from "node:child_process";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
@@ -33,11 +34,25 @@ async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
 
 async function start() {
   await waitForDatabase();
+  runPrismaMigrations();
   await validateDatabaseHealth();
   await ensureAdminBootstrap();
   app.listen(env.port, () => {
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });
+    console.log(`API STARTED ON PORT ${env.port}`);
   });
+}
+
+function runPrismaMigrations() {
+  try {
+    logApiEvent("INFO", "Executando prisma migrate deploy");
+    execSync("npx prisma migrate deploy", { stdio: "inherit" });
+  } catch (error) {
+    logApiEvent("WARN", "prisma migrate deploy falhou; executando prisma db push", {
+      stack: error instanceof Error ? error.stack : String(error),
+    });
+    execSync("npx prisma db push", { stdio: "inherit" });
+  }
 }
 
 start().catch((error) => {
