@@ -1,9 +1,10 @@
 import { Role } from "@prisma/client";
+import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { hashPassword } from "../utils/password.js";
 
-const PREVIEW_ADMIN = {
+const DEFAULT_PREVIEW_ADMIN = {
   name: "Admin Preview",
   email: "admin@preview.com",
   password: "123456",
@@ -12,8 +13,19 @@ const PREVIEW_ADMIN = {
   isActive: true
 } as const;
 
+function getBootstrapAdminConfig() {
+  return {
+    name: env.adminBootstrapName?.trim() || DEFAULT_PREVIEW_ADMIN.name,
+    email: env.adminBootstrapEmail?.trim().toLowerCase() || DEFAULT_PREVIEW_ADMIN.email,
+    password: env.adminBootstrapPassword || DEFAULT_PREVIEW_ADMIN.password,
+    role: Role.diretor,
+    region: env.adminBootstrapRegion?.trim() || DEFAULT_PREVIEW_ADMIN.region,
+    isActive: true
+  } as const;
+}
+
 function isAdminBootstrapExplicitlyEnabled() {
-  return process.env.ADMIN_BOOTSTRAP_ENABLED === "true";
+  return env.adminBootstrapEnabled;
 }
 
 export async function ensureAdminBootstrap() {
@@ -33,35 +45,37 @@ export async function ensureAdminBootstrap() {
     return;
   }
 
+  const bootstrapAdmin = getBootstrapAdminConfig();
+
   const existingPreviewAdmin = await prisma.user.findUnique({
-    where: { email: PREVIEW_ADMIN.email },
+    where: { email: bootstrapAdmin.email },
     select: { id: true, role: true }
   });
 
   if (existingPreviewAdmin) {
     logApiEvent("WARN", "Admin bootstrap não criou usuário: email padrão já existe sem role diretor", {
-      email: PREVIEW_ADMIN.email,
+      email: bootstrapAdmin.email,
       role: existingPreviewAdmin.role
     });
     return;
   }
 
-  const passwordHash = await hashPassword(PREVIEW_ADMIN.password);
+  const passwordHash = await hashPassword(bootstrapAdmin.password);
 
   await prisma.user.create({
     data: {
-      name: PREVIEW_ADMIN.name,
-      email: PREVIEW_ADMIN.email,
+      name: bootstrapAdmin.name,
+      email: bootstrapAdmin.email,
       passwordHash,
-      role: PREVIEW_ADMIN.role,
-      region: PREVIEW_ADMIN.region,
-      isActive: PREVIEW_ADMIN.isActive
+      role: bootstrapAdmin.role,
+      region: bootstrapAdmin.region,
+      isActive: bootstrapAdmin.isActive
     }
   });
 
   logApiEvent("INFO", "Usuário admin de preview criado automaticamente", {
-    email: PREVIEW_ADMIN.email,
-    role: PREVIEW_ADMIN.role,
-    region: PREVIEW_ADMIN.region
+    email: bootstrapAdmin.email,
+    role: bootstrapAdmin.role,
+    region: bootstrapAdmin.region
   });
 }
