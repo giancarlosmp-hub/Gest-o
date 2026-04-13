@@ -44,31 +44,19 @@ jobs:
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
 
             mkdir -p "$PREVIEW_DIR"
+            cd "$PREVIEW_DIR"
+
+            if [ ! -d ".git" ]; then
+              git clone "https://github.com/${GITHUB_REPOSITORY}.git" .
+            fi
+
+            git fetch origin
+            git checkout "${PR_BRANCH}"
+            git reset --hard "origin/${PR_BRANCH}"
+
             cat > "$PREVIEW_DIR/.env" <<EOF
             ADMIN_BOOTSTRAP_ENABLED=true
             EOF
-
-            echo "=== DEBUG START ==="
-            whoami
-            hostname
-            pwd
-
-            echo "=== TESTE DIRETÓRIO ==="
-            mkdir -p /tmp/test-preview
-            cd /tmp/test-preview
-            pwd
-
-            echo "=== TESTE GIT ==="
-            git --version
-
-            echo "=== TESTE DOCKER ==="
-            docker --version || echo "Docker não encontrado"
-            docker compose version || echo "Docker Compose não encontrado"
-
-            echo "=== TESTE FINAL ==="
-            ls -la
-
-            echo "=== DEBUG END ==="
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
