@@ -33,4 +33,4 @@ COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 
 EXPOSE 4000
 ENTRYPOINT ["tini", "--"]
-CMD ["npm", "run", "docker:start", "-w", "@salesforce-pro/api"]
+CMD ["npm", "run", "start", "-w", "@salesforce-pro/api"]

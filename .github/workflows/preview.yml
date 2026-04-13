@@ -84,6 +84,9 @@ jobs:
             docker compose pull || true
             docker compose up -d --build
 
+            docker compose ps
+            docker compose logs api --tail=100
+
             MAX_ATTEMPTS=60
             SLEEP=5
 

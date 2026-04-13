@@ -13,6 +13,17 @@ import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./m
 
 export const app = express();
 
+export function startApiHttpServer(port: number, onListening?: () => void) {
+  console.log("Starting API...");
+  console.log("Connecting to DB...");
+
+  return app.listen(port, "0.0.0.0", () => {
+    console.log("Server listening...");
+    console.log(`API running on port ${port}`);
+    onListening?.();
+  });
+}
+
 if (env.isProduction) {
   app.set("trust proxy", 1);
 }
