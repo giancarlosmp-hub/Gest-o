@@ -46,13 +46,13 @@ jobs:
             mkdir -p "$PREVIEW_DIR"
             cd "$PREVIEW_DIR"
 
-            if [ ! -d ".git" ]; then
-              git clone "https://github.com/${GITHUB_REPOSITORY}.git" .
+            if [ -d ".git" ]; then
+              git fetch origin
+              git reset --hard origin/${PR_BRANCH}
+            else
+              git clone https://github.com/${GITHUB_REPOSITORY}.git .
+              git checkout ${PR_BRANCH}
             fi
-
-            git fetch origin
-            git checkout "${PR_BRANCH}"
-            git reset --hard "origin/${PR_BRANCH}"
 
             cat > "$PREVIEW_DIR/.env" <<EOF
             ADMIN_BOOTSTRAP_ENABLED=true
