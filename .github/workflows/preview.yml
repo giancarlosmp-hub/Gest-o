@@ -85,7 +85,7 @@ jobs:
             docker compose up -d --build
 
             docker compose ps
-            docker compose logs api --tail=100
+            docker compose logs api --tail=200
 
             MAX_ATTEMPTS=60
             SLEEP=5
@@ -105,7 +105,7 @@ jobs:
             echo "ERRO: stack não ficou pronta"
 
             docker compose ps
-            docker compose logs api --tail=100
+            docker compose logs api --tail=200
             docker compose logs web --tail=100
             docker compose logs db --tail=100
 

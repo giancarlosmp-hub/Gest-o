@@ -22,6 +22,7 @@ async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
     try {
       await prisma.$connect();
       logApiEvent("INFO", "Conexão com banco estabelecida");
+      console.log("DB CONNECTED");
       return true;
     } catch (error) {
       if (attempt === maxRetries) {
@@ -34,6 +35,7 @@ async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
       }
 
       logApiEvent("WARN", "Banco indisponível, tentando novamente", { attempt, maxRetries });
+      console.log("DB connection attempt failed", { attempt, maxRetries });
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
