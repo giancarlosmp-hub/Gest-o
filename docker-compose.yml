@@ -5,7 +5,7 @@ services:
     command: postgres -c password_encryption=md5
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: salesforce_pro
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: postgresql://postgres@db:5432/salesforce_pro?schema=public
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/salesforce_pro?schema=public
       NODE_ENV: production
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}

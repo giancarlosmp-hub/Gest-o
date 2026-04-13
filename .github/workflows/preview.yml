@@ -60,6 +60,7 @@ jobs:
 
             cat > .env <<EOF
             NODE_ENV=production
+            POSTGRES_PASSWORD=postgres
             WEB_PORT=${WEB_PORT}
             API_PORT=${API_PORT}
             VITE_API_URL=/api
