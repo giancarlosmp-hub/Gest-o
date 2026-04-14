@@ -57,6 +57,12 @@ jobs:
       - name: Verify compiled bootstrap exists in running API container
         run: docker compose exec -T api sh -lc "cat /app/apps/api/dist/scripts/bootstrap.js | grep BOOTSTRAP"
 
+      - name: Print compiled bootstrap header from container
+        run: docker compose exec -T api sh -lc "cd /app/apps/api && cat dist/scripts/bootstrap.js | head -20"
+
+      - name: Assert compiled bootstrap contains BOOTSTRAP START
+        run: docker compose exec -T api sh -lc "cd /app/apps/api && cat dist/scripts/bootstrap.js | grep 'BOOTSTRAP START'"
+
       - name: Assert API service has no bind mount / dist override
         run: |
           RESOLVED=$(docker compose config)
