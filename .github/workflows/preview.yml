@@ -49,21 +49,14 @@ jobs:
             WEB_PORT="$((5173 + PR_NUMBER))"
             PREVIEW_URL="https://pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
 
+            echo "[stage] clean preview dir"
+            rm -rf "$PREVIEW_DIR"
             mkdir -p "$PREVIEW_DIR"
             cd "$PREVIEW_DIR"
 
-            if [ -d ".git" ]; then
-              echo "Atualizando repo existente..."
-              git fetch origin
-              git reset --hard "origin/${PR_BRANCH}"
-            else
-              echo "Diretório sem repo, limpando e clonando..."
-              rm -rf ./*
-              rm -rf .git || true
-
-              git clone "https://github.com/${GITHUB_REPOSITORY}.git" .
-              git checkout "${PR_BRANCH}"
-            fi
+            echo "[stage] clone repo"
+            git clone "https://github.com/${GITHUB_REPOSITORY}.git" .
+            git checkout "${PR_BRANCH}"
 
             if [ ! -f docker-compose.yml ]; then
               echo "ERRO: docker-compose.yml não encontrado"

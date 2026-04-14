@@ -88,10 +88,11 @@ async function runBootstrap() {
       return;
     }
 
-    const migrateOk = runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma migrate deploy");
-    if (!migrateOk) {
-      console.warn("Tentando fallback de migração com prisma db push...");
-      runStep("npx prisma db push --schema=apps/api/prisma/schema.prisma", "prisma db push (fallback)");
+    const dbSyncOk = runStep("npx prisma db push --schema=apps/api/prisma/schema.prisma", "prisma db push");
+    if (dbSyncOk) {
+      console.log("DB SYNC SUCCESS (db push)");
+    } else {
+      console.error("Falha no db push durante bootstrap, seguindo sem derrubar API");
     }
 
     try {

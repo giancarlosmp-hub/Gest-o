@@ -18,55 +18,63 @@ process.on("uncaughtException", (error) => {
   });
 });
 
-async function connectDatabaseOrFail() {
-  logApiEvent("INFO", "Tentando conectar no banco", { host: "db", port: 5432 });
+async function runBootstrapSafe() {
+  logApiEvent("INFO", "BOOTSTRAP START", { mode: "runtime" });
 
   try {
-    await prisma.$connect();
-    console.log("DB CONNECTED SUCCESS");
-    logApiEvent("INFO", "Conexão com banco estabelecida");
+    try {
+      await prisma.$connect();
+      console.log("DB CONNECTED SUCCESS");
+    } catch (error) {
+      logApiEvent("ERROR", "Falha ao conectar no banco durante bootstrap", {
+        stack: error instanceof Error ? error.stack : String(error)
+      });
+      return;
+    }
+
+    try {
+      execSync("npx prisma db push --schema=prisma/schema.prisma", { stdio: "inherit" });
+      console.log("DB SYNC SUCCESS (db push)");
+    } catch (error) {
+      logApiEvent("ERROR", "Falha no prisma db push", {
+        stack: error instanceof Error ? error.stack : String(error)
+      });
+    }
+
+    try {
+      await validateDatabaseHealth();
+    } catch (error) {
+      logApiEvent("ERROR", "Falha ao validar saúde do banco", {
+        stack: error instanceof Error ? error.stack : String(error)
+      });
+    }
+
+    try {
+      await ensureAdminBootstrap();
+    } catch (error) {
+      logApiEvent("ERROR", "Falha no ensureAdminBootstrap", {
+        stack: error instanceof Error ? error.stack : String(error)
+      });
+    }
+
+    logApiEvent("INFO", "BOOTSTRAP SUCCESS", { mode: "runtime" });
   } catch (error) {
-    logApiEvent("ERROR", "Falha ao conectar no banco", {
+    logApiEvent("ERROR", "BOOTSTRAP ERROR", {
       stack: error instanceof Error ? error.stack : String(error)
     });
-    throw error;
   }
 }
 
-function runMigrationsOrFail() {
-  logApiEvent("INFO", "Executando prisma migrate deploy");
+function start() {
+  startApiHttpServer(env.port, () => {
+    logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv, host: "0.0.0.0" });
 
-  try {
-    execSync("npx prisma migrate deploy --schema=prisma/schema.prisma", { stdio: "inherit" });
-    logApiEvent("INFO", "prisma migrate deploy concluído");
-  } catch (error) {
-    logApiEvent("ERROR", "Falha no prisma migrate deploy", {
-      stack: error instanceof Error ? error.stack : String(error)
+    runBootstrapSafe().catch((error) => {
+      logApiEvent("ERROR", "Bootstrap failed", {
+        stack: error instanceof Error ? error.stack : String(error)
+      });
     });
-    throw error;
-  }
-}
-
-async function startupBootstrapOrFail() {
-  await connectDatabaseOrFail();
-  runMigrationsOrFail();
-  await validateDatabaseHealth();
-  await ensureAdminBootstrap();
-}
-
-async function start() {
-  try {
-    await startupBootstrapOrFail();
-
-    startApiHttpServer(env.port, () => {
-      logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv, host: "0.0.0.0" });
-    });
-  } catch (error) {
-    logApiEvent("ERROR", "Startup abortado: API não subirá sem banco/migrations", {
-      stack: error instanceof Error ? error.stack : String(error)
-    });
-    process.exit(1);
-  }
+  });
 }
 
 start();
