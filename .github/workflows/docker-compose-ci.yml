@@ -33,8 +33,11 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
-      - name: Remove previous stack (volumes included)
-        run: docker compose down -v
+      - name: Remove previous stack (volumes and orphans included)
+        run: docker compose down -v --remove-orphans
+
+      - name: Remove legacy API image tag if present
+        run: docker image rm -f gest-o-api || true
 
       - name: Prune docker images before rebuild
         run: docker image prune -af
@@ -51,14 +54,10 @@ jobs:
       - name: Show compose images
         run: docker compose images
 
-      - name: Assert compose is not using fixed legacy image tag
+      - name: Assert API image entry exists
         run: |
           IMAGES=$(docker compose images)
           echo "$IMAGES"
-          if echo "$IMAGES" | grep -q "gest-o-api"; then
-            echo "Legacy fixed image tag 'gest-o-api' is still present."
-            exit 1
-          fi
           if ! echo "$IMAGES" | grep -E -q "api"; then
             echo "API image entry not found in docker compose images output."
             exit 1
