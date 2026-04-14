@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
@@ -17,79 +18,55 @@ process.on("uncaughtException", (error) => {
   });
 });
 
-async function waitForDatabase(maxRetries = 20, delayMs = 2000) {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      await prisma.$connect();
-      logApiEvent("INFO", "Conexão com banco estabelecida");
-      console.log("DB CONNECTED");
-      return true;
-    } catch (error) {
-      if (attempt === maxRetries) {
-        logApiEvent("ERROR", "Falha ao conectar banco após tentativas", {
-          stack: error instanceof Error ? error.stack : String(error),
-          attempt,
-          maxRetries
-        });
-        return false;
-      }
-
-      logApiEvent("WARN", "Banco indisponível, tentando novamente", { attempt, maxRetries });
-      console.log("DB connection attempt failed", { attempt, maxRetries });
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  return false;
-}
-
-async function runRuntimeBootstrap() {
-  logApiEvent("INFO", "BOOTSTRAP START", { mode: "runtime" });
+async function connectDatabaseOrFail() {
+  logApiEvent("INFO", "Tentando conectar no banco", { host: "db", port: 5432 });
 
   try {
-    const dbReady = await waitForDatabase();
-    if (!dbReady) {
-      logApiEvent("ERROR", "BOOTSTRAP ERROR", { reason: "database_not_ready" });
-      return;
-    }
-
-    try {
-      await validateDatabaseHealth();
-    } catch (error) {
-      logApiEvent("ERROR", "BOOTSTRAP ERROR", {
-        step: "validateDatabaseHealth",
-        stack: error instanceof Error ? error.stack : String(error)
-      });
-    }
-
-    try {
-      await ensureAdminBootstrap();
-    } catch (error) {
-      logApiEvent("ERROR", "BOOTSTRAP ERROR", {
-        step: "ensureAdminBootstrap",
-        stack: error instanceof Error ? error.stack : String(error)
-      });
-    }
-
-    logApiEvent("INFO", "BOOTSTRAP SUCCESS", { mode: "runtime" });
+    await prisma.$connect();
+    console.log("DB CONNECTED SUCCESS");
+    logApiEvent("INFO", "Conexão com banco estabelecida");
   } catch (error) {
-    logApiEvent("ERROR", "BOOTSTRAP ERROR", {
-      step: "runRuntimeBootstrap",
+    logApiEvent("ERROR", "Falha ao conectar no banco", {
       stack: error instanceof Error ? error.stack : String(error)
     });
+    throw error;
   }
 }
 
-function start() {
-  startApiHttpServer(env.port, () => {
-    logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv, host: "0.0.0.0" });
+function runMigrationsOrFail() {
+  logApiEvent("INFO", "Executando prisma migrate deploy");
 
-    runRuntimeBootstrap().catch((error) => {
-      logApiEvent("ERROR", "Bootstrap failed", {
-        stack: error instanceof Error ? error.stack : String(error)
-      });
+  try {
+    execSync("npx prisma migrate deploy --schema=prisma/schema.prisma", { stdio: "inherit" });
+    logApiEvent("INFO", "prisma migrate deploy concluído");
+  } catch (error) {
+    logApiEvent("ERROR", "Falha no prisma migrate deploy", {
+      stack: error instanceof Error ? error.stack : String(error)
     });
-  });
+    throw error;
+  }
+}
+
+async function startupBootstrapOrFail() {
+  await connectDatabaseOrFail();
+  runMigrationsOrFail();
+  await validateDatabaseHealth();
+  await ensureAdminBootstrap();
+}
+
+async function start() {
+  try {
+    await startupBootstrapOrFail();
+
+    startApiHttpServer(env.port, () => {
+      logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv, host: "0.0.0.0" });
+    });
+  } catch (error) {
+    logApiEvent("ERROR", "Startup abortado: API não subirá sem banco/migrations", {
+      stack: error instanceof Error ? error.stack : String(error)
+    });
+    process.exit(1);
+  }
 }
 
 start();

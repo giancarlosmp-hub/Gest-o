@@ -7,6 +7,24 @@ import { logApiEvent } from "../utils/logger.js";
 
 const cookieConfig = { httpOnly: true, sameSite: "lax" as const, secure: env.isProduction, maxAge: 7 * 24 * 60 * 60 * 1000 };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`LOGIN_DB_TIMEOUT after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
   const requestId = req.requestId ?? "unknown";
@@ -18,8 +36,10 @@ export async function login(req: Request, res: Response) {
   });
 
   try {
+    console.log("LOGIN: before db query");
     logApiEvent("INFO", "[auth/login] before db query", { requestId, email });
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await withTimeout(prisma.user.findUnique({ where: { email } }), 3000);
+    console.log("LOGIN: after db query");
     logApiEvent("INFO", "[auth/login] after db query", {
       requestId,
       userFound: Boolean(user),
@@ -65,9 +85,11 @@ export async function login(req: Request, res: Response) {
       stack: error instanceof Error ? error.stack : String(error)
     });
 
+    const isDbTimeout = error instanceof Error && error.message.includes("LOGIN_DB_TIMEOUT");
+
     return res.status(503).json({
-      message: "Falha ao processar login no momento",
-      code: "LOGIN_RUNTIME_ERROR"
+      message: isDbTimeout ? "Timeout ao consultar banco no login" : "Falha ao processar login no momento",
+      code: isDbTimeout ? "LOGIN_DB_TIMEOUT" : "LOGIN_RUNTIME_ERROR"
     });
   }
 }
