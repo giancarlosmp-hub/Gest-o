@@ -82,11 +82,11 @@ async function ensureAdminUser(prismaClient: typeof prisma) {
       }
     });
 
-    console.log("ADMIN USER CREATED:", email);
+    console.log("ADMIN CREATED");
     return;
   }
 
-  console.log("ADMIN USER ALREADY EXISTS:", email);
+  console.log("ADMIN ALREADY EXISTS");
 }
 
 async function runDatabaseBootstrap() {
@@ -97,7 +97,10 @@ async function runDatabaseBootstrap() {
 
   try {
     await waitForDatabase();
+    await prisma.$connect();
     console.log("DB CONNECTED");
+    const count = await prisma.user.count();
+    console.log("USERS COUNT:", count);
   } catch (error) {
     console.error("DB CONNECTION FAILED:", error);
     return;
@@ -144,9 +147,15 @@ async function runDatabaseBootstrap() {
 
   try {
     await ensureAdminUser(prisma);
+    const admin = await prisma.user.findUnique({
+      where: { email: "admin@preview.local" }
+    });
+    console.log("ADMIN EXISTS:", admin);
   } catch (error) {
     console.error("ADMIN PREVIEW USER BOOTSTRAP FAILED (non-blocking):", error);
   }
+
+  console.log("BOOTSTRAP END");
 }
 
 async function start() {
@@ -156,7 +165,6 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     console.log(`API on http://localhost:${env.port}`);
-    console.log("BOOTSTRAP END");
   });
 }
 

@@ -22,27 +22,31 @@ export async function login(req: Request, res: Response) {
   let timedOut = false;
 
   try {
+    console.log("LOGIN START");
+    console.log("LOGIN_EMAIL:", email);
     logApiEvent("INFO", "LOGIN_START", { email });
 
     const loginLogic = async () => {
+      console.log("BEFORE DB QUERY");
       logApiEvent("INFO", "BEFORE_DB", { email });
-      console.log("LOGIN_EMAIL:", email);
       const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
       logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
-      console.log("USER_FOUND:", user);
+      console.log("USER FOUND:", user);
 
       if (timedOut || res.headersSent) return;
       if (!user) {
-        console.log("USER NOT FOUND IN DATABASE");
+        console.log("USER NOT FOUND");
         return res.status(401).json({ message: "Credenciais inválidas" });
       }
       if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
 
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
-      const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
+      console.log("BEFORE PASSWORD CHECK");
+      const isValid = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
+      console.log("PASSWORD VALID:", isValid);
 
       if (timedOut || res.headersSent) return;
-      if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
+      if (!isValid) return res.status(401).json({ message: "Credenciais inválidas" });
 
       const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
       const accessToken = signAccessToken(payload);
@@ -62,13 +66,15 @@ export async function login(req: Request, res: Response) {
       ),
     ]);
   } catch (error) {
+    console.error("LOGIN ERROR:", error);
     logApiEvent("ERROR", "LOGIN_RUNTIME_ERROR", {
       email,
       error: error instanceof Error ? error.message : "UNKNOWN_LOGIN_ERROR",
     });
 
     if (!res.headersSent) {
-      return res.status(503).json({ message: "LOGIN_RUNTIME_ERROR" });
+      const message = error instanceof Error ? error.message : "UNKNOWN_LOGIN_ERROR";
+      return res.status(500).json({ error: message });
     }
   }
 }
