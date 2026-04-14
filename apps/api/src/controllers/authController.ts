@@ -3,21 +3,69 @@ import { prisma } from "../config/prisma.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt.js";
 import { verifyPassword } from "../utils/password.js";
 import { env } from "../config/env.js";
+import { logApiEvent } from "../utils/logger.js";
 
 const cookieConfig = { httpOnly: true, sameSite: "lax" as const, secure: env.isProduction, maxAge: 7 * 24 * 60 * 60 * 1000 };
+const LOGIN_TIMEOUT = 3000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutError: string, timeoutMs = LOGIN_TIMEOUT): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => reject(new Error(timeoutError)), timeoutMs);
+    }),
+  ]);
+}
 
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) return res.status(401).json({ message: "Credenciais inválidas" });
-  if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
-  const ok = await verifyPassword(password, user.passwordHash);
-  if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
-  const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
-  const accessToken = signAccessToken(payload);
-  const refreshToken = signRefreshToken(payload);
-  res.cookie("refreshToken", refreshToken, cookieConfig);
-  return res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, region: user.region } });
+  let timedOut = false;
+
+  try {
+    logApiEvent("INFO", "LOGIN_START", { email });
+
+    const loginLogic = async () => {
+      logApiEvent("INFO", "BEFORE_DB", { email });
+      const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
+      logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
+
+      if (timedOut || res.headersSent) return;
+      if (!user) return res.status(401).json({ message: "Credenciais inválidas" });
+      if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
+
+      logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
+      const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
+
+      if (timedOut || res.headersSent) return;
+      if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
+
+      const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
+      const accessToken = signAccessToken(payload);
+      const refreshToken = signRefreshToken(payload);
+      res.cookie("refreshToken", refreshToken, cookieConfig);
+      logApiEvent("INFO", "SUCCESS", { email, userId: user.id });
+      return res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, region: user.region } });
+    };
+
+    await Promise.race([
+      loginLogic(),
+      new Promise((_, reject) =>
+        setTimeout(() => {
+          timedOut = true;
+          reject(new Error("LOGIN_TIMEOUT"));
+        }, LOGIN_TIMEOUT),
+      ),
+    ]);
+  } catch (error) {
+    logApiEvent("ERROR", "LOGIN_RUNTIME_ERROR", {
+      email,
+      error: error instanceof Error ? error.message : "UNKNOWN_LOGIN_ERROR",
+    });
+
+    if (!res.headersSent) {
+      return res.status(503).json({ message: "LOGIN_RUNTIME_ERROR" });
+    }
+  }
 }
 
 export async function refresh(req: Request, res: Response) {
