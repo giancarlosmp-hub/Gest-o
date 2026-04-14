@@ -97,7 +97,9 @@ async function runDatabaseBootstrap() {
 
   try {
     await waitForDatabase();
+    await prisma.$connect();
     console.log("DB CONNECTED");
+    console.log("USERS COUNT:", await prisma.user.count());
   } catch (error) {
     console.error("DB CONNECTION FAILED:", error);
     return;
@@ -144,6 +146,10 @@ async function runDatabaseBootstrap() {
 
   try {
     await ensureAdminUser(prisma);
+    console.log(
+      "ADMIN EXISTS:",
+      await prisma.user.findUnique({ where: { email: "admin@preview.local" } })
+    );
   } catch (error) {
     console.error("ADMIN PREVIEW USER BOOTSTRAP FAILED (non-blocking):", error);
   }
