@@ -43,6 +43,7 @@ services:
     ports:
       - "4000:4000"
     restart: always
+    command: ["node", "dist/scripts/bootstrap.js"]
     depends_on:
       db:
         condition: service_healthy
