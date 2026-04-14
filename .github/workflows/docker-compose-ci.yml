@@ -54,6 +54,27 @@ jobs:
       - name: Show compose images
         run: docker compose images
 
+      - name: Verify compiled bootstrap exists in running API container
+        run: docker compose exec -T api sh -lc "cat /app/apps/api/dist/scripts/bootstrap.js | grep BOOTSTRAP"
+
+      - name: Assert API service has no bind mount / dist override
+        run: |
+          RESOLVED=$(docker compose config)
+          echo "$RESOLVED"
+          API_BLOCK=$(printf '%s\n' "$RESOLVED" | awk '
+            $0 ~ /^  api:$/ { in_api=1; print; next }
+            in_api && $0 ~ /^  [^ ]/ { exit }
+            in_api { print }
+          ')
+          if echo "$API_BLOCK" | grep -q "type: bind"; then
+            echo "API service has bind mount configured, which may override dist at runtime."
+            exit 1
+          fi
+          if echo "$API_BLOCK" | grep -q "/dist"; then
+            echo "API service appears to mount/override dist at runtime."
+            exit 1
+          fi
+
       - name: Assert API image entry exists
         run: |
           IMAGES=$(docker compose images)
