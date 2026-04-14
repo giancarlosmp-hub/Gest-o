@@ -12,7 +12,9 @@ COPY apps/api/prisma ./apps/api/prisma
 COPY . .
 RUN npm run build -w @salesforce-pro/shared \
   && npx prisma generate --schema=apps/api/prisma/schema.prisma \
-  && npm run build -w @salesforce-pro/api
+  && npm run build -w @salesforce-pro/api \
+  && test -f /app/apps/api/dist/server.js \
+  && test -f /app/apps/api/dist/scripts/bootstrap.js
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
@@ -31,4 +33,4 @@ COPY --from=build /app/packages/shared/dist ./packages/shared/dist
 
 EXPOSE 4000
 ENTRYPOINT ["tini", "--"]
-CMD ["npm", "run", "docker:start", "-w", "@salesforce-pro/api"]
+CMD ["npm", "run", "start", "-w", "@salesforce-pro/api"]

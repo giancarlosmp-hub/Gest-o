@@ -9,10 +9,8 @@ import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
 
-function ensureDatabaseUrlFromEnvironment() {
-  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
-    throw new Error("DATABASE_URL não definida no ambiente");
-  }
+function hasDatabaseUrl() {
+  return Boolean(process.env.DATABASE_URL && process.env.DATABASE_URL.trim().length > 0);
 }
 
 function sleep(ms: number) {
@@ -24,15 +22,18 @@ async function waitForDatabase() {
     try {
       await prisma.$queryRaw`SELECT 1`;
       console.log("Postgres pronto para conexões");
-      return;
-    } catch {
+      return true;
+    } catch (error) {
       if (attempt === MAX_DB_RETRIES) {
-        throw new Error("Não foi possível conectar no Postgres dentro do tempo limite");
+        console.error("Postgres não ficou pronto no tempo limite", error);
+        return false;
       }
       console.log(`Postgres indisponível (${attempt}/${MAX_DB_RETRIES}), aguardando...`);
       await sleep(RETRY_DELAY_MS);
     }
   }
+
+  return false;
 }
 
 function logRuntimeContext() {
@@ -47,40 +48,95 @@ function logRuntimeContext() {
       } catch {
         return false;
       }
+    })(),
+    hasDistBootstrap: (() => {
+      try {
+        execSync("test -f /app/apps/api/dist/scripts/bootstrap.js");
+        return true;
+      } catch {
+        return false;
+      }
     })()
   });
 }
 
 function runStep(command: string, label: string) {
-  console.log(`Executando ${label}...`);
-  execSync(command, { stdio: "inherit" });
+  try {
+    console.log(`Executando ${label}...`);
+    execSync(command, { stdio: "inherit" });
+    return true;
+  } catch (error) {
+    console.error(`[BOOTSTRAP ERROR] Falha ao executar ${label}`, error);
+    return false;
+  }
 }
 
-async function start() {
-  logRuntimeContext();
-  ensureDatabaseUrlFromEnvironment();
-  await waitForDatabase();
-  runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-  await validateDatabaseHealth();
-  await ensureAdminBootstrap();
-  if (env.enableSmokeBootstrap) {
-    await ensureSmokeBootstrap();
-  } else {
-    console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
-  }
+async function runBootstrap() {
+  console.log("BOOTSTRAP START");
 
-  if (env.seedOnBootstrap) {
-    runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
-  } else {
-    console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
-  }
+  try {
+    logRuntimeContext();
 
+    if (!hasDatabaseUrl()) {
+      console.error("BOOTSTRAP ERROR: DATABASE_URL não definida no ambiente");
+      return;
+    }
+
+    const dbReady = await waitForDatabase();
+    if (!dbReady) {
+      console.error("BOOTSTRAP ERROR: banco indisponível, bootstrap será ignorado nesta execução");
+      return;
+    }
+
+    const dbSyncOk = runStep("npx prisma db push --schema=apps/api/prisma/schema.prisma", "prisma db push");
+    if (dbSyncOk) {
+      console.log("DB SYNC SUCCESS (db push)");
+    } else {
+      console.error("Falha no db push durante bootstrap, seguindo sem derrubar API");
+    }
+
+    try {
+      await validateDatabaseHealth();
+    } catch (error) {
+      console.error("[BOOTSTRAP ERROR] validateDatabaseHealth falhou", error);
+    }
+
+    try {
+      await ensureAdminBootstrap();
+    } catch (error) {
+      console.error("[BOOTSTRAP ERROR] ensureAdminBootstrap falhou", error);
+    }
+
+    if (env.enableSmokeBootstrap) {
+      try {
+        await ensureSmokeBootstrap();
+      } catch (error) {
+        console.error("[BOOTSTRAP ERROR] ensureSmokeBootstrap falhou", error);
+      }
+    } else {
+      console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
+    }
+
+    if (env.seedOnBootstrap) {
+      runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
+    } else {
+      console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
+    }
+
+    console.log("BOOTSTRAP SUCCESS");
+  } catch (error) {
+    console.error("BOOTSTRAP ERROR", error);
+  }
+}
+
+function startApiServer() {
   app.listen(env.port, () => {
     console.log(`API on http://localhost:${env.port}`);
+
+    runBootstrap().catch((error) => {
+      console.error("Bootstrap failed:", error);
+    });
   });
 }
 
-start().catch((error) => {
-  console.error("Falha ao inicializar API", error);
-  process.exit(1);
-});
+startApiServer();
