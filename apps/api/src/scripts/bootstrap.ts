@@ -1,4 +1,6 @@
 import { execSync } from "node:child_process";
+import bcrypt from "bcryptjs";
+import { Role } from "@prisma/client";
 import { app } from "../app.js";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
@@ -48,6 +50,33 @@ function logRuntimeContext() {
 function runStep(command: string, label: string) {
   console.log(`Executando ${label}...`);
   execSync(command, { stdio: "inherit" });
+}
+
+async function ensureAdminUser(prismaClient: typeof prisma) {
+  const email = "admin@preview.local";
+  const password = "123456";
+
+  const existing = await prismaClient.user.findUnique({
+    where: { email }
+  });
+
+  if (!existing) {
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await prismaClient.user.create({
+      data: {
+        name: "Admin Preview",
+        email,
+        passwordHash,
+        role: Role.diretor
+      }
+    });
+
+    console.log("ADMIN USER CREATED:", email);
+    return;
+  }
+
+  console.log("ADMIN USER ALREADY EXISTS:", email);
 }
 
 async function runDatabaseBootstrap() {
@@ -101,6 +130,12 @@ async function runDatabaseBootstrap() {
     }
   } else {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
+  }
+
+  try {
+    await ensureAdminUser(prisma);
+  } catch (error) {
+    console.error("ADMIN PREVIEW USER BOOTSTRAP FAILED (non-blocking):", error);
   }
 }
 
