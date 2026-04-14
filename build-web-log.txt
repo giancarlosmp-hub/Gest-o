@@ -1,5 +1,4 @@
  Image gest-o-web Building 
- Image gest-o-api Building 
 #1 [internal] load local bake definitions
 #1 reading from stdin 926B 0.0s done
 #1 DONE 0.0s
