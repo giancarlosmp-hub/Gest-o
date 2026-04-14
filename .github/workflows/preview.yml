@@ -37,38 +37,37 @@ jobs:
           script_stop: true
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
+            set -euo pipefail
             set -x
 
             echo "PR_NUMBER=$PR_NUMBER"
             echo "PR_BRANCH=$PR_BRANCH"
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
 
+            echo "Cleaning directory..."
+            if [ -d "$PREVIEW_DIR" ]; then
+              rm -rf "$PREVIEW_DIR"
+            fi
+
+            echo "Creating directory..."
             mkdir -p "$PREVIEW_DIR"
-            cat > "$PREVIEW_DIR/.env" <<EOF
+            cd "$PREVIEW_DIR"
+
+            echo "Cloning repository..."
+            git clone --depth 1 --branch "${PR_BRANCH}" "https://github.com/${GITHUB_REPOSITORY}.git" .
+
+            echo "Checkout branch..."
+            git checkout "${PR_BRANCH}"
+
+            echo "Validating .git directory..."
+            if [ ! -d .git ]; then
+              echo "ERROR: Invalid repository state - .git directory is missing"
+              exit 1
+            fi
+
+            cat > .env <<EOF
             ADMIN_BOOTSTRAP_ENABLED=true
             EOF
-
-            echo "=== DEBUG START ==="
-            whoami
-            hostname
-            pwd
-
-            echo "=== TESTE DIRETÓRIO ==="
-            mkdir -p /tmp/test-preview
-            cd /tmp/test-preview
-            pwd
-
-            echo "=== TESTE GIT ==="
-            git --version
-
-            echo "=== TESTE DOCKER ==="
-            docker --version || echo "Docker não encontrado"
-            docker compose version || echo "Docker Compose não encontrado"
-
-            echo "=== TESTE FINAL ==="
-            ls -la
-
-            echo "=== DEBUG END ==="
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
