@@ -3,16 +3,11 @@ WORKDIR /app
 
 RUN apk add --no-cache openssl ca-certificates
 
-COPY package*.json ./
-COPY apps/api/package*.json ./apps/api/
-COPY packages/shared/package*.json ./packages/shared/
-RUN npm install
-
-COPY apps/api/prisma ./apps/api/prisma
 COPY . .
-RUN npm run build -w @salesforce-pro/shared \
-  && npx prisma generate --schema=apps/api/prisma/schema.prisma \
-  && npm run build -w @salesforce-pro/api
+RUN npm install
+RUN rm -rf /app/apps/api/dist
+RUN npm run build -w @salesforce-pro/api \
+  && test -f /app/apps/api/dist/scripts/bootstrap.js
 
 FROM node:20-alpine AS runtime
 WORKDIR /app

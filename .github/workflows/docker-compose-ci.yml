@@ -33,11 +33,75 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
-      - name: Build and start stack
+      - name: Remove previous stack (volumes and orphans included)
+        run: docker compose down -v --remove-orphans
+
+      - name: Remove legacy API image tag if present
+        run: docker image rm -f gest-o-api || true
+
+      - name: Prune docker images before rebuild
+        run: docker image prune -af
+
+      - name: Rebuild API image without cache
+        run: docker compose build --no-cache api
+
+      - name: Start stack
         env:
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
-        run: docker compose up -d --build
+        run: docker compose up -d
+
+      - name: Show compose images
+        run: docker compose images
+
+      - name: Verify compiled bootstrap exists in running API container
+        run: docker compose exec -T api sh -lc "cat /app/apps/api/dist/scripts/bootstrap.js | grep BOOTSTRAP"
+
+      - name: Print compiled bootstrap header from container
+        run: docker compose exec -T api sh -lc "cd /app/apps/api && cat dist/scripts/bootstrap.js | head -20"
+
+      - name: Assert compiled bootstrap contains BOOTSTRAP START
+        run: docker compose exec -T api sh -lc "cd /app/apps/api && cat dist/scripts/bootstrap.js | grep 'BOOTSTRAP START'"
+
+      - name: Assert API service has no bind mount / dist override
+        run: |
+          RESOLVED=$(docker compose config)
+          echo "$RESOLVED"
+          API_BLOCK=$(printf '%s\n' "$RESOLVED" | awk '
+            $0 ~ /^  api:$/ { in_api=1; print; next }
+            in_api && $0 ~ /^  [^ ]/ { exit }
+            in_api { print }
+          ')
+          if echo "$API_BLOCK" | grep -q "type: bind"; then
+            echo "API service has bind mount configured, which may override dist at runtime."
+            exit 1
+          fi
+          if echo "$API_BLOCK" | grep -q "/dist"; then
+            echo "API service appears to mount/override dist at runtime."
+            exit 1
+          fi
+
+      - name: Assert API image entry exists
+        run: |
+          IMAGES=$(docker compose images)
+          echo "$IMAGES"
+          if ! echo "$IMAGES" | grep -E -q "api"; then
+            echo "API image entry not found in docker compose images output."
+            exit 1
+          fi
+
+      - name: Print API startup logs (tail)
+        run: docker compose logs api --tail=100
+
+      - name: Assert bootstrap logs are from latest build
+        run: |
+          LOGS=$(docker compose logs api --tail=200)
+          echo "$LOGS"
+          if ! echo "$LOGS" | grep -q "BOOTSTRAP START"; then
+            echo "Expected BOOTSTRAP START not found in API logs."
+            echo "This may indicate stale/cached image still running."
+            exit 1
+          fi
 
       - name: Print API logs on failure
         if: failure()
@@ -65,6 +129,20 @@ jobs:
           curl -f -X POST http://localhost:4000/auth/login \
             -H 'Content-Type: application/json' \
             -d '{"email":"diretor@empresa.com","password":"123456"}'
+
+      - name: Print API logs after login failure
+        if: failure()
+        run: docker compose logs api --tail=200
+
+      - name: Assert login diagnostics logs
+        run: |
+          LOGS=$(docker compose logs api --tail=300)
+          echo "$LOGS"
+          if ! echo "$LOGS" | grep -q "LOGIN START"; then
+            echo "Expected LOGIN START not found in API logs."
+            echo "This may indicate stale/cached image still running."
+            exit 1
+          fi
 
       - name: Smoke test opportunities + dashboard flow
         run: node scripts/smoke/compose-smoke.mjs
