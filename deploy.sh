@@ -136,6 +136,21 @@ wait_for_api_healthcheck() {
   exit 1
 }
 
+
+check_direct_api_debug_endpoint() {
+  local debug_url="${DEPLOY_API_DEBUG_URL:-http://localhost:4000/debug}"
+
+  log "[PREVIEW] Validando API direta via HTTP em $debug_url ..."
+  if curl -fsS "$debug_url" >/dev/null; then
+    log "[PREVIEW] API respondeu via HTTP direto em $debug_url"
+    return
+  fi
+
+  log "ERRO: API não respondeu via HTTP direto em $debug_url"
+  log "[PREVIEW] Últimas 200 linhas do container api para diagnóstico:"
+  docker logs api --tail=200 2>&1 | tee -a "$LOG_FILE"
+  exit 1
+}
 inspect_cnpj_lookup_config() {
   local resolved_config=""
   local provider_line=""
@@ -299,6 +314,7 @@ main() {
   log "[DEPLOY] Status dos serviços após rebuild:"
   docker compose ps | tee -a "$LOG_FILE"
 
+  check_direct_api_debug_endpoint
   wait_for_api_healthcheck
   collect_counts "depois"
   validate_data_safety
