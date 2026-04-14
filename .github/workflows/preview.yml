@@ -23,6 +23,7 @@ jobs:
 
     steps:
       - name: Deploy preview on VPS
+        if: ${{ secrets.VPS_HOST != "" && secrets.VPS_USER != "" && secrets.VPS_KEY != "" }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -39,6 +40,7 @@ jobs:
           script: |
             set -euo pipefail
 
+            echo "[stage] init"
             echo "PR_NUMBER=$PR_NUMBER"
             echo "PR_BRANCH=$PR_BRANCH"
 
@@ -69,6 +71,9 @@ jobs:
             fi
 
             cat > .env <<EOF
+            PR_NUMBER=${PR_NUMBER}
+            PREVIEW_DB_NAME=salesforce_preview_pr_${PR_NUMBER}
+            PG_VOLUME_NAME=gest-o_pgdata_pr_${PR_NUMBER}
             API_PORT=${API_PORT}
             WEB_PORT=${WEB_PORT}
             VITE_API_URL=${PREVIEW_URL}/api
@@ -80,10 +85,14 @@ jobs:
             ADMIN_BOOTSTRAP_NAME=Admin Preview
             EOF
 
-            docker compose down || true
+            echo "[stage] docker down"
+            docker compose down -v || true
+            echo "[stage] docker pull"
             docker compose pull || true
+            echo "[stage] docker up"
             docker compose up -d --build
 
+            echo "[stage] post-up diagnostics"
             docker compose ps
             docker compose logs api --tail=200
 
@@ -104,6 +113,7 @@ jobs:
 
             echo "ERRO: stack não ficou pronta"
 
+            echo "[stage] post-up diagnostics"
             docker compose ps
             docker compose logs api --tail=200
             docker compose logs web --tail=100
@@ -112,6 +122,7 @@ jobs:
             exit 1
 
       - name: Comment preview link on PR
+        if: ${{ success() && secrets.VPS_HOST != "" && secrets.VPS_USER != "" && secrets.VPS_KEY != "" }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
