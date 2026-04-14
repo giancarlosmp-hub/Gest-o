@@ -36,6 +36,9 @@ jobs:
       - name: Remove previous stack (volumes included)
         run: docker compose down -v
 
+      - name: Prune docker images before rebuild
+        run: docker image prune -af
+
       - name: Rebuild API image without cache
         run: docker compose build --no-cache api
 
@@ -44,6 +47,22 @@ jobs:
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
         run: docker compose up -d
+
+      - name: Show compose images
+        run: docker compose images
+
+      - name: Assert compose is not using fixed legacy image tag
+        run: |
+          IMAGES=$(docker compose images)
+          echo "$IMAGES"
+          if echo "$IMAGES" | grep -q "gest-o-api"; then
+            echo "Legacy fixed image tag 'gest-o-api' is still present."
+            exit 1
+          fi
+          if ! echo "$IMAGES" | grep -E -q "api"; then
+            echo "API image entry not found in docker compose images output."
+            exit 1
+          fi
 
       - name: Print API startup logs (tail)
         run: docker compose logs api --tail=100
