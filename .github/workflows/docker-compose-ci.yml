@@ -124,6 +124,10 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"email":"diretor@empresa.com","password":"123456"}'
 
+      - name: Print API logs after login failure
+        if: failure()
+        run: docker compose logs api --tail=200
+
       - name: Assert login diagnostics logs
         run: |
           LOGS=$(docker compose logs api --tail=300)
