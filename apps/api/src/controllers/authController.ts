@@ -26,11 +26,16 @@ export async function login(req: Request, res: Response) {
 
     const loginLogic = async () => {
       logApiEvent("INFO", "BEFORE_DB", { email });
+      console.log("LOGIN_EMAIL:", email);
       const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
       logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
+      console.log("USER_FOUND:", user);
 
       if (timedOut || res.headersSent) return;
-      if (!user) return res.status(401).json({ message: "Credenciais inválidas" });
+      if (!user) {
+        console.log("USER NOT FOUND IN DATABASE");
+        return res.status(401).json({ message: "Credenciais inválidas" });
+      }
       if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
 
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
