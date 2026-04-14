@@ -61,10 +61,41 @@ jobs:
         run: node scripts/smoke/api-endpoints-smoke.mjs
 
       - name: Smoke test auth login
+        continue-on-error: true
         run: |
-          curl -f -X POST http://localhost:4000/auth/login \
+          TMP_LOGIN_RESPONSE="$(mktemp)"
+          set +e
+          curl -i -sS -X POST http://localhost:4000/auth/login \
             -H 'Content-Type: application/json' \
-            -d '{"email":"diretor@empresa.com","password":"123456"}'
+            -d '{"email":"diretor@empresa.com","password":"123456"}' \
+            -o "$TMP_LOGIN_RESPONSE"
+          CURL_EXIT_CODE="$?"
+          set -e
+
+          LOGIN_HTTP_STATUS="$(awk 'BEGIN { code = "" } /^HTTP\/[0-9.]+ [0-9]+/ { code = $2 } END { print code }' "$TMP_LOGIN_RESPONSE")"
+          if [ -z "$LOGIN_HTTP_STATUS" ]; then
+            LOGIN_HTTP_STATUS="000"
+          fi
+
+          LOGIN_RESPONSE_BODY="$(awk 'f { print } /^\r?$/ { f = 1 }' "$TMP_LOGIN_RESPONSE" | tr -d '\r')"
+
+          echo "LOGIN_HTTP_STATUS=$LOGIN_HTTP_STATUS"
+          echo "LOGIN_RESPONSE_BODY=$LOGIN_RESPONSE_BODY"
+          echo "LOGIN_CURL_EXIT_CODE=$CURL_EXIT_CODE"
+
+          {
+            echo "LOGIN_HTTP_STATUS=$LOGIN_HTTP_STATUS"
+            echo "LOGIN_RESPONSE_BODY<<EOF"
+            printf '%s\n' "$LOGIN_RESPONSE_BODY"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
+
+      - name: Collect diagnostics after login attempt
+        if: always()
+        run: |
+          docker compose logs api --tail=300
+          docker compose ps
+          docker compose exec -T api node -e "const { PrismaClient } = require('@prisma/client'); (async () => { const prisma = new PrismaClient(); const user = await prisma.user.findUnique({ where: { email: 'admin@preview.local' } }); console.log('USER_LOOKUP_RESULT: ' + JSON.stringify(user)); await prisma.\$disconnect(); })().catch(async (error) => { console.error(error); process.exitCode = 1; });"
 
       - name: Smoke test opportunities + dashboard flow
         run: node scripts/smoke/compose-smoke.mjs
@@ -76,6 +107,14 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker compose logs
+
+      - name: Fail if login status is not 200
+        if: always()
+        run: |
+          if [ "${LOGIN_HTTP_STATUS}" != "200" ]; then
+            echo "Smoke auth login failed after collecting diagnostics"
+            exit 1
+          fi
 
       - name: Tear down
         if: always()
