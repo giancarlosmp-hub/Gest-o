@@ -8,6 +8,16 @@ import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 
+console.log("BOOTSTRAP START");
+
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
 
@@ -144,7 +154,9 @@ async function start() {
   await runDatabaseBootstrap();
 
   app.listen(env.port, () => {
+    console.log(`SERVER RUNNING ON PORT ${env.port}`);
     console.log(`API on http://localhost:${env.port}`);
+    console.log("BOOTSTRAP END");
   });
 }
 

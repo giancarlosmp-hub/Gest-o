@@ -61,6 +61,13 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/debug", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    time: new Date(),
+  });
+});
+
 app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);
 app.use(["/auth/refresh", "/api/auth/refresh"], authRefreshRateLimit);
 app.use(["/auth/me", "/api/auth/me", "/auth/logout", "/api/auth/logout"], appUsageRateLimit);
