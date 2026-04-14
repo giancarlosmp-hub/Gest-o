@@ -9,12 +9,6 @@ import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
 
-function ensureDatabaseUrlFromEnvironment() {
-  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
-    throw new Error("DATABASE_URL não definida no ambiente");
-  }
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -56,24 +50,63 @@ function runStep(command: string, label: string) {
   execSync(command, { stdio: "inherit" });
 }
 
-async function start() {
-  logRuntimeContext();
-  ensureDatabaseUrlFromEnvironment();
-  await waitForDatabase();
-  runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-  await validateDatabaseHealth();
-  await ensureAdminBootstrap();
+async function runDatabaseBootstrap() {
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
+    console.error("DB CONNECTION FAILED:", new Error("DATABASE_URL não definida no ambiente"));
+    return;
+  }
+
+  try {
+    await waitForDatabase();
+    console.log("DB CONNECTED");
+  } catch (error) {
+    console.error("DB CONNECTION FAILED:", error);
+    return;
+  }
+
+  try {
+    console.log("Running prisma migrate deploy...");
+    runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+  } catch (error) {
+    console.error("MIGRATE FAILED (non-blocking):", error);
+  }
+
+  try {
+    await validateDatabaseHealth();
+  } catch (error) {
+    console.error("DATABASE HEALTH CHECK FAILED (non-blocking):", error);
+  }
+
+  try {
+    await ensureAdminBootstrap();
+  } catch (error) {
+    console.error("ADMIN BOOTSTRAP FAILED (non-blocking):", error);
+  }
+
   if (env.enableSmokeBootstrap) {
-    await ensureSmokeBootstrap();
+    try {
+      await ensureSmokeBootstrap();
+    } catch (error) {
+      console.error("SMOKE BOOTSTRAP FAILED (non-blocking):", error);
+    }
   } else {
     console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
   }
 
   if (env.seedOnBootstrap) {
-    runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
+    try {
+      runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
+    } catch (error) {
+      console.error("SEED FAILED (non-blocking):", error);
+    }
   } else {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }
+}
+
+async function start() {
+  logRuntimeContext();
+  await runDatabaseBootstrap();
 
   app.listen(env.port, () => {
     console.log(`API on http://localhost:${env.port}`);
@@ -81,6 +114,5 @@ async function start() {
 }
 
 start().catch((error) => {
-  console.error("Falha ao inicializar API", error);
-  process.exit(1);
+  console.error("Falha ao inicializar API (non-blocking)", error);
 });
