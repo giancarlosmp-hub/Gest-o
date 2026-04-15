@@ -18,8 +18,10 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.event.pull_request.head.ref }}
       PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}-crm.demetraagronegocios.com.br
+      PREVIEW_URL_HTTP: http://pr-${{ github.event.pull_request.number }}.crm.demetraagronegocios.com.br
       GITHUB_REPOSITORY: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
 
     steps:
       - name: Deploy preview on VPS
@@ -29,45 +31,65 @@ jobs:
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN
+          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,VPS_HOST
           script: |
             set -euo pipefail
             set -x
 
-            echo "PR_NUMBER=$PR_NUMBER"
-            echo "PR_BRANCH=$PR_BRANCH"
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
+            PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
+            PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
 
-            echo "Cleaning directory..."
             if [ -d "$PREVIEW_DIR" ]; then
               rm -rf "$PREVIEW_DIR"
             fi
 
-            echo "Creating directory..."
             mkdir -p "$PREVIEW_DIR"
             cd "$PREVIEW_DIR"
 
-            echo "Cloning repository..."
             git clone --depth 1 --branch "${PR_BRANCH}" "https://github.com/${GITHUB_REPOSITORY}.git" .
-
-            echo "Checkout branch..."
             git checkout "${PR_BRANCH}"
 
-            echo "Validating .git directory..."
+            cat > .env <<ENVFILE
+            ADMIN_BOOTSTRAP_ENABLED=true
+            WEB_PORT=61${PR_NUMBER}
+            ENVFILE
+
             if [ ! -d .git ]; then
               echo "ERROR: Invalid repository state - .git directory is missing"
               exit 1
             fi
 
-            cat > .env <<EOF
-            ADMIN_BOOTSTRAP_ENABLED=true
-            EOF
+            # Garantir nginx para preview com HTTP(80) e HTTPS(443), logs e headers.
+            sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+            sudo cp docs/ops/nginx-crm-preview.conf /etc/nginx/sites-available/crm-preview
+            sudo ln -sfn /etc/nginx/sites-available/crm-preview /etc/nginx/sites-enabled/crm-preview
+            sudo nginx -t
+            sudo systemctl reload nginx
+
+            # Verificação de DNS do domínio de preview.
+            if ! command -v dig >/dev/null 2>&1; then
+              sudo apt-get update
+              sudo apt-get install -y dnsutils
+            fi
+            echo "DNS for ${PREVIEW_HOST_TLS}"
+            dig +short A "${PREVIEW_HOST_TLS}" || true
+            echo "DNS for ${PREVIEW_HOST_HTTP}"
+            dig +short A "${PREVIEW_HOST_HTTP}" || true
+            echo "Expected VPS host/IP: ${VPS_HOST}"
+
+            docker compose up -d --build
+
+            # Diagnóstico de proxy e API conforme solicitado.
+            curl -v http://localhost:80 || true
+            curl -v http://localhost:4000/debug || true
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
@@ -76,4 +98,5 @@ jobs:
           body: |
             🚀 Preview environment updated.
 
-            Preview URL: ${{ env.PREVIEW_URL }}
+            Preview URL (HTTPS): ${{ env.PREVIEW_URL }}
+            Preview URL (HTTP fallback): ${{ env.PREVIEW_URL_HTTP }}
