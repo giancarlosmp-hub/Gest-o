@@ -23,13 +23,13 @@ export async function login(req: Request, res: Response) {
 
   try {
     logApiEvent("INFO", "LOGIN_START", { email });
+    console.log("[LOGIN_DEBUG] email recebido:", email);
 
     const loginLogic = async () => {
       logApiEvent("INFO", "BEFORE_DB", { email });
-      console.log("LOGIN_EMAIL:", email);
       const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
       logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
-      console.log("USER_FOUND:", user);
+      console.log("[LOGIN_DEBUG] user encontrado:", user ? { id: user.id, email: user.email, role: user.role, isActive: user.isActive, region: user.region, name: user.name } : null);
 
       if (timedOut || res.headersSent) return;
       if (!user) {
@@ -40,6 +40,7 @@ export async function login(req: Request, res: Response) {
 
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
       const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
+      console.log("[LOGIN_DEBUG] bcrypt.compare resultado:", ok);
 
       if (timedOut || res.headersSent) return;
       if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
