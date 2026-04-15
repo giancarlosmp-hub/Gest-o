@@ -20,37 +20,43 @@ function withTimeout<T>(promise: Promise<T>, timeoutError: string, timeoutMs = L
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
   let timedOut = false;
+  const sendLoginResponse = (status: number, body: Record<string, unknown>) => {
+    console.log("LOGIN_RESPONSE_STATUS=", status);
+    return res.status(status).json(body);
+  };
 
   try {
     logApiEvent("INFO", "LOGIN_START", { email });
-    console.log("[LOGIN_DEBUG] email recebido:", email);
+    console.log("LOGIN_EMAIL=", email);
 
     const loginLogic = async () => {
       logApiEvent("INFO", "BEFORE_DB", { email });
       const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
       logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
-      console.log("[LOGIN_DEBUG] user encontrado:", user ? { id: user.id, email: user.email, role: user.role, isActive: user.isActive, region: user.region, name: user.name } : null);
+      console.log("USER_FOUND_EMAIL=", user?.email ?? null);
+      console.log("USER_FOUND_ID=", user?.id ?? null);
+      console.log("PASSWORD_HASH_PRESENT=", Boolean(user?.passwordHash));
 
       if (timedOut || res.headersSent) return;
       if (!user) {
         console.log("USER NOT FOUND IN DATABASE");
-        return res.status(401).json({ message: "Credenciais inválidas" });
+        return sendLoginResponse(401, { message: "Credenciais inválidas" });
       }
-      if (!user.isActive) return res.status(403).json({ message: "Usuário inativo" });
+      if (!user.isActive) return sendLoginResponse(403, { message: "Usuário inativo" });
 
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
       const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
-      console.log("[LOGIN_DEBUG] bcrypt.compare resultado:", ok);
+      console.log("BCRYPT_COMPARE_RESULT=", ok);
 
       if (timedOut || res.headersSent) return;
-      if (!ok) return res.status(401).json({ message: "Credenciais inválidas" });
+      if (!ok) return sendLoginResponse(401, { message: "Credenciais inválidas" });
 
       const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
       const accessToken = signAccessToken(payload);
       const refreshToken = signRefreshToken(payload);
       res.cookie("refreshToken", refreshToken, cookieConfig);
       logApiEvent("INFO", "SUCCESS", { email, userId: user.id });
-      return res.json({ accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, region: user.region } });
+      return sendLoginResponse(200, { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, region: user.region } });
     };
 
     await Promise.race([
@@ -69,7 +75,7 @@ export async function login(req: Request, res: Response) {
     });
 
     if (!res.headersSent) {
-      return res.status(503).json({ message: "LOGIN_RUNTIME_ERROR" });
+      return sendLoginResponse(503, { message: "LOGIN_RUNTIME_ERROR" });
     }
   }
 }
