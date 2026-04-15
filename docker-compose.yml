@@ -41,7 +41,7 @@ services:
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
-      - "4000:4000"
+      - "${API_PORT:-4000}:4000"
     restart: always
     depends_on:
       db:
