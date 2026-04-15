@@ -60,6 +60,7 @@ jobs:
             cat > .env <<ENVFILE
             ADMIN_BOOTSTRAP_ENABLED=true
             WEB_PORT=61${PR_NUMBER}
+            API_PORT=40${PR_NUMBER}
             ENVFILE
 
             if [ ! -d .git ]; then
@@ -85,6 +86,8 @@ jobs:
             dig +short A "${PREVIEW_HOST_HTTP}" || true
             echo "Expected VPS host/IP: ${VPS_HOST}"
 
+            export API_PORT="40${PR_NUMBER}"
+            echo "Using API_PORT=${API_PORT}"
             docker compose up -d --build
 
             # Diagnóstico de proxy e API conforme solicitado.
