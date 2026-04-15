@@ -90,9 +90,25 @@ jobs:
             echo "Using API_PORT=${API_PORT}"
             docker compose up -d --build
 
-            # Diagnóstico de proxy e API conforme solicitado.
-            curl -v http://localhost:80 || true
-            curl -v http://localhost:4000/debug || true
+            for i in {1..60}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
+              if [ "$STATUS" = "200" ]; then
+                echo "API healthy on 127.0.0.1:${API_PORT}"
+                break
+              fi
+              sleep 2
+            done
+
+            curl -i -sS "http://127.0.0.1:${API_PORT}/debug/admin"
+            curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" \
+              --data '{"email":"admin@preview.local","password":"123456"}'
+            curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" \
+              --data '{"email":"diretor@empresa.com","password":"123456"}'
+
+            docker compose logs api --tail=300
+            docker compose ps
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4

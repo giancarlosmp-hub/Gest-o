@@ -73,12 +73,16 @@ app.get("/debug/admin", async (_req, res) => {
   const admin = await prisma.user.findFirst({
     where: { email: { in: ["admin@preview.local", "admin@preview.com"] } },
     orderBy: { createdAt: "desc" },
-    select: { email: true, passwordHash: true }
+    select: { id: true, email: true, role: true, isActive: true, createdAt: true, passwordHash: true },
   });
 
   return res.status(200).json({
+    id: admin?.id ?? null,
     email: admin?.email ?? null,
-    passwordHash: admin?.passwordHash ?? null
+    role: admin?.role ?? null,
+    isActive: admin?.isActive ?? null,
+    createdAt: admin?.createdAt ?? null,
+    passwordHashPrefix: admin?.passwordHash ? admin.passwordHash.slice(0, 12) : null,
   });
 });
 
