@@ -68,6 +68,20 @@ app.get("/debug", (_req, res) => {
   });
 });
 
+app.get("/debug/admin", async (_req, res) => {
+  const { prisma } = await import("./config/prisma.js");
+  const admin = await prisma.user.findFirst({
+    where: { email: { in: ["admin@preview.local", "admin@preview.com"] } },
+    orderBy: { createdAt: "desc" },
+    select: { email: true, passwordHash: true }
+  });
+
+  return res.status(200).json({
+    email: admin?.email ?? null,
+    passwordHash: admin?.passwordHash ?? null
+  });
+});
+
 app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);
 app.use(["/auth/refresh", "/api/auth/refresh"], authRefreshRateLimit);
 app.use(["/auth/me", "/api/auth/me", "/auth/logout", "/api/auth/logout"], appUsageRateLimit);

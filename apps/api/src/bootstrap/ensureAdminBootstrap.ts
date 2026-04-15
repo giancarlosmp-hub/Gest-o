@@ -1,7 +1,7 @@
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { hashPassword } from "../utils/password.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
 
 const PREVIEW_ADMIN = {
   name: "Admin Preview",
@@ -19,6 +19,36 @@ function isAdminBootstrapExplicitlyEnabled() {
 export async function ensureAdminBootstrap() {
   if (!isAdminBootstrapExplicitlyEnabled()) {
     return;
+  }
+
+  const generatedPasswordHash = await hashPassword(PREVIEW_ADMIN.password);
+  console.log('[BOOTSTRAP_DEBUG] hash gerado para "123456":', generatedPasswordHash);
+  console.log(
+    '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashGerado):',
+    await verifyPassword(PREVIEW_ADMIN.password, generatedPasswordHash)
+  );
+
+  const existingPreviewAdminForDebug = await prisma.user.findFirst({
+    where: {
+      email: { in: ["admin@preview.local", "admin@preview.com"] }
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      passwordHash: true,
+      role: true,
+      region: true,
+      isActive: true
+    }
+  });
+
+  console.log("[BOOTSTRAP_DEBUG] usuário salvo no banco (antes do bootstrap):", existingPreviewAdminForDebug);
+  if (existingPreviewAdminForDebug?.passwordHash) {
+    console.log(
+      '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashBancoAntesBootstrap):',
+      await verifyPassword(PREVIEW_ADMIN.password, existingPreviewAdminForDebug.passwordHash)
+    );
   }
 
   const existingDirector = await prisma.user.findFirst({
@@ -46,18 +76,30 @@ export async function ensureAdminBootstrap() {
     return;
   }
 
-  const passwordHash = await hashPassword(PREVIEW_ADMIN.password);
-
-  await prisma.user.create({
+  const createdUser = await prisma.user.create({
     data: {
       name: PREVIEW_ADMIN.name,
       email: PREVIEW_ADMIN.email,
-      passwordHash,
+      passwordHash: generatedPasswordHash,
       role: PREVIEW_ADMIN.role,
       region: PREVIEW_ADMIN.region,
       isActive: PREVIEW_ADMIN.isActive
+    },
+    select: {
+      id: true,
+      email: true,
+      passwordHash: true,
+      role: true,
+      region: true,
+      isActive: true
     }
   });
+
+  console.log("[BOOTSTRAP_DEBUG] usuário salvo no banco:", createdUser);
+  console.log(
+    '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashSalvo):',
+    await verifyPassword(PREVIEW_ADMIN.password, createdUser.passwordHash)
+  );
 
   logApiEvent("INFO", "Usuário admin de preview criado automaticamente", {
     email: PREVIEW_ADMIN.email,
