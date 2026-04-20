@@ -109,7 +109,9 @@ jobs:
 
             echo "=== BOOTSTRAP ADMIN ==="
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              node dist/scripts/bootstrap.js
+              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              npm run docker:start -w @salesforce-pro/api
             echo "Bootstrap executed"
             echo "Admin ensured"
 
