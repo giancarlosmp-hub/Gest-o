@@ -1,0 +1,42 @@
+name: Preview Cleanup
+
+on:
+  pull_request:
+    types:
+      - closed
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup preview stack for closed PR
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          port: 22022
+          script_stop: true
+          envs: PR_NUMBER
+          script: |
+            set -euo pipefail
+            set -x
+
+            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
+            COMPOSE_PROJECT_NAME="gesto-pr-${PR_NUMBER}"
+            POSTGRES_DB="gesto_preview_pr_${PR_NUMBER}"
+            POSTGRES_VOLUME_NAME="gesto_pgdata_pr_${PR_NUMBER}"
+
+            if [ -d "$PREVIEW_DIR" ]; then
+              cd "$PREVIEW_DIR"
+              docker compose -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
+              cd /
+              rm -rf "$PREVIEW_DIR"
+            fi
+
+            docker volume rm "${POSTGRES_VOLUME_NAME}" || true

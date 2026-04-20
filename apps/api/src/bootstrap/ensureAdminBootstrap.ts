@@ -1,11 +1,12 @@
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
+import { env } from "../config/env.js";
 import { logApiEvent } from "../utils/logger.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 
-const PREVIEW_ADMIN = {
+const DEFAULT_PREVIEW_ADMIN = {
   name: "Admin Preview",
-  email: "admin@preview.com",
+  email: "admin@preview.local",
   password: "123456",
   role: Role.diretor,
   region: "Nacional",
@@ -21,89 +22,47 @@ export async function ensureAdminBootstrap() {
     return;
   }
 
-  const generatedPasswordHash = await hashPassword(PREVIEW_ADMIN.password);
-  console.log('[BOOTSTRAP_DEBUG] hash gerado para "123456":', generatedPasswordHash);
-  console.log(
-    '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashGerado):',
-    await verifyPassword(PREVIEW_ADMIN.password, generatedPasswordHash)
-  );
+  const adminConfig = {
+    name: env.adminBootstrapName || DEFAULT_PREVIEW_ADMIN.name,
+    email: env.adminBootstrapEmail || DEFAULT_PREVIEW_ADMIN.email,
+    password: env.adminBootstrapPassword || DEFAULT_PREVIEW_ADMIN.password,
+    role: (env.adminBootstrapRole as Role | undefined) || DEFAULT_PREVIEW_ADMIN.role,
+    region: env.adminBootstrapRegion || DEFAULT_PREVIEW_ADMIN.region,
+    isActive: true
+  };
 
-  const existingPreviewAdminForDebug = await prisma.user.findFirst({
-    where: {
-      email: { in: ["admin@preview.local", "admin@preview.com"] }
-    },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      role: true,
-      region: true,
+  const existing = await prisma.user.findUnique({
+    where: { email: adminConfig.email },
+    select: { id: true, passwordHash: true, role: true, region: true, isActive: true, name: true }
+  });
+
+  const shouldRotatePassword = existing ? !(await verifyPassword(adminConfig.password, existing.passwordHash)) : true;
+  const passwordHash = shouldRotatePassword ? await hashPassword(adminConfig.password) : existing?.passwordHash;
+
+  const user = await prisma.user.upsert({
+    where: { email: adminConfig.email },
+    create: {
+      name: adminConfig.name,
+      email: adminConfig.email,
+      passwordHash: passwordHash!,
+      role: adminConfig.role,
+      region: adminConfig.region,
       isActive: true
-    }
-  });
-
-  console.log("[BOOTSTRAP_DEBUG] usuário salvo no banco (antes do bootstrap):", existingPreviewAdminForDebug);
-  if (existingPreviewAdminForDebug?.passwordHash) {
-    console.log(
-      '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashBancoAntesBootstrap):',
-      await verifyPassword(PREVIEW_ADMIN.password, existingPreviewAdminForDebug.passwordHash)
-    );
-  }
-
-  const existingDirector = await prisma.user.findFirst({
-    where: { role: Role.diretor },
-    select: { id: true, email: true }
-  });
-
-  if (existingDirector) {
-    logApiEvent("INFO", "Admin bootstrap ignorado: já existe usuário diretor", {
-      email: existingDirector.email
-    });
-    return;
-  }
-
-  const existingPreviewAdmin = await prisma.user.findUnique({
-    where: { email: PREVIEW_ADMIN.email },
-    select: { id: true, role: true }
-  });
-
-  if (existingPreviewAdmin) {
-    logApiEvent("WARN", "Admin bootstrap não criou usuário: email padrão já existe sem role diretor", {
-      email: PREVIEW_ADMIN.email,
-      role: existingPreviewAdmin.role
-    });
-    return;
-  }
-
-  const createdUser = await prisma.user.create({
-    data: {
-      name: PREVIEW_ADMIN.name,
-      email: PREVIEW_ADMIN.email,
-      passwordHash: generatedPasswordHash,
-      role: PREVIEW_ADMIN.role,
-      region: PREVIEW_ADMIN.region,
-      isActive: PREVIEW_ADMIN.isActive
     },
-    select: {
-      id: true,
-      email: true,
-      passwordHash: true,
-      role: true,
-      region: true,
-      isActive: true
-    }
+    update: {
+      name: adminConfig.name,
+      role: adminConfig.role,
+      region: adminConfig.region,
+      isActive: true,
+      ...(shouldRotatePassword && passwordHash ? { passwordHash } : {})
+    },
+    select: { id: true, email: true, role: true, region: true }
   });
 
-  console.log("[BOOTSTRAP_DEBUG] usuário salvo no banco:", createdUser);
-  console.log(
-    '[BOOTSTRAP_DEBUG] bcrypt.compare("123456", hashSalvo):',
-    await verifyPassword(PREVIEW_ADMIN.password, createdUser.passwordHash)
-  );
-
-  logApiEvent("INFO", "Usuário admin de preview criado automaticamente", {
-    email: PREVIEW_ADMIN.email,
-    role: PREVIEW_ADMIN.role,
-    region: PREVIEW_ADMIN.region
+  logApiEvent("INFO", "Usuário admin técnico garantido via bootstrap", {
+    email: user.email,
+    role: user.role,
+    region: user.region,
+    passwordRotated: shouldRotatePassword
   });
 }

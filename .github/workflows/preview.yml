@@ -59,8 +59,16 @@ jobs:
 
             cat > .env <<ENVFILE
             ADMIN_BOOTSTRAP_ENABLED=true
+            ADMIN_BOOTSTRAP_NAME=Admin Preview
+            ADMIN_BOOTSTRAP_EMAIL=admin@preview.local
+            ADMIN_BOOTSTRAP_PASSWORD=123456
+            ADMIN_BOOTSTRAP_ROLE=diretor
+            ADMIN_BOOTSTRAP_REGION=Nacional
             WEB_PORT=61${PR_NUMBER}
             API_PORT=40${PR_NUMBER}
+            POSTGRES_DB=gesto_preview_pr_${PR_NUMBER}
+            POSTGRES_VOLUME_NAME=gesto_pgdata_pr_${PR_NUMBER}
+            COMPOSE_PROJECT_NAME=gesto-pr-${PR_NUMBER}
             ENVFILE
 
             if [ ! -d .git ]; then
@@ -87,8 +95,11 @@ jobs:
             echo "Expected VPS host/IP: ${VPS_HOST}"
 
             export API_PORT="40${PR_NUMBER}"
+            export COMPOSE_PROJECT_NAME="gesto-pr-${PR_NUMBER}"
+            export POSTGRES_DB="gesto_preview_pr_${PR_NUMBER}"
+            export POSTGRES_VOLUME_NAME="gesto_pgdata_pr_${PR_NUMBER}"
             echo "Using API_PORT=${API_PORT}"
-            docker compose up -d --build
+            docker compose -f docker-compose.yml -f docker-compose.preview.yml up -d --build
 
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
@@ -107,8 +118,11 @@ jobs:
               -H "Content-Type: application/json" \
               --data '{"email":"diretor@empresa.com","password":"123456"}'
 
-            docker compose logs api --tail=300
-            docker compose ps
+            docker compose -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              npm run admin:diagnose-hash -w @salesforce-pro/api
+
+            docker compose -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=300
+            docker compose -f docker-compose.yml -f docker-compose.preview.yml ps
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4

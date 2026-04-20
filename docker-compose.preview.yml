@@ -1,0 +1,18 @@
+name: ${COMPOSE_PROJECT_NAME}
+
+services:
+  db:
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB}"]
+
+  api:
+    environment:
+      DATABASE_URL: postgresql://postgres@db:5432/${POSTGRES_DB}?schema=public
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME}
