@@ -4,14 +4,14 @@ services:
     restart: always
     command: postgres -c password_encryption=md5
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: salesforce_pro
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-salesforce_pro}
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d salesforce_pro"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-salesforce_pro}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: postgresql://postgres@db:5432/salesforce_pro?schema=public
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro}?schema=public}
       NODE_ENV: production
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
@@ -82,4 +82,4 @@ services:
 
 volumes:
   postgres_data:
-    name: gest-o_pgdata
+    name: ${POSTGRES_VOLUME_NAME:-gest-o_pgdata}

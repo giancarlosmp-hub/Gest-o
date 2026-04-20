@@ -17,23 +17,32 @@ function isAdminBootstrapExplicitlyEnabled() {
   return process.env.ADMIN_BOOTSTRAP_ENABLED === "true";
 }
 
+function resolveAdminRole(role: string | undefined): Role {
+  if (!role) {
+    return DEFAULT_PREVIEW_ADMIN.role;
+  }
+
+  const normalizedRole = role.trim().toLowerCase() as Role;
+  return Object.values(Role).includes(normalizedRole) ? normalizedRole : DEFAULT_PREVIEW_ADMIN.role;
+}
+
 export async function ensureAdminBootstrap() {
   if (!isAdminBootstrapExplicitlyEnabled()) {
     return;
   }
 
   const adminConfig = {
-    name: env.adminBootstrapName || DEFAULT_PREVIEW_ADMIN.name,
-    email: env.adminBootstrapEmail || DEFAULT_PREVIEW_ADMIN.email,
+    name: env.adminBootstrapName?.trim() || DEFAULT_PREVIEW_ADMIN.name,
+    email: env.adminBootstrapEmail?.trim().toLowerCase() || DEFAULT_PREVIEW_ADMIN.email,
     password: env.adminBootstrapPassword || DEFAULT_PREVIEW_ADMIN.password,
-    role: (env.adminBootstrapRole as Role | undefined) || DEFAULT_PREVIEW_ADMIN.role,
-    region: env.adminBootstrapRegion || DEFAULT_PREVIEW_ADMIN.region,
+    role: resolveAdminRole(env.adminBootstrapRole),
+    region: env.adminBootstrapRegion?.trim() || DEFAULT_PREVIEW_ADMIN.region,
     isActive: true
   };
 
   const existing = await prisma.user.findUnique({
     where: { email: adminConfig.email },
-    select: { id: true, passwordHash: true, role: true, region: true, isActive: true, name: true }
+    select: { id: true, passwordHash: true }
   });
 
   const shouldRotatePassword = existing ? !(await verifyPassword(adminConfig.password, existing.passwordHash)) : true;
@@ -47,22 +56,24 @@ export async function ensureAdminBootstrap() {
       passwordHash: passwordHash!,
       role: adminConfig.role,
       region: adminConfig.region,
-      isActive: true
+      isActive: adminConfig.isActive
     },
     update: {
       name: adminConfig.name,
       role: adminConfig.role,
       region: adminConfig.region,
-      isActive: true,
+      isActive: adminConfig.isActive,
       ...(shouldRotatePassword && passwordHash ? { passwordHash } : {})
     },
-    select: { id: true, email: true, role: true, region: true }
+    select: { id: true, email: true, role: true, region: true, isActive: true }
   });
 
   logApiEvent("INFO", "Usuário admin técnico garantido via bootstrap", {
+    id: user.id,
     email: user.email,
     role: user.role,
     region: user.region,
+    isActive: user.isActive,
     passwordRotated: shouldRotatePassword
   });
 }

@@ -12,7 +12,7 @@ jobs:
   cleanup-preview:
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup preview stack for closed PR
+      - name: Cleanup preview stack on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -28,15 +28,16 @@ jobs:
             set -x
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
-            COMPOSE_PROJECT_NAME="gesto-pr-${PR_NUMBER}"
-            POSTGRES_DB="gesto_preview_pr_${PR_NUMBER}"
-            POSTGRES_VOLUME_NAME="gesto_pgdata_pr_${PR_NUMBER}"
+            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
+            PREVIEW_VOLUME="gesto_pgdata_pr_${PR_NUMBER}"
 
             if [ -d "$PREVIEW_DIR" ]; then
               cd "$PREVIEW_DIR"
-              docker compose -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
               cd /
               rm -rf "$PREVIEW_DIR"
+            else
+              echo "Preview directory not found, nothing to cleanup."
             fi
 
-            docker volume rm "${POSTGRES_VOLUME_NAME}" || true
+            docker volume rm "${PREVIEW_VOLUME}" || true

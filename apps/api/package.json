@@ -12,6 +12,7 @@
     "prisma:seed": "tsx prisma/seed.js",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",
+    "auth:diagnose-hash": "tsx src/scripts/diagnosePasswordHash.ts",
     "seed:fixture": "tsx prisma/seedTestFixture.ts",
     "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean",
     "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit",
