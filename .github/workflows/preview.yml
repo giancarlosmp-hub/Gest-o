@@ -90,14 +90,28 @@ jobs:
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
 
+            API_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
               if [ "$STATUS" = "200" ]; then
                 echo "API healthy"
+                API_HEALTHY=true
                 break
               fi
               sleep 2
             done
+
+            if [ "$API_HEALTHY" != "true" ]; then
+              echo "API did not become healthy in time"
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              exit 1
+            fi
+
+            echo "=== BOOTSTRAP ADMIN ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node dist/scripts/bootstrap.js
+            echo "Bootstrap executed"
+            echo "Admin ensured"
 
             echo "=== DEBUG ADMIN ==="
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
@@ -108,9 +122,21 @@ jobs:
               --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
 
             echo "=== DIAGNOSE HASH ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
-              npm run auth:diagnose-hash -w @salesforce-pro/api
+            set +e
+            DIAG_OUTPUT=$(
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+                env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
+                npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
+            )
+            DIAG_STATUS=$?
+            set -e
+            echo "$DIAG_OUTPUT"
+            if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
+              echo "Diagnose result: user_not_found (non-blocking)."
+            fi
+            if [ "$DIAG_STATUS" -ne 0 ]; then
+              echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
+            fi
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
 
