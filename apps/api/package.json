@@ -16,7 +16,8 @@
     "seed:fixture": "tsx prisma/seedTestFixture.ts",
     "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean",
     "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit",
-    "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts"
+    "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts",
+    "admin:diagnose-hash": "tsx src/scripts/diagnosePasswordHash.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

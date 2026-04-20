@@ -5,7 +5,9 @@ async function main() {
   const email = (process.env.ADMIN_DIAG_EMAIL || "").trim().toLowerCase();
   const password = process.env.ADMIN_DIAG_PASSWORD || "";
 
-  // modo 1: buscar usuário no banco (preview)
+  // ===============================
+  // MODO 1: DIAGNÓSTICO VIA BANCO
+  // ===============================
   if (email) {
     const user = await prisma.user.findUnique({
       where: { email },
@@ -18,25 +20,33 @@ async function main() {
     });
 
     if (!user) {
-      console.log(JSON.stringify({ ok: false, reason: "user_not_found", email }, null, 2));
+      console.log(JSON.stringify({
+        ok: false,
+        reason: "user_not_found",
+        email
+      }, null, 2));
       process.exit(1);
     }
 
-    const match = await verifyPassword(password, user.passwordHash);
+    const passwordMatches = await verifyPassword(password, user.passwordHash);
 
     console.log(JSON.stringify({
       mode: "db_lookup",
       email: user.email,
+      role: user.role,
+      isActive: user.isActive,
       hashPrefix: user.passwordHash.slice(0, 4),
       hashLength: user.passwordHash.length,
       isValidFormat: isValidPasswordHashFormat(user.passwordHash),
-      passwordMatches: match
+      passwordMatches
     }, null, 2));
 
     return;
   }
 
-  // modo 2: manual (fallback)
+  // ===============================
+  // MODO 2: TESTE MANUAL
+  // ===============================
   const hashArg = process.argv[2];
   const passwordArg = process.argv[3];
 
@@ -45,14 +55,16 @@ async function main() {
     process.exit(1);
   }
 
-  const match = passwordArg ? await verifyPassword(passwordArg, hashArg) : null;
+  const passwordMatches = passwordArg
+    ? await verifyPassword(passwordArg, hashArg)
+    : null;
 
   console.log(JSON.stringify({
     mode: "manual",
     hashPrefix: hashArg.slice(0, 4),
     hashLength: hashArg.length,
     isValidFormat: isValidPasswordHashFormat(hashArg),
-    passwordMatches: match
+    passwordMatches
   }, null, 2));
 }
 

@@ -1,22 +1,37 @@
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { hashPassword } from "../utils/password.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
+
+const DEFAULT_PREVIEW_ADMIN = {
+  name: "Admin Preview",
+  email: "admin@preview.local",
+  password: "123456",
+  role: Role.diretor,
+  region: "Nacional",
+  isActive: true
+} as const;
 
 function isAdminBootstrapExplicitlyEnabled() {
   return process.env.ADMIN_BOOTSTRAP_ENABLED === "true";
 }
 
-function resolveAdminBootstrapConfig() {
-  const roleFromEnv = (process.env.ADMIN_BOOTSTRAP_ROLE || "diretor").trim().toLowerCase();
-  const role = Object.values(Role).includes(roleFromEnv as Role) ? (roleFromEnv as Role) : Role.diretor;
+function resolveAdminRole(role: string | undefined): Role {
+  if (!role) {
+    return DEFAULT_PREVIEW_ADMIN.role;
+  }
 
+  const normalizedRole = role.trim().toLowerCase() as Role;
+  return Object.values(Role).includes(normalizedRole) ? normalizedRole : DEFAULT_PREVIEW_ADMIN.role;
+}
+
+function resolveAdminBootstrapConfig() {
   return {
-    name: (process.env.ADMIN_BOOTSTRAP_NAME || "Admin Preview").trim(),
-    email: (process.env.ADMIN_BOOTSTRAP_EMAIL || "admin@preview.local").trim().toLowerCase(),
-    password: process.env.ADMIN_BOOTSTRAP_PASSWORD || "123456",
-    role,
-    region: (process.env.ADMIN_BOOTSTRAP_REGION || "Nacional").trim(),
+    name: (process.env.ADMIN_BOOTSTRAP_NAME || DEFAULT_PREVIEW_ADMIN.name).trim(),
+    email: (process.env.ADMIN_BOOTSTRAP_EMAIL || DEFAULT_PREVIEW_ADMIN.email).trim().toLowerCase(),
+    password: process.env.ADMIN_BOOTSTRAP_PASSWORD || DEFAULT_PREVIEW_ADMIN.password,
+    role: resolveAdminRole(process.env.ADMIN_BOOTSTRAP_ROLE),
+    region: (process.env.ADMIN_BOOTSTRAP_REGION || DEFAULT_PREVIEW_ADMIN.region).trim(),
     isActive: true
   } as const;
 }
@@ -27,24 +42,36 @@ export async function ensureAdminBootstrap() {
   }
 
   const adminBootstrap = resolveAdminBootstrapConfig();
-  const generatedPasswordHash = await hashPassword(adminBootstrap.password);
+
+  const existing = await prisma.user.findUnique({
+    where: { email: adminBootstrap.email },
+    select: { id: true, passwordHash: true }
+  });
+
+  const shouldRotatePassword = existing
+    ? !(await verifyPassword(adminBootstrap.password, existing.passwordHash))
+    : true;
+
+  const passwordHash = shouldRotatePassword
+    ? await hashPassword(adminBootstrap.password)
+    : existing?.passwordHash;
 
   const upsertedUser = await prisma.user.upsert({
     where: { email: adminBootstrap.email },
     create: {
       name: adminBootstrap.name,
       email: adminBootstrap.email,
-      passwordHash: generatedPasswordHash,
+      passwordHash: passwordHash!,
       role: adminBootstrap.role,
       region: adminBootstrap.region,
       isActive: adminBootstrap.isActive
     },
     update: {
       name: adminBootstrap.name,
-      passwordHash: generatedPasswordHash,
       role: adminBootstrap.role,
       region: adminBootstrap.region,
-      isActive: adminBootstrap.isActive
+      isActive: adminBootstrap.isActive,
+      ...(shouldRotatePassword && passwordHash ? { passwordHash } : {})
     },
     select: {
       id: true,
@@ -55,11 +82,12 @@ export async function ensureAdminBootstrap() {
     }
   });
 
-  logApiEvent("INFO", "Usuário admin de bootstrap garantido", {
+  logApiEvent("INFO", "Usuário admin técnico garantido via bootstrap", {
     id: upsertedUser.id,
     email: upsertedUser.email,
     role: upsertedUser.role,
     region: upsertedUser.region,
-    isActive: upsertedUser.isActive
+    isActive: upsertedUser.isActive,
+    passwordRotated: shouldRotatePassword
   });
 }

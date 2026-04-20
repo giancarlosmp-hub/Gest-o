@@ -113,3 +113,13 @@ jobs:
               npm run auth:diagnose-hash -w @salesforce-pro/api
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
+
+      - name: Comment preview link on PR
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            🚀 Preview environment updated.
+
+            Preview URL (HTTPS): ${{ env.PREVIEW_URL }}
+            Preview URL (HTTP fallback): ${{ env.PREVIEW_URL_HTTP }}
