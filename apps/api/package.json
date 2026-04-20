@@ -12,12 +12,12 @@
     "prisma:seed": "tsx prisma/seed.js",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",
-    "auth:diagnose-hash": "tsx src/scripts/diagnosePasswordHash.ts",
+    "auth:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js",
     "seed:fixture": "tsx prisma/seedTestFixture.ts",
     "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean",
     "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit",
     "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts",
-    "admin:diagnose-hash": "tsx src/scripts/diagnosePasswordHash.ts"
+    "admin:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
