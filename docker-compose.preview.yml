@@ -5,16 +5,16 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB:-salesforce_pro_preview}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-salesforce_pro_preview}"]
 
   api:
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB}?schema=public}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro_preview}?schema=public}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}
       ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-true}

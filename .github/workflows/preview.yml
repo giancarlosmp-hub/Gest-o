@@ -47,8 +47,8 @@ jobs:
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
             PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
-            PREVIEW_DB="gesto_preview_pr_${PR_NUMBER}"
-            PREVIEW_VOLUME="gesto_pgdata_pr_${PR_NUMBER}"
+            PREVIEW_DB="salesforce_pro_preview_pr_${PR_NUMBER}"
+            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
             PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
 
@@ -84,14 +84,12 @@ jobs:
               exit 1
             fi
 
-            # Garantir nginx para preview com HTTP(80) e HTTPS(443), logs e headers.
             sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
             sudo cp docs/ops/nginx-crm-preview.conf /etc/nginx/sites-available/crm-preview
             sudo ln -sfn /etc/nginx/sites-available/crm-preview /etc/nginx/sites-enabled/crm-preview
             sudo nginx -t
             sudo systemctl reload nginx
 
-            # Verificação de DNS do domínio de preview.
             if ! command -v dig >/dev/null 2>&1; then
               sudo apt-get update
               sudo apt-get install -y dnsutils
@@ -106,7 +104,10 @@ jobs:
             export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
+
             echo "Using API_PORT=${API_PORT}"
+
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
 
             for i in {1..60}; do
@@ -119,9 +120,11 @@ jobs:
             done
 
             curl -i -sS "http://127.0.0.1:${API_PORT}/debug/admin"
+
             curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
               --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
+
             curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
               --data '{"email":"diretor@empresa.com","password":"123456"}'
@@ -131,7 +134,7 @@ jobs:
               npm run admin:diagnose-hash -w @salesforce-pro/api
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              node -e "const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); (async () => { const users = await p.user.findMany({ select: { email: true, role: true, isActive: true }, orderBy: { createdAt: 'desc' }, take: 5 }); console.log(JSON.stringify({ project: process.env.COMPOSE_PROJECT_NAME, users }, null, 2)); await p.$disconnect(); })().catch(async (e) => { console.error(e); process.exitCode = 1; });"
+              node -e "const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); (async () => { const users = await p.user.findMany({ select: { email: true, role: true, isActive: true }, orderBy: { createdAt: 'desc' }, take: 5 }); console.log(JSON.stringify({ project: process.env.COMPOSE_PROJECT_NAME, users }, null, 2)); await p.\$disconnect(); })().catch(async (e) => { console.error(e); process.exitCode = 1; });"
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=300
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps

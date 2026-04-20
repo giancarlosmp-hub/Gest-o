@@ -29,15 +29,17 @@ jobs:
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
             PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
-            PREVIEW_VOLUME="gesto_pgdata_pr_${PR_NUMBER}"
+            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
 
-            if [ -d "$PREVIEW_DIR" ]; then
-              cd "$PREVIEW_DIR"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
-              cd /
-              rm -rf "$PREVIEW_DIR"
-            else
+            if [ ! -d "$PREVIEW_DIR" ]; then
               echo "Preview directory not found, nothing to cleanup."
+              docker volume rm "${PREVIEW_VOLUME}" || true
+              exit 0
             fi
+
+            cd "$PREVIEW_DIR"
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
+            cd /
+            rm -rf "$PREVIEW_DIR"
 
             docker volume rm "${PREVIEW_VOLUME}" || true

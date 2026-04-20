@@ -7,7 +7,14 @@ async function main() {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    select: { id: true, email: true, role: true, isActive: true, passwordHash: true, createdAt: true }
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      isActive: true,
+      passwordHash: true,
+      createdAt: true
+    }
   });
 
   if (!user) {
@@ -26,6 +33,7 @@ async function main() {
   }
 
   const passwordMatches = await verifyPassword(password, user.passwordHash);
+
   console.log(
     JSON.stringify(
       {
