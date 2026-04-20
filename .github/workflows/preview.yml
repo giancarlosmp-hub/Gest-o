@@ -44,6 +44,9 @@ jobs:
             set -x
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
+            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
+            PREVIEW_DB="salesforce_pro_preview_pr_${PR_NUMBER}"
+            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
             PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
 
@@ -58,7 +61,17 @@ jobs:
             git checkout "${PR_BRANCH}"
 
             cat > .env <<ENVFILE
+            COMPOSE_PROJECT_NAME=${PREVIEW_PROJECT}
+            POSTGRES_DB=${PREVIEW_DB}
+            POSTGRES_VOLUME_NAME=${PREVIEW_VOLUME}
             ADMIN_BOOTSTRAP_ENABLED=true
+            ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
+            ADMIN_BOOTSTRAP_EMAIL=admin+pr${PR_NUMBER}@preview.local
+            ADMIN_BOOTSTRAP_PASSWORD=PreviewPr${PR_NUMBER}!123
+            ADMIN_BOOTSTRAP_ROLE=diretor
+            ADMIN_BOOTSTRAP_REGION=Nacional
+            SEED_ON_BOOTSTRAP=false
+            ENABLE_SMOKE_BOOTSTRAP=false
             WEB_PORT=61${PR_NUMBER}
             API_PORT=40${PR_NUMBER}
             ENVFILE
@@ -87,8 +100,11 @@ jobs:
             echo "Expected VPS host/IP: ${VPS_HOST}"
 
             export API_PORT="40${PR_NUMBER}"
+            export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
+            export POSTGRES_DB="${PREVIEW_DB}"
+            export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
             echo "Using API_PORT=${API_PORT}"
-            docker compose up -d --build
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
 
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
@@ -102,13 +118,14 @@ jobs:
             curl -i -sS "http://127.0.0.1:${API_PORT}/debug/admin"
             curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
-              --data '{"email":"admin@preview.local","password":"123456"}'
+              --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
             curl -i -sS -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
               --data '{"email":"diretor@empresa.com","password":"123456"}'
 
-            docker compose logs api --tail=300
-            docker compose ps
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api node -e "const { PrismaClient } = require('@prisma/client'); const p = new PrismaClient(); (async () => { const users = await p.user.findMany({ select: { email: true, role: true, isActive: true }, orderBy: { createdAt: 'desc' }, take: 5 }); console.log(JSON.stringify({ project: process.env.COMPOSE_PROJECT_NAME, users }, null, 2)); await p.\$disconnect(); })().catch(async (e) => { console.error(e); process.exitCode = 1; });"
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=300
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
