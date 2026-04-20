@@ -83,12 +83,14 @@ jobs:
             sudo systemctl reload nginx
 
             export API_PORT="40${PR_NUMBER}"
+            export WEB_PORT="61${PR_NUMBER}"
             export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
 
             API_HEALTHY=false
             for i in {1..60}; do
@@ -104,6 +106,37 @@ jobs:
             if [ "$API_HEALTHY" != "true" ]; then
               echo "API did not become healthy in time"
               docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              exit 1
+            fi
+
+            WEB_HEALTHY=false
+            for i in {1..60}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
+              if [ "$STATUS" = "200" ]; then
+                echo "WEB healthy"
+                WEB_HEALTHY=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$WEB_HEALTHY" != "true" ]; then
+              echo "WEB did not become healthy in time"
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              exit 1
+            fi
+
+            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/" || true)
+            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/" || true)
+            echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
+            echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
+
+            if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
+              echo "Reverse proxy check failed"
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              sudo tail -n 200 /var/log/nginx/preview_error.log || true
               exit 1
             fi
 
