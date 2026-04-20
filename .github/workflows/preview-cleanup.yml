@@ -1,0 +1,37 @@
+name: Preview Cleanup
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  cleanup-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup preview stack on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          port: 22022
+          script_stop: true
+          envs: PR_NUMBER
+          script: |
+            set -euo pipefail
+
+            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
+            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
+
+            if [ ! -d "$PREVIEW_DIR" ]; then
+              echo "Preview directory not found, nothing to cleanup."
+              exit 0
+            fi
+
+            cd "$PREVIEW_DIR"
+
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
+            rm -rf "$PREVIEW_DIR"
