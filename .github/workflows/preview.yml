@@ -83,12 +83,28 @@ jobs:
             sudo systemctl reload nginx
 
             export API_PORT="40${PR_NUMBER}"
+            export WEB_PORT="61${PR_NUMBER}"
             export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
+
+            collect_preview_debug() {
+              echo "=== PREVIEW DEBUG: docker compose ps ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps || true
+              echo "=== PREVIEW DEBUG: api logs ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              echo "=== PREVIEW DEBUG: web logs ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              echo "=== PREVIEW DEBUG: nginx preview logs ==="
+              sudo tail -n 200 /var/log/nginx/crm-preview-error.log 2>/dev/null || true
+              sudo tail -n 200 /var/log/nginx/crm-preview-access.log 2>/dev/null || true
+              sudo tail -n 200 /var/log/nginx/error.log 2>/dev/null || true
+              sudo tail -n 200 /var/log/nginx/access.log 2>/dev/null || true
+            }
 
             API_HEALTHY=false
             for i in {1..60}; do
@@ -103,7 +119,46 @@ jobs:
 
             if [ "$API_HEALTHY" != "true" ]; then
               echo "API did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              collect_preview_debug
+              exit 1
+            fi
+
+            WEB_HEALTHY=false
+            for i in {1..60}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
+              if [ "$STATUS" = "200" ]; then
+                echo "Web healthy"
+                WEB_HEALTHY=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$WEB_HEALTHY" != "true" ]; then
+              echo "Web did not become healthy in time"
+              collect_preview_debug
+              exit 1
+            fi
+
+            PROXY_HTTP_STATUS=$(curl -sS -o /tmp/preview-proxy-http-body -w "%{http_code}" \
+              -H "Host: ${PREVIEW_HOST_HTTP}" \
+              "http://127.0.0.1/" || true)
+            if [ "$PROXY_HTTP_STATUS" != "200" ]; then
+              echo "Proxy HTTP check failed with status ${PROXY_HTTP_STATUS}"
+              echo "HTTP response body:"
+              cat /tmp/preview-proxy-http-body || true
+              collect_preview_debug
+              exit 1
+            fi
+
+            PROXY_HTTPS_STATUS=$(curl -k -sS -o /tmp/preview-proxy-https-body -w "%{http_code}" \
+              --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" \
+              "https://${PREVIEW_HOST_TLS}/" || true)
+            if [ "$PROXY_HTTPS_STATUS" != "200" ]; then
+              echo "Proxy HTTPS check failed with status ${PROXY_HTTPS_STATUS}"
+              echo "HTTPS response body:"
+              cat /tmp/preview-proxy-https-body || true
+              collect_preview_debug
               exit 1
             fi
 
