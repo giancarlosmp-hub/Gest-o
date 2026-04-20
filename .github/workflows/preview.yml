@@ -17,6 +17,7 @@ jobs:
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+      PR_SHA: ${{ github.event.pull_request.head.sha }}
       PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}-crm.demetraagronegocios.com.br
       PREVIEW_URL_HTTP: http://pr-${{ github.event.pull_request.number }}.crm.demetraagronegocios.com.br
       GITHUB_REPOSITORY: ${{ github.repository }}
@@ -29,6 +30,7 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -38,7 +40,7 @@ jobs:
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,VPS_HOST
+          envs: PR_NUMBER,PR_BRANCH,PR_SHA,GITHUB_REPOSITORY,GITHUB_TOKEN,VPS_HOST
           script: |
             set -euo pipefail
             set -x
@@ -55,7 +57,8 @@ jobs:
             cd "$PREVIEW_DIR"
 
             git clone --depth 1 --branch "${PR_BRANCH}" "https://github.com/${GITHUB_REPOSITORY}.git" .
-            git checkout "${PR_BRANCH}"
+            git fetch --depth 1 origin "${PR_SHA}"
+            git checkout --detach "${PR_SHA}"
 
             cat > .env <<ENVFILE
             ADMIN_BOOTSTRAP_ENABLED=true
