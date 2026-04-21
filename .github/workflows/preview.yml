@@ -86,92 +86,9 @@ jobs:
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
 
-            echo "=== PREVIEW ISOLATION CHECK ==="
-            echo "COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}"
-            echo "API_PORT=${API_PORT} WEB_PORT=${WEB_PORT}"
-            if [ "${COMPOSE_PROJECT_NAME}" != "gesto-pr-${PR_NUMBER}" ]; then
-              echo "Invalid compose project name for PR isolation"
-              exit 1
-            fi
-            if [ "${API_PORT}" -lt 1024 ] || [ "${API_PORT}" -gt 65535 ]; then
-              echo "API_PORT out of range: ${API_PORT}"
-              exit 1
-            fi
-            if [ "${WEB_PORT}" -lt 1024 ] || [ "${WEB_PORT}" -gt 65535 ]; then
-              echo "WEB_PORT out of range: ${WEB_PORT}"
-              exit 1
-            fi
-
-            echo "=== PREVIEW CLEANUP (DETERMINISTIC) ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --volumes --remove-orphans || true
-            docker ps -a --filter "name=${PREVIEW_PROJECT}" --format '{{.ID}}' | xargs -r docker rm -f || true
-            docker network ls --filter "name=${PREVIEW_PROJECT}" --format '{{.ID}}' | xargs -r docker network rm || true
-            docker volume rm -f "${PREVIEW_VOLUME}" || true
-            docker volume ls --filter "name=${PREVIEW_PROJECT}" -q | xargs -r docker volume rm -f || true
-
-            if docker ps --format '{{.Ports}}' | grep -E "(0\\.0\\.0\\.0|::):${API_PORT}->" >/dev/null; then
-              echo "API_PORT collision detected on ${API_PORT}"
-              docker ps -a
-              exit 1
-            fi
-            if docker ps --format '{{.Ports}}' | grep -E "(0\\.0\\.0\\.0|::):${WEB_PORT}->" >/dev/null; then
-              echo "WEB_PORT collision detected on ${WEB_PORT}"
-              docker ps -a
-              exit 1
-            fi
-
-            echo "=== PREVIEW DOCKER STATE BEFORE START ==="
-            docker ps -a
-            docker volume ls | grep preview || true
-            docker network ls
-
-            echo "=== STARTUP ORDER: DB -> API/WEB -> NGINX ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build db
-
-            DB_HEALTHY=false
-            for i in {1..60}; do
-              DB_CONTAINER_ID=$(docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps -q db || true)
-              DB_STATUS=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${DB_CONTAINER_ID}" 2>/dev/null || true)
-              if [ "$DB_STATUS" = "healthy" ]; then
-                echo "DB healthy"
-                DB_HEALTHY=true
-                break
-              fi
-              sleep 2
-            done
-            if [ "$DB_HEALTHY" != "true" ]; then
-              echo "DB did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs db --tail=200 || true
-              exit 1
-            fi
-
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build api web
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
-
-            collect_preview_debug() {
-              echo "=== PREVIEW DEBUG: docker compose ps ==="
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps || true
-              echo "=== PREVIEW DEBUG: docker ps -a ==="
-              docker ps -a || true
-              echo "=== PREVIEW DEBUG: docker volume ls | grep preview ==="
-              docker volume ls | grep preview || true
-              echo "=== PREVIEW DEBUG: docker network ls ==="
-              docker network ls || true
-              echo "=== PREVIEW DEBUG: api logs ==="
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              echo "=== PREVIEW DEBUG: web logs ==="
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              echo "=== PREVIEW DEBUG: db logs ==="
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs db --tail=200 || true
-              echo "=== PREVIEW DEBUG: nginx preview logs ==="
-              sudo tail -n 200 /var/log/nginx/preview_error.log 2>/dev/null || true
-              sudo tail -n 200 /var/log/nginx/preview_access.log 2>/dev/null || true
-              sudo tail -n 200 /var/log/nginx/crm-preview-error.log 2>/dev/null || true
-              sudo tail -n 200 /var/log/nginx/crm-preview-access.log 2>/dev/null || true
-              sudo tail -n 200 /var/log/nginx/error.log 2>/dev/null || true
-              sudo tail -n 200 /var/log/nginx/access.log 2>/dev/null || true
-            }
 
             API_HEALTHY=false
             for i in {1..60}; do
@@ -187,6 +104,37 @@ jobs:
             if [ "$API_HEALTHY" != "true" ]; then
               echo "API did not become healthy in time"
               collect_preview_debug
+              exit 1
+            fi
+
+            WEB_HEALTHY=false
+            for i in {1..60}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
+              if [ "$STATUS" = "200" ]; then
+                echo "WEB healthy"
+                WEB_HEALTHY=true
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$WEB_HEALTHY" != "true" ]; then
+              echo "WEB did not become healthy in time"
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              exit 1
+            fi
+
+            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/" || true)
+            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/" || true)
+            echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
+            echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
+
+            if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
+              echo "Reverse proxy check failed"
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              sudo tail -n 200 /var/log/nginx/preview_error.log || true
               exit 1
             fi
 
