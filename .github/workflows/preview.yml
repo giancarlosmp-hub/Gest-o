@@ -100,6 +100,8 @@ jobs:
               echo "=== PREVIEW DEBUG: web logs ==="
               docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
               echo "=== PREVIEW DEBUG: nginx preview logs ==="
+              sudo tail -n 200 /var/log/nginx/preview_error.log 2>/dev/null || true
+              sudo tail -n 200 /var/log/nginx/preview_access.log 2>/dev/null || true
               sudo tail -n 200 /var/log/nginx/crm-preview-error.log 2>/dev/null || true
               sudo tail -n 200 /var/log/nginx/crm-preview-access.log 2>/dev/null || true
               sudo tail -n 200 /var/log/nginx/error.log 2>/dev/null || true
@@ -150,7 +152,7 @@ jobs:
 
             PROXY_HTTP_STATUS=$(curl -sS -o /tmp/preview-proxy-http-body -w "%{http_code}" \
               -H "Host: ${PREVIEW_HOST_HTTP}" \
-              "http://127.0.0.1/" || true)
+              "http://127.0.0.1/healthz" || true)
             if [ "$PROXY_HTTP_STATUS" != "200" ]; then
               echo "Proxy HTTP check failed with status ${PROXY_HTTP_STATUS}"
               echo "HTTP response body:"
@@ -161,7 +163,7 @@ jobs:
 
             PROXY_HTTPS_STATUS=$(curl -k -sS -o /tmp/preview-proxy-https-body -w "%{http_code}" \
               --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" \
-              "https://${PREVIEW_HOST_TLS}/" || true)
+              "https://${PREVIEW_HOST_TLS}/healthz" || true)
             if [ "$PROXY_HTTPS_STATUS" != "200" ]; then
               echo "Proxy HTTPS check failed with status ${PROXY_HTTPS_STATUS}"
               echo "HTTPS response body:"
