@@ -175,26 +175,55 @@ jobs:
             echo "=== DEBUG ADMIN ==="
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
 
+            echo "=== ENSURE PREVIEW ADMIN USER ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node dist/scripts/adminEnsureUser.js \
+                --name "Admin Preview PR ${PR_NUMBER}" \
+                --email "admin+pr${PR_NUMBER}@preview.local" \
+                --password "PreviewPr${PR_NUMBER}!123" \
+                --role "diretor" \
+                --region "Nacional"
+
+            echo "=== CHECK PREVIEW ADMIN IN DATABASE ==="
+            DB_ADMIN_ROW=$(
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T db sh -lc \
+                "psql -U \"\${POSTGRES_USER:-postgres}\" -d \"${PREVIEW_DB}\" -tAc \"SELECT email FROM \\\"User\\\" WHERE email='admin+pr${PR_NUMBER}@preview.local' LIMIT 1;\""
+            )
+            DB_ADMIN_EMAIL=$(echo "$DB_ADMIN_ROW" | tr -d '[:space:]')
+            if [ -z "$DB_ADMIN_EMAIL" ]; then
+              echo "Preview admin user not found in database"
+              collect_preview_debug
+              exit 1
+            fi
+            echo "Preview admin found in DB: ${DB_ADMIN_EMAIL}"
+
             echo "=== LOGIN ADMIN PREVIEW ==="
-            curl -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+            LOGIN_STATUS=$(curl -sS -o /tmp/preview-login-body -w "%{http_code}" -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
-              --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
+              --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}" || true)
+            if [ "$LOGIN_STATUS" != "200" ]; then
+              echo "Preview admin login failed with status ${LOGIN_STATUS}"
+              cat /tmp/preview-login-body || true
+              collect_preview_debug
+              exit 1
+            fi
 
             echo "=== DIAGNOSE HASH ==="
-            set +e
             DIAG_OUTPUT=$(
               docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
                 env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
                 npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
             )
-            DIAG_STATUS=$?
-            set -e
             echo "$DIAG_OUTPUT"
             if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
-              echo "Diagnose result: user_not_found (non-blocking)."
+              echo "Diagnose result: user_not_found"
+              collect_preview_debug
+              exit 1
             fi
-            if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
+            if ! echo "$DIAG_OUTPUT" | grep -q '"passwordMatches":[[:space:]]*true'; then
+              echo "Diagnose result: password does not match expected preview credential"
+              collect_preview_debug
+              exit 1
             fi
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
