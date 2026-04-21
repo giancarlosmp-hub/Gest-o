@@ -123,6 +123,14 @@ jobs:
               exit 1
             fi
 
+            echo "=== BOOTSTRAP ADMIN ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              npm run docker:start -w @salesforce-pro/api
+            echo "Bootstrap executed"
+            echo "Admin ensured"
+
             WEB_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
@@ -161,14 +169,6 @@ jobs:
               collect_preview_debug
               exit 1
             fi
-
-            echo "=== BOOTSTRAP ADMIN ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              npm run docker:start -w @salesforce-pro/api
-            echo "Bootstrap executed"
-            echo "Admin ensured"
 
             echo "=== DEBUG ADMIN ==="
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
