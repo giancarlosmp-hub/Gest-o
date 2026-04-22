@@ -87,6 +87,9 @@ jobs:
             export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
+            set -a
+            . ./.env
+            set +a
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
@@ -143,10 +146,23 @@ jobs:
             echo "=== BOOTSTRAP ADMIN ==="
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
+            echo "=== ENV CHECK (ADMIN_BOOTSTRAP_*) ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              sh -lc 'printenv | grep ADMIN_BOOTSTRAP | sort'
+            echo "=== ENV CHECK (DATABASE_URL) ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              sh -lc 'printenv | grep DATABASE_URL'
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               npm run docker:start -w @salesforce-pro/api
             echo "Bootstrap executed"
             echo "Admin ensured"
+
+            echo "=== DB CHECK (RECENT USERS) ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node -e "const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); (async () => { const users = await prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 10, select: { id: true, email: true, role: true, isActive: true, createdAt: true, passwordHash: true } }); console.log(JSON.stringify(users.map((u) => ({ ...u, hashPrefix: u.passwordHash?.slice(0, 4), hashLength: u.passwordHash?.length })), null, 2)); await prisma.\$disconnect(); })().catch(async (err) => { console.error(err); await prisma.\$disconnect(); process.exit(1); });"
+            echo "=== DB CHECK (EXPECTED ADMIN) ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node -e "const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); (async () => { const email = 'admin+pr${PR_NUMBER}@preview.local'; const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, role: true, isActive: true, passwordHash: true, createdAt: true, updatedAt: true } }); if (!user) { console.error('EXPECTED_ADMIN_NOT_FOUND', email); process.exit(1); } console.log(JSON.stringify({ ...user, hashPrefix: user.passwordHash?.slice(0, 4), hashLength: user.passwordHash?.length }, null, 2)); await prisma.\$disconnect(); })().catch(async (err) => { console.error(err); await prisma.\$disconnect(); process.exit(1); });"
 
             echo "=== DEBUG ADMIN ==="
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
@@ -167,10 +183,12 @@ jobs:
             set -e
             echo "$DIAG_OUTPUT"
             if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
-              echo "Diagnose result: user_not_found (non-blocking)."
+              echo "Diagnose result: user_not_found (blocking)."
+              exit 1
             fi
             if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
+              echo "Diagnose exited with status ${DIAG_STATUS}; blocking deploy."
+              exit "$DIAG_STATUS"
             fi
 
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
