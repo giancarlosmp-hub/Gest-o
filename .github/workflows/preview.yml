@@ -49,6 +49,49 @@ jobs:
             PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
             PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
+            API_PORT="40${PR_NUMBER}"
+            WEB_PORT="61${PR_NUMBER}"
+            ADMIN_EMAIL="admin+pr${PR_NUMBER}@preview.local"
+            ADMIN_PASSWORD="PreviewPr${PR_NUMBER}!123"
+
+            collect_preview_debug() {
+              echo "=== PREVIEW DOCKER COMPOSE PS ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps || true
+
+              echo "=== PREVIEW DOCKER PS -A ==="
+              docker ps -a || true
+
+              echo "=== PREVIEW DOCKER NETWORK LS ==="
+              docker network ls || true
+
+              echo "=== PREVIEW DOCKER VOLUME LS ==="
+              docker volume ls || true
+
+              echo "=== PREVIEW API LOGS ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=300 || true
+
+              echo "=== PREVIEW WEB LOGS ==="
+              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=300 || true
+
+              echo "=== NGINX PREVIEW ERROR LOG ==="
+              sudo tail -n 300 /var/log/nginx/preview_error.log || true
+
+              echo "=== NGINX PREVIEW ACCESS LOG ==="
+              sudo tail -n 300 /var/log/nginx/preview_access.log || true
+
+              echo "=== NGINX DEFAULT ERROR LOG ==="
+              sudo tail -n 300 /var/log/nginx/error.log || true
+
+              echo "=== NGINX DEFAULT ACCESS LOG ==="
+              sudo tail -n 300 /var/log/nginx/access.log || true
+            }
+
+            echo "=== PREVIEW CLEAN START ==="
+            echo "COMPOSE_PROJECT_NAME=${PREVIEW_PROJECT}"
+            echo "POSTGRES_DB=${PREVIEW_DB}"
+            echo "POSTGRES_VOLUME_NAME=${PREVIEW_VOLUME}"
+            echo "API_PORT=${API_PORT}"
+            echo "WEB_PORT=${WEB_PORT}"
 
             if [ -d "$PREVIEW_DIR" ]; then
               rm -rf "$PREVIEW_DIR"
@@ -66,14 +109,14 @@ jobs:
             POSTGRES_VOLUME_NAME=${PREVIEW_VOLUME}
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
-            ADMIN_BOOTSTRAP_EMAIL=admin+pr${PR_NUMBER}@preview.local
-            ADMIN_BOOTSTRAP_PASSWORD=PreviewPr${PR_NUMBER}!123
+            ADMIN_BOOTSTRAP_EMAIL=${ADMIN_EMAIL}
+            ADMIN_BOOTSTRAP_PASSWORD=${ADMIN_PASSWORD}
             ADMIN_BOOTSTRAP_ROLE=diretor
             ADMIN_BOOTSTRAP_REGION=Nacional
             SEED_ON_BOOTSTRAP=false
             ENABLE_SMOKE_BOOTSTRAP=false
-            WEB_PORT=61${PR_NUMBER}
-            API_PORT=40${PR_NUMBER}
+            WEB_PORT=${WEB_PORT}
+            API_PORT=${API_PORT}
             ENVFILE
 
             sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
@@ -82,23 +125,45 @@ jobs:
             sudo nginx -t
             sudo systemctl reload nginx
 
-            export API_PORT="40${PR_NUMBER}"
-            export WEB_PORT="61${PR_NUMBER}"
+            export API_PORT="${API_PORT}"
+            export WEB_PORT="${WEB_PORT}"
             export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
             export POSTGRES_DB="${PREVIEW_DB}"
             export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
-            set -a
-            . ./.env
-            set +a
 
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
+            echo "=== FULL CLEANUP BEFORE START ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --volumes --remove-orphans || true
+            docker rm -f $(docker ps -aq --filter "name=${PREVIEW_PROJECT}") 2>/dev/null || true
+            docker volume rm -f "${PREVIEW_VOLUME}" 2>/dev/null || true
+
+            echo "=== STARTUP ORDER: DB/API/WEB ==="
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
+
+            DB_HEALTHY=false
+            for i in {1..60}; do
+              DB_CONTAINER_ID=$(docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps -q db || true)
+              if [ -n "${DB_CONTAINER_ID}" ]; then
+                DB_STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${DB_CONTAINER_ID}" || true)
+                if [ "${DB_STATUS}" = "healthy" ] || [ "${DB_STATUS}" = "running" ]; then
+                  echo "DB healthy"
+                  DB_HEALTHY=true
+                  break
+                fi
+              fi
+              sleep 2
+            done
+
+            if [ "${DB_HEALTHY}" != "true" ]; then
+              echo "DB did not become healthy in time"
+              collect_preview_debug
+              exit 1
+            fi
 
             API_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
-              if [ "$STATUS" = "200" ]; then
+              if [ "${STATUS}" = "200" ]; then
                 echo "API healthy"
                 API_HEALTHY=true
                 break
@@ -106,16 +171,16 @@ jobs:
               sleep 2
             done
 
-            if [ "$API_HEALTHY" != "true" ]; then
+            if [ "${API_HEALTHY}" != "true" ]; then
               echo "API did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              collect_preview_debug
               exit 1
             fi
 
             WEB_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
-              if [ "$STATUS" = "200" ]; then
+              if [ "${STATUS}" = "200" ]; then
                 echo "WEB healthy"
                 WEB_HEALTHY=true
                 break
@@ -123,75 +188,82 @@ jobs:
               sleep 2
             done
 
-            if [ "$WEB_HEALTHY" != "true" ]; then
+            if [ "${WEB_HEALTHY}" != "true" ]; then
               echo "WEB did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              collect_preview_debug
               exit 1
             fi
 
-            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/" || true)
-            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/" || true)
+            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/healthz" || true)
+            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/healthz" || true)
+
             echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
             echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
 
-            if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
-              echo "Reverse proxy check failed"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              sudo tail -n 200 /var/log/nginx/preview_error.log || true
+            if [ "${PROXY_HTTP_STATUS}" != "200" ]; then
+              echo "Proxy HTTP check failed with status ${PROXY_HTTP_STATUS}"
+              collect_preview_debug
               exit 1
             fi
 
-            echo "=== BOOTSTRAP ADMIN ==="
+            if [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
+              echo "Proxy HTTPS check failed with status ${PROXY_HTTPS_STATUS}"
+              collect_preview_debug
+              exit 1
+            fi
+
+            echo "=== ENSURE PREVIEW ADMIN USER ==="
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
-            echo "=== ENV CHECK (ADMIN_BOOTSTRAP_*) ==="
             docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'printenv | grep ADMIN_BOOTSTRAP | sort'
-            echo "=== ENV CHECK (DATABASE_URL) ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'printenv | grep DATABASE_URL'
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              npm run docker:start -w @salesforce-pro/api
-            echo "Bootstrap executed"
-            echo "Admin ensured"
+              node apps/api/dist/scripts/adminEnsureUser.js
 
-            echo "=== DB CHECK (RECENT USERS) ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              node -e "const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); (async () => { const users = await prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 10, select: { id: true, email: true, role: true, isActive: true, createdAt: true, passwordHash: true } }); console.log(JSON.stringify(users.map((u) => ({ ...u, hashPrefix: u.passwordHash?.slice(0, 4), hashLength: u.passwordHash?.length })), null, 2)); await prisma.\$disconnect(); })().catch(async (err) => { console.error(err); await prisma.\$disconnect(); process.exit(1); });"
-            echo "=== DB CHECK (EXPECTED ADMIN) ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              node -e "const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); (async () => { const email = 'admin+pr${PR_NUMBER}@preview.local'; const user = await prisma.user.findUnique({ where: { email }, select: { id: true, email: true, role: true, isActive: true, passwordHash: true, createdAt: true, updatedAt: true } }); if (!user) { console.error('EXPECTED_ADMIN_NOT_FOUND', email); process.exit(1); } console.log(JSON.stringify({ ...user, hashPrefix: user.passwordHash?.slice(0, 4), hashLength: user.passwordHash?.length }, null, 2)); await prisma.\$disconnect(); })().catch(async (err) => { console.error(err); await prisma.\$disconnect(); process.exit(1); });"
-
-            echo "=== DEBUG ADMIN ==="
-            curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
-
-            echo "=== LOGIN ADMIN PREVIEW ==="
-            curl -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" \
-              --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
-
-            echo "=== DIAGNOSE HASH ==="
-            set +e
-            DIAG_OUTPUT=$(
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-                env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
-                npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
-            )
-            DIAG_STATUS=$?
-            set -e
-            echo "$DIAG_OUTPUT"
-            if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
-              echo "Diagnose result: user_not_found (blocking)."
+            echo "=== VERIFY ADMIN EXISTS IN DB ==="
+            DB_CONTAINER=$(docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps -q db)
+            if [ -z "${DB_CONTAINER}" ]; then
+              echo "DB container not found"
+              collect_preview_debug
               exit 1
             fi
-            if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}; blocking deploy."
-              exit "$DIAG_STATUS"
+
+            USER_EXISTS=$(
+              docker exec -e PGPASSWORD=postgres "${DB_CONTAINER}" \
+                psql -U postgres -d "${PREVIEW_DB}" -tAc "SELECT email FROM \"User\" WHERE email='${ADMIN_EMAIL}' LIMIT 1;" \
+                | tr -d '[:space:]'
+            )
+
+            if [ "${USER_EXISTS}" != "${ADMIN_EMAIL}" ]; then
+              echo "Preview admin user not found in DB"
+              collect_preview_debug
+              exit 1
             fi
 
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
+            echo "Preview admin found in DB: ${USER_EXISTS}"
+
+            echo "=== LOGIN ADMIN PREVIEW ==="
+            LOGIN_STATUS=$(curl -s -o /tmp/preview_login_response.txt -w "%{http_code}" -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" \
+              --data "{\"email\":\"${ADMIN_EMAIL}\",\"password\":\"${ADMIN_PASSWORD}\"}" || true)
+
+            cat /tmp/preview_login_response.txt || true
+            echo
+            echo "Login status: ${LOGIN_STATUS}"
+
+            if [ "${LOGIN_STATUS}" != "200" ]; then
+              echo "Preview login failed"
+              collect_preview_debug
+              exit 1
+            fi
+
+            echo "=== DIAGNOSE HASH ==="
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              env ADMIN_DIAG_EMAIL="${ADMIN_EMAIL}" ADMIN_DIAG_PASSWORD="${ADMIN_PASSWORD}" \
+              npm run auth:diagnose-hash -w @salesforce-pro/api
+
+            echo "=== DEBUG ADMIN ==="
+            curl -i "http://127.0.0.1:${API_PORT}/debug/admin" || true
+
+            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
