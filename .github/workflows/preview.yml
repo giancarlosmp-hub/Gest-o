@@ -22,6 +22,13 @@ jobs:
       GITHUB_REPOSITORY: ${{ github.repository }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
+      COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}
+      POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}
+      POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}
+      API_PORT: 40${{ github.event.pull_request.number }}
+      WEB_PORT: 61${{ github.event.pull_request.number }}
+      ADMIN_BOOTSTRAP_EMAIL: admin+pr${{ github.event.pull_request.number }}@preview.local
+      ADMIN_BOOTSTRAP_PASSWORD: PreviewPr${{ github.event.pull_request.number }}!123
 
     steps:
       - name: Deploy preview on VPS
@@ -32,21 +39,25 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
+          COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}
+          POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}
+          POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}
+          API_PORT: 40${{ github.event.pull_request.number }}
+          WEB_PORT: 61${{ github.event.pull_request.number }}
+          ADMIN_BOOTSTRAP_EMAIL: admin+pr${{ github.event.pull_request.number }}@preview.local
+          ADMIN_BOOTSTRAP_PASSWORD: PreviewPr${{ github.event.pull_request.number }}!123
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,VPS_HOST
+          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,ADMIN_BOOTSTRAP_EMAIL,ADMIN_BOOTSTRAP_PASSWORD
           script: |
             set -euo pipefail
             set -x
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
-            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
-            PREVIEW_DB="salesforce_pro_preview_pr_${PR_NUMBER}"
-            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
             PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
 
@@ -61,9 +72,9 @@ jobs:
             git checkout "${PR_BRANCH}"
 
             cat > .env <<ENVFILE
-            COMPOSE_PROJECT_NAME=${PREVIEW_PROJECT}
-            POSTGRES_DB=${PREVIEW_DB}
-            POSTGRES_VOLUME_NAME=${PREVIEW_VOLUME}
+            COMPOSE_PROJECT_NAME=gesto-pr-${PR_NUMBER}
+            POSTGRES_DB=salesforce_pro_preview_pr_${PR_NUMBER}
+            POSTGRES_VOLUME_NAME=gesto_pgdata_pr_${PR_NUMBER}
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
             ADMIN_BOOTSTRAP_EMAIL=admin+pr${PR_NUMBER}@preview.local
@@ -82,15 +93,17 @@ jobs:
             sudo nginx -t
             sudo systemctl reload nginx
 
+            export COMPOSE_PROJECT_NAME="gesto-pr-${PR_NUMBER}"
+            export POSTGRES_DB="salesforce_pro_preview_pr_${PR_NUMBER}"
+            export POSTGRES_VOLUME_NAME="gesto_pgdata_pr_${PR_NUMBER}"
             export API_PORT="40${PR_NUMBER}"
             export WEB_PORT="61${PR_NUMBER}"
-            export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
-            export POSTGRES_DB="${PREVIEW_DB}"
-            export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
+            export ADMIN_BOOTSTRAP_EMAIL="admin+pr${PR_NUMBER}@preview.local"
+            export ADMIN_BOOTSTRAP_PASSWORD="PreviewPr${PR_NUMBER}!123"
 
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps
 
             API_HEALTHY=false
             for i in {1..60}; do
@@ -105,7 +118,7 @@ jobs:
 
             if [ "$API_HEALTHY" != "true" ]; then
               echo "API did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
               exit 1
             fi
 
@@ -122,8 +135,8 @@ jobs:
 
             if [ "$WEB_HEALTHY" != "true" ]; then
               echo "WEB did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
               exit 1
             fi
 
@@ -134,17 +147,20 @@ jobs:
 
             if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
               echo "Reverse proxy check failed"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
               sudo tail -n 200 /var/log/nginx/preview_error.log || true
               exit 1
             fi
 
             echo "=== BOOTSTRAP ADMIN ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              npm run docker:start -w @salesforce-pro/api
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node apps/api/dist/scripts/adminEnsureUser.js \
+              --name "Admin Preview PR ${PR_NUMBER}" \
+              --email "$ADMIN_BOOTSTRAP_EMAIL" \
+              --password "$ADMIN_BOOTSTRAP_PASSWORD" \
+              --role "diretor" \
+              --region "Nacional"
             echo "Bootstrap executed"
             echo "Admin ensured"
 
@@ -159,7 +175,7 @@ jobs:
             echo "=== DIAGNOSE HASH ==="
             set +e
             DIAG_OUTPUT=$(
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
                 env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
                 npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
             )
@@ -173,7 +189,7 @@ jobs:
               echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
             fi
 
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
