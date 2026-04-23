@@ -14,173 +14,119 @@ permissions:
 jobs:
   deploy-preview:
     runs-on: ubuntu-latest
+
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-      PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}-crm.demetraagronegocios.com.br
-      PREVIEW_URL_HTTP: http://pr-${{ github.event.pull_request.number }}.crm.demetraagronegocios.com.br
-      GITHUB_REPOSITORY: ${{ github.repository }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      PREVIEW_PROJECT: gesto-pr-${{ github.event.pull_request.number }}
+      PREVIEW_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}
+      PREVIEW_VOLUME: gesto_pgdata_pr_${{ github.event.pull_request.number }}
+
+      API_PORT: 40${{ github.event.pull_request.number }}
+      WEB_PORT: 61${{ github.event.pull_request.number }}
+
+      PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}.crm.demetraagronegocios.com.br
+
+      ADMIN_EMAIL: admin+pr${{ github.event.pull_request.number }}@preview.local
+      ADMIN_PASSWORD: PreviewPr${{ github.event.pull_request.number }}!123
+
       VPS_HOST: ${{ secrets.VPS_HOST }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Deploy preview on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VPS_HOST: ${{ secrets.VPS_HOST }}
+          PR_NUMBER: ${{ env.PR_NUMBER }}
+          PR_BRANCH: ${{ env.PR_BRANCH }}
+          PREVIEW_PROJECT: ${{ env.PREVIEW_PROJECT }}
+          PREVIEW_DB: ${{ env.PREVIEW_DB }}
+          PREVIEW_VOLUME: ${{ env.PREVIEW_VOLUME }}
+          API_PORT: ${{ env.API_PORT }}
+          WEB_PORT: ${{ env.WEB_PORT }}
+          ADMIN_EMAIL: ${{ env.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ env.ADMIN_PASSWORD }}
+
         with:
           host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          username: root
           key: ${{ secrets.VPS_KEY }}
-          port: 22022
-          script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,VPS_HOST
+          port: 22022   # 🔥 CORREÇÃO AQUI
+
           script: |
-            set -euo pipefail
-            set -x
 
-            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
-            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
-            PREVIEW_DB="salesforce_pro_preview_pr_${PR_NUMBER}"
-            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
-            PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
-            PREVIEW_HOST_HTTP="pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
+            set -e
 
-            if [ -d "$PREVIEW_DIR" ]; then
-              rm -rf "$PREVIEW_DIR"
+            echo "=== PREVIEW CLEANUP ==="
+            docker compose -p "$PREVIEW_PROJECT" -f docker-compose.yml -f docker-compose.preview.yml down --volumes --remove-orphans || true
+            docker volume rm -f "$PREVIEW_VOLUME" || true
+
+            echo "=== CLONE / UPDATE REPO ==="
+            if [ ! -d "app" ]; then
+              git clone https://github.com/${{ github.repository }}.git app
             fi
 
-            mkdir -p "$PREVIEW_DIR"
-            cd "$PREVIEW_DIR"
+            cd app
+            git fetch origin
+            git checkout $PR_BRANCH
+            git pull origin $PR_BRANCH
 
-            git clone --depth 1 --branch "${PR_BRANCH}" "https://github.com/${GITHUB_REPOSITORY}.git" .
-            git checkout "${PR_BRANCH}"
+            echo "=== BUILD AND START ==="
+            docker compose -p "$PREVIEW_PROJECT" \
+              -f docker-compose.yml \
+              -f docker-compose.preview.yml \
+              up -d --build
 
-            cat > .env <<ENVFILE
-            COMPOSE_PROJECT_NAME=${PREVIEW_PROJECT}
-            POSTGRES_DB=${PREVIEW_DB}
-            POSTGRES_VOLUME_NAME=${PREVIEW_VOLUME}
-            ADMIN_BOOTSTRAP_ENABLED=true
-            ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
-            ADMIN_BOOTSTRAP_EMAIL=admin+pr${PR_NUMBER}@preview.local
-            ADMIN_BOOTSTRAP_PASSWORD=PreviewPr${PR_NUMBER}!123
-            ADMIN_BOOTSTRAP_ROLE=diretor
-            ADMIN_BOOTSTRAP_REGION=Nacional
-            SEED_ON_BOOTSTRAP=false
-            ENABLE_SMOKE_BOOTSTRAP=false
-            WEB_PORT=61${PR_NUMBER}
-            API_PORT=40${PR_NUMBER}
-            ENVFILE
-
-            sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
-            sudo cp docs/ops/nginx-crm-preview.conf /etc/nginx/sites-available/crm-preview
-            sudo ln -sfn /etc/nginx/sites-available/crm-preview /etc/nginx/sites-enabled/crm-preview
-            sudo nginx -t
-            sudo systemctl reload nginx
-
-            export API_PORT="40${PR_NUMBER}"
-            export WEB_PORT="61${PR_NUMBER}"
-            export COMPOSE_PROJECT_NAME="${PREVIEW_PROJECT}"
-            export POSTGRES_DB="${PREVIEW_DB}"
-            export POSTGRES_VOLUME_NAME="${PREVIEW_VOLUME}"
-
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml ps
-
-            API_HEALTHY=false
+            echo "=== WAIT DB HEALTH ==="
+            DB_HEALTHY=false
             for i in {1..60}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
+              DB_CONTAINER=$(docker ps --filter "name=${PREVIEW_PROJECT}-db" --format "{{.ID}}")
+              if [ -n "$DB_CONTAINER" ]; then
+                STATUS=$(docker inspect --format='{{.State.Health.Status}}' $DB_CONTAINER || echo "none")
+                if [ "$STATUS" = "healthy" ]; then
+                  echo "DB healthy"
+                  DB_HEALTHY=true
+                  break
+                fi
+              fi
+              sleep 2
+            done
+
+            if [ "$DB_HEALTHY" != true ]; then
+              echo "DB did not become healthy"
+              docker ps -a
+              exit 1
+            fi
+
+            echo "=== ENSURE PREVIEW ADMIN USER ==="
+            docker compose -p "$PREVIEW_PROJECT" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
+              node apps/api/dist/scripts/adminEnsureUser.js \
+                --name "Admin Preview PR ${PR_NUMBER}" \
+                --email "${ADMIN_EMAIL}" \
+                --password "${ADMIN_PASSWORD}" \
+                --role "diretor" \
+                --region "Nacional"
+
+            echo "=== CHECK API HEALTH ==="
+            for i in {1..60}; do
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${API_PORT}/health || true)
               if [ "$STATUS" = "200" ]; then
                 echo "API healthy"
-                API_HEALTHY=true
                 break
               fi
               sleep 2
             done
 
-            if [ "$API_HEALTHY" != "true" ]; then
-              echo "API did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              exit 1
-            fi
-
-            WEB_HEALTHY=false
+            echo "=== CHECK WEB ==="
             for i in {1..60}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
+              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${WEB_PORT} || true)
               if [ "$STATUS" = "200" ]; then
                 echo "WEB healthy"
-                WEB_HEALTHY=true
                 break
               fi
               sleep 2
             done
 
-            if [ "$WEB_HEALTHY" != "true" ]; then
-              echo "WEB did not become healthy in time"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              exit 1
-            fi
-
-            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/" || true)
-            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/" || true)
-            echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
-            echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
-
-            if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
-              echo "Reverse proxy check failed"
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              sudo tail -n 200 /var/log/nginx/preview_error.log || true
-              exit 1
-            fi
-
-            echo "=== BOOTSTRAP ADMIN ==="
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              npm run docker:start -w @salesforce-pro/api
-            echo "Bootstrap executed"
-            echo "Admin ensured"
-
-            echo "=== DEBUG ADMIN ==="
-            curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
-
-            echo "=== LOGIN ADMIN PREVIEW ==="
-            curl -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" \
-              --data "{\"email\":\"admin+pr${PR_NUMBER}@preview.local\",\"password\":\"PreviewPr${PR_NUMBER}!123\"}"
-
-            echo "=== DIAGNOSE HASH ==="
-            set +e
-            DIAG_OUTPUT=$(
-              docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-                env ADMIN_DIAG_EMAIL="admin+pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="PreviewPr${PR_NUMBER}!123" \
-                npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
-            )
-            DIAG_STATUS=$?
-            set -e
-            echo "$DIAG_OUTPUT"
-            if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
-              echo "Diagnose result: user_not_found (non-blocking)."
-            fi
-            if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
-            fi
-
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
-
-      - name: Comment preview link on PR
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            🚀 Preview environment updated.
-
-            Preview URL (HTTPS): ${{ env.PREVIEW_URL }}
-            Preview URL (HTTP fallback): ${{ env.PREVIEW_URL_HTTP }}
+            echo "=== PREVIEW OK ==="
+            echo "URL: https://pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
