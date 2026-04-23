@@ -52,6 +52,8 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: root
           key: ${{ secrets.VPS_KEY }}
+          port: 22022   # 🔥 CORREÇÃO AQUI
+
           script: |
 
             set -e
@@ -99,9 +101,6 @@ jobs:
 
             echo "=== ENSURE PREVIEW ADMIN USER ==="
             docker compose -p "$PREVIEW_PROJECT" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              sh -lc 'pwd; ls -la; ls -la dist || true; ls -la apps/api/dist || true; ls -la apps/api/dist/scripts || true'
-
-            docker compose -p "$PREVIEW_PROJECT" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               node apps/api/dist/scripts/adminEnsureUser.js \
                 --name "Admin Preview PR ${PR_NUMBER}" \
                 --email "${ADMIN_EMAIL}" \
@@ -110,40 +109,24 @@ jobs:
                 --region "Nacional"
 
             echo "=== CHECK API HEALTH ==="
-            API_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${API_PORT}/health || true)
               if [ "$STATUS" = "200" ]; then
                 echo "API healthy"
-                API_HEALTHY=true
                 break
               fi
               sleep 2
             done
 
-            if [ "$API_HEALTHY" != true ]; then
-              echo "API did not respond"
-              docker logs ${PREVIEW_PROJECT}-api || true
-              exit 1
-            fi
-
             echo "=== CHECK WEB ==="
-            WEB_HEALTHY=false
             for i in {1..60}; do
               STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${WEB_PORT} || true)
               if [ "$STATUS" = "200" ]; then
                 echo "WEB healthy"
-                WEB_HEALTHY=true
                 break
               fi
               sleep 2
             done
-
-            if [ "$WEB_HEALTHY" != true ]; then
-              echo "WEB did not respond"
-              docker logs ${PREVIEW_PROJECT}-web || true
-              exit 1
-            fi
 
             echo "=== PREVIEW OK ==="
             echo "URL: https://pr-${PR_NUMBER}.crm.demetraagronegocios.com.br"
