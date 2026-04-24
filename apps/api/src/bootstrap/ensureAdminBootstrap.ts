@@ -42,19 +42,7 @@ export async function ensureAdminBootstrap() {
   }
 
   const adminBootstrap = resolveAdminBootstrapConfig();
-
-  const existing = await prisma.user.findUnique({
-    where: { email: adminBootstrap.email },
-    select: { id: true, passwordHash: true }
-  });
-
-  const shouldRotatePassword = existing
-    ? !(await verifyPassword(adminBootstrap.password, existing.passwordHash))
-    : true;
-
-  const passwordHash = shouldRotatePassword
-    ? await hashPassword(adminBootstrap.password)
-    : existing?.passwordHash;
+  const passwordHash = await hashPassword(adminBootstrap.password);
 
   const upsertedUser = await prisma.user.upsert({
     where: { email: adminBootstrap.email },
@@ -68,19 +56,22 @@ export async function ensureAdminBootstrap() {
     },
     update: {
       name: adminBootstrap.name,
+      passwordHash,
       role: adminBootstrap.role,
       region: adminBootstrap.region,
-      isActive: adminBootstrap.isActive,
-      ...(shouldRotatePassword && passwordHash ? { passwordHash } : {})
+      isActive: adminBootstrap.isActive
     },
     select: {
       id: true,
       email: true,
       role: true,
       region: true,
-      isActive: true
+      isActive: true,
+      passwordHash: true
     }
   });
+
+  const passwordMatches = await verifyPassword(adminBootstrap.password, upsertedUser.passwordHash);
 
   logApiEvent("INFO", "Usuário admin técnico garantido via bootstrap", {
     id: upsertedUser.id,
@@ -88,6 +79,9 @@ export async function ensureAdminBootstrap() {
     role: upsertedUser.role,
     region: upsertedUser.region,
     isActive: upsertedUser.isActive,
-    passwordRotated: shouldRotatePassword
+    passwordLength: adminBootstrap.password.length,
+    hashPrefix: upsertedUser.passwordHash.slice(0, 4),
+    hashLength: upsertedUser.passwordHash.length,
+    passwordMatches
   });
 }

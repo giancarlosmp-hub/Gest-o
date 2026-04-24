@@ -36,6 +36,11 @@ export async function login(req: Request, res: Response) {
       console.log("USER_FOUND_EMAIL=", user?.email ?? null);
       console.log("USER_FOUND_ID=", user?.id ?? null);
       console.log("PASSWORD_HASH_PRESENT=", Boolean(user?.passwordHash));
+      if (user?.passwordHash) {
+        console.log("LOGIN_PASSWORD_LENGTH=", typeof password === "string" ? password.length : 0);
+        console.log("LOGIN_HASH_PREFIX=", user.passwordHash.slice(0, 4));
+        console.log("LOGIN_HASH_LENGTH=", user.passwordHash.length);
+      }
 
       if (timedOut || res.headersSent) return;
       if (!user) {
@@ -47,6 +52,7 @@ export async function login(req: Request, res: Response) {
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
       const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
       console.log("BCRYPT_COMPARE_RESULT=", ok);
+      console.log("LOGIN_PASSWORD_MATCHES=", ok);
 
       if (timedOut || res.headersSent) return;
       if (!ok) return sendLoginResponse(401, { message: "Credenciais inválidas" });

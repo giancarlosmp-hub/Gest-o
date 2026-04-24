@@ -1,6 +1,6 @@
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
-import { hashPassword } from "../utils/password.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
 
 type EnsureUserArgs = {
   name: string;
@@ -74,7 +74,7 @@ async function ensureUser(args: EnsureUserArgs) {
   const existingUser = await prisma.user.findUnique({ where: { email: args.email }, select: { id: true } });
 
   if (!existingUser) {
-    await prisma.user.create({
+    const createdUser = await prisma.user.create({
       data: {
         name: args.name,
         email: args.email,
@@ -85,11 +85,19 @@ async function ensureUser(args: EnsureUserArgs) {
       }
     });
 
+    const passwordMatches = await verifyPassword(args.password, createdUser.passwordHash);
+    console.log("ADMIN_ENSURE_USER=", JSON.stringify({
+      email: args.email,
+      passwordLength: args.password.length,
+      hashPrefix: createdUser.passwordHash.slice(0, 4),
+      hashLength: createdUser.passwordHash.length,
+      passwordMatches
+    }));
     console.log(`✅ Usuário criado com sucesso: ${args.email}`);
     return;
   }
 
-  await prisma.user.update({
+  const updatedUser = await prisma.user.update({
     where: { id: existingUser.id },
     data: {
       name: args.name,
@@ -97,9 +105,18 @@ async function ensureUser(args: EnsureUserArgs) {
       role: args.role,
       region: args.region,
       isActive: true
-    }
+    },
+    select: { passwordHash: true }
   });
 
+  const passwordMatches = await verifyPassword(args.password, updatedUser.passwordHash);
+  console.log("ADMIN_ENSURE_USER=", JSON.stringify({
+    email: args.email,
+    passwordLength: args.password.length,
+    hashPrefix: updatedUser.passwordHash.slice(0, 4),
+    hashLength: updatedUser.passwordHash.length,
+    passwordMatches
+  }));
   console.log(`✅ Usuário atualizado com sucesso: ${args.email}`);
 }
 
