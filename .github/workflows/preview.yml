@@ -28,7 +28,7 @@ jobs:
       API_PORT: 40${{ github.event.pull_request.number }}
       WEB_PORT: 61${{ github.event.pull_request.number }}
       ADMIN_BOOTSTRAP_EMAIL: pr${{ github.event.pull_request.number }}@preview.local
-      ADMIN_BOOTSTRAP_PASSWORD: ${{ github.event.pull_request.number }}
+      ADMIN_BOOTSTRAP_PASSWORD: pr${{ github.event.pull_request.number }}pr${{ github.event.pull_request.number }}
 
     steps:
       - name: Deploy preview on VPS
@@ -45,7 +45,7 @@ jobs:
           API_PORT: 40${{ github.event.pull_request.number }}
           WEB_PORT: 61${{ github.event.pull_request.number }}
           ADMIN_BOOTSTRAP_EMAIL: pr${{ github.event.pull_request.number }}@preview.local
-          ADMIN_BOOTSTRAP_PASSWORD: ${{ github.event.pull_request.number }}
+          ADMIN_BOOTSTRAP_PASSWORD: pr${{ github.event.pull_request.number }}pr${{ github.event.pull_request.number }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
@@ -78,7 +78,7 @@ jobs:
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
             ADMIN_BOOTSTRAP_EMAIL=pr${PR_NUMBER}@preview.local
-            ADMIN_BOOTSTRAP_PASSWORD=${PR_NUMBER}
+            ADMIN_BOOTSTRAP_PASSWORD=pr${PR_NUMBER}pr${PR_NUMBER}
             ADMIN_BOOTSTRAP_ROLE=diretor
             ADMIN_BOOTSTRAP_REGION=Nacional
             SEED_ON_BOOTSTRAP=false
@@ -99,7 +99,7 @@ jobs:
             export API_PORT="40${PR_NUMBER}"
             export WEB_PORT="61${PR_NUMBER}"
             export ADMIN_BOOTSTRAP_EMAIL="pr${PR_NUMBER}@preview.local"
-            export ADMIN_BOOTSTRAP_PASSWORD="${PR_NUMBER}"
+            export ADMIN_BOOTSTRAP_PASSWORD="pr${PR_NUMBER}pr${PR_NUMBER}"
 
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
@@ -157,8 +157,8 @@ jobs:
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               node apps/api/dist/scripts/adminEnsureUser.js \
               --name "Admin Preview PR ${PR_NUMBER}" \
-              --email "pr${PR_NUMBER}@preview.local" \
-              --password "${PR_NUMBER}" \
+              --email "${ADMIN_BOOTSTRAP_EMAIL}" \
+              --password "${ADMIN_BOOTSTRAP_PASSWORD}" \
               --role "diretor" \
               --region "Nacional"
             echo "Bootstrap executed"
@@ -168,25 +168,43 @@ jobs:
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
 
             echo "=== LOGIN ADMIN PREVIEW ==="
-            curl -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+            LOGIN_RESPONSE=$(
+              curl -sS -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
-              --data "{\"email\":\"pr${PR_NUMBER}@preview.local\",\"password\":\"${PR_NUMBER}\"}"
+              --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}"
+            )
+            echo "${LOGIN_RESPONSE}"
+            LOGIN_RESPONSE_STATUS=$(echo "${LOGIN_RESPONSE}" | awk 'NR==1 {print $2}')
+            echo "LOGIN_RESPONSE_STATUS=${LOGIN_RESPONSE_STATUS}"
 
             echo "=== DIAGNOSE HASH ==="
             set +e
             DIAG_OUTPUT=$(
               docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-                env ADMIN_DIAG_EMAIL="pr${PR_NUMBER}@preview.local" ADMIN_DIAG_PASSWORD="${PR_NUMBER}" \
+                env ADMIN_BOOTSTRAP_EMAIL="${ADMIN_BOOTSTRAP_EMAIL}" ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD}" \
                 npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
             )
             DIAG_STATUS=$?
             set -e
             echo "$DIAG_OUTPUT"
-            if echo "$DIAG_OUTPUT" | grep -q "user_not_found"; then
-              echo "Diagnose result: user_not_found (non-blocking)."
-            fi
             if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}; continuing pipeline (non-blocking)."
+              echo "Diagnose exited with status ${DIAG_STATUS}"
+              exit 1
+            fi
+
+            if ! echo "$DIAG_OUTPUT" | grep -q '"passwordMatches": true'; then
+              echo "passwordMatches=false"
+              exit 1
+            fi
+
+            if ! echo "$DIAG_OUTPUT" | grep -q "\"email\": \"${ADMIN_BOOTSTRAP_EMAIL}\""; then
+              echo "Diagnose output is not using ADMIN_BOOTSTRAP_EMAIL"
+              exit 1
+            fi
+
+            if [ "${LOGIN_RESPONSE_STATUS}" != "200" ]; then
+              echo "Login status is not 200"
+              exit 1
             fi
 
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200

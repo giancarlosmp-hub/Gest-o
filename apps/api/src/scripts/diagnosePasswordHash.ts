@@ -2,8 +2,8 @@ import { prisma } from "../config/prisma.js";
 import { verifyPassword, isValidPasswordHashFormat } from "../utils/password.js";
 
 async function main() {
-  const email = (process.env.ADMIN_DIAG_EMAIL || "").trim().toLowerCase();
-  const password = process.env.ADMIN_DIAG_PASSWORD || "";
+  const email = (process.env.ADMIN_BOOTSTRAP_EMAIL || "").trim().toLowerCase();
+  const password = process.env.ADMIN_BOOTSTRAP_PASSWORD || "";
 
   // ===============================
   // MODO 1: DIAGNÓSTICO VIA BANCO
@@ -33,6 +33,7 @@ async function main() {
     console.log(JSON.stringify({
       mode: "db_lookup",
       email: user.email,
+      passwordLength: password.length,
       role: user.role,
       isActive: user.isActive,
       hashPrefix: user.passwordHash.slice(0, 4),
