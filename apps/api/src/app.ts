@@ -70,8 +70,12 @@ app.get("/debug", (_req, res) => {
 
 app.get("/debug/admin", async (_req, res) => {
   const { prisma } = await import("./config/prisma.js");
+  const bootstrapEmail = process.env.ADMIN_BOOTSTRAP_EMAIL;
+  const debugEmails = bootstrapEmail
+    ? [bootstrapEmail, "admin@preview.local", "admin@preview.com"]
+    : ["admin@preview.local", "admin@preview.com"];
   const admin = await prisma.user.findFirst({
-    where: { email: { in: ["admin@preview.local", "admin@preview.com"] } },
+    where: { email: { in: debugEmails } },
     orderBy: { createdAt: "desc" },
     select: { id: true, email: true, role: true, isActive: true, createdAt: true, passwordHash: true },
   });
