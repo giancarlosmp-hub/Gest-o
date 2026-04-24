@@ -157,8 +157,8 @@ jobs:
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
               node apps/api/dist/scripts/adminEnsureUser.js \
               --name "Admin Preview PR ${PR_NUMBER}" \
-              --email "$ADMIN_BOOTSTRAP_EMAIL" \
-              --password "$ADMIN_BOOTSTRAP_PASSWORD" \
+              --email "pr${PR_NUMBER}@preview.local" \
+              --password "${PR_NUMBER}" \
               --role "diretor" \
               --region "Nacional"
             echo "Bootstrap executed"
