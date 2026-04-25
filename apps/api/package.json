@@ -10,6 +10,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma db push",
     "prisma:seed": "tsx prisma/seed.js",
+    "seed:preview": "tsx prisma/seedPreview.ts",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",
     "docker:start": "node dist/scripts/bootstrap.js",
     "auth:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js",

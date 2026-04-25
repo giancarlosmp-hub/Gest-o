@@ -105,12 +105,12 @@ const toDateInput = (date: Date) => {
 
 const getClosedDefaultFilters = (): ClosedFilters => {
   const today = new Date();
-  const ninetyDaysAgo = new Date();
-  ninetyDaysAgo.setDate(today.getDate() - 90);
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
   return {
-    dateFrom: toDateInput(ninetyDaysAgo),
-    dateTo: toDateInput(today),
+    dateFrom: toDateInput(monthStart),
+    dateTo: toDateInput(monthEnd),
     ownerSellerId: "",
     clientId: "",
     crop: "",

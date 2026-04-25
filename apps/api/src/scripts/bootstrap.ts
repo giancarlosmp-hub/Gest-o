@@ -113,6 +113,16 @@ async function runDatabaseBootstrap() {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }
 
+  if (env.enablePreviewSeed) {
+    try {
+      runStep("npm run seed:preview -w @salesforce-pro/api", "preview seed");
+    } catch (error) {
+      console.error("PREVIEW SEED FAILED (non-blocking):", error);
+    }
+  } else {
+    console.log("Preview seed desabilitado (ENABLE_PREVIEW_SEED=false)");
+  }
+
 }
 
 async function start() {
