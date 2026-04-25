@@ -23,6 +23,7 @@ export const env = {
   frontendUrl:
     process.env.FRONTEND_URL || ((process.env.NODE_ENV || "development") === "production" ? "" : "http://localhost:5173"),
   seedOnBootstrap: toBoolean(process.env.SEED_ON_BOOTSTRAP, false),
+  enablePreviewSeed: toBoolean(process.env.ENABLE_PREVIEW_SEED, false),
   enableSmokeBootstrap: toBoolean(process.env.ENABLE_SMOKE_BOOTSTRAP, false),
   adminBootstrapEnabled: toBoolean(process.env.ADMIN_BOOTSTRAP_ENABLED, false),
   adminBootstrapName: process.env.ADMIN_BOOTSTRAP_NAME,
