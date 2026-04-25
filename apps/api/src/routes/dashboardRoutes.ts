@@ -47,20 +47,48 @@ router.get("/summary", async (req, res) => {
   const { start, end } = getMonthRange(month);
   const whereSale = getSellerSalesFilter(req);
   const whereOwner = sellerWhere(req);
+  const shouldLogDashboardDiagnostics = process.env.NODE_ENV !== "production";
+  const wonWhere = {
+    ...whereOwner,
+    stage: "ganho" as const,
+    ...buildWonDateRangeFilter(start, end)
+  };
+  const lostWhere = {
+    ...whereOwner,
+    stage: "perdido" as const,
+    OR: [
+      { closedAt: { gte: start, lte: end } },
+      { closedAt: null, expectedCloseDate: { gte: start, lte: end } }
+    ]
+  };
 
   const [wonOpportunities, lostOpportunities, openOpportunities, newLeads, goals, users, recentActivities] = await Promise.all([
     prisma.opportunity.findMany({
-      where: {
-        ...whereOwner,
-        stage: "ganho",
-        ...buildWonDateRangeFilter(start, end)
+      where: wonWhere,
+      select: {
+        id: true,
+        title: true,
+        stage: true,
+        value: true,
+        closedAt: true,
+        expectedCloseDate: true,
+        proposalDate: true,
+        ownerSellerId: true,
+        ownerSeller: { select: { name: true } }
       }
     }),
     prisma.opportunity.findMany({
-      where: {
-        ...whereOwner,
-        stage: "perdido",
-        expectedCloseDate: { gte: start, lte: end }
+      where: lostWhere,
+      select: {
+        id: true,
+        title: true,
+        stage: true,
+        value: true,
+        closedAt: true,
+        expectedCloseDate: true,
+        proposalDate: true,
+        ownerSellerId: true,
+        ownerSeller: { select: { name: true } }
       }
     }),
     prisma.opportunity.findMany({
@@ -118,6 +146,34 @@ router.get("/summary", async (req, res) => {
       };
     })
     .sort((a, b) => b.revenue - a.revenue);
+
+  if (shouldLogDashboardDiagnostics) {
+    const summarize = (opportunity: (typeof wonOpportunities)[number]) => ({
+      id: opportunity.id,
+      title: opportunity.title,
+      stage: opportunity.stage,
+      value: opportunity.value,
+      closedAt: opportunity.closedAt?.toISOString() || null,
+      expectedCloseDate: opportunity.expectedCloseDate?.toISOString() || null,
+      proposalDate: opportunity.proposalDate?.toISOString() || null,
+      sellerId: opportunity.ownerSellerId,
+      sellerName: opportunity.ownerSeller?.name || null
+    });
+    console.info("[diag-dashboard][summary]", {
+      endpoint: "/dashboard/summary",
+      userId: req.user?.id,
+      role: req.user?.role,
+      month,
+      wonWhere,
+      lostWhere,
+      wonCount: wonOpportunities.length,
+      lostCount: lostOpportunities.length,
+      wonTotalValue: totalRevenue,
+      lostTotalValue: lostOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0),
+      wonOpportunities: wonOpportunities.slice(0, 50).map(summarize),
+      lostOpportunities: lostOpportunities.slice(0, 50).map(summarize)
+    });
+  }
 
   res.json({
     totalRevenue,

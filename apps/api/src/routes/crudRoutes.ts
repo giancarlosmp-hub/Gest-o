@@ -314,7 +314,7 @@ type OpportunityFilterParams = {
   search?: string;
   crop?: string;
   season?: string;
-  proposalDateWhere?: { gte?: Date; lte?: Date };
+  dateRangeWhere?: { gte?: Date; lte?: Date };
   overdueOnly: boolean;
 };
 
@@ -330,16 +330,16 @@ const parseOpportunityFilterParams = (req: Request) => {
   const dateFrom = req.query.dateFrom as string | undefined;
   const dateTo = req.query.dateTo as string | undefined;
 
-  const proposalDateWhere: OpportunityFilterParams["proposalDateWhere"] = {};
+  const dateRangeWhere: OpportunityFilterParams["dateRangeWhere"] = {};
   if (dateFrom) {
     const parsed = normalizeDateToUtc(dateFrom, false);
     if (!parsed) return { error: "dateFrom inválido" } as const;
-    proposalDateWhere.gte = parsed;
+    dateRangeWhere.gte = parsed;
   }
   if (dateTo) {
     const parsed = normalizeDateToUtc(dateTo, true);
     if (!parsed) return { error: "dateTo inválido" } as const;
-    proposalDateWhere.lte = parsed;
+    dateRangeWhere.lte = parsed;
   }
 
   return {
@@ -351,7 +351,7 @@ const parseOpportunityFilterParams = (req: Request) => {
       search: req.query.search as string | undefined,
       crop: req.query.crop as string | undefined,
       season: req.query.season as string | undefined,
-      proposalDateWhere: Object.keys(proposalDateWhere).length ? proposalDateWhere : undefined,
+      dateRangeWhere: Object.keys(dateRangeWhere).length ? dateRangeWhere : undefined,
       overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true"
     } satisfies OpportunityFilterParams
   } as const;
@@ -367,7 +367,18 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
   if (params.clientId) whereFilters.push({ clientId: params.clientId });
   if (params.crop) whereFilters.push({ crop: params.crop });
   if (params.season) whereFilters.push({ season: params.season });
-  if (params.proposalDateWhere) whereFilters.push({ proposalDate: params.proposalDateWhere });
+  if (params.dateRangeWhere) {
+    if (params.status === "closed") {
+      whereFilters.push({
+        OR: [
+          { closedAt: params.dateRangeWhere },
+          { closedAt: null, expectedCloseDate: params.dateRangeWhere }
+        ]
+      });
+    } else {
+      whereFilters.push({ proposalDate: params.dateRangeWhere });
+    }
+  }
   if (params.overdueOnly) {
     whereFilters.push({
       followUpDate: { lt: todayStart },
@@ -4841,7 +4852,9 @@ router.get("/opportunities", async (req, res) => {
     console.info("[diag-opportunities-api][list][request]", {
       userId: req.user?.id,
       role: req.user?.role,
+      endpoint: "/opportunities",
       filters: parsedFilters.params,
+      prismaWhere: where,
       query: req.query
     });
   }
@@ -4868,11 +4881,24 @@ router.get("/opportunities", async (req, res) => {
           overdueCount: acc.overdueCount + (isOverdue ? 1 : 0)
         };
       }, { count: 0, value: 0, weighted: 0, overdueCount: 0 });
+      const consideredOpportunities = opportunities.slice(0, 50).map((opportunity) => ({
+        id: opportunity.id,
+        title: opportunity.title,
+        stage: opportunity.stage,
+        value: opportunity.value,
+        closedAt: toIsoStringOrNull(opportunity.closedAt),
+        expectedCloseDate: toIsoStringOrNull(opportunity.expectedCloseDate),
+        proposalDate: toIsoStringOrNull(opportunity.proposalDate),
+        sellerId: opportunity.ownerSeller?.id || null,
+        sellerName: opportunity.ownerSeller?.name || null
+      }));
       console.info("[diag-opportunities-api][list][response]", {
         userId: req.user?.id,
         role: req.user?.role,
+        endpoint: "/opportunities",
         filters: parsedFilters.params,
-        totals
+        totals,
+        consideredOpportunities
       });
     }
     return res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
@@ -4899,12 +4925,26 @@ router.get("/opportunities", async (req, res) => {
         overdueCount: acc.overdueCount + (isOverdue ? 1 : 0)
       };
     }, { count: 0, value: 0, weighted: 0, overdueCount: 0 });
+    const consideredOpportunities = opportunities.slice(0, 50).map((opportunity) => ({
+      id: opportunity.id,
+      title: opportunity.title,
+      stage: opportunity.stage,
+      value: opportunity.value,
+      closedAt: toIsoStringOrNull(opportunity.closedAt),
+      expectedCloseDate: toIsoStringOrNull(opportunity.expectedCloseDate),
+      proposalDate: toIsoStringOrNull(opportunity.proposalDate),
+      sellerId: opportunity.ownerSeller?.id || null,
+      sellerName: opportunity.ownerSeller?.name || null
+    }));
     console.info("[diag-opportunities-api][list][response-paginated]", {
       userId: req.user?.id,
       role: req.user?.role,
+      endpoint: "/opportunities",
       filters: parsedFilters.params,
+      prismaWhere: where,
       pagination: { page, pageSize, total },
-      returnedTotals: totals
+      returnedTotals: totals,
+      consideredOpportunities
     });
   }
   return res.json({
@@ -4935,7 +4975,20 @@ router.get("/opportunities/summary", async (req, res) => {
 
   const opportunities: any[] = await prisma.opportunity.findMany({
     where,
-    select: { value: true, stage: true, crop: true, season: true, probability: true, followUpDate: true }
+    select: {
+      id: true,
+      title: true,
+      value: true,
+      stage: true,
+      crop: true,
+      season: true,
+      probability: true,
+      followUpDate: true,
+      closedAt: true,
+      expectedCloseDate: true,
+      proposalDate: true,
+      ownerSeller: { select: { id: true, name: true } }
+    }
   });
 
   const totalsByStage: Record<string, { value: number; weighted: number }> = {};
@@ -4978,15 +5031,29 @@ router.get("/opportunities/summary", async (req, res) => {
   // Provável causa = se filtros (ownerSellerId/overdue/status) não forem enviados/refetchados após mutações de follow-up,
   // os cards no front podem permanecer com valores antigos ou aparentemente iguais entre vendedores.
   if (shouldLogOpportunityDiagnostics) {
+    const sample = opportunities.slice(0, 50).map((opportunity) => ({
+      id: opportunity.id,
+      title: opportunity.title,
+      stage: opportunity.stage,
+      value: opportunity.value,
+      closedAt: toIsoStringOrNull(opportunity.closedAt),
+      expectedCloseDate: toIsoStringOrNull(opportunity.expectedCloseDate),
+      proposalDate: toIsoStringOrNull(opportunity.proposalDate),
+      sellerId: opportunity.ownerSeller?.id || null,
+      sellerName: opportunity.ownerSeller?.name || null
+    }));
     console.info("[diag-opportunities-api][summary][response]", {
       userId: req.user?.id,
       role: req.user?.role,
+      endpoint: "/opportunities/summary",
       filters: parsedFilters.params,
+      prismaWhere: where,
       totalCount: opportunities.length,
       pipelineTotal: pipelineMetrics.pipelineTotal,
       weightedTotal: pipelineMetrics.weightedTotal,
       overdueCount: pipelineMetrics.overdueCount,
-      conversionRate
+      conversionRate,
+      consideredOpportunities: sample
     });
   }
   res.json({
