@@ -20,24 +20,35 @@ jobs:
           script: |
             set -e
 
-            APP_DIR="/apps/production"
+            APP_DIR="/apps/gest-o"
+            DEPLOY_BRANCH="main"
 
-            echo "Iniciando deploy seguro..."
+            echo "Iniciando deploy seguro em produção"
+            echo "Data/Hora (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
 
             if [ -d "$APP_DIR/.git" ]; then
               cd "$APP_DIR"
-              git fetch origin
-              git checkout main
-              git reset --hard origin/main
             else
-              mkdir -p "$APP_DIR"
-              git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git "$APP_DIR"
-              cd "$APP_DIR"
+              echo "ERRO: diretório de produção não encontrado em $APP_DIR"
+              exit 1
             fi
 
-            echo "Atualizando containers sem afetar banco..."
+            echo "Diretório atual (pwd): $(pwd)"
+            echo "Sincronizando branch $DEPLOY_BRANCH"
 
-            docker compose pull || true
-            docker compose up -d --no-deps --build api web
+            git fetch origin "$DEPLOY_BRANCH"
+            git checkout "$DEPLOY_BRANCH"
+            git pull --ff-only origin "$DEPLOY_BRANCH"
+
+            echo "Commit atual: $(git rev-parse --short HEAD)"
+
+            echo "Reconstruindo e atualizando apenas web/api (sem remover volumes)"
+            docker compose up -d --build api web
+
+            echo "Status dos containers após deploy"
+            docker compose ps
+
+            echo "Volumes do projeto (filtro: gest-o/gesto/postgres)"
+            docker volume ls --format '{{.Name}}' | grep -E 'gest-o|gesto|postgres' || true
 
             echo "Deploy concluído com segurança"
