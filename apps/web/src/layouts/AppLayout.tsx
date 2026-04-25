@@ -40,13 +40,26 @@ const DESKTOP_EXPANDED_WIDTH = 240;
 
 
 function normalizePath(pathname: string) {
-  const normalized = pathname
+  const decodedPath = decodeURIComponent(pathname);
+  const normalized = decodedPath
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 
   const withoutTrailingSlash = normalized.replace(/\/+$/, "");
   return withoutTrailingSlash || "/";
+}
+
+function isSidebarItemActive(currentPath: string, itemPath: string) {
+  const normalizedCurrentPath = normalizePath(currentPath);
+  const normalizedItemPath = normalizePath(itemPath);
+
+  if (normalizedItemPath === "/") return normalizedCurrentPath === "/";
+
+  return (
+    normalizedCurrentPath === normalizedItemPath ||
+    normalizedCurrentPath.startsWith(`${normalizedItemPath}/`)
+  );
 }
 
 const items: SidebarNavItem[] = [
@@ -104,12 +117,20 @@ function AppLayoutShell() {
   );
 
   const isActiveItem = (item: SidebarNavItem) => {
-    const currentPath = normalizePath(location.pathname);
-    const itemPath = normalizePath(item.path);
+    const active = isSidebarItemActive(location.pathname, item.path);
 
-    if (itemPath === "/") return currentPath === "/";
+    if (import.meta.env.DEV) {
+      console.debug("[sidebar-active]", {
+        label: item.label,
+        path: item.path,
+        currentPath: location.pathname,
+        normalizedCurrentPath: normalizePath(location.pathname),
+        normalizedItemPath: normalizePath(item.path),
+        active,
+      });
+    }
 
-    return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
+    return active;
   };
 
   const getSidebarBadgeCount = (item: SidebarNavItem) => {
