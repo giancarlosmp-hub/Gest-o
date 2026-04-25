@@ -66,8 +66,8 @@ export default function SidebarNavItem({
         title={tooltipText}
         aria-label={shouldShowTooltip ? `${label}: ${tooltipText}` : label}
         aria-describedby={shouldShowTooltip && isOpen ? tooltipId : undefined}
-        className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
-          active ? "bg-white text-brand-700" : "hover:bg-brand-600"
+        className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-white transition ${
+          active ? "bg-brand-500 ring-1 ring-white/35 shadow-sm" : "hover:bg-brand-600"
         }`}
       >
         <span className="flex items-center gap-2">
@@ -77,7 +77,7 @@ export default function SidebarNavItem({
         {shouldShowBadge && (
           <span
             className={`rounded-full px-2 py-0.5 text-xs font-semibold leading-none ${
-              active ? "bg-brand-700 text-white" : "bg-white/20 text-white"
+              active ? "bg-white/20 text-white ring-1 ring-white/30" : "bg-white/20 text-white"
             }`}
             aria-label={`${badgeCount} ${badgeCount === 1 ? "pendência" : "pendências"}`}
           >
