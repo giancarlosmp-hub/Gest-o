@@ -58,6 +58,9 @@ type ClosedOpportunity = {
   crop?: string | null;
   season?: string | null;
   expectedCloseDate: string;
+  createdAt?: string | null;
+  closedAt?: string | null;
+  lastContactAt?: string | null;
 };
 
 type PaginatedClosedOpportunitiesResponse = {
@@ -147,6 +150,19 @@ const monthLabel = (value: string) => {
   const [year, month] = value.split("-");
   const dt = new Date(Number(year), Number(month) - 1, 1);
   return dt.toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
+};
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 };
 
 export default function ReportsPage() {
@@ -363,9 +379,18 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <div className={cardClass}><div className="text-sm text-slate-500">Pipeline total</div><div className="mt-2 text-2xl font-semibold">{formatCurrencyBRL(totals.pipeline)}</div></div>
-        <div className={cardClass}><div className="text-sm text-slate-500">Pipeline ponderado</div><div className="mt-2 text-2xl font-semibold">{formatCurrencyBRL(totals.weighted)}</div></div>
-        <div className={cardClass}><div className="text-sm text-slate-500">Oportunidades atrasadas</div><div className="mt-2 text-2xl font-semibold">{formatNumberBR(totals.overdue)}</div></div>
+        <div className={cardClass}>
+          <div className="text-sm text-slate-500" title="Soma do valor das oportunidades abertas conforme os filtros aplicados no relatório.">Pipeline total (abertas)</div>
+          <div className="mt-2 text-2xl font-semibold">{formatCurrencyBRL(totals.pipeline)}</div>
+        </div>
+        <div className={cardClass}>
+          <div className="text-sm text-slate-500" title="Soma do valor ponderado por probabilidade das oportunidades abertas no relatório.">Pipeline ponderado (abertas)</div>
+          <div className="mt-2 text-2xl font-semibold">{formatCurrencyBRL(totals.weighted)}</div>
+        </div>
+        <div className={cardClass}>
+          <div className="text-sm text-slate-500" title="Contagem de oportunidades abertas com follow-up vencido até hoje.">Oportunidades atrasadas (abertas)</div>
+          <div className="mt-2 text-2xl font-semibold">{formatNumberBR(totals.overdue)}</div>
+        </div>
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
@@ -555,6 +580,10 @@ export default function ReportsPage() {
         <div className="mb-4 flex flex-col gap-2">
           <h3 className="text-base font-semibold text-slate-900">Oportunidades encerradas</h3>
           <p className="text-sm text-slate-500">Histórico de ganhos e perdas com busca rápida e paginação server-side.</p>
+          <p className="text-xs text-slate-500">
+            As métricas abaixo consideram apenas <strong>ganho/perdido</strong> no período filtrado por data de fechamento
+            (closedAt e, quando ausente, expectedCloseDate).
+          </p>
         </div>
 
         <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-7">
@@ -584,7 +613,7 @@ export default function ReportsPage() {
         </div>
 
         <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-          <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Total ganho</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatCurrencyBRL(closedKpis.totalWon)}</div></div>
+          <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Total ganho (faturado)</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatCurrencyBRL(closedKpis.totalWon)}</div></div>
           <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Total perdido</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatCurrencyBRL(closedKpis.totalLost)}</div></div>
           <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Quantidade</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatNumberBR(closedKpis.totalCount)}</div></div>
           <div className="rounded-xl border border-slate-200 p-3"><div className="text-xs text-slate-500">Taxa de ganho</div><div className="mt-1 text-lg font-semibold text-slate-900">{formatPercentBR(closedKpis.winRate)}</div></div>
@@ -602,14 +631,17 @@ export default function ReportsPage() {
                 <th className="py-2 pr-3 font-medium">Safra</th>
                 <th className="py-2 pr-3 font-medium">Etapa</th>
                 <th className="py-2 pr-3 font-medium">Valor</th>
+                <th className="py-2 pr-3 font-medium">Criação</th>
+                <th className="py-2 pr-3 font-medium">Fechamento</th>
+                <th className="py-2 pr-3 font-medium">Últ. atualização</th>
                 <th className="py-2 pr-3 font-medium text-right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {closedLoading ? (
-                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
+                <tr><td colSpan={11} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
               ) : closedItems.length === 0 ? (
-                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
+                <tr><td colSpan={11} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
               ) : closedItems.map((item) => (
                 <tr key={item.id} className="border-b border-slate-100">
                   <td className="py-2 pr-3 text-slate-700">{item.title}</td>
@@ -619,6 +651,9 @@ export default function ReportsPage() {
                   <td className="py-2 pr-3 text-slate-700">{item.season || "—"}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</td>
                   <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatDateTime(item.createdAt)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatDateTime(item.closedAt || item.expectedCloseDate)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatDateTime(item.lastContactAt)}</td>
                   <td className="py-2 pr-3 text-right">
                     {canEditClosedOpportunities ? (
                       <button
@@ -649,6 +684,9 @@ export default function ReportsPage() {
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Cultura / Safra</dt><dd className="text-slate-700 text-right">{item.crop || "—"} · {item.season || "—"}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Etapa</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Criação</dt><dd className="text-slate-700 text-right">{formatDateTime(item.createdAt)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Fechamento</dt><dd className="text-slate-700 text-right">{formatDateTime(item.closedAt || item.expectedCloseDate)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Últ. atualização</dt><dd className="text-slate-700 text-right">{formatDateTime(item.lastContactAt)}</dd></div>
               </dl>
               <div className="mt-3 flex justify-end">
                 {canEditClosedOpportunities ? (

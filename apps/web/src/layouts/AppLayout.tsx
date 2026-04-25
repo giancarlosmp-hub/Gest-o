@@ -69,8 +69,12 @@ export default function AppLayout() {
   };
 
   const isActiveItem = (item: SidebarItem) => {
-    if (item.path === "/") return location.pathname === "/";
-    return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+    const normalizePath = (path: string) => path.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const currentPath = normalizePath(location.pathname);
+    const itemPath = normalizePath(item.path);
+
+    if (itemPath === "/") return currentPath === "/";
+    return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
   };
 
   const sidebar = (
