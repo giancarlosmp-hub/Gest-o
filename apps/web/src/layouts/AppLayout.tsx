@@ -68,9 +68,18 @@ export default function AppLayout() {
     return undefined;
   };
 
+  const normalizePath = (path: string) => {
+    const normalizedPath = path.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (normalizedPath === "/") return normalizedPath;
+    return normalizedPath.replace(/\/+$/, "");
+  };
+
   const isActiveItem = (item: SidebarItem) => {
-    if (item.path === "/") return location.pathname === "/";
-    return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+    const currentPath = normalizePath(location.pathname);
+    const itemPath = normalizePath(item.path);
+
+    if (itemPath === "/") return currentPath === "/";
+    return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
   };
 
   const sidebar = (
