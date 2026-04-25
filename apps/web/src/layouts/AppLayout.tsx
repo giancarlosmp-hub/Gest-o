@@ -36,6 +36,13 @@ const items: SidebarItem[] = [
   { id: "configuracoes", label: "Configurações", path: "/configurações", route: "configuracoes" }
 ];
 
+function normalizePath(path: string) {
+  return path
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 function canAccessSidebarItem(item: SidebarItem, role?: UserRole | null) {
   if (item.route) return canAccessRoute(item.route, role);
 
@@ -69,8 +76,12 @@ export default function AppLayout() {
   };
 
   const isActiveItem = (item: SidebarItem) => {
-    if (item.path === "/") return location.pathname === "/";
-    return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+    const normalizedPathname = normalizePath(location.pathname);
+    const normalizedItemPath = normalizePath(item.path);
+
+    if (normalizedItemPath === "/") return normalizedPathname === "/";
+
+    return normalizedPathname === normalizedItemPath || normalizedPathname.startsWith(`${normalizedItemPath}/`);
   };
 
   const sidebar = (
