@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from "@prisma/client";
-import { hashPassword } from "../src/utils/password.js";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -86,7 +86,7 @@ function assertSafePreviewEnvironment() {
 }
 
 async function upsertSeller(name: string, email: string, region: string) {
-  const passwordHash = await hashPassword(PREVIEW_SEED_PASSWORD);
+  const passwordHash = await bcrypt.hash(PREVIEW_SEED_PASSWORD, 10);
   return prisma.user.upsert({
     where: { email },
     update: {
