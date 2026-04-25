@@ -169,8 +169,10 @@ jobs:
             echo "Admin ensured"
 
             echo "=== PREVIEW SEED ==="
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              npm run seed:preview -w @salesforce-pro/api
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T \
+              -e ENABLE_PREVIEW_SEED=true \
+              -e NODE_ENV=development \
+              api npm run seed:preview -w @salesforce-pro/api
 
             echo "=== DEBUG ADMIN ==="
             curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
