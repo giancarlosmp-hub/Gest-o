@@ -38,6 +38,17 @@ type SidebarNavItem = {
 const DESKTOP_COLLAPSED_WIDTH = 72;
 const DESKTOP_EXPANDED_WIDTH = 240;
 
+
+function normalizePath(pathname: string) {
+  const normalized = pathname
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const withoutTrailingSlash = normalized.replace(/\/+$/, "");
+  return withoutTrailingSlash || "/";
+}
+
 const items: SidebarNavItem[] = [
   { id: "home", label: "Central do Dia", path: "/", icon: LayoutDashboard },
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: BarChart3 },
@@ -67,9 +78,11 @@ const items: SidebarNavItem[] = [
 function canAccessSidebarItem(item: SidebarNavItem, role?: UserRole | null) {
   if (item.route) return canAccessRoute(item.route, role);
 
-  if (item.path.startsWith("/equipe")) return canAccessRoute("equipe", role);
-  if (item.path.startsWith("/objetivos") || item.path.startsWith("/metas")) return canAccessRoute("objetivos", role);
-  if (item.path.startsWith("/configurações") || item.path.startsWith("/configuracoes")) return canAccessRoute("configuracoes", role);
+  const itemPath = normalizePath(item.path);
+
+  if (itemPath.startsWith("/equipe")) return canAccessRoute("equipe", role);
+  if (itemPath.startsWith("/objetivos") || itemPath.startsWith("/metas")) return canAccessRoute("objetivos", role);
+  if (itemPath.startsWith("/configuracoes")) return canAccessRoute("configuracoes", role);
 
   return true;
 }
@@ -91,8 +104,12 @@ function AppLayoutShell() {
   );
 
   const isActiveItem = (item: SidebarNavItem) => {
-    if (item.path === "/") return location.pathname === "/";
-    return location.pathname === item.path || location.pathname.startsWith(`${item.path}/`);
+    const currentPath = normalizePath(location.pathname);
+    const itemPath = normalizePath(item.path);
+
+    if (itemPath === "/") return currentPath === "/";
+
+    return currentPath === itemPath || currentPath.startsWith(`${itemPath}/`);
   };
 
   const getSidebarBadgeCount = (item: SidebarNavItem) => {
