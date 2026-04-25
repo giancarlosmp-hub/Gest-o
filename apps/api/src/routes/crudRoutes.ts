@@ -367,7 +367,21 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
   if (params.clientId) whereFilters.push({ clientId: params.clientId });
   if (params.crop) whereFilters.push({ crop: params.crop });
   if (params.season) whereFilters.push({ season: params.season });
-  if (params.proposalDateWhere) whereFilters.push({ proposalDate: params.proposalDateWhere });
+  if (params.proposalDateWhere) {
+    if (params.status === "closed") {
+      whereFilters.push({
+        OR: [
+          { closedAt: params.proposalDateWhere },
+          {
+            closedAt: null,
+            expectedCloseDate: params.proposalDateWhere
+          }
+        ]
+      });
+    } else {
+      whereFilters.push({ proposalDate: params.proposalDateWhere });
+    }
+  }
   if (params.overdueOnly) {
     whereFilters.push({
       followUpDate: { lt: todayStart },

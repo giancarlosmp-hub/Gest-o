@@ -1038,15 +1038,15 @@ export default function DashboardPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {[
-          ["Faturamento no mês", formatCurrencyBRL(summary.totalRevenue)],
-          ["Vendas no mês", formatNumberBR(summary.totalSales)],
-          ["Vendido hoje", formatCurrencyBRL(salesPace.soldToday)],
-          ["% do objetivo atingido", formatPercentBR(salesPace.percentObjectiveReached)],
-          ["Clientes ativos", formatNumberBR(portfolio.walletStatus.active)],
-          ["Inativos 31–90 / >90", `${formatNumberBR(portfolio.walletStatus.inactiveRecent)} / ${formatNumberBR(portfolio.walletStatus.inactiveOld)}`],
-        ].map(([label, value]) => (
+          ["Faturamento no mês (ganho)", formatCurrencyBRL(summary.totalRevenue), "Soma de oportunidades em etapa ganho no mês selecionado."],
+          ["Vendas no mês (ganhas)", formatNumberBR(summary.totalSales), "Quantidade de oportunidades em etapa ganho no mês selecionado."],
+          ["Vendido hoje (ganho)", formatCurrencyBRL(salesPace.soldToday), "Soma de oportunidades ganho fechadas hoje."],
+          ["% do objetivo atingido", formatPercentBR(salesPace.percentObjectiveReached), "Faturamento no mês dividido pelo objetivo mensal configurado."],
+          ["Clientes ativos", formatNumberBR(portfolio.walletStatus.active), "Clientes com venda nos últimos 30 dias."],
+          ["Inativos 31–90 / >90", `${formatNumberBR(portfolio.walletStatus.inactiveRecent)} / ${formatNumberBR(portfolio.walletStatus.inactiveOld)}`, "Clientes sem venda no período indicado."],
+        ].map(([label, value, description]) => (
           <div key={String(label)} className={cardClass}>
-            <div className="text-sm text-slate-500">{label}</div>
+            <div className="text-sm text-slate-500" title={String(description || "")}>{label}</div>
             <div className="text-2xl font-bold text-slate-900">{value}</div>
           </div>
         ))}
