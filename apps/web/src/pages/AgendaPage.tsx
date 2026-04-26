@@ -1522,23 +1522,36 @@ export default function AgendaPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-900">Roteiro de visitas integrado</h3>
-            <p className="text-sm text-slate-500">Os roteiros aparecem na timeline junto com compromissos.</p>
+            <p className="text-sm text-slate-500">Roteiro operacional da semana + roteiro integrado na agenda do dia.</p>
           </div>
           <button type="button" className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white sm:w-auto" onClick={() => openCreate("roteiro")}>
             Criar roteiro
           </button>
         </div>
-        {weeklyRoutePlans.length ? (
-          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            {weeklyRoutePlans.map((item, index) => (
-              <div key={`${item.dayLabel}-${item.city}-${index}`} className="min-w-[180px] rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
-                <p className="font-semibold text-slate-800">{item.dayLabel}</p>
-                <p className="text-slate-600">{item.city}</p>
-                <p className="text-slate-500">{item.visits} visitas</p>
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Roteiro operacional da semana</p>
+            {!weeklyRoutePlans.length ? (
+              <p className="mt-2 text-sm text-slate-500">Nenhum roteiro planejado para esta semana.</p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {weeklyRoutePlans.slice(0, 4).map((item, index) => (
+                  <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                    <p className="font-medium text-slate-800">{item.dayLabel} · {item.city}</p>
+                    <p className="text-xs text-slate-500">{item.visits} visitas</p>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        ) : null}
+          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Roteiro integrado na agenda do dia</p>
+            <p className="mt-2 text-sm text-emerald-800">
+              Os eventos de <strong>Roteiro de visita</strong> aparecem na timeline principal com status, paradas e ações rápidas.
+            </p>
+            <p className="mt-1 text-xs text-emerald-700">Use “Ver paradas” dentro dos cards da agenda para acompanhar execução.</p>
+          </div>
+        </div>
       </div>
 
       {false && searchParams.get("execute") === "1" && executionEvent ? (
