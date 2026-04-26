@@ -12,6 +12,12 @@ import ClientSearchSelect, { type SearchableClientOption } from "../components/c
 
 type Seller = { id: string; name: string };
 type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
+type OperationalSummary = {
+  visitsToday: number;
+  followupsPending: number;
+  overdueActivities: number;
+  nextActivity: AgendaEvent | null;
+};
 
 type Visualizacao = "daily" | "weekly" | "monthly" | "list";
 type PeriodFilter = "today" | "this_week" | "next_7_days" | "next_30_days" | "custom_range";
@@ -147,6 +153,38 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
     },
     { meetings: 0, routes: 0, followups: 0, overdue: 0 }
   );
+}
+
+function isVisitEvent(event: AgendaEvent) {
+  const normalizedType = normalizeEventType(event.type);
+  return normalizedType === "reuniao_presencial" || normalizedType === "roteiro_visita";
+}
+
+function calculateOperationalSummary(events: AgendaEvent[]): OperationalSummary {
+  const now = new Date();
+  const todayStart = startOfDay(now).getTime();
+  const todayEnd = endOfDay(now).getTime();
+
+  const plannedEvents = events.filter((event) => event.status === "planned");
+
+  const visitsToday = plannedEvents.filter((event) => {
+    if (!isVisitEvent(event)) return false;
+    const startsAt = new Date(getStartsAt(event)).getTime();
+    return startsAt >= todayStart && startsAt <= todayEnd;
+  }).length;
+
+  const followupsPending = plannedEvents.filter((event) => isFollowUpEvent(event)).length;
+  const overdueActivities = plannedEvents.filter((event) => new Date(getEndsAt(event)).getTime() < now.getTime()).length;
+  const nextActivity = plannedEvents
+    .filter((event) => new Date(getEndsAt(event)).getTime() >= now.getTime())
+    .sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())[0] || null;
+
+  return {
+    visitsToday,
+    followupsPending,
+    overdueActivities,
+    nextActivity
+  };
 }
 
 function startOfDay(date: Date) {
@@ -351,6 +389,50 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
     hasLinkedActivity: Boolean(item.hasLinkedActivity),
     stops: mappedStops
   };
+}
+
+type OperationalMetricCardProps = {
+  label: string;
+  value: number | string;
+  tone?: "default" | "danger" | "priority";
+  helper?: string;
+};
+
+function OperationalMetricCard({ label, value, tone = "default", helper }: OperationalMetricCardProps) {
+  const toneClass =
+    tone === "danger"
+      ? "border-rose-200 bg-rose-50"
+      : tone === "priority"
+        ? "border-amber-200 bg-amber-50"
+        : "border-slate-200 bg-slate-50";
+
+  const valueClass = tone === "danger" ? "text-rose-700" : tone === "priority" ? "text-amber-700" : "text-slate-900";
+
+  return (
+    <div className={`rounded-lg border px-3 py-2.5 ${toneClass}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className={`mt-1 text-base font-semibold ${valueClass}`}>{value}</p>
+      {helper ? <p className="mt-1 text-xs text-slate-600">{helper}</p> : null}
+    </div>
+  );
+}
+
+type TimelineSkeletonItemProps = {
+  label: string;
+  time: string;
+  tone?: "neutral" | "highlight";
+};
+
+function TimelineSkeletonItem({ label, time, tone = "neutral" }: TimelineSkeletonItemProps) {
+  return (
+    <div className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${tone === "highlight" ? "border-brand-200 bg-brand-50" : "border-slate-200 bg-white"}`}>
+      <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-brand-500" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{time}</p>
+        <p className="truncate text-sm font-medium text-slate-900">{label}</p>
+      </div>
+    </div>
+  );
 }
 
 export default function AgendaPage() {
@@ -655,6 +737,15 @@ export default function AgendaPage() {
   }, [filteredEvents]);
 
   const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
+  const operationalDateLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString("pt-BR", {
+        weekday: "long",
+        day: "2-digit",
+        month: "2-digit"
+      }),
+    []
+  );
 
   const roleScopedEvents = useMemo(() => {
     return events.filter((event) => {
@@ -663,6 +754,8 @@ export default function AgendaPage() {
       return true;
     });
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
+
+  const operationalSummary = useMemo(() => calculateOperationalSummary(roleScopedEvents), [roleScopedEvents]);
 
   const weeklyRoutePlans = useMemo(() => {
     const weekRange = getRangeFromFilter("this_week", customFrom, customTo);
@@ -1348,19 +1441,19 @@ export default function AgendaPage() {
   };
 
   return (
-    <section className="space-y-4">
-      <header className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+    <section className="space-y-3">
+      <header className="flex flex-col gap-2 rounded-xl border bg-white p-3 shadow-sm sm:flex-row sm:items-start sm:justify-between sm:p-4">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold">Agenda</h2>
-          <p className="text-sm text-slate-600">Roteiro de visitas / compromissos</p>
+          <h2 className="text-lg font-semibold sm:text-xl">Agenda operacional</h2>
+          <p className="text-xs text-slate-600 sm:text-sm">Hoje: {operationalDateLabel} · Rotina, prioridade e próxima ação</p>
         </div>
 
-        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white sm:w-auto">
+        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:w-auto">
           Nova agenda
         </button>
       </header>
 
-      <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-3">
+      <div className="grid gap-2 rounded-xl border bg-white p-3 shadow-sm md:grid-cols-3">
         <label className="text-sm font-medium text-slate-700">
           Visualização
           <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm">
@@ -1414,7 +1507,7 @@ export default function AgendaPage() {
       </div>
 
       {periodFilter === "custom_range" ? (
-        <div className="grid gap-3 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-2">
+        <div className="grid gap-2 rounded-xl border bg-white p-3 shadow-sm md:grid-cols-2">
           <label className="text-sm font-medium text-slate-700">De
             <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
@@ -1424,34 +1517,52 @@ export default function AgendaPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-3 rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Reuniões</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.meetings}</p>
+      <div className="rounded-xl border bg-white p-3 shadow-sm">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">Resumo operacional do dia</h3>
+          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">Activity-first</span>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Roteiros</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.routes}</p>
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <OperationalMetricCard label="Próxima atividade" value={operationalSummary.nextActivity ? formatTime(getStartsAt(operationalSummary.nextActivity)) : "Sem agenda"} tone="priority" helper={operationalSummary.nextActivity?.title || "Defina o próximo compromisso"} />
+          <OperationalMetricCard label="Atividades atrasadas" value={operationalSummary.overdueActivities} tone={operationalSummary.overdueActivities > 0 ? "danger" : "default"} />
+          <OperationalMetricCard label="Visitas hoje" value={operationalSummary.visitsToday} helper={`${summary.routes} roteiros no período`} />
+          <OperationalMetricCard label="Follow-ups pendentes" value={operationalSummary.followupsPending} helper={`${summary.followups} no filtro atual`} />
         </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Follow-ups</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.followups}</p>
+      </div>
+
+      <div className="rounded-xl border bg-white p-3 shadow-sm">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-slate-900">Timeline operacional (estrutura inicial)</h3>
+          <span className="text-[11px] text-slate-500">Em evolução</span>
         </div>
-        <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-rose-600">Atrasados</p>
-          <p className="mt-1 text-lg font-semibold text-rose-700">{summary.overdue}</p>
+        <div className="space-y-2">
+          {operationalSummary.nextActivity ? (
+            <TimelineSkeletonItem
+              time={formatTime(getStartsAt(operationalSummary.nextActivity))}
+              label={operationalSummary.nextActivity.title}
+              tone="highlight"
+            />
+          ) : null}
+          {[
+            { time: "08:00", label: "Visita" },
+            { time: "09:30", label: "Follow-up" },
+            { time: "11:00", label: "Roteiro" },
+            { time: "14:00", label: "Ligação" }
+          ].map((item) => (
+            <TimelineSkeletonItem key={`${item.time}-${item.label}`} time={item.time} label={item.label} />
+          ))}
         </div>
       </div>
 
 
-      <div className="rounded-xl border bg-white p-4 shadow-sm">
-        <h3 className="text-base font-semibold text-slate-900">Roteiro da Semana</h3>
-        <div className="mt-3 space-y-2 text-sm text-slate-700">
+      <div className="rounded-xl border bg-white p-3 shadow-sm">
+        <h3 className="text-sm font-semibold text-slate-900">Roteiro operacional da semana</h3>
+        <div className="mt-2 space-y-2 text-sm text-slate-700">
           {!weeklyRoutePlans.length ? (
             <p className="text-slate-500">Nenhum roteiro planejado para esta semana.</p>
           ) : (
             weeklyRoutePlans.map((item, index) => (
-              <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-lg border border-slate-200 p-3">
+              <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-lg border border-slate-200 px-3 py-2">
                 <p className="font-medium text-slate-900">{item.dayLabel} – {item.city}</p>
                 <p className="text-slate-600">{item.visits} visitas</p>
               </div>
@@ -1460,11 +1571,11 @@ export default function AgendaPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="rounded-xl border bg-white p-3 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900">Roteiro de Visitas (dia)</h3>
-            <p className="text-sm text-slate-500">Planeje múltiplas paradas e acompanhe execução no dia.</p>
+            <h3 className="text-sm font-semibold text-slate-900">Roteiro integrado na agenda do dia</h3>
+            <p className="text-xs text-slate-500 sm:text-sm">Planeje múltiplas paradas e acompanhe execução sem sair da rotina operacional.</p>
           </div>
           <button type="button" className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white sm:w-auto" onClick={() => openCreate("roteiro")}>
             Criar roteiro
@@ -1551,7 +1662,7 @@ export default function AgendaPage() {
         ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
         ) : view === "monthly" ? (
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
@@ -1574,7 +1685,7 @@ export default function AgendaPage() {
                 <div
                   key={event.id}
                   ref={isHighlighted ? highlightedEventRef : null}
-                  className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
+                  className={`flex items-center justify-between gap-3 p-3 ${isHighlighted ? "bg-amber-50" : ""}`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-900">{event.title}</p>
@@ -1594,10 +1705,10 @@ export default function AgendaPage() {
             })}
           </div>
         ) : (
-          <div className="space-y-4 p-4">
+          <div className="space-y-3 p-3">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="overflow-hidden rounded-lg border border-slate-200">
-                <p className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
+                <p className="bg-slate-50 px-3 py-1.5 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
                 <div className="divide-y">
                   {group.events.map((event) => {
                     const isHighlighted = event.id === highlightedEventId;
@@ -1605,7 +1716,7 @@ export default function AgendaPage() {
                       <Fragment key={event.id}>
                       <div
                         ref={isHighlighted ? highlightedEventRef : null}
-                        className={`flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}
+                        className={`flex flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}
                       >
                         <div className="min-w-0 flex-1">
                           <p className="break-words font-medium text-slate-900">{event.title}</p>
