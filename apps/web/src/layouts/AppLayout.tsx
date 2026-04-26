@@ -139,16 +139,26 @@ function AppLayoutShell() {
     return 0;
   };
 
-  const renderSidebarContent = (expanded: boolean, onItemClick?: () => void) => (
+  const renderSidebarContent = (
+    expanded: boolean,
+    options?: {
+      onItemClick?: () => void;
+      onFooterActionClick?: () => void;
+      footerActionLabel?: string;
+      showBrand?: boolean;
+    }
+  ) => (
     <>
-      <div className="mb-4 flex h-11 items-center overflow-hidden px-2">
-        <div className={expanded ? "block" : "hidden"}>
-          <BrandLogo size="sidebar" />
+      {options?.showBrand === false ? null : (
+        <div className="mb-4 flex h-11 items-center overflow-hidden px-2">
+          <div className={expanded ? "block" : "hidden"}>
+            <BrandLogo context="sidebar" tone="light" showText className="min-w-0" />
+          </div>
+          <div className={expanded ? "hidden" : "flex w-full justify-center"}>
+            <BrandLogo context="sidebar" tone="light" compact />
+          </div>
         </div>
-        <div className={expanded ? "hidden" : "flex w-full justify-center"}>
-          <span className="text-xs font-bold tracking-[0.2em] text-brand-100">DA</span>
-        </div>
-      </div>
+      )}
 
       <nav className="flex-1 space-y-1.5">
         {visibleItems.map((item) => (
@@ -160,7 +170,7 @@ function AppLayoutShell() {
             active={isActiveItem(item)}
             expanded={expanded}
             badgeCount={getSidebarBadgeCount(item)}
-            onClick={onItemClick}
+            onClick={options?.onItemClick}
           />
         ))}
       </nav>
@@ -168,14 +178,14 @@ function AppLayoutShell() {
       <div className="mt-4 border-t border-white/15 pt-3">
         <button
           type="button"
-          onClick={togglePinnedExpanded}
+          onClick={options?.onFooterActionClick ?? togglePinnedExpanded}
           className="flex h-10 w-full items-center justify-center gap-2 rounded-xl text-brand-100 transition hover:bg-white/10 hover:text-white"
-          aria-label={isPinnedExpanded ? "Fixar recolhida" : "Fixar expandida"}
-          title={isPinnedExpanded ? "Fixar recolhida" : "Fixar expandida"}
+          aria-label={options?.footerActionLabel ?? (isPinnedExpanded ? "Fixar recolhida" : "Fixar expandida")}
+          title={options?.footerActionLabel ?? (isPinnedExpanded ? "Fixar recolhida" : "Fixar expandida")}
         >
-          {isPinnedExpanded ? <ChevronFirst size={18} /> : <ChevronLast size={18} />}
+          {options?.onFooterActionClick ? <X size={18} /> : isPinnedExpanded ? <ChevronFirst size={18} /> : <ChevronLast size={18} />}
           <span className={expanded ? "text-xs font-semibold" : "hidden"}>
-            {isPinnedExpanded ? "Recolher" : "Expandir"}
+            {options?.footerActionLabel ?? (isPinnedExpanded ? "Recolher" : "Expandir")}
           </span>
         </button>
       </div>
@@ -190,7 +200,7 @@ function AppLayoutShell() {
         onMouseEnter={() => setDesktopHovered(true)}
         onMouseLeave={() => setDesktopHovered(false)}
       >
-        {renderSidebarContent(isDesktopExpanded)}
+        {renderSidebarContent(isDesktopExpanded, { showBrand: true })}
       </aside>
 
       <div className="fixed left-0 top-0 z-50 w-full border-b border-brand-100 bg-white px-3 py-3 md:hidden">
@@ -198,7 +208,7 @@ function AppLayoutShell() {
           <button className="rounded-md p-1 text-brand-700" onClick={() => setMobileOpen(true)} aria-label="Abrir menu">
             <Menu />
           </button>
-          <BrandLogo size="header" className="min-w-0" />
+          <BrandLogo context="header" tone="dark" compact className="min-w-0" />
           <button
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-2.5 py-2 text-xs font-medium text-white hover:bg-brand-800"
             onClick={logout}
@@ -213,8 +223,7 @@ function AppLayoutShell() {
         <div className="fixed inset-0 z-[60] md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 h-full w-[84%] max-w-[280px] bg-brand-700 px-3 py-4 text-white shadow-2xl">
-            <div className="mb-3 flex items-center justify-between px-1">
-              <BrandLogo size="header" />
+            <div className="mb-3 flex items-center justify-end px-1">
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
@@ -224,7 +233,12 @@ function AppLayoutShell() {
                 <X size={18} />
               </button>
             </div>
-            <div className="flex h-[calc(100%-3.5rem)] flex-col">{renderSidebarContent(true, () => setMobileOpen(false))}</div>
+            <div className="flex h-[calc(100%-3.5rem)] flex-col">{renderSidebarContent(true, {
+              onItemClick: () => setMobileOpen(false),
+              onFooterActionClick: () => setMobileOpen(false),
+              footerActionLabel: "Recolher",
+              showBrand: false,
+            })}</div>
           </aside>
         </div>
       )}
