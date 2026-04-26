@@ -1,0 +1,16 @@
+{
+  "name": "Demetra Agro Performance",
+  "short_name": "Demetra",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b3c1d",
+  "icons": [
+    {
+      "src": "/favicon.svg?v=2026-04-26",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
