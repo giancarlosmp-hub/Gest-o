@@ -23,7 +23,7 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-brand-700 p-4">
       <form onSubmit={onSubmit} className="w-full max-w-sm space-y-3 rounded-2xl bg-white p-6 shadow-lg">
-        <BrandLogo size="login" textClassName="text-slate-800" className="mb-1" />
+        <BrandLogo context="login" tone="dark" textClassName="text-slate-800" className="mb-1" />
         <p className="text-sm text-slate-600">Acesse o painel comercial.</p>
         <input
           className="w-full rounded-lg border p-2"
