@@ -12,18 +12,8 @@ type BrandLogoProps = {
 const BRAND_ASSET_VERSION = "2026-04-26";
 
 const brandAssetCandidatesByTone: Record<NonNullable<BrandLogoProps["tone"]>, string[]> = {
-  dark: [
-    "/brand/demetra-logo-dark.svg",
-    "/brand/demetra-logo-dark.png",
-    "/logo-demetra-dark.svg",
-    "/logo-demetra-dark.png",
-  ],
-  light: [
-    "/brand/demetra-logo-light.svg",
-    "/brand/demetra-logo-light.png",
-    "/logo-demetra-light.svg",
-    "/logo-demetra-light.png",
-  ],
+  dark: ["/brand/demetra-logo-dark.png", "/brand/demetra-logo-dark.svg"],
+  light: ["/brand/demetra-logo-light.png", "/brand/demetra-logo-light.svg"],
 };
 
 const imageClassByContext: Record<NonNullable<BrandLogoProps["context"]>, string> = {
@@ -52,41 +42,11 @@ export default function BrandLogo({
     setAssetIndex(0);
   }, [tone]);
 
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      console.debug("[brand-logo] candidates", {
-        context,
-        tone,
-        compact,
-        candidates: assetCandidates,
-      });
-    }
-  }, [assetCandidates, compact, context, tone]);
-
   const handleError = () => {
     const nextIndex = assetIndex + 1;
 
-    if (import.meta.env.DEV) {
-      console.warn("[brand-logo] failed asset", {
-        tone,
-        attempted: currentAsset,
-        next: assetCandidates[nextIndex] ?? null,
-      });
-    }
-
     if (nextIndex < assetCandidates.length) {
       setAssetIndex(nextIndex);
-    }
-  };
-
-  const handleLoad = () => {
-    if (import.meta.env.DEV) {
-      console.debug("[brand-logo] loaded asset", {
-        tone,
-        context,
-        compact,
-        src: currentAsset,
-      });
     }
   };
 
@@ -98,7 +58,6 @@ export default function BrandLogo({
           alt="Marca Demetra"
           className={imageClassByContext[context]}
           onError={handleError}
-          onLoad={handleLoad}
         />
       ) : (
         <span
