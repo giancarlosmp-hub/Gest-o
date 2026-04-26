@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 type BrandLogoProps = {
   context?: "login" | "sidebar" | "header";
@@ -11,9 +11,9 @@ type BrandLogoProps = {
 
 const BRAND_ASSET_VERSION = "2026-04-26";
 
-const brandAssetCandidatesByTone: Record<NonNullable<BrandLogoProps["tone"]>, string[]> = {
-  dark: ["/brand/demetra-logo-dark.png", "/brand/demetra-logo-dark.svg"],
-  light: ["/brand/demetra-logo-light.png", "/brand/demetra-logo-light.svg"],
+const brandAssetByTone: Record<NonNullable<BrandLogoProps["tone"]>, string> = {
+  dark: "/brand/demetra-logo-dark.png",
+  light: "/brand/demetra-logo-light.png",
 };
 
 const imageClassByContext: Record<NonNullable<BrandLogoProps["context"]>, string> = {
@@ -33,40 +33,15 @@ export default function BrandLogo({
   className = "",
 }: BrandLogoProps) {
   const shouldShowText = showText && !compact;
-  const [assetIndex, setAssetIndex] = useState(0);
-
-  const assetCandidates = useMemo(() => brandAssetCandidatesByTone[tone], [tone]);
-  const currentAsset = assetCandidates[assetIndex];
-
-  useEffect(() => {
-    setAssetIndex(0);
-  }, [tone]);
-
-  const handleError = () => {
-    const nextIndex = assetIndex + 1;
-
-    if (nextIndex < assetCandidates.length) {
-      setAssetIndex(nextIndex);
-    }
-  };
+  const currentAsset = useMemo(() => brandAssetByTone[tone], [tone]);
 
   return (
     <div className={`inline-flex items-center gap-3 ${className}`.trim()}>
-      {currentAsset ? (
-        <img
-          src={cacheBustedSrc(currentAsset)}
-          alt="Marca Demetra"
-          className={imageClassByContext[context]}
-          onError={handleError}
-        />
-      ) : (
-        <span
-          aria-hidden
-          className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white/15 text-xs font-bold text-current"
-        >
-          DA
-        </span>
-      )}
+      <img
+        src={cacheBustedSrc(currentAsset)}
+        alt="Marca Demetra"
+        className={imageClassByContext[context]}
+      />
       {shouldShowText ? (
         <div className={`leading-tight ${textClassName}`.trim()}>
           <p className="text-sm font-semibold">Demetra</p>
