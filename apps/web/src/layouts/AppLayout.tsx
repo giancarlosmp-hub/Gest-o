@@ -223,7 +223,8 @@ function AppLayoutShell() {
         <div className="fixed inset-0 z-[60] md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 h-full w-[84%] max-w-[280px] bg-brand-700 px-3 py-4 text-white shadow-2xl">
-            <div className="mb-3 flex items-center justify-end px-1">
+            <div className="mb-3 flex items-center justify-between px-1">
+              <BrandLogo context="header" tone="light" compact />
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}

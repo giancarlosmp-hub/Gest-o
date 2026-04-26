@@ -1,3 +1,5 @@
+import { useEffect, useMemo, useState } from "react";
+
 type BrandLogoProps = {
   context?: "login" | "sidebar" | "header";
   tone?: "light" | "dark";
@@ -7,9 +9,21 @@ type BrandLogoProps = {
   className?: string;
 };
 
-const logoByTone: Record<NonNullable<BrandLogoProps["tone"]>, string> = {
-  dark: "/brand/demetra-logo-dark.svg",
-  light: "/brand/demetra-logo-light.svg",
+const BRAND_ASSET_VERSION = "2026-04-26";
+
+const brandAssetCandidatesByTone: Record<NonNullable<BrandLogoProps["tone"]>, string[]> = {
+  dark: [
+    "/brand/demetra-logo-dark.svg",
+    "/brand/demetra-logo-dark.png",
+    "/logo-demetra-dark.svg",
+    "/logo-demetra-dark.png",
+  ],
+  light: [
+    "/brand/demetra-logo-light.svg",
+    "/brand/demetra-logo-light.png",
+    "/logo-demetra-light.svg",
+    "/logo-demetra-light.png",
+  ],
 };
 
 const imageClassByContext: Record<NonNullable<BrandLogoProps["context"]>, string> = {
@@ -17,6 +31,8 @@ const imageClassByContext: Record<NonNullable<BrandLogoProps["context"]>, string
   header: "h-8 w-auto object-contain",
   sidebar: "h-8 w-auto object-contain",
 };
+
+const cacheBustedSrc = (src: string) => `${src}?v=${BRAND_ASSET_VERSION}`;
 
 export default function BrandLogo({
   context = "sidebar",
@@ -27,10 +43,71 @@ export default function BrandLogo({
   className = "",
 }: BrandLogoProps) {
   const shouldShowText = showText && !compact;
+  const [assetIndex, setAssetIndex] = useState(0);
+
+  const assetCandidates = useMemo(() => brandAssetCandidatesByTone[tone], [tone]);
+  const currentAsset = assetCandidates[assetIndex];
+
+  useEffect(() => {
+    setAssetIndex(0);
+  }, [tone]);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug("[brand-logo] candidates", {
+        context,
+        tone,
+        compact,
+        candidates: assetCandidates,
+      });
+    }
+  }, [assetCandidates, compact, context, tone]);
+
+  const handleError = () => {
+    const nextIndex = assetIndex + 1;
+
+    if (import.meta.env.DEV) {
+      console.warn("[brand-logo] failed asset", {
+        tone,
+        attempted: currentAsset,
+        next: assetCandidates[nextIndex] ?? null,
+      });
+    }
+
+    if (nextIndex < assetCandidates.length) {
+      setAssetIndex(nextIndex);
+    }
+  };
+
+  const handleLoad = () => {
+    if (import.meta.env.DEV) {
+      console.debug("[brand-logo] loaded asset", {
+        tone,
+        context,
+        compact,
+        src: currentAsset,
+      });
+    }
+  };
 
   return (
     <div className={`inline-flex items-center gap-3 ${className}`.trim()}>
-      <img src={logoByTone[tone]} alt="Marca Demetra" className={imageClassByContext[context]} />
+      {currentAsset ? (
+        <img
+          src={cacheBustedSrc(currentAsset)}
+          alt="Marca Demetra"
+          className={imageClassByContext[context]}
+          onError={handleError}
+          onLoad={handleLoad}
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-white/15 text-xs font-bold text-current"
+        >
+          DA
+        </span>
+      )}
       {shouldShowText ? (
         <div className={`leading-tight ${textClassName}`.trim()}>
           <p className="text-sm font-semibold">Demetra</p>
