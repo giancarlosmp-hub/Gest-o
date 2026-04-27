@@ -267,6 +267,10 @@ function formatTime(value: string) {
   });
 }
 
+function formatHourLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
 function getStopMobileStatus(stop: AgendaStop): StopMobileStatus {
   if (stop.resultStatus === "realizada") return "realizada";
   if (stop.resultStatus === "nao_realizada") return "nao_realizada";
@@ -441,6 +445,7 @@ export default function AgendaPage() {
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
   const [isFiltersOpenMobile, setIsFiltersOpenMobile] = useState(false);
   const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [periodAnchorDate, setPeriodAnchorDate] = useState(() => new Date());
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
@@ -675,6 +680,36 @@ export default function AgendaPage() {
         events: dayEvents.sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())
       }));
   }, [filteredEvents]);
+
+  const dailyTimelineHours = useMemo(() => {
+    if (view !== "daily") return [] as Array<{ hour: number; events: AgendaEvent[] }>;
+
+    const selectedDayKey = formatDayKey(dateRange.start.toISOString());
+    const eventsByHour = new Map<number, AgendaEvent[]>();
+
+    filteredEvents
+      .filter((event) => formatDayKey(getStartsAt(event)) === selectedDayKey)
+      .forEach((event) => {
+        const eventHour = new Date(getStartsAt(event)).getHours();
+        const current = eventsByHour.get(eventHour) || [];
+        current.push(event);
+        eventsByHour.set(eventHour, current);
+      });
+
+    const hoursWithEvents = Array.from(eventsByHour.keys());
+    const firstHour = hoursWithEvents.length ? Math.max(6, Math.min(...hoursWithEvents)) : 8;
+    const lastHour = hoursWithEvents.length ? Math.min(22, Math.max(...hoursWithEvents)) : 18;
+
+    const timeline: Array<{ hour: number; events: AgendaEvent[] }> = [];
+    for (let hour = firstHour; hour <= lastHour; hour += 1) {
+      timeline.push({
+        hour,
+        events: (eventsByHour.get(hour) || []).sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())
+      });
+    }
+
+    return timeline;
+  }, [view, filteredEvents, dateRange]);
 
   const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
 
@@ -1395,18 +1430,30 @@ export default function AgendaPage() {
 
   return (
     <section className="space-y-4">
-      <header className="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
+      <header className="flex flex-col gap-3 rounded-xl border bg-white p-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold">Agenda</h2>
-          <p className="text-sm text-slate-600">Roteiro de visitas / compromissos</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Agenda operacional</p>
+          <h2 className="text-lg font-semibold text-slate-900">Calendário de compromissos e roteiros</h2>
         </div>
 
-        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white sm:w-auto">
+        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:w-auto">
           Nova agenda
         </button>
       </header>
 
       <div className="space-y-3 rounded-xl border bg-white p-3 shadow-sm sm:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold capitalize text-slate-800">{periodLabel}</p>
+          <button
+            type="button"
+            onClick={() => setIsFiltersCollapsed((current) => !current)}
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-700"
+          >
+            {isFiltersCollapsed ? "Mostrar filtros" : "Recolher filtros"}
+          </button>
+        </div>
+
+        {!isFiltersCollapsed ? (
         <div className="flex flex-wrap items-center gap-2">
           {(isMobile ? isFiltersOpenMobile : true) ? (
             <>
@@ -1446,12 +1493,12 @@ export default function AgendaPage() {
             </button>
           )}
         </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2">
-          <button type="button" onClick={() => navigatePeriod(-1)} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">{"<"}</button>
+          <button type="button" onClick={() => navigatePeriod(-1)} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">Anterior</button>
           <button type="button" onClick={goToToday} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium">Hoje</button>
-          <button type="button" onClick={() => navigatePeriod(1)} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">{">"}</button>
-          <p className="truncate pl-1 text-sm font-semibold capitalize text-slate-800">{periodLabel}</p>
+          <button type="button" onClick={() => navigatePeriod(1)} className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm">Próximo</button>
         </div>
 
         <div className="flex items-center gap-2 overflow-x-auto">
@@ -1674,6 +1721,52 @@ export default function AgendaPage() {
                 </div>
               );
             })}
+          </div>
+        ) : view === "daily" ? (
+          <div className="space-y-3 p-3 sm:p-4">
+            {dailyTimelineHours.map((slot) => (
+              <div key={slot.hour} className="rounded-lg border border-slate-200">
+                <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                  <p className="w-14 text-xs font-semibold text-slate-600">{formatHourLabel(slot.hour)}</p>
+                  <span className="h-px flex-1 bg-slate-200" />
+                </div>
+                {!slot.events.length ? (
+                  <p className="px-3 py-2 text-xs text-slate-400">Sem compromissos neste horário.</p>
+                ) : (
+                  <div className="divide-y">
+                    {slot.events.map((event) => {
+                      const isHighlighted = event.id === highlightedEventId;
+                      return (
+                        <div key={event.id} ref={isHighlighted ? highlightedEventRef : null} className={`flex flex-col gap-3 p-3 md:flex-row md:items-start md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}>
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words font-medium text-slate-900">{event.title}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
+                              <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                              {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro de visita</span> : null}
+                              <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
+                            </div>
+                          </div>
+                          <div className="mobile-action-stack w-full shrink-0 md:w-auto md:justify-end">
+                            <button
+                              type="button"
+                              title={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
+                              aria-label={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
+                              className="rounded-md border border-green-300 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50"
+                              onClick={() => void onSetAsDone(event)}
+                            >
+                              {event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         ) : (
           <div className="space-y-4 p-3 sm:p-4">
