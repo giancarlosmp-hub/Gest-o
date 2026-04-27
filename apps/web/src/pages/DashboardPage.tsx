@@ -390,10 +390,10 @@ export default function DashboardPage() {
       api.get<DashboardPortfolio>(`/dashboard/portfolio?month=${month}${querySeller}`, { signal }),
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
       api.get<Activity[]>(`/activities?month=${month}${querySeller}&done=true`, { signal }),
-      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}`, { signal }),
-      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}`, { signal }),
-      api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}`, { signal }),
-      api.get<ConsistencyResponse>("/reports/consistency", { signal }),
+      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}${querySeller}`, { signal }),
+      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}${querySeller}`, { signal }),
+      api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}${querySeller}`, { signal }),
+      api.get<ConsistencyResponse>(`/reports/consistency${querySeller ? `?sellerId=${debouncedSellerId}` : ""}`, { signal }),
       api.get<MonthlyScoreResponse>(`/reports/score-monthly?month=${month}${scoreQuery}`, { signal }),
     ])
       .then(([summaryResponse, seriesResponse, portfolioResponse, activityKpisResponse, activitiesResponse, disciplineRankingResponse, weeklyDisciplineRankingResponse, weeklyHighlightsResponse, consistencyResponse, monthlyScoreResponse]) => {

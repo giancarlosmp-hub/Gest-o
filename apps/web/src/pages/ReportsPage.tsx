@@ -164,6 +164,7 @@ export default function ReportsPage() {
   const [closedEditForm, setClosedEditForm] = useState<ClosedEditForm | null>(null);
   const [isSavingClosedEdit, setIsSavingClosedEdit] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [showClosedFilters, setShowClosedFilters] = useState(true);
 
   const canEditClosedOpportunities = user?.role === "diretor" || user?.role === "gerente" || user?.role === "vendedor";
 
@@ -238,6 +239,10 @@ export default function ReportsPage() {
     media.addEventListener("change", sync);
     return () => media.removeEventListener("change", sync);
   }, []);
+
+  useEffect(() => {
+    setShowClosedFilters(!isMobile);
+  }, [isMobile]);
 
 
   useEffect(() => {
@@ -555,9 +560,16 @@ export default function ReportsPage() {
         <div className="mb-4 flex flex-col gap-2">
           <h3 className="text-base font-semibold text-slate-900">Oportunidades encerradas</h3>
           <p className="text-sm text-slate-500">Histórico de ganhos e perdas com busca rápida e paginação server-side.</p>
+          <button
+            type="button"
+            className="inline-flex w-fit rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 md:hidden"
+            onClick={() => setShowClosedFilters((prev) => !prev)}
+          >
+            {showClosedFilters ? "Ocultar filtros" : "Mostrar filtros"}
+          </button>
         </div>
 
-        <div className="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-7">
+        <div className={`${showClosedFilters ? "mb-4 grid" : "hidden"} gap-3 md:grid md:grid-cols-3 xl:grid-cols-7`}>
           <input type="date" value={closedFilters.dateFrom} onChange={(e) => setClosedFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           <input type="date" value={closedFilters.dateTo} onChange={(e) => setClosedFilters((prev) => ({ ...prev, dateTo: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           <select value={closedFilters.ownerSellerId} onChange={(e) => setClosedFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
