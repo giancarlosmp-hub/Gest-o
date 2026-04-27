@@ -15,7 +15,8 @@ import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { getApiErrorMessage } from "../lib/apiError";
-import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
+import { formatCurrencyBRL, formatDateBR, formatNumberBR, formatPercentBR } from "../lib/formatters";
+import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
 
@@ -54,9 +55,12 @@ type ClosedOpportunity = {
   value: number;
   stage: ClosedOpportunityStage;
   client: string;
+  clientCity?: string | null;
+  clientState?: string | null;
   owner: string;
   crop?: string | null;
   season?: string | null;
+  closedAt?: string | null;
   expectedCloseDate: string;
 };
 
@@ -159,7 +163,7 @@ export default function ReportsPage() {
   const [closedLoading, setClosedLoading] = useState(true);
   const [closedSummary, setClosedSummary] = useState<ClosedSummaryResponse | null>(null);
   const [sellerOptions, setSellerOptions] = useState<SelectOption[]>([]);
-  const [clientOptions, setClientOptions] = useState<SelectOption[]>([]);
+  const [clientOptions, setClientOptions] = useState<SearchableClientOption[]>([]);
   const [editingClosed, setEditingClosed] = useState<ClosedOpportunity | null>(null);
   const [closedEditForm, setClosedEditForm] = useState<ClosedEditForm | null>(null);
   const [isSavingClosedEdit, setIsSavingClosedEdit] = useState(false);
@@ -227,7 +231,19 @@ export default function ReportsPage() {
       const clients = Array.isArray(clientsRes.data) ? clientsRes.data : [];
 
       setSellerOptions(sellers.map((item: any) => ({ id: item.id, name: item.name })));
-      setClientOptions(clients.filter((item: any) => item?.id && item?.name).map((item: any) => ({ id: item.id, name: item.name })));
+      setClientOptions(
+        clients
+          .filter((item: any) => item?.id && item?.name)
+          .map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            fantasyName: item.fantasyName || null,
+            code: item.code || null,
+            city: item.city || null,
+            state: item.state || null,
+            cnpj: item.cnpj || null
+          }))
+      );
     });
   }, [searchParams]);
 
@@ -349,6 +365,15 @@ export default function ReportsPage() {
 
   const cropOptions = useMemo(() => Array.from(new Set(closedItems.map((item) => item.crop).filter(Boolean))) as string[], [closedItems]);
   const seasonOptions = useMemo(() => Array.from(new Set(closedItems.map((item) => item.season).filter(Boolean))) as string[], [closedItems]);
+  const getClosedDate = (item: ClosedOpportunity) => item.closedAt || item.expectedCloseDate;
+  const formatClientCityState = (item: ClosedOpportunity) => {
+    const city = item.clientCity?.trim();
+    const state = item.clientState?.trim()?.toUpperCase();
+    if (city && state) return `${city}/${state}`;
+    if (city) return city;
+    if (state) return state;
+    return "—";
+  };
 
   if (!report) return <div className="rounded-xl border border-slate-200 bg-white p-6">Carregando relatório Agro CRM...</div>;
 
@@ -576,10 +601,14 @@ export default function ReportsPage() {
             <option value="">Todos vendedores</option>
             {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
           </select>
-          <select value={closedFilters.clientId} onChange={(e) => setClosedFilters((prev) => ({ ...prev, clientId: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-            <option value="">Todos clientes</option>
-            {clientOptions.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}
-          </select>
+          <ClientSearchSelect
+            clients={clientOptions}
+            value={closedFilters.clientId}
+            onChange={(clientId) => setClosedFilters((prev) => ({ ...prev, clientId }))}
+            placeholder="Todos clientes (busque por nome, código, cidade, UF ou CNPJ)"
+            emptyLabel="Nenhum cliente encontrado."
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
           <select value={closedFilters.crop} onChange={(e) => setClosedFilters((prev) => ({ ...prev, crop: e.target.value }))} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <option value="">Todas culturas</option>
             {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
@@ -607,8 +636,10 @@ export default function ReportsPage() {
           <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
+                <th className="py-2 pr-3 font-medium">Data</th>
                 <th className="py-2 pr-3 font-medium">Oportunidade</th>
                 <th className="py-2 pr-3 font-medium">Cliente</th>
+                <th className="py-2 pr-3 font-medium">Cidade/UF</th>
                 <th className="py-2 pr-3 font-medium">Vendedor</th>
                 <th className="py-2 pr-3 font-medium">Cultura</th>
                 <th className="py-2 pr-3 font-medium">Safra</th>
@@ -619,13 +650,15 @@ export default function ReportsPage() {
             </thead>
             <tbody>
               {closedLoading ? (
-                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
+                <tr><td colSpan={10} className="py-6 text-center text-slate-500">Carregando oportunidades encerradas...</td></tr>
               ) : closedItems.length === 0 ? (
-                <tr><td colSpan={8} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
+                <tr><td colSpan={10} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
               ) : closedItems.map((item) => (
                 <tr key={item.id} className="border-b border-slate-100">
+                  <td className="py-2 pr-3 text-slate-700">{formatDateBR(getClosedDate(item))}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.title}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.client}</td>
+                  <td className="py-2 pr-3 text-slate-700">{formatClientCityState(item)}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.owner}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.crop || "—"}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.season || "—"}</td>
@@ -656,10 +689,11 @@ export default function ReportsPage() {
             <article key={item.id} className="rounded-xl border border-slate-200 p-3 text-sm">
               <h4 className="font-semibold text-slate-900">{item.title}</h4>
               <dl className="mt-2 space-y-1">
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Data</dt><dd className="text-slate-700 text-right">{formatDateBR(getClosedDate(item))}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Cliente</dt><dd className="text-slate-700 text-right">{item.client}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Cidade/UF</dt><dd className="text-slate-700 text-right">{formatClientCityState(item)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Vendedor</dt><dd className="text-slate-700 text-right">{item.owner}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Cultura / Safra</dt><dd className="text-slate-700 text-right">{item.crop || "—"} · {item.season || "—"}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Etapa</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Status</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</dd></div>
               </dl>
               <div className="mt-3 flex justify-end">
