@@ -39,6 +39,16 @@ jobs:
           SEED_ON_BOOTSTRAP: "true"
         run: docker compose up -d --build
 
+      - name: Assert bootstrap artifact in container dist
+        run: docker compose exec -T -w /app/apps/api api cat dist/scripts/bootstrap.js | grep BOOTSTRAP
+
+      - name: Assert compose has no bind mounts
+        run: |
+          if rg -n "type:\s*bind" docker-compose.yml; then
+            echo "Bind mount found in docker-compose.yml"
+            exit 1
+          fi
+
       - name: Print API logs on failure
         if: failure()
         run: docker compose logs api
