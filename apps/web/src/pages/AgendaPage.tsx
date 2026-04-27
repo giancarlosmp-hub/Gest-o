@@ -1,4 +1,4 @@
-import { FormEvent, Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -11,7 +11,6 @@ import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda"
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 
 type Seller = { id: string; name: string };
-type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
 
 type Visualizacao = "daily" | "weekly" | "monthly" | "list";
 type PeriodFilter = "today" | "this_week" | "next_7_days" | "next_30_days" | "custom_range";
@@ -77,8 +76,6 @@ const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
 
 const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
 
-const normalizeAgendaEventType = (type: AgendaEventType): SharedAgendaEventType => type;
-
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   planned: "Planejado",
   completed: "Concluído",
@@ -89,18 +86,6 @@ const STATUS_COLOR_CLASS: Record<AgendaEvent["status"], string> = {
   planned: "border-sky-200 bg-sky-100 text-sky-700",
   completed: "border-green-200 bg-green-100 text-green-700",
   cancelled: "border-slate-200 bg-slate-100 text-slate-700"
-};
-
-const STOP_MOBILE_STATUS_LABEL: Record<StopMobileStatus, string> = {
-  pendente: "Pendente",
-  realizada: "Realizada",
-  nao_realizada: "Não realizada"
-};
-
-const STOP_MOBILE_STATUS_CLASS: Record<StopMobileStatus, string> = {
-  pendente: "border-amber-200 bg-amber-100 text-amber-800",
-  realizada: "border-green-200 bg-green-100 text-green-800",
-  nao_realizada: "border-rose-200 bg-rose-100 text-rose-800"
 };
 
 const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
@@ -115,39 +100,6 @@ type DateRange = {
   start: Date;
   end: Date;
 };
-
-type StopMobileStatus = "pendente" | "realizada" | "nao_realizada";
-
-function normalizeEventType(type: string | undefined): string {
-  return String(type || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-}
-
-function isFollowUpEvent(event: AgendaEvent) {
-  const normalizedType = normalizeEventType(event.type);
-  return normalizedType === "follow_up" || normalizedType === "followup";
-}
-
-function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
-  const now = Date.now();
-
-  return events.reduce<AgendaSummary>(
-    (acc, event) => {
-      if (event.status !== "planned") return acc;
-
-      const normalizedType = normalizeEventType(event.type);
-      if (normalizedType === "reuniao_online" || normalizedType === "reuniao_presencial") acc.meetings += 1;
-      if (normalizedType === "roteiro_visita") acc.routes += 1;
-      if (isFollowUpEvent(event)) acc.followups += 1;
-
-      if (new Date(getEndsAt(event)).getTime() < now) acc.overdue += 1;
-      return acc;
-    },
-    { meetings: 0, routes: 0, followups: 0, overdue: 0 }
-  );
-}
 
 function startOfDay(date: Date) {
   const next = new Date(date);
@@ -226,11 +178,6 @@ function formatPeriodLabel(range: DateRange, view: Visualizacao) {
   })}`;
 }
 
-function isEventWithinRange(eventDateTime: string, startDate: Date, endDate: Date) {
-  const eventDate = new Date(eventDateTime);
-  return eventDate.getTime() >= startDate.getTime() && eventDate.getTime() <= endDate.getTime();
-}
-
 function isEventOverlappingRange(startsAt: string, endsAt: string, startDate: Date, endDate: Date) {
   const eventStart = new Date(startsAt).getTime();
   const eventEnd = new Date(endsAt).getTime();
@@ -269,12 +216,6 @@ function formatTime(value: string) {
 
 function formatHourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}:00`;
-}
-
-function getStopMobileStatus(stop: AgendaStop): StopMobileStatus {
-  if (stop.resultStatus === "realizada") return "realizada";
-  if (stop.resultStatus === "nao_realizada") return "nao_realizada";
-  return "pendente";
 }
 
 function createEmptyDraftStop(): DraftStop {
@@ -435,17 +376,15 @@ export default function AgendaPage() {
   });
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
-  const [expandedRouteEventId, setExpandedRouteEventId] = useState<string>("");
-  const highlightedEventRef = useRef<HTMLDivElement | null>(null);
+  const highlightedEventRef = useRef<HTMLElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
   const [executionEventId, setExecutionEventId] = useState("");
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [activeStopId, setActiveStopId] = useState("");
   const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
-  const [isFiltersOpenMobile, setIsFiltersOpenMobile] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
-  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [periodAnchorDate, setPeriodAnchorDate] = useState(() => new Date());
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
@@ -476,11 +415,20 @@ export default function AgendaPage() {
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
-    const update = () => setIsMobile(mediaQuery.matches);
+    const update = () => {
+      setIsMobile(mediaQuery.matches);
+      setIsFiltersOpen((current) => (mediaQuery.matches ? false : current));
+    };
     update();
     mediaQuery.addEventListener("change", update);
     return () => mediaQuery.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => {
+    if (isMobile && view !== "daily") {
+      setView("daily");
+    }
+  }, [isMobile, view]);
 
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
@@ -646,8 +594,6 @@ export default function AgendaPage() {
     };
   }, [eventsQuery, eventsQueryKey, eventsRefreshToken]);
 
-  const sellerById = useMemo(() => Object.fromEntries(sellers.map((seller) => [seller.id, seller.name])), [sellers]);
-
   const filteredEvents = useMemo(() => {
     const byRole = events.filter((event) => {
       if (user?.role === "vendedor") return getOwnerId(event) === user.id;
@@ -711,41 +657,48 @@ export default function AgendaPage() {
     return timeline;
   }, [view, filteredEvents, dateRange]);
 
-  const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
+  const weeklyCalendarDays = useMemo(() => {
+    const start = startOfDay(dateRange.start);
+    const dayOfWeek = start.getDay();
+    const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(start);
+    monday.setDate(monday.getDate() + diffToMonday);
 
-  const roleScopedEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (user?.role === "vendedor") return getOwnerId(event) === user.id;
-      if (canFilterBySeller && selectedSellerId) return getOwnerId(event) === selectedSellerId;
-      return true;
+    return Array.from({ length: 7 }).map((_, index) => {
+      const day = new Date(monday);
+      day.setDate(monday.getDate() + index);
+      const key = formatDayKey(day.toISOString());
+      return {
+        key,
+        date: day,
+        events: filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === key)
+      };
     });
-  }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
+  }, [dateRange, filteredEvents]);
 
-  const weeklyRoutePlans = useMemo(() => {
-    const weekRange = getRangeFromFilter("this_week", customFrom, customTo, periodAnchorDate);
-    const grouped = new Map<string, { dayLabel: string; city: string; visits: number }>();
+  const monthlyCalendarDays = useMemo(() => {
+    const monthAnchor = new Date(periodAnchorDate);
+    const monthStart = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1);
+    const monthEnd = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth() + 1, 0);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+    const gridEnd = new Date(monthEnd);
+    gridEnd.setDate(monthEnd.getDate() + (6 - monthEnd.getDay()));
 
-    roleScopedEvents
-      .filter((event) => event.type === "roteiro_visita" && event.status === "planned")
-      .filter((event) => isEventWithinRange(getStartsAt(event), weekRange.start, weekRange.end))
-      .forEach((event) => {
-        const date = new Date(getStartsAt(event));
-        const dayLabel = date.toLocaleDateString("pt-BR", { weekday: "long" });
-        const city = event.city || "Sem cidade";
-        const key = `${formatDayKey(getStartsAt(event))}::${city}`;
-        const current = grouped.get(key);
-        const visits = event.stops?.length || 1;
-        if (current) {
-          current.visits += visits;
-        } else {
-          grouped.set(key, { dayLabel, city, visits });
-        }
+    const days: Array<{ key: string; date: Date; isCurrentMonth: boolean; events: AgendaEvent[] }> = [];
+    const cursor = new Date(gridStart);
+    while (cursor <= gridEnd) {
+      const key = formatDayKey(cursor.toISOString());
+      days.push({
+        key,
+        date: new Date(cursor),
+        isCurrentMonth: cursor.getMonth() === monthAnchor.getMonth(),
+        events: filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === key)
       });
-
-    return Array.from(grouped.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([, value]) => value);
-  }, [roleScopedEvents, customFrom, customTo, periodAnchorDate]);
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return days;
+  }, [periodAnchorDate, filteredEvents]);
 
   const clientById = useMemo(() => new Map(activityClients.map((client) => [client.id, client])), [activityClients]);
 
@@ -1446,24 +1399,16 @@ export default function AgendaPage() {
           <p className="text-sm font-semibold capitalize text-slate-800">{periodLabel}</p>
           <button
             type="button"
-            onClick={() => setIsFiltersCollapsed((current) => !current)}
+            onClick={() => setIsFiltersOpen((current) => !current)}
             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-slate-700"
           >
-            {isFiltersCollapsed ? "Mostrar filtros" : "Recolher filtros"}
+            Filtros
           </button>
         </div>
 
-        {!isFiltersCollapsed ? (
+        {isFiltersOpen ? (
         <div className="flex flex-wrap items-center gap-2">
-          {(isMobile ? isFiltersOpenMobile : true) ? (
             <>
-              <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                <option value="daily">Dia</option>
-                <option value="weekly">Semana</option>
-                <option value="monthly">Mês</option>
-                <option value="list">Lista</option>
-              </select>
-
               <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
                 <option value="today">Hoje</option>
                 <option value="this_week">Esta semana</option>
@@ -1487,11 +1432,6 @@ export default function AgendaPage() {
                 Mais filtros
               </button>
             </>
-          ) : (
-            <button type="button" onClick={() => setIsFiltersOpenMobile(true)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">
-              Filtrar
-            </button>
-          )}
         </div>
         ) : null}
 
@@ -1526,7 +1466,7 @@ export default function AgendaPage() {
               Somente vencidos
             </label>
             {isMobile ? (
-              <button type="button" onClick={() => setIsFiltersOpenMobile(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+              <button type="button" onClick={() => setIsFiltersOpen(false)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                 Recolher filtros
               </button>
             ) : null}
@@ -1544,62 +1484,6 @@ export default function AgendaPage() {
           </label>
         </div>
       ) : null}
-
-      <div className="grid gap-3 rounded-xl border bg-white p-4 text-sm text-slate-700 shadow-sm sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Reuniões</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.meetings}</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Roteiros</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.routes}</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Follow-ups</p>
-          <p className="mt-1 text-lg font-semibold text-slate-900">{summary.followups}</p>
-        </div>
-        <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-rose-600">Atrasados</p>
-          <p className="mt-1 text-lg font-semibold text-rose-700">{summary.overdue}</p>
-        </div>
-      </div>
-
-
-      <div className="rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900">Roteiro de visitas integrado</h3>
-            <p className="text-sm text-slate-500">Roteiro operacional da semana + roteiro integrado na agenda do dia.</p>
-          </div>
-          <button type="button" className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white sm:w-auto" onClick={() => openCreate("roteiro")}>
-            Criar roteiro
-          </button>
-        </div>
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Roteiro operacional da semana</p>
-            {!weeklyRoutePlans.length ? (
-              <p className="mt-2 text-sm text-slate-500">Nenhum roteiro planejado para esta semana.</p>
-            ) : (
-              <div className="mt-2 space-y-2">
-                {weeklyRoutePlans.slice(0, 4).map((item, index) => (
-                  <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
-                    <p className="font-medium text-slate-800">{item.dayLabel} · {item.city}</p>
-                    <p className="text-xs text-slate-500">{item.visits} visitas</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Roteiro integrado na agenda do dia</p>
-            <p className="mt-2 text-sm text-emerald-800">
-              Os eventos de <strong>Roteiro de visita</strong> aparecem na timeline principal com status, paradas e ações rápidas.
-            </p>
-            <p className="mt-1 text-xs text-emerald-700">Use “Ver paradas” dentro dos cards da agenda para acompanhar execução.</p>
-          </div>
-        </div>
-      </div>
 
       {false && searchParams.get("execute") === "1" && executionEvent ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
@@ -1679,92 +1563,67 @@ export default function AgendaPage() {
           <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
         ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
-        ) : view === "monthly" ? (
-          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-            {groupedEventsByDay.map((group) => (
-              <div key={group.day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
-                <div className="space-y-2">
-                  {group.events.map((event) => (
+        ) : view === "daily" ? (
+          <div className="overflow-x-auto p-3 sm:p-4">
+            <div className="relative min-w-[320px] rounded-lg border border-slate-200 bg-white" style={{ height: `${Math.max(dailyTimelineHours.length * 68, 640)}px` }}>
+              {dailyTimelineHours.map((slot, index) => (
+                <div key={slot.hour} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * 68}px` }}>
+                  <p className="absolute -top-3 left-2 bg-white px-1 text-[11px] font-semibold text-slate-500">{formatHourLabel(slot.hour)}</p>
+                </div>
+              ))}
+              {dailyTimelineHours.flatMap((slot, index) =>
+                slot.events.map((event) => (
+                  <button
+                    key={event.id}
+                    type="button"
+                    ref={(node) => {
+                      if (event.id === highlightedEventId) highlightedEventRef.current = node;
+                    }}
+                    onClick={() => void onSetAsDone(event)}
+                    className="absolute left-16 right-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-left shadow-sm"
+                    style={{
+                      top: `${index * 68 + 10}px`,
+                      minHeight: "52px"
+                    }}
+                  >
+                    <p className="truncate text-sm font-semibold text-slate-900">{event.title}</p>
+                    <p className="text-xs text-slate-600">{formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}</p>
+                    <p className="mt-1 text-[11px] font-medium text-slate-500">{TYPE_LABEL[event.type]}</p>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        ) : view === "weekly" ? (
+          <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-7">
+            {weeklyCalendarDays.map((day) => (
+              <div key={day.key} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <p className="text-xs font-semibold uppercase text-slate-600">{day.date.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" })}</p>
+                <div className="mt-2 space-y-2">
+                  {day.events.length ? day.events.map((event) => (
                     <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
-                      <p className="truncate text-sm font-medium text-slate-900">{event.title}</p>
-                      <p className="text-xs text-slate-500">{formatTime(getStartsAt(event))} • {TYPE_LABEL[event.type]}</p>
+                      <p className="truncate text-xs font-semibold text-slate-900">{event.title}</p>
+                      <p className="text-[11px] text-slate-500">{formatTime(getStartsAt(event))}</p>
                     </div>
-                  ))}
+                  )) : <p className="text-xs text-slate-400">Sem eventos</p>}
                 </div>
               </div>
             ))}
           </div>
-        ) : view === "list" ? (
-          <div className="divide-y">
-            {filteredEvents.map((event) => {
-              const isHighlighted = event.id === highlightedEventId;
-              return (
-                <div
-                  key={event.id}
-                  ref={isHighlighted ? highlightedEventRef : null}
-                  className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-slate-900">{event.title}</p>
-                    <p className="text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
-
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
-                      <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}>{TYPE_LABEL[normalizeAgendaEventType(event.type)]}</span>
-                      {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
-                      <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
-                      <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
-                        {sellerById[getOwnerId(event)] || "Vendedor"}
-                      </span>
-                    </div>
-                  </div>
+        ) : view === "monthly" ? (
+          <div className="grid grid-cols-7 gap-1 p-3 text-xs sm:p-4">
+            {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((weekday) => (
+              <p key={weekday} className="px-1 pb-1 text-center font-semibold text-slate-500">{weekday}</p>
+            ))}
+            {monthlyCalendarDays.map((day) => (
+              <div key={day.key} className={`min-h-24 rounded-lg border p-1 ${day.isCurrentMonth ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 text-slate-400"}`}>
+                <p className="text-[11px] font-semibold">{day.date.getDate()}</p>
+                <div className="mt-1 space-y-1">
+                  {day.events.slice(0, 2).map((event) => (
+                    <p key={event.id} className="truncate rounded bg-brand-50 px-1 py-0.5 text-[10px] text-brand-800">{formatTime(getStartsAt(event))} {event.title}</p>
+                  ))}
+                  {day.events.length > 2 ? <p className="text-[10px] text-slate-500">+{day.events.length - 2} mais</p> : null}
                 </div>
-              );
-            })}
-          </div>
-        ) : view === "daily" ? (
-          <div className="space-y-3 p-3 sm:p-4">
-            {dailyTimelineHours.map((slot) => (
-              <div key={slot.hour} className="rounded-lg border border-slate-200">
-                <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                  <p className="w-14 text-xs font-semibold text-slate-600">{formatHourLabel(slot.hour)}</p>
-                  <span className="h-px flex-1 bg-slate-200" />
-                </div>
-                {!slot.events.length ? (
-                  <p className="px-3 py-2 text-xs text-slate-400">Sem compromissos neste horário.</p>
-                ) : (
-                  <div className="divide-y">
-                    {slot.events.map((event) => {
-                      const isHighlighted = event.id === highlightedEventId;
-                      return (
-                        <div key={event.id} ref={isHighlighted ? highlightedEventRef : null} className={`flex flex-col gap-3 p-3 md:flex-row md:items-start md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}>
-                          <div className="min-w-0 flex-1">
-                            <p className="break-words font-medium text-slate-900">{event.title}</p>
-                            <p className="mt-1 text-xs text-slate-500">
-                              {formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}
-                            </p>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
-                              <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
-                              {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro de visita</span> : null}
-                              <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
-                            </div>
-                          </div>
-                          <div className="mobile-action-stack w-full shrink-0 md:w-auto md:justify-end">
-                            <button
-                              type="button"
-                              title={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                              aria-label={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                              className="rounded-md border border-green-300 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50"
-                              onClick={() => void onSetAsDone(event)}
-                            >
-                              {event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -1775,152 +1634,21 @@ export default function AgendaPage() {
                 <p className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
                 <div className="divide-y">
                   {group.events.map((event) => {
-                    const isHighlighted = event.id === highlightedEventId;
                     return (
-                      <Fragment key={event.id}>
                       <div
-                        ref={isHighlighted ? highlightedEventRef : null}
-                        className={`flex flex-col gap-3 p-3 sm:p-4 md:flex-row md:items-start md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}
+                        key={event.id}
+                        ref={(node) => {
+                          if (event.id === highlightedEventId) highlightedEventRef.current = node;
+                        }}
+                        className="flex flex-col gap-2 p-3 sm:p-4"
                       >
-                        <div className="flex min-w-0 flex-1 gap-3">
-                          <div className="hidden w-16 shrink-0 text-right md:block">
-                            <p className="text-xs font-semibold text-slate-700">{formatTime(getStartsAt(event))}</p>
-                            <p className="text-[11px] text-slate-400">{formatTime(getEndsAt(event))}</p>
-                          </div>
-                          <div className="relative hidden w-4 md:flex justify-center">
-                            <span className="h-full w-px bg-slate-200" />
-                            <span className="absolute top-1 h-2.5 w-2.5 rounded-full bg-brand-600" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-xs font-semibold text-slate-500 md:hidden">{formatTime(getStartsAt(event))}</p>
-                            <p className="break-words font-medium text-slate-900">{event.title}</p>
-                            <p className="mt-1 text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
-
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
-                              <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
-                              {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro de visita</span> : null}
-                              <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
-                              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
-                                {sellerById[getOwnerId(event)] || "Vendedor"}
-                              </span>
-                              {isHighlighted ? (
-                                <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="mobile-action-stack w-full shrink-0 md:w-auto md:justify-end">
-                          {event.type === "roteiro_visita" ? (
-                            <button
-                              type="button"
-                              className="rounded-md border border-emerald-300 px-3 py-2 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                              onClick={() => setExpandedRouteEventId((current) => (current === event.id ? "" : event.id))}
-                            >
-                              {expandedRouteEventId === event.id ? "Ocultar paradas" : "Ver paradas"}
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            title={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                            aria-label={event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                            className="rounded-md border border-green-300 px-3 py-2 text-xs font-medium text-green-700 hover:bg-green-50"
-                            onClick={() => void onSetAsDone(event)}
-                          >
-                            {event.status === "completed" ? "Reabrir compromisso" : "Concluir compromisso"}
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md border border-rose-300 px-3 py-2 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                            onClick={() => void onDeleteAgendaEvent(event)}
-                          >
-                            Excluir
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-md border border-brand-300 px-3 py-2 text-center text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={Boolean(event.hasLinkedActivity || event.linkedActivityId)}
-                            onClick={() => void openActivityModal(event)}
-                          >
-                            {event.hasLinkedActivity || event.linkedActivityId ? "Ver atividade" : "Registrar atividade"}
-                          </button>
-
-                          {event.clientId ? (
-                            <Link
-                              to={`/clientes/${event.clientId}`}
-                              title="Abrir cliente 360"
-                              aria-label="Abrir cliente 360"
-                              className="rounded-md border border-brand-300 px-3 py-2 text-center text-xs font-medium text-brand-700 hover:bg-brand-50"
-                            >
-                              Cliente
-                            </Link>
-                          ) : null}
+                        <p className="text-xs font-semibold text-slate-600">{formatDateTime(getStartsAt(event))}</p>
+                        <p className="font-medium text-slate-900">{event.title}</p>
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                          <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                         </div>
                       </div>
-                      {event.type === "roteiro_visita" && expandedRouteEventId === event.id ? (
-                        <div className="border-t border-emerald-100 bg-emerald-50 px-4 py-3">
-                          {!event.stops?.length ? (
-                            <p className="text-xs text-emerald-700">Sem paradas cadastradas.</p>
-                          ) : isMobile ? (
-                            <div className="max-h-[70vh] space-y-3 overflow-y-auto overscroll-contain scroll-smooth pr-1 select-none touch-pan-y">
-                              {event.stops.map((stop) => {
-                                const stopStatus = getStopMobileStatus(stop);
-                                return (
-                                  <article key={stop.id} className="rounded-xl border border-emerald-200 bg-white p-4 shadow-sm">
-                                    <div className="space-y-2">
-                                      <p className="text-sm font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
-                                      <p className="text-sm text-slate-600">{getStopCityDisplayName(stop)}</p>
-                                      <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${STOP_MOBILE_STATUS_CLASS[stopStatus]}`}>
-                                        {STOP_MOBILE_STATUS_LABEL[stopStatus]}
-                                      </span>
-                                    </div>
-                                    <div className="mt-4 grid grid-cols-2 gap-3">
-                                      {stop.clientId ? (
-                                        <Link
-                                          to={`/clientes/${stop.clientId}`}
-                                          className="rounded-lg border border-brand-300 px-4 py-3 text-center text-sm font-semibold text-brand-700 active:bg-brand-50"
-                                        >
-                                          Abrir
-                                        </Link>
-                                      ) : (
-                                        <button
-                                          type="button"
-                                          disabled
-                                          className="rounded-lg border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-400"
-                                        >
-                                          Abrir
-                                        </button>
-                                      )}
-                                      <button
-                                        type="button"
-                                        disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting}
-                                        onClick={() => void onCheckOutStop(stop.id)}
-                                        className="rounded-lg border border-green-300 px-4 py-3 text-sm font-semibold text-green-700 active:bg-green-50 disabled:opacity-50"
-                                      >
-                                        Concluir
-                                      </button>
-                                    </div>
-                                  </article>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <ul className="space-y-2">
-                              {event.stops.map((stop) => (
-                                <li key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
-                                  <div className="space-y-1 text-sm text-slate-800">
-                                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
-                                    <p className="font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
-                                    <p className="text-xs text-slate-600">Cidade: {getStopCityDisplayName(stop)}</p>
-                                    <p className="text-xs text-slate-600">Observação: {stop.notes || "Sem observação"}</p>
-                                  </div>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ) : null}
-                      </Fragment>
                     );
                   })}
                 </div>

@@ -43,6 +43,17 @@ type SeedOpportunityTemplate = {
   probability: number;
 };
 
+type PreviewAgendaTemplate = {
+  title: string;
+  type: Prisma.AgendaEventType;
+  startOffsetDays: number;
+  startHour: number;
+  durationHours: number;
+  status: Prisma.AgendaEventStatus;
+  notes: string;
+  withStops?: boolean;
+};
+
 const OPPORTUNITY_TEMPLATES: SeedOpportunityTemplate[] = [
   { stage: "prospeccao", title: "Pipeline prospecção 1", daysFromNowProposal: -4, daysFromNowFollowUp: 3, daysFromNowExpectedClose: 12, value: 38000, probability: 25 },
   { stage: "prospeccao", title: "Pipeline prospecção 2", daysFromNowProposal: -38, daysFromNowFollowUp: -10, daysFromNowExpectedClose: -2, value: 29000, probability: 20 },
@@ -56,9 +67,24 @@ const OPPORTUNITY_TEMPLATES: SeedOpportunityTemplate[] = [
   { stage: "perdido", title: "Negócio perdido 2", daysFromNowProposal: -36, daysFromNowFollowUp: -24, daysFromNowExpectedClose: -20, closedAtOffset: -20, value: 53000, probability: 5 }
 ];
 
+const PREVIEW_AGENDA_TEMPLATES: PreviewAgendaTemplate[] = [
+  { title: "Reunião online de alinhamento", type: "reuniao_online", startOffsetDays: 0, startHour: 9, durationHours: 1, status: "agendado", notes: "Revisar proposta comercial." },
+  { title: "Visita presencial de diagnóstico", type: "reuniao_presencial", startOffsetDays: 1, startHour: 14, durationHours: 2, status: "agendado", notes: "Levantamento técnico da safra." },
+  { title: "Follow-up pós proposta", type: "followup", startOffsetDays: 2, startHour: 10, durationHours: 1, status: "agendado", notes: "Confirmar próximos passos." },
+  { title: "Roteiro de visita regional", type: "roteiro_visita", startOffsetDays: 0, startHour: 8, durationHours: 6, status: "agendado", notes: "Roteiro com paradas prioritárias.", withStops: true },
+  { title: "Reunião atrasada de renegociação", type: "reuniao_online", startOffsetDays: -2, startHour: 16, durationHours: 1, status: "vencido", notes: "Evento atrasado para validar indicadores." },
+  { title: "Visita concluída de fechamento", type: "reuniao_presencial", startOffsetDays: -1, startHour: 11, durationHours: 1, status: "realizado", notes: "Visita concluída para histórico." }
+];
+
 function addDays(baseDate: Date, days: number) {
   const date = new Date(baseDate);
   date.setDate(date.getDate() + days);
+  return date;
+}
+
+function withHour(baseDate: Date, hour: number, minute = 0) {
+  const date = new Date(baseDate);
+  date.setHours(hour, minute, 0, 0);
   return date;
 }
 
@@ -231,6 +257,46 @@ async function createPreviewDataset() {
     opportunityCounter += 1;
   }
 
+  for (const [index, template] of PREVIEW_AGENDA_TEMPLATES.entries()) {
+    const ownerSeller = sellers[index % sellers.length];
+    const client = clients[index % clients.length];
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { ownerSellerId: ownerSeller.id, title: { contains: PREVIEW_SEED_TAG } },
+      orderBy: { createdAt: "asc" }
+    });
+    const startDate = withHour(addDays(now, template.startOffsetDays), template.startHour);
+    const endDate = withHour(addDays(now, template.startOffsetDays), template.startHour + template.durationHours);
+
+    const createdAgenda = await prisma.agendaEvent.create({
+      data: {
+        title: `${PREVIEW_SEED_TAG} ${template.title}`,
+        type: template.type,
+        status: template.status,
+        startDateTime: startDate,
+        endDateTime: endDate,
+        notes: `${PREVIEW_SEED_TAG} ${template.notes}`,
+        city: client.city,
+        sellerId: ownerSeller.id,
+        clientId: client.id,
+        opportunityId: opportunity?.id
+      }
+    });
+
+    if (template.withStops) {
+      const stopClients = clients.slice(index, index + 3);
+      await prisma.agendaStop.createMany({
+        data: stopClients.map((stopClient, stopIndex) => ({
+          agendaEventId: createdAgenda.id,
+          order: stopIndex + 1,
+          clientId: stopClient.id,
+          city: stopClient.city,
+          notes: `${PREVIEW_SEED_TAG} parada ${stopIndex + 1}`,
+          plannedTime: withHour(addDays(now, template.startOffsetDays), template.startHour + stopIndex + 1)
+        }))
+      });
+    }
+  }
+
   for (const seller of sellers) {
     await prisma.goal.upsert({
       where: { sellerId_month: { sellerId: seller.id, month: currentMonth } },
@@ -257,6 +323,7 @@ async function createPreviewDataset() {
     sellers: sellers.length,
     clients: PREVIEW_CLIENTS.length,
     opportunities: OPPORTUNITY_TEMPLATES.length,
+    agendaEvents: PREVIEW_AGENDA_TEMPLATES.length,
     tag: PREVIEW_SEED_TAG
   });
 }
