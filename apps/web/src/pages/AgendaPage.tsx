@@ -510,12 +510,6 @@ export default function AgendaPage() {
     return () => mediaQuery.removeEventListener("change", update);
   }, []);
 
-  useEffect(() => {
-    if (isMobile && view !== "daily") {
-      setView("daily");
-    }
-  }, [isMobile, view]);
-
   const sellers = useMemo<Seller[]>(() => {
     if (!canFilterBySeller && user?.id && user?.name) {
       return [{ id: user.id, name: user.name }];
@@ -713,10 +707,10 @@ export default function AgendaPage() {
       }));
   }, [filteredEvents]);
 
-  const dailyTimelineHours = useMemo(() => {
-    if (view !== "daily") return [] as number[];
-    return Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, index) => DAY_START_HOUR + index);
-  }, [view]);
+  const timelineHours = useMemo(
+    () => Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, index) => DAY_START_HOUR + index),
+    []
+  );
 
   const selectedDayEvents = useMemo(() => {
     const selectedDayKey = formatDayKey(dateRange.start.toISOString());
@@ -1459,9 +1453,13 @@ export default function AgendaPage() {
     if (view !== "daily") setView("daily");
   };
 
+  const openAgendaDetails = (event: AgendaEvent) => {
+    setSelectedEvent(event);
+  };
+
   return (
-    <section className="space-y-4">
-      <header className="flex flex-col gap-2 rounded-xl border bg-white p-2.5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-3">
+    <section className="flex min-h-[calc(100dvh-9rem)] flex-col gap-3 overflow-hidden">
+      <header className="shrink-0 flex flex-col gap-2 rounded-xl border bg-white p-2.5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Agenda operacional</p>
           <h2 className="text-lg font-semibold text-slate-900">Calendário de compromissos e roteiros</h2>
@@ -1472,7 +1470,7 @@ export default function AgendaPage() {
         </button>
       </header>
 
-      <div className="space-y-2.5 rounded-xl border bg-white p-2.5 shadow-sm sm:space-y-3 sm:p-4">
+      <div className="shrink-0 space-y-2.5 rounded-xl border bg-white p-2.5 shadow-sm sm:space-y-3 sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-semibold capitalize text-slate-800">{periodLabel}</p>
           <button
@@ -1636,23 +1634,23 @@ export default function AgendaPage() {
       ) : null}
 
       {/* Lista de eventos */}
-      <div className="rounded-xl border bg-white shadow-sm">
+      <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-white shadow-sm">
         {isEventsLoading ? (
           <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
         ) : !filteredEvents.length ? (
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
         ) : view === "daily" ? (
-          <div className="overflow-x-auto p-3 sm:p-4">
+          <div className="h-full overflow-auto p-3 sm:p-4">
             <div className="grid min-w-[340px] grid-cols-[64px_1fr]">
               <div className="relative border-r border-slate-200 bg-slate-50">
-                {dailyTimelineHours.map((hour, index) => (
+                {timelineHours.map((hour, index) => (
                   <div key={hour} className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${index * HOUR_HEIGHT_PX}px`, height: `${HOUR_HEIGHT_PX}px` }}>
                     <p className="absolute -top-2 right-2 bg-slate-50 px-1 text-[11px] font-medium text-slate-500">{formatHourLabel(hour)}</p>
                   </div>
                 ))}
               </div>
-              <div className="relative rounded-r-lg border border-l-0 border-slate-200 bg-white" style={{ height: `${dailyTimelineHours.length * HOUR_HEIGHT_PX}px` }}>
-                {dailyTimelineHours.map((hour, index) => (
+              <div className="relative rounded-r-lg border border-l-0 border-slate-200 bg-white" style={{ height: `${timelineHours.length * HOUR_HEIGHT_PX}px` }}>
+                {timelineHours.map((hour, index) => (
                   <div key={hour} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * HOUR_HEIGHT_PX}px`, height: `${HOUR_HEIGHT_PX}px` }}>
                     <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-slate-100" />
                   </div>
@@ -1682,7 +1680,7 @@ export default function AgendaPage() {
                       }}
                       className={`absolute rounded-xl border px-2 py-1.5 shadow-sm transition hover:shadow-md ${getEventAccentClass(event)} ${isCompleted ? "opacity-65" : ""}`}
                       style={{ top: `${top}px`, height: `${height}px`, width, left }}
-                      onClick={() => setSelectedEvent(event)}
+                      onClick={() => openAgendaDetails(event)}
                     >
                       <div className="flex items-start justify-between gap-1">
                         <p className="truncate text-[11px] font-semibold leading-tight text-slate-900">{event.title}</p>
@@ -1726,8 +1724,8 @@ export default function AgendaPage() {
             </div>
           </div>
         ) : view === "weekly" ? (
-          <div className="overflow-x-auto p-2 sm:p-4">
-            <div className="min-w-[980px] rounded-xl border border-slate-200 bg-white">
+          <div className="h-full overflow-auto p-2 sm:p-4">
+            <div className="min-h-full min-w-[980px] rounded-xl border border-slate-200 bg-white">
               <div className="sticky top-0 z-10 grid grid-cols-[72px_repeat(7,minmax(140px,1fr))] border-b bg-white">
                 <div />
                 {weeklyCalendarDaysWithLayout.map((day) => (
@@ -1736,9 +1734,9 @@ export default function AgendaPage() {
                   </div>
                 ))}
               </div>
-              <div className="relative grid grid-cols-[72px_repeat(7,minmax(140px,1fr))]" style={{ height: `${dailyTimelineHours.length * HOUR_HEIGHT_PX}px` }}>
+              <div className="relative grid grid-cols-[72px_repeat(7,minmax(140px,1fr))]" style={{ height: `${timelineHours.length * HOUR_HEIGHT_PX}px` }}>
                 <div className="relative border-r bg-slate-50">
-                  {dailyTimelineHours.map((hour, index) => (
+                  {timelineHours.map((hour, index) => (
                     <div key={hour} className="absolute inset-x-0 border-t border-slate-200/70" style={{ top: `${index * HOUR_HEIGHT_PX}px` }}>
                       <p className="absolute -top-2 right-2 bg-slate-50 px-1 text-[11px] text-slate-500">{formatHourLabel(hour)}</p>
                     </div>
@@ -1746,7 +1744,7 @@ export default function AgendaPage() {
                 </div>
                 {weeklyCalendarDaysWithLayout.map((day) => (
                   <div key={day.key} className="relative border-l">
-                    {dailyTimelineHours.map((hour, index) => (
+                    {timelineHours.map((hour, index) => (
                       <div key={`${day.key}-${hour}`} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * HOUR_HEIGHT_PX}px` }} />
                     ))}
                     {day.positionedEvents.map(({ event, column, columns }) => {
@@ -1757,7 +1755,7 @@ export default function AgendaPage() {
                       const width = `calc(${100 / columns}% - 6px)`;
                       const left = `calc(${(100 / columns) * column}% + 3px)`;
                       return (
-                        <button key={event.id} type="button" className={`absolute rounded-lg border px-1.5 py-1 text-left text-[11px] shadow-sm ${getEventAccentClass(event)}`} style={{ top: `${Math.max(0, top)}px`, height: `${height}px`, width, left }} onClick={() => setSelectedEvent(event)}>
+                        <button key={event.id} type="button" className={`absolute rounded-lg border px-1.5 py-1 text-left text-[11px] shadow-sm ${getEventAccentClass(event)}`} style={{ top: `${Math.max(0, top)}px`, height: `${height}px`, width, left }} onClick={() => openAgendaDetails(event)}>
                           <p className="truncate font-semibold leading-tight text-slate-800">{event.title}</p>
                           <p className="text-[10px] text-slate-500">{formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}</p>
                         </button>
@@ -1769,46 +1767,58 @@ export default function AgendaPage() {
             </div>
           </div>
         ) : view === "monthly" ? (
-          <div className="grid grid-cols-7 gap-1.5 bg-slate-50 p-3 text-xs sm:p-4">
-            {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((weekday) => (
-              <p key={weekday} className="px-1 pb-1 text-center font-semibold text-slate-500">{weekday}</p>
-            ))}
-            {monthlyCalendarDays.map((day) => {
-              const isToday = day.key === formatDayKey(new Date().toISOString());
-              return (
-              <button key={day.key} type="button" onClick={() => setSelectedMonthDayKey(day.key)} className={`min-h-28 rounded-xl border p-1.5 text-left shadow-sm transition hover:shadow ${day.isCurrentMonth ? "bg-white" : "bg-slate-100 text-slate-400"} ${isToday ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200"}`}>
-                <p className={`text-[11px] font-semibold ${isToday ? "text-brand-800" : ""}`}>{day.date.getDate()}</p>
-                <div className="mt-1 space-y-1">
-                  {day.events.slice(0, 2).map((event) => (
-                    <p key={event.id} className={`truncate rounded-md border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{formatTime(getStartsAt(event))} {event.title}</p>
-                  ))}
-                  {day.events.length > 2 ? <p className="text-[10px] font-semibold text-slate-500">+ {day.events.length - 2} mais</p> : null}
-                </div>
-              </button>
-            );})}
+          <div className="flex h-full flex-col bg-slate-50 p-3 text-xs sm:p-4">
+            <div className="grid grid-cols-7 gap-1.5 pb-1.5">
+              {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map((weekday) => (
+                <p key={weekday} className="px-1 pb-1 text-center font-semibold text-slate-500">{weekday}</p>
+              ))}
+            </div>
+            <div
+              className="grid flex-1 grid-cols-7 gap-1.5"
+              style={{ gridTemplateRows: `repeat(${Math.ceil(monthlyCalendarDays.length / 7)}, minmax(0, 1fr))` }}
+            >
+              {monthlyCalendarDays.map((day) => {
+                const isToday = day.key === formatDayKey(new Date().toISOString());
+                return (
+                <button key={day.key} type="button" onClick={() => setSelectedMonthDayKey(day.key)} className={`h-full min-h-[104px] overflow-hidden rounded-xl border p-1.5 text-left shadow-sm transition hover:shadow ${day.isCurrentMonth ? "bg-white" : "bg-slate-100 text-slate-400"} ${isToday ? "border-brand-300 ring-2 ring-brand-100" : "border-slate-200"}`}>
+                  <p className={`text-[11px] font-semibold ${isToday ? "text-brand-800" : ""}`}>{day.date.getDate()}</p>
+                  <div className="mt-1 space-y-1">
+                    {day.events.slice(0, 2).map((event) => (
+                      <p key={event.id} className={`truncate rounded-md border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{formatTime(getStartsAt(event))} {event.title}</p>
+                    ))}
+                    {day.events.length > 2 ? <p className="text-[10px] font-semibold text-slate-500">+ {day.events.length - 2} mais</p> : null}
+                  </div>
+                </button>
+              );})}
+            </div>
           </div>
         ) : (
-          <div className="space-y-4 p-3 sm:p-4">
+          <div className="h-full space-y-4 overflow-auto p-3 sm:p-4">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="overflow-hidden rounded-lg border border-slate-200">
                 <p className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
                 <div className="divide-y">
                   {group.events.map((event) => {
                     return (
-                      <div
+                      <button
                         key={event.id}
+                        type="button"
                         ref={(node) => {
                           if (event.id === highlightedEventId) highlightedEventRef.current = node;
                         }}
-                        className="flex flex-col gap-2 p-3 sm:p-4"
+                        className="flex w-full flex-col gap-2 p-3 text-left transition hover:bg-slate-50 active:bg-slate-100 sm:p-4"
+                        onClick={() => openAgendaDetails(event)}
                       >
                         <p className="text-xs font-semibold text-slate-600">{formatDateTime(getStartsAt(event))}</p>
                         <p className="font-medium text-slate-900">{event.title}</p>
+                        <p className="text-xs text-slate-500">
+                          {event.clientId ? clientById.get(event.clientId)?.name || "Cliente vinculado" : "Sem cliente"} · {sellers.find((seller) => seller.id === getOwnerId(event))?.name || "Vendedor"}
+                        </p>
                         <div className="flex flex-wrap gap-2 text-xs">
                           <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
                           <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
                         </div>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>
@@ -1826,7 +1836,7 @@ export default function AgendaPage() {
           </div>
           <div className="max-h-[calc(100%-56px)] space-y-2 overflow-y-auto p-3">
             {selectedMonthDayEvents.length ? selectedMonthDayEvents.map((event) => (
-              <button key={event.id} type="button" className={`w-full rounded-lg border p-2 text-left ${getEventAccentClass(event)}`} onClick={() => setSelectedEvent(event)}>
+              <button key={event.id} type="button" className={`w-full rounded-lg border p-2 text-left ${getEventAccentClass(event)}`} onClick={() => openAgendaDetails(event)}>
                 <p className="text-sm font-semibold text-slate-900">{event.title}</p>
                 <p className="text-xs text-slate-600">{formatDateTime(getStartsAt(event))}</p>
               </button>
