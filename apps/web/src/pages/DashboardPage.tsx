@@ -202,7 +202,10 @@ const doughnutCenterTextPlugin: Plugin<"doughnut"> = {
   },
 };
 
-const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
+const getCurrentMonth = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 const getCurrentWeekStart = () => {
   const now = new Date();
@@ -1038,16 +1041,17 @@ export default function DashboardPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {[
-          ["Faturamento no mês", formatCurrencyBRL(summary.totalRevenue)],
-          ["Vendas no mês", formatNumberBR(summary.totalSales)],
-          ["Vendido hoje", formatCurrencyBRL(salesPace.soldToday)],
-          ["% do objetivo atingido", formatPercentBR(salesPace.percentObjectiveReached)],
-          ["Clientes ativos", formatNumberBR(portfolio.walletStatus.active)],
-          ["Inativos 31–90 / >90", `${formatNumberBR(portfolio.walletStatus.inactiveRecent)} / ${formatNumberBR(portfolio.walletStatus.inactiveOld)}`],
-        ].map(([label, value]) => (
-          <div key={String(label)} className={cardClass}>
-            <div className="text-sm text-slate-500">{label}</div>
-            <div className="text-2xl font-bold text-slate-900">{value}</div>
+          { label: "Faturamento no mês", value: formatCurrencyBRL(summary.totalRevenue), subtitle: "Baseado em oportunidades ganhas" },
+          { label: "Vendas no mês", value: formatNumberBR(summary.totalSales) },
+          { label: "Vendido hoje", value: formatCurrencyBRL(salesPace.soldToday) },
+          { label: "% do objetivo atingido", value: formatPercentBR(salesPace.percentObjectiveReached) },
+          { label: "Clientes ativos", value: formatNumberBR(portfolio.walletStatus.active) },
+          { label: "Inativos 31–90 / >90", value: `${formatNumberBR(portfolio.walletStatus.inactiveRecent)} / ${formatNumberBR(portfolio.walletStatus.inactiveOld)}` },
+        ].map((item) => (
+          <div key={item.label} className={cardClass}>
+            <div className="text-sm text-slate-500">{item.label}</div>
+            <div className="text-2xl font-bold text-slate-900">{item.value}</div>
+            {item.subtitle ? <div className="mt-1 text-xs text-slate-500">{item.subtitle}</div> : null}
           </div>
         ))}
       </div>

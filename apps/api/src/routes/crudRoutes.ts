@@ -5034,10 +5034,12 @@ router.get("/opportunities/summary", async (req, res) => {
 
   const closedCount = wonCount + lossCount;
   const conversionRate = parsedFilters.params.status === "open" || closedCount === 0 ? 0 : (wonCount / closedCount) * 100;
-  // Fonte atual do KPI = agregação deste endpoint /opportunities/summary.
-  // Provável causa = se filtros (ownerSellerId/overdue/status) não forem enviados/refetchados após mutações de follow-up,
-  // os cards no front podem permanecer com valores antigos ou aparentemente iguais entre vendedores.
   if (shouldLogOpportunityDiagnostics) {
+    const wonOpportunities = opportunities.filter((opportunity) => opportunity.stage === "ganho");
+    const wonUsingClosedAt = wonOpportunities.filter((opportunity) => opportunity.closedAt);
+    const wonUsingExpectedCloseDateFallback = wonOpportunities.filter((opportunity) => !opportunity.closedAt && opportunity.expectedCloseDate);
+    const wonTotal = wonOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0);
+
     const sample = opportunities.slice(0, 50).map((opportunity) => ({
       id: opportunity.id,
       title: opportunity.title,
@@ -5060,6 +5062,21 @@ router.get("/opportunities/summary", async (req, res) => {
       weightedTotal: pipelineMetrics.weightedTotal,
       overdueCount: pipelineMetrics.overdueCount,
       conversionRate,
+      wonDiagnostics: {
+        count: wonOpportunities.length,
+        totalValue: wonTotal,
+        usingClosedAtCount: wonUsingClosedAt.length,
+        usingExpectedCloseDateFallbackCount: wonUsingExpectedCloseDateFallback.length,
+        usingExpectedCloseDateFallbackValue: wonUsingExpectedCloseDateFallback.reduce((acc, opportunity) => acc + opportunity.value, 0),
+        sampleFallbackItems: wonUsingExpectedCloseDateFallback.slice(0, 20).map((opportunity) => ({
+          id: opportunity.id,
+          title: opportunity.title,
+          value: opportunity.value,
+          expectedCloseDate: toIsoStringOrNull(opportunity.expectedCloseDate),
+          sellerId: opportunity.ownerSeller?.id || null,
+          sellerName: opportunity.ownerSeller?.name || null
+        }))
+      },
       consideredOpportunities: sample
     });
   }
