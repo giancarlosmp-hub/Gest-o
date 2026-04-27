@@ -2841,6 +2841,7 @@ router.get("/reports/weekly-missions", async (req, res) => {
 router.get("/reports/discipline-ranking", async (req, res) => {
   const fromRaw = req.query.from as string | undefined;
   const toRaw = req.query.to as string | undefined;
+  const sellerIdRaw = typeof req.query.sellerId === "string" ? req.query.sellerId.trim() : "";
 
   if (!fromRaw || !toRaw) {
     return res.status(400).json({ message: "Parâmetros from e to são obrigatórios." });
@@ -2853,7 +2854,7 @@ router.get("/reports/discipline-ranking", async (req, res) => {
     return res.status(400).json({ message: "Parâmetros from/to inválidos." });
   }
 
-  const scopedSellerId = undefined;
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw || undefined;
   const inactivityWindow = getLastBusinessDaysWindow(3);
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
@@ -3114,6 +3115,8 @@ router.get("/reports/score-monthly", async (req, res) => {
 });
 
 router.get("/reports/weekly-highlights", async (req, res) => {
+  const sellerIdRaw = typeof req.query.sellerId === "string" ? req.query.sellerId.trim() : "";
+  const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw || undefined;
   const range = getCurrentWeekRangeFromBrazilNow();
   const previousStart = new Date(range.start);
   previousStart.setUTCDate(previousStart.getUTCDate() - 7);
@@ -3124,7 +3127,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
 
   const [sellers, currentWonOpportunities, previousWonOpportunities, visitActivities, followUpActivities, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
-      where: { role: "vendedor" },
+      where: { role: "vendedor", ...(scopedSellerId ? { id: scopedSellerId } : {}) },
       select: { id: true, name: true }
     }),
     prisma.opportunity.groupBy({
@@ -3551,9 +3554,13 @@ router.get("/reports/commercial-score", async (req, res) => {
 });
 
 router.get("/reports/consistency", async (req, res) => {
+  const sellerIdRaw = typeof req.query.sellerId === "string" ? req.query.sellerId.trim() : "";
   const monthKeys = getLastNMonthKeys(3);
 
-  const scopedSellerFilter = req.user?.role === "vendedor" ? { id: req.user.id } : { role: "vendedor" as const };
+  const scopedSellerFilter =
+    req.user?.role === "vendedor"
+      ? { id: req.user.id }
+      : { role: "vendedor" as const, ...(sellerIdRaw ? { id: sellerIdRaw } : {}) };
   const sellers = await prisma.user.findMany({
     where: scopedSellerFilter,
     select: { id: true, name: true },
