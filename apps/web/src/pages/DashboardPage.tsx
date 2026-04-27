@@ -1041,7 +1041,7 @@ export default function DashboardPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         {[
-          { label: "Faturamento no mês", value: formatCurrencyBRL(summary.totalRevenue), subtitle: "Baseado em oportunidades ganhas" },
+          { label: "Faturamento no mês", value: formatCurrencyBRL(summary.totalRevenue) },
           { label: "Vendas no mês", value: formatNumberBR(summary.totalSales) },
           { label: "Vendido hoje", value: formatCurrencyBRL(salesPace.soldToday) },
           { label: "% do objetivo atingido", value: formatPercentBR(salesPace.percentObjectiveReached) },
@@ -1051,7 +1051,6 @@ export default function DashboardPage() {
           <div key={item.label} className={cardClass}>
             <div className="text-sm text-slate-500">{item.label}</div>
             <div className="text-2xl font-bold text-slate-900">{item.value}</div>
-            {item.subtitle ? <div className="mt-1 text-xs text-slate-500">{item.subtitle}</div> : null}
           </div>
         ))}
       </div>
