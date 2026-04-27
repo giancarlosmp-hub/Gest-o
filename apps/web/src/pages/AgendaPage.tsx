@@ -96,6 +96,10 @@ const PERIOD_FILTER_LABEL: Record<PeriodFilter, string> = {
   custom_range: "Personalizado"
 };
 
+const DAY_START_HOUR = 7;
+const DAY_END_HOUR = 21;
+const HOUR_HEIGHT_PX = 72;
+
 type DateRange = {
   start: Date;
   end: Date;
@@ -216,6 +220,26 @@ function formatTime(value: string) {
 
 function formatHourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function getEventVisualType(event: AgendaEvent) {
+  if (event.status === "cancelled") return "cancelled";
+  if (event.status === "completed") return "completed";
+  if (new Date(getEndsAt(event)).getTime() < Date.now() && event.status === "planned") return "overdue";
+  if (event.type === "roteiro_visita") return "route";
+  if (event.type === "followup") return "followup";
+  if (event.type === "reuniao_online" || event.type === "reuniao_presencial") return "meeting";
+  return "visit";
+}
+
+function getEventAccentClass(event: AgendaEvent) {
+  const visualType = getEventVisualType(event);
+  if (visualType === "overdue") return "border-l-4 border-red-500 bg-red-50/70";
+  if (visualType === "route") return "border-l-4 border-emerald-500 bg-emerald-50/70";
+  if (visualType === "followup") return "border-l-4 border-amber-500 bg-amber-50/70";
+  if (visualType === "meeting") return "border-l-4 border-blue-500 bg-blue-50/70";
+  if (visualType === "completed") return "border-l-4 border-slate-400 bg-slate-100/80";
+  return "border-l-4 border-green-500 bg-green-50/70";
 }
 
 function createEmptyDraftStop(): DraftStop {
@@ -376,6 +400,9 @@ export default function AgendaPage() {
   });
   const [draftStops, setDraftStops] = useState<DraftStop[]>([]);
   const [highlightedEventId, setHighlightedEventId] = useState<string>("");
+  const [expandedRouteEventId, setExpandedRouteEventId] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState<AgendaEvent | null>(null);
+  const [selectedMonthDayKey, setSelectedMonthDayKey] = useState("");
   const highlightedEventRef = useRef<HTMLElement | null>(null);
   const inFlightRef = useRef<Map<string, Promise<any>>>(new Map());
   const [executionEventId, setExecutionEventId] = useState("");
@@ -628,34 +655,14 @@ export default function AgendaPage() {
   }, [filteredEvents]);
 
   const dailyTimelineHours = useMemo(() => {
-    if (view !== "daily") return [] as Array<{ hour: number; events: AgendaEvent[] }>;
+    if (view !== "daily") return [] as number[];
+    return Array.from({ length: DAY_END_HOUR - DAY_START_HOUR + 1 }, (_, index) => DAY_START_HOUR + index);
+  }, [view]);
 
+  const selectedDayEvents = useMemo(() => {
     const selectedDayKey = formatDayKey(dateRange.start.toISOString());
-    const eventsByHour = new Map<number, AgendaEvent[]>();
-
-    filteredEvents
-      .filter((event) => formatDayKey(getStartsAt(event)) === selectedDayKey)
-      .forEach((event) => {
-        const eventHour = new Date(getStartsAt(event)).getHours();
-        const current = eventsByHour.get(eventHour) || [];
-        current.push(event);
-        eventsByHour.set(eventHour, current);
-      });
-
-    const hoursWithEvents = Array.from(eventsByHour.keys());
-    const firstHour = hoursWithEvents.length ? Math.max(6, Math.min(...hoursWithEvents)) : 8;
-    const lastHour = hoursWithEvents.length ? Math.min(22, Math.max(...hoursWithEvents)) : 18;
-
-    const timeline: Array<{ hour: number; events: AgendaEvent[] }> = [];
-    for (let hour = firstHour; hour <= lastHour; hour += 1) {
-      timeline.push({
-        hour,
-        events: (eventsByHour.get(hour) || []).sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())
-      });
-    }
-
-    return timeline;
-  }, [view, filteredEvents, dateRange]);
+    return filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === selectedDayKey);
+  }, [filteredEvents, dateRange]);
 
   const weeklyCalendarDays = useMemo(() => {
     const start = startOfDay(dateRange.start);
@@ -699,6 +706,11 @@ export default function AgendaPage() {
     }
     return days;
   }, [periodAnchorDate, filteredEvents]);
+
+  const selectedMonthDayEvents = useMemo(() => {
+    if (!selectedMonthDayKey) return [] as AgendaEvent[];
+    return filteredEvents.filter((event) => formatDayKey(getStartsAt(event)) === selectedMonthDayKey);
+  }, [selectedMonthDayKey, filteredEvents]);
 
   const clientById = useMemo(() => new Map(activityClients.map((client) => [client.id, client])), [activityClients]);
 
@@ -1565,50 +1577,126 @@ export default function AgendaPage() {
           <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
         ) : view === "daily" ? (
           <div className="overflow-x-auto p-3 sm:p-4">
-            <div className="relative min-w-[320px] rounded-lg border border-slate-200 bg-white" style={{ height: `${Math.max(dailyTimelineHours.length * 68, 640)}px` }}>
-              {dailyTimelineHours.map((slot, index) => (
-                <div key={slot.hour} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * 68}px` }}>
-                  <p className="absolute -top-3 left-2 bg-white px-1 text-[11px] font-semibold text-slate-500">{formatHourLabel(slot.hour)}</p>
-                </div>
-              ))}
-              {dailyTimelineHours.flatMap((slot, index) =>
-                slot.events.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    ref={(node) => {
-                      if (event.id === highlightedEventId) highlightedEventRef.current = node;
-                    }}
-                    onClick={() => void onSetAsDone(event)}
-                    className="absolute left-16 right-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-left shadow-sm"
-                    style={{
-                      top: `${index * 68 + 10}px`,
-                      minHeight: "52px"
-                    }}
-                  >
-                    <p className="truncate text-sm font-semibold text-slate-900">{event.title}</p>
-                    <p className="text-xs text-slate-600">{formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}</p>
-                    <p className="mt-1 text-[11px] font-medium text-slate-500">{TYPE_LABEL[event.type]}</p>
-                  </button>
-                ))
-              )}
+            <div className="grid min-w-[340px] grid-cols-[64px_1fr]">
+              <div className="relative border-r border-slate-200 bg-slate-50">
+                {dailyTimelineHours.map((hour, index) => (
+                  <div key={hour} className="absolute left-0 right-0 border-t border-slate-200/70" style={{ top: `${index * HOUR_HEIGHT_PX}px`, height: `${HOUR_HEIGHT_PX}px` }}>
+                    <p className="absolute -top-2 right-2 bg-slate-50 px-1 text-[11px] font-medium text-slate-500">{formatHourLabel(hour)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="relative rounded-r-lg border border-l-0 border-slate-200 bg-white" style={{ height: `${dailyTimelineHours.length * HOUR_HEIGHT_PX}px` }}>
+                {dailyTimelineHours.map((hour, index) => (
+                  <div key={hour} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * HOUR_HEIGHT_PX}px`, height: `${HOUR_HEIGHT_PX}px` }}>
+                    <div className="absolute inset-x-0 top-1/2 border-t border-dashed border-slate-100" />
+                  </div>
+                ))}
+                {selectedDayEvents.map((event) => {
+                  const start = new Date(getStartsAt(event));
+                  const end = new Date(getEndsAt(event));
+                  const startsAtMinutes = start.getHours() * 60 + start.getMinutes();
+                  const endsAtMinutes = end.getHours() * 60 + end.getMinutes();
+                  const minMinutes = DAY_START_HOUR * 60;
+                  const maxMinutes = DAY_END_HOUR * 60;
+                  const clampedStart = Math.max(minMinutes, Math.min(startsAtMinutes, maxMinutes));
+                  const clampedEnd = Math.max(clampedStart + 30, Math.min(endsAtMinutes, maxMinutes + 60));
+                  const top = ((clampedStart - minMinutes) / 60) * HOUR_HEIGHT_PX;
+                  const height = Math.max(42, ((clampedEnd - clampedStart) / 60) * HOUR_HEIGHT_PX - 4);
+                  const isCompleted = event.status === "completed";
+                  const isRoute = event.type === "roteiro_visita";
+                  const stopsDone = event.stops?.filter((stop) => stop.resultStatus === "realizada").length || 0;
+                  return (
+                    <article
+                      key={event.id}
+                      ref={(node) => {
+                        if (event.id === highlightedEventId) highlightedEventRef.current = node;
+                      }}
+                      className={`absolute left-2 right-2 rounded-xl border p-2 shadow-sm transition hover:shadow-md ${getEventAccentClass(event)} ${isCompleted ? "opacity-65" : ""}`}
+                      style={{ top: `${top}px`, height: `${height}px` }}
+                      onClick={() => setSelectedEvent(event)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-xs font-semibold text-slate-900">{event.title}</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600">{formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}</p>
+                      <p className="text-[11px] text-slate-500">{sellers.find((seller) => seller.id === getOwnerId(event))?.name || "Vendedor"} · {event.city || "Sem cidade"}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                        {event.clientId ? <span className="rounded-full bg-white/80 px-1.5 py-0.5 text-[10px] text-slate-600">{clientById.get(event.clientId)?.name || "Cliente"}</span> : null}
+                        {isCompleted ? <span className="text-[11px] text-slate-500">✓ concluído</span> : null}
+                      </div>
+                      {isRoute ? (
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            className="text-[10px] font-semibold text-emerald-700 underline"
+                            onClick={(eventClick) => {
+                              eventClick.stopPropagation();
+                              setExpandedRouteEventId((current) => (current === event.id ? "" : event.id));
+                            }}
+                          >
+                            {expandedRouteEventId === event.id ? "Ocultar roteiro" : "Expandir roteiro"}
+                          </button>
+                          {expandedRouteEventId === event.id ? (
+                            <div className="mt-1 space-y-1 rounded-lg bg-white/70 p-1">
+                              <p className="text-[10px] font-semibold text-emerald-700">{event.stops?.length || 0} paradas · {stopsDone} concluídas</p>
+                              {event.stops?.slice(0, 3).map((stop) => (
+                                <p key={stop.id} className="truncate text-[10px] text-slate-600">• {stop.clientName || "Cliente"} · {stop.city || "Cidade"} · {stop.notes || "Sem observação"}</p>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+                {!selectedDayEvents.length ? (
+                  <p className="absolute inset-x-0 top-20 text-center text-sm text-slate-400">Nenhum compromisso neste dia.</p>
+                ) : null}
+              </div>
             </div>
           </div>
         ) : view === "weekly" ? (
-          <div className="grid gap-2 p-3 sm:grid-cols-2 sm:p-4 lg:grid-cols-7">
-            {weeklyCalendarDays.map((day) => (
-              <div key={day.key} className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <p className="text-xs font-semibold uppercase text-slate-600">{day.date.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit" })}</p>
-                <div className="mt-2 space-y-2">
-                  {day.events.length ? day.events.map((event) => (
-                    <div key={event.id} className="rounded-md border border-slate-200 bg-white p-2">
-                      <p className="truncate text-xs font-semibold text-slate-900">{event.title}</p>
-                      <p className="text-[11px] text-slate-500">{formatTime(getStartsAt(event))}</p>
-                    </div>
-                  )) : <p className="text-xs text-slate-400">Sem eventos</p>}
-                </div>
+          <div className="overflow-x-auto p-2 sm:p-4">
+            <div className="min-w-[920px] rounded-lg border border-slate-200 bg-white">
+              <div className="sticky top-0 z-10 grid grid-cols-[64px_repeat(7,minmax(0,1fr))] border-b bg-white">
+                <div />
+                {weeklyCalendarDays.map((day) => (
+                  <div key={day.key} className={`border-l px-2 py-2 text-xs font-semibold ${formatDayKey(new Date().toISOString()) === day.key ? "bg-brand-50 text-brand-700" : "text-slate-600"}`}>
+                    {day.date.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })}
+                  </div>
+                ))}
               </div>
-            ))}
+              <div className="relative grid grid-cols-[64px_repeat(7,minmax(0,1fr))]" style={{ height: `${dailyTimelineHours.length * HOUR_HEIGHT_PX}px` }}>
+                <div className="relative border-r bg-slate-50">
+                  {dailyTimelineHours.map((hour, index) => (
+                    <div key={hour} className="absolute inset-x-0 border-t border-slate-200/70" style={{ top: `${index * HOUR_HEIGHT_PX}px` }}>
+                      <p className="absolute -top-2 right-2 bg-slate-50 px-1 text-[11px] text-slate-500">{formatHourLabel(hour)}</p>
+                    </div>
+                  ))}
+                </div>
+                {weeklyCalendarDays.map((day) => (
+                  <div key={day.key} className="relative border-l">
+                    {dailyTimelineHours.map((hour, index) => (
+                      <div key={`${day.key}-${hour}`} className="absolute inset-x-0 border-t border-slate-100" style={{ top: `${index * HOUR_HEIGHT_PX}px` }} />
+                    ))}
+                    {day.events.map((event) => {
+                      const start = new Date(getStartsAt(event));
+                      const end = new Date(getEndsAt(event));
+                      const top = (((start.getHours() * 60 + start.getMinutes()) - DAY_START_HOUR * 60) / 60) * HOUR_HEIGHT_PX;
+                      const height = Math.max(38, ((((end.getHours() * 60 + end.getMinutes()) - (start.getHours() * 60 + start.getMinutes())) / 60) * HOUR_HEIGHT_PX) - 4);
+                      return (
+                        <button key={event.id} type="button" className={`absolute left-1 right-1 rounded-lg border p-1 text-left text-[11px] shadow-sm ${getEventAccentClass(event)}`} style={{ top: `${Math.max(0, top)}px`, height: `${height}px` }} onClick={() => setSelectedEvent(event)}>
+                          <p className="truncate font-semibold text-slate-800">{event.title}</p>
+                          <p className="text-[10px] text-slate-500">{formatTime(getStartsAt(event))}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : view === "monthly" ? (
           <div className="grid grid-cols-7 gap-1 p-3 text-xs sm:p-4">
@@ -1616,7 +1704,7 @@ export default function AgendaPage() {
               <p key={weekday} className="px-1 pb-1 text-center font-semibold text-slate-500">{weekday}</p>
             ))}
             {monthlyCalendarDays.map((day) => (
-              <div key={day.key} className={`min-h-24 rounded-lg border p-1 ${day.isCurrentMonth ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 text-slate-400"}`}>
+              <button key={day.key} type="button" onClick={() => setSelectedMonthDayKey(day.key)} className={`min-h-24 rounded-lg border p-1 text-left ${day.isCurrentMonth ? "border-slate-200 bg-white" : "border-slate-100 bg-slate-50 text-slate-400"}`}>
                 <p className="text-[11px] font-semibold">{day.date.getDate()}</p>
                 <div className="mt-1 space-y-1">
                   {day.events.slice(0, 2).map((event) => (
@@ -1624,7 +1712,7 @@ export default function AgendaPage() {
                   ))}
                   {day.events.length > 2 ? <p className="text-[10px] text-slate-500">+{day.events.length - 2} mais</p> : null}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (
@@ -1658,9 +1746,65 @@ export default function AgendaPage() {
         )}
       </div>
 
+      {selectedMonthDayKey ? (
+        <aside className={`fixed inset-y-0 right-0 z-40 w-full max-w-sm border-l border-slate-200 bg-white shadow-2xl ${isMobile ? "bottom-0 top-auto h-[70vh] max-w-none rounded-t-2xl border-t border-l-0" : ""}`}>
+          <div className="flex items-center justify-between border-b px-4 py-3">
+            <h3 className="text-sm font-semibold text-slate-900">Agenda do dia {new Date(`${selectedMonthDayKey}T00:00:00`).toLocaleDateString("pt-BR")}</h3>
+            <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedMonthDayKey("")}>Fechar</button>
+          </div>
+          <div className="max-h-[calc(100%-56px)] space-y-2 overflow-y-auto p-3">
+            {selectedMonthDayEvents.length ? selectedMonthDayEvents.map((event) => (
+              <button key={event.id} type="button" className={`w-full rounded-lg border p-2 text-left ${getEventAccentClass(event)}`} onClick={() => setSelectedEvent(event)}>
+                <p className="text-sm font-semibold text-slate-900">{event.title}</p>
+                <p className="text-xs text-slate-600">{formatDateTime(getStartsAt(event))}</p>
+              </button>
+            )) : <p className="text-sm text-slate-500">Nenhum evento neste dia.</p>}
+          </div>
+        </aside>
+      ) : null}
+
+      {selectedEvent ? (
+        <aside className={`fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-slate-200 bg-white shadow-2xl ${isMobile ? "bottom-0 top-auto h-[85vh] max-w-none rounded-t-2xl border-t border-l-0" : ""}`}>
+          <div className="flex items-start justify-between border-b px-4 py-3">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">{selectedEvent.title}</h3>
+              <p className="text-xs text-slate-500">{formatDateTime(getStartsAt(selectedEvent))} - {formatTime(getEndsAt(selectedEvent))}</p>
+            </div>
+            <button type="button" className="text-sm text-slate-500" onClick={() => setSelectedEvent(null)}>Fechar</button>
+          </div>
+          <div className="space-y-3 overflow-y-auto p-4 pb-28">
+            <p className="text-sm text-slate-700"><strong>Cliente:</strong> {selectedEvent.clientId ? clientById.get(selectedEvent.clientId)?.name || "Cliente vinculado" : "Não informado"}</p>
+            <p className="text-sm text-slate-700"><strong>Vendedor:</strong> {sellers.find((seller) => seller.id === getOwnerId(selectedEvent))?.name || "Vendedor"}</p>
+            <p className="text-sm text-slate-700"><strong>Observações:</strong> {selectedEvent.notes || "Sem observações."}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" className="rounded-lg border border-green-300 px-3 py-2 text-xs font-semibold text-green-700" onClick={() => void onSetAsDone(selectedEvent)}>Concluir</button>
+              <button type="button" className="rounded-lg border border-amber-300 px-3 py-2 text-xs font-semibold text-amber-700" onClick={() => openRescheduleModal(selectedEvent)}>Reagendar</button>
+              {selectedEvent.type === "roteiro_visita" ? <button type="button" className="rounded-lg border border-emerald-300 px-3 py-2 text-xs font-semibold text-emerald-700" onClick={() => setExecutionEventId(selectedEvent.id)}>Iniciar rota</button> : null}
+              {selectedEvent.clientId ? <Link to={`/clientes/${selectedEvent.clientId}`} className="rounded-lg border border-brand-300 px-3 py-2 text-center text-xs font-semibold text-brand-700">Cliente 360</Link> : null}
+            </div>
+            {selectedEvent.clientId ? (
+              <a
+                href={`https://wa.me/?text=${encodeURIComponent(`Olá! Sobre o compromisso ${selectedEvent.title}`)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700"
+              >
+                Abrir WhatsApp
+              </a>
+            ) : null}
+          </div>
+        </aside>
+      ) : null}
+
+      {isMobile ? (
+        <button type="button" onClick={() => openCreate("agenda")} className="fixed bottom-5 right-4 z-40 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+          + Nova agenda
+        </button>
+      ) : null}
+
       {isCreateOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/60 p-0 sm:items-center sm:p-4" onClick={closeCreate}>
-          <div className="flex h-[100dvh] w-full max-w-xl flex-col overflow-hidden bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex h-[90dvh] w-full max-w-xl flex-col overflow-hidden bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
                 <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>

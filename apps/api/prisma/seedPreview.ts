@@ -69,11 +69,16 @@ const OPPORTUNITY_TEMPLATES: SeedOpportunityTemplate[] = [
 
 const PREVIEW_AGENDA_TEMPLATES: PreviewAgendaTemplate[] = [
   { title: "Reunião online de alinhamento", type: "reuniao_online", startOffsetDays: 0, startHour: 9, durationHours: 1, status: "agendado", notes: "Revisar proposta comercial." },
+  { title: "Reunião conflito carteira A", type: "reuniao_online", startOffsetDays: 0, startHour: 9, durationHours: 2, status: "agendado", notes: "Conflito de horário proposital para validação visual." },
   { title: "Visita presencial de diagnóstico", type: "reuniao_presencial", startOffsetDays: 1, startHour: 14, durationHours: 2, status: "agendado", notes: "Levantamento técnico da safra." },
+  { title: "Visita presencial conflito rota", type: "reuniao_presencial", startOffsetDays: 1, startHour: 14, durationHours: 1, status: "agendado", notes: "Segundo compromisso no mesmo horário." },
   { title: "Follow-up pós proposta", type: "followup", startOffsetDays: 2, startHour: 10, durationHours: 1, status: "agendado", notes: "Confirmar próximos passos." },
+  { title: "Follow-up pós visita", type: "followup", startOffsetDays: 3, startHour: 11, durationHours: 1, status: "agendado", notes: "Enviar resumo comercial." },
   { title: "Roteiro de visita regional", type: "roteiro_visita", startOffsetDays: 0, startHour: 8, durationHours: 6, status: "agendado", notes: "Roteiro com paradas prioritárias.", withStops: true },
+  { title: "Roteiro interior estratégico", type: "roteiro_visita", startOffsetDays: 4, startHour: 7, durationHours: 8, status: "agendado", notes: "Roteiro completo em múltiplas cidades.", withStops: true },
   { title: "Reunião atrasada de renegociação", type: "reuniao_online", startOffsetDays: -2, startHour: 16, durationHours: 1, status: "vencido", notes: "Evento atrasado para validar indicadores." },
-  { title: "Visita concluída de fechamento", type: "reuniao_presencial", startOffsetDays: -1, startHour: 11, durationHours: 1, status: "realizado", notes: "Visita concluída para histórico." }
+  { title: "Visita concluída de fechamento", type: "reuniao_presencial", startOffsetDays: -1, startHour: 11, durationHours: 1, status: "realizado", notes: "Visita concluída para histórico." },
+  { title: "Reunião futura de planejamento trimestral", type: "reuniao_online", startOffsetDays: 9, startHour: 15, durationHours: 2, status: "agendado", notes: "Compromisso futuro para visão de longo prazo." }
 ];
 
 function addDays(baseDate: Date, days: number) {
