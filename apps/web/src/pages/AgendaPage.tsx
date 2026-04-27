@@ -14,7 +14,6 @@ type Seller = { id: string; name: string };
 
 type Visualizacao = "daily" | "weekly" | "monthly" | "list";
 type PeriodFilter = "today" | "this_week" | "next_7_days" | "next_30_days" | "custom_range";
-type CreateModalMode = "agenda" | "roteiro";
 
 type CreateAgendaForm = {
   title: string;
@@ -74,7 +73,7 @@ const UNIQUE_AGENDA_EVENT_TYPE_OPTIONS = Array.from(
   new Map(typedAgendaEventOptions.map((option) => [option.value, option])).values()
 );
 
-const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS.filter((option) => option.value !== "roteiro_visita");
+const CREATE_AGENDA_TYPE_OPTIONS = UNIQUE_AGENDA_EVENT_TYPE_OPTIONS;
 
 const STATUS_LABEL: Record<AgendaEvent["status"], string> = {
   planned: "Planejado",
@@ -318,11 +317,6 @@ function buildPositionedAgendaEvents(events: AgendaEvent[]): PositionedAgendaEve
   return positioned;
 }
 
-function formatStopPlannedTime(value: AgendaStop["plannedTime"]) {
-  if (!value) return null;
-  return new Date(value).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-}
-
 function isGenericClientPlaceholder(value?: string | null) {
   const normalized = (value || "")
     .trim()
@@ -400,7 +394,7 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
 export default function AgendaPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const canFilterBySeller = user?.role === "gerente" || user?.role === "diretor";
 
   const [view, setView] = useState<Visualizacao>("daily");
@@ -415,7 +409,6 @@ export default function AgendaPage() {
   const [eventsRefreshToken, setEventsRefreshToken] = useState(0);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [createModalMode, setCreateModalMode] = useState<CreateModalMode>("agenda");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activityClients, setActivityClients] = useState<ClientOption[]>([]);
   const loadedClientIdsRef = useRef<Set<string>>(new Set());
@@ -888,13 +881,6 @@ export default function AgendaPage() {
   }, [executionEventId, routeEvents]);
 
   const executionStops = executionEvent?.stops || [];
-  const completedStops = executionStops.filter((stop) => stop.checkOutAt).length;
-  const nextStop = executionStops.find((stop) => !stop.checkOutAt) || null;
-  const nextStopOrder = nextStop?.order ?? null;
-  const nextStopPlannedTime = nextStop?.plannedTime;
-  const nextStopClientDisplayName = nextStop ? getStopClientDisplayName(nextStop) : null;
-  const nextStopPlannedTimeLabel = formatStopPlannedTime(nextStopPlannedTime);
-  const lateMinutes = nextStopPlannedTime ? Math.max(0, Math.floor((Date.now() - new Date(nextStopPlannedTime).getTime()) / 60000)) : 0;
 
   const updateStopState = (stopId: string, patch: Partial<AgendaStop>) => {
     setEvents((current) =>
@@ -978,21 +964,6 @@ export default function AgendaPage() {
       status: "realizada",
       summary: ""
     });
-  };
-
-  const closeExecutionMode = async () => {
-    const params = new URLSearchParams(searchParams);
-    params.delete("execute");
-    params.delete("eventId");
-    setSearchParams(params);
-    setExecutionEventId("");
-    try {
-      const response = await api.get("/agenda/events", { params: eventsQuery });
-      const payload = Array.isArray(response.data?.items) ? response.data.items : [];
-      setEvents(payload.map((item: any) => mapApiAgendaEvent(item)).filter((item: AgendaEvent) => Boolean(getOwnerId(item))));
-    } catch {
-      // já existe carga automática com debounce
-    }
   };
 
   const onSetAsDone = async (agendaEvent: AgendaEvent) => {
@@ -1263,12 +1234,11 @@ export default function AgendaPage() {
     }
   };
 
-  const openCreate = (mode: CreateModalMode = "agenda") => {
-    const isRouteMode = mode === "roteiro";
-    setCreateModalMode(mode);
+  const openCreate = (initialType: AgendaEventType = "reuniao_online") => {
+    const isRouteMode = initialType === "roteiro_visita";
     setCreateForm({
       title: isRouteMode ? "Roteiro do dia" : "",
-      type: isRouteMode ? "roteiro_visita" : "reuniao_online",
+      type: initialType,
       startDateTime: "",
       endDateTime: "",
       sellerId: user?.role === "vendedor" ? user.id : selectedSellerId,
@@ -1282,12 +1252,20 @@ export default function AgendaPage() {
 
   const closeCreate = () => {
     setIsCreateOpen(false);
-    setCreateModalMode("agenda");
     setDraftStops([]);
   };
 
   const updateDraftStop = (stopId: string, patch: Partial<DraftStop>) => {
     setDraftStops((current) => current.map((stop) => (stop.id === stopId ? { ...stop, ...patch } : stop)));
+  };
+
+  const handleCreateTypeChange = (nextType: AgendaEventType) => {
+    setCreateForm((current) => ({ ...current, type: nextType }));
+    if (nextType === "roteiro_visita") {
+      setDraftStops((current) => (current.length ? current : [createEmptyDraftStop()]));
+      return;
+    }
+    setDraftStops([]);
   };
 
   const moveDraftStop = (index: number, direction: -1 | 1) => {
@@ -1465,9 +1443,14 @@ export default function AgendaPage() {
           <h2 className="text-lg font-semibold text-slate-900">Calendário de compromissos e roteiros</h2>
         </div>
 
-        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:w-auto">
-          Nova agenda
-        </button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <button type="button" onClick={() => openCreate("reuniao_online")} className="w-full rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:w-auto">
+            Nova agenda
+          </button>
+          <button type="button" onClick={() => openCreate("roteiro_visita")} className="w-full rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 sm:w-auto">
+            Criar roteiro
+          </button>
+        </div>
       </header>
 
       <div className="shrink-0 space-y-2.5 rounded-xl border bg-white p-2.5 shadow-sm sm:space-y-3 sm:p-4">
@@ -1561,78 +1544,6 @@ export default function AgendaPage() {
         </div>
       ) : null}
 
-      {false && searchParams.get("execute") === "1" && executionEvent ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold text-emerald-900">Modo execução · {executionEvent?.title}</h3>
-              <p className="text-sm text-emerald-800">{completedStops} de {executionStops.length} paradas concluídas.</p>
-            </div>
-            <button type="button" className="rounded-md border border-emerald-300 px-3 py-1.5 text-sm font-medium text-emerald-800" onClick={() => void closeExecutionMode()}>
-              Sair da execução
-            </button>
-          </div>
-
-          <div className="mb-3 h-2 rounded-full bg-emerald-100">
-            <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${executionStops.length ? (completedStops / executionStops.length) * 100 : 0}%` }} />
-          </div>
-
-          {nextStop ? (
-            <p className="mb-3 text-sm text-emerald-900">
-              Próxima parada: #{nextStopOrder} {nextStopClientDisplayName}
-              {nextStopPlannedTimeLabel ? ` · ${nextStopPlannedTimeLabel}` : ""}
-              {lateMinutes > 0 ? ` · atraso de ${lateMinutes} min` : ""}
-            </p>
-          ) : (
-            <p className="mb-3 text-sm font-semibold text-emerald-900">Roteiro concluído.</p>
-          )}
-
-          <div className="space-y-2">
-            {executionStops.map((stop) => (
-              <div key={stop.id} className="rounded-lg border border-emerald-200 bg-white p-3">
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Parada #{stop.order}</p>
-                  <p className="text-sm font-semibold text-slate-900">{getStopClientDisplayName(stop)}</p>
-                  <p className="text-xs text-slate-600">Cidade: {getStopCityDisplayName(stop)}</p>
-                  <p className="text-xs text-slate-600">
-                    <span className="inline-flex items-center gap-1">
-                      {stop.checkInAt ? `Check-in ${formatTime(stop.checkInAt)}` : "Check-in pendente"}
-                      {stop.checkInLat != null && stop.checkInLng != null ? <span title="Local registrado">📍</span> : null}
-                    </span>{" "}
-                    ·{" "}
-                    <span className="inline-flex items-center gap-1">
-                      {stop.checkOutAt ? `Check-out ${formatTime(stop.checkOutAt)}` : "Check-out pendente"}
-                      {stop.checkOutLat != null && stop.checkOutLng != null ? <span title="Local registrado">📍</span> : null}
-                    </span>
-                  </p>
-                  {stop.notes ? <p className="text-xs text-slate-600">Observação: {stop.notes}</p> : null}
-                  {stop.resultStatus ? <p className="text-xs text-slate-600">Resultado: {stop.resultStatus === "realizada" ? "Realizada" : "Não realizada"}</p> : null}
-                </div>
-                <div className="mobile-action-stack mt-3">
-                  <button type="button" disabled={Boolean(stop.checkInAt) || isExecutionSubmitting} onClick={() => void onCheckInStop(stop.id)} className="rounded-md border border-blue-300 px-2 py-2 text-xs font-medium text-blue-700 disabled:opacity-50">Iniciar parada</button>
-                  <button type="button" disabled={!stop.checkInAt || Boolean(stop.checkOutAt) || isExecutionSubmitting} onClick={() => void onCheckOutStop(stop.id)} className="rounded-md border border-green-300 px-2 py-2 text-xs font-medium text-green-700 disabled:opacity-50">Finalizar parada</button>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {executionStops.length > 0 && completedStops === executionStops.length ? (
-            <button
-              type="button"
-              className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
-              onClick={() => {
-                const realizadas = executionStops.filter((stop) => stop.resultStatus === "realizada").length;
-                const naoRealizadas = executionStops.filter((stop) => stop.resultStatus === "nao_realizada").length;
-                const pendencias = executionStops.length - (realizadas + naoRealizadas);
-                toast.success(`Resumo do dia: ${executionStops.length} paradas, ${realizadas} realizadas, ${naoRealizadas} não realizadas e ${pendencias} pendências.`);
-              }}
-            >
-              Encerrar roteiro do dia
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
       {/* Lista de eventos */}
       <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-white shadow-sm">
         {isEventsLoading ? (
@@ -1694,6 +1605,7 @@ export default function AgendaPage() {
                       </div>
                       {isRoute ? (
                         <div className="mt-1 rounded-md border border-emerald-200/70 bg-white/70 p-1">
+                          <p className="text-[10px] text-emerald-700">Paradas: {event.stops?.length || 0} · Status: {STATUS_LABEL[event.status]}</p>
                           <button
                             type="button"
                             className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
@@ -1758,6 +1670,8 @@ export default function AgendaPage() {
                         <button key={event.id} type="button" className={`absolute rounded-lg border px-1.5 py-1 text-left text-[11px] shadow-sm ${getEventAccentClass(event)}`} style={{ top: `${Math.max(0, top)}px`, height: `${height}px`, width, left }} onClick={() => openAgendaDetails(event)}>
                           <p className="truncate font-semibold leading-tight text-slate-800">{event.title}</p>
                           <p className="text-[10px] text-slate-500">{formatTime(getStartsAt(event))} - {formatTime(getEndsAt(event))}</p>
+                          <p className="truncate text-[10px] text-slate-500">{sellers.find((seller) => seller.id === getOwnerId(event))?.name || "Vendedor"}</p>
+                          {event.type === "roteiro_visita" ? <p className="text-[10px] font-semibold text-emerald-700">{event.stops?.length || 0} paradas · {STATUS_LABEL[event.status]}</p> : null}
                         </button>
                       );
                     })}
@@ -1784,7 +1698,7 @@ export default function AgendaPage() {
                   <p className={`text-[11px] font-semibold ${isToday ? "text-brand-800" : ""}`}>{day.date.getDate()}</p>
                   <div className="mt-1 space-y-1">
                     {day.events.slice(0, 2).map((event) => (
-                      <p key={event.id} className={`truncate rounded-md border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{formatTime(getStartsAt(event))} {event.title}</p>
+                      <p key={event.id} className={`truncate rounded-md border px-1.5 py-0.5 text-[10px] ${TYPE_COLOR_CLASS[event.type]}`}>{formatTime(getStartsAt(event))} {event.title}{event.type === "roteiro_visita" ? ` · ${event.stops?.length || 0} paradas` : ""}</p>
                     ))}
                     {day.events.length > 2 ? <p className="text-[10px] font-semibold text-slate-500">+ {day.events.length - 2} mais</p> : null}
                   </div>
@@ -1814,6 +1728,7 @@ export default function AgendaPage() {
                         <p className="text-xs text-slate-500">
                           {event.clientId ? clientById.get(event.clientId)?.name || "Cliente vinculado" : "Sem cliente"} · {sellers.find((seller) => seller.id === getOwnerId(event))?.name || "Vendedor"}
                         </p>
+                        {event.type === "roteiro_visita" ? <p className="text-xs font-medium text-emerald-700">Paradas: {event.stops?.length || 0} · {STATUS_LABEL[event.status]} · Ver paradas nos detalhes</p> : null}
                         <div className="flex flex-wrap gap-2 text-xs">
                           <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
                           <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
@@ -1839,6 +1754,7 @@ export default function AgendaPage() {
               <button key={event.id} type="button" className={`w-full rounded-lg border p-2 text-left ${getEventAccentClass(event)}`} onClick={() => openAgendaDetails(event)}>
                 <p className="text-sm font-semibold text-slate-900">{event.title}</p>
                 <p className="text-xs text-slate-600">{formatDateTime(getStartsAt(event))}</p>
+                {event.type === "roteiro_visita" ? <p className="text-xs font-medium text-emerald-700">{event.stops?.length || 0} paradas · {STATUS_LABEL[event.status]} · Ver paradas</p> : null}
               </button>
             )) : <p className="text-sm text-slate-500">Nenhum evento neste dia.</p>}
           </div>
@@ -1880,11 +1796,26 @@ export default function AgendaPage() {
             </section>
 
             {selectedEvent.type === "roteiro_visita" ? (
-              <section className="space-y-2 rounded-xl border border-emerald-200 bg-white p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Roteiro / paradas</p>
+              <section className="space-y-3 rounded-xl border border-emerald-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">Paradas do roteiro</p>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">{selectedEvent.stops?.length || 0} paradas</span>
+                </div>
                 {selectedEvent.stops?.length ? selectedEvent.stops.map((stop) => (
-                  <p key={stop.id} className="truncate text-xs text-slate-600">• {stop.clientName || "Cliente"} · {stop.city || "Cidade"} · {stop.notes || "Sem observação"}</p>
+                  <article key={stop.id} className="space-y-1 rounded-lg border border-emerald-100 bg-emerald-50/40 p-2">
+                    <p className="text-xs font-semibold text-slate-800">{getStopClientDisplayName(stop)} · {getStopCityDisplayName(stop)}</p>
+                    <p className="text-xs text-slate-600">{stop.notes || "Sem observação da parada."}</p>
+                    <p className="text-[11px] font-medium text-slate-500">
+                      Status: {stop.resultStatus === "realizada" ? "Realizada" : stop.resultStatus === "nao_realizada" ? "Não realizada" : "Pendente"}
+                    </p>
+                  </article>
                 )) : <p className="text-xs text-slate-500">Sem paradas cadastradas.</p>}
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Iniciar rota</button>
+                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Registrar visita</button>
+                  <button type="button" disabled className="rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">Abrir cliente 360</button>
+                </div>
               </section>
             ) : null}
 
@@ -1903,7 +1834,7 @@ export default function AgendaPage() {
       ) : null}
 
       {isMobile ? (
-        <button type="button" onClick={() => openCreate("agenda")} className="fixed bottom-5 right-4 z-40 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg">
+        <button type="button" onClick={() => openCreate("reuniao_online")} className="fixed bottom-5 right-4 z-40 rounded-full bg-brand-700 px-4 py-3 text-sm font-semibold text-white shadow-lg">
           + Nova agenda
         </button>
       ) : null}
@@ -1913,8 +1844,8 @@ export default function AgendaPage() {
           <div className="flex h-[90dvh] w-full max-w-xl flex-col overflow-hidden bg-white shadow-xl sm:my-0 sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 bg-white px-4 py-4 sm:px-6">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">{createModalMode === "roteiro" ? "Roteiro de visita" : "Nova agenda"}</h3>
-                <p className="text-sm text-slate-500">{createModalMode === "roteiro" ? "Planeje as paradas do roteiro com cliente, cidade automática e observações." : "Informe os dados básicos para criar um compromisso."}</p>
+                <h3 className="text-lg font-semibold text-slate-900">Nova agenda</h3>
+                <p className="text-sm text-slate-500">Crie compromissos e roteiros no mesmo fluxo de Agenda.</p>
               </div>
               <button type="button" onClick={closeCreate} className="rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-600 hover:bg-slate-50">
                 ✕
@@ -1936,21 +1867,17 @@ export default function AgendaPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium uppercase text-slate-500">Tipo</label>
-                  {createModalMode === "roteiro" ? (
-                    <input value="Roteiro de visita" readOnly className="w-full rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" />
-                  ) : (
-                    <select
-                      value={createForm.type}
-                      onChange={(event) => setCreateForm((current) => ({ ...current, type: event.target.value as AgendaEventType }))}
-                      className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    >
-                      {CREATE_AGENDA_TYPE_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    value={createForm.type}
+                    onChange={(event) => handleCreateTypeChange(event.target.value as AgendaEventType)}
+                    className="w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                  >
+                    {CREATE_AGENDA_TYPE_OPTIONS.map((option) => (
+                      <option key={option.id} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {canFilterBySeller ? (
@@ -2083,7 +2010,7 @@ export default function AgendaPage() {
                   disabled={isSubmitting}
                   className="mobile-primary-button rounded-lg bg-brand-700 px-4 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {isSubmitting ? "Salvando..." : createModalMode === "roteiro" ? "Salvar roteiro" : "Salvar agenda"}
+                  {isSubmitting ? "Salvando..." : createForm.type === "roteiro_visita" ? "Salvar roteiro" : "Salvar agenda"}
                 </button>
               </div>
             </form>
