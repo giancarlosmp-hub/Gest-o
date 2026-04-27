@@ -12,12 +12,6 @@ import ClientSearchSelect, { type SearchableClientOption } from "../components/c
 
 type Seller = { id: string; name: string };
 type AgendaSummary = { meetings: number; routes: number; followups: number; overdue: number };
-type OperationalSummary = {
-  visitsToday: number;
-  followupsPending: number;
-  overdueActivities: number;
-  nextActivity: AgendaEvent | null;
-};
 
 type Visualizacao = "daily" | "weekly" | "monthly" | "list";
 type PeriodFilter = "today" | "this_week" | "next_7_days" | "next_30_days" | "custom_range";
@@ -155,38 +149,6 @@ function calculateAgendaSummary(events: AgendaEvent[]): AgendaSummary {
   );
 }
 
-function isVisitEvent(event: AgendaEvent) {
-  const normalizedType = normalizeEventType(event.type);
-  return normalizedType === "reuniao_presencial" || normalizedType === "roteiro_visita";
-}
-
-function calculateOperationalSummary(events: AgendaEvent[]): OperationalSummary {
-  const now = new Date();
-  const todayStart = startOfDay(now).getTime();
-  const todayEnd = endOfDay(now).getTime();
-
-  const plannedEvents = events.filter((event) => event.status === "planned");
-
-  const visitsToday = plannedEvents.filter((event) => {
-    if (!isVisitEvent(event)) return false;
-    const startsAt = new Date(getStartsAt(event)).getTime();
-    return startsAt >= todayStart && startsAt <= todayEnd;
-  }).length;
-
-  const followupsPending = plannedEvents.filter((event) => isFollowUpEvent(event)).length;
-  const overdueActivities = plannedEvents.filter((event) => new Date(getEndsAt(event)).getTime() < now.getTime()).length;
-  const nextActivity = plannedEvents
-    .filter((event) => new Date(getEndsAt(event)).getTime() >= now.getTime())
-    .sort((a, b) => new Date(getStartsAt(a)).getTime() - new Date(getStartsAt(b)).getTime())[0] || null;
-
-  return {
-    visitsToday,
-    followupsPending,
-    overdueActivities,
-    nextActivity
-  };
-}
-
 function startOfDay(date: Date) {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -199,8 +161,8 @@ function endOfDay(date: Date) {
   return next;
 }
 
-function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string): DateRange {
-  const today = new Date();
+function getRangeFromFilter(periodFilter: PeriodFilter, customFrom: string, customTo: string, anchorDate: Date = new Date()): DateRange {
+  const today = new Date(anchorDate);
   const dayStart = startOfDay(today);
 
   if (periodFilter === "today") {
@@ -246,6 +208,22 @@ function formatDateOnly(value: string) {
     day: "2-digit",
     month: "2-digit"
   });
+}
+
+function formatPeriodLabel(range: DateRange, view: Visualizacao) {
+  const sameDay = range.start.toDateString() === range.end.toDateString();
+  if (sameDay || view === "daily") {
+    return range.start.toLocaleDateString("pt-BR", {
+      weekday: "long",
+      day: "2-digit",
+      month: "long"
+    });
+  }
+
+  return `${range.start.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} - ${range.end.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "short"
+  })}`;
 }
 
 function isEventWithinRange(eventDateTime: string, startDate: Date, endDate: Date) {
@@ -395,50 +373,6 @@ function mapApiAgendaEvent(item: any): AgendaEvent {
   };
 }
 
-type OperationalMetricCardProps = {
-  label: string;
-  value: number | string;
-  tone?: "default" | "danger" | "priority";
-  helper?: string;
-};
-
-function OperationalMetricCard({ label, value, tone = "default", helper }: OperationalMetricCardProps) {
-  const toneClass =
-    tone === "danger"
-      ? "border-rose-200 bg-rose-50"
-      : tone === "priority"
-        ? "border-amber-200 bg-amber-50"
-        : "border-slate-200 bg-slate-50";
-
-  const valueClass = tone === "danger" ? "text-rose-700" : tone === "priority" ? "text-amber-700" : "text-slate-900";
-
-  return (
-    <div className={`rounded-lg border px-3 py-2.5 ${toneClass}`}>
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className={`mt-1 text-base font-semibold ${valueClass}`}>{value}</p>
-      {helper ? <p className="mt-1 text-xs text-slate-600">{helper}</p> : null}
-    </div>
-  );
-}
-
-type TimelineSkeletonItemProps = {
-  label: string;
-  time: string;
-  tone?: "neutral" | "highlight";
-};
-
-function TimelineSkeletonItem({ label, time, tone = "neutral" }: TimelineSkeletonItemProps) {
-  return (
-    <div className={`flex items-start gap-3 rounded-lg border px-3 py-2 ${tone === "highlight" ? "border-brand-200 bg-brand-50" : "border-slate-200 bg-white"}`}>
-      <div className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-brand-500" />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{time}</p>
-        <p className="truncate text-sm font-medium text-slate-900">{label}</p>
-      </div>
-    </div>
-  );
-}
-
 export default function AgendaPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -510,12 +444,18 @@ export default function AgendaPage() {
   const [activeStopId, setActiveStopId] = useState("");
   const [isExecutionSubmitting, setIsExecutionSubmitting] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 767px)").matches);
+  const [isFiltersOpenMobile, setIsFiltersOpenMobile] = useState(false);
+  const [isMoreFiltersOpen, setIsMoreFiltersOpen] = useState(false);
+  const [periodAnchorDate, setPeriodAnchorDate] = useState(() => new Date());
   const [visitResultForm, setVisitResultForm] = useState<VisitResultForm>({
     status: "realizada",
     summary: ""
   });
 
-  const dateRange = useMemo(() => getRangeFromFilter(periodFilter, customFrom, customTo), [periodFilter, customFrom, customTo]);
+  const dateRange = useMemo(
+    () => getRangeFromFilter(periodFilter, customFrom, customTo, periodAnchorDate),
+    [periodFilter, customFrom, customTo, periodAnchorDate]
+  );
 
   const eventsQuery = useMemo(() => {
     const params: Record<string, string> = {
@@ -742,15 +682,6 @@ export default function AgendaPage() {
   }, [filteredEvents]);
 
   const summary = useMemo(() => calculateAgendaSummary(filteredEvents), [filteredEvents]);
-  const operationalDateLabel = useMemo(
-    () =>
-      new Date().toLocaleDateString("pt-BR", {
-        weekday: "long",
-        day: "2-digit",
-        month: "2-digit"
-      }),
-    []
-  );
 
   const roleScopedEvents = useMemo(() => {
     return events.filter((event) => {
@@ -760,10 +691,8 @@ export default function AgendaPage() {
     });
   }, [events, user?.role, user?.id, canFilterBySeller, selectedSellerId]);
 
-  const operationalSummary = useMemo(() => calculateOperationalSummary(roleScopedEvents), [roleScopedEvents]);
-
   const weeklyRoutePlans = useMemo(() => {
-    const weekRange = getRangeFromFilter("this_week", customFrom, customTo);
+    const weekRange = getRangeFromFilter("this_week", customFrom, customTo, periodAnchorDate);
     const grouped = new Map<string, { dayLabel: string; city: string; visits: number }>();
 
     roleScopedEvents
@@ -786,7 +715,7 @@ export default function AgendaPage() {
     return Array.from(grouped.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([, value]) => value);
-  }, [roleScopedEvents, customFrom, customTo]);
+  }, [roleScopedEvents, customFrom, customTo, periodAnchorDate]);
 
   const periodTitle = useMemo(() => {
     const startLabel = dateRange.start.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
@@ -1442,7 +1371,7 @@ export default function AgendaPage() {
             })
           : response.data?.stops
       });
-      const range = getRangeFromFilter(periodFilter, customFrom, customTo);
+      const range = getRangeFromFilter(periodFilter, customFrom, customTo, periodAnchorDate);
       const createdEventInSelectedRange = isEventOverlappingRange(getStartsAt(createdEvent), getEndsAt(createdEvent), range.start, range.end);
 
       setEventsRefreshToken((current) => current + 1);
@@ -1469,6 +1398,30 @@ export default function AgendaPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const periodLabel = useMemo(() => formatPeriodLabel(dateRange, view), [dateRange, view]);
+
+  const navigatePeriod = (direction: -1 | 1) => {
+    setPeriodAnchorDate((current) => {
+      const next = new Date(current);
+      if (periodFilter === "today" || view === "daily") {
+        next.setDate(next.getDate() + direction);
+      } else if (periodFilter === "this_week" || view === "weekly") {
+        next.setDate(next.getDate() + direction * 7);
+      } else if (periodFilter === "next_30_days" || view === "monthly") {
+        next.setDate(next.getDate() + direction * 30);
+      } else {
+        next.setDate(next.getDate() + direction * 7);
+      }
+      return next;
+    });
+  };
+
+  const goToToday = () => {
+    setPeriodAnchorDate(new Date());
+    setPeriodFilter("today");
+    if (view !== "daily") setView("daily");
   };
 
   return (
@@ -1708,7 +1661,7 @@ export default function AgendaPage() {
             </div>
           </div>
         ) : view === "monthly" ? (
-          <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <p className="mb-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
@@ -1731,7 +1684,7 @@ export default function AgendaPage() {
                 <div
                   key={event.id}
                   ref={isHighlighted ? highlightedEventRef : null}
-                  className={`flex items-center justify-between gap-3 p-3 ${isHighlighted ? "bg-amber-50" : ""}`}
+                  className={`flex items-center justify-between gap-3 p-4 ${isHighlighted ? "bg-amber-50" : ""}`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium text-slate-900">{event.title}</p>
@@ -1751,10 +1704,10 @@ export default function AgendaPage() {
             })}
           </div>
         ) : (
-          <div className="space-y-3 p-3">
+          <div className="space-y-4 p-3 sm:p-4">
             {groupedEventsByDay.map((group) => (
               <div key={group.day} className="overflow-hidden rounded-lg border border-slate-200">
-                <p className="bg-slate-50 px-3 py-1.5 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
+                <p className="bg-slate-50 px-4 py-2 text-xs font-semibold uppercase text-slate-600">{group.label}</p>
                 <div className="divide-y">
                   {group.events.map((event) => {
                     const isHighlighted = event.id === highlightedEventId;
@@ -1762,22 +1715,33 @@ export default function AgendaPage() {
                       <Fragment key={event.id}>
                       <div
                         ref={isHighlighted ? highlightedEventRef : null}
-                        className={`flex flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}
+                        className={`flex flex-col gap-3 p-3 sm:p-4 md:flex-row md:items-start md:justify-between ${isHighlighted ? "bg-amber-50" : ""}`}
                       >
-                        <div className="min-w-0 flex-1">
-                          <p className="break-words font-medium text-slate-900">{event.title}</p>
-                          <p className="mt-1 text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
+                        <div className="flex min-w-0 flex-1 gap-3">
+                          <div className="hidden w-16 shrink-0 text-right md:block">
+                            <p className="text-xs font-semibold text-slate-700">{formatTime(getStartsAt(event))}</p>
+                            <p className="text-[11px] text-slate-400">{formatTime(getEndsAt(event))}</p>
+                          </div>
+                          <div className="relative hidden w-4 md:flex justify-center">
+                            <span className="h-full w-px bg-slate-200" />
+                            <span className="absolute top-1 h-2.5 w-2.5 rounded-full bg-brand-600" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-slate-500 md:hidden">{formatTime(getStartsAt(event))}</p>
+                            <p className="break-words font-medium text-slate-900">{event.title}</p>
+                            <p className="mt-1 text-xs text-slate-500">{formatDateTime(getStartsAt(event))}</p>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
-                            <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
-                            {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro</span> : null}
-                            <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
-                            <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
-                              {sellerById[getOwnerId(event)] || "Vendedor"}
-                            </span>
-                            {isHighlighted ? (
-                              <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
-                            ) : null}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium leading-5">
+                              <span className={`rounded-full border px-2 py-1 ${TYPE_COLOR_CLASS[event.type]}`}>{TYPE_LABEL[event.type]}</span>
+                              {event.type === "roteiro_visita" ? <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-1 text-emerald-800">Roteiro de visita</span> : null}
+                              <span className={`rounded-full border px-2 py-1 ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
+                              <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-slate-700">
+                                {sellerById[getOwnerId(event)] || "Vendedor"}
+                              </span>
+                              {isHighlighted ? (
+                                <span className="rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-amber-700">Próximo compromisso</span>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
 
