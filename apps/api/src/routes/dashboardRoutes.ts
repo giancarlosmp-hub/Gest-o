@@ -10,8 +10,11 @@ router.use(appUsageRateLimit);
 
 const getMonthRange = (month: string) => {
   const [year, monthN] = month.split("-").map(Number);
-  const start = new Date(year, monthN - 1, 1, 0, 0, 0, 0);
-  const end = new Date(year, monthN, 0, 23, 59, 59, 999);
+  // Mantém o mesmo recorte temporal utilizado pelos filtros de datas dos relatórios:
+  // início em 03:00 UTC (00:00 BRT) e término em 02:59:59.999 UTC do dia seguinte ao fim do mês.
+  // Isso evita divergência silenciosa entre "Faturamento no mês" (Dashboard) e "Total ganho" (Relatórios).
+  const start = new Date(Date.UTC(year, monthN - 1, 1, 3, 0, 0, 0));
+  const end = new Date(Date.UTC(year, monthN, 1, 2, 59, 59, 999));
   return { start, end };
 };
 
