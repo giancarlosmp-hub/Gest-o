@@ -289,6 +289,10 @@ function formatTime(value: string) {
   });
 }
 
+function toHourSlotLabel(hour: number) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
 function getStopMobileStatus(stop: AgendaStop): StopMobileStatus {
   if (stop.resultStatus === "realizada") return "realizada";
   if (stop.resultStatus === "nao_realizada") return "nao_realizada";
@@ -447,6 +451,7 @@ export default function AgendaPage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   const [events, setEvents] = useState<AgendaEvent[]>([]);
   const [isEventsLoading, setIsEventsLoading] = useState(false);
@@ -782,6 +787,14 @@ export default function AgendaPage() {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([, value]) => value);
   }, [roleScopedEvents, customFrom, customTo]);
+
+  const periodTitle = useMemo(() => {
+    const startLabel = dateRange.start.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+    const endLabel = dateRange.end.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+    return startLabel === endLabel ? startLabel : `${startLabel} — ${endLabel}`;
+  }, [dateRange.end, dateRange.start]);
+
+  const hourSlots = useMemo(() => Array.from({ length: 15 }, (_, index) => 7 + index), []);
 
   const clientById = useMemo(() => new Map(activityClients.map((client) => [client.id, client])), [activityClients]);
 
@@ -1320,6 +1333,24 @@ export default function AgendaPage() {
     return createForm.sellerId || user?.id || "";
   };
 
+  const onGoToToday = () => {
+    setPeriodFilter("today");
+    const today = formatLocalDateParam(new Date());
+    setCustomFrom(today);
+    setCustomTo(today);
+  };
+
+  const onShiftPeriod = (direction: -1 | 1) => {
+    const baseStart = new Date(dateRange.start);
+    const baseEnd = new Date(dateRange.end);
+    const spanDays = Math.max(1, Math.round((baseEnd.getTime() - baseStart.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+    baseStart.setDate(baseStart.getDate() + direction * spanDays);
+    baseEnd.setDate(baseEnd.getDate() + direction * spanDays);
+    setPeriodFilter("custom_range");
+    setCustomFrom(formatLocalDateParam(baseStart));
+    setCustomTo(formatLocalDateParam(baseEnd));
+  };
+
 
   const onCreateAgenda = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1441,147 +1472,113 @@ export default function AgendaPage() {
   };
 
   return (
-    <section className="space-y-3">
-      <header className="flex flex-col gap-2 rounded-xl border bg-white p-3 shadow-sm sm:flex-row sm:items-start sm:justify-between sm:p-4">
+    <section className="space-y-2.5 pb-20 sm:pb-3">
+      <header className="flex flex-col gap-2 rounded-xl border bg-white px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold sm:text-xl">Agenda operacional</h2>
-          <p className="text-xs text-slate-600 sm:text-sm">Hoje: {operationalDateLabel} · Rotina, prioridade e próxima ação</p>
+          <h2 className="text-base font-semibold text-slate-900 sm:text-lg">Agenda operacional</h2>
+          <p className="text-xs text-slate-500">{operationalDateLabel}</p>
         </div>
-
-        <button type="button" onClick={() => openCreate("agenda")} className="w-full rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:w-auto">
-          Nova agenda
-        </button>
-      </header>
-
-      <div className="grid gap-2 rounded-xl border bg-white p-3 shadow-sm md:grid-cols-3">
-        <label className="text-sm font-medium text-slate-700">
-          Visualização
-          <select value={view} onChange={(event) => setView(event.target.value as Visualizacao)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm">
-            <option value="daily">Diária</option>
-            <option value="weekly">Semanal</option>
-            <option value="monthly">Mensal</option>
-            <option value="list">Lista</option>
-          </select>
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          Período
-          <select
-            value={periodFilter}
-            onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)}
-            className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-          >
-            <option value="today">Hoje</option>
-            <option value="this_week">Esta semana</option>
-            <option value="next_7_days">Próximos 7 dias</option>
-            <option value="next_30_days">Próximos 30 dias</option>
-            <option value="custom_range">Personalizado</option>
-          </select>
-        </label>
-
-        <label className="text-sm font-medium text-slate-700">
-          <span className="block">Status</span>
-          <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal text-slate-700">
-            <input type="checkbox" checked={overdueOnly} onChange={(event) => setOverdueOnly(event.target.checked)} />
-            Somente vencidos
-          </div>
-        </label>
-
-        {canFilterBySeller ? (
-          <label className="text-sm font-medium text-slate-700">
-            Vendedor
-            <select
-              value={selectedSellerId}
-              onChange={(event) => setSelectedSellerId(event.target.value)}
-              className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="">{user?.role === "diretor" ? "Todos" : "Time"}</option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-      </div>
-
-      {periodFilter === "custom_range" ? (
-        <div className="grid gap-2 rounded-xl border bg-white p-3 shadow-sm md:grid-cols-2">
-          <label className="text-sm font-medium text-slate-700">De
-            <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-          <label className="text-sm font-medium text-slate-700">Até
-            <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 w-full min-w-0 rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-          </label>
-        </div>
-      ) : null}
-
-      <div className="rounded-xl border bg-white p-3 shadow-sm">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-slate-900">Resumo operacional do dia</h3>
-          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-medium text-slate-600">Activity-first</span>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <OperationalMetricCard label="Próxima atividade" value={operationalSummary.nextActivity ? formatTime(getStartsAt(operationalSummary.nextActivity)) : "Sem agenda"} tone="priority" helper={operationalSummary.nextActivity?.title || "Defina o próximo compromisso"} />
-          <OperationalMetricCard label="Atividades atrasadas" value={operationalSummary.overdueActivities} tone={operationalSummary.overdueActivities > 0 ? "danger" : "default"} />
-          <OperationalMetricCard label="Visitas hoje" value={operationalSummary.visitsToday} helper={`${summary.routes} roteiros no período`} />
-          <OperationalMetricCard label="Follow-ups pendentes" value={operationalSummary.followupsPending} helper={`${summary.followups} no filtro atual`} />
-        </div>
-      </div>
-
-      <div className="rounded-xl border bg-white p-3 shadow-sm">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-slate-900">Timeline operacional (estrutura inicial)</h3>
-          <span className="text-[11px] text-slate-500">Em evolução</span>
-        </div>
-        <div className="space-y-2">
-          {operationalSummary.nextActivity ? (
-            <TimelineSkeletonItem
-              time={formatTime(getStartsAt(operationalSummary.nextActivity))}
-              label={operationalSummary.nextActivity.title}
-              tone="highlight"
-            />
-          ) : null}
-          {[
-            { time: "08:00", label: "Visita" },
-            { time: "09:30", label: "Follow-up" },
-            { time: "11:00", label: "Roteiro" },
-            { time: "14:00", label: "Ligação" }
-          ].map((item) => (
-            <TimelineSkeletonItem key={`${item.time}-${item.label}`} time={item.time} label={item.label} />
-          ))}
-        </div>
-      </div>
-
-
-      <div className="rounded-xl border bg-white p-3 shadow-sm">
-        <h3 className="text-sm font-semibold text-slate-900">Roteiro operacional da semana</h3>
-        <div className="mt-2 space-y-2 text-sm text-slate-700">
-          {!weeklyRoutePlans.length ? (
-            <p className="text-slate-500">Nenhum roteiro planejado para esta semana.</p>
-          ) : (
-            weeklyRoutePlans.map((item, index) => (
-              <div key={`${item.dayLabel}-${item.city}-${index}`} className="rounded-lg border border-slate-200 px-3 py-2">
-                <p className="font-medium text-slate-900">{item.dayLabel} – {item.city}</p>
-                <p className="text-slate-600">{item.visits} visitas</p>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="rounded-xl border bg-white p-3 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-900">Roteiro integrado na agenda do dia</h3>
-            <p className="text-xs text-slate-500 sm:text-sm">Planeje múltiplas paradas e acompanhe execução sem sair da rotina operacional.</p>
-          </div>
-          <button type="button" className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white sm:w-auto" onClick={() => openCreate("roteiro")}>
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <button type="button" onClick={() => openCreate("agenda")} className="flex-1 rounded-lg bg-brand-700 px-3 py-2 text-sm font-medium text-white sm:flex-none">
+            Nova agenda
+          </button>
+          <button type="button" className="rounded-lg border border-emerald-300 px-3 py-2 text-sm font-medium text-emerald-700" onClick={() => openCreate("roteiro")}>
             Criar roteiro
           </button>
         </div>
+      </header>
+
+      <div className="overflow-x-auto rounded-xl border bg-white px-2 py-2">
+        <div className="flex min-w-max items-center gap-1.5">
+          <button type="button" onClick={onGoToToday} className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            Hoje
+          </button>
+          <button type="button" onClick={() => onShiftPeriod(-1)} className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">◀</button>
+          <button type="button" onClick={() => onShiftPeriod(1)} className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">▶</button>
+          <span className="px-1 text-xs font-medium text-slate-500">{periodTitle}</span>
+
+          <div className="ml-1 flex overflow-hidden rounded-md border border-slate-200">
+            {([
+              { key: "daily", label: "Dia" },
+              { key: "weekly", label: "Semana" },
+              { key: "monthly", label: "Mês" },
+              { key: "list", label: "Lista" }
+            ] as const).map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className={`px-2.5 py-1.5 text-xs font-medium ${view === option.key ? "bg-brand-700 text-white" : "bg-white text-slate-700 hover:bg-slate-50"}`}
+                onClick={() => setView(option.key)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          {canFilterBySeller ? (
+            <label className="ml-1 inline-flex items-center gap-2 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs text-slate-700">
+              <span className="font-medium">Vendedor</span>
+              <select value={selectedSellerId} onChange={(event) => setSelectedSellerId(event.target.value)} className="bg-transparent text-xs focus:outline-none">
+                <option value="">{user?.role === "diretor" ? "Todos" : "Time"}</option>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>{seller.name}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          <button type="button" className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50" onClick={() => setIsFiltersOpen((current) => !current)}>
+            Filtros
+          </button>
+        </div>
       </div>
+
+      {isFiltersOpen ? (
+        <div className="grid gap-2 rounded-xl border bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="text-xs font-medium text-slate-700">
+            Período
+            <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)} className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm">
+              <option value="today">Hoje</option>
+              <option value="this_week">Esta semana</option>
+              <option value="next_7_days">Próximos 7 dias</option>
+              <option value="next_30_days">Próximos 30 dias</option>
+              <option value="custom_range">Personalizado</option>
+            </select>
+          </label>
+
+          <label className="text-xs font-medium text-slate-700">
+            Status
+            <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <input type="checkbox" checked={overdueOnly} onChange={(event) => setOverdueOnly(event.target.checked)} />
+              Somente vencidos
+            </div>
+          </label>
+
+          {periodFilter === "custom_range" ? (
+            <Fragment>
+              <label className="text-xs font-medium text-slate-700">De
+                <input type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm" />
+              </label>
+              <label className="text-xs font-medium text-slate-700">Até
+                <input type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm" />
+              </label>
+            </Fragment>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border bg-white px-3 py-2">
+        <p className="text-xs font-medium text-slate-600">
+          {summary.meetings} reuniões · {summary.routes} roteiros · {summary.followups} follow-ups · {summary.overdue} atrasados
+          {operationalSummary.nextActivity ? ` · próxima ${formatTime(getStartsAt(operationalSummary.nextActivity))}` : ""}
+        </p>
+      </div>
+
+      {!weeklyRoutePlans.length ? (
+        <div className="rounded-xl border border-dashed bg-white px-3 py-2 text-xs text-slate-500">
+          Roteiros de visita aparecem diretamente na timeline.
+        </div>
+      ) : null}
 
       {false && searchParams.get("execute") === "1" && executionEvent ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
@@ -1660,7 +1657,56 @@ export default function AgendaPage() {
         {isEventsLoading ? (
           <p className="p-6 text-center text-sm text-slate-500">Carregando agenda...</p>
         ) : !filteredEvents.length ? (
-          <p className="p-6 text-center text-sm text-slate-500">Nenhum evento encontrado.</p>
+          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-sm text-slate-500">Nenhum compromisso neste período</p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onClick={() => openCreate("agenda")} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700">
+                Criar compromisso
+              </button>
+              <button type="button" onClick={() => openCreate("roteiro")} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700">
+                Criar roteiro
+              </button>
+            </div>
+          </div>
+        ) : view === "daily" ? (
+          <div className="p-3">
+            <div className="space-y-0.5">
+              {hourSlots.map((hour) => {
+                const slotStart = new Date(dateRange.start);
+                slotStart.setHours(hour, 0, 0, 0);
+                const slotEnd = new Date(slotStart);
+                slotEnd.setHours(hour + 1, 0, 0, 0);
+                const hourEvents = filteredEvents.filter((event) => {
+                  const startsAt = new Date(getStartsAt(event));
+                  return startsAt >= slotStart && startsAt < slotEnd;
+                });
+                return (
+                  <div key={hour} className="grid grid-cols-[56px_minmax(0,1fr)] gap-2 border-t border-slate-100 py-1 first:border-t-0">
+                    <div className="pt-2 text-xs font-medium text-slate-400">{toHourSlotLabel(hour)}</div>
+                    <div className="space-y-1.5 pb-1 pt-1">
+                      {!hourEvents.length ? <div className="h-8 rounded-md border border-dashed border-slate-200" /> : null}
+                      {hourEvents.map((event) => (
+                        <button
+                          key={event.id}
+                          type="button"
+                          onClick={() => setExpandedRouteEventId((current) => (current === event.id ? "" : event.id))}
+                          className={`w-full rounded-md border px-2.5 py-2 text-left ${TYPE_COLOR_CLASS[normalizeAgendaEventType(event.type)]}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold">{event.title}</p>
+                              <p className="text-[11px] opacity-80">{formatTime(getStartsAt(event))} · {sellerById[getOwnerId(event)] || "Vendedor"}</p>
+                            </div>
+                            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${STATUS_COLOR_CLASS[event.status]}`}>{STATUS_LABEL[event.status]}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         ) : view === "monthly" ? (
           <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
             {groupedEventsByDay.map((group) => (
