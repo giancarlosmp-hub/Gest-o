@@ -33,11 +33,20 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
-      - name: Build and start stack
+      - name: Cleanup Docker state
+        run: |
+          docker compose down -v --remove-orphans
+          docker image rm -f gest-o-api || true
+          docker image prune -af
+
+      - name: Build API image
+        run: docker compose build --no-cache api
+
+      - name: Start stack
         env:
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
-        run: docker compose up -d --build
+        run: docker compose up -d
 
       - name: Print API logs on failure
         if: failure()
