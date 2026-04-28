@@ -79,6 +79,31 @@ type Filters = {
   overdue: boolean;
 };
 
+type DiscountType = "value" | "percent";
+
+type OpportunityProduct = {
+  id: string;
+  name: string;
+  erpProductCode: string;
+  erpProductClassCode: string;
+  unit?: string | null;
+  defaultPrice?: number | null;
+};
+
+type OpportunityItemForm = {
+  id?: string;
+  productId: string;
+  productNameSnapshot: string;
+  erpProductCode: string;
+  erpProductClassCode: string;
+  unit: string;
+  quantity: string;
+  unitPrice: string;
+  discountType: DiscountType;
+  discountValue: string;
+  notes: string;
+};
+
 type FormState = {
   title: string;
   value: string;
@@ -192,6 +217,19 @@ const emptyForm: FormState = {
   ownerSellerId: ""
 };
 
+const emptyOpportunityItem: OpportunityItemForm = {
+  productId: "",
+  productNameSnapshot: "",
+  erpProductCode: "",
+  erpProductClassCode: "",
+  unit: "",
+  quantity: "1",
+  unitPrice: "0",
+  discountType: "value",
+  discountValue: "0",
+  notes: ""
+};
+
 const emptySummary: Summary = {
   pipelineTotal: 0,
   weightedTotal: 0,
@@ -230,6 +268,22 @@ function normalizeRisk(value?: string | null): OpportunityRisk {
   return "baixo";
 }
 
+
+function toTwoDecimals(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function calculateItemTotals(item: OpportunityItemForm) {
+  const quantity = Number(item.quantity || 0);
+  const unitPrice = Number(item.unitPrice || 0);
+  const grossTotal = toTwoDecimals(quantity * unitPrice);
+  const discountValue = Number(item.discountValue || 0);
+  const discountTotalRaw = item.discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
+  const discountTotal = toTwoDecimals(Math.max(0, Math.min(grossTotal, discountTotalRaw)));
+  const netTotal = toTwoDecimals(grossTotal - discountTotal);
+  return { grossTotal, discountTotal, netTotal };
+}
+
 export default function OpportunitiesPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<Opportunity[]>([]);
@@ -243,6 +297,11 @@ export default function OpportunitiesPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [opportunityItems, setOpportunityItems] = useState<OpportunityItemForm[]>([]);
+  const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
+  const [productSearch, setProductSearch] = useState("");
+  const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("pipeline");
@@ -320,7 +379,13 @@ export default function OpportunitiesPage() {
       ...emptyForm,
       ownerSellerId: isSeller && user?.id ? user.id : ""
     });
+    setOpportunityItems([]);
+    setItemDraft(emptyOpportunityItem);
+    setProductSearch("");
+    setProductOptions([]);
     setSubmitError(null);
+    setOpportunityItems([]);
+    setItemDraft(emptyOpportunityItem);
     setIsOpportunityModalOpen(true);
 
     const params = new URLSearchParams(searchParams);
@@ -629,6 +694,86 @@ export default function OpportunitiesPage() {
     }
   };
 
+
+  const loadOpportunityItems = useCallback(async (opportunityId: string) => {
+    setLoadingItems(true);
+    try {
+      const response = await api.get(`/opportunities/${opportunityId}/items`);
+      const loadedItems = (response.data?.items || []).map((item: any) => ({
+        id: item.id,
+        productId: item.productId || "",
+        productNameSnapshot: item.productNameSnapshot || "",
+        erpProductCode: item.erpProductCode || "",
+        erpProductClassCode: item.erpProductClassCode || "",
+        unit: item.unit || "",
+        quantity: String(item.quantity ?? 1),
+        unitPrice: String(item.unitPrice ?? 0),
+        discountType: (item.discountType || "value") as DiscountType,
+        discountValue: String(item.discountValue ?? 0),
+        notes: item.notes || ""
+      }));
+      setOpportunityItems(loadedItems);
+    } catch {
+      toast.error("Não foi possível carregar os itens da oportunidade");
+    } finally {
+      setLoadingItems(false);
+    }
+  }, []);
+
+  const searchProducts = useCallback(async (query: string) => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setProductOptions([]);
+      return;
+    }
+    try {
+      const response = await api.get(`/products/search?q=${encodeURIComponent(trimmed)}`);
+      setProductOptions(response.data || []);
+    } catch {
+      setProductOptions([]);
+    }
+  }, []);
+
+  const persistOpportunityItem = async (draft: OpportunityItemForm) => {
+    if (!editing) {
+      toast.message("Salve a oportunidade para começar a adicionar produtos.");
+      return;
+    }
+    const payload = {
+      productId: draft.productId || undefined,
+      productNameSnapshot: draft.productNameSnapshot,
+      erpProductCode: draft.erpProductCode,
+      erpProductClassCode: draft.erpProductClassCode,
+      unit: draft.unit || undefined,
+      quantity: Number(draft.quantity || 0),
+      unitPrice: Number(draft.unitPrice || 0),
+      discountType: draft.discountType,
+      discountValue: Number(draft.discountValue || 0),
+      notes: draft.notes || undefined
+    };
+
+    if (payload.quantity <= 0 || payload.unitPrice < 0 || !payload.productNameSnapshot) {
+      toast.error("Preencha produto, quantidade e preço válidos.");
+      return;
+    }
+
+    if (draft.id) {
+      await api.put(`/opportunities/${editing}/items/${draft.id}`, payload);
+    } else {
+      await api.post(`/opportunities/${editing}/items`, payload);
+    }
+    await loadOpportunityItems(editing);
+    setItemDraft(emptyOpportunityItem);
+    toast.success(draft.id ? "Item atualizado" : "Item adicionado");
+  };
+
+  const removeOpportunityItem = async (itemId?: string) => {
+    if (!editing || !itemId) return;
+    await api.delete(`/opportunities/${editing}/items/${itemId}`);
+    await loadOpportunityItems(editing);
+    toast.success("Item removido");
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -703,6 +848,10 @@ export default function OpportunitiesPage() {
       ...emptyForm,
       ownerSellerId: isSeller && user?.id ? user.id : ""
     });
+    setOpportunityItems([]);
+    setItemDraft(emptyOpportunityItem);
+    setProductSearch("");
+    setProductOptions([]);
     setSubmitError(null);
     setIsOpportunityModalOpen(true);
   };
@@ -717,6 +866,10 @@ export default function OpportunitiesPage() {
       ...emptyForm,
       ownerSellerId: isSeller && user?.id ? user.id : ""
     });
+    setOpportunityItems([]);
+    setItemDraft(emptyOpportunityItem);
+    setProductSearch("");
+    setProductOptions([]);
   };
 
   const onEdit = (item: Opportunity) => {
@@ -742,6 +895,7 @@ export default function OpportunitiesPage() {
     });
     setSubmitError(null);
     setIsOpportunityModalOpen(true);
+    loadOpportunityItems(item.id).catch(() => null);
   };
 
   const onDelete = async (id: string) => {
@@ -769,6 +923,20 @@ export default function OpportunitiesPage() {
     setForm((current) => ({ ...current, clientId: clientOption.id }));
     return clientOption;
   };
+
+
+  const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
+  const itemsTotals = useMemo(() => opportunityItems.reduce(
+    (acc, current) => {
+      const currentTotals = calculateItemTotals(current);
+      return {
+        grossTotal: acc.grossTotal + currentTotals.grossTotal,
+        discountTotal: acc.discountTotal + currentTotals.discountTotal,
+        netTotal: acc.netTotal + currentTotals.netTotal
+      };
+    },
+    { grossTotal: 0, discountTotal: 0, netTotal: 0 }
+  ), [opportunityItems]);
 
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
@@ -1099,6 +1267,136 @@ export default function OpportunitiesPage() {
         requireOwnerSeller={user?.role === "diretor" || user?.role === "gerente"}
         onClientCreated={selectExistingClient}
         onSelectExisting={selectExistingClient}
+        productsSection={
+          <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
+              {!editing ? <span className="text-xs text-slate-500">Disponível após salvar a oportunidade</span> : null}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="space-y-1 sm:col-span-2">
+                <span className="text-sm font-medium text-slate-700">Buscar produto</span>
+                <input
+                  className="w-full rounded-lg border border-slate-200 p-2"
+                  placeholder="Digite nome ou código"
+                  value={productSearch}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setProductSearch(value);
+                    searchProducts(value).catch(() => null);
+                  }}
+                  disabled={!editing}
+                />
+              </label>
+              <label className="space-y-1 sm:col-span-2">
+                <span className="text-sm font-medium text-slate-700">Produto</span>
+                <select
+                  className="w-full rounded-lg border border-slate-200 p-2"
+                  value={itemDraft.productId}
+                  onChange={(event) => {
+                    const selected = productOptions.find((option) => option.id === event.target.value);
+                    if (!selected) return;
+                    setItemDraft((current) => ({
+                      ...current,
+                      productId: selected.id,
+                      productNameSnapshot: selected.name,
+                      erpProductCode: selected.erpProductCode,
+                      erpProductClassCode: selected.erpProductClassCode,
+                      unit: selected.unit || "",
+                      unitPrice: selected.defaultPrice != null ? String(selected.defaultPrice) : current.unitPrice
+                    }));
+                  }}
+                  disabled={!editing}
+                >
+                  <option value="">Selecione</option>
+                  {productOptions.map((product) => (
+                    <option key={product.id} value={product.id}>
+                      {product.erpProductCode} · {product.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">Quantidade</span>
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">Preço unitário</span>
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">Desconto</span>
+                <div className="flex gap-2">
+                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))} disabled={!editing}>
+                    <option value="value">R$</option>
+                    <option value="percent">%</option>
+                  </select>
+                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+                </div>
+              </label>
+              <label className="space-y-1">
+                <span className="text-sm font-medium text-slate-700">Total do item</span>
+                <div className="rounded-lg border border-slate-200 bg-white p-2 text-sm text-slate-700">{formatCurrencyBRL(itemDraftTotals.netTotal)}</div>
+              </label>
+            </div>
+
+            <label className="space-y-1">
+              <span className="text-sm font-medium text-slate-700">Observação</span>
+              <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.notes} onChange={(e) => setItemDraft((current) => ({ ...current, notes: e.target.value }))} disabled={!editing} />
+            </label>
+
+            <div className="flex justify-end">
+              <button type="button" className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400" onClick={() => persistOpportunityItem(itemDraft).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível salvar item")))} disabled={!editing}>
+                {itemDraft.id ? "Atualizar item" : "Adicionar item"}
+              </button>
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="p-2">Produto</th>
+                    <th className="p-2">Qtd</th>
+                    <th className="p-2">Preço</th>
+                    <th className="p-2">Desc.</th>
+                    <th className="p-2">Total</th>
+                    <th className="p-2">Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingItems ? (
+                    <tr><td className="p-3 text-slate-500" colSpan={6}>Carregando itens...</td></tr>
+                  ) : opportunityItems.length === 0 ? (
+                    <tr><td className="p-3 text-slate-500" colSpan={6}>Nenhum produto adicionado.</td></tr>
+                  ) : opportunityItems.map((opportunityItem) => {
+                    const totals = calculateItemTotals(opportunityItem);
+                    return (
+                      <tr key={opportunityItem.id} className="border-t border-slate-100">
+                        <td className="p-2">{opportunityItem.productNameSnapshot}</td>
+                        <td className="p-2">{opportunityItem.quantity}</td>
+                        <td className="p-2">{formatCurrencyBRL(Number(opportunityItem.unitPrice || 0))}</td>
+                        <td className="p-2">{opportunityItem.discountType === "percent" ? `${opportunityItem.discountValue}%` : formatCurrencyBRL(Number(opportunityItem.discountValue || 0))}</td>
+                        <td className="p-2 font-medium">{formatCurrencyBRL(totals.netTotal)}</td>
+                        <td className="p-2">
+                          <div className="flex gap-2">
+                            <button type="button" className="text-slate-700" onClick={() => setItemDraft(opportunityItem)}>Editar</button>
+                            <button type="button" className="text-red-600" onClick={() => removeOpportunityItem(opportunityItem.id).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível remover item")))}>Excluir</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex justify-end text-sm text-slate-700">
+              <span className="mr-2">Total geral dos itens:</span>
+              <strong>{formatCurrencyBRL(itemsTotals.netTotal)}</strong>
+            </div>
+          </section>
+        }
       />
 
       <OpportunityImportModal

@@ -5401,6 +5401,216 @@ router.get("/opportunities/import/dictionary", async (_req, res) => {
   });
 });
 
+
+
+const productSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(120)
+});
+
+const opportunityItemPayloadSchema = z.object({
+  productId: z.string().optional(),
+  lineNumber: z.number().int().positive().optional(),
+  erpProductCode: z.string().trim().min(1).max(60).optional(),
+  erpProductClassCode: z.string().trim().min(1).max(60).optional(),
+  productNameSnapshot: z.string().trim().min(1).max(240).optional(),
+  unit: z.string().trim().max(30).optional(),
+  quantity: z.number().positive(),
+  unitPrice: z.number().nonnegative(),
+  discountType: z.enum(["value", "percent"]).optional(),
+  discountValue: z.number().nonnegative().optional(),
+  notes: z.string().max(2000).optional()
+});
+
+const computeOpportunityItemTotals = (payload: { quantity: number; unitPrice: number; discountType?: "value" | "percent"; discountValue?: number }) => {
+  const quantity = Number(payload.quantity || 0);
+  const unitPrice = Number(payload.unitPrice || 0);
+  const grossTotal = Number((quantity * unitPrice).toFixed(2));
+  const discountType = payload.discountType || "value";
+  const discountValue = Number(payload.discountValue || 0);
+  const rawDiscount = discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
+  const discountTotal = Number(Math.max(0, Math.min(grossTotal, rawDiscount)).toFixed(2));
+  const netTotal = Number((grossTotal - discountTotal).toFixed(2));
+  return { grossTotal, discountTotal, netTotal, discountType, discountValue };
+};
+
+const mapOpportunityItemResponse = (item: any) => ({
+  ...item,
+  createdAt: toIsoStringOrNull(item.createdAt),
+  updatedAt: toIsoStringOrNull(item.updatedAt)
+});
+
+
+router.get("/products", async (_req, res) => {
+  const products = await prisma.product.findMany({
+    orderBy: [{ name: "asc" }],
+    include: { prices: { orderBy: [{ validFrom: "desc" }] } }
+  });
+  return res.json(products);
+});
+
+router.get("/products/search", async (req, res) => {
+  const parsed = productSearchQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ message: "Parâmetro q é obrigatório" });
+  const q = parsed.data.q;
+  const products = await prisma.product.findMany({
+    where: {
+      OR: [
+        { name: { contains: q, mode: "insensitive" } },
+        { erpProductCode: { contains: q, mode: "insensitive" } },
+        { erpProductClassCode: { contains: q, mode: "insensitive" } }
+      ]
+    },
+    take: 30,
+    orderBy: [{ name: "asc" }],
+    include: { prices: { orderBy: [{ validFrom: "desc" }] } }
+  });
+  return res.json(products);
+});
+
+router.get("/products/:id", async (req, res) => {
+  const product = await prisma.product.findUnique({
+    where: { id: req.params.id },
+    include: { prices: { orderBy: [{ validFrom: "desc" }] } }
+  });
+  if (!product) return res.status(404).json({ message: "Produto não encontrado" });
+  return res.json(product);
+});
+
+router.get("/opportunities/:id/items", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: sellerWhere(req, { id: req.params.id }) });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  const items = await prisma.opportunityItem.findMany({
+    where: { opportunityId: req.params.id },
+    orderBy: [{ lineNumber: "asc" }],
+    include: { product: true }
+  });
+
+  const totals = items.reduce(
+    (acc, item) => ({ grossTotal: acc.grossTotal + item.grossTotal, discountTotal: acc.discountTotal + item.discountTotal, netTotal: acc.netTotal + item.netTotal }),
+    { grossTotal: 0, discountTotal: 0, netTotal: 0 }
+  );
+
+  return res.json({
+    items: items.map(mapOpportunityItemResponse),
+    totals: {
+      grossTotal: Number(totals.grossTotal.toFixed(2)),
+      discountTotal: Number(totals.discountTotal.toFixed(2)),
+      netTotal: Number(totals.netTotal.toFixed(2))
+    }
+  });
+});
+
+router.post("/opportunities/:id/items", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: sellerWhere(req, { id: req.params.id }) });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  const parsed = opportunityItemPayloadSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido" });
+
+  const payload = parsed.data;
+  let product = null;
+  if (payload.productId) {
+    product = await prisma.product.findUnique({ where: { id: payload.productId } });
+    if (!product) return res.status(404).json({ message: "Produto não encontrado" });
+  }
+
+  const maxLine = await prisma.opportunityItem.aggregate({
+    where: { opportunityId: req.params.id },
+    _max: { lineNumber: true }
+  });
+
+  const { grossTotal, discountTotal, netTotal, discountType, discountValue } = computeOpportunityItemTotals(payload);
+
+  const created = await prisma.opportunityItem.create({
+    data: {
+      opportunityId: req.params.id,
+      productId: payload.productId || null,
+      lineNumber: payload.lineNumber || (maxLine._max.lineNumber || 0) + 1,
+      erpProductCode: payload.erpProductCode || product?.erpProductCode || "manual",
+      erpProductClassCode: payload.erpProductClassCode || product?.erpProductClassCode || "manual",
+      productNameSnapshot: payload.productNameSnapshot || product?.name || "Item sem produto",
+      unit: payload.unit || product?.unit || null,
+      quantity: payload.quantity,
+      unitPrice: payload.unitPrice,
+      discountType,
+      discountValue,
+      grossTotal,
+      discountTotal,
+      netTotal,
+      notes: payload.notes || null
+    },
+    include: { product: true }
+  });
+
+  return res.status(201).json(mapOpportunityItemResponse(created));
+});
+
+router.put("/opportunities/:id/items/:itemId", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: sellerWhere(req, { id: req.params.id }) });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
+  if (!existing) return res.status(404).json({ message: "Item não encontrado" });
+
+  const parsed = opportunityItemPayloadSchema.partial().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido" });
+
+  const payload = parsed.data;
+  const nextQuantity = payload.quantity ?? existing.quantity;
+  const nextUnitPrice = payload.unitPrice ?? existing.unitPrice;
+  const nextDiscountType = payload.discountType ?? existing.discountType;
+  const nextDiscountValue = payload.discountValue ?? existing.discountValue;
+
+  let product = null;
+  const productId = payload.productId === undefined ? existing.productId : payload.productId;
+  if (productId) {
+    product = await prisma.product.findUnique({ where: { id: productId } });
+    if (!product) return res.status(404).json({ message: "Produto não encontrado" });
+  }
+
+  const { grossTotal, discountTotal, netTotal } = computeOpportunityItemTotals({
+    quantity: nextQuantity,
+    unitPrice: nextUnitPrice,
+    discountType: nextDiscountType,
+    discountValue: nextDiscountValue
+  });
+
+  const updated = await prisma.opportunityItem.update({
+    where: { id: existing.id },
+    data: {
+      productId: productId || null,
+      lineNumber: payload.lineNumber ?? existing.lineNumber,
+      erpProductCode: payload.erpProductCode ?? product?.erpProductCode ?? existing.erpProductCode,
+      erpProductClassCode: payload.erpProductClassCode ?? product?.erpProductClassCode ?? existing.erpProductClassCode,
+      productNameSnapshot: payload.productNameSnapshot ?? product?.name ?? existing.productNameSnapshot,
+      unit: payload.unit ?? product?.unit ?? existing.unit,
+      quantity: nextQuantity,
+      unitPrice: nextUnitPrice,
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
+      grossTotal,
+      discountTotal,
+      netTotal,
+      notes: payload.notes === undefined ? existing.notes : payload.notes || null
+    },
+    include: { product: true }
+  });
+
+  return res.json(mapOpportunityItemResponse(updated));
+});
+
+router.delete("/opportunities/:id/items/:itemId", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: sellerWhere(req, { id: req.params.id }) });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  const existing = await prisma.opportunityItem.findFirst({ where: { id: req.params.itemId, opportunityId: req.params.id } });
+  if (!existing) return res.status(404).json({ message: "Item não encontrado" });
+
+  await prisma.opportunityItem.delete({ where: { id: req.params.itemId } });
+  return res.status(204).send();
+});
+
 router.get("/opportunities/:id", async (req, res) => {
   const todayStart = getUtcTodayStart();
   const opportunity = await prisma.opportunity.findFirst({

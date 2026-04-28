@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from "react";
+import { FormEvent, ReactNode, useEffect, useRef } from "react";
 import { ExistingClientSummary } from "../../lib/clientDuplicateCheck";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 import QuickCreateClientSection from "../clients/QuickCreateClientSection";
@@ -55,6 +55,7 @@ type CreateOpportunityModalProps = {
   requireOwnerSeller?: boolean;
   onClientCreated: (client: ClientOption) => void;
   onSelectExisting: (client: ExistingClientSummary) => void;
+  productsSection?: ReactNode;
 };
 
 export default function CreateOpportunityModal({
@@ -78,7 +79,8 @@ export default function CreateOpportunityModal({
   ownerSellerId,
   requireOwnerSeller = false,
   onClientCreated,
-  onSelectExisting
+  onSelectExisting,
+  productsSection
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -202,6 +204,8 @@ export default function CreateOpportunityModal({
                 <option value="2026/27" />
               </datalist>
             </section>
+
+{productsSection ? productsSection : null}
 
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Datas</h4>

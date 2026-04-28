@@ -19,6 +19,45 @@ type PreviewClientTemplate = {
   segment: string;
 };
 
+const PREVIEW_PRODUCTS = [
+  {
+    erpProductCode: "1001",
+    erpProductClassCode: "SEMENTE",
+    name: "Semente Soja Premium",
+    className: "Sementes",
+    unit: "SC",
+    brand: "Demetra",
+    groupName: "Soja",
+    defaultPrice: 210,
+    minPrice: 190,
+    prices: [{ erpPriceId: "P1001", branchCode: "01", price: 210 }]
+  },
+  {
+    erpProductCode: "2003",
+    erpProductClassCode: "FERT",
+    name: "Fertilizante NPK 20-05-20",
+    className: "Fertilizantes",
+    unit: "SC",
+    brand: "Demetra",
+    groupName: "Nutrição",
+    defaultPrice: 168,
+    minPrice: 150,
+    prices: [{ erpPriceId: "P2003", branchCode: "01", price: 168 }]
+  },
+  {
+    erpProductCode: "3010",
+    erpProductClassCode: "DEF",
+    name: "Inseticida Controle Total",
+    className: "Defensivos",
+    unit: "LT",
+    brand: "Demetra",
+    groupName: "Proteção",
+    defaultPrice: 98.5,
+    minPrice: 89.9,
+    prices: [{ erpPriceId: "P3010", branchCode: "02", price: 98.5 }]
+  }
+] as const;
+
 const PREVIEW_CLIENTS: PreviewClientTemplate[] = [
   { name: "Fazenda Horizonte", city: "Ribeirão Preto", state: "SP", region: "Sudeste", segment: "Soja" },
   { name: "Sítio Boa Safra", city: "Uberaba", state: "MG", region: "Sudeste", segment: "Milho" },
@@ -157,6 +196,9 @@ async function cleanOldPreviewSeedData() {
     }
   });
 
+  await prisma.productPrice.deleteMany();
+  await prisma.product.deleteMany();
+
   await prisma.contact.deleteMany({
     where: {
       name: { contains: PREVIEW_SEED_TAG }
@@ -180,6 +222,41 @@ async function createPreviewDataset() {
   );
 
   await cleanOldPreviewSeedData();
+
+  for (const productTemplate of PREVIEW_PRODUCTS) {
+    const product = await prisma.product.create({
+      data: {
+        erpProductCode: productTemplate.erpProductCode,
+        erpProductClassCode: productTemplate.erpProductClassCode,
+        name: productTemplate.name,
+        className: productTemplate.className,
+        unit: productTemplate.unit,
+        brand: productTemplate.brand,
+        groupName: productTemplate.groupName,
+        defaultPrice: productTemplate.defaultPrice,
+        minPrice: productTemplate.minPrice,
+        stockQuantity: 120,
+        rawErpPayload: {
+          CODPRODUTO: productTemplate.erpProductCode,
+          CODPRODUTO_CLAS: productTemplate.erpProductClassCode,
+          DSCPRODUTO: productTemplate.name,
+          DSCPRODUTO_CLAS: productTemplate.className,
+          UND_MEDIDA: productTemplate.unit,
+          PRECO: productTemplate.defaultPrice
+        }
+      }
+    });
+
+    await prisma.productPrice.createMany({
+      data: productTemplate.prices.map((price) => ({
+        productId: product.id,
+        erpPriceId: price.erpPriceId,
+        branchCode: price.branchCode,
+        validFrom: now,
+        price: price.price
+      }))
+    });
+  }
 
   const clients = [];
 
