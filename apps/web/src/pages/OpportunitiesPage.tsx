@@ -86,6 +86,9 @@ type OpportunityProduct = {
   name: string;
   erpProductCode: string;
   erpProductClassCode: string;
+  className?: string | null;
+  brand?: string | null;
+  groupName?: string | null;
   unit?: string | null;
   defaultPrice?: number | null;
 };
@@ -730,7 +733,18 @@ export default function OpportunitiesPage() {
     }
     try {
       const response = await api.get(`/products/search?q=${encodeURIComponent(trimmed)}`);
-      setProductOptions(response.data || []);
+      const mappedOptions = (response.data || []).map((product: any) => ({
+        id: product.id,
+        name: product.name || "",
+        erpProductCode: product.erpProductCode || "",
+        erpProductClassCode: product.erpProductClassCode || "",
+        className: product.className || null,
+        brand: product.brand || null,
+        groupName: product.groupName || null,
+        unit: product.unit || null,
+        defaultPrice: Number(product?.prices?.[0]?.price ?? product.defaultPrice ?? 0)
+      }));
+      setProductOptions(mappedOptions);
     } catch {
       setProductOptions([]);
     }
@@ -1329,6 +1343,11 @@ export default function OpportunitiesPage() {
                 </datalist>
                 {hasAttemptedProductSearch && productOptions.length === 0 ? (
                   <p className="text-xs text-amber-700">Nenhum produto encontrado para essa busca.</p>
+                ) : null}
+                {itemDraft.productNameSnapshot ? (
+                  <p className="text-xs text-slate-500">
+                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"}
+                  </p>
                 ) : null}
               </label>
               <label className="space-y-1">

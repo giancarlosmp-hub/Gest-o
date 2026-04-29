@@ -272,6 +272,8 @@ async function createPreviewDataset() {
         defaultPrice: productTemplate.defaultPrice,
         minPrice: productTemplate.minPrice,
         stockQuantity: 120,
+        isActive: true,
+        isSuspended: false,
         rawErpPayload: {
           CODPRODUTO: productTemplate.erpProductCode,
           CODPRODUTO_CLAS: productTemplate.erpProductClassCode,
@@ -284,7 +286,9 @@ async function createPreviewDataset() {
     });
 
     await prisma.productPrice.createMany({
-      data: productTemplate.prices.map((price) => ({
+      data: productTemplate.prices
+        .filter((price) => price.price > 0)
+        .map((price) => ({
         productId: product.id,
         erpPriceId: price.erpPriceId,
         branchCode: price.branchCode,
