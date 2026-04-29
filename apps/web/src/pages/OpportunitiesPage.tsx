@@ -301,6 +301,7 @@ export default function OpportunitiesPage() {
   const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
   const [productSearch, setProductSearch] = useState("");
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
+  const [hasAttemptedProductSearch, setHasAttemptedProductSearch] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -722,6 +723,7 @@ export default function OpportunitiesPage() {
 
   const searchProducts = useCallback(async (query: string) => {
     const trimmed = query.trim();
+    setHasAttemptedProductSearch(trimmed.length >= 2);
     if (trimmed.length < 2) {
       setProductOptions([]);
       return;
@@ -754,6 +756,19 @@ export default function OpportunitiesPage() {
 
     if (payload.quantity <= 0 || payload.unitPrice < 0 || !payload.productNameSnapshot) {
       toast.error("Preencha produto, quantidade e preço válidos.");
+      return;
+    }
+    const draftTotals = calculateItemTotals(draft);
+    if (draft.discountType === "percent" && (payload.discountValue < 0 || payload.discountValue > 100)) {
+      toast.error("Desconto percentual deve estar entre 0 e 100.");
+      return;
+    }
+    if (draft.discountType === "value" && (payload.discountValue < 0 || payload.discountValue > draftTotals.grossTotal)) {
+      toast.error("Desconto em valor não pode ser maior que o valor bruto do item.");
+      return;
+    }
+    if (draftTotals.netTotal < 0) {
+      toast.error("Valor líquido do item não pode ser negativo.");
       return;
     }
 
@@ -937,6 +952,12 @@ export default function OpportunitiesPage() {
     },
     { grossTotal: 0, discountTotal: 0, netTotal: 0 }
   ), [opportunityItems]);
+  const hasStructuredItems = opportunityItems.length > 0;
+
+  useEffect(() => {
+    if (!hasStructuredItems) return;
+    setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
+  }, [hasStructuredItems, itemsTotals.netTotal]);
 
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
@@ -1267,6 +1288,7 @@ export default function OpportunitiesPage() {
         requireOwnerSeller={user?.role === "diretor" || user?.role === "gerente"}
         onClientCreated={selectExistingClient}
         onSelectExisting={selectExistingClient}
+        hasStructuredItems={hasStructuredItems}
         productsSection={
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex items-center justify-between">
@@ -1275,11 +1297,11 @@ export default function OpportunitiesPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1 sm:col-span-2">
-                <span className="text-sm font-medium text-slate-700">Buscar produto</span>
+              <label className="space-y-1 sm:col-span-4">
+                <span className="text-sm font-medium text-slate-700">Produto (autocomplete)</span>
                 <input
                   className="w-full rounded-lg border border-slate-200 p-2"
-                  placeholder="Digite nome ou código"
+                  placeholder="Busque por código ERP, nome, classificação ou parte do nome"
                   value={productSearch}
                   onChange={(event) => {
                     const value = event.target.value;
@@ -1288,9 +1310,12 @@ export default function OpportunitiesPage() {
                   }}
                   disabled={!editing}
                 />
+                {hasAttemptedProductSearch && productOptions.length === 0 ? (
+                  <p className="text-xs text-amber-700">Nenhum produto encontrado para essa busca.</p>
+                ) : null}
               </label>
-              <label className="space-y-1 sm:col-span-2">
-                <span className="text-sm font-medium text-slate-700">Produto</span>
+              <label className="space-y-1 sm:col-span-4">
+                <span className="text-sm font-medium text-slate-700">Selecionar produto</span>
                 <select
                   className="w-full rounded-lg border border-slate-200 p-2"
                   value={itemDraft.productId}
@@ -1312,7 +1337,7 @@ export default function OpportunitiesPage() {
                   <option value="">Selecione</option>
                   {productOptions.map((product) => (
                     <option key={product.id} value={product.id}>
-                      {product.erpProductCode} · {product.name}
+                      {product.erpProductCode} · {product.name} · {product.erpProductClassCode}
                     </option>
                   ))}
                 </select>

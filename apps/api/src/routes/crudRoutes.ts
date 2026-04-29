@@ -5427,9 +5427,19 @@ const computeOpportunityItemTotals = (payload: { quantity: number; unitPrice: nu
   const grossTotal = Number((quantity * unitPrice).toFixed(2));
   const discountType = payload.discountType || "value";
   const discountValue = Number(payload.discountValue || 0);
+  // TODO: adicionar limites de desconto por perfil via Configurações.
+  if (discountType === "percent" && (discountValue < 0 || discountValue > 100)) {
+    throw Object.assign(new Error("Desconto percentual deve estar entre 0 e 100."), { status: 400 });
+  }
+  if (discountType === "value" && (discountValue < 0 || discountValue > grossTotal)) {
+    throw Object.assign(new Error("Desconto em valor não pode ser maior que o valor bruto do item."), { status: 400 });
+  }
   const rawDiscount = discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
   const discountTotal = Number(Math.max(0, Math.min(grossTotal, rawDiscount)).toFixed(2));
   const netTotal = Number((grossTotal - discountTotal).toFixed(2));
+  if (netTotal < 0) {
+    throw Object.assign(new Error("Valor líquido do item não pode ser negativo."), { status: 400 });
+  }
   return { grossTotal, discountTotal, netTotal, discountType, discountValue };
 };
 

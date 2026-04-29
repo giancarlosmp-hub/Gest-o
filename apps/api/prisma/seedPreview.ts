@@ -55,6 +55,42 @@ const PREVIEW_PRODUCTS = [
     defaultPrice: 98.5,
     minPrice: 89.9,
     prices: [{ erpPriceId: "P3010", branchCode: "02", price: 98.5 }]
+  },
+  {
+    erpProductCode: "4107",
+    erpProductClassCode: "BIO",
+    name: "Inoculante NitroFix",
+    className: "Biológicos",
+    unit: "LT",
+    brand: "Demetra",
+    groupName: "Biológicos",
+    defaultPrice: 74,
+    minPrice: 66,
+    prices: [{ erpPriceId: "P4107", branchCode: "01", price: 74 }]
+  },
+  {
+    erpProductCode: "5202",
+    erpProductClassCode: "HERB",
+    name: "Herbicida Pós-Emergente",
+    className: "Defensivos",
+    unit: "LT",
+    brand: "Demetra",
+    groupName: "Proteção",
+    defaultPrice: 132,
+    minPrice: 121,
+    prices: [{ erpPriceId: "P5202", branchCode: "02", price: 132 }]
+  },
+  {
+    erpProductCode: "6301",
+    erpProductClassCode: "FOLIAR",
+    name: "Fertilizante Foliar Premium",
+    className: "Nutrição Foliar",
+    unit: "LT",
+    brand: "Demetra",
+    groupName: "Nutrição",
+    defaultPrice: 58,
+    minPrice: 52,
+    prices: [{ erpPriceId: "P6301", branchCode: "01", price: 58 }]
   }
 ] as const;
 

@@ -56,6 +56,7 @@ type CreateOpportunityModalProps = {
   onClientCreated: (client: ClientOption) => void;
   onSelectExisting: (client: ExistingClientSummary) => void;
   productsSection?: ReactNode;
+  hasStructuredItems?: boolean;
 };
 
 export default function CreateOpportunityModal({
@@ -80,7 +81,8 @@ export default function CreateOpportunityModal({
   requireOwnerSeller = false,
   onClientCreated,
   onSelectExisting,
-  productsSection
+  productsSection,
+  hasStructuredItems = false
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -159,8 +161,9 @@ export default function CreateOpportunityModal({
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Valor e potencial</h4>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <label className="space-y-1">
-                  <span className={labelClassName}>Valor *</span>
-                  <input required inputMode="decimal" className={fieldClassName} placeholder="Ex: 45000" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+                  <span className={labelClassName}>{hasStructuredItems ? "Valor da oportunidade (itens)" : "Valor *"}</span>
+                  <input required inputMode="decimal" readOnly={hasStructuredItems} className={fieldClassName} placeholder="Ex: 45000" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+                  {hasStructuredItems ? <p className={helpClassName}>Calculado automaticamente pela soma líquida dos itens estruturados.</p> : null}
                 </label>
                 <label className="space-y-1">
                   <span className={labelClassName}>Probabilidade % *</span>
@@ -179,7 +182,7 @@ export default function CreateOpportunityModal({
               </div>
             </section>
 
-            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <section className={`space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 ${hasStructuredItems ? "opacity-70" : ""}`}>
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Contexto técnico/comercial</h4>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="space-y-1">
