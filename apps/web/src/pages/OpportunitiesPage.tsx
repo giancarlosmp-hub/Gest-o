@@ -1293,13 +1293,14 @@ export default function OpportunitiesPage() {
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              {!editing ? <span className="text-xs text-slate-500">Disponível após salvar a oportunidade</span> : null}
+              {!editing ? <span className="text-xs text-slate-500">Salve a oportunidade para persistir os itens. O total dos produtos atualizará o valor da oportunidade.</span> : null}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1 sm:col-span-4">
-                <span className="text-sm font-medium text-slate-700">Produto (autocomplete)</span>
+                <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
+                  list="opportunity-product-options"
                   className="w-full rounded-lg border border-slate-200 p-2"
                   placeholder="Busque por código ERP, nome, classificação ou parte do nome"
                   value={productSearch}
@@ -1307,20 +1308,7 @@ export default function OpportunitiesPage() {
                     const value = event.target.value;
                     setProductSearch(value);
                     searchProducts(value).catch(() => null);
-                  }}
-                  disabled={!editing}
-                />
-                {hasAttemptedProductSearch && productOptions.length === 0 ? (
-                  <p className="text-xs text-amber-700">Nenhum produto encontrado para essa busca.</p>
-                ) : null}
-              </label>
-              <label className="space-y-1 sm:col-span-4">
-                <span className="text-sm font-medium text-slate-700">Selecionar produto</span>
-                <select
-                  className="w-full rounded-lg border border-slate-200 p-2"
-                  value={itemDraft.productId}
-                  onChange={(event) => {
-                    const selected = productOptions.find((option) => option.id === event.target.value);
+                    const selected = productOptions.find((option) => `${option.erpProductCode} · ${option.name} · ${option.erpProductClassCode}` === value);
                     if (!selected) return;
                     setItemDraft((current) => ({
                       ...current,
@@ -1333,14 +1321,15 @@ export default function OpportunitiesPage() {
                     }));
                   }}
                   disabled={!editing}
-                >
-                  <option value="">Selecione</option>
+                />
+                <datalist id="opportunity-product-options">
                   {productOptions.map((product) => (
-                    <option key={product.id} value={product.id}>
-                      {product.erpProductCode} · {product.name} · {product.erpProductClassCode}
-                    </option>
+                    <option key={product.id} value={`${product.erpProductCode} · ${product.name} · ${product.erpProductClassCode}`} />
                   ))}
-                </select>
+                </datalist>
+                {hasAttemptedProductSearch && productOptions.length === 0 ? (
+                  <p className="text-xs text-amber-700">Nenhum produto encontrado para essa busca.</p>
+                ) : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
@@ -1398,7 +1387,7 @@ export default function OpportunitiesPage() {
                     const totals = calculateItemTotals(opportunityItem);
                     return (
                       <tr key={opportunityItem.id} className="border-t border-slate-100">
-                        <td className="p-2">{opportunityItem.productNameSnapshot}</td>
+                        <td className="p-2">{opportunityItem.productNameSnapshot} · {opportunityItem.erpProductClassCode}</td>
                         <td className="p-2">{opportunityItem.quantity}</td>
                         <td className="p-2">{formatCurrencyBRL(Number(opportunityItem.unitPrice || 0))}</td>
                         <td className="p-2">{opportunityItem.discountType === "percent" ? `${opportunityItem.discountValue}%` : formatCurrencyBRL(Number(opportunityItem.discountValue || 0))}</td>

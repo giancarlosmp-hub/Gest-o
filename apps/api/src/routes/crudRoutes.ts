@@ -5464,6 +5464,9 @@ router.get("/products/search", async (req, res) => {
   const q = parsed.data.q;
   const products = await prisma.product.findMany({
     where: {
+      isActive: true,
+      isSuspended: false,
+      prices: { some: { price: { gt: 0 } } },
       OR: [
         { name: { contains: q, mode: "insensitive" } },
         { erpProductCode: { contains: q, mode: "insensitive" } },

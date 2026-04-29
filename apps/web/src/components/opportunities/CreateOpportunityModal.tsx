@@ -157,6 +157,10 @@ export default function CreateOpportunityModal({
               </div>
             </section>
 
+
+
+{productsSection ? productsSection : null}
+
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Valor e potencial</h4>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -184,7 +188,7 @@ export default function CreateOpportunityModal({
 
             <section className={`space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 ${hasStructuredItems ? "opacity-70" : ""}`}>
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Contexto técnico/comercial</h4>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="space-y-1">
                   <span className={labelClassName}>Cultura (opcional)</span>
                   <select className={fieldClassName} value={form.crop} onChange={(e) => onFormChange({ ...form, crop: e.target.value })}>
@@ -196,10 +200,6 @@ export default function CreateOpportunityModal({
                   <span className={labelClassName}>Safra (opcional)</span>
                   <input list="season-suggestions" className={fieldClassName} placeholder="Ex: 2025/26" value={form.season} onChange={(e) => onFormChange({ ...form, season: e.target.value })} />
                 </label>
-                <label className="space-y-1">
-                  <span className={labelClassName}>Produto ofertado (opcional)</span>
-                  <input className={fieldClassName} placeholder="Ex: Mix cobertura inverno" value={form.productOffered} onChange={(e) => onFormChange({ ...form, productOffered: e.target.value })} />
-                </label>
               </div>
               <datalist id="season-suggestions">
                 <option value="2024/25" />
@@ -207,8 +207,6 @@ export default function CreateOpportunityModal({
                 <option value="2026/27" />
               </datalist>
             </section>
-
-{productsSection ? productsSection : null}
 
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Datas</h4>
