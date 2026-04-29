@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef } from "react";
+import { FormEvent, ReactNode, useEffect, useRef } from "react";
 import { ExistingClientSummary } from "../../lib/clientDuplicateCheck";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 import QuickCreateClientSection from "../clients/QuickCreateClientSection";
@@ -55,6 +55,8 @@ type CreateOpportunityModalProps = {
   requireOwnerSeller?: boolean;
   onClientCreated: (client: ClientOption) => void;
   onSelectExisting: (client: ExistingClientSummary) => void;
+  productsSection?: ReactNode;
+  hasStructuredItems?: boolean;
 };
 
 export default function CreateOpportunityModal({
@@ -78,7 +80,9 @@ export default function CreateOpportunityModal({
   ownerSellerId,
   requireOwnerSeller = false,
   onClientCreated,
-  onSelectExisting
+  onSelectExisting,
+  productsSection,
+  hasStructuredItems = false
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -153,12 +157,17 @@ export default function CreateOpportunityModal({
               </div>
             </section>
 
+
+
+{productsSection ? productsSection : null}
+
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Valor e potencial</h4>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <label className="space-y-1">
-                  <span className={labelClassName}>Valor *</span>
-                  <input required inputMode="decimal" className={fieldClassName} placeholder="Ex: 45000" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+                  <span className={labelClassName}>{hasStructuredItems ? "Valor da oportunidade (itens)" : "Valor *"}</span>
+                  <input required inputMode="decimal" readOnly={hasStructuredItems} className={fieldClassName} placeholder="Ex: 45000" value={form.value} onChange={(e) => onFormChange({ ...form, value: sanitizeNumericInput(e.target.value) })} />
+                  {hasStructuredItems ? <p className={helpClassName}>Calculado automaticamente pela soma líquida dos itens estruturados.</p> : null}
                 </label>
                 <label className="space-y-1">
                   <span className={labelClassName}>Probabilidade % *</span>
@@ -177,9 +186,9 @@ export default function CreateOpportunityModal({
               </div>
             </section>
 
-            <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+            <section className={`space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4 ${hasStructuredItems ? "opacity-70" : ""}`}>
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Contexto técnico/comercial</h4>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="space-y-1">
                   <span className={labelClassName}>Cultura (opcional)</span>
                   <select className={fieldClassName} value={form.crop} onChange={(e) => onFormChange({ ...form, crop: e.target.value })}>
@@ -190,10 +199,6 @@ export default function CreateOpportunityModal({
                 <label className="space-y-1">
                   <span className={labelClassName}>Safra (opcional)</span>
                   <input list="season-suggestions" className={fieldClassName} placeholder="Ex: 2025/26" value={form.season} onChange={(e) => onFormChange({ ...form, season: e.target.value })} />
-                </label>
-                <label className="space-y-1">
-                  <span className={labelClassName}>Produto ofertado (opcional)</span>
-                  <input className={fieldClassName} placeholder="Ex: Mix cobertura inverno" value={form.productOffered} onChange={(e) => onFormChange({ ...form, productOffered: e.target.value })} />
                 </label>
               </div>
               <datalist id="season-suggestions">

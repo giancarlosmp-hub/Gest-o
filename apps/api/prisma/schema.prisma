@@ -60,6 +60,11 @@ enum AgendaEventStatus {
   vencido
 }
 
+enum OpportunityItemDiscountType {
+  value
+  percent
+}
+
 model User {
   id           String        @id @default(cuid())
   name         String
@@ -213,6 +218,7 @@ model Opportunity {
   agendaEvents      AgendaEvent[]
   timelineEvents    TimelineEvent[]
   changeLogs        OpportunityChangeLog[]
+  items             OpportunityItem[]
   createdAt         DateTime         @default(now())
 }
 
@@ -335,4 +341,71 @@ model CultureCatalog {
   updatedAt               DateTime @updatedAt
 
   @@index([isActive])
+}
+
+
+model Product {
+  id                  String           @id @default(cuid())
+  erpProductCode      String
+  erpProductClassCode String
+  name                String
+  className           String?
+  unit                String?
+  brand               String?
+  groupName           String?
+  isActive            Boolean          @default(true)
+  isSuspended         Boolean          @default(false)
+  stockQuantity       Float?
+  minPrice            Float?
+  defaultPrice        Float?
+  rawErpPayload       Json?
+  prices              ProductPrice[]
+  opportunityItems    OpportunityItem[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([name])
+  @@unique([erpProductCode, erpProductClassCode])
+}
+
+model ProductPrice {
+  id         String   @id @default(cuid())
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  erpPriceId String?
+  branchCode String?
+  validFrom  DateTime?
+  price      Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([productId])
+  @@index([branchCode])
+}
+
+model OpportunityItem {
+  id                  String                      @id @default(cuid())
+  opportunityId       String
+  opportunity         Opportunity                 @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  productId           String?
+  product             Product?                    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  lineNumber          Int
+  erpProductCode      String
+  erpProductClassCode String
+  productNameSnapshot String
+  unit                String?
+  quantity            Float
+  unitPrice           Float
+  discountType        OpportunityItemDiscountType @default(value)
+  discountValue       Float                       @default(0)
+  grossTotal          Float
+  discountTotal       Float
+  netTotal            Float
+  notes               String?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  @@index([opportunityId])
+  @@index([productId])
+  @@unique([opportunityId, lineNumber])
 }
