@@ -39,5 +39,8 @@ export const env = {
   cnpjLookupApiKey: process.env.CNPJ_LOOKUP_API_KEY || "",
   openAiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
   openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
-  openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false)
+  openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false),
+  ultraFv3BaseUrl: process.env.ULTRAFV3_BASE_URL || "",
+  ultraFv3Username: process.env.ULTRAFV3_USERNAME || "",
+  ultraFv3Password: process.env.ULTRAFV3_PASSWORD || ""
 };
