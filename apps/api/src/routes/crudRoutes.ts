@@ -41,6 +41,11 @@ import {
   generateOpportunityInsight,
   parseActivityObservation
 } from "../services/ai/index.js";
+import {
+  getUltraFv3SyncStatus,
+  syncPartners,
+  syncProducts
+} from "../services/ultraFv3SyncService.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -6621,6 +6626,26 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
   });
 });
 
+
+
+router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente"), async (_req, res) => {
+  const result = await syncProducts();
+  return res.status(200).json({ scope: "products", ...result });
+});
+
+router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), async (_req, res) => {
+  const result = await syncPartners();
+  return res.status(200).json({ scope: "partners", ...result });
+});
+
+router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (_req, res) => {
+  const status = await getUltraFv3SyncStatus();
+  const [productCount, clientCount] = await Promise.all([
+    prisma.product.count({ where: { isActive: true } }),
+    prisma.client.count()
+  ]);
+  return res.status(200).json({ status, productCount, clientCount });
+});
 
 router.get("/settings/weekly-visit-minimum", async (_req, res) => {
   const weeklyVisitGoal = await getWeeklyVisitGoal();

@@ -1,4 +1,4 @@
-import { Leaf, Settings2, Target, Users } from "lucide-react";
+import { Database, Leaf, Settings2, Target, Users } from "lucide-react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -6,8 +6,9 @@ import CrudSimplePage from "./CrudSimplePage";
 import ActivityKpisPage from "./ActivityKpisPage";
 import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPanel";
 import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPanel";
+import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 
-type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures";
+type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "erp-integration";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -29,6 +30,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     icon: Leaf
   },
   {
+    id: "erp-integration",
+    label: "Integração ERP",
+    description: "Acompanhe conexão e execute sincronizações manuais com o UltraFV3.",
+    icon: Database
+  },
+  {
     id: "users",
     label: "Usuários",
     description: "Gerencie cadastro, permissões e manutenção de contas da operação comercial.",
@@ -44,11 +51,13 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedSection === "kpis" || normalizedSection === "kpis-atividades") return "kpis";
   if (normalizedSection === "discipline" || normalizedSection === "disciplina") return "discipline";
   if (normalizedSection === "technical-cultures" || normalizedSection === "catalogo-tecnico") return "technical-cultures";
+  if (normalizedSection === "erp-integration" || normalizedSection === "integracao-erp") return "erp-integration";
 
   if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
   if (normalizedHash === "#disciplina" || normalizedHash === "#discipline") return "discipline";
   if (normalizedHash === "#catalogo-tecnico" || normalizedHash === "#technical-cultures") return "technical-cultures";
+  if (normalizedHash === "#integracao-erp" || normalizedHash === "#erp-integration") return "erp-integration";
 
   return "kpis";
 }
@@ -85,7 +94,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-4" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-5" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -124,6 +133,8 @@ export default function SettingsPage() {
         <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
       ) : activeSection === "technical-cultures" ? (
         <TechnicalCulturesPanel />
+      ) : activeSection === "erp-integration" ? (
+        <ErpIntegrationPanel />
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage
