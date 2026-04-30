@@ -26,7 +26,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -46,6 +46,7 @@ import {
   syncPartners,
   syncProducts
 } from "../services/ultraFv3SyncService.js";
+import { ultraFv3Client } from "../services/ultraFv3Client.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -115,6 +116,21 @@ const cultureQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
+
+const erpOrderGenerationSchema = z.object({
+  paymentMethodCode: z.string().trim().min(1),
+  receivingConditionCode: z.string().trim().min(1),
+  priceTableCode: z.string().trim().min(1),
+  branchCode: z.string().trim().min(1),
+  operationCode: z.string().trim().min(1)
+});
+
+const formatDateDot = (date: Date) => {
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  return `${day}.${month}.${year}`;
+};
 
 type TechnicalCultureCatalogItem = {
   id: string;
@@ -5652,6 +5668,71 @@ router.get("/opportunities/:id", async (req, res) => {
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   return res.json(serializeOpportunity(opportunity, todayStart));
+});
+
+router.post("/opportunities/:id/erp/orders", async (req, res) => {
+  const parsed = erpOrderGenerationSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido" });
+
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: req.params.id, ...sellerWhere(req) },
+    include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }] } }
+  });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  if (!opportunity.client.code) return res.status(400).json({ message: "Cliente sem código ERP" });
+  if (!opportunity.ownerSeller.erpCode) return res.status(400).json({ message: "Vendedor sem código ERP" });
+  if (!opportunity.items.length) return res.status(400).json({ message: "Oportunidade sem itens para envio" });
+  if (opportunity.items.some((item) => !item.erpProductCode?.trim())) return res.status(400).json({ message: "Há item sem código ERP" });
+  if (opportunity.items.some((item) => !item.unit?.trim())) return res.status(400).json({ message: "Há item sem unidade de medida" });
+
+  const pedidoIdImportacao = randomUUID();
+  const now = new Date();
+  const itens = opportunity.items.map((item) => ({
+    CODPRODUTO: item.erpProductCode,
+    QTD_PEDIDO: Number(item.quantity),
+    PRECO: Number(item.unitPrice),
+    UND_MEDIDA: item.unit
+  }));
+
+  const valorBruto = Number(opportunity.items.reduce((sum, item) => sum + Number(item.grossTotal || 0), 0).toFixed(2));
+  const valorLiquido = Number(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0).toFixed(2));
+
+  const payload = {
+    PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
+    DATA_EMISSAO: formatDateDot(now),
+    TIPO_MOVIMENTO: "PEDIDO",
+    FORMA: parsed.data.paymentMethodCode,
+    CODCONDREC: parsed.data.receivingConditionCode,
+    TABELA_PRECO: parsed.data.priceTableCode,
+    CODFILIAL: parsed.data.branchCode,
+    CODOPER: parsed.data.operationCode,
+    PARCEIRO: opportunity.client.code,
+    VENDEDOR: opportunity.ownerSeller.erpCode,
+    VALOR_BRUTO: valorBruto,
+    VALOR_LIQUIDO: valorLiquido,
+    ITENS: itens
+  };
+
+  try {
+    const erpResponse = await ultraFv3Client.request("/orders", { method: "POST", body: payload });
+    await prisma.appConfig.create({
+      data: {
+        key: `erp.ultrafv3.order.${pedidoIdImportacao}`,
+        value: JSON.stringify({ opportunityId: opportunity.id, pedidoIdImportacao, payload, erpResponse, status: "enviado", createdAt: now.toISOString() })
+      }
+    });
+    return res.status(201).json({ pedidoIdImportacao, status: "enviado", response: erpResponse });
+  } catch (error: any) {
+    const message = error?.message || "Erro no envio ao ERP";
+    await prisma.appConfig.create({
+      data: {
+        key: `erp.ultrafv3.order.${pedidoIdImportacao}`,
+        value: JSON.stringify({ opportunityId: opportunity.id, pedidoIdImportacao, payload, erpResponse: { message }, status: "erro", createdAt: now.toISOString() })
+      }
+    });
+    return res.status(502).json({ pedidoIdImportacao, status: "erro", message });
+  }
 });
 
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
