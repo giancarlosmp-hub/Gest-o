@@ -7,6 +7,7 @@ const DEFAULT_HEADERS = {
 
 class UltraFv3Client {
   private token: string | null = null;
+  private tokenPromise: Promise<string> | null = null;
 
   private get baseUrl() {
     return env.ultraFv3BaseUrl.replace(/\/+$/, "");
@@ -19,6 +20,9 @@ class UltraFv3Client {
   }
 
   private async login() {
+    if (this.tokenPromise) return this.tokenPromise;
+
+    this.tokenPromise = (async () => {
     this.ensureConfig();
 
     const response = await fetch(`${this.baseUrl}/auth/login`, {
@@ -41,24 +45,41 @@ class UltraFv3Client {
       throw new Error("UltraFV3 login did not return an access token");
     }
 
-    this.token = token;
-    return token;
+      this.token = token;
+      return token;
+    })();
+
+    try {
+      return await this.tokenPromise;
+    } finally {
+      this.tokenPromise = null;
+    }
   }
 
-  async request<T>(path: string): Promise<T> {
+  async request<T>(
+    path: string,
+    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string> }
+  ): Promise<T> {
     this.ensureConfig();
 
     if (!this.token) {
       await this.login();
     }
 
+    const method = options?.method || "GET";
     const execute = async () => {
+      const headers = {
+        ...DEFAULT_HEADERS,
+        ...(options?.headers || {}),
+        Authorization: `Bearer ${this.token}`,
+      };
+      const requestInit: RequestInit = { method, headers };
+      if (method !== "GET" && options?.body !== undefined) {
+        requestInit.body = JSON.stringify(options.body);
+      }
+
       const response = await fetch(`${this.baseUrl}${path}`, {
-        method: "GET",
-        headers: {
-          ...DEFAULT_HEADERS,
-          Authorization: `Bearer ${this.token}`,
-        },
+        ...requestInit,
       });
 
       return response;
