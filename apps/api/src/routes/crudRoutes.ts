@@ -28,7 +28,7 @@ import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType, OpportunityStage, Prisma } from "@prisma/client";
+import { ActivityType, ClientType, OpportunityStage, Prisma, type User } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
@@ -130,6 +130,12 @@ const formatDateDot = (date: Date) => {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const year = date.getUTCFullYear();
   return `${day}.${month}.${year}`;
+};
+
+const resolveSellerErpCode = (_ownerSeller: Pick<User, "id" | "name" | "email" | "role" | "region" | "isActive" | "createdAt">): string | null => {
+  // O schema Prisma atual de User não possui código ERP, metadata ou rawErpPayload.
+  // Não usar id/e-mail do CRM como código ERP para evitar criar códigos manualmente.
+  return null;
 };
 
 type TechnicalCultureCatalogItem = {
@@ -5681,7 +5687,8 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   if (!opportunity.client.code) return res.status(400).json({ message: "Cliente sem código ERP" });
-  if (!opportunity.ownerSeller.erpCode) return res.status(400).json({ message: "Vendedor sem código ERP" });
+  const sellerErpCode = resolveSellerErpCode(opportunity.ownerSeller);
+  if (!sellerErpCode) return res.status(400).json({ message: "Vendedor sem código ERP vinculado. Sincronize ou vincule o vendedor ao ERP antes de gerar pedido." });
   if (!opportunity.items.length) return res.status(400).json({ message: "Oportunidade sem itens para envio" });
   if (opportunity.items.some((item) => !item.erpProductCode?.trim())) return res.status(400).json({ message: "Há item sem código ERP" });
   if (opportunity.items.some((item) => !item.unit?.trim())) return res.status(400).json({ message: "Há item sem unidade de medida" });
@@ -5708,7 +5715,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     CODFILIAL: parsed.data.branchCode,
     CODOPER: parsed.data.operationCode,
     PARCEIRO: opportunity.client.code,
-    VENDEDOR: opportunity.ownerSeller.erpCode,
+    VENDEDOR: sellerErpCode,
     VALOR_BRUTO: valorBruto,
     VALOR_LIQUIDO: valorLiquido,
     ITENS: itens
