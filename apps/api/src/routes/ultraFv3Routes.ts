@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
+import { logApiEvent } from "../utils/logger.js";
 
 const router = Router();
 
@@ -8,9 +9,11 @@ const wrap = (path: string) => async (_req: any, res: any) => {
     const data = await ultraFv3Client.request(path);
     return res.status(200).json(data);
   } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 proxy] request failed", { path, error: details });
     return res.status(502).json({
-      message: "UltraFV3 integration error",
-      details: error instanceof Error ? error.message : String(error),
+      message: "Falha de integração UltraFV3.",
+      details,
     });
   }
 };

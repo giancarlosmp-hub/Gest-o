@@ -43,8 +43,14 @@ import {
 } from "../services/ai/index.js";
 import {
   getUltraFv3SyncStatus,
+  syncBranches,
+  syncConnection,
+  syncOperations,
   syncPartners,
+  syncPaymentMethods,
+  syncPriceTables,
   syncProducts,
+  syncReceivingConditions,
   syncSalesmen
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
@@ -6786,20 +6792,40 @@ router.patch(["/agenda-events/:id/result", "/agenda/events/:id/result"], validat
 
 
 
-router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente"), async (_req, res) => {
-  const result = await syncProducts();
-  return res.status(200).json({ scope: "products", ...result });
-});
+const ultraFv3SyncHandlers = {
+  connection: syncConnection,
+  products: syncProducts,
+  partners: syncPartners,
+  salesmen: syncSalesmen,
+  paymentMethods: syncPaymentMethods,
+  receivingConditions: syncReceivingConditions,
+  priceTables: syncPriceTables,
+  branches: syncBranches,
+  operations: syncOperations
+} as const;
 
-router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), async (_req, res) => {
-  const result = await syncPartners();
-  return res.status(200).json({ scope: "partners", ...result });
-});
+const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_req: Request, res: express.Response) => {
+  try {
+    const result = await ultraFv3SyncHandlers[scope]();
+    return res.status(200).json({ scope, ...result });
+  } catch (error) {
+    return res.status(502).json({
+      scope,
+      message: "Falha na sincronização UltraFV3.",
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+};
 
-router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), async (_req, res) => {
-  const result = await syncSalesmen();
-  return res.status(200).json({ scope: "salesmen", ...result });
-});
+router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
+router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente"), runUltraFv3Sync("products"));
+router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
+router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runUltraFv3Sync("salesmen"));
+router.post("/erp/ultrafv3/sync/payment-methods", authorize("diretor", "gerente"), runUltraFv3Sync("paymentMethods"));
+router.post("/erp/ultrafv3/sync/receiving-conditions", authorize("diretor", "gerente"), runUltraFv3Sync("receivingConditions"));
+router.post("/erp/ultrafv3/sync/price-tables", authorize("diretor", "gerente"), runUltraFv3Sync("priceTables"));
+router.post("/erp/ultrafv3/sync/branches", authorize("diretor", "gerente"), runUltraFv3Sync("branches"));
+router.post("/erp/ultrafv3/sync/operations", authorize("diretor", "gerente"), runUltraFv3Sync("operations"));
 
 router.get("/erp/ultrafv3/salesmen/options", authorize("diretor", "gerente"), async (_req, res) => {
   const options = await loadErpSalesmenOptions();
