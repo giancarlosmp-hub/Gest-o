@@ -24,12 +24,22 @@ type CrudSimplePageProps = {
     type?: string;
     placeholder?: string;
     options?: Array<{ value: string; label: string }>;
+    tableLabel?: string;
   }[];
   readOnly?: boolean;
   detailsPath?: string;
   createInModal?: boolean;
   createButtonLabel?: string;
   createModalTitle?: string;
+};
+
+type ErpSalesmanOption = {
+  code: string;
+  name: string;
+  cpf?: string | null;
+  email?: string | null;
+  erpOperatorCode?: string | null;
+  raw?: unknown;
 };
 
 type ClientListItem = {
@@ -231,6 +241,7 @@ export default function CrudSimplePage({
 
   const [items, setItems] = useState<ClientListItem[]>([]);
   const [users, setUsers] = useState<Array<{ id: string; name: string; role?: string }>>([]);
+  const [erpSalesmen, setErpSalesmen] = useState<ErpSalesmanOption[]>([]);
   const [form, setForm] = useState<any>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -285,6 +296,7 @@ export default function CrudSimplePage({
   const [didRunLocalValidation, setDidRunLocalValidation] = useState(false);
 
   const isClientsPage = endpoint === "/clients";
+  const isUsersPage = endpoint === "/users";
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
   const isSeller = user?.role === "vendedor";
   const canChooseOwnerSeller = user?.role === "diretor" || user?.role === "gerente";
@@ -351,6 +363,17 @@ export default function CrudSimplePage({
       setIsApplyingFilters(false);
     }
   };
+
+  useEffect(() => {
+    if (isUsersPage) {
+      api
+        .get<ErpSalesmanOption[]>("/erp/ultrafv3/salesmen/options")
+        .then((response) => setErpSalesmen(Array.isArray(response.data) ? response.data : []))
+        .catch(() => setErpSalesmen([]));
+    } else {
+      setErpSalesmen([]);
+    }
+  }, [isUsersPage]);
 
   useEffect(() => {
     if (isClientsPage) {
@@ -437,6 +460,12 @@ export default function CrudSimplePage({
   const getCellValue = (item: ClientListItem, fieldKey: string) => {
     if (isClientsPage && fieldKey === "ownerSellerId") {
       return item.ownerSeller?.name || item.ownerSellerName || "—";
+    }
+    if (isUsersPage && fieldKey === "erpCode") {
+      const code = typeof item.erpCode === "string" ? item.erpCode : "";
+      if (!code) return "Sem vínculo ERP";
+      const option = erpSalesmen.find((salesman) => salesman.code === code);
+      return option ? `ERP vinculado · ${option.name} (${code})` : `ERP vinculado · ${code}`;
     }
     const value = item[fieldKey];
     if (value === null || value === undefined || value === "") return "—";
@@ -1455,6 +1484,10 @@ export default function CrudSimplePage({
       if (endpoint === "/users") {
         payload.name = String(payload.name || "").trim();
         payload.email = String(payload.email || "").trim();
+        if (!payload.erpCode) {
+          payload.erpCode = null;
+          payload.erpOperatorCode = null;
+        }
 
         if (typeof payload.password === "string") {
           const trimmedPassword = payload.password.trim();
@@ -1598,52 +1631,107 @@ export default function CrudSimplePage({
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
+      <div className={isUsersPage ? "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" : ""}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
+            {isUsersPage ? (
+              <p className="mt-1 text-sm text-slate-500">Controle perfis de acesso e vincule usuários do CRM aos vendedores/operadores sincronizados do UltraFV3.</p>
+            ) : null}
+          </div>
+          {isUsersPage ? (
+            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">Diretor/Gerente</span>
+          ) : null}
+        </div>
+      </div>
 
       {!readOnly && !createInModal && (
         <form
           onSubmit={submit}
-          className="grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3"
+          className={isUsersPage ? "grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 xl:grid-cols-3" : "grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3"}
         >
           {fields.map((f) => {
             const fieldPlaceholder = f.placeholder ?? `Informe ${f.label.toLowerCase()}`;
             const isPasswordOptionalOnUserEdit = endpoint === "/users" && f.key === "password" && Boolean(editing);
-            const isFieldRequired = !isPasswordOptionalOnUserEdit;
+            const isErpSalesmanField = endpoint === "/users" && f.type === "erpSalesman";
+            const isFieldRequired = !isPasswordOptionalOnUserEdit && !isErpSalesmanField;
+
+            const fieldControlClass = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100";
 
             if (f.type === "select") {
               return (
-                <select
-                  key={f.key}
-                  required={isFieldRequired}
-                  className="rounded-lg border p-2"
-                  value={form[f.key] ?? ""}
-                  onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                >
-                  <option value="">Selecione {f.label.toLowerCase()}</option>
-                  {(f.options ?? []).map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <label key={f.key} className="text-sm font-medium text-slate-700">
+                  {f.label}
+                  <select
+                    required={isFieldRequired}
+                    className={fieldControlClass}
+                    value={form[f.key] ?? ""}
+                    onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                  >
+                    <option value="">Selecione {f.label.toLowerCase()}</option>
+                    {(f.options ?? []).map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            }
+
+            if (f.type === "erpSalesman") {
+              const selectedSalesman = erpSalesmen.find((option) => option.code === form.erpCode);
+              return (
+                <label key={f.key} className="text-sm font-medium text-slate-700 md:col-span-2 xl:col-span-1">
+                  {f.label}
+                  <input
+                    list="erp-salesmen-options"
+                    className={fieldControlClass}
+                    placeholder={fieldPlaceholder}
+                    value={selectedSalesman ? `${selectedSalesman.name} · ${selectedSalesman.code}` : form.erpCode ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const matched = erpSalesmen.find((option) => `${option.name} · ${option.code}` === value || option.code === value);
+                      setForm({
+                        ...form,
+                        erpCode: matched?.code ?? value.trim(),
+                        erpOperatorCode: matched?.erpOperatorCode ?? null
+                      });
+                    }}
+                  />
+                  <datalist id="erp-salesmen-options">
+                    {erpSalesmen.map((option) => (
+                      <option key={option.code} value={`${option.name} · ${option.code}`}>
+                        {[option.email, option.cpf].filter(Boolean).join(" · ")}
+                      </option>
+                    ))}
+                  </datalist>
+                  {form.role === "vendedor" && !form.erpCode ? (
+                    <span className="mt-1 block text-xs font-medium text-amber-700">Recomendado para vendedores: vincule ao ERP para gerar pedidos UltraFV3.</span>
+                  ) : (
+                    <span className="mt-1 block text-xs text-slate-500">Opcional para diretor/gerente. Não altera login nem autenticação.</span>
+                  )}
+                </label>
               );
             }
 
             return (
-              <input
-                key={f.key}
-                required={isFieldRequired}
-                className="rounded-lg border p-2"
-                type={f.type || "text"}
-                placeholder={fieldPlaceholder}
-                value={form[f.key] ?? ""}
-                onChange={(e) => setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) })}
-              />
+              <label key={f.key} className="text-sm font-medium text-slate-700">
+                {f.label}
+                <input
+                  required={isFieldRequired}
+                  className={fieldControlClass}
+                  type={f.type || "text"}
+                  placeholder={fieldPlaceholder}
+                  value={form[f.key] ?? ""}
+                  onChange={(e) => setForm({ ...form, [f.key]: parseFormValue(f.key, f.type, e.target.value) })}
+                />
+              </label>
             );
           })}
           <button
             disabled={saving}
-            className="rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"
+            className={isUsersPage ? "self-end rounded-lg bg-brand-700 px-4 py-2.5 font-semibold text-white shadow-sm hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60" : "rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"}
           >
             {saving ? "Salvando..." : editing ? "Atualizar" : "Criar"}
           </button>
@@ -1857,7 +1945,7 @@ export default function CrudSimplePage({
                   <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
                     {fields.map((f) => (
                       <th className="p-2 text-left" key={f.key}>
-                        {f.label}
+                        {f.tableLabel ?? f.label}
                       </th>
                     ))}
                     {detailsPath || !readOnly ? <th className="p-2 text-left">Ações</th> : null}
@@ -2302,7 +2390,7 @@ export default function CrudSimplePage({
                       return (
                         <div key={f.key} className="space-y-1 md:col-span-2">
                           <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                            {f.label}
+                            {f.tableLabel ?? f.label}
                           </label>
                           <select
                             id={`modal-${f.key}`}
@@ -2339,7 +2427,7 @@ export default function CrudSimplePage({
                       <div key={f.key} className={`space-y-1 ${isCnpjField ? "md:col-span-2" : ""}`}>
                         <div className="flex items-center justify-between gap-2">
                           <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
-                            {f.label}
+                            {f.tableLabel ?? f.label}
                           </label>
                         </div>
 

@@ -166,12 +166,20 @@ export const userRoleUpdateSchema = z.object({
   role: roleSchema
 });
 
+
+const optionalErpLinkCodeSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional().nullable()
+);
+
 export const userCreateSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(6),
   role: roleSchema,
-  region: z.string().min(2).optional()
+  region: z.string().min(2).optional(),
+  erpCode: optionalErpLinkCodeSchema,
+  erpOperatorCode: optionalErpLinkCodeSchema
 });
 
 export const userUpdateSchema = z.object({
@@ -179,7 +187,9 @@ export const userUpdateSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6).optional(),
   role: roleSchema,
-  region: z.string().min(2).optional()
+  region: z.string().min(2).optional(),
+  erpCode: optionalErpLinkCodeSchema,
+  erpOperatorCode: optionalErpLinkCodeSchema
 });
 
 export const userResetPasswordSchema = z.object({
