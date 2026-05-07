@@ -44,7 +44,8 @@ import {
 import {
   getUltraFv3SyncStatus,
   syncPartners,
-  syncProducts
+  syncProducts,
+  syncSalesmen
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 
@@ -67,6 +68,79 @@ const normalizeGoalKey = (value: string) =>
     .trim()
     .replace(/\s+/g, "_")
     .replace(GOAL_KEY_NORMALIZER, "");
+
+
+type ErpSalesmanOption = {
+  code: string;
+  name: string;
+  cpf: string | null;
+  email: string | null;
+  erpOperatorCode: string | null;
+  raw: unknown;
+};
+
+const normalizeOptionalString = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return normalized || null;
+};
+
+const pickFirstString = (row: Record<string, unknown>, keys: string[]): string | null => {
+  for (const key of keys) {
+    const value = normalizeOptionalString(row[key]);
+    if (value) return value;
+  }
+  return null;
+};
+
+const normalizeErpSalesmanOption = (row: unknown): ErpSalesmanOption | null => {
+  if (!row || typeof row !== "object") return null;
+  const payload = row as Record<string, unknown>;
+  const code = pickFirstString(payload, ["code", "erpCode", "sellerCode", "salesmanCode", "vendedorCodigo", "codigo", "CODIGO", "codVendedor"]);
+  const name = pickFirstString(payload, ["name", "description", "fullName", "sellerName", "salesmanName", "nome", "NOME", "razaoSocial"]);
+  if (!code || !name) return null;
+
+  return {
+    code,
+    name,
+    cpf: pickFirstString(payload, ["cpf", "CPF", "document", "documentNumber", "cnpjCpf"]),
+    email: pickFirstString(payload, ["email", "EMAIL", "mail", "eMail"]),
+    erpOperatorCode: pickFirstString(payload, ["operatorCode", "erpOperatorCode", "operadorCodigo", "codigoOperador", "operator", "operador"]),
+    raw: row
+  };
+};
+
+const loadErpSalesmenOptions = async (): Promise<ErpSalesmanOption[]> => {
+  const stored = await prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.salesmen" }, select: { value: true } });
+  let rows: unknown[] = [];
+
+  if (stored?.value) {
+    try {
+      const parsed = JSON.parse(stored.value);
+      if (Array.isArray(parsed)) rows = parsed;
+    } catch {
+      rows = [];
+    }
+  }
+
+  if (!rows.length) {
+    const consulted = await ultraFv3Client.request("/salesmen");
+    rows = Array.isArray(consulted) ? consulted : [];
+    await prisma.appConfig.upsert({
+      where: { key: "erp.ultrafv3.salesmen" },
+      update: { value: JSON.stringify(rows) },
+      create: { key: "erp.ultrafv3.salesmen", value: JSON.stringify(rows) }
+    });
+  }
+
+  const byCode = new Map<string, ErpSalesmanOption>();
+  for (const row of rows) {
+    const option = normalizeErpSalesmanOption(row);
+    if (option && !byCode.has(option.code)) byCode.set(option.code, option);
+  }
+
+  return Array.from(byCode.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+};
 
 const normalizeCulturePayload = (payload: z.infer<typeof cultureCatalogSchema>) => {
   const goals = Object.entries(payload.goalsJson || {}).reduce<CultureGoals>((acc, [goal, range]) => {
@@ -132,11 +206,7 @@ const formatDateDot = (date: Date) => {
   return `${day}.${month}.${year}`;
 };
 
-const resolveSellerErpCode = (_ownerSeller: Pick<User, "id" | "name" | "email" | "role" | "region" | "isActive" | "createdAt">): string | null => {
-  // O schema Prisma atual de User não possui código ERP, metadata ou rawErpPayload.
-  // Não usar id/e-mail do CRM como código ERP para evitar criar códigos manualmente.
-  return null;
-};
+const resolveSellerErpCode = (ownerSeller: Pick<User, "erpCode">): string | null => ownerSeller.erpCode?.trim() || null;
 
 type TechnicalCultureCatalogItem = {
   id: string;
@@ -6726,6 +6796,16 @@ router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), asyn
   return res.status(200).json({ scope: "partners", ...result });
 });
 
+router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), async (_req, res) => {
+  const result = await syncSalesmen();
+  return res.status(200).json({ scope: "salesmen", ...result });
+});
+
+router.get("/erp/ultrafv3/salesmen/options", authorize("diretor", "gerente"), async (_req, res) => {
+  const options = await loadErpSalesmenOptions();
+  return res.status(200).json(options);
+});
+
 router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (_req, res) => {
   const status = await getUltraFv3SyncStatus();
   const [productCount, clientCount] = await Promise.all([
@@ -6968,26 +7048,47 @@ router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema),
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true } })));
-router.post("/users", authorize("diretor"), validateBody(userCreateSchema), async (req, res) => {
-  const { name, email, password, role, region } = req.body;
+const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, isActive: true, createdAt: true } as const;
+
+router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: userListSelect })));
+router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSchema), async (req, res) => {
+  const { name, email, password, role, region, erpCode, erpOperatorCode } = req.body;
+  if (req.user!.role === "gerente" && role === "diretor") {
+    return res.status(403).json({ success: false, message: "Gerentes não podem criar usuários diretores." });
+  }
+  const erpOption = erpCode ? (await loadErpSalesmenOptions()).find((option) => option.code === erpCode) : null;
   const passwordHash = await hashPassword(password);
-  const user = await prisma.user.create({ data: { name, email, passwordHash, role, region } });
-  return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: { id: user.id, email: user.email } });
+  const user = await prisma.user.create({
+    data: { name, email, passwordHash, role, region, erpCode: erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ?? undefined },
+    select: userListSelect
+  });
+  return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: user });
 });
-router.put("/users/:id", authorize("diretor"), validateBody(userUpdateSchema), async (req, res) => {
+router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdateSchema), async (req, res) => {
   const { id } = req.params;
-  const { name, email, password, role, region } = req.body;
+  const { name, email, password, role, region, erpCode, erpOperatorCode } = req.body;
 
   if (req.user!.id === id && role !== "diretor") {
     return res.status(400).json({ success: false, message: "Você não pode remover seu próprio papel de diretor." });
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } });
     if (!user) return res.status(404).json({ success: false, message: "Usuário não encontrado." });
+    if (req.user!.role === "gerente" && (user.role === "diretor" || role === "diretor")) {
+      return res.status(403).json({ success: false, message: "Gerentes não podem criar ou editar perfis diretores." });
+    }
 
-    const data: Record<string, unknown> = { name, email, role, region };
+    const erpOption = erpCode ? (await loadErpSalesmenOptions()).find((option) => option.code === erpCode) : null;
+    const data: Record<string, unknown> = {
+      name,
+      email,
+      role,
+      region,
+      erpCode: erpCode ?? null,
+      erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null,
+      erpRawPayload: erpOption?.raw ?? Prisma.JsonNull
+    };
 
     if (typeof password === "string" && password.trim().length > 0) {
       data.passwordHash = await hashPassword(password);
@@ -6996,7 +7097,7 @@ router.put("/users/:id", authorize("diretor"), validateBody(userUpdateSchema), a
     const updated = await prisma.user.update({
       where: { id },
       data,
-      select: { id: true, name: true, email: true, role: true, region: true, isActive: true, createdAt: true }
+      select: userListSelect
     });
 
     return res.json({ success: true, message: "Usuário atualizado com sucesso.", data: updated });

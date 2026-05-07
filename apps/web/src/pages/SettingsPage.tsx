@@ -148,15 +148,22 @@ export default function SettingsPage() {
                 label: "Perfil de acesso",
                 type: "select",
                 options: [
-                  { value: "diretor", label: "Diretor" },
+                  ...(user.role === "diretor" ? [{ value: "diretor", label: "Diretor" }] : []),
                   { value: "gerente", label: "Gerente" },
                   { value: "vendedor", label: "Vendedor" }
                 ]
               },
               { key: "region", label: "Região de atuação", placeholder: "Informe a região de atuação" },
+              {
+                key: "erpCode",
+                label: "Vendedor/operador ERP",
+                tableLabel: "Vínculo ERP",
+                type: "erpSalesman",
+                placeholder: "Pesquise pelo nome ou código ERP"
+              },
               { key: "password", label: "Senha de acesso", placeholder: "Defina uma senha de acesso" }
             ]}
-            readOnly={user.role !== "diretor"}
+            readOnly={user.role !== "diretor" && user.role !== "gerente"}
           />
         </div>
       )}
