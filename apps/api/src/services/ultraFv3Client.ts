@@ -5,8 +5,24 @@ const DEFAULT_HEADERS = {
   Accept: "application/json",
 };
 
+const ULTRAFV3_REQUEST_TIMEOUT_MS = 15_000;
+
 type UltraFv3EnvVar = "ULTRAFV3_BASE_URL" | "ULTRAFV3_USERNAME" | "ULTRAFV3_PASSWORD";
 type UltraFv3AuthenticationStatus = "missing_config" | "authenticated" | "not_authenticated";
+
+type UltraFv3AuthPayload = {
+  token?: string;
+  accessToken?: string;
+  access_token?: string;
+  expiresAt?: string;
+  expires_at?: string;
+  expiresIn?: number;
+  expires_in?: number;
+  operador?: unknown;
+  operator?: unknown;
+  vendedor?: unknown;
+  salesman?: unknown;
+};
 
 const maskBaseUrl = (value: string) => {
   if (!value) return "";
@@ -34,6 +50,9 @@ export class UltraFv3IntegrationError extends Error {
 
 class UltraFv3Client {
   private token: string | null = null;
+  private tokenExpiresAt: Date | null = null;
+  private erpOperator: unknown = null;
+  private erpSalesman: unknown = null;
   private tokenPromise: Promise<string> | null = null;
   private lastError: string | null = null;
 
@@ -69,6 +88,9 @@ class UltraFv3Client {
       missingConfig,
       authenticationStatus,
       lastError: this.lastError,
+      tokenExpiresAt: this.tokenExpiresAt?.toISOString() ?? null,
+      erpOperator: this.erpOperator,
+      erpSalesman: this.erpSalesman,
     };
   }
 
@@ -80,6 +102,29 @@ class UltraFv3Client {
     } catch {
       throw new UltraFv3IntegrationError("UltraFV3 retornou uma resposta inválida (JSON malformado).", "invalid_response", response.status);
     }
+  }
+
+  private buildTimeoutSignal() {
+    return AbortSignal.timeout(ULTRAFV3_REQUEST_TIMEOUT_MS);
+  }
+
+  private isTokenExpired() {
+    return Boolean(this.tokenExpiresAt && this.tokenExpiresAt.getTime() <= Date.now() + 30_000);
+  }
+
+  private resolveTokenExpiration(payload: UltraFv3AuthPayload) {
+    const explicitExpiration = payload.expiresAt || payload.expires_at;
+    if (explicitExpiration) {
+      const parsed = new Date(explicitExpiration);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const expiresInSeconds = Number(payload.expiresIn ?? payload.expires_in ?? 0);
+    if (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0) {
+      return new Date(Date.now() + expiresInSeconds * 1000);
+    }
+
+    return null;
   }
 
   private async login() {
@@ -97,6 +142,7 @@ class UltraFv3Client {
             username: env.ultraFv3Username,
             password: env.ultraFv3Password,
           }),
+          signal: this.buildTimeoutSignal(),
         });
       } catch (error) {
         throw new UltraFv3IntegrationError(
@@ -117,7 +163,7 @@ class UltraFv3Client {
         throw new UltraFv3IntegrationError(`UltraFV3 login falhou com status ${response.status}.`, "request_failed", response.status);
       }
 
-      const payload = (await this.safeJson(response)) as { token?: string; accessToken?: string; access_token?: string } | null;
+      const payload = (await this.safeJson(response)) as UltraFv3AuthPayload | null;
       const token = payload?.token || payload?.accessToken || payload?.access_token;
 
       if (!token) {
@@ -125,6 +171,9 @@ class UltraFv3Client {
       }
 
       this.token = token;
+      this.tokenExpiresAt = payload ? this.resolveTokenExpiration(payload) : null;
+      this.erpOperator = payload?.operador ?? payload?.operator ?? null;
+      this.erpSalesman = payload?.vendedor ?? payload?.salesman ?? null;
       return token;
     })();
 
@@ -146,7 +195,8 @@ class UltraFv3Client {
   ): Promise<T> {
     this.ensureConfig();
 
-    if (!this.token) {
+    if (!this.token || this.isTokenExpired()) {
+      this.token = null;
       await this.login();
     }
 
@@ -163,7 +213,7 @@ class UltraFv3Client {
       }
 
       try {
-        return await fetch(`${this.baseUrl}${path}`, { ...requestInit });
+        return await fetch(`${this.baseUrl}${path}`, { ...requestInit, signal: this.buildTimeoutSignal() });
       } catch (error) {
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível ao consultar ${path}: ${error instanceof Error ? error.message : String(error)}`,
