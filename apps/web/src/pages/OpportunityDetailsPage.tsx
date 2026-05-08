@@ -124,7 +124,20 @@ type ErpOrderForm = {
 type ErpOrderFeedback = {
   status: "enviado" | "erro";
   pedidoIdImportacao?: string;
+  erpOrderNumber?: string | null;
   message?: string;
+};
+
+type ErpOrderSync = {
+  id: string;
+  pedidoIdImportacao: string;
+  numPedido?: string | null;
+  erpOrderNumber?: string | null;
+  status: "pending" | "sent" | "error";
+  orderStatus?: "pendente" | "faturado" | "parcial" | "cancelado" | "entregue" | null;
+  createdAt: string;
+  sentAt?: string | null;
+  statusSyncedAt?: string | null;
 };
 
 const stageFlow: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho"];
@@ -308,6 +321,8 @@ export default function OpportunityDetailsPage() {
   const [operations, setOperations] = useState<ErpOption[]>([]);
   const [erpOrderForm, setErpOrderForm] = useState<ErpOrderForm>(emptyErpOrderForm);
   const [erpOrderFeedback, setErpOrderFeedback] = useState<ErpOrderFeedback | null>(null);
+  const [erpOrders, setErpOrders] = useState<ErpOrderSync[]>([]);
+  const [syncingErpOrderStatus, setSyncingErpOrderStatus] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -351,6 +366,7 @@ export default function OpportunityDetailsPage() {
     return typeof stockQuantity === "number" && stockQuantity < Number(opportunityItem.quantity || 0);
   });
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
+  const canGenerateErpOrder = item?.stage === "ganho";
 
   const setErpOrderField = (field: keyof ErpOrderForm, value: string) => {
     setErpOrderForm((current) => ({ ...current, [field]: value }));
@@ -361,14 +377,15 @@ export default function OpportunityDetailsPage() {
     setLoadingErpOrderData(true);
     setErpOrderFeedback(null);
     try {
-      const [itemsResponse, clientResponse, paymentMethodsResponse, receivingConditionsResponse, priceTablesResponse, branchesResponse, operationsResponse] = await Promise.all([
+      const [itemsResponse, clientResponse, paymentMethodsResponse, receivingConditionsResponse, priceTablesResponse, branchesResponse, operationsResponse, erpOrdersResponse] = await Promise.all([
         api.get(`/opportunities/${item.id}/items`),
         api.get(`/clients/${item.clientId}`),
         api.get("/erp/ultrafv3/payment-methods"),
         api.get("/erp/ultrafv3/receiving-conditions"),
         api.get("/erp/ultrafv3/price-tables"),
         api.get("/erp/ultrafv3/branches"),
-        api.get("/erp/ultrafv3/operations")
+        api.get("/erp/ultrafv3/operations"),
+        api.get(`/opportunities/${item.id}/erp/orders`)
       ]);
 
       const nextPaymentMethods = toErpOptions(paymentMethodsResponse.data);
@@ -385,6 +402,7 @@ export default function OpportunityDetailsPage() {
       setPriceTables(nextPriceTables);
       setBranches(nextBranches);
       setOperations(nextOperations);
+      setErpOrders(Array.isArray(erpOrdersResponse.data?.items) ? erpOrdersResponse.data.items : []);
       setErpOrderForm((current) => ({
         paymentMethodCode: current.paymentMethodCode || firstOptionCode(nextPaymentMethods),
         receivingConditionCode: current.receivingConditionCode || firstOptionCode(nextReceivingConditions),
@@ -410,7 +428,9 @@ export default function OpportunityDetailsPage() {
     setErpOrderFeedback(null);
     try {
       const response = await api.post(`/opportunities/${item.id}/erp/orders`, erpOrderForm);
-      setErpOrderFeedback({ status: "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao });
+      setErpOrderFeedback({ status: "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber });
+      const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
+      setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
       toast.success("Pedido enviado ao ERP");
     } catch (error) {
       const message = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
@@ -419,6 +439,21 @@ export default function OpportunityDetailsPage() {
       toast.error(message);
     } finally {
       setSendingErpOrder(false);
+    }
+  };
+
+
+  const onSyncErpOrderStatus = async () => {
+    if (!item) return;
+    setSyncingErpOrderStatus(true);
+    try {
+      const response = await api.post(`/opportunities/${item.id}/erp/orders/status`);
+      setErpOrders(Array.isArray(response.data?.items) ? response.data.items : []);
+      toast.success("Status ERP atualizado");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível atualizar status ERP"));
+    } finally {
+      setSyncingErpOrderStatus(false);
     }
   };
 
@@ -540,8 +575,10 @@ export default function OpportunityDetailsPage() {
         <div className="mobile-action-stack md:justify-end">
           <button
             type="button"
-            className="mobile-primary-button rounded-xl bg-gradient-to-r from-brand-700 to-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-900/20 hover:from-brand-800 hover:to-slate-950"
+            disabled={!canGenerateErpOrder}
+            className="mobile-primary-button rounded-xl bg-gradient-to-r from-brand-700 to-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-900/20 hover:from-brand-800 hover:to-slate-950 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400"
             onClick={openErpOrderModal}
+            title={!canGenerateErpOrder ? "Disponível somente para oportunidade Ganha" : undefined}
           >
             Gerar pedido ERP
           </button>
@@ -813,13 +850,38 @@ export default function OpportunityDetailsPage() {
                         <div className={`mt-5 rounded-2xl border p-4 text-sm ${erpOrderFeedback.status === "enviado" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
                           <p className="font-bold">{erpOrderFeedback.status === "enviado" ? "Pedido enviado" : "Erro ERP"}</p>
                           {erpOrderFeedback.pedidoIdImportacao ? <p className="mt-1 break-all">pedidoIdImportacao: <strong>{erpOrderFeedback.pedidoIdImportacao}</strong></p> : null}
+                          {erpOrderFeedback.erpOrderNumber ? <p className="mt-1">Pedido ERP: <strong>{erpOrderFeedback.erpOrderNumber}</strong></p> : null}
                           {erpOrderFeedback.message ? <p className="mt-1">{erpOrderFeedback.message}</p> : null}
                         </div>
                       ) : null}
 
+
+                      <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <strong>Pedidos ERP gerados</strong>
+                          <button type="button" className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-semibold disabled:opacity-60" disabled={syncingErpOrderStatus || !erpOrders.length} onClick={onSyncErpOrderStatus}>
+                            {syncingErpOrderStatus ? "Atualizando..." : "Atualizar status"}
+                          </button>
+                        </div>
+                        {erpOrders.length ? (
+                          <div className="space-y-2">
+                            {erpOrders.map((order) => (
+                              <div key={order.id} className="rounded-xl bg-white p-3">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <StatusPill tone={order.status === "sent" ? "success" : order.status === "error" ? "danger" : "warning"}>{order.status === "sent" ? "enviado" : order.status === "error" ? "erro" : "pendente"}</StatusPill>
+                                  {order.orderStatus ? <StatusPill tone={order.orderStatus === "cancelado" ? "danger" : order.orderStatus === "pendente" ? "warning" : "success"}>{order.orderStatus}</StatusPill> : null}
+                                </div>
+                                <p className="mt-2 break-all text-xs text-slate-600">Importação: {order.pedidoIdImportacao}</p>
+                                <p className="text-xs text-slate-600">Pedido: {order.erpOrderNumber || order.numPedido || "-"}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : <p className="text-xs text-slate-500">Nenhum pedido ERP enviado para esta oportunidade.</p>}
+                      </div>
+
                       <button
                         type="button"
-                        disabled={sendingErpOrder || loadingErpOrderData}
+                        disabled={sendingErpOrder || loadingErpOrderData || !canGenerateErpOrder}
                         onClick={onSendErpOrder}
                         className="mt-5 w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/20 transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                       >

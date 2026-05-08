@@ -26,7 +26,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma, type User } from "@prisma/client";
 import { z } from "zod";
@@ -55,6 +55,7 @@ import {
   syncSalesmen
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
+import { createErpOrderFromOpportunity, syncErpOrderStatuses } from "../services/erpOrderService.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -5763,59 +5764,49 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
   });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
-  if (!opportunity.client.code) return res.status(400).json({ message: "Cliente sem código ERP" });
-  const sellerErpCode = resolveSellerErpCode(opportunity.ownerSeller);
-  if (!sellerErpCode) return res.status(400).json({ message: "Vendedor sem código ERP vinculado. Sincronize ou vincule o vendedor ao ERP antes de gerar pedido." });
-  if (!opportunity.items.length) return res.status(400).json({ message: "Oportunidade sem itens para envio" });
-  if (opportunity.items.some((item) => !item.erpProductCode?.trim())) return res.status(400).json({ message: "Há item sem código ERP" });
-  if (opportunity.items.some((item) => !item.unit?.trim())) return res.status(400).json({ message: "Há item sem unidade de medida" });
+  try {
+    const sync = await createErpOrderFromOpportunity(opportunity, parsed.data);
+    return res.status(201).json({
+      id: sync.id,
+      pedidoIdImportacao: sync.pedidoIdImportacao,
+      numPedido: sync.numPedido,
+      erpOrderNumber: sync.erpOrderNumber,
+      status: sync.status,
+      orderStatus: sync.orderStatus,
+      response: sync.erpResponse
+    });
+  } catch (error: any) {
+    const status = Number(error?.status || 502);
+    return res.status(status >= 400 && status < 600 ? status : 502).json({
+      pedidoIdImportacao: error?.pedidoIdImportacao,
+      status: "erro",
+      message: error?.message || "Erro no envio ao ERP"
+    });
+  }
+});
 
-  const pedidoIdImportacao = randomUUID();
-  const now = new Date();
-  const itens = opportunity.items.map((item) => ({
-    CODPRODUTO: item.erpProductCode,
-    QTD_PEDIDO: Number(item.quantity),
-    PRECO: Number(item.unitPrice),
-    UND_MEDIDA: item.unit
-  }));
+router.get("/opportunities/:id/erp/orders", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) }, select: { id: true } });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
-  const valorBruto = Number(opportunity.items.reduce((sum, item) => sum + Number(item.grossTotal || 0), 0).toFixed(2));
-  const valorLiquido = Number(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0).toFixed(2));
+  const orders = await prisma.erpOrderSync.findMany({
+    where: { opportunityId: req.params.id },
+    orderBy: [{ createdAt: "desc" }]
+  });
 
-  const payload = {
-    PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
-    DATA_EMISSAO: formatDateDot(now),
-    TIPO_MOVIMENTO: "PEDIDO",
-    FORMA: parsed.data.paymentMethodCode,
-    CODCONDREC: parsed.data.receivingConditionCode,
-    TABELA_PRECO: parsed.data.priceTableCode,
-    CODFILIAL: parsed.data.branchCode,
-    CODOPER: parsed.data.operationCode,
-    PARCEIRO: opportunity.client.code,
-    VENDEDOR: sellerErpCode,
-    VALOR_BRUTO: valorBruto,
-    VALOR_LIQUIDO: valorLiquido,
-    ITENS: itens
-  };
+  return res.status(200).json({ items: orders });
+});
+
+router.post("/opportunities/:id/erp/orders/status", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) }, select: { id: true } });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   try {
-    const erpResponse = await ultraFv3Client.request("/orders", { method: "POST", body: payload });
-    await prisma.appConfig.create({
-      data: {
-        key: `erp.ultrafv3.order.${pedidoIdImportacao}`,
-        value: JSON.stringify({ opportunityId: opportunity.id, pedidoIdImportacao, payload, erpResponse, status: "enviado", createdAt: now.toISOString() })
-      }
-    });
-    return res.status(201).json({ pedidoIdImportacao, status: "enviado", response: erpResponse });
-  } catch (error: any) {
-    const message = error?.message || "Erro no envio ao ERP";
-    await prisma.appConfig.create({
-      data: {
-        key: `erp.ultrafv3.order.${pedidoIdImportacao}`,
-        value: JSON.stringify({ opportunityId: opportunity.id, pedidoIdImportacao, payload, erpResponse: { message }, status: "erro", createdAt: now.toISOString() })
-      }
-    });
-    return res.status(502).json({ pedidoIdImportacao, status: "erro", message });
+    const result = await syncErpOrderStatuses(req.params.id);
+    const orders = await prisma.erpOrderSync.findMany({ where: { opportunityId: req.params.id }, orderBy: [{ createdAt: "desc" }] });
+    return res.status(200).json({ ...result, items: orders });
+  } catch (error) {
+    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details: error instanceof Error ? error.message : String(error) });
   }
 });
 
@@ -6827,6 +6818,14 @@ router.post("/erp/ultrafv3/sync/receiving-conditions", authorize("diretor", "ger
 router.post("/erp/ultrafv3/sync/price-tables", authorize("diretor", "gerente"), runUltraFv3Sync("priceTables"));
 router.post("/erp/ultrafv3/sync/branches", authorize("diretor", "gerente"), runUltraFv3Sync("branches"));
 router.post("/erp/ultrafv3/sync/operations", authorize("diretor", "gerente"), runUltraFv3Sync("operations"));
+router.post("/erp/ultrafv3/sync/order-status", authorize("diretor", "gerente"), async (_req, res) => {
+  try {
+    const result = await syncErpOrderStatuses();
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 router.get("/erp/ultrafv3/salesmen/options", authorize("diretor", "gerente"), async (_req, res) => {
   const options = await loadErpSalesmenOptions();

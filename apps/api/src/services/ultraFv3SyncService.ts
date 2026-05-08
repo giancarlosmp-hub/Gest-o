@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { ultraFv3Client } from "./ultraFv3Client.js";
 import { logApiEvent } from "../utils/logger.js";
+import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 
@@ -168,7 +169,7 @@ export async function syncProducts() {
       const stockNumber = stockQuantity === null ? null : Number(stockQuantity);
       if (stockNumber !== null && Number.isFinite(stockNumber) && stockNumber <= 0) diagnostics.withoutStock += 1;
 
-      await prisma.product.upsert({
+      const product = await prisma.product.upsert({
         where: { erpProductCode_erpProductClassCode: { erpProductCode: code, erpProductClassCode: classCode } },
         update: {
           name: pickFirstString(payload, ["description", "name", "descricao", "NOME"]) || "Produto sem descrição",
@@ -199,6 +200,16 @@ export async function syncProducts() {
           rawErpPayload: payload as Prisma.InputJsonValue
         }
       });
+      const priceTableCode = pickFirstString(payload, ["priceTable", "priceTableCode", "tabelaPreco", "TABELA_PRECO"]);
+      const branchCode = pickFirstString(payload, ["branchCode", "filial", "CODFILIAL"]);
+      const existingPrice = await prisma.productPrice.findFirst({
+        where: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null }
+      });
+      if (existingPrice) {
+        await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price } });
+      } else {
+        await prisma.productPrice.create({ data: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null, price } });
+      }
       syncedCount += 1;
     }
 
@@ -212,22 +223,33 @@ export async function syncPartners() {
     const fallbackSeller = await prisma.user.findFirst({ where: { role: "vendedor", isActive: true }, select: { id: true } });
     if (!fallbackSeller) throw new Error("Nenhum vendedor ativo encontrado para vincular clientes sincronizados.");
 
+    const sellersByErpCode = new Map(
+      (await prisma.user.findMany({ where: { erpCode: { not: null }, isActive: true }, select: { id: true, erpCode: true } }))
+        .map((seller) => [seller.erpCode?.trim(), seller.id] as const)
+        .filter(([code]) => Boolean(code))
+    );
+
     let syncedCount = 0;
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       const payload = row as Record<string, unknown>;
       const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
       if (!code) continue;
+      const sellerCode = pickFirstString(payload, ["sellerCode", "salesmanCode", "codVendedor", "CODVENDEDOR", "vendedorCodigo", "VENDEDOR"]);
+      const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
+      const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
+      const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
       const existing = await prisma.client.findFirst({ where: { code } });
       const data = {
         code,
         name: pickFirstString(payload, ["corporateName", "name", "razaoSocial", "nome", "NOME"]) || "Cliente sem nome",
         fantasyName: pickFirstString(payload, ["fantasyName", "nomeFantasia", "apelido"]) || null,
-        cnpj: pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]) || null,
+        cnpj: cnpj || null,
+        cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
         city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
-        state: pickFirstString(payload, ["state", "uf", "UF", "estado"]) || "NI",
+        state: normalizeState(state || "NI"),
         region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
-        ownerSellerId: fallbackSeller.id,
+        ownerSellerId,
         erpUpdatedAt: new Date()
       };
       if (existing) await prisma.client.update({ where: { id: existing.id }, data });
@@ -237,7 +259,6 @@ export async function syncPartners() {
     return { syncedCount, diagnostics: { received: rows.length, withoutCode: rows.length - syncedCount } };
   });
 }
-
 async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners">, endpoint: string) {
   return runSync(scope, async () => {
     const rows = await fetchUltraFv3Rows(endpoint, scope);

@@ -80,6 +80,7 @@ model User {
   clients               Client[]
   contacts              Contact[]
   opportunities         Opportunity[]
+  erpOrderSyncs         ErpOrderSync[]
   opportunityChangeLogs OpportunityChangeLog[]
   activities            Activity[]
   timelineEvents        TimelineEvent[]
@@ -221,6 +222,7 @@ model Opportunity {
   timelineEvents       TimelineEvent[]
   changeLogs           OpportunityChangeLog[]
   items                OpportunityItem[]
+  erpOrderSyncs        ErpOrderSync[]
   createdAt            DateTime               @default(now())
 }
 
@@ -409,4 +411,44 @@ model OpportunityItem {
   @@unique([opportunityId, lineNumber])
   @@index([opportunityId])
   @@index([productId])
+}
+
+enum ErpOrderSyncStatus {
+  pending
+  sent
+  error
+}
+
+enum ErpOrderFulfillmentStatus {
+  pendente
+  faturado
+  parcial
+  cancelado
+  entregue
+}
+
+model ErpOrderSync {
+  id                 String                     @id @default(cuid())
+  opportunityId      String
+  opportunity        Opportunity                @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  sellerId           String
+  seller             User                       @relation(fields: [sellerId], references: [id])
+  pedidoIdImportacao String                     @unique
+  numPedido          String?
+  erpOrderNumber     String?
+  status             ErpOrderSyncStatus         @default(pending)
+  orderStatus        ErpOrderFulfillmentStatus?
+  payloadSent        Json
+  erpResponse        Json?
+  syncErrors         Json?
+  lastStatusPayload  Json?
+  sentAt             DateTime?
+  statusSyncedAt     DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+
+  @@index([opportunityId, createdAt])
+  @@index([status])
+  @@index([orderStatus])
+  @@index([numPedido])
 }

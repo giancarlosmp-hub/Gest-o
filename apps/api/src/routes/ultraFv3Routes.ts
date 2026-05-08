@@ -27,5 +27,6 @@ router.get("/erp/ultrafv3/price-tables", wrap("/price-tables"));
 router.get("/erp/ultrafv3/branches", wrap("/branches"));
 router.get("/erp/ultrafv3/operations", wrap("/operations"));
 router.get("/erp/ultrafv3/salesmen", wrap("/salesmen"));
+router.get("/erp/ultrafv3/order-status", wrap("/orderStatus"));
 
 export default router;
