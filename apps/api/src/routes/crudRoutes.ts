@@ -56,6 +56,7 @@ import {
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { logApiEvent } from "../utils/logger.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -5777,8 +5778,16 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     });
   } catch (error: any) {
     const status = Number(error?.status || 502);
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order route] order submission rejected", {
+      opportunityId: req.params.id,
+      httpStatus: status,
+      pedidoIdImportacao: error?.pedidoIdImportacao,
+      existingErpOrderSyncId: error?.existingErpOrderSyncId,
+      error: error?.message || "Erro no envio ao ERP"
+    });
     return res.status(status >= 400 && status < 600 ? status : 502).json({
       pedidoIdImportacao: error?.pedidoIdImportacao,
+      existingErpOrderSyncId: error?.existingErpOrderSyncId,
       status: "erro",
       message: error?.message || "Erro no envio ao ERP"
     });
@@ -5806,7 +5815,9 @@ router.post("/opportunities/:id/erp/orders/status", async (req, res) => {
     const orders = await prisma.erpOrderSync.findMany({ where: { opportunityId: req.params.id }, orderBy: [{ createdAt: "desc" }] });
     return res.status(200).json({ ...result, items: orders });
   } catch (error) {
-    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details: error instanceof Error ? error.message : String(error) });
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[erp order status route] opportunity status sync failed", { opportunityId: req.params.id, error: details });
+    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
   }
 });
 
@@ -6801,10 +6812,12 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
     const result = await ultraFv3SyncHandlers[scope]();
     return res.status(200).json({ scope, ...result });
   } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 sync route] scope sync failed", { scope, error: details });
     return res.status(502).json({
       scope,
       message: "Falha na sincronização UltraFV3.",
-      details: error instanceof Error ? error.message : String(error)
+      details
     });
   }
 };
@@ -6823,7 +6836,9 @@ router.post("/erp/ultrafv3/sync/order-status", authorize("diretor", "gerente"), 
     const result = await syncErpOrderStatuses();
     return res.status(200).json(result);
   } catch (error) {
-    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details: error instanceof Error ? error.message : String(error) });
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[erp order status route] global status sync failed", { error: details });
+    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
   }
 });
 
