@@ -5,6 +5,22 @@ const DEFAULT_HEADERS = {
   Accept: "application/json",
 };
 
+type UltraFv3EnvVar = "ULTRAFV3_BASE_URL" | "ULTRAFV3_USERNAME" | "ULTRAFV3_PASSWORD";
+type UltraFv3AuthenticationStatus = "missing_config" | "authenticated" | "not_authenticated";
+
+const maskBaseUrl = (value: string) => {
+  if (!value) return "";
+  try {
+    const url = new URL(value);
+    if (url.username) url.username = "***";
+    if (url.password) url.password = "***";
+    if (url.search) url.search = "?***";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return value.replace(/:\/\/([^:@/]+):([^@/]+)@/, "://***:***@");
+  }
+};
+
 export class UltraFv3IntegrationError extends Error {
   constructor(
     message: string,
@@ -19,18 +35,41 @@ export class UltraFv3IntegrationError extends Error {
 class UltraFv3Client {
   private token: string | null = null;
   private tokenPromise: Promise<string> | null = null;
+  private lastError: string | null = null;
 
   private get baseUrl() {
     return env.ultraFv3BaseUrl.replace(/\/+$/, "");
   }
 
+  private getMissingConfig(): UltraFv3EnvVar[] {
+    const missing: UltraFv3EnvVar[] = [];
+    if (!this.baseUrl) missing.push("ULTRAFV3_BASE_URL");
+    if (!env.ultraFv3Username) missing.push("ULTRAFV3_USERNAME");
+    if (!env.ultraFv3Password) missing.push("ULTRAFV3_PASSWORD");
+    return missing;
+  }
+
   private ensureConfig() {
-    if (!this.baseUrl || !env.ultraFv3Username || !env.ultraFv3Password) {
+    const missing = this.getMissingConfig();
+    if (missing.length > 0) {
       throw new UltraFv3IntegrationError(
-        "Credenciais UltraFV3 não configuradas. Defina ULTRAFV3_BASE_URL, ULTRAFV3_USERNAME e ULTRAFV3_PASSWORD.",
+        `Credenciais UltraFV3 não configuradas. Defina ${missing.join(", ")}.`,
         "missing_credentials"
       );
     }
+  }
+
+  getDiagnostics() {
+    const missingConfig = this.getMissingConfig();
+    const isConfigured = missingConfig.length === 0;
+    const authenticationStatus: UltraFv3AuthenticationStatus = !isConfigured ? "missing_config" : this.token ? "authenticated" : "not_authenticated";
+    return {
+      baseUrl: this.baseUrl ? maskBaseUrl(this.baseUrl) : null,
+      isConfigured,
+      missingConfig,
+      authenticationStatus,
+      lastError: this.lastError,
+    };
   }
 
   private async safeJson(response: Response) {
@@ -90,7 +129,12 @@ class UltraFv3Client {
     })();
 
     try {
-      return await this.tokenPromise;
+      const token = await this.tokenPromise;
+      this.lastError = null;
+      return token;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
       this.tokenPromise = null;
     }
@@ -137,18 +181,26 @@ class UltraFv3Client {
     }
 
     if (response.status === 401 || response.status === 403) {
-      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path}.`, "auth_failed", response.status);
+      const error = new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path}.`, "auth_failed", response.status);
+      this.lastError = error.message;
+      throw error;
     }
 
     if (response.status === 404) {
-      throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}.`, "not_found", response.status);
+      const error = new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}.`, "not_found", response.status);
+      this.lastError = error.message;
+      throw error;
     }
 
     if (!response.ok) {
-      throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}.`, "request_failed", response.status);
+      const error = new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}.`, "request_failed", response.status);
+      this.lastError = error.message;
+      throw error;
     }
 
-    return (await this.safeJson(response)) as T;
+    const payload = (await this.safeJson(response)) as T;
+    this.lastError = null;
+    return payload;
   }
 }
 

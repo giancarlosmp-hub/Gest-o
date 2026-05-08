@@ -27,6 +27,15 @@ type SyncStatusPayload = {
 
 type SyncResult = { syncedCount: number; diagnostics?: Record<string, number> };
 
+type UltraFv3IntegrationDiagnostics = {
+  baseUrl: string | null;
+  isConfigured: boolean;
+  missingConfig: string[];
+  authenticationStatus: "missing_config" | "authenticated" | "not_authenticated" | "auth_failed";
+  lastError: string | null;
+  guidance: string;
+};
+
 const pickFirstValue = (payload: Record<string, unknown>, keys: string[]) => {
   for (const key of keys) {
     const value = payload[key];
@@ -247,6 +256,41 @@ export const syncReceivingConditions = () => syncReferenceData("receivingConditi
 export const syncBranches = () => syncReferenceData("branches", "/branches");
 export const syncOperations = () => syncReferenceData("operations", "/operations");
 export const syncSalesmen = () => syncReferenceData("salesmen", "/salesmen");
+
+const getLatestSyncError = (statuses: Record<UltraFv3SyncScope, SyncStatusPayload>) => {
+  return Object.values(statuses)
+    .filter((status) => status.errors?.[0])
+    .sort((a, b) => new Date(b.lastSyncAt || 0).getTime() - new Date(a.lastSyncAt || 0).getTime())[0]?.errors?.[0] ?? null;
+};
+
+export function getUltraFv3IntegrationDiagnostics(statuses: Record<UltraFv3SyncScope, SyncStatusPayload>): UltraFv3IntegrationDiagnostics {
+  const clientDiagnostics = ultraFv3Client.getDiagnostics();
+  const lastError = clientDiagnostics.lastError || getLatestSyncError(statuses);
+  const hasAuthError = lastError ? /autentica|usuário|usuario|senha|401|403/i.test(lastError) : false;
+  const authenticationStatus = clientDiagnostics.authenticationStatus === "missing_config"
+    ? "missing_config"
+    : hasAuthError
+      ? "auth_failed"
+      : clientDiagnostics.authenticationStatus;
+
+  let guidance = "Configuração mínima presente. Use o card Conexão UltraFV3 para validar autenticação e disponibilidade antes das sincronizações.";
+  if (clientDiagnostics.missingConfig.length > 0) {
+    guidance = `Configure ${clientDiagnostics.missingConfig.join(", ")} no .env do backend/API e reinicie o serviço antes de sincronizar.`;
+  } else if (authenticationStatus === "auth_failed") {
+    guidance = "Revise ULTRAFV3_USERNAME e ULTRAFV3_PASSWORD no backend/API e valide se o usuário tem permissão na API UltraFV3.";
+  } else if (lastError) {
+    guidance = "Corrija o último erro informado e execute novamente o card Conexão UltraFV3.";
+  } else if (authenticationStatus === "authenticated") {
+    guidance = "Autenticação UltraFV3 ativa em memória. As sincronizações podem ser executadas conforme necessário.";
+  }
+
+  return {
+    ...clientDiagnostics,
+    authenticationStatus,
+    lastError,
+    guidance,
+  };
+}
 
 export async function getUltraFv3SyncStatus() {
   const config = await prisma.appConfig.findUnique({ where: { key: ERP_SYNC_STATUS_KEY }, select: { value: true } });
