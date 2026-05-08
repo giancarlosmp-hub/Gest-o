@@ -23,8 +23,18 @@ type SyncScopeStatus = {
   diagnostics?: Record<string, number>;
 };
 
+type IntegrationDiagnostics = {
+  baseUrl: string | null;
+  isConfigured: boolean;
+  missingConfig: string[];
+  authenticationStatus: "missing_config" | "authenticated" | "not_authenticated" | "auth_failed" | string;
+  lastError: string | null;
+  guidance: string;
+};
+
 type SyncStatusResponse = {
   status: Record<SyncScopeKey, SyncScopeStatus>;
+  integration?: IntegrationDiagnostics;
   productCount: number;
   clientCount: number;
 };
@@ -72,6 +82,20 @@ const formatDate = (value?: string) => {
 
 const latestError = (status?: SyncScopeStatus) => status?.errors?.[0] || "Nenhum erro registrado.";
 
+const authenticationStatusLabel: Record<string, string> = {
+  missing_config: "Configuração ausente",
+  authenticated: "Autenticado",
+  not_authenticated: "Não autenticado",
+  auth_failed: "Falha de autenticação",
+};
+
+const integrationStatusClasses: Record<string, string> = {
+  missing_config: "bg-red-50 text-red-700 ring-red-200",
+  authenticated: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  not_authenticated: "bg-amber-50 text-amber-700 ring-amber-200",
+  auth_failed: "bg-red-50 text-red-700 ring-red-200",
+};
+
 export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -111,6 +135,10 @@ export default function ErpIntegrationPanel() {
 
   if (loading) return <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">Carregando integração ERP...</div>;
 
+  const integration = data?.integration;
+  const integrationClasses = integrationStatusClasses[integration?.authenticationStatus || "not_authenticated"] || integrationStatusClasses.not_authenticated;
+  const missingConfig = integration?.missingConfig ?? [];
+
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
@@ -123,6 +151,29 @@ export default function ErpIntegrationPanel() {
             <p>Produtos CRM: {data?.productCount ?? 0}</p>
             <p>Clientes CRM: {data?.clientCount ?? 0}</p>
             <p>{summary.runningCount ? `${summary.runningCount} sincronização(ões) em execução` : summary.errors ? `${summary.errors} card(s) com erro` : "Sem erros ativos"}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Base URL UltraFV3</p>
+            <p className={integration?.baseUrl ? "mt-1 break-all text-slate-900" : "mt-1 text-red-700"}>{integration?.baseUrl || "Ausente"}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Autenticação</p>
+            <span className={`mt-2 inline-flex rounded-full px-2 py-1 text-[11px] font-semibold ring-1 ${integrationClasses}`}>
+              {authenticationStatusLabel[integration?.authenticationStatus || "not_authenticated"] || integration?.authenticationStatus || "Não autenticado"}
+            </span>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Último erro</p>
+            <p className={integration?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>{integration?.lastError || "Nenhum erro registrado."}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">O que falta configurar</p>
+            <p className={missingConfig.length ? "mt-1 text-red-700" : "mt-1 text-slate-600"}>
+              {missingConfig.length ? missingConfig.join(", ") : integration?.guidance || "Configuração mínima presente."}
+            </p>
           </div>
         </div>
       </div>
@@ -173,7 +224,7 @@ export default function ErpIntegrationPanel() {
               <button
                 type="button"
                 className="mt-auto rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-                disabled={running !== null || isRunning}
+                disabled={running !== null || isRunning || integration?.isConfigured === false}
                 onClick={() => runSync(card)}
               >
                 {isRunning ? "Sincronizando..." : "Sincronizar"}

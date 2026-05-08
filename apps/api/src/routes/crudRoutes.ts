@@ -42,6 +42,7 @@ import {
   parseActivityObservation
 } from "../services/ai/index.js";
 import {
+  getUltraFv3IntegrationDiagnostics,
   getUltraFv3SyncStatus,
   syncBranches,
   syncConnection,
@@ -6834,11 +6835,12 @@ router.get("/erp/ultrafv3/salesmen/options", authorize("diretor", "gerente"), as
 
 router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (_req, res) => {
   const status = await getUltraFv3SyncStatus();
+  const integration = getUltraFv3IntegrationDiagnostics(status);
   const [productCount, clientCount] = await Promise.all([
     prisma.product.count({ where: { isActive: true } }),
     prisma.client.count()
   ]);
-  return res.status(200).json({ status, productCount, clientCount });
+  return res.status(200).json({ status, integration, productCount, clientCount });
 });
 
 router.get("/settings/weekly-visit-minimum", async (_req, res) => {

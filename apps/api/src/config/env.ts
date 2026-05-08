@@ -2,9 +2,14 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-function toBoolean(value: string | undefined, defaultValue = false) {
+function cleanEnvString(value: string | undefined, defaultValue = "") {
   if (value == null) return defaultValue;
-  const normalizedValue = value.trim().toLowerCase().replace(/^['\"]|['\"]$/g, "");
+  return value.trim().replace(/^['"]|['"]$/g, "").trim();
+}
+
+function toBoolean(value: string | undefined, defaultValue = false) {
+  const normalizedValue = cleanEnvString(value).toLowerCase();
+  if (!normalizedValue) return defaultValue;
   return ["1", "true", "yes", "on"].includes(normalizedValue);
 }
 
@@ -40,7 +45,7 @@ export const env = {
   openAiApiKey: process.env.OPENAI_API_KEY?.trim() || "",
   openAiModel: process.env.OPENAI_MODEL || "gpt-4.1-mini",
   openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false),
-  ultraFv3BaseUrl: process.env.ULTRAFV3_BASE_URL || "",
-  ultraFv3Username: process.env.ULTRAFV3_USERNAME || "",
-  ultraFv3Password: process.env.ULTRAFV3_PASSWORD || ""
+  ultraFv3BaseUrl: cleanEnvString(process.env.ULTRAFV3_BASE_URL),
+  ultraFv3Username: cleanEnvString(process.env.ULTRAFV3_USERNAME),
+  ultraFv3Password: cleanEnvString(process.env.ULTRAFV3_PASSWORD)
 };
