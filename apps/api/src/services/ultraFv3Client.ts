@@ -1,4 +1,5 @@
 import { env } from "../config/env.js";
+import { logApiEvent } from "../utils/logger.js";
 
 const DEFAULT_HEADERS = {
   "Content-Type": "application/json",
@@ -6,9 +7,19 @@ const DEFAULT_HEADERS = {
 };
 
 const ULTRAFV3_REQUEST_TIMEOUT_MS = 15_000;
+const ULTRAFV3_GET_RETRY_DELAY_MS = 500;
+const RETRIABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
-type UltraFv3EnvVar = "ULTRAFV3_BASE_URL" | "ULTRAFV3_USERNAME" | "ULTRAFV3_PASSWORD";
-type UltraFv3AuthenticationStatus = "missing_config" | "authenticated" | "not_authenticated";
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+type UltraFv3EnvVar =
+  | "ULTRAFV3_BASE_URL"
+  | "ULTRAFV3_USERNAME"
+  | "ULTRAFV3_PASSWORD";
+type UltraFv3AuthenticationStatus =
+  | "missing_config"
+  | "authenticated"
+  | "not_authenticated";
 
 type UltraFv3AuthPayload = {
   token?: string;
@@ -40,8 +51,14 @@ const maskBaseUrl = (value: string) => {
 export class UltraFv3IntegrationError extends Error {
   constructor(
     message: string,
-    readonly code: "missing_credentials" | "unavailable" | "auth_failed" | "not_found" | "invalid_response" | "request_failed",
-    readonly status?: number
+    readonly code:
+      | "missing_credentials"
+      | "unavailable"
+      | "auth_failed"
+      | "not_found"
+      | "invalid_response"
+      | "request_failed",
+    readonly status?: number,
   ) {
     super(message);
     this.name = "UltraFv3IntegrationError";
@@ -73,7 +90,7 @@ class UltraFv3Client {
     if (missing.length > 0) {
       throw new UltraFv3IntegrationError(
         `Credenciais UltraFV3 não configuradas. Defina ${missing.join(", ")}.`,
-        "missing_credentials"
+        "missing_credentials",
       );
     }
   }
@@ -81,7 +98,11 @@ class UltraFv3Client {
   getDiagnostics() {
     const missingConfig = this.getMissingConfig();
     const isConfigured = missingConfig.length === 0;
-    const authenticationStatus: UltraFv3AuthenticationStatus = !isConfigured ? "missing_config" : this.token ? "authenticated" : "not_authenticated";
+    const authenticationStatus: UltraFv3AuthenticationStatus = !isConfigured
+      ? "missing_config"
+      : this.token
+        ? "authenticated"
+        : "not_authenticated";
     return {
       baseUrl: this.baseUrl ? maskBaseUrl(this.baseUrl) : null,
       isConfigured,
@@ -100,7 +121,11 @@ class UltraFv3Client {
     try {
       return JSON.parse(text) as unknown;
     } catch {
-      throw new UltraFv3IntegrationError("UltraFV3 retornou uma resposta inválida (JSON malformado).", "invalid_response", response.status);
+      throw new UltraFv3IntegrationError(
+        "UltraFV3 retornou uma resposta inválida (JSON malformado).",
+        "invalid_response",
+        response.status,
+      );
     }
   }
 
@@ -109,7 +134,10 @@ class UltraFv3Client {
   }
 
   private isTokenExpired() {
-    return Boolean(this.tokenExpiresAt && this.tokenExpiresAt.getTime() <= Date.now() + 30_000);
+    return Boolean(
+      this.tokenExpiresAt &&
+      this.tokenExpiresAt.getTime() <= Date.now() + 30_000,
+    );
   }
 
   private resolveTokenExpiration(payload: UltraFv3AuthPayload) {
@@ -119,12 +147,49 @@ class UltraFv3Client {
       if (!Number.isNaN(parsed.getTime())) return parsed;
     }
 
-    const expiresInSeconds = Number(payload.expiresIn ?? payload.expires_in ?? 0);
+    const expiresInSeconds = Number(
+      payload.expiresIn ?? payload.expires_in ?? 0,
+    );
     if (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0) {
       return new Date(Date.now() + expiresInSeconds * 1000);
     }
 
     return null;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    context: { method: string; path: string; attempt: number },
+  ) {
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: this.buildTimeoutSignal(),
+      });
+      logApiEvent(
+        response.ok ? "INFO" : "WARN",
+        "[ultrafv3 http] request completed",
+        {
+          method: context.method,
+          path: context.path,
+          attempt: context.attempt,
+          status: response.status,
+          durationMs: Date.now() - startedAt,
+        },
+      );
+      return response;
+    } catch (error) {
+      logApiEvent("ERROR", "[ultrafv3 http] request failed", {
+        method: context.method,
+        path: context.path,
+        attempt: context.attempt,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async login() {
@@ -135,43 +200,67 @@ class UltraFv3Client {
 
       let response: Response;
       try {
-        response = await fetch(`${this.baseUrl}/auth/login`, {
-          method: "POST",
-          headers: DEFAULT_HEADERS,
-          body: JSON.stringify({
-            username: env.ultraFv3Username,
-            password: env.ultraFv3Password,
-          }),
-          signal: this.buildTimeoutSignal(),
-        });
+        response = await this.fetchWithTimeout(
+          `${this.baseUrl}/auth/login`,
+          {
+            method: "POST",
+            headers: DEFAULT_HEADERS,
+            body: JSON.stringify({
+              username: env.ultraFv3Username,
+              password: env.ultraFv3Password,
+            }),
+          },
+          { method: "POST", path: "/auth/login", attempt: 1 },
+        );
       } catch (error) {
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível durante autenticação: ${error instanceof Error ? error.message : String(error)}`,
-          "unavailable"
+          "unavailable",
         );
       }
 
       if (response.status === 401 || response.status === 403) {
-        throw new UltraFv3IntegrationError("Erro de autenticação no UltraFV3. Verifique usuário e senha configurados.", "auth_failed", response.status);
+        throw new UltraFv3IntegrationError(
+          "Erro de autenticação no UltraFV3. Verifique usuário e senha configurados.",
+          "auth_failed",
+          response.status,
+        );
       }
 
       if (response.status === 404) {
-        throw new UltraFv3IntegrationError("Endpoint de autenticação do UltraFV3 inexistente: /auth/login.", "not_found", response.status);
+        throw new UltraFv3IntegrationError(
+          "Endpoint de autenticação do UltraFV3 inexistente: /auth/login.",
+          "not_found",
+          response.status,
+        );
       }
 
       if (!response.ok) {
-        throw new UltraFv3IntegrationError(`UltraFV3 login falhou com status ${response.status}.`, "request_failed", response.status);
+        throw new UltraFv3IntegrationError(
+          `UltraFV3 login falhou com status ${response.status}.`,
+          "request_failed",
+          response.status,
+        );
       }
 
-      const payload = (await this.safeJson(response)) as UltraFv3AuthPayload | null;
-      const token = payload?.token || payload?.accessToken || payload?.access_token;
+      const payload = (await this.safeJson(
+        response,
+      )) as UltraFv3AuthPayload | null;
+      const token =
+        payload?.token || payload?.accessToken || payload?.access_token;
 
       if (!token) {
-        throw new UltraFv3IntegrationError("UltraFV3 autenticou, mas não retornou token de acesso.", "invalid_response", response.status);
+        throw new UltraFv3IntegrationError(
+          "UltraFV3 autenticou, mas não retornou token de acesso.",
+          "invalid_response",
+          response.status,
+        );
       }
 
       this.token = token;
-      this.tokenExpiresAt = payload ? this.resolveTokenExpiration(payload) : null;
+      this.tokenExpiresAt = payload
+        ? this.resolveTokenExpiration(payload)
+        : null;
       this.erpOperator = payload?.operador ?? payload?.operator ?? null;
       this.erpSalesman = payload?.vendedor ?? payload?.salesman ?? null;
       return token;
@@ -191,7 +280,11 @@ class UltraFv3Client {
 
   async request<T>(
     path: string,
-    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string> }
+    options?: {
+      method?: "GET" | "POST" | "PUT";
+      body?: unknown;
+      headers?: Record<string, string>;
+    },
   ): Promise<T> {
     this.ensureConfig();
 
@@ -201,7 +294,7 @@ class UltraFv3Client {
     }
 
     const method = options?.method || "GET";
-    const execute = async () => {
+    const execute = async (attempt: number) => {
       const headers = {
         ...DEFAULT_HEADERS,
         ...(options?.headers || {}),
@@ -213,37 +306,79 @@ class UltraFv3Client {
       }
 
       try {
-        return await fetch(`${this.baseUrl}${path}`, { ...requestInit, signal: this.buildTimeoutSignal() });
+        return await this.fetchWithTimeout(
+          `${this.baseUrl}${path}`,
+          requestInit,
+          { method, path, attempt },
+        );
       } catch (error) {
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível ao consultar ${path}: ${error instanceof Error ? error.message : String(error)}`,
-          "unavailable"
+          "unavailable",
         );
       }
     };
 
-    let response = await execute();
+    let response: Response;
+    try {
+      response = await execute(1);
+    } catch (error) {
+      if (method !== "GET") throw error;
+      logApiEvent("WARN", "[ultrafv3 http] retrying unavailable GET failure", {
+        method,
+        path,
+        retryDelayMs: ULTRAFV3_GET_RETRY_DELAY_MS,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await sleep(ULTRAFV3_GET_RETRY_DELAY_MS);
+      response = await execute(2);
+    }
+
+    if (method === "GET" && RETRIABLE_STATUS_CODES.has(response.status)) {
+      logApiEvent("WARN", "[ultrafv3 http] retrying transient GET failure", {
+        method,
+        path,
+        status: response.status,
+        retryDelayMs: ULTRAFV3_GET_RETRY_DELAY_MS,
+      });
+      await sleep(ULTRAFV3_GET_RETRY_DELAY_MS);
+      response = await execute(2);
+    }
 
     if (response.status === 401) {
       this.token = null;
       await this.login();
-      response = await execute();
+      response = await execute(
+        method === "GET" && RETRIABLE_STATUS_CODES.has(response.status) ? 3 : 2,
+      );
     }
 
     if (response.status === 401 || response.status === 403) {
-      const error = new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path}.`, "auth_failed", response.status);
+      const error = new UltraFv3IntegrationError(
+        `Erro de autenticação no UltraFV3 ao consultar ${path}.`,
+        "auth_failed",
+        response.status,
+      );
       this.lastError = error.message;
       throw error;
     }
 
     if (response.status === 404) {
-      const error = new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}.`, "not_found", response.status);
+      const error = new UltraFv3IntegrationError(
+        `Endpoint UltraFV3 inexistente: ${path}.`,
+        "not_found",
+        response.status,
+      );
       this.lastError = error.message;
       throw error;
     }
 
     if (!response.ok) {
-      const error = new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}.`, "request_failed", response.status);
+      const error = new UltraFv3IntegrationError(
+        `UltraFV3 retornou status ${response.status} ao consultar ${path}.`,
+        "request_failed",
+        response.status,
+      );
       this.lastError = error.message;
       throw error;
     }
