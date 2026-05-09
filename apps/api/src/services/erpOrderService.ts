@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { ultraFv3Client } from "./ultraFv3Client.js";
+import { requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
@@ -450,9 +451,9 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
         query,
         correlationId,
       });
-      const response = await ultraFv3Client.request<unknown>(
+      const response = await requestUltraFv3ReadOnlyWithRetry<unknown>(
         `/orderStatus?pedido=${encodeURIComponent(query)}`,
-        { correlationId },
+        correlationId,
       );
       const rows = toArray(response);
       const statusPayload = (

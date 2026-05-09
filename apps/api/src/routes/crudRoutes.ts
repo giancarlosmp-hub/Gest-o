@@ -43,6 +43,7 @@ import {
 } from "../services/ai/index.js";
 import {
   getUltraFv3IntegrationDiagnostics,
+  getUltraFv3SyncHistory,
   getUltraFv3SyncStatus,
   syncBranches,
   syncConnection,
@@ -52,7 +53,8 @@ import {
   syncPriceTables,
   syncProducts,
   syncReceivingConditions,
-  syncSalesmen
+  syncSalesmen,
+  syncOrderStatus
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, syncErpOrderStatuses } from "../services/erpOrderService.js";
@@ -5824,7 +5826,7 @@ router.post("/opportunities/:id/erp/orders/status", async (req, res) => {
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     logApiEvent("ERROR", "[erp order status route] opportunity status sync failed", { opportunityId: req.params.id, error: details });
-    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
   }
 });
 
@@ -6821,7 +6823,7 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     logApiEvent("ERROR", "[ultrafv3 sync route] scope sync failed", { scope, error: details });
-    return res.status(502).json({
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
       scope,
       message: "Falha na sincronização UltraFV3.",
       details
@@ -6840,12 +6842,12 @@ router.post("/erp/ultrafv3/sync/branches", authorize("diretor", "gerente"), runU
 router.post("/erp/ultrafv3/sync/operations", authorize("diretor", "gerente"), runUltraFv3Sync("operations"));
 router.post("/erp/ultrafv3/sync/order-status", authorize("diretor", "gerente"), async (_req, res) => {
   try {
-    const result = await syncErpOrderStatuses();
-    return res.status(200).json(result);
+    const result = await syncOrderStatus(() => syncErpOrderStatuses());
+    return res.status(200).json({ scope: "orderStatus", ...result });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     logApiEvent("ERROR", "[erp order status route] global status sync failed", { error: details });
-    return res.status(502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
   }
 });
 
@@ -6862,10 +6864,28 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
     prisma.client.count(),
     getErpOrderOperationalSummary()
   ]);
-  return res.status(200).json({ status, integration, productCount, clientCount, operational });
+  const history = await getUltraFv3SyncHistory(10);
+  return res.status(200).json({ status, integration, productCount, clientCount, operational, history });
 });
 
+router.get("/erp/ultrafv3/sync/history", authorize("diretor", "gerente"), async (req, res) => {
+  const limit = Number(req.query.limit ?? 20);
+  const history = await getUltraFv3SyncHistory(Number.isFinite(limit) ? limit : 20);
+  return res.status(200).json({ items: history });
+});
 
+router.get("/erp/ultrafv3/healthcheck", authorize("diretor", "gerente"), async (_req, res) => {
+  const status = await getUltraFv3SyncStatus();
+  const integration = getUltraFv3IntegrationDiagnostics(status);
+  const operational = await getErpOrderOperationalSummary();
+  const hasOperationalErrors = Object.values(status).some((item) => item.status === "error") || operational.errorOrders > 0;
+  return res.status(hasOperationalErrors ? 207 : 200).json({
+    ok: integration.isConfigured && !hasOperationalErrors,
+    integration,
+    operational,
+    status,
+  });
+});
 
 router.get("/erp/ultrafv3/diagnostics", authorize("diretor", "gerente"), async (_req, res) => {
   const status = await getUltraFv3SyncStatus();
