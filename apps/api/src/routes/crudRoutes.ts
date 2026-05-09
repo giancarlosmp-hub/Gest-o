@@ -55,7 +55,7 @@ import {
   syncSalesmen
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
-import { createErpOrderFromOpportunity, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { logApiEvent } from "../utils/logger.js";
 
 const router = Router();
@@ -205,7 +205,8 @@ const erpOrderGenerationSchema = z.object({
   receivingConditionCode: z.string().trim().min(1),
   priceTableCode: z.string().trim().min(1),
   branchCode: z.string().trim().min(1),
-  operationCode: z.string().trim().min(1)
+  operationCode: z.string().trim().min(1),
+  simulateOnly: z.boolean().optional().default(false)
 });
 
 const formatDateDot = (date: Date) => {
@@ -5757,11 +5758,15 @@ router.get("/opportunities/:id", async (req, res) => {
 
 router.post("/opportunities/:id/erp/orders", async (req, res) => {
   const parsed = erpOrderGenerationSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ message: parsed.error.issues[0]?.message || "Payload inválido" });
+  if (!parsed.success) {
+    const message = parsed.error.issues[0]?.message || "Payload inválido";
+    logApiEvent("WARN", "[erp order route] invalid payload", { opportunityId: req.params.id, error: message });
+    return res.status(400).json({ message: `Payload inválido: ${message}` });
+  }
 
   const opportunity = await prisma.opportunity.findFirst({
     where: { id: req.params.id, ...sellerWhere(req) },
-    include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }] } }
+    include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
   });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
@@ -5774,6 +5779,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       erpOrderNumber: sync.erpOrderNumber,
       status: sync.status,
       orderStatus: sync.orderStatus,
+      simulated: parsed.data.simulateOnly,
       response: sync.erpResponse
     });
   } catch (error: any) {
@@ -5783,6 +5789,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       httpStatus: status,
       pedidoIdImportacao: error?.pedidoIdImportacao,
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
+      simulateOnly: parsed.data.simulateOnly,
       error: error?.message || "Erro no envio ao ERP"
     });
     return res.status(status >= 400 && status < 600 ? status : 502).json({
@@ -6850,11 +6857,33 @@ router.get("/erp/ultrafv3/salesmen/options", authorize("diretor", "gerente"), as
 router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (_req, res) => {
   const status = await getUltraFv3SyncStatus();
   const integration = getUltraFv3IntegrationDiagnostics(status);
-  const [productCount, clientCount] = await Promise.all([
+  const [productCount, clientCount, operational] = await Promise.all([
     prisma.product.count({ where: { isActive: true } }),
-    prisma.client.count()
+    prisma.client.count(),
+    getErpOrderOperationalSummary()
   ]);
-  return res.status(200).json({ status, integration, productCount, clientCount });
+  return res.status(200).json({ status, integration, productCount, clientCount, operational });
+});
+
+
+
+router.get("/erp/ultrafv3/diagnostics", authorize("diretor", "gerente"), async (_req, res) => {
+  const status = await getUltraFv3SyncStatus();
+  const integration = getUltraFv3IntegrationDiagnostics(status);
+  const operational = await getErpOrderOperationalSummary();
+  return res.status(200).json({
+    ultraFv3Status: integration.authenticationStatus,
+    lastLoginAt: integration.lastLoginAt ?? null,
+    tokenExpired: Boolean(integration.tokenExpired),
+    tokenExpiresAt: integration.tokenExpiresAt ?? null,
+    lastProductsSyncAt: status.products.lastSyncAt ?? null,
+    lastPartnersSyncAt: status.partners.lastSyncAt ?? null,
+    pendingOrders: operational.pendingOrders,
+    errorOrders: operational.errorOrders,
+    operational,
+    integration,
+    status,
+  });
 });
 
 router.get("/settings/weekly-visit-minimum", async (_req, res) => {

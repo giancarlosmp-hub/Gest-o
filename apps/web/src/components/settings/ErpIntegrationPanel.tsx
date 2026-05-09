@@ -20,6 +20,8 @@ type SyncScopeStatus = {
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
+  correlationId?: string;
+  durationMs?: number;
   diagnostics?: Record<string, number>;
 };
 
@@ -29,12 +31,24 @@ type IntegrationDiagnostics = {
   missingConfig: string[];
   authenticationStatus: "missing_config" | "authenticated" | "not_authenticated" | "auth_failed" | string;
   lastError: string | null;
+  lastLoginAt?: string | null;
+  tokenExpiresAt?: string | null;
+  tokenExpired?: boolean;
   guidance: string;
+};
+
+type OperationalSummary = {
+  sentOrders: number;
+  pendingOrders: number;
+  errorOrders: number;
+  syncedOrders: number;
+  lastOrderActivityAt?: string | null;
 };
 
 type SyncStatusResponse = {
   status: Record<SyncScopeKey, SyncScopeStatus>;
   integration?: IntegrationDiagnostics;
+  operational?: OperationalSummary;
   productCount: number;
   clientCount: number;
 };
@@ -154,7 +168,7 @@ export default function ErpIntegrationPanel() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-6">
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Base URL UltraFV3</p>
             <p className={integration?.baseUrl ? "mt-1 break-all text-slate-900" : "mt-1 text-red-700"}>{integration?.baseUrl || "Ausente"}</p>
@@ -166,6 +180,14 @@ export default function ErpIntegrationPanel() {
             </span>
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Último login</p>
+            <p className="mt-1 text-slate-900">{formatDate(integration?.lastLoginAt || undefined)}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Token</p>
+            <p className={integration?.tokenExpired ? "mt-1 text-red-700" : "mt-1 text-slate-900"}>{integration?.tokenExpired ? "Expirado" : "Válido/indeterminado"}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Último erro</p>
             <p className={integration?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>{integration?.lastError || "Nenhum erro registrado."}</p>
           </div>
@@ -175,6 +197,24 @@ export default function ErpIntegrationPanel() {
               {missingConfig.length ? missingConfig.join(", ") : integration?.guidance || "Configuração mínima presente."}
             </p>
           </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-5">
+        {[
+          { label: "Pedidos enviados", value: data?.operational?.sentOrders ?? 0 },
+          { label: "Pendentes", value: data?.operational?.pendingOrders ?? 0 },
+          { label: "Erro", value: data?.operational?.errorOrders ?? 0 },
+          { label: "Sincronizados", value: data?.operational?.syncedOrders ?? 0 },
+        ].map((item) => (
+          <div key={item.label} className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
+            <p className="text-xs font-semibold text-slate-500">{item.label}</p>
+            <p className="mt-1 text-2xl font-bold text-slate-900">{item.value}</p>
+          </div>
+        ))}
+        <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
+          <p className="text-xs font-semibold text-slate-500">Último sync</p>
+          <p className="mt-1 text-sm font-bold text-slate-900">{formatDate(data?.operational?.lastOrderActivityAt || data?.status?.products?.lastSyncAt || data?.status?.partners?.lastSyncAt)}</p>
         </div>
       </div>
 
@@ -211,7 +251,7 @@ export default function ErpIntegrationPanel() {
 
               {status.diagnostics && Object.keys(status.diagnostics).length > 0 && (
                 <div className="mt-3 rounded-lg bg-slate-50 p-2 text-[11px] text-slate-600">
-                  {Object.entries(status.diagnostics).slice(0, 4).map(([key, value]) => (
+                  {Object.entries(status.diagnostics).slice(0, 6).map(([key, value]) => (
                     <p key={key} className="flex justify-between gap-2"><span>{key}</span><strong>{value}</strong></p>
                   ))}
                 </div>
@@ -219,6 +259,8 @@ export default function ErpIntegrationPanel() {
 
               <div className={`mt-3 rounded-lg p-2 text-xs ${status.status === "error" ? "bg-red-50 text-red-700" : "bg-slate-50 text-slate-500"}`}>
                 <span className="font-semibold">Erro mais recente: </span>{latestError(status)}
+                {status.correlationId ? <p className="mt-1 break-all"><span className="font-semibold">correlationId: </span>{status.correlationId}</p> : null}
+                {status.durationMs ? <p className="mt-1"><span className="font-semibold">Duração: </span>{status.durationMs}ms</p> : null}
               </div>
 
               <button

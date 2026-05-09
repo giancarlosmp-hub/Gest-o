@@ -119,10 +119,11 @@ type ErpOrderForm = {
   priceTableCode: string;
   branchCode: string;
   operationCode: string;
+  simulateOnly: boolean;
 };
 
 type ErpOrderFeedback = {
-  status: "enviado" | "erro";
+  status: "enviado" | "simulado" | "erro";
   pedidoIdImportacao?: string;
   erpOrderNumber?: string | null;
   message?: string;
@@ -178,7 +179,8 @@ const emptyErpOrderForm: ErpOrderForm = {
   receivingConditionCode: "",
   priceTableCode: "",
   branchCode: "",
-  operationCode: ""
+  operationCode: "",
+  simulateOnly: false
 };
 
 const getTextValue = (value: unknown) => (value == null ? "" : String(value).trim());
@@ -368,7 +370,7 @@ export default function OpportunityDetailsPage() {
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
   const canGenerateErpOrder = item?.stage === "ganho";
 
-  const setErpOrderField = (field: keyof ErpOrderForm, value: string) => {
+  const setErpOrderField = (field: keyof Omit<ErpOrderForm, "simulateOnly">, value: string) => {
     setErpOrderForm((current) => ({ ...current, [field]: value }));
   };
 
@@ -404,6 +406,7 @@ export default function OpportunityDetailsPage() {
       setOperations(nextOperations);
       setErpOrders(Array.isArray(erpOrdersResponse.data?.items) ? erpOrdersResponse.data.items : []);
       setErpOrderForm((current) => ({
+        ...current,
         paymentMethodCode: current.paymentMethodCode || firstOptionCode(nextPaymentMethods),
         receivingConditionCode: current.receivingConditionCode || firstOptionCode(nextReceivingConditions),
         priceTableCode: current.priceTableCode || firstOptionCode(nextPriceTables),
@@ -428,10 +431,12 @@ export default function OpportunityDetailsPage() {
     setErpOrderFeedback(null);
     try {
       const response = await api.post(`/opportunities/${item.id}/erp/orders`, erpOrderForm);
-      setErpOrderFeedback({ status: "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber });
-      const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
-      setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
-      toast.success("Pedido enviado ao ERP");
+      setErpOrderFeedback({ status: response.data?.simulated ? "simulado" : "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber });
+      if (!response.data?.simulated) {
+        const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
+        setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
+      }
+      toast.success(response.data?.simulated ? "Simulação ERP validada sem envio real" : "Pedido enviado ao ERP");
     } catch (error) {
       const message = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
       const maybeResponse = (error as any)?.response?.data;
@@ -768,6 +773,15 @@ export default function OpportunityDetailsPage() {
                         <SearchableSelect label="Filial" value={erpOrderForm.branchCode} options={branches} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("branchCode", value)} />
                         <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("operationCode", value)} />
                       </div>
+                      <label className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 rounded border-amber-300"
+                          checked={erpOrderForm.simulateOnly}
+                          onChange={(event) => setErpOrderForm((current) => ({ ...current, simulateOnly: event.target.checked }))}
+                        />
+                        <span><strong>Simulação ERP:</strong> validar payload, vínculos, parâmetros, preço e estoque sem enviar pedido real ao UltraFV3.</span>
+                      </label>
                     </section>
 
                     <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -847,8 +861,8 @@ export default function OpportunityDetailsPage() {
                       </div>
 
                       {erpOrderFeedback ? (
-                        <div className={`mt-5 rounded-2xl border p-4 text-sm ${erpOrderFeedback.status === "enviado" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
-                          <p className="font-bold">{erpOrderFeedback.status === "enviado" ? "Pedido enviado" : "Erro ERP"}</p>
+                        <div className={`mt-5 rounded-2xl border p-4 text-sm ${erpOrderFeedback.status !== "erro" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+                          <p className="font-bold">{erpOrderFeedback.status === "simulado" ? "Simulação ERP validada" : erpOrderFeedback.status === "enviado" ? "Pedido enviado" : "Erro ERP"}</p>
                           {erpOrderFeedback.pedidoIdImportacao ? <p className="mt-1 break-all">pedidoIdImportacao: <strong>{erpOrderFeedback.pedidoIdImportacao}</strong></p> : null}
                           {erpOrderFeedback.erpOrderNumber ? <p className="mt-1">Pedido ERP: <strong>{erpOrderFeedback.erpOrderNumber}</strong></p> : null}
                           {erpOrderFeedback.message ? <p className="mt-1">{erpOrderFeedback.message}</p> : null}
@@ -885,9 +899,9 @@ export default function OpportunityDetailsPage() {
                         onClick={onSendErpOrder}
                         className="mt-5 w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/20 transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
-                        {sendingErpOrder ? "Enviando ao ERP..." : "Enviar pedido ao ERP"}
+                        {sendingErpOrder ? (erpOrderForm.simulateOnly ? "Validando simulação..." : "Enviando ao ERP...") : erpOrderForm.simulateOnly ? "Validar simulação ERP" : "Enviar pedido ao ERP"}
                       </button>
-                      <p className="mt-3 text-center text-xs text-slate-500">O backend confirma vínculos, itens, unidade, códigos ERP e retorno UltraFV3.</p>
+                      <p className="mt-3 text-center text-xs text-slate-500">O backend bloqueia cliente/vendedor sem ERP, oportunidade sem itens, preço zerado, estoque insuficiente e payload inválido antes do envio.</p>
                     </section>
                   </aside>
                 </div>

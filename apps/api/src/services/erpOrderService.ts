@@ -3,6 +3,7 @@ import {
   ErpOrderSyncStatus,
   Prisma,
   type OpportunityItem,
+  type Product,
   type User,
 } from "@prisma/client";
 import { randomUUID } from "node:crypto";
@@ -22,6 +23,7 @@ type OrderParameterCodes = {
   priceTableCode: string;
   branchCode: string;
   operationCode: string;
+  simulateOnly?: boolean;
 };
 
 type OpportunityForErpOrder = {
@@ -29,7 +31,7 @@ type OpportunityForErpOrder = {
   stage: string;
   client: { code: string | null };
   ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode">;
-  items: OpportunityItem[];
+  items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity"> | null }>;
 };
 
 const pickFirstValue = (payload: Record<string, unknown>, keys: string[]) => {
@@ -96,6 +98,31 @@ const normalizeOrderStatus = (
     return ErpOrderFulfillmentStatus.pendente;
   return null;
 };
+
+
+const referenceCodeKeys: Record<string, string[]> = {
+  priceTables: ["code", "codigo", "CODIGO", "id", "ID", "value", "TABELA_PRECO"],
+  operations: ["code", "codigo", "CODIGO", "id", "ID", "value", "CODOPER"],
+};
+
+async function assertReferenceCode(scope: "priceTables" | "operations", code: string, message: string) {
+  const stored = await prisma.appConfig.findUnique({
+    where: { key: `erp.ultrafv3.${scope}` },
+    select: { value: true },
+  });
+  if (!stored?.value) return;
+  try {
+    const rows = toArray(JSON.parse(stored.value));
+    if (!rows.length) return;
+    const exists = rows.some((row) => {
+      if (!row || typeof row !== "object") return false;
+      return pickFirstString(row as Record<string, unknown>, referenceCodeKeys[scope]) === code;
+    });
+    if (!exists) throw Object.assign(new Error(message), { status: 400 });
+  } catch (error) {
+    if (error instanceof Error && (error as any).status) throw error;
+  }
+}
 
 const extractErpOrderNumber = (payload: unknown) => {
   if (!payload || typeof payload !== "object") return null;
@@ -175,32 +202,50 @@ export async function createErpOrderFromOpportunity(
 ) {
   if (opportunity.stage !== "ganho")
     throw Object.assign(
-      new Error("Apenas oportunidades na etapa Ganha podem gerar pedido ERP."),
+      new Error("Operação inválida: apenas oportunidades na etapa Ganha podem gerar pedido ERP."),
       { status: 400 },
     );
-  if (!opportunity.client.code)
-    throw Object.assign(new Error("Cliente sem código ERP."), { status: 400 });
+
+  const clientErpCode = opportunity.client.code?.trim();
+  if (!clientErpCode)
+    throw Object.assign(new Error("Cliente inválido: cliente sem código ERP."), { status: 400 });
 
   const sellerErpCode = opportunity.ownerSeller.erpCode?.trim();
   const operatorCode = opportunity.ownerSeller.erpOperatorCode?.trim();
   if (!sellerErpCode)
-    throw Object.assign(new Error("Vendedor sem CODVENDEDOR ERP vinculado."), {
+    throw Object.assign(new Error("Vendedor sem vínculo ERP: informe o CODVENDEDOR no cadastro do usuário."), {
       status: 400,
     });
   if (!operatorCode)
-    throw Object.assign(new Error("Vendedor sem OPERADOR ERP vinculado."), {
+    throw Object.assign(new Error("Vendedor sem operador ERP: informe o OPERADOR no cadastro do usuário."), {
       status: 400,
     });
   if (!opportunity.items.length)
-    throw Object.assign(new Error("Oportunidade sem itens para envio."), {
+    throw Object.assign(new Error("Operação inválida: oportunidade sem itens para envio ao ERP."), {
       status: 400,
     });
   if (opportunity.items.some((item) => !item.erpProductCode?.trim()))
-    throw Object.assign(new Error("Há item sem código ERP."), { status: 400 });
+    throw Object.assign(new Error("Payload inválido: há item sem código ERP."), { status: 400 });
   if (opportunity.items.some((item) => !item.unit?.trim()))
-    throw Object.assign(new Error("Há item sem unidade de medida."), {
+    throw Object.assign(new Error("Payload inválido: há item sem unidade de medida."), {
       status: 400,
     });
+  if (opportunity.items.some((item) => Number(item.unitPrice) <= 0 || Number(item.netTotal) <= 0))
+    throw Object.assign(new Error("Payload inválido: pedido ERP bloqueado por item com preço zerado."), {
+      status: 400,
+    });
+  const insufficientStockItem = opportunity.items.find((item) => {
+    const stockQuantity = item.product?.stockQuantity;
+    return typeof stockQuantity === "number" && stockQuantity < Number(item.quantity || 0);
+  });
+  if (insufficientStockItem)
+    throw Object.assign(
+      new Error(`Estoque insuficiente para ${insufficientStockItem.productNameSnapshot}. Disponível: ${insufficientStockItem.product?.stockQuantity ?? 0}.`),
+      { status: 400 },
+    );
+
+  await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
+  await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
 
   const now = new Date();
   const pedidoIdImportacao = randomUUID();
@@ -257,12 +302,38 @@ export async function createErpOrderFromOpportunity(
     TABELA_PRECO: params.priceTableCode,
     CODFILIAL: params.branchCode,
     CODOPER: params.operationCode,
-    PARCEIRO: opportunity.client.code,
+    PARCEIRO: clientErpCode,
     VENDEDOR: sellerErpCode,
     VALOR_BRUTO: valorBruto,
     VALOR_LIQUIDO: valorLiquido,
     ITENS: itens,
   };
+
+  if (params.simulateOnly) {
+    logApiEvent("INFO", "[erp order simulation] UltraFV3 order payload validated without submission", {
+      ...operationContext,
+      pedidoIdImportacao,
+      numPedido,
+    });
+    return {
+      id: `simulation-${pedidoIdImportacao}`,
+      opportunityId: opportunity.id,
+      sellerId: opportunity.ownerSeller.id,
+      pedidoIdImportacao,
+      numPedido,
+      erpOrderNumber: null,
+      status: ErpOrderSyncStatus.pending,
+      orderStatus: null,
+      payloadSent: toJson(payload),
+      erpResponse: toJson({ simulation: true, message: "Payload validado em modo simulação ERP. Pedido real não enviado." }),
+      syncErrors: null,
+      lastStatusPayload: null,
+      sentAt: null,
+      statusSyncedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
 
   const sync = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}, hashtext(${opportunity.id}))`;
@@ -311,6 +382,7 @@ export async function createErpOrderFromOpportunity(
     const erpResponse = await ultraFv3Client.request<unknown>("/orders", {
       method: "POST",
       body: payload,
+      correlationId: pedidoIdImportacao,
     });
     const erpOrderNumber = extractErpOrderNumber(erpResponse) || numPedido;
     const updated = await prisma.erpOrderSync.update({
@@ -338,7 +410,7 @@ export async function createErpOrderFromOpportunity(
       data: {
         status: ErpOrderSyncStatus.error,
         erpResponse: toJson({ message }),
-        syncErrors: toJson([{ message, at: new Date().toISOString() }]),
+        syncErrors: toJson([{ message, at: new Date().toISOString(), correlationId: pedidoIdImportacao }]),
       },
     });
     logApiEvent("ERROR", "[erp order] UltraFV3 order submission failed", {
@@ -370,8 +442,17 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
     const query =
       order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao;
     try {
+      const correlationId = randomUUID();
+      logApiEvent("INFO", "[erp order status] querying UltraFV3 orderStatus", {
+        erpOrderSyncId: order.id,
+        opportunityId: order.opportunityId,
+        pedidoIdImportacao: order.pedidoIdImportacao,
+        query,
+        correlationId,
+      });
       const response = await ultraFv3Client.request<unknown>(
         `/orderStatus?pedido=${encodeURIComponent(query)}`,
+        { correlationId },
       );
       const rows = toArray(response);
       const statusPayload = (
@@ -430,4 +511,29 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
   }
 
   return { syncedCount, errorCount };
+}
+
+
+export async function getErpOrderOperationalSummary() {
+  const [sentOrders, pendingOrders, errorOrders, fulfilledOrders, lastOrderSync] = await Promise.all([
+    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.sent } }),
+    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.pending } }),
+    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.error } }),
+    prisma.erpOrderSync.count({ where: { orderStatus: { not: null } } }),
+    prisma.erpOrderSync.findFirst({
+      orderBy: [{ updatedAt: "desc" }],
+      select: { updatedAt: true, sentAt: true, statusSyncedAt: true },
+    }),
+  ]);
+
+  return {
+    sentOrders,
+    pendingOrders,
+    errorOrders,
+    syncedOrders: fulfilledOrders,
+    lastOrderActivityAt: lastOrderSync?.statusSyncedAt?.toISOString()
+      ?? lastOrderSync?.sentAt?.toISOString()
+      ?? lastOrderSync?.updatedAt.toISOString()
+      ?? null,
+  };
 }
