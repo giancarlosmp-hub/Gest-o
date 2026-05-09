@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { logApiEvent } from "../utils/logger.js";
 
@@ -70,6 +71,7 @@ class UltraFv3Client {
   private tokenExpiresAt: Date | null = null;
   private erpOperator: unknown = null;
   private erpSalesman: unknown = null;
+  private lastLoginAt: Date | null = null;
   private tokenPromise: Promise<string> | null = null;
   private lastError: string | null = null;
 
@@ -110,6 +112,8 @@ class UltraFv3Client {
       authenticationStatus,
       lastError: this.lastError,
       tokenExpiresAt: this.tokenExpiresAt?.toISOString() ?? null,
+      lastLoginAt: this.lastLoginAt?.toISOString() ?? null,
+      tokenExpired: this.isTokenExpired(),
       erpOperator: this.erpOperator,
       erpSalesman: this.erpSalesman,
     };
@@ -160,7 +164,7 @@ class UltraFv3Client {
   private async fetchWithTimeout(
     url: string,
     init: RequestInit,
-    context: { method: string; path: string; attempt: number },
+    context: { method: string; path: string; attempt: number; correlationId: string },
   ) {
     const startedAt = Date.now();
     try {
@@ -175,16 +179,19 @@ class UltraFv3Client {
           method: context.method,
           path: context.path,
           attempt: context.attempt,
+          correlationId: context.correlationId,
           status: response.status,
           durationMs: Date.now() - startedAt,
         },
       );
       return response;
     } catch (error) {
-      logApiEvent("ERROR", "[ultrafv3 http] request failed", {
+      const isTimeout = error instanceof Error && /abort|timeout|timed out/i.test(`${error.name} ${error.message}`);
+      logApiEvent("ERROR", isTimeout ? "[ultrafv3 timeout] request timed out" : "[ultrafv3 http] request failed", {
         method: context.method,
         path: context.path,
         attempt: context.attempt,
+        correlationId: context.correlationId,
         durationMs: Date.now() - startedAt,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -210,7 +217,7 @@ class UltraFv3Client {
               password: env.ultraFv3Password,
             }),
           },
-          { method: "POST", path: "/auth/login", attempt: 1 },
+          { method: "POST", path: "/auth/login", attempt: 1, correlationId: randomUUID() },
         );
       } catch (error) {
         throw new UltraFv3IntegrationError(
@@ -263,6 +270,11 @@ class UltraFv3Client {
         : null;
       this.erpOperator = payload?.operador ?? payload?.operator ?? null;
       this.erpSalesman = payload?.vendedor ?? payload?.salesman ?? null;
+      this.lastLoginAt = new Date();
+      logApiEvent("INFO", "[ultrafv3 auth] login succeeded", {
+        lastLoginAt: this.lastLoginAt.toISOString(),
+        tokenExpiresAt: this.tokenExpiresAt?.toISOString() ?? null,
+      });
       return token;
     })();
 
@@ -284,6 +296,7 @@ class UltraFv3Client {
       method?: "GET" | "POST" | "PUT";
       body?: unknown;
       headers?: Record<string, string>;
+      correlationId?: string;
     },
   ): Promise<T> {
     this.ensureConfig();
@@ -294,6 +307,7 @@ class UltraFv3Client {
     }
 
     const method = options?.method || "GET";
+    const correlationId = options?.correlationId || randomUUID();
     const execute = async (attempt: number) => {
       const headers = {
         ...DEFAULT_HEADERS,
@@ -309,7 +323,7 @@ class UltraFv3Client {
         return await this.fetchWithTimeout(
           `${this.baseUrl}${path}`,
           requestInit,
-          { method, path, attempt },
+          { method, path, attempt, correlationId },
         );
       } catch (error) {
         throw new UltraFv3IntegrationError(
@@ -327,6 +341,7 @@ class UltraFv3Client {
       logApiEvent("WARN", "[ultrafv3 http] retrying unavailable GET failure", {
         method,
         path,
+        correlationId,
         retryDelayMs: ULTRAFV3_GET_RETRY_DELAY_MS,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -338,6 +353,7 @@ class UltraFv3Client {
       logApiEvent("WARN", "[ultrafv3 http] retrying transient GET failure", {
         method,
         path,
+        correlationId,
         status: response.status,
         retryDelayMs: ULTRAFV3_GET_RETRY_DELAY_MS,
       });

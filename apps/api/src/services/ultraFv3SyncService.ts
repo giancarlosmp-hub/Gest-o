@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
 import { ultraFv3Client } from "./ultraFv3Client.js";
 import { logApiEvent } from "../utils/logger.js";
@@ -23,6 +24,8 @@ type SyncStatusPayload = {
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
+  correlationId?: string;
+  durationMs?: number;
   diagnostics?: Record<string, number>;
 };
 
@@ -34,6 +37,9 @@ type UltraFv3IntegrationDiagnostics = {
   missingConfig: string[];
   authenticationStatus: "missing_config" | "authenticated" | "not_authenticated" | "auth_failed";
   lastError: string | null;
+  lastLoginAt?: string | null;
+  tokenExpiresAt?: string | null;
+  tokenExpired?: boolean;
   guidance: string;
 };
 
@@ -69,8 +75,8 @@ const toArray = (payload: unknown) => {
 
 const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope) {
-  const response = await ultraFv3Client.request<unknown>(endpoint);
+async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, correlationId: string) {
+  const response = await ultraFv3Client.request<unknown>(endpoint, { correlationId });
   const rows = toArray(response);
   if (!rows.length) {
     throw new Error(`Retorno vazio do UltraFV3 para ${scope} (${endpoint}).`);
@@ -89,33 +95,37 @@ async function writeSyncStatus(payload: SyncStatusPayload) {
   });
 }
 
-async function runSync(scope: UltraFv3SyncScope, runner: () => Promise<SyncResult>) {
-  await writeSyncStatus({ scope, status: "running", lastSyncAt: new Date().toISOString(), syncedCount: 0 });
-  logApiEvent("INFO", `[ultrafv3 sync] ${scope} started`, { scope });
+async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string) => Promise<SyncResult>) {
+  const correlationId = randomUUID();
+  const startedAt = Date.now();
+  await writeSyncStatus({ scope, status: "running", lastSyncAt: new Date().toISOString(), syncedCount: 0, correlationId });
+  logApiEvent("INFO", `[ultrafv3 sync] ${scope} started`, { scope, correlationId });
 
   try {
-    const result = await runner();
-    await writeSyncStatus({ scope, status: "success", lastSyncAt: new Date().toISOString(), ...result });
-    logApiEvent("INFO", `[ultrafv3 sync] ${scope} finished`, { scope, ...result });
+    const result = await runner(correlationId);
+    const durationMs = Date.now() - startedAt;
+    await writeSyncStatus({ scope, status: "success", lastSyncAt: new Date().toISOString(), correlationId, durationMs, ...result });
+    logApiEvent("INFO", `[ultrafv3 sync] ${scope} finished`, { scope, correlationId, durationMs, ...result });
     return result;
   } catch (error) {
     const message = formatError(error);
-    await writeSyncStatus({ scope, status: "error", lastSyncAt: new Date().toISOString(), syncedCount: 0, errors: [message] });
-    logApiEvent("ERROR", `[ultrafv3 sync] ${scope} failed`, { scope, error: message });
+    const durationMs = Date.now() - startedAt;
+    await writeSyncStatus({ scope, status: "error", lastSyncAt: new Date().toISOString(), syncedCount: 0, errors: [message], correlationId, durationMs });
+    logApiEvent("ERROR", `[ultrafv3 sync] ${scope} failed`, { scope, correlationId, durationMs, error: message });
     throw error;
   }
 }
 
 export async function syncConnection() {
-  return runSync("connection", async () => {
-    await ultraFv3Client.request<unknown>("/health");
+  return runSync("connection", async (correlationId) => {
+    await ultraFv3Client.request<unknown>("/health", { correlationId });
     return { syncedCount: 1 };
   });
 }
 
 export async function syncProducts() {
-  return runSync("products", async () => {
-    const rows = await fetchUltraFv3Rows("/products", "products");
+  return runSync("products", async (correlationId) => {
+    const rows = await fetchUltraFv3Rows("/products", "products", correlationId);
     const diagnostics = {
       received: rows.length,
       invalidInactive: 0,
@@ -213,13 +223,14 @@ export async function syncProducts() {
       syncedCount += 1;
     }
 
+    logApiEvent("INFO", "[ultrafv3 sync products] processed products payload", { correlationId, syncedCount, diagnostics });
     return { syncedCount, diagnostics };
   });
 }
 
 export async function syncPartners() {
-  return runSync("partners", async () => {
-    const rows = await fetchUltraFv3Rows("/partners", "partners");
+  return runSync("partners", async (correlationId) => {
+    const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId);
     const fallbackSeller = await prisma.user.findFirst({ where: { role: "vendedor", isActive: true }, select: { id: true } });
     if (!fallbackSeller) throw new Error("Nenhum vendedor ativo encontrado para vincular clientes sincronizados.");
 
@@ -256,12 +267,14 @@ export async function syncPartners() {
       else await prisma.client.create({ data });
       syncedCount += 1;
     }
-    return { syncedCount, diagnostics: { received: rows.length, withoutCode: rows.length - syncedCount } };
+    const diagnostics = { received: rows.length, withoutCode: rows.length - syncedCount };
+    logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics });
+    return { syncedCount, diagnostics };
   });
 }
 async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners">, endpoint: string) {
-  return runSync(scope, async () => {
-    const rows = await fetchUltraFv3Rows(endpoint, scope);
+  return runSync(scope, async (correlationId) => {
+    const rows = await fetchUltraFv3Rows(endpoint, scope, correlationId);
     await prisma.appConfig.upsert({
       where: { key: `erp.ultrafv3.${scope}` },
       update: { value: JSON.stringify(rows) },
