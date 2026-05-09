@@ -361,12 +361,16 @@ class UltraFv3Client {
       response = await execute(2);
     }
 
-    if (response.status === 401) {
+    if (response.status === 401 && method === "GET") {
       this.token = null;
       await this.login();
       response = await execute(
-        method === "GET" && RETRIABLE_STATUS_CODES.has(response.status) ? 3 : 2,
+        RETRIABLE_STATUS_CODES.has(response.status) ? 3 : 2,
       );
+    }
+
+    if (response.status === 401 && method !== "GET") {
+      this.token = null;
     }
 
     if (response.status === 401 || response.status === 403) {
