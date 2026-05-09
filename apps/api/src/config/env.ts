@@ -13,6 +13,11 @@ function toBoolean(value: string | undefined, defaultValue = false) {
   return ["1", "true", "yes", "on"].includes(normalizedValue);
 }
 
+function toNumber(value: string | undefined, defaultValue: number) {
+  const parsed = Number(cleanEnvString(value));
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: (process.env.NODE_ENV || "development") === "production",
@@ -47,5 +52,10 @@ export const env = {
   openAiEnabled: toBoolean(process.env.OPENAI_ENABLED, false),
   ultraFv3BaseUrl: cleanEnvString(process.env.ULTRAFV3_BASE_URL),
   ultraFv3Username: cleanEnvString(process.env.ULTRAFV3_USERNAME),
-  ultraFv3Password: cleanEnvString(process.env.ULTRAFV3_PASSWORD)
+  ultraFv3Password: cleanEnvString(process.env.ULTRAFV3_PASSWORD),
+  erpSyncSchedulerEnabled: toBoolean(process.env.ERP_SYNC_SCHEDULER_ENABLED, (process.env.NODE_ENV || "development") === "production"),
+  erpSyncProductsIntervalMs: toNumber(process.env.ERP_SYNC_PRODUCTS_INTERVAL_MS, 6 * 60 * 60 * 1000),
+  erpSyncPartnersIntervalMs: toNumber(process.env.ERP_SYNC_PARTNERS_INTERVAL_MS, 6 * 60 * 60 * 1000),
+  erpSyncOrderStatusIntervalMs: toNumber(process.env.ERP_SYNC_ORDER_STATUS_INTERVAL_MS, 15 * 60 * 1000),
+  erpSyncHealthcheckIntervalMs: toNumber(process.env.ERP_SYNC_HEALTHCHECK_INTERVAL_MS, 5 * 60 * 1000)
 };

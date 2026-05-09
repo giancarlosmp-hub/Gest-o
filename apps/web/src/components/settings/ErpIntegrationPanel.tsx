@@ -7,6 +7,7 @@ type SyncScopeKey =
   | "connection"
   | "products"
   | "partners"
+  | "orderStatus"
   | "salesmen"
   | "paymentMethods"
   | "receivingConditions"
@@ -45,12 +46,26 @@ type OperationalSummary = {
   lastOrderActivityAt?: string | null;
 };
 
+type SyncHistoryItem = {
+  id: string;
+  scope: SyncScopeKey | string;
+  trigger: "manual" | "scheduler" | string;
+  status: "running" | "success" | "error" | "skipped" | string;
+  correlationId?: string | null;
+  startedAt: string;
+  finishedAt?: string | null;
+  durationMs?: number | null;
+  syncedCount: number;
+  errorMessage?: string | null;
+};
+
 type SyncStatusResponse = {
   status: Record<SyncScopeKey, SyncScopeStatus>;
   integration?: IntegrationDiagnostics;
   operational?: OperationalSummary;
   productCount: number;
   clientCount: number;
+  history?: SyncHistoryItem[];
 };
 
 type SyncCardConfig = {
@@ -65,6 +80,7 @@ const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
   { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos válidos", description: "Importa somente produtos ativos, não suspensos, com código ERP, unidade e preço maior que zero." },
   { key: "partners", title: "Clientes/parceiros", endpoint: "partners", countLabel: "Clientes", description: "Atualiza código ERP, nome, cidade, UF e CNPJ/CPF quando disponíveis." },
+  { key: "orderStatus", title: "Status de pedidos", endpoint: "order-status", countLabel: "Pedidos consultados", description: "Consulta o /orderStatus em modo somente leitura para atualizar o acompanhamento operacional dos pedidos já enviados." },
   { key: "salesmen", title: "Vendedores", endpoint: "salesmen", description: "Persiste o catálogo de vendedores com código ERP para vínculo com usuários CRM." },
   { key: "paymentMethods", title: "Formas de pagamento", endpoint: "payment-methods", description: "Sincroniza formas de pagamento disponíveis para emissão de pedidos." },
   { key: "receivingConditions", title: "Condições de pagamento", endpoint: "receiving-conditions", description: "Sincroniza condições comerciais de recebimento retornadas pelo UltraFV3." },
@@ -114,6 +130,7 @@ export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<SyncScopeKey | null>(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = async () => {
     const response = await api.get<SyncStatusResponse>("/erp/ultrafv3/sync/status");
@@ -125,6 +142,14 @@ export default function ErpIntegrationPanel() {
       .catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível carregar status da integração ERP.")))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) return undefined;
+    const timer = window.setInterval(() => {
+      load().catch(() => undefined);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh]);
 
   const runSync = async (card: SyncCardConfig) => {
     setRunning(card.key);
@@ -144,7 +169,8 @@ export default function ErpIntegrationPanel() {
     const statuses = data ? Object.values(data.status) : [];
     const errors = statuses.filter((item) => item?.status === "error").length;
     const runningCount = statuses.filter((item) => item?.status === "running").length;
-    return { errors, runningCount };
+    const lastError = statuses.find((item) => item?.status === "error")?.errors?.[0] ?? null;
+    return { errors, runningCount, lastError };
   }, [data]);
 
   if (loading) return <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">Carregando integração ERP...</div>;
@@ -165,6 +191,9 @@ export default function ErpIntegrationPanel() {
             <p>Produtos CRM: {data?.productCount ?? 0}</p>
             <p>Clientes CRM: {data?.clientCount ?? 0}</p>
             <p>{summary.runningCount ? `${summary.runningCount} sincronização(ões) em execução` : summary.errors ? `${summary.errors} card(s) com erro` : "Sem erros ativos"}</p>
+            <button type="button" className="mt-2 rounded-lg border border-slate-300 px-3 py-1 font-semibold text-slate-700 hover:bg-white" onClick={() => setAutoRefresh((value) => !value)}>
+              Auto-refresh: {autoRefresh ? "ligado" : "desligado"}
+            </button>
           </div>
         </div>
 
@@ -200,6 +229,13 @@ export default function ErpIntegrationPanel() {
         </div>
       </div>
 
+      {(summary.errors > 0 || (data?.operational?.errorOrders ?? 0) > 0) ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <strong>Alerta operacional ERP:</strong> existem falhas de sincronização ou pedidos com erro. Revise o histórico, correlationId e último erro antes de executar novamente.
+          {summary.lastError ? <p className="mt-1 text-xs">Último erro: {summary.lastError}</p> : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-5">
         {[
           { label: "Pedidos enviados", value: data?.operational?.sentOrders ?? 0 },
@@ -215,6 +251,47 @@ export default function ErpIntegrationPanel() {
         <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
           <p className="text-xs font-semibold text-slate-500">Último sync</p>
           <p className="mt-1 text-sm font-bold text-slate-900">{formatDate(data?.operational?.lastOrderActivityAt || data?.status?.products?.lastSyncAt || data?.status?.partners?.lastSyncAt)}</p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Histórico de execução</h4>
+            <p className="mt-1 text-xs text-slate-500">Últimas execuções manuais e automáticas, com métricas, duração e correlationId.</p>
+          </div>
+          <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50" onClick={() => load().catch(() => undefined)}>Atualizar painel</button>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="text-slate-500">
+              <tr>
+                <th className="py-2 pr-3">Escopo</th>
+                <th className="py-2 pr-3">Origem</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Início</th>
+                <th className="py-2 pr-3">Qtd.</th>
+                <th className="py-2 pr-3">Duração</th>
+                <th className="py-2 pr-3">Erro</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {(data?.history ?? []).map((item) => (
+                <tr key={item.id}>
+                  <td className="py-2 pr-3 font-semibold text-slate-800">{item.scope}</td>
+                  <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Agendado" : "Manual"}</td>
+                  <td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td>
+                  <td className="py-2 pr-3 text-slate-600">{formatDate(item.startedAt)}</td>
+                  <td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td>
+                  <td className="py-2 pr-3 text-slate-600">{item.durationMs ?? 0}ms</td>
+                  <td className="max-w-xs truncate py-2 pr-3 text-red-700" title={item.errorMessage || undefined}>{item.errorMessage || "—"}</td>
+                </tr>
+              ))}
+              {!(data?.history ?? []).length ? (
+                <tr><td colSpan={7} className="py-4 text-center text-slate-500">Nenhuma execução registrada.</td></tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </div>
 

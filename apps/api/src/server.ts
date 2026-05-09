@@ -4,6 +4,7 @@ import { prisma } from "./config/prisma.js";
 import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "./utils/databaseHealth.js";
 import { logApiEvent } from "./utils/logger.js";
+import { startErpSyncScheduler } from "./jobs/erpSyncScheduler.js";
 
 console.log("SERVER STARTING...");
 
@@ -42,6 +43,7 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });
+    startErpSyncScheduler();
   });
 }
 

@@ -452,3 +452,44 @@ model ErpOrderSync {
   @@index([orderStatus])
   @@index([numPedido])
 }
+
+enum ErpSyncRunStatus {
+  running
+  success
+  error
+  skipped
+}
+
+enum ErpSyncTrigger {
+  manual
+  scheduler
+}
+
+model ErpSyncRun {
+  id           String           @id @default(cuid())
+  scope        String
+  trigger      ErpSyncTrigger   @default(manual)
+  status       ErpSyncRunStatus @default(running)
+  correlationId String?
+  startedAt    DateTime         @default(now())
+  finishedAt   DateTime?
+  durationMs   Int?
+  syncedCount  Int              @default(0)
+  metrics      Json?
+  errors       Json?
+  errorMessage String?
+  createdAt    DateTime         @default(now())
+
+  @@index([scope, startedAt])
+  @@index([status, startedAt])
+}
+
+model ErpSyncLock {
+  scope       String   @id
+  runId       String
+  lockedUntil DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([lockedUntil])
+}
