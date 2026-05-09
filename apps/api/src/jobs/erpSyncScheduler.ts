@@ -2,6 +2,7 @@ import { ErpSyncTrigger } from "@prisma/client";
 import { env } from "../config/env.js";
 import { syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { syncOrderStatus, syncPartners, syncProducts, syncConnection } from "../services/ultraFv3SyncService.js";
+import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { logApiEvent } from "../utils/logger.js";
 
 const MIN_INTERVAL_MS = 60_000;
@@ -56,6 +57,16 @@ export function startErpSyncScheduler() {
     logApiEvent("INFO", "[erp sync scheduler] disabled by configuration");
     return;
   }
+
+  const diagnostics = ultraFv3Client.getDiagnostics();
+  if (!diagnostics.isConfigured) {
+    logApiEvent("WARN", "[erp sync scheduler] disabled because UltraFV3 is not configured", {
+      missingConfig: diagnostics.missingConfig,
+      operationalAlert: true,
+    });
+    return;
+  }
+
   if (scheduledJobs.length > 0) return;
 
   scheduledJobs = [
