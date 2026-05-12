@@ -472,6 +472,9 @@ model ErpSyncRun {
   scope         String
   trigger       ErpSyncTrigger   @default(manual)
   status        ErpSyncRunStatus @default(running)
+  sellerId      String?
+  sellerName    String?
+  authMode      String           @default("global")
   correlationId String?
   startedAt     DateTime         @default(now())
   finishedAt    DateTime?
@@ -483,6 +486,8 @@ model ErpSyncRun {
   createdAt     DateTime         @default(now())
 
   @@index([scope, startedAt])
+  @@index([sellerId, startedAt])
+  @@index([authMode, startedAt])
   @@index([status, startedAt])
 }
 

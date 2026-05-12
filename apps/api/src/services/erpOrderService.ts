@@ -9,8 +9,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { ultraFv3Client } from "./ultraFv3Client.js";
-import { requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
+import { ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { decryptErpCredential } from "./erpCredentialCrypto.js";
+import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
@@ -31,7 +32,7 @@ type OpportunityForErpOrder = {
   id: string;
   stage: string;
   client: { code: string | null };
-  ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode">;
+  ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode" | "erpLoginUsername" | "erpLoginPasswordEncrypted">;
   items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity"> | null }>;
 };
 
@@ -141,35 +142,40 @@ const extractErpOrderNumber = (payload: unknown) => {
   );
 };
 
-async function loadSalesmenRows(options: { forceRefresh?: boolean } = {}) {
-  const stored = options.forceRefresh
-    ? null
-    : await prisma.appConfig.findUnique({
-        where: { key: SALESMEN_CONFIG_KEY },
-        select: { value: true },
-      });
-  if (stored?.value) {
-    try {
-      const parsed = JSON.parse(stored.value) as unknown;
-      const rows = toArray(parsed);
-      if (rows.length) return rows;
-    } catch {
-      // fall back to UltraFV3
+async function loadSalesmenRows(options: { forceRefresh?: boolean; credentials?: UltraFv3Credentials; correlationId?: string } = {}) {
+  if (!options.credentials) {
+    const stored = options.forceRefresh
+      ? null
+      : await prisma.appConfig.findUnique({
+          where: { key: SALESMEN_CONFIG_KEY },
+          select: { value: true },
+        });
+    if (stored?.value) {
+      try {
+        const parsed = JSON.parse(stored.value) as unknown;
+        const rows = toArray(parsed);
+        if (rows.length) return rows;
+      } catch {
+        // fall back to UltraFV3
+      }
     }
+
+    const response = await ultraFv3Client.request<unknown>("/salesmen", { correlationId: options.correlationId });
+    const rows = toArray(response);
+    await prisma.appConfig.upsert({
+      where: { key: SALESMEN_CONFIG_KEY },
+      update: { value: JSON.stringify(rows) },
+      create: { key: SALESMEN_CONFIG_KEY, value: JSON.stringify(rows) },
+    });
+    return rows;
   }
 
-  const response = await ultraFv3Client.request<unknown>("/salesmen");
-  const rows = toArray(response);
-  await prisma.appConfig.upsert({
-    where: { key: SALESMEN_CONFIG_KEY },
-    update: { value: JSON.stringify(rows) },
-    create: { key: SALESMEN_CONFIG_KEY, value: JSON.stringify(rows) },
-  });
-  return rows;
+  const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/salesmen", options.credentials, options.correlationId || randomUUID());
+  return toArray(response);
 }
 
-async function resolveSalesmanOrderSequence(sellerErpCode: string) {
-  const rows = await loadSalesmenRows({ forceRefresh: true });
+async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string) {
+  const rows = await loadSalesmenRows({ forceRefresh: true, credentials, correlationId });
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const payload = row as Record<string, unknown>;
@@ -213,6 +219,7 @@ export async function createErpOrderFromOpportunity(
 
   const sellerErpCode = opportunity.ownerSeller.erpCode?.trim();
   const operatorCode = opportunity.ownerSeller.erpOperatorCode?.trim();
+  const sellerFv3Username = opportunity.ownerSeller.erpLoginUsername?.trim();
   if (!sellerErpCode)
     throw Object.assign(new Error("Vendedor sem vínculo ERP: informe o CODVENDEDOR no cadastro do usuário."), {
       status: 400,
@@ -221,6 +228,14 @@ export async function createErpOrderFromOpportunity(
     throw Object.assign(new Error("Vendedor sem operador ERP: informe o OPERADOR no cadastro do usuário."), {
       status: 400,
     });
+  if (!sellerFv3Username || !opportunity.ownerSeller.erpLoginPasswordEncrypted)
+    throw Object.assign(new Error("Vendedor sem Login FV3/Senha FV3: configure as credenciais UltraFV3 no cadastro do usuário antes de gerar pedido ERP."), {
+      status: 400,
+    });
+  const sellerCredentials = {
+    username: sellerFv3Username,
+    password: decryptErpCredential(opportunity.ownerSeller.erpLoginPasswordEncrypted),
+  };
   if (!opportunity.items.length)
     throw Object.assign(new Error("Operação inválida: oportunidade sem itens para envio ao ERP."), {
       status: 400,
@@ -255,6 +270,7 @@ export async function createErpOrderFromOpportunity(
     sellerId: opportunity.ownerSeller.id,
     sellerErpCode,
     operatorCode,
+    authMode: "seller",
   };
   logApiEvent(
     "INFO",
@@ -262,7 +278,7 @@ export async function createErpOrderFromOpportunity(
     operationContext,
   );
 
-  const numPedido = await resolveSalesmanOrderSequence(sellerErpCode);
+  const numPedido = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
   if (!numPedido)
     throw Object.assign(
       new Error(
@@ -380,7 +396,7 @@ export async function createErpOrderFromOpportunity(
   });
 
   try {
-    const erpResponse = await ultraFv3Client.request<unknown>("/orders", {
+    const erpResponse = await ultraFv3Client.requestWithCredentials<unknown>("/orders", sellerCredentials, {
       method: "POST",
       body: payload,
       correlationId: pedidoIdImportacao,
