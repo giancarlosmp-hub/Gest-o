@@ -53,6 +53,7 @@ export const env = {
   ultraFv3BaseUrl: cleanEnvString(process.env.ULTRAFV3_BASE_URL),
   ultraFv3Username: cleanEnvString(process.env.ULTRAFV3_USERNAME),
   ultraFv3Password: cleanEnvString(process.env.ULTRAFV3_PASSWORD),
+  erpCredentialEncryptionKey: cleanEnvString(process.env.ERP_CREDENTIAL_ENCRYPTION_KEY),
   erpSyncSchedulerEnabled: toBoolean(process.env.ERP_SYNC_SCHEDULER_ENABLED, (process.env.NODE_ENV || "development") === "production"),
   erpSyncProductsIntervalMs: toNumber(process.env.ERP_SYNC_PRODUCTS_INTERVAL_MS, 6 * 60 * 60 * 1000),
   erpSyncPartnersIntervalMs: toNumber(process.env.ERP_SYNC_PARTNERS_INTERVAL_MS, 6 * 60 * 60 * 1000),

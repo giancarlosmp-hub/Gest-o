@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { logApiEvent } from "../utils/logger.js";
 
@@ -21,6 +21,8 @@ type UltraFv3AuthenticationStatus =
   | "missing_config"
   | "authenticated"
   | "not_authenticated";
+
+export type UltraFv3Credentials = { username: string; password: string };
 
 type UltraFv3AuthPayload = {
   token?: string;
@@ -74,6 +76,7 @@ class UltraFv3Client {
   private lastLoginAt: Date | null = null;
   private tokenPromise: Promise<string> | null = null;
   private lastError: string | null = null;
+  private credentialTokenCache = new Map<string, { token: string; expiresAt: Date | null }>();
 
   private get baseUrl() {
     return env.ultraFv3BaseUrl.replace(/\/+$/, "");
@@ -85,6 +88,10 @@ class UltraFv3Client {
     if (!env.ultraFv3Username) missing.push("ULTRAFV3_USERNAME");
     if (!env.ultraFv3Password) missing.push("ULTRAFV3_PASSWORD");
     return missing;
+  }
+
+  hasGlobalCredentials() {
+    return this.getMissingConfig().length === 0;
   }
 
   private ensureConfig() {
@@ -137,11 +144,15 @@ class UltraFv3Client {
     return AbortSignal.timeout(ULTRAFV3_REQUEST_TIMEOUT_MS);
   }
 
-  private isTokenExpired() {
+  private isTokenExpired(expiresAt = this.tokenExpiresAt) {
     return Boolean(
-      this.tokenExpiresAt &&
-      this.tokenExpiresAt.getTime() <= Date.now() + 30_000,
+      expiresAt &&
+      expiresAt.getTime() <= Date.now() + 30_000,
     );
+  }
+
+  private getCredentialCacheKey(credentials: UltraFv3Credentials) {
+    return createHash("sha256").update(credentials.username).digest("hex");
   }
 
   private resolveTokenExpiration(payload: UltraFv3AuthPayload) {
@@ -288,6 +299,110 @@ class UltraFv3Client {
     } finally {
       this.tokenPromise = null;
     }
+  }
+
+  private async loginWithCredentials(credentials: UltraFv3Credentials) {
+    if (!this.baseUrl) {
+      throw new UltraFv3IntegrationError(
+        "URL base UltraFV3 não configurada. Defina ULTRAFV3_BASE_URL.",
+        "missing_credentials",
+      );
+    }
+    if (!credentials.username.trim() || !credentials.password.trim()) {
+      throw new UltraFv3IntegrationError(
+        "Credenciais UltraFV3 do usuário incompletas.",
+        "missing_credentials",
+      );
+    }
+
+    let response: Response;
+    try {
+      response = await this.fetchWithTimeout(
+        `${this.baseUrl}/auth/login`,
+        {
+          method: "POST",
+          headers: DEFAULT_HEADERS,
+          body: JSON.stringify({ username: credentials.username.trim(), password: credentials.password }),
+        },
+        { method: "POST", path: "/auth/login", attempt: 1, correlationId: randomUUID() },
+      );
+    } catch (error) {
+      throw new UltraFv3IntegrationError(
+        `UltraFV3 fora do ar ou inacessível durante autenticação de usuário ERP: ${error instanceof Error ? error.message : String(error)}`,
+        "unavailable",
+      );
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new UltraFv3IntegrationError(
+        "Erro de autenticação no UltraFV3 para credencial do usuário.",
+        "auth_failed",
+        response.status,
+      );
+    }
+    if (response.status === 404) {
+      throw new UltraFv3IntegrationError(
+        "Endpoint de autenticação do UltraFV3 inexistente: /auth/login.",
+        "not_found",
+        response.status,
+      );
+    }
+    if (!response.ok) {
+      throw new UltraFv3IntegrationError(
+        `UltraFV3 login de usuário falhou com status ${response.status}.`,
+        "request_failed",
+        response.status,
+      );
+    }
+
+    const payload = (await this.safeJson(response)) as UltraFv3AuthPayload | null;
+    const token = payload?.token || payload?.accessToken || payload?.access_token;
+    if (!token) {
+      throw new UltraFv3IntegrationError(
+        "UltraFV3 autenticou usuário, mas não retornou token de acesso.",
+        "invalid_response",
+        response.status,
+      );
+    }
+    return { token, expiresAt: payload ? this.resolveTokenExpiration(payload) : null };
+  }
+
+  async testLogin(credentials: UltraFv3Credentials) {
+    const authenticated = await this.loginWithCredentials(credentials);
+    return { ok: true, tokenExpiresAt: authenticated.expiresAt?.toISOString() ?? null };
+  }
+
+  async requestWithCredentials<T>(
+    path: string,
+    credentials: UltraFv3Credentials,
+    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string>; correlationId?: string },
+  ): Promise<T> {
+    const cacheKey = this.getCredentialCacheKey(credentials);
+    let cached = this.credentialTokenCache.get(cacheKey);
+    if (!cached || this.isTokenExpired(cached.expiresAt)) {
+      cached = await this.loginWithCredentials(credentials);
+      this.credentialTokenCache.set(cacheKey, cached);
+    }
+
+    const method = options?.method || "GET";
+    const correlationId = options?.correlationId || randomUUID();
+    const response = await this.fetchWithTimeout(
+      `${this.baseUrl}${path}`,
+      {
+        method,
+        headers: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: `Bearer ${cached.token}` },
+        ...(method !== "GET" && options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      },
+      { method, path, attempt: 1, correlationId },
+    );
+
+    if (response.status === 401 || response.status === 403) {
+      this.credentialTokenCache.delete(cacheKey);
+      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path} com credencial de usuário.`, "auth_failed", response.status);
+    }
+    if (response.status === 404) throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}.`, "not_found", response.status);
+    if (!response.ok) throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}.`, "request_failed", response.status);
+    return (await this.safeJson(response)) as T;
   }
 
   async request<T>(

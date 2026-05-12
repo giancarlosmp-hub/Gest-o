@@ -172,6 +172,16 @@ const optionalErpLinkCodeSchema = z.preprocess(
   z.string().trim().min(1).optional().nullable()
 );
 
+const optionalErpLoginUsernameSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(3).max(80).optional().nullable()
+);
+
+const optionalErpLoginPasswordSchema = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).max(256).optional().nullable()
+);
+
 export const userCreateSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
@@ -179,7 +189,9 @@ export const userCreateSchema = z.object({
   role: roleSchema,
   region: z.string().min(2).optional(),
   erpCode: optionalErpLinkCodeSchema,
-  erpOperatorCode: optionalErpLinkCodeSchema
+  erpOperatorCode: optionalErpLinkCodeSchema,
+  erpLoginUsername: optionalErpLoginUsernameSchema,
+  erpLoginPassword: optionalErpLoginPasswordSchema
 });
 
 export const userUpdateSchema = z.object({
@@ -189,7 +201,9 @@ export const userUpdateSchema = z.object({
   role: roleSchema,
   region: z.string().min(2).optional(),
   erpCode: optionalErpLinkCodeSchema,
-  erpOperatorCode: optionalErpLinkCodeSchema
+  erpOperatorCode: optionalErpLinkCodeSchema,
+  erpLoginUsername: optionalErpLoginUsernameSchema,
+  erpLoginPassword: optionalErpLoginPasswordSchema
 });
 
 export const userResetPasswordSchema = z.object({

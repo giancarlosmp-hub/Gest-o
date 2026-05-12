@@ -59,6 +59,14 @@ type SyncHistoryItem = {
   errorMessage?: string | null;
 };
 
+type AuthModeDiagnostics = {
+  hasGlobalCredentials: boolean;
+  encryptionKeyConfigured: boolean;
+  sellers: { total: number; withErpLink: number; missingErpLink: number; withFv3Login: number; missingFv3Login: number };
+  recommendation: "global" | "por_vendedor" | "indefinido" | string;
+  rationale: string;
+};
+
 type SyncStatusResponse = {
   status: Record<SyncScopeKey, SyncScopeStatus>;
   integration?: IntegrationDiagnostics;
@@ -128,13 +136,18 @@ const integrationStatusClasses: Record<string, string> = {
 
 export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
+  const [authMode, setAuthMode] = useState<AuthModeDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState<SyncScopeKey | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = async () => {
-    const response = await api.get<SyncStatusResponse>("/erp/ultrafv3/sync/status");
-    setData(response.data);
+    const [statusResponse, authModeResponse] = await Promise.all([
+      api.get<SyncStatusResponse>("/erp/ultrafv3/sync/status"),
+      api.get<AuthModeDiagnostics>("/erp/ultrafv3/auth/mode-diagnostics"),
+    ]);
+    setData(statusResponse.data);
+    setAuthMode(authModeResponse.data);
   };
 
   useEffect(() => {
@@ -227,6 +240,31 @@ export default function ErpIntegrationPanel() {
             </p>
           </div>
         </div>
+      </div>
+
+
+      <div className="rounded-xl border border-brand-100 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Modo de autenticação UltraFV3</h4>
+            <p className="mt-1 text-xs text-slate-600">O CRM mantém login próprio por e-mail/senha. Estes dados são somente vínculo técnico com o ERP.</p>
+          </div>
+          <span className="inline-flex w-fit rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700 ring-1 ring-brand-100">
+            {authMode?.recommendation === "por_vendedor" ? "Credenciais por vendedor" : authMode?.recommendation === "global" ? "Credencial técnica global" : "Modo indefinido"}
+          </span>
+        </div>
+        <p className="mt-3 text-sm text-slate-700">{authMode?.rationale || "Carregando diagnóstico de autenticação."}</p>
+        <div className="mt-4 grid gap-3 text-xs md:grid-cols-4">
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Global .env</strong><span className="mt-1 block text-slate-600">{authMode?.hasGlobalCredentials ? "ULTRAFV3_USERNAME/PASSWORD configurados" : "Credencial global ausente"}</span></div>
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Vínculo ERP</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withErpLink}/${authMode.sellers.total} vendedores` : "—"}</span></div>
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Login FV3 vendedor</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withFv3Login}/${authMode.sellers.total} configurados` : "—"}</span></div>
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Criptografia</strong><span className="mt-1 block text-slate-600">{authMode?.encryptionKeyConfigured ? "ERP_CREDENTIAL_ENCRYPTION_KEY ativa" : "Chave não configurada"}</span></div>
+        </div>
+        {authMode && authMode.recommendation !== "global" && authMode.sellers.missingFv3Login > 0 ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Atenção: se o UltraFV3 restringir clientes/produtos/preços por login de vendedor, configure Login FV3 e Senha FV3 para {authMode.sellers.missingFv3Login} vendedor(es) ativo(s).
+          </div>
+        ) : null}
       </div>
 
       {(summary.errors > 0 || (data?.operational?.errorOrders ?? 0) > 0) ? (
