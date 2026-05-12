@@ -59,6 +59,7 @@ import {
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { logApiEvent } from "../utils/logger.js";
+import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -6906,6 +6907,65 @@ router.get("/erp/ultrafv3/diagnostics", authorize("diretor", "gerente"), async (
   });
 });
 
+
+router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"), async (_req, res) => {
+  const sellers = await prisma.user.findMany({
+    where: { role: "vendedor", isActive: true },
+    select: { id: true, erpCode: true, erpOperatorCode: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
+  });
+  const totalSellers = sellers.length;
+  const sellersWithErpLink = sellers.filter((user) => Boolean(user.erpCode?.trim() && user.erpOperatorCode?.trim())).length;
+  const sellersWithFv3Login = sellers.filter((user) => Boolean(user.erpLoginUsername?.trim() && user.erpLoginPasswordEncrypted)).length;
+  const hasGlobalCredentials = ultraFv3Client.hasGlobalCredentials();
+  const allSellersLinked = totalSellers === 0 || sellersWithErpLink === totalSellers;
+  const allSellersWithLogin = totalSellers > 0 && sellersWithFv3Login === totalSellers;
+  const recommendation = allSellersWithLogin
+    ? "por_vendedor"
+    : hasGlobalCredentials && allSellersLinked
+      ? "global"
+      : "indefinido";
+
+  return res.status(200).json({
+    hasGlobalCredentials,
+    encryptionKeyConfigured: isErpCredentialEncryptionConfigured(),
+    sellers: {
+      total: totalSellers,
+      withErpLink: sellersWithErpLink,
+      missingErpLink: Math.max(totalSellers - sellersWithErpLink, 0),
+      withFv3Login: sellersWithFv3Login,
+      missingFv3Login: Math.max(totalSellers - sellersWithFv3Login, 0),
+    },
+    recommendation,
+    rationale: recommendation === "por_vendedor"
+      ? "Todos os vendedores ativos possuem login FV3 configurado; use este modo se o UltraFV3 aplicar restrições por CPF/CNPJ."
+      : recommendation === "global"
+        ? "Há credencial técnica global e os vendedores ativos possuem CODVENDEDOR/OPERADOR para montar pedidos."
+        : "Configuração insuficiente para afirmar o modo: revise credencial global, vínculo CODVENDEDOR/OPERADOR e logins FV3 por vendedor.",
+  });
+});
+
+router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, name: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
+  });
+  if (!user) return res.status(404).json({ success: false, message: "Usuário não encontrado." });
+  if (!user.erpLoginUsername?.trim() || !user.erpLoginPasswordEncrypted) {
+    return res.status(400).json({ success: false, message: "Login FV3 do usuário não configurado." });
+  }
+
+  try {
+    const password = decryptErpCredential(user.erpLoginPasswordEncrypted);
+    const result = await ultraFv3Client.testLogin({ username: user.erpLoginUsername, password });
+    return res.status(200).json({ success: true, message: "Login UltraFV3 validado com sucesso.", tokenExpiresAt: result.tokenExpiresAt });
+  } catch (error) {
+    const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502;
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("WARN", "[ultrafv3 user auth] login test failed", { userId: user.id, status });
+    return res.status(status).json({ success: false, message: "Falha ao testar login UltraFV3 do usuário.", details });
+  }
+});
+
 router.get("/settings/weekly-visit-minimum", async (_req, res) => {
   const weeklyVisitGoal = await getWeeklyVisitGoal();
   return res.json({ minimumWeeklyVisits: weeklyVisitGoal });
@@ -7139,25 +7199,39 @@ router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema),
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, isActive: true, createdAt: true } as const;
+const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, isActive: true, createdAt: true } as const;
 
-router.get("/users", authorize("diretor", "gerente"), async (_req, res) => res.json(await prisma.user.findMany({ select: userListSelect })));
+const sanitizeUserForList = (user: Prisma.UserGetPayload<{ select: typeof userListSelect }>) => {
+  const { erpLoginPasswordEncrypted, ...safeUser } = user;
+  return {
+    ...safeUser,
+    erpLoginConfigured: Boolean(user.erpLoginUsername?.trim() && erpLoginPasswordEncrypted),
+  };
+};
+
+router.get("/users", authorize("diretor", "gerente"), async (_req, res) => {
+  const users = await prisma.user.findMany({ select: userListSelect });
+  return res.json(users.map(sanitizeUserForList));
+});
 router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSchema), async (req, res) => {
-  const { name, email, password, role, region, erpCode, erpOperatorCode } = req.body;
+  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword } = req.body;
   if (req.user!.role === "gerente" && role === "diretor") {
     return res.status(403).json({ success: false, message: "Gerentes não podem criar usuários diretores." });
   }
   const erpOption = erpCode ? (await loadErpSalesmenOptions()).find((option) => option.code === erpCode) : null;
   const passwordHash = await hashPassword(password);
+  const erpLoginPasswordEncrypted = typeof erpLoginPassword === "string" && erpLoginPassword.trim()
+    ? encryptErpCredential(erpLoginPassword)
+    : null;
   const user = await prisma.user.create({
-    data: { name, email, passwordHash, role, region, erpCode: erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ?? undefined },
+    data: { name, email, passwordHash, role, region, erpCode: erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ?? undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted },
     select: userListSelect
   });
-  return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: user });
+  return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: sanitizeUserForList(user) });
 });
 router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdateSchema), async (req, res) => {
   const { id } = req.params;
-  const { name, email, password, role, region, erpCode, erpOperatorCode } = req.body;
+  const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword } = req.body;
 
   if (req.user!.id === id && role !== "diretor") {
     return res.status(400).json({ success: false, message: "Você não pode remover seu próprio papel de diretor." });
@@ -7178,11 +7252,16 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
       region,
       erpCode: erpCode ?? null,
       erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null,
-      erpRawPayload: erpOption?.raw ?? Prisma.JsonNull
+      erpRawPayload: erpOption?.raw ?? Prisma.JsonNull,
+      erpLoginUsername: erpLoginUsername ?? null
     };
 
     if (typeof password === "string" && password.trim().length > 0) {
       data.passwordHash = await hashPassword(password);
+    }
+
+    if (typeof erpLoginPassword === "string" && erpLoginPassword.trim().length > 0) {
+      data.erpLoginPasswordEncrypted = encryptErpCredential(erpLoginPassword);
     }
 
     const updated = await prisma.user.update({
@@ -7191,7 +7270,7 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
       select: userListSelect
     });
 
-    return res.json({ success: true, message: "Usuário atualizado com sucesso.", data: updated });
+    return res.json({ success: true, message: "Usuário atualizado com sucesso.", data: sanitizeUserForList(updated) });
   } catch (error: any) {
     if (error?.code === "P2002") {
       return res.status(409).json({ success: false, message: "Já existe outro usuário com este e-mail corporativo." });

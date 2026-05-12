@@ -25,6 +25,8 @@ type CrudSimplePageProps = {
     placeholder?: string;
     options?: Array<{ value: string; label: string }>;
     tableLabel?: string;
+    tableOnly?: boolean;
+    formOnly?: boolean;
   }[];
   readOnly?: boolean;
   detailsPath?: string;
@@ -463,9 +465,14 @@ export default function CrudSimplePage({
     }
     if (isUsersPage && fieldKey === "erpCode") {
       const code = typeof item.erpCode === "string" ? item.erpCode : "";
+      const operatorCode = typeof item.erpOperatorCode === "string" ? item.erpOperatorCode : "";
       if (!code) return "Sem vínculo ERP";
       const option = erpSalesmen.find((salesman) => salesman.code === code);
-      return option ? `ERP vinculado · ${option.name} (${code})` : `ERP vinculado · ${code}`;
+      const sellerLabel = option ? `${option.name} (${code})` : code;
+      return `CODVENDEDOR ${sellerLabel}${operatorCode ? ` · OPERADOR ${operatorCode}` : ""}`;
+    }
+    if (isUsersPage && fieldKey === "erpLoginConfigured") {
+      return item.erpLoginConfigured ? "Senha ERP configurada" : "Login FV3 pendente";
     }
     const value = item[fieldKey];
     if (value === null || value === undefined || value === "") return "—";
@@ -1489,10 +1496,18 @@ export default function CrudSimplePage({
           payload.erpOperatorCode = null;
         }
 
+        if (!payload.erpLoginUsername) payload.erpLoginUsername = null;
+
         if (typeof payload.password === "string") {
           const trimmedPassword = payload.password.trim();
           if (!trimmedPassword) delete payload.password;
           else payload.password = trimmedPassword;
+        }
+
+        if (typeof payload.erpLoginPassword === "string") {
+          const trimmedErpPassword = payload.erpLoginPassword.trim();
+          if (!trimmedErpPassword) delete payload.erpLoginPassword;
+          else payload.erpLoginPassword = trimmedErpPassword;
         }
       }
 
@@ -1514,10 +1529,19 @@ export default function CrudSimplePage({
     }
   };
 
+  const testUserErpLogin = async (item: ClientListItem) => {
+    try {
+      await api.post(`/users/${item.id}/erp-login/test`);
+      toast.success("Login FV3 validado com sucesso.");
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || error.response?.data?.details || "Não foi possível testar o login FV3.");
+    }
+  };
+
   const onEdit = (item: any) => {
     setFormError(null);
     setFormFieldErrors({});
-    const nextForm = endpoint === "/users" ? { ...item, password: "" } : item;
+    const nextForm = endpoint === "/users" ? { ...item, password: "", erpLoginPassword: "" } : item;
 
     if (createInModal) {
       setEditing(item.id);
@@ -1650,11 +1674,12 @@ export default function CrudSimplePage({
           onSubmit={submit}
           className={isUsersPage ? "grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:grid-cols-2 xl:grid-cols-3" : "grid gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-3"}
         >
-          {fields.map((f) => {
+          {fields.filter((field) => !field.tableOnly).map((f) => {
             const fieldPlaceholder = f.placeholder ?? `Informe ${f.label.toLowerCase()}`;
             const isPasswordOptionalOnUserEdit = endpoint === "/users" && f.key === "password" && Boolean(editing);
             const isErpSalesmanField = endpoint === "/users" && f.type === "erpSalesman";
-            const isFieldRequired = !isPasswordOptionalOnUserEdit && !isErpSalesmanField;
+            const isOptionalErpLoginField = endpoint === "/users" && ["erpLoginUsername", "erpLoginPassword", "erpLoginConfigured"].includes(f.key);
+            const isFieldRequired = !isPasswordOptionalOnUserEdit && !isErpSalesmanField && !isOptionalErpLoginField;
 
             const fieldControlClass = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100";
 
@@ -1943,7 +1968,7 @@ export default function CrudSimplePage({
               <table className="min-w-[600px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
-                    {fields.map((f) => (
+                    {fields.filter((field) => !field.formOnly).map((f) => (
                       <th className="p-2 text-left" key={f.key}>
                         {f.tableLabel ?? f.label}
                       </th>
@@ -1958,7 +1983,7 @@ export default function CrudSimplePage({
                       className={`border-t border-slate-100 ${detailsPath ? "cursor-pointer hover:bg-slate-50" : ""}`}
                       onClick={(event) => onRowClick(event, it.id)}
                     >
-                      {fields.map((f) => (
+                      {fields.filter((field) => !field.formOnly).map((f) => (
                         <td key={f.key} className="p-2 text-slate-700">
                           {getCellValue(it, f.key)}
                         </td>
@@ -1990,6 +2015,18 @@ export default function CrudSimplePage({
 
                                 {openActionsMenuId === it.id ? (
                                   <div className="absolute right-0 z-10 mt-1 min-w-28 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                    {isUsersPage ? (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-brand-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void testUserErpLogin(it);
+                                        }}
+                                      >
+                                        Testar login FV3
+                                      </button>
+                                    ) : null}
                                     <button
                                       type="button"
                                       className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100"

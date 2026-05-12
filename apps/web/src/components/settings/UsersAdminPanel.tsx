@@ -33,6 +33,23 @@ export default function UsersAdminPanel() {
           type: "erpSalesman",
           placeholder: "Pesquise pelo nome ou código ERP"
         },
+        {
+          key: "erpLoginUsername",
+          label: "Login FV3 / CPF-CNPJ",
+          placeholder: "Documento ou usuário do FV3"
+        },
+        {
+          key: "erpLoginPassword",
+          label: "Senha FV3",
+          type: "password",
+          formOnly: true,
+          placeholder: "Preencha apenas para cadastrar/alterar"
+        },
+        {
+          key: "erpLoginConfigured",
+          label: "Login FV3 configurado",
+          tableOnly: true
+        },
         { key: "password", label: "Senha de acesso", placeholder: "Defina uma senha de acesso" }
       ]}
       readOnly={user?.role !== "diretor" && user?.role !== "gerente"}
