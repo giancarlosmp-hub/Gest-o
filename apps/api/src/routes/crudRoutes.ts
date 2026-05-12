@@ -49,6 +49,8 @@ import {
   syncConnection,
   syncOperations,
   syncPartners,
+  syncPartnersByUser,
+  syncPartnersForAllConfiguredSellers,
   syncPaymentMethods,
   syncPriceTables,
   syncProducts,
@@ -6835,6 +6837,26 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
+router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", "gerente"), async (req, res) => {
+  try {
+    const result = await syncPartnersByUser(req.params.userId);
+    return res.status(200).json({ scope: "partners", authMode: "seller", sellerId: req.params.userId, ...result });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 sync route] seller partners sync failed", { userId: req.params.userId, error: details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
+      scope: "partners",
+      authMode: "seller",
+      sellerId: req.params.userId,
+      message: "Falha na sincronização UltraFV3 por vendedor.",
+      details
+    });
+  }
+});
+router.post("/erp/ultrafv3/sync/partners/all-sellers", authorize("diretor", "gerente"), async (_req, res) => {
+  const result = await syncPartnersForAllConfiguredSellers();
+  return res.status(result.errorCount > 0 ? 207 : 200).json(result);
+});
 router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runUltraFv3Sync("salesmen"));
 router.post("/erp/ultrafv3/sync/payment-methods", authorize("diretor", "gerente"), runUltraFv3Sync("paymentMethods"));
 router.post("/erp/ultrafv3/sync/receiving-conditions", authorize("diretor", "gerente"), runUltraFv3Sync("receivingConditions"));

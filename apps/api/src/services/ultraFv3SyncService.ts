@@ -1,7 +1,8 @@
 import { Prisma, ErpSyncRunStatus, ErpSyncTrigger } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
-import { ultraFv3Client } from "./ultraFv3Client.js";
+import { ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
 import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
 
@@ -25,6 +26,9 @@ export type UltraFv3SyncScope =
 type SyncStatusPayload = {
   scope: UltraFv3SyncScope;
   status: "idle" | "running" | "success" | "error" | "skipped";
+  sellerId?: string | null;
+  sellerName?: string | null;
+  authMode?: "global" | "seller";
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
@@ -36,7 +40,7 @@ type SyncStatusPayload = {
 };
 
 export type SyncResult = { syncedCount: number; diagnostics?: Record<string, number> };
-export type RunSyncOptions = { trigger?: ErpSyncTrigger; failIfLocked?: boolean };
+export type RunSyncOptions = { trigger?: ErpSyncTrigger; failIfLocked?: boolean; lockScope?: string; sellerId?: string; sellerName?: string; authMode?: "global" | "seller"; writeStatus?: boolean };
 type LockAcquireResult = { acquired: true; runId: string } | { acquired: false; runId: string; lockedUntil: Date | null };
 
 type UltraFv3IntegrationDiagnostics = {
@@ -84,11 +88,11 @@ const toArray = (payload: unknown) => {
 const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
+async function requestReadOnlyWithRetry<T>(endpoint: string, correlationId: string, requester: () => Promise<T>, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await ultraFv3Client.request<T>(endpoint, { correlationId });
+      return await requester();
     } catch (error) {
       lastError = error;
       if (attempt >= attempts) break;
@@ -100,8 +104,18 @@ export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, corr
   throw lastError instanceof Error ? lastError : new Error(formatError(lastError));
 }
 
-async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, correlationId: string) {
-  const response = await requestUltraFv3ReadOnlyWithRetry<unknown>(endpoint, correlationId);
+export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.request<T>(endpoint, { correlationId }), attempts);
+}
+
+export async function requestUltraFv3ReadOnlyWithCredentialsRetry<T>(endpoint: string, credentials: UltraFv3Credentials, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.requestWithCredentials<T>(endpoint, credentials, { correlationId }), attempts);
+}
+
+async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, correlationId: string, credentials?: UltraFv3Credentials) {
+  const response = credentials
+    ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(endpoint, credentials, correlationId)
+    : await requestUltraFv3ReadOnlyWithRetry<unknown>(endpoint, correlationId);
   const rows = toArray(response);
   if (!rows.length) {
     throw new Error(`Retorno vazio do UltraFV3 para ${scope} (${endpoint}).`);
@@ -120,7 +134,7 @@ async function writeSyncStatus(payload: SyncStatusPayload) {
   });
 }
 
-async function acquireSyncLock(scope: UltraFv3SyncScope, runId: string): Promise<LockAcquireResult> {
+async function acquireSyncLock(scope: string, runId: string): Promise<LockAcquireResult> {
   const now = new Date();
   const lockedUntil = new Date(now.getTime() + ERP_SYNC_LOCK_TTL_MS);
   try {
@@ -143,7 +157,7 @@ async function acquireSyncLock(scope: UltraFv3SyncScope, runId: string): Promise
   return { acquired: false, runId: current?.runId ?? runId, lockedUntil: current?.lockedUntil ?? null };
 }
 
-async function releaseSyncLock(scope: UltraFv3SyncScope, runId: string) {
+async function releaseSyncLock(scope: string, runId: string) {
   await prisma.erpSyncLock.deleteMany({ where: { scope, runId } });
 }
 
@@ -152,7 +166,11 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
   const startedAt = Date.now();
   const startedAtDate = new Date();
   const trigger = options.trigger ?? ErpSyncTrigger.manual;
-  const lock = await acquireSyncLock(scope, correlationId);
+  const lockScope = options.lockScope ?? scope;
+  const authMode = options.authMode ?? "global";
+  const syncContext = { sellerId: options.sellerId ?? null, sellerName: options.sellerName ?? null, authMode };
+  const shouldWriteStatus = options.writeStatus ?? !options.sellerId;
+  const lock = await acquireSyncLock(lockScope, correlationId);
 
   if (!lock.acquired) {
     const message = `Sincronização ${scope} já está em execução até ${lock.lockedUntil?.toISOString() ?? "instante desconhecido"}.`;
@@ -161,6 +179,7 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
         scope,
         trigger,
         status: ErpSyncRunStatus.skipped,
+        ...syncContext,
         correlationId,
         startedAt: startedAtDate,
         finishedAt: new Date(),
@@ -170,14 +189,14 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
         errorMessage: message,
       },
     });
-    await writeSyncStatus({ scope, status: "running", lastSyncAt: startedAtDate.toISOString(), syncedCount: 0, correlationId: lock.runId, trigger });
+    if (shouldWriteStatus) await writeSyncStatus({ scope, status: "running", lastSyncAt: startedAtDate.toISOString(), syncedCount: 0, correlationId: lock.runId, trigger, ...syncContext });
     logApiEvent("WARN", `[ultrafv3 sync] ${scope} skipped because lock is active`, { scope, correlationId, lockedRunId: lock.runId, lockedUntil: lock.lockedUntil?.toISOString() });
     if (options.failIfLocked ?? true) throw Object.assign(new Error(message), { status: 409 });
     return { syncedCount: 0, diagnostics: { skippedByLock: 1 } };
   }
 
-  const run = await prisma.erpSyncRun.create({ data: { scope, trigger, status: ErpSyncRunStatus.running, correlationId, startedAt: startedAtDate } });
-  await writeSyncStatus({ scope, status: "running", lastSyncAt: startedAtDate.toISOString(), syncedCount: 0, correlationId, trigger, runId: run.id });
+  const run = await prisma.erpSyncRun.create({ data: { scope, trigger, status: ErpSyncRunStatus.running, correlationId, startedAt: startedAtDate, ...syncContext } });
+  if (shouldWriteStatus) await writeSyncStatus({ scope, status: "running", lastSyncAt: startedAtDate.toISOString(), syncedCount: 0, correlationId, trigger, runId: run.id, ...syncContext });
   logApiEvent("INFO", `[ultrafv3 sync] ${scope} started`, { scope, correlationId, trigger, runId: run.id });
 
   try {
@@ -188,7 +207,7 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
       where: { id: run.id },
       data: { status: ErpSyncRunStatus.success, finishedAt, durationMs, syncedCount: result.syncedCount, metrics: (result.diagnostics ?? {}) as Prisma.InputJsonValue },
     });
-    await writeSyncStatus({ scope, status: "success", lastSyncAt: finishedAt.toISOString(), correlationId, durationMs, trigger, runId: run.id, ...result });
+    if (shouldWriteStatus) await writeSyncStatus({ scope, status: "success", lastSyncAt: finishedAt.toISOString(), correlationId, durationMs, trigger, runId: run.id, ...result, ...syncContext });
     logApiEvent("INFO", `[ultrafv3 sync] ${scope} finished`, { scope, correlationId, durationMs, trigger, runId: run.id, ...result });
     return result;
   } catch (error) {
@@ -199,11 +218,11 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
       where: { id: run.id },
       data: { status: ErpSyncRunStatus.error, finishedAt, durationMs, syncedCount: 0, errorMessage: message, errors: [{ message, at: finishedAt.toISOString(), correlationId }] as Prisma.InputJsonValue },
     });
-    await writeSyncStatus({ scope, status: "error", lastSyncAt: finishedAt.toISOString(), syncedCount: 0, errors: [message], correlationId, durationMs, trigger, runId: run.id });
+    if (shouldWriteStatus) await writeSyncStatus({ scope, status: "error", lastSyncAt: finishedAt.toISOString(), syncedCount: 0, errors: [message], correlationId, durationMs, trigger, runId: run.id, ...syncContext });
     logApiEvent("ERROR", `[ultrafv3 sync] ${scope} failed`, { scope, correlationId, durationMs, trigger, runId: run.id, error: message, operationalAlert: true });
     throw error;
   } finally {
-    await releaseSyncLock(scope, correlationId).catch((error) => logApiEvent("ERROR", "[ultrafv3 sync] failed to release lock", { scope, correlationId, error: formatError(error) }));
+    await releaseSyncLock(lockScope, correlationId).catch((error) => logApiEvent("ERROR", "[ultrafv3 sync] failed to release lock", { scope, lockScope, correlationId, error: formatError(error) }));
   }
 }
 
@@ -319,6 +338,87 @@ export async function syncProducts(options?: RunSyncOptions) {
   }, options);
 }
 
+type SellerSyncUser = {
+  id: string;
+  name: string;
+  erpCode: string | null;
+  erpLoginUsername: string | null;
+  erpLoginPasswordEncrypted: string | null;
+};
+
+const getConfiguredSellerCredentials = (seller: SellerSyncUser): UltraFv3Credentials => {
+  if (!seller.erpLoginUsername?.trim() || !seller.erpLoginPasswordEncrypted) {
+    throw Object.assign(new Error("Vendedor sem Login FV3/Senha FV3 configurados."), { status: 400 });
+  }
+  return { username: seller.erpLoginUsername.trim(), password: decryptErpCredential(seller.erpLoginPasswordEncrypted) };
+};
+
+async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUser, correlationId: string) {
+  const diagnostics = {
+    received: rows.length,
+    withoutCode: 0,
+    created: 0,
+    updated: 0,
+    preservedCommercialLinkWarnings: 0,
+  };
+  const warnings: string[] = [];
+  let syncedCount = 0;
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const payload = row as Record<string, unknown>;
+    const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+    if (!code) {
+      diagnostics.withoutCode += 1;
+      continue;
+    }
+
+    const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
+    const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
+    const existing = await prisma.client.findFirst({ where: { code }, select: { id: true, ownerSellerId: true } });
+    const data = {
+      code,
+      name: pickFirstString(payload, ["corporateName", "name", "razaoSocial", "nome", "NOME"]) || "Cliente sem nome",
+      fantasyName: pickFirstString(payload, ["fantasyName", "nomeFantasia", "apelido"]) || null,
+      cnpj: cnpj || null,
+      cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
+      city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
+      state: normalizeState(state || "NI"),
+      region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
+      erpUpdatedAt: new Date()
+    };
+
+    if (existing) {
+      const shouldPreserveCommercialLink = existing.ownerSellerId !== seller.id;
+      await prisma.client.update({
+        where: { id: existing.id },
+        data: shouldPreserveCommercialLink ? data : { ...data, ownerSellerId: seller.id },
+      });
+      diagnostics.updated += 1;
+      if (shouldPreserveCommercialLink) {
+        diagnostics.preservedCommercialLinkWarnings += 1;
+        warnings.push(`Cliente ERP ${code} já possui vínculo comercial com outro vendedor CRM; vínculo preservado por limitação de vendedor único por cliente.`);
+      }
+    } else {
+      await prisma.client.create({ data: { ...data, ownerSellerId: seller.id } });
+      diagnostics.created += 1;
+    }
+    syncedCount += 1;
+  }
+
+  if (warnings.length) {
+    logApiEvent("WARN", "[ultrafv3 sync partners] preserved existing commercial links", {
+      correlationId,
+      sellerId: seller.id,
+      sellerName: seller.name,
+      warningCount: warnings.length,
+      limitation: "Client.ownerSellerId suporta apenas um vendedor; vínculos existentes não são sobrescritos em sync por vendedor.",
+    });
+  }
+
+  return { syncedCount, diagnostics, warnings };
+}
+
 export async function syncPartners(options?: RunSyncOptions) {
   return runSync("partners", async (correlationId) => {
     const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId);
@@ -331,17 +431,22 @@ export async function syncPartners(options?: RunSyncOptions) {
         .filter(([code]) => Boolean(code))
     );
 
+    const diagnostics = { received: rows.length, withoutCode: 0, fallbackSellerLinks: 0, updated: 0, created: 0 };
     let syncedCount = 0;
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       const payload = row as Record<string, unknown>;
       const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
-      if (!code) continue;
+      if (!code) {
+        diagnostics.withoutCode += 1;
+        continue;
+      }
       const sellerCode = pickFirstString(payload, ["sellerCode", "salesmanCode", "codVendedor", "CODVENDEDOR", "vendedorCodigo", "VENDEDOR"]);
       const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
+      if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks += 1;
       const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
       const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
-      const existing = await prisma.client.findFirst({ where: { code } });
+      const existing = await prisma.client.findFirst({ where: { code }, select: { id: true } });
       const data = {
         code,
         name: pickFirstString(payload, ["corporateName", "name", "razaoSocial", "nome", "NOME"]) || "Cliente sem nome",
@@ -354,14 +459,68 @@ export async function syncPartners(options?: RunSyncOptions) {
         ownerSellerId,
         erpUpdatedAt: new Date()
       };
-      if (existing) await prisma.client.update({ where: { id: existing.id }, data });
-      else await prisma.client.create({ data });
+      if (existing) {
+        await prisma.client.update({ where: { id: existing.id }, data });
+        diagnostics.updated += 1;
+      } else {
+        await prisma.client.create({ data });
+        diagnostics.created += 1;
+      }
       syncedCount += 1;
     }
-    const diagnostics = { received: rows.length, withoutCode: rows.length - syncedCount };
-    logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics });
+    logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics, authMode: "global" });
     return { syncedCount, diagnostics };
   }, options);
+}
+
+export async function syncPartnersByUser(userId: string, options?: RunSyncOptions) {
+  const seller = await prisma.user.findFirst({
+    where: { id: userId, role: "vendedor", isActive: true },
+    select: { id: true, name: true, erpCode: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
+  });
+  if (!seller) throw Object.assign(new Error("Vendedor ativo não encontrado."), { status: 404 });
+  const credentials = getConfiguredSellerCredentials(seller);
+
+  return runSync("partners", async (correlationId) => {
+    const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId, credentials);
+    const result = await persistPartnerRowsForSeller(rows, seller, correlationId);
+    logApiEvent("INFO", "[ultrafv3 sync partners] processed seller partners payload", {
+      correlationId,
+      sellerId: seller.id,
+      sellerName: seller.name,
+      syncedCount: result.syncedCount,
+      diagnostics: result.diagnostics,
+      authMode: "seller",
+    });
+    return { syncedCount: result.syncedCount, diagnostics: { ...result.diagnostics, warnings: result.warnings.length } };
+  }, { ...options, lockScope: `partners:user:${seller.id}`, sellerId: seller.id, sellerName: seller.name, authMode: "seller", writeStatus: false });
+}
+
+export async function syncPartnersForAllConfiguredSellers(options?: RunSyncOptions) {
+  const sellers = await prisma.user.findMany({
+    where: { role: "vendedor", isActive: true, erpLoginUsername: { not: null }, erpLoginPasswordEncrypted: { not: null } },
+    select: { id: true, name: true, erpCode: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
+    orderBy: [{ name: "asc" }],
+  });
+  const summary = { totalUsers: sellers.length, successCount: 0, errorCount: 0, skippedCount: 0 };
+  const results: Array<{ userId: string; sellerName: string; status: "success" | "error" | "skipped"; syncedCount?: number; error?: string }> = [];
+
+  for (const seller of sellers) {
+    try {
+      const result = await syncPartnersByUser(seller.id, { ...options, failIfLocked: false });
+      const skipped = Boolean(result.diagnostics?.skippedByLock);
+      if (skipped) summary.skippedCount += 1;
+      else summary.successCount += 1;
+      results.push({ userId: seller.id, sellerName: seller.name, status: skipped ? "skipped" : "success", syncedCount: result.syncedCount });
+    } catch (error) {
+      summary.errorCount += 1;
+      const message = formatError(error);
+      results.push({ userId: seller.id, sellerName: seller.name, status: "error", error: message });
+      logApiEvent("ERROR", "[ultrafv3 sync partners] seller sync failed during all-sellers run", { sellerId: seller.id, sellerName: seller.name, error: message });
+    }
+  }
+
+  return { ...summary, results };
 }
 async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">, endpoint: string, options?: RunSyncOptions) {
   return runSync(scope, async (correlationId) => {

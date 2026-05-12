@@ -21,6 +21,9 @@ type SyncScopeStatus = {
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
+  sellerId?: string | null;
+  sellerName?: string | null;
+  authMode?: "global" | "seller" | string;
   correlationId?: string;
   durationMs?: number;
   diagnostics?: Record<string, number>;
@@ -56,6 +59,9 @@ type SyncHistoryItem = {
   finishedAt?: string | null;
   durationMs?: number | null;
   syncedCount: number;
+  sellerId?: string | null;
+  sellerName?: string | null;
+  authMode?: "global" | "seller" | string;
   errorMessage?: string | null;
 };
 
@@ -138,7 +144,7 @@ export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
   const [authMode, setAuthMode] = useState<AuthModeDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<SyncScopeKey | null>(null);
+  const [running, setRunning] = useState<SyncScopeKey | "allSellers" | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = async () => {
@@ -172,6 +178,21 @@ export default function ErpIntegrationPanel() {
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error, `Não foi possível sincronizar ${card.title}.`));
+      await load().catch(() => undefined);
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  const runAllSellerPartnersSync = async () => {
+    setRunning("allSellers");
+    try {
+      const response = await api.post<{ totalUsers: number; successCount: number; errorCount: number; skippedCount: number }>("/erp/ultrafv3/sync/partners/all-sellers");
+      const { totalUsers, successCount, errorCount, skippedCount } = response.data;
+      toast.success(`Sync por vendedor finalizado: ${successCount}/${totalUsers} sucesso, ${errorCount} erro(s), ${skippedCount} ignorado(s).`);
+      await load();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível sincronizar clientes de todos vendedores."));
       await load().catch(() => undefined);
     } finally {
       setRunning(null);
@@ -250,7 +271,7 @@ export default function ErpIntegrationPanel() {
             <p className="mt-1 text-xs text-slate-600">O CRM mantém login próprio por e-mail/senha. Estes dados são somente vínculo técnico com o ERP.</p>
           </div>
           <span className="inline-flex w-fit rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-brand-700 ring-1 ring-brand-100">
-            {authMode?.recommendation === "por_vendedor" ? "Credenciais por vendedor" : authMode?.recommendation === "global" ? "Credencial técnica global" : "Modo indefinido"}
+            {authMode?.recommendation === "por_vendedor" ? "Usando autenticação do vendedor" : authMode?.recommendation === "global" ? "Usando autenticação global" : "Modo indefinido"}
           </span>
         </div>
         <p className="mt-3 text-sm text-slate-700">{authMode?.rationale || "Carregando diagnóstico de autenticação."}</p>
@@ -273,6 +294,23 @@ export default function ErpIntegrationPanel() {
           {summary.lastError ? <p className="mt-1 text-xs">Último erro: {summary.lastError}</p> : null}
         </div>
       ) : null}
+
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-emerald-950">Clientes por vendedor</h4>
+            <p className="mt-1 text-xs text-emerald-800">Executa /partners sequencialmente com Login FV3 de cada vendedor ativo configurado, sem concorrência por vendedor.</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+            disabled={running !== null}
+            onClick={runAllSellerPartnersSync}
+          >
+            {running === "allSellers" ? "Sincronizando todos..." : "Sincronizar clientes de todos vendedores"}
+          </button>
+        </div>
+      </div>
 
       <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-5">
         {[
@@ -305,28 +343,34 @@ export default function ErpIntegrationPanel() {
             <thead className="text-slate-500">
               <tr>
                 <th className="py-2 pr-3">Escopo</th>
+                <th className="py-2 pr-3">Vendedor</th>
+                <th className="py-2 pr-3">Auth</th>
                 <th className="py-2 pr-3">Origem</th>
                 <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Início</th>
+                <th className="py-2 pr-3">Último sync</th>
                 <th className="py-2 pr-3">Qtd.</th>
                 <th className="py-2 pr-3">Duração</th>
-                <th className="py-2 pr-3">Erro</th>
+                <th className="py-2 pr-3">correlationId</th>
+                <th className="py-2 pr-3">Último erro</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {(data?.history ?? []).map((item) => (
                 <tr key={item.id}>
                   <td className="py-2 pr-3 font-semibold text-slate-800">{item.scope}</td>
+                  <td className="py-2 pr-3 text-slate-700">{item.sellerName || "Global"}</td>
+                  <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{item.authMode === "seller" ? "Vendedor" : "Global"}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Agendado" : "Manual"}</td>
                   <td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td>
-                  <td className="py-2 pr-3 text-slate-600">{formatDate(item.startedAt)}</td>
+                  <td className="py-2 pr-3 text-slate-600">{formatDate(item.finishedAt || item.startedAt)}</td>
                   <td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td>
                   <td className="py-2 pr-3 text-slate-600">{item.durationMs ?? 0}ms</td>
+                  <td className="max-w-[160px] truncate py-2 pr-3 font-mono text-slate-500" title={item.correlationId || undefined}>{item.correlationId || "—"}</td>
                   <td className="max-w-xs truncate py-2 pr-3 text-red-700" title={item.errorMessage || undefined}>{item.errorMessage || "—"}</td>
                 </tr>
               ))}
               {!(data?.history ?? []).length ? (
-                <tr><td colSpan={7} className="py-4 text-center text-slate-500">Nenhuma execução registrada.</td></tr>
+                <tr><td colSpan={10} className="py-4 text-center text-slate-500">Nenhuma execução registrada.</td></tr>
               ) : null}
             </tbody>
           </table>
