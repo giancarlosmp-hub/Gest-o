@@ -190,6 +190,7 @@ export const userCreateSchema = z.object({
   region: z.string().min(2).optional(),
   erpCode: optionalErpLinkCodeSchema,
   erpOperatorCode: optionalErpLinkCodeSchema,
+  erpRawPayload: z.unknown().optional().nullable(),
   erpLoginUsername: optionalErpLoginUsernameSchema,
   erpLoginPassword: optionalErpLoginPasswordSchema
 });
@@ -202,6 +203,7 @@ export const userUpdateSchema = z.object({
   region: z.string().min(2).optional(),
   erpCode: optionalErpLinkCodeSchema,
   erpOperatorCode: optionalErpLinkCodeSchema,
+  erpRawPayload: z.unknown().optional().nullable(),
   erpLoginUsername: optionalErpLoginUsernameSchema,
   erpLoginPassword: optionalErpLoginPasswordSchema
 });

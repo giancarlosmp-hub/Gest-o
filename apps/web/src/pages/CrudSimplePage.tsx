@@ -14,6 +14,7 @@ import {
 } from "../components/ClientImportColumnMappingStep";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
 import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
+import { getApiErrorMessage } from "../lib/apiError";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -1469,7 +1470,9 @@ export default function CrudSimplePage({
         else await load();
         if (createInModal) closeCreateModal();
       } catch (err: any) {
-        toast.error(err.response?.data?.message || "Erro ao salvar");
+        const message = getApiErrorMessage(err, "Erro ao salvar");
+        setFormError(message);
+        toast.error(message);
       } finally {
         setSaving(false);
       }
@@ -1489,29 +1492,41 @@ export default function CrudSimplePage({
       }
 
       if (endpoint === "/users") {
-        payload.name = String(payload.name || "").trim();
-        payload.email = String(payload.email || "").trim();
-        if (!payload.erpCode) {
-          payload.erpCode = null;
-          payload.erpOperatorCode = null;
-        }
+        const selectedSalesman = erpSalesmen.find((option) =>
+          option.code === payload.erpCode ||
+          option.name === payload.erpCode ||
+          `${option.name} · ${option.code}` === payload.erpCode
+        );
+        const userPayload: Record<string, unknown> = {
+          name: String(payload.name || "").trim(),
+          email: String(payload.email || "").trim(),
+          role: payload.role,
+          region: payload.region || undefined,
+          erpCode: selectedSalesman?.code ?? payload.erpCode ?? null,
+          erpOperatorCode: selectedSalesman?.erpOperatorCode ?? payload.erpOperatorCode ?? null,
+          erpRawPayload: selectedSalesman?.raw ?? payload.erpRawPayload,
+          erpLoginUsername: payload.erpLoginUsername ? String(payload.erpLoginUsername).trim() : null
+        };
 
-        if (!payload.erpLoginUsername) payload.erpLoginUsername = null;
+        if (!userPayload.erpCode) {
+          userPayload.erpCode = null;
+          userPayload.erpOperatorCode = null;
+          delete userPayload.erpRawPayload;
+        }
 
         if (typeof payload.password === "string") {
           const trimmedPassword = payload.password.trim();
-          if (!trimmedPassword) delete payload.password;
-          else payload.password = trimmedPassword;
+          if (trimmedPassword) userPayload.password = trimmedPassword;
         }
 
         if (typeof payload.erpLoginPassword === "string") {
           const trimmedErpPassword = payload.erpLoginPassword.trim();
-          if (!trimmedErpPassword) delete payload.erpLoginPassword;
-          else payload.erpLoginPassword = trimmedErpPassword;
+          if (trimmedErpPassword) userPayload.erpLoginPassword = trimmedErpPassword;
         }
-      }
 
-      if (editing) await api.put(`${endpoint}/${editing}`, payload);
+        if (editing) await api.put(`${endpoint}/${editing}`, userPayload);
+        else await api.post(endpoint, userPayload);
+      } else if (editing) await api.put(`${endpoint}/${editing}`, payload);
       else await api.post(endpoint, payload);
 
       toast.success(editing ? "Registro atualizado com sucesso." : "Registro criado com sucesso.");
@@ -1523,7 +1538,9 @@ export default function CrudSimplePage({
       else await load();
       if (createInModal) closeCreateModal();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || "Erro ao salvar");
+      const message = getApiErrorMessage(err, "Erro ao salvar");
+      setFormError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
@@ -1716,11 +1733,12 @@ export default function CrudSimplePage({
                     value={selectedSalesman ? `${selectedSalesman.name} · ${selectedSalesman.code}` : form.erpCode ?? ""}
                     onChange={(event) => {
                       const value = event.target.value;
-                      const matched = erpSalesmen.find((option) => `${option.name} · ${option.code}` === value || option.code === value);
+                      const matched = erpSalesmen.find((option) => `${option.name} · ${option.code}` === value || option.code === value || option.name === value);
                       setForm({
                         ...form,
                         erpCode: matched?.code ?? value.trim(),
-                        erpOperatorCode: matched?.erpOperatorCode ?? null
+                        erpOperatorCode: matched?.erpOperatorCode ?? null,
+                        erpRawPayload: matched?.raw
                       });
                     }}
                   />
@@ -1754,6 +1772,11 @@ export default function CrudSimplePage({
               </label>
             );
           })}
+          {formError ? (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 md:col-span-2 xl:col-span-3">
+              {formError}
+            </p>
+          ) : null}
           <button
             disabled={saving}
             className={isUsersPage ? "self-end rounded-lg bg-brand-700 px-4 py-2.5 font-semibold text-white shadow-sm hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60" : "rounded-lg bg-brand-700 px-3 py-2 font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-60"}
