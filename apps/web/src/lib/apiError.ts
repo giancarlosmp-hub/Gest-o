@@ -12,10 +12,22 @@ const FRIENDLY_BY_STATUS: Record<number, string> = {
   504: "Tempo de resposta esgotado. Tente novamente.",
 };
 
+const getResponseMessage = (data: unknown): string | null => {
+  if (!data || typeof data !== "object") return null;
+  const payload = data as { message?: unknown; details?: unknown; error?: unknown };
+  for (const value of [payload.message, payload.details, payload.error]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+};
+
 export function getApiErrorMessage(error: unknown, fallbackMessage: string) {
   const maybeAxiosError = error as {
-    response?: { status?: number };
+    response?: { status?: number; data?: unknown };
   };
+
+  const responseMessage = getResponseMessage(maybeAxiosError.response?.data);
+  if (responseMessage) return responseMessage;
 
   const status = maybeAxiosError.response?.status;
 

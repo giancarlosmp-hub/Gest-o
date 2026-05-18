@@ -60,7 +60,7 @@ import {
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, syncErpOrderStatuses } from "../services/erpOrderService.js";
-import { logApiEvent } from "../utils/logger.js";
+import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
 const router = Router();
@@ -110,7 +110,7 @@ const pickFirstString = (row: Record<string, unknown>, keys: string[]): string |
 const normalizeErpSalesmanOption = (row: unknown): ErpSalesmanOption | null => {
   if (!row || typeof row !== "object") return null;
   const payload = row as Record<string, unknown>;
-  const code = pickFirstString(payload, ["code", "erpCode", "sellerCode", "salesmanCode", "vendedorCodigo", "codigo", "CODIGO", "codVendedor"]);
+  const code = pickFirstString(payload, ["code", "erpCode", "sellerCode", "salesmanCode", "vendedorCodigo", "codigo", "CODIGO", "CODVENDEDOR", "codVendedor"]);
   const name = pickFirstString(payload, ["name", "description", "fullName", "sellerName", "salesmanName", "nome", "NOME", "razaoSocial"]);
   if (!code || !name) return null;
 
@@ -119,7 +119,7 @@ const normalizeErpSalesmanOption = (row: unknown): ErpSalesmanOption | null => {
     name,
     cpf: pickFirstString(payload, ["cpf", "CPF", "document", "documentNumber", "cnpjCpf"]),
     email: pickFirstString(payload, ["email", "EMAIL", "mail", "eMail"]),
-    erpOperatorCode: pickFirstString(payload, ["operatorCode", "erpOperatorCode", "operadorCodigo", "codigoOperador", "operator", "operador"]),
+    erpOperatorCode: pickFirstString(payload, ["operatorCode", "erpOperatorCode", "operadorCodigo", "codigoOperador", "operator", "operador", "OPERADOR"]),
     raw: row
   };
 };
@@ -155,6 +155,73 @@ const loadErpSalesmenOptions = async (): Promise<ErpSalesmanOption[]> => {
 
   return Array.from(byCode.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
 };
+
+
+const maskDocumentForLog = (value: unknown): string | null => {
+  const digits = typeof value === "string" ? value.replace(/\D/g, "") : "";
+  if (!digits) return null;
+  if (digits.length <= 4) return "****";
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+};
+
+
+const sanitizeErpRawPayload = (value: unknown): unknown => {
+  if (value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeErpRawPayload(item));
+  }
+
+  if (typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+      if (/(cpf|cnpj|document|documento)/i.test(key)) {
+        output[key] = maskDocumentForLog(nestedValue);
+      } else {
+        output[key] = sanitizeErpRawPayload(nestedValue);
+      }
+    }
+    return sanitizePayload(output);
+  }
+
+  return value;
+};
+
+const resolveErpSalesmanOption = async (submittedErpCode: unknown): Promise<ErpSalesmanOption | null> => {
+  const normalized = normalizeOptionalString(submittedErpCode);
+  if (!normalized) return null;
+
+  const options = await loadErpSalesmenOptions();
+  const normalizedLower = normalized.toLowerCase();
+  return options.find((option) =>
+    option.code === normalized ||
+    option.name.toLowerCase() === normalizedLower ||
+    `${option.name} · ${option.code}`.toLowerCase() === normalizedLower ||
+    `${option.name} - ${option.code}`.toLowerCase() === normalizedLower
+  ) ?? null;
+};
+
+const buildUserUpdateLogMeta = (params: {
+  targetUserId: string;
+  actorUserId?: string;
+  actorRole?: string;
+  role?: string;
+  erpCode?: unknown;
+  erpOperatorCode?: unknown;
+  erpLoginUsername?: unknown;
+  hasCrmPasswordChange: boolean;
+  hasErpPasswordChange: boolean;
+}) => ({
+  targetUserId: params.targetUserId,
+  actorUserId: params.actorUserId,
+  actorRole: params.actorRole,
+  role: params.role,
+  erpCode: normalizeOptionalString(params.erpCode),
+  erpOperatorCode: normalizeOptionalString(params.erpOperatorCode),
+  erpLoginUsernameMasked: maskDocumentForLog(params.erpLoginUsername),
+  hasCrmPasswordChange: params.hasCrmPasswordChange,
+  hasErpPasswordChange: params.hasErpPasswordChange
+});
 
 const normalizeCulturePayload = (payload: z.infer<typeof cultureCatalogSchema>) => {
   const goals = Object.entries(payload.goalsJson || {}).reduce<CultureGoals>((acc, [goal, range]) => {
@@ -7240,13 +7307,16 @@ router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSc
   if (req.user!.role === "gerente" && role === "diretor") {
     return res.status(403).json({ success: false, message: "Gerentes não podem criar usuários diretores." });
   }
-  const erpOption = erpCode ? (await loadErpSalesmenOptions()).find((option) => option.code === erpCode) : null;
+  const erpOption = await resolveErpSalesmanOption(erpCode);
   const passwordHash = await hashPassword(password);
+  if (typeof erpLoginPassword === "string" && erpLoginPassword.trim() && !isErpCredentialEncryptionConfigured()) {
+    return res.status(400).json({ success: false, message: "Configure ERP_CREDENTIAL_ENCRYPTION_KEY antes de salvar senha FV3." });
+  }
   const erpLoginPasswordEncrypted = typeof erpLoginPassword === "string" && erpLoginPassword.trim()
     ? encryptErpCredential(erpLoginPassword)
     : null;
   const user = await prisma.user.create({
-    data: { name, email, passwordHash, role, region, erpCode: erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ?? undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted },
+    data: { name, email, passwordHash, role, region, erpCode: erpOption?.code ?? erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted },
     select: userListSelect
   });
   return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: sanitizeUserForList(user) });
@@ -7266,23 +7336,44 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
       return res.status(403).json({ success: false, message: "Gerentes não podem criar ou editar perfis diretores." });
     }
 
-    const erpOption = erpCode ? (await loadErpSalesmenOptions()).find((option) => option.code === erpCode) : null;
+    const hasCrmPasswordChange = typeof password === "string" && password.trim().length > 0;
+    const hasErpPasswordChange = typeof erpLoginPassword === "string" && erpLoginPassword.trim().length > 0;
+
+    logApiEvent("INFO", "[users:update] start", buildUserUpdateLogMeta({
+      targetUserId: id,
+      actorUserId: req.user!.id,
+      actorRole: req.user!.role,
+      role,
+      erpCode,
+      erpOperatorCode,
+      erpLoginUsername,
+      hasCrmPasswordChange,
+      hasErpPasswordChange
+    }));
+
+    if (hasErpPasswordChange && !isErpCredentialEncryptionConfigured()) {
+      logApiEvent("WARN", "[users:update] ERP credential encryption key missing", { targetUserId: id, actorUserId: req.user!.id });
+      return res.status(400).json({ success: false, message: "Configure ERP_CREDENTIAL_ENCRYPTION_KEY antes de salvar senha FV3." });
+    }
+
+    const erpOption = await resolveErpSalesmanOption(erpCode);
+    const resolvedErpCode = erpCode ? erpOption?.code ?? erpCode : null;
     const data: Record<string, unknown> = {
       name,
       email,
       role,
       region,
-      erpCode: erpCode ?? null,
+      erpCode: resolvedErpCode,
       erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null,
-      erpRawPayload: erpOption?.raw ?? Prisma.JsonNull,
+      erpRawPayload: resolvedErpCode && erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : Prisma.JsonNull,
       erpLoginUsername: erpLoginUsername ?? null
     };
 
-    if (typeof password === "string" && password.trim().length > 0) {
+    if (hasCrmPasswordChange) {
       data.passwordHash = await hashPassword(password);
     }
 
-    if (typeof erpLoginPassword === "string" && erpLoginPassword.trim().length > 0) {
+    if (hasErpPasswordChange) {
       data.erpLoginPasswordEncrypted = encryptErpCredential(erpLoginPassword);
     }
 
@@ -7292,14 +7383,17 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
       select: userListSelect
     });
 
+    logApiEvent("INFO", "[users:update] success", { targetUserId: id, actorUserId: req.user!.id, erpCode: updated.erpCode, erpOperatorCode: updated.erpOperatorCode, erpLoginConfigured: Boolean(updated.erpLoginUsername?.trim() && updated.erpLoginPasswordEncrypted) });
+
     return res.json({ success: true, message: "Usuário atualizado com sucesso.", data: sanitizeUserForList(updated) });
   } catch (error: any) {
     if (error?.code === "P2002") {
       return res.status(409).json({ success: false, message: "Já existe outro usuário com este e-mail corporativo." });
     }
 
-    console.error("[users:update]", error);
-    return res.status(500).json({ success: false, message: "Não foi possível atualizar o usuário.", details: error?.message });
+    const message = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[users:update] failed", { targetUserId: id, actorUserId: req.user?.id, error: message });
+    return res.status(500).json({ success: false, message: "Não foi possível atualizar o usuário.", details: message });
   }
 });
 router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
