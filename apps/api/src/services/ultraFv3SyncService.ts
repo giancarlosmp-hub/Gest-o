@@ -85,6 +85,19 @@ const toArray = (payload: unknown) => {
   return [];
 };
 
+
+
+const describeBodyType = (payload: unknown) => {
+  if (Array.isArray(payload)) return "array";
+  if (payload === null) return "null";
+  return typeof payload;
+};
+
+const extractSampleFields = (payload: unknown) => {
+  if (!payload || typeof payload !== "object") return [] as string[];
+  const keys = Object.keys(payload as Record<string, unknown>).slice(0, 3);
+  return keys.map((key) => `${key}:${typeof (payload as Record<string, unknown>)[key]}`);
+};
 const formatError = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -397,6 +410,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
   const diagnostics = {
     received: rows.length,
     withoutCode: 0,
+    discardedNonObject: 0,
     created: 0,
     updated: 0,
     preservedCommercialLinkWarnings: 0,
@@ -405,7 +419,10 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
   let syncedCount = 0;
 
   for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
+    if (!row || typeof row !== "object") {
+      diagnostics.discardedNonObject += 1;
+      continue;
+    }
     const payload = row as Record<string, unknown>;
     const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
     if (!code) {
@@ -524,21 +541,30 @@ export async function syncPartnersByUser(userId: string, options?: RunSyncOption
   return runSync("partners", async (correlationId) => {
     const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/partners", credentials, correlationId);
     const rows = toArray(response);
-    const diagnosticsBase = { receivedRaw: rows.length };
+    const firstRowSamples = rows.slice(0, 3).flatMap((item) => extractSampleFields(item)).slice(0, 9);
+    const diagnosticsBase = {
+      httpStatus: 200,
+      responseBodyType: describeBodyType(response) === "object" ? 1 : 0,
+      receivedRaw: rows.length,
+      sampleFieldCount: firstRowSamples.length,
+    };
     if (!rows.length) {
-      logApiEvent("INFO", "[ultrafv3 sync partners] seller returned zero partners", { correlationId, sellerId: seller.id, sellerName: seller.name, authMode: "seller", ...diagnosticsBase });
-      return { syncedCount: 0, diagnostics: { ...diagnosticsBase, validAfterNormalization: 0 } };
+      logApiEvent("INFO", "[ultrafv3 sync partners] seller returned zero partners", { correlationId, sellerId: seller.id, sellerName: seller.name, authMode: "seller", bodyType: describeBodyType(response), sampleFields: firstRowSamples, ...diagnosticsBase });
+      return { syncedCount: 0, diagnostics: { ...diagnosticsBase, validAfterNormalization: 0, discardedAfterNormalization: 0 } };
     }
     const result = await persistPartnerRowsForSeller(rows, seller, correlationId);
+    const discardedAfterNormalization = Math.max(rows.length - result.syncedCount, 0);
     logApiEvent("INFO", "[ultrafv3 sync partners] processed seller partners payload", {
       correlationId,
       sellerId: seller.id,
       sellerName: seller.name,
       syncedCount: result.syncedCount,
-      diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization: Math.max(rows.length - result.syncedCount, 0) },
+      bodyType: describeBodyType(response),
+      sampleFields: firstRowSamples,
+      diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization },
       authMode: "seller",
     });
-    return { syncedCount: result.syncedCount, diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization: Math.max(rows.length - result.syncedCount, 0), warnings: result.warnings.length } };
+    return { syncedCount: result.syncedCount, diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization, warnings: result.warnings.length } };
   }, { ...options, lockScope: `partners:user:${seller.id}`, sellerId: seller.id, sellerName: seller.name, authMode: "seller", writeStatus: false });
 }
 
@@ -586,7 +612,7 @@ export const syncPaymentMethods = (options?: RunSyncOptions) => syncReferenceDat
 export const syncReceivingConditions = (options?: RunSyncOptions) => syncReferenceData("receivingConditions", "/receiving-conditions", options, ["/receivingConditions"]);
 export const syncBranches = (options?: RunSyncOptions) => syncReferenceData("branches", "/branches", options);
 export const syncOperations = (options?: RunSyncOptions) => syncReferenceData("operations", "/operations", options);
-export const syncSalesmen = (options?: RunSyncOptions) => syncReferenceData("salesmen", "/salesmen", options);
+export const syncSalesmen = (options?: RunSyncOptions) => syncReferenceData("salesmen", "/salesmen", options, ["/seller", "/vendors", "/vendedores"]);
 
 const getLatestSyncError = (statuses: Record<UltraFv3SyncScope, SyncStatusPayload>) => {
   return Object.values(statuses)
