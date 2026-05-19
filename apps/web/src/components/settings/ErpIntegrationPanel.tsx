@@ -212,6 +212,18 @@ export default function ErpIntegrationPanel() {
   const integration = data?.integration;
   const integrationClasses = integrationStatusClasses[integration?.authenticationStatus || "not_authenticated"] || integrationStatusClasses.not_authenticated;
   const missingConfig = integration?.missingConfig ?? [];
+  const hasSellerFallback = (authMode?.encryptionKeyConfigured ?? false) && (authMode?.sellers.withFv3Login ?? 0) > 0;
+  const hasGlobalCredentials = authMode?.hasGlobalCredentials ?? false;
+  const hasAnyCredentialPath = hasGlobalCredentials || hasSellerFallback;
+  const hasBaseUrlConfigured = Boolean(integration?.baseUrl);
+  const canSyncReferenceCards = hasBaseUrlConfigured && hasAnyCredentialPath;
+  const configGuidanceMessage = !hasBaseUrlConfigured
+    ? "Configure ULTRAFV3_BASE_URL para habilitar as sincronizações."
+    : !hasAnyCredentialPath
+      ? "Sem credenciais válidas: configure ULTRAFV3_USERNAME/ULTRAFV3_PASSWORD ou Login FV3/Senha FV3 de pelo menos 1 vendedor ativo."
+      : !hasGlobalCredentials && hasSellerFallback
+        ? "Modo por vendedor disponível: as sincronizações usarão credencial de vendedor como fallback."
+        : null;
 
   return (
     <div className="space-y-4">
@@ -276,7 +288,7 @@ export default function ErpIntegrationPanel() {
         </div>
         <p className="mt-3 text-sm text-slate-700">{authMode?.rationale || "Carregando diagnóstico de autenticação."}</p>
         <div className="mt-4 grid gap-3 text-xs md:grid-cols-4">
-          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Global .env</strong><span className="mt-1 block text-slate-600">{authMode?.hasGlobalCredentials ? "ULTRAFV3_USERNAME/PASSWORD configurados" : "Credencial global ausente"}</span></div>
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Global .env</strong><span className="mt-1 block text-slate-600">{authMode?.hasGlobalCredentials ? "ULTRAFV3_USERNAME/PASSWORD configurados" : hasSellerFallback ? "Modo por vendedor disponível" : "Credencial global ausente"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Vínculo ERP</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withErpLink}/${authMode.sellers.total} vendedores` : "—"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Login FV3 vendedor</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withFv3Login}/${authMode.sellers.total} configurados` : "—"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Criptografia</strong><span className="mt-1 block text-slate-600">{authMode?.encryptionKeyConfigured ? "ERP_CREDENTIAL_ENCRYPTION_KEY ativa" : "Chave não configurada"}</span></div>
@@ -377,6 +389,12 @@ export default function ErpIntegrationPanel() {
         </div>
       </div>
 
+      {configGuidanceMessage ? (
+        <div className={`rounded-xl border p-3 text-sm ${canSyncReferenceCards ? "border-amber-200 bg-amber-50 text-amber-800" : "border-red-200 bg-red-50 text-red-800"}`}>
+          {configGuidanceMessage}
+        </div>
+      ) : null}
+
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {SYNC_CARDS.map((card) => {
           const status = data?.status?.[card.key] ?? { status: "idle", syncedCount: 0 };
@@ -425,7 +443,7 @@ export default function ErpIntegrationPanel() {
               <button
                 type="button"
                 className="mt-auto rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
-                disabled={running !== null || isRunning || integration?.isConfigured === false}
+                disabled={running !== null || isRunning || !canSyncReferenceCards}
                 onClick={() => runSync(card)}
               >
                 {isRunning ? "Sincronizando..." : "Sincronizar"}
