@@ -28,7 +28,7 @@ type SyncStatusPayload = {
   status: "idle" | "running" | "success" | "error" | "skipped";
   sellerId?: string | null;
   sellerName?: string | null;
-  authMode?: "global" | "seller";
+  authMode?: "global" | "seller" | "seller_reference";
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
@@ -40,7 +40,7 @@ type SyncStatusPayload = {
 };
 
 export type SyncResult = { syncedCount: number; diagnostics?: Record<string, number> };
-export type RunSyncOptions = { trigger?: ErpSyncTrigger; failIfLocked?: boolean; lockScope?: string; sellerId?: string; sellerName?: string; authMode?: "global" | "seller"; writeStatus?: boolean };
+export type RunSyncOptions = { trigger?: ErpSyncTrigger; failIfLocked?: boolean; lockScope?: string; sellerId?: string; sellerName?: string; authMode?: "global" | "seller" | "seller_reference"; writeStatus?: boolean };
 type LockAcquireResult = { acquired: true; runId: string } | { acquired: false; runId: string; lockedUntil: Date | null };
 
 type UltraFv3IntegrationDiagnostics = {
@@ -121,6 +121,18 @@ async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, cor
     throw new Error(`Retorno vazio do UltraFV3 para ${scope} (${endpoint}).`);
   }
   return rows;
+}
+
+
+async function resolveReferenceCredentials() {
+  if (ultraFv3Client.hasGlobalCredentials()) return { credentials: undefined, authMode: "global" as const, sellerId: null, sellerName: null };
+  const seller = await prisma.user.findFirst({
+    where: { role: "vendedor", isActive: true, erpLoginUsername: { not: null }, erpLoginPasswordEncrypted: { not: null } },
+    select: { id: true, name: true, erpCode: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
+    orderBy: [{ name: "asc" }],
+  });
+  if (!seller) throw new Error("Credencial global ausente e nenhum vendedor ativo com Login FV3/Senha FV3 configurados.");
+  return { credentials: getConfiguredSellerCredentials(seller), authMode: "seller_reference" as const, sellerId: seller.id, sellerName: seller.name };
 }
 
 async function writeSyncStatus(payload: SyncStatusPayload) {
@@ -234,8 +246,9 @@ export async function syncConnection(options?: RunSyncOptions) {
 }
 
 export async function syncProducts(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
   return runSync("products", async (correlationId) => {
-    const rows = await fetchUltraFv3Rows("/products", "products", correlationId);
+    const rows = await fetchUltraFv3Rows("/products", "products", correlationId, resolved.credentials);
     const diagnostics = {
       received: rows.length,
       invalidInactive: 0,
@@ -335,7 +348,7 @@ export async function syncProducts(options?: RunSyncOptions) {
 
     logApiEvent("INFO", "[ultrafv3 sync products] processed products payload", { correlationId, syncedCount, diagnostics });
     return { syncedCount, diagnostics };
-  }, options);
+  }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
 
 type SellerSyncUser = {
@@ -482,17 +495,23 @@ export async function syncPartnersByUser(userId: string, options?: RunSyncOption
   const credentials = getConfiguredSellerCredentials(seller);
 
   return runSync("partners", async (correlationId) => {
-    const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId, credentials);
+    const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/partners", credentials, correlationId);
+    const rows = toArray(response);
+    const diagnosticsBase = { receivedRaw: rows.length };
+    if (!rows.length) {
+      logApiEvent("INFO", "[ultrafv3 sync partners] seller returned zero partners", { correlationId, sellerId: seller.id, sellerName: seller.name, authMode: "seller", ...diagnosticsBase });
+      return { syncedCount: 0, diagnostics: { ...diagnosticsBase, validAfterNormalization: 0 } };
+    }
     const result = await persistPartnerRowsForSeller(rows, seller, correlationId);
     logApiEvent("INFO", "[ultrafv3 sync partners] processed seller partners payload", {
       correlationId,
       sellerId: seller.id,
       sellerName: seller.name,
       syncedCount: result.syncedCount,
-      diagnostics: result.diagnostics,
+      diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization: Math.max(rows.length - result.syncedCount, 0) },
       authMode: "seller",
     });
-    return { syncedCount: result.syncedCount, diagnostics: { ...result.diagnostics, warnings: result.warnings.length } };
+    return { syncedCount: result.syncedCount, diagnostics: { ...diagnosticsBase, ...result.diagnostics, validAfterNormalization: result.syncedCount, discardedAfterNormalization: Math.max(rows.length - result.syncedCount, 0), warnings: result.warnings.length } };
   }, { ...options, lockScope: `partners:user:${seller.id}`, sellerId: seller.id, sellerName: seller.name, authMode: "seller", writeStatus: false });
 }
 
@@ -523,15 +542,16 @@ export async function syncPartnersForAllConfiguredSellers(options?: RunSyncOptio
   return { ...summary, results };
 }
 async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">, endpoint: string, options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
   return runSync(scope, async (correlationId) => {
-    const rows = await fetchUltraFv3Rows(endpoint, scope, correlationId);
+    const rows = await fetchUltraFv3Rows(endpoint, scope, correlationId, resolved.credentials);
     await prisma.appConfig.upsert({
       where: { key: `erp.ultrafv3.${scope}` },
       update: { value: JSON.stringify(rows) },
       create: { key: `erp.ultrafv3.${scope}`, value: JSON.stringify(rows) }
     });
     return { syncedCount: rows.length };
-  }, options);
+  }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
 
 export const syncPriceTables = (options?: RunSyncOptions) => syncReferenceData("priceTables", "/price-tables", options);
