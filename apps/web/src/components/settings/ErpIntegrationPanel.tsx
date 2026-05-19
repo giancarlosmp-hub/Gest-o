@@ -424,6 +424,14 @@ export default function ErpIntegrationPanel() {
                   <dt>{card.countLabel || "Quantidade sincronizada"}</dt>
                   <dd className="font-medium text-slate-900">{status.syncedCount ?? 0}</dd>
                 </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Auth</dt>
+                  <dd className="text-right font-medium text-slate-900">{status.authMode === "seller" ? "Vendedor" : status.authMode === "seller_reference" ? "Vendedor (referência)" : "Global"}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt>Contexto</dt>
+                  <dd className="text-right font-medium text-slate-900">{status.sellerName || "Global"}</dd>
+                </div>
               </dl>
 
               {status.diagnostics && Object.keys(status.diagnostics).length > 0 && (
