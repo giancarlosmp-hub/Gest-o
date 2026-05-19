@@ -124,6 +124,33 @@ async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, cor
 }
 
 
+
+
+async function fetchUltraFv3RowsWithAlias(
+  endpoint: string,
+  scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">,
+  correlationId: string,
+  credentials: UltraFv3Credentials | undefined,
+  aliases: string[] = [],
+) {
+  const candidates = [endpoint, ...aliases.filter((item) => item && item !== endpoint)];
+  let lastError: unknown;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    try {
+      const rows = await fetchUltraFv3Rows(candidate, scope, correlationId, credentials);
+      return { rows, endpointUsed: candidate, aliasFallbackUsed: index > 0 ? 1 : 0 };
+    } catch (error) {
+      lastError = error;
+      const message = formatError(error);
+      const canTryAlias = index < candidates.length - 1 && /404|inexistente|not found/i.test(message);
+      if (!canTryAlias) throw error;
+      logApiEvent("WARN", "[ultrafv3 sync] endpoint unavailable; trying alias", { scope, correlationId, endpoint: candidate, nextEndpoint: candidates[index + 1], error: message });
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(formatError(lastError));
+}
+
 async function resolveReferenceCredentials() {
   if (ultraFv3Client.hasGlobalCredentials()) return { credentials: undefined, authMode: "global" as const, sellerId: null, sellerName: null };
   const seller = await prisma.user.findFirst({
@@ -541,22 +568,22 @@ export async function syncPartnersForAllConfiguredSellers(options?: RunSyncOptio
 
   return { ...summary, results };
 }
-async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">, endpoint: string, options?: RunSyncOptions) {
+async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">, endpoint: string, options?: RunSyncOptions, aliases: string[] = []) {
   const resolved = await resolveReferenceCredentials();
   return runSync(scope, async (correlationId) => {
-    const rows = await fetchUltraFv3Rows(endpoint, scope, correlationId, resolved.credentials);
+    const result = await fetchUltraFv3RowsWithAlias(endpoint, scope, correlationId, resolved.credentials, aliases);
     await prisma.appConfig.upsert({
       where: { key: `erp.ultrafv3.${scope}` },
-      update: { value: JSON.stringify(rows) },
-      create: { key: `erp.ultrafv3.${scope}`, value: JSON.stringify(rows) }
+      update: { value: JSON.stringify(result.rows) },
+      create: { key: `erp.ultrafv3.${scope}`, value: JSON.stringify(result.rows) }
     });
-    return { syncedCount: rows.length };
+    return { syncedCount: result.rows.length, diagnostics: { endpointUsed: 1, aliasFallbackUsed: result.aliasFallbackUsed } };
   }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
 
-export const syncPriceTables = (options?: RunSyncOptions) => syncReferenceData("priceTables", "/price-tables", options);
-export const syncPaymentMethods = (options?: RunSyncOptions) => syncReferenceData("paymentMethods", "/payment-methods", options);
-export const syncReceivingConditions = (options?: RunSyncOptions) => syncReferenceData("receivingConditions", "/receiving-conditions", options);
+export const syncPriceTables = (options?: RunSyncOptions) => syncReferenceData("priceTables", "/price-tables", options, ["/priceTables"]);
+export const syncPaymentMethods = (options?: RunSyncOptions) => syncReferenceData("paymentMethods", "/payment-methods", options, ["/paymentMethods"]);
+export const syncReceivingConditions = (options?: RunSyncOptions) => syncReferenceData("receivingConditions", "/receiving-conditions", options, ["/receivingConditions"]);
 export const syncBranches = (options?: RunSyncOptions) => syncReferenceData("branches", "/branches", options);
 export const syncOperations = (options?: RunSyncOptions) => syncReferenceData("operations", "/operations", options);
 export const syncSalesmen = (options?: RunSyncOptions) => syncReferenceData("salesmen", "/salesmen", options);
@@ -597,11 +624,35 @@ export function getUltraFv3IntegrationDiagnostics(statuses: Record<UltraFv3SyncS
 }
 
 export async function getUltraFv3SyncStatus() {
-  const config = await prisma.appConfig.findUnique({ where: { key: ERP_SYNC_STATUS_KEY }, select: { value: true } });
-  const parsed = config?.value ? JSON.parse(config.value) : {};
   const scopes: UltraFv3SyncScope[] = ["connection", "products", "partners", "orderStatus", "salesmen", "paymentMethods", "receivingConditions", "priceTables", "branches", "operations"];
+  const latestRuns = await prisma.erpSyncRun.findMany({
+    where: { scope: { in: scopes }, status: { not: ErpSyncRunStatus.running } },
+    orderBy: [{ startedAt: "desc" }],
+    distinct: ["scope"],
+  });
+  const byScope = new Map(latestRuns.map((run) => [run.scope as UltraFv3SyncScope, run]));
+
   return scopes.reduce<Record<UltraFv3SyncScope, SyncStatusPayload>>((acc, scope) => {
-    acc[scope] = parsed[scope] ?? { scope, status: "idle", syncedCount: 0 };
+    const run = byScope.get(scope);
+    if (!run) {
+      acc[scope] = { scope, status: "idle", syncedCount: 0 };
+      return acc;
+    }
+    const errors = run.errorMessage ? [run.errorMessage] : undefined;
+    acc[scope] = {
+      scope,
+      status: run.status === ErpSyncRunStatus.success ? "success" : run.status === ErpSyncRunStatus.error ? "error" : run.status === ErpSyncRunStatus.skipped ? "skipped" : "running",
+      lastSyncAt: (run.finishedAt ?? run.startedAt).toISOString(),
+      syncedCount: run.syncedCount ?? 0,
+      errors,
+      correlationId: run.correlationId ?? undefined,
+      durationMs: run.durationMs ?? undefined,
+      trigger: run.trigger,
+      runId: run.id,
+      sellerId: run.sellerId,
+      sellerName: run.sellerName,
+      authMode: run.authMode as "global" | "seller" | "seller_reference" | undefined,
+    };
     return acc;
   }, {} as Record<UltraFv3SyncScope, SyncStatusPayload>);
 }
