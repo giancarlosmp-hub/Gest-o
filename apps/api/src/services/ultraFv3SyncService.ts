@@ -87,6 +87,31 @@ const toArray = (payload: unknown) => {
 
 
 
+
+const sanitizePayloadForLog = (value: unknown, depth = 0): unknown => {
+  if (value === null || value === undefined) return value;
+  if (depth > 3) return "[max-depth]";
+  if (Array.isArray(value)) return value.slice(0, 3).map((item) => sanitizePayloadForLog(item, depth + 1));
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const entries = Object.entries(record).slice(0, 15).map(([key, raw]) => {
+      const lower = key.toLowerCase();
+      if (/(token|password|authorization|senha)/i.test(lower)) return [key, "***"] as const;
+      return [key, sanitizePayloadForLog(raw, depth + 1)] as const;
+    });
+    return Object.fromEntries(entries);
+  }
+  if (typeof value === "string") return value.length > 160 ? `${value.slice(0, 160)}...` : value;
+  return value;
+};
+
+const getCandidateCounts = (body: unknown) => {
+  if (!body || typeof body !== "object") return { data: 0, items: 0, partners: 0, result: 0, records: 0 };
+  const record = body as Record<string, unknown>;
+  const count = (key: string) => Array.isArray(record[key]) ? (record[key] as unknown[]).length : 0;
+  return { data: count("data"), items: count("items"), partners: count("partners"), result: count("result"), records: count("records") };
+};
+
 const describeBodyType = (payload: unknown) => {
   if (Array.isArray(payload)) return "array";
   if (payload === null) return "null";
@@ -541,15 +566,36 @@ export async function syncPartnersByUser(userId: string, options?: RunSyncOption
   return runSync("partners", async (correlationId) => {
     const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/partners", credentials, correlationId);
     const rows = toArray(response);
+    const candidateCounts = getCandidateCounts(response);
+    const rootKeys = response && typeof response === "object" && !Array.isArray(response) ? Object.keys(response as Record<string, unknown>).slice(0, 20) : [];
     const firstRowSamples = rows.slice(0, 3).flatMap((item) => extractSampleFields(item)).slice(0, 9);
     const diagnosticsBase = {
       httpStatus: 200,
       responseBodyType: describeBodyType(response) === "object" ? 1 : 0,
       receivedRaw: rows.length,
       sampleFieldCount: firstRowSamples.length,
+      normalizedCount: rows.length,
+      discardedAfterNormalization: 0,
     };
+    logApiEvent("INFO", "[ultrafv3 sync partners] seller payload diagnostics", {
+      correlationId,
+      endpoint: "/partners",
+      httpStatus: 200,
+      bodyType: typeof response,
+      isArrayBody: Array.isArray(response),
+      rootKeys,
+      foundCount: rows.length,
+      candidatePaths: candidateCounts,
+      sampleFirstItem: sanitizePayloadForLog(rows[0] ?? null),
+      sellerId: seller.id,
+      sellerName: seller.name,
+      authMode: "seller",
+      receivedRaw: rows.length,
+      normalizedCount: rows.length,
+      discardedAfterNormalization: 0,
+    });
     if (!rows.length) {
-      logApiEvent("INFO", "[ultrafv3 sync partners] seller returned zero partners", { correlationId, sellerId: seller.id, sellerName: seller.name, authMode: "seller", bodyType: describeBodyType(response), sampleFields: firstRowSamples, ...diagnosticsBase });
+      logApiEvent("INFO", "UltraFV3 retornou payload vazio para /partners", { correlationId, sellerId: seller.id, sellerName: seller.name, authMode: "seller", bodyType: describeBodyType(response), sampleFields: firstRowSamples, ...diagnosticsBase });
       return { syncedCount: 0, diagnostics: { ...diagnosticsBase, validAfterNormalization: 0, discardedAfterNormalization: 0 } };
     }
     const result = await persistPartnerRowsForSeller(rows, seller, correlationId);
@@ -597,7 +643,65 @@ export async function syncPartnersForAllConfiguredSellers(options?: RunSyncOptio
 async function syncReferenceData(scope: Exclude<UltraFv3SyncScope, "connection" | "products" | "partners" | "orderStatus">, endpoint: string, options?: RunSyncOptions, aliases: string[] = []) {
   const resolved = await resolveReferenceCredentials();
   return runSync(scope, async (correlationId) => {
-    const result = await fetchUltraFv3RowsWithAlias(endpoint, scope, correlationId, resolved.credentials, aliases);
+    let tokenPayload: { isSupervisor: number; salesman: number; operator: number } | null = null;
+    if (scope === "salesmen" && resolved.credentials) {
+      const auth = await ultraFv3Client.authenticateWithCredentials(resolved.credentials);
+      tokenPayload = {
+        isSupervisor: auth.tokenPayload.salesman ? 0 : 1,
+        salesman: auth.tokenPayload.salesman ? 1 : 0,
+        operator: auth.tokenPayload.operator ? 1 : 0,
+      };
+    }
+    let result;
+    if (scope === "salesmen") {
+      const candidates = [endpoint, ...aliases.filter((item) => item && item !== endpoint)];
+      let lastError: unknown;
+      let rawBody: unknown = null;
+      let endpointUsed = endpoint;
+      let rows: unknown[] = [];
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        try {
+          rawBody = resolved.credentials
+            ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(candidate, resolved.credentials, correlationId)
+            : await requestUltraFv3ReadOnlyWithRetry<unknown>(candidate, correlationId);
+          rows = toArray(rawBody);
+          endpointUsed = candidate;
+          break;
+        } catch (error) {
+          lastError = error;
+          const message = formatError(error);
+          const canTryAlias = index < candidates.length - 1 && /404|inexistente|not found/i.test(message);
+          if (!canTryAlias) throw error;
+          logApiEvent("WARN", "[ultrafv3 sync] endpoint unavailable; trying alias", { scope, correlationId, endpoint: candidate, nextEndpoint: candidates[index + 1], error: message });
+        }
+      }
+      if (lastError && !rows.length && rawBody === null) throw lastError instanceof Error ? lastError : new Error(formatError(lastError));
+      const rootKeys = rawBody && typeof rawBody === "object" && !Array.isArray(rawBody) ? Object.keys(rawBody as Record<string, unknown>).slice(0, 20) : [];
+      logApiEvent("INFO", "[ultrafv3 sync salesmen] payload diagnostics", {
+        correlationId,
+        endpointUsed,
+        httpStatus: 200,
+        rawBody: sanitizePayloadForLog(rawBody),
+        keys: rootKeys,
+        foundCount: rows.length,
+        tokenPayloadIsSupervisor: tokenPayload?.isSupervisor ?? null,
+        tokenPayloadSalesman: tokenPayload?.salesman ?? null,
+        tokenPayloadOperator: tokenPayload?.operator ?? null,
+      });
+      if (!rows.length) {
+        logApiEvent("INFO", "UltraFV3 retornou vazio para /salesmen usando vendedor comum", {
+          correlationId,
+          endpointUsed,
+          tokenPayloadIsSupervisor: tokenPayload?.isSupervisor ?? null,
+          tokenPayloadSalesman: tokenPayload?.salesman ?? null,
+          tokenPayloadOperator: tokenPayload?.operator ?? null,
+        });
+      }
+      result = { rows, endpointUsed, aliasFallbackUsed: endpointUsed !== endpoint ? 1 : 0 };
+    } else {
+      result = await fetchUltraFv3RowsWithAlias(endpoint, scope, correlationId, resolved.credentials, aliases);
+    }
     await prisma.appConfig.upsert({
       where: { key: `erp.ultrafv3.${scope}` },
       update: { value: JSON.stringify(result.rows) },
