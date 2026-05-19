@@ -93,6 +93,13 @@ type ErpSalesmanOption = {
   raw: unknown;
 };
 
+type ErpSalesmenOptionsMode = "global_available" | "global_unavailable";
+type ErpSalesmenOptionsResponse = {
+  items: ErpSalesmanOption[];
+  mode: ErpSalesmenOptionsMode;
+  warning: string | null;
+};
+
 const normalizeOptionalString = (value: unknown): string | null => {
   if (value === null || value === undefined) return null;
   const normalized = String(value).trim();
@@ -124,7 +131,7 @@ const normalizeErpSalesmanOption = (row: unknown): ErpSalesmanOption | null => {
   };
 };
 
-const loadErpSalesmenOptions = async (): Promise<ErpSalesmanOption[]> => {
+const loadErpSalesmenOptions = async (): Promise<ErpSalesmenOptionsResponse> => {
   const stored = await prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.salesmen" }, select: { value: true } });
   let rows: unknown[] = [];
 
@@ -138,13 +145,27 @@ const loadErpSalesmenOptions = async (): Promise<ErpSalesmanOption[]> => {
   }
 
   if (!rows.length) {
-    const consulted = await ultraFv3Client.request("/salesmen");
-    rows = Array.isArray(consulted) ? consulted : [];
-    await prisma.appConfig.upsert({
-      where: { key: "erp.ultrafv3.salesmen" },
-      update: { value: JSON.stringify(rows) },
-      create: { key: "erp.ultrafv3.salesmen", value: JSON.stringify(rows) }
-    });
+    try {
+      const consulted = await ultraFv3Client.request("/salesmen");
+      rows = Array.isArray(consulted) ? consulted : [];
+      await prisma.appConfig.upsert({
+        where: { key: "erp.ultrafv3.salesmen" },
+        update: { value: JSON.stringify(rows) },
+        create: { key: "erp.ultrafv3.salesmen", value: JSON.stringify(rows) }
+      });
+    } catch (error) {
+      if (!ultraFv3Client.hasGlobalCredentials()) {
+        logApiEvent("INFO", "[erp salesmen options] global credentials unavailable; returning empty options", {
+          missingConfig: ultraFv3Client.getDiagnostics().missingConfig
+        });
+        return {
+          items: [],
+          mode: "global_unavailable",
+          warning: "Credenciais globais do UltraFV3 não configuradas. Preencha o vínculo ERP/Login FV3 manualmente para este vendedor."
+        };
+      }
+      throw error;
+    }
   }
 
   const byCode = new Map<string, ErpSalesmanOption>();
@@ -153,7 +174,11 @@ const loadErpSalesmenOptions = async (): Promise<ErpSalesmanOption[]> => {
     if (option && !byCode.has(option.code)) byCode.set(option.code, option);
   }
 
-  return Array.from(byCode.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+  return {
+    items: Array.from(byCode.values()).sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    mode: ultraFv3Client.hasGlobalCredentials() ? "global_available" : "global_unavailable",
+    warning: ultraFv3Client.hasGlobalCredentials() ? null : "Credenciais globais do UltraFV3 não configuradas."
+  };
 };
 
 
@@ -192,8 +217,9 @@ const resolveErpSalesmanOption = async (submittedErpCode: unknown): Promise<ErpS
   if (!normalized) return null;
 
   const options = await loadErpSalesmenOptions();
+  const optionItems = options.items;
   const normalizedLower = normalized.toLowerCase();
-  return options.find((option) =>
+  return optionItems.find((option) =>
     option.code === normalized ||
     option.name.toLowerCase() === normalizedLower ||
     `${option.name} · ${option.code}`.toLowerCase() === normalizedLower ||
