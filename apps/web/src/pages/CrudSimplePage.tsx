@@ -45,6 +45,12 @@ type ErpSalesmanOption = {
   raw?: unknown;
 };
 
+type ErpSalesmenOptionsResponse = {
+  items?: ErpSalesmanOption[];
+  mode?: "global_available" | "global_unavailable";
+  warning?: string | null;
+};
+
 type ClientListItem = {
   id: string;
   ownerSellerId?: string;
@@ -370,8 +376,12 @@ export default function CrudSimplePage({
   useEffect(() => {
     if (isUsersPage) {
       api
-        .get<ErpSalesmanOption[]>("/erp/ultrafv3/salesmen/options")
-        .then((response) => setErpSalesmen(Array.isArray(response.data) ? response.data : []))
+        .get<ErpSalesmanOption[] | ErpSalesmenOptionsResponse>("/erp/ultrafv3/salesmen/options")
+        .then((response) => {
+          const payload = response.data;
+          const options = Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []);
+          setErpSalesmen(options);
+        })
         .catch(() => setErpSalesmen([]));
     } else {
       setErpSalesmen([]);
