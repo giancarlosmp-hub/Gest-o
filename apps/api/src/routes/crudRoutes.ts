@@ -7033,8 +7033,9 @@ router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"
   const sellersWithFv3Login = sellers.filter((user) => Boolean(user.erpLoginUsername?.trim() && user.erpLoginPasswordEncrypted)).length;
   const hasGlobalCredentials = ultraFv3Client.hasGlobalCredentials();
   const allSellersLinked = totalSellers === 0 || sellersWithErpLink === totalSellers;
+  const hasAnySellerLogin = sellersWithFv3Login > 0;
   const allSellersWithLogin = totalSellers > 0 && sellersWithFv3Login === totalSellers;
-  const recommendation = allSellersWithLogin
+  const recommendation = (!hasGlobalCredentials && hasAnySellerLogin) || allSellersWithLogin
     ? "por_vendedor"
     : hasGlobalCredentials && allSellersLinked
       ? "global"
@@ -7052,7 +7053,7 @@ router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"
     },
     recommendation,
     rationale: recommendation === "por_vendedor"
-      ? "Todos os vendedores ativos possuem login FV3 configurado; use este modo se o UltraFV3 aplicar restrições por CPF/CNPJ."
+      ? "Modo por vendedor ativo: use Login FV3/Senha FV3 de vendedor para sincronizar catálogos quando credencial global estiver ausente."
       : recommendation === "global"
         ? "Há credencial técnica global e os vendedores ativos possuem CODVENDEDOR/OPERADOR para montar pedidos."
         : "Configuração insuficiente para afirmar o modo: revise credencial global, vínculo CODVENDEDOR/OPERADOR e logins FV3 por vendedor.",

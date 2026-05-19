@@ -23,7 +23,7 @@ type SyncScopeStatus = {
   errors?: string[];
   sellerId?: string | null;
   sellerName?: string | null;
-  authMode?: "global" | "seller" | string;
+  authMode?: "global" | "seller" | "seller_reference" | string;
   correlationId?: string;
   durationMs?: number;
   diagnostics?: Record<string, number>;
@@ -61,7 +61,7 @@ type SyncHistoryItem = {
   syncedCount: number;
   sellerId?: string | null;
   sellerName?: string | null;
-  authMode?: "global" | "seller" | string;
+  authMode?: "global" | "seller" | "seller_reference" | string;
   errorMessage?: string | null;
 };
 
@@ -359,7 +359,7 @@ export default function ErpIntegrationPanel() {
                 <tr key={item.id}>
                   <td className="py-2 pr-3 font-semibold text-slate-800">{item.scope}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.sellerName || "Global"}</td>
-                  <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{item.authMode === "seller" ? "Vendedor" : "Global"}</span></td>
+                  <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{item.authMode === "seller" ? "Vendedor" : item.authMode === "seller_reference" ? "Vendedor (referência)" : "Global"}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Agendado" : "Manual"}</td>
                   <td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{formatDate(item.finishedAt || item.startedAt)}</td>
