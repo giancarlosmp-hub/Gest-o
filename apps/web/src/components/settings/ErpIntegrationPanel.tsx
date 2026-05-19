@@ -126,6 +126,9 @@ const formatDate = (value?: string) => {
 
 const latestError = (status?: SyncScopeStatus) => status?.errors?.[0] || "Nenhum erro registrado.";
 
+
+const authModeLabel = (mode?: string) => (mode === "seller" ? "Vendedor" : mode === "seller_reference" ? "Vendedor de referência" : "Global");
+const contextModeLabel = (mode?: string) => (mode === "seller" ? "seller" : mode === "seller_reference" ? "seller_reference" : "global");
 const authenticationStatusLabel: Record<string, string> = {
   missing_config: "Configuração ausente",
   authenticated: "Autenticado",
@@ -205,6 +208,23 @@ export default function ErpIntegrationPanel() {
     const runningCount = statuses.filter((item) => item?.status === "running").length;
     const lastError = statuses.find((item) => item?.status === "error")?.errors?.[0] ?? null;
     return { errors, runningCount, lastError };
+  }, [data]);
+
+
+  const sellerPartnerRuns = useMemo(() => {
+    const grouped = new Map<string, { sellerId: string; sellerName: string; status: string; syncedCount: number; error?: string }>();
+    for (const item of data?.history ?? []) {
+      if (item.scope !== "partners" || item.authMode !== "seller" || !item.sellerId) continue;
+      if (grouped.has(item.sellerId)) continue;
+      grouped.set(item.sellerId, {
+        sellerId: item.sellerId,
+        sellerName: item.sellerName || "Sem nome",
+        status: item.status,
+        syncedCount: item.syncedCount,
+        error: item.errorMessage || undefined,
+      });
+    }
+    return Array.from(grouped.values());
   }, [data]);
 
   if (loading) return <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">Carregando integração ERP...</div>;
@@ -324,6 +344,23 @@ export default function ErpIntegrationPanel() {
         </div>
       </div>
 
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h4 className="text-sm font-semibold text-slate-900">Resumo de clientes por vendedor</h4>
+        <p className="mt-1 text-xs text-slate-600">Última execução individual por vendedor (fluxo correto para parceiros/clientes).</p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full text-left text-xs">
+            <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Importados</th><th className="py-2 pr-3">Erro</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {sellerPartnerRuns.map((item) => (
+                <tr key={item.sellerId}><td className="py-2 pr-3 font-medium text-slate-800">{item.sellerName}</td><td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td><td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td><td className="max-w-md truncate py-2 pr-3 text-red-700" title={item.error}>{item.error || "—"}</td></tr>
+              ))}
+              {!sellerPartnerRuns.length ? <tr><td colSpan={4} className="py-4 text-center text-slate-500">Nenhuma execução por vendedor registrada.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div className="grid gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-2 xl:grid-cols-5">
         {[
           { label: "Pedidos enviados", value: data?.operational?.sentOrders ?? 0 },
@@ -371,7 +408,7 @@ export default function ErpIntegrationPanel() {
                 <tr key={item.id}>
                   <td className="py-2 pr-3 font-semibold text-slate-800">{item.scope}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.sellerName || "Global"}</td>
-                  <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{item.authMode === "seller" ? "Vendedor" : item.authMode === "seller_reference" ? "Vendedor (referência)" : "Global"}</span></td>
+                  <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{authModeLabel(item.authMode)}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Agendado" : "Manual"}</td>
                   <td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{formatDate(item.finishedAt || item.startedAt)}</td>
@@ -426,11 +463,11 @@ export default function ErpIntegrationPanel() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt>Auth</dt>
-                  <dd className="text-right font-medium text-slate-900">{status.authMode === "seller" ? "Vendedor" : status.authMode === "seller_reference" ? "Vendedor (referência)" : "Global"}</dd>
+                  <dd className="text-right font-medium text-slate-900">{authModeLabel(status.authMode)}</dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt>Contexto</dt>
-                  <dd className="text-right font-medium text-slate-900">{status.sellerName || "Global"}</dd>
+                  <dd className="text-right font-medium text-slate-900">{status.sellerName || "Global"} ({contextModeLabel(status.authMode)})</dd>
                 </div>
               </dl>
 
