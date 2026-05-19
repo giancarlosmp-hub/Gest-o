@@ -1558,10 +1558,15 @@ export default function CrudSimplePage({
 
   const testUserErpLogin = async (item: ClientListItem) => {
     try {
-      await api.post(`/users/${item.id}/erp-login/test`);
-      toast.success("Login FV3 validado com sucesso.");
+      const response = await api.post(`/users/${item.id}/erp-login/test`);
+      const apiMessage = response.data?.message || "Login FV3 validado com sucesso.";
+      toast.success(apiMessage);
     } catch (error: any) {
-      toast.error(error.response?.data?.message || error.response?.data?.details || "Não foi possível testar o login FV3.");
+      const data = error.response?.data;
+      const status = data?.status ?? error.response?.status;
+      const correlation = data?.correlationId ? ` (correlationId: ${data.correlationId})` : "";
+      const message = data?.message || data?.details || "Não foi possível testar o login FV3.";
+      toast.error(`${status ? `Status ${status}: ` : ""}${message}${correlation}`);
     }
   };
 
