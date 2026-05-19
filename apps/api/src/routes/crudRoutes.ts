@@ -7076,9 +7076,9 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
     return res.status(200).json({
       success: true,
       status: 200,
-      message: "Login UltraFV3 validado com sucesso.",
-      ultraResponse: null,
-      tokenExpiresAt: result.tokenExpiresAt,
+      message: "Login FV3 validado",
+      maskedDocument: result.maskedDocument,
+      tokenPayload: result.tokenPayload,
       correlationId,
     });
   } catch (error) {
@@ -7102,8 +7102,8 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
       success: false,
       status,
       message: diagnostics?.message || "Falha ao testar login UltraFV3 do usuário.",
-      ultraResponse: diagnostics?.ultraResponse ?? null,
-      details,
+      maskedDocument: maskedLogin,
+      tokenPayload: null,
       correlationId: apiCorrelationId,
     });
   }

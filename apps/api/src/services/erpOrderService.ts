@@ -278,7 +278,13 @@ export async function createErpOrderFromOpportunity(
     operationContext,
   );
 
-  const numPedido = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
+  const sellerToken = await ultraFv3Client.authenticateWithCredentials(sellerCredentials);
+  const tokenOperatorCode = sellerToken.tokenPayload.operator?.trim() || null;
+  const tokenSalesmanCode = sellerToken.tokenPayload.salesman?.trim() || null;
+  const effectiveOperatorCode = tokenOperatorCode || operatorCode;
+  const effectiveSellerErpCode = tokenSalesmanCode || sellerErpCode;
+
+  const numPedido = await resolveSalesmanOrderSequence(effectiveSellerErpCode, sellerCredentials, pedidoIdImportacao);
   if (!numPedido)
     throw Object.assign(
       new Error(
@@ -310,7 +316,7 @@ export async function createErpOrderFromOpportunity(
   const payload = {
     PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
     NUM_PEDIDO: numPedido,
-    OPERADOR: operatorCode,
+    OPERADOR: effectiveOperatorCode,
     DATA_EMISSAO: formatDateDot(now),
     DATA_ENTREGA: formatDateDot(now),
     TIPO_MOVIMENTO: "PEDIDO",
@@ -320,7 +326,7 @@ export async function createErpOrderFromOpportunity(
     CODFILIAL: params.branchCode,
     CODOPER: params.operationCode,
     PARCEIRO: clientErpCode,
-    VENDEDOR: sellerErpCode,
+    VENDEDOR: effectiveSellerErpCode,
     VALOR_BRUTO: valorBruto,
     VALOR_LIQUIDO: valorLiquido,
     ITENS: itens,

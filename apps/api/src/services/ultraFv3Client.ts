@@ -23,6 +23,14 @@ type UltraFv3AuthenticationStatus =
   | "not_authenticated";
 
 export type UltraFv3Credentials = { username: string; password: string };
+export type UltraFv3TokenPayload = {
+  salesman: string | null;
+  operator: string | null;
+  branch: string | null;
+  name: string | null;
+  partner: string | null;
+  exp: number | null;
+};
 export type UltraFv3LoginDiagnostic = {
   status: number;
   message: string;
@@ -42,6 +50,53 @@ type UltraFv3AuthPayload = {
   operator?: unknown;
   vendedor?: unknown;
   salesman?: unknown;
+};
+
+
+const ULTRAFV3_APP_VERSION = "1.15.13";
+
+const toNullableString = (value: unknown): string | null => {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return null;
+};
+
+const formatUltraDocument = (rawValue: string) => {
+  const trimmed = rawValue.trim();
+  const digits = trimmed.replace(/\D/g, "");
+  if (!trimmed) return "";
+  if (/[.\-/]/.test(trimmed)) return trimmed;
+  if (digits.length === 11) return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  if (digits.length === 14) return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  return trimmed;
+};
+
+const decodeJwtPayload = (token: string): Record<string, unknown> | null => {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const normalized = parts[1]!.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = Buffer.from(padded, "base64").toString("utf8");
+    const parsed = JSON.parse(decoded);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+};
+
+const sanitizeUltraTokenPayload = (token: string): UltraFv3TokenPayload => {
+  const payload = decodeJwtPayload(token) ?? {};
+  const first = (...keys: string[]) => keys.map((key) => payload[key]).find((value) => value !== undefined);
+  const expRaw = first("exp");
+  return {
+    name: toNullableString(first("name", "nome")),
+    salesman: toNullableString(first("salesman", "vendedor")),
+    operator: toNullableString(first("operator", "operador")),
+    branch: toNullableString(first("branch", "filial")),
+    partner: toNullableString(first("partner", "parceiro")),
+    exp: typeof expRaw === "number" && Number.isFinite(expRaw) ? expRaw : null,
+  };
 };
 
 const maskBaseUrl = (value: string) => {
@@ -100,7 +155,7 @@ class UltraFv3Client {
   private lastLoginAt: Date | null = null;
   private tokenPromise: Promise<string> | null = null;
   private lastError: string | null = null;
-  private credentialTokenCache = new Map<string, { token: string; expiresAt: Date | null }>();
+  private credentialTokenCache = new Map<string, { token: string; expiresAt: Date | null; tokenPayload: UltraFv3TokenPayload }>();
 
   private get baseUrl() {
     return env.ultraFv3BaseUrl.replace(/\/+$/, "");
@@ -332,7 +387,8 @@ class UltraFv3Client {
         "missing_credentials",
       );
     }
-    if (!credentials.username.trim() || !credentials.password.trim()) {
+    const formattedDocument = formatUltraDocument(credentials.username);
+    if (!formattedDocument || !credentials.password.trim()) {
       throw new UltraFv3IntegrationError(
         "Credenciais UltraFV3 do usuário incompletas.",
         "missing_credentials",
@@ -340,7 +396,7 @@ class UltraFv3Client {
     }
 
     const correlationId = randomUUID();
-    const maskedLogin = maskCpfCnpjLogin(credentials.username.trim());
+    const maskedLogin = maskCpfCnpjLogin(formattedDocument);
     let response: Response;
     try {
       response = await this.fetchWithTimeout(
@@ -348,7 +404,7 @@ class UltraFv3Client {
         {
           method: "POST",
           headers: DEFAULT_HEADERS,
-          body: JSON.stringify({ username: credentials.username.trim(), password: credentials.password }),
+          body: JSON.stringify({ document: formattedDocument, password: credentials.password, appVersion: ULTRAFV3_APP_VERSION }),
         },
         { method: "POST", path: "/auth/login", attempt: 1, correlationId },
       );
@@ -395,12 +451,28 @@ class UltraFv3Client {
         response.status,
       );
     }
-    return { token, expiresAt: payload ? this.resolveTokenExpiration(payload) : null };
+    return { token, expiresAt: payload ? this.resolveTokenExpiration(payload) : null, tokenPayload: sanitizeUltraTokenPayload(token) };
   }
 
   async testLogin(credentials: UltraFv3Credentials) {
     const authenticated = await this.loginWithCredentials(credentials);
-    return { ok: true, tokenExpiresAt: authenticated.expiresAt?.toISOString() ?? null };
+    return {
+      ok: true,
+      tokenExpiresAt: authenticated.expiresAt?.toISOString() ?? null,
+      maskedDocument: formatUltraDocument(credentials.username),
+      tokenPayload: authenticated.tokenPayload,
+    };
+  }
+
+
+  async authenticateWithCredentials(credentials: UltraFv3Credentials) {
+    const cacheKey = this.getCredentialCacheKey(credentials);
+    let cached = this.credentialTokenCache.get(cacheKey);
+    if (!cached || this.isTokenExpired(cached.expiresAt)) {
+      cached = await this.loginWithCredentials(credentials);
+      this.credentialTokenCache.set(cacheKey, cached);
+    }
+    return { tokenPayload: cached.tokenPayload, tokenExpiresAt: cached.expiresAt?.toISOString() ?? null };
   }
 
   async requestWithCredentials<T>(

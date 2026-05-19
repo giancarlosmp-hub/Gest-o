@@ -1559,7 +1559,7 @@ export default function CrudSimplePage({
   const testUserErpLogin = async (item: ClientListItem) => {
     try {
       const response = await api.post(`/users/${item.id}/erp-login/test`);
-      const apiMessage = response.data?.message || "Login FV3 validado com sucesso.";
+      const apiMessage = response.data?.message || "Login FV3 validado";
       toast.success(apiMessage);
     } catch (error: any) {
       const data = error.response?.data;
