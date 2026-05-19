@@ -26,7 +26,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, OpportunityStage, Prisma, type User } from "@prisma/client";
 import { z } from "zod";
@@ -7060,6 +7060,7 @@ router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"
 });
 
 router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async (req, res) => {
+  const correlationId = randomUUID();
   const user = await prisma.user.findUnique({
     where: { id: req.params.id },
     select: { id: true, name: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true },
@@ -7072,12 +7073,39 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
   try {
     const password = decryptErpCredential(user.erpLoginPasswordEncrypted);
     const result = await ultraFv3Client.testLogin({ username: user.erpLoginUsername, password });
-    return res.status(200).json({ success: true, message: "Login UltraFV3 validado com sucesso.", tokenExpiresAt: result.tokenExpiresAt });
+    return res.status(200).json({
+      success: true,
+      status: 200,
+      message: "Login UltraFV3 validado com sucesso.",
+      ultraResponse: null,
+      tokenExpiresAt: result.tokenExpiresAt,
+      correlationId,
+    });
   } catch (error) {
     const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502;
     const details = error instanceof Error ? error.message : String(error);
-    logApiEvent("WARN", "[ultrafv3 user auth] login test failed", { userId: user.id, status });
-    return res.status(status).json({ success: false, message: "Falha ao testar login UltraFV3 do usuário.", details });
+    const diagnostics = (error as { diagnostics?: { message?: string; ultraResponse?: unknown; correlationId?: string } }).diagnostics;
+    const apiCorrelationId = diagnostics?.correlationId || correlationId;
+    const maskedLogin = user.erpLoginUsername.replace(/\D/g, "").replace(/^(\d{3})\d+(\d{2})$/, "$1***$2");
+    logApiEvent("WARN", "[ultrafv3 user auth] login test failed", {
+      correlationId: apiCorrelationId,
+      sellerId: user.id,
+      sellerName: user.name,
+      authMode: "seller",
+      maskedLogin,
+      status,
+      details,
+      ultraMessage: diagnostics?.message ?? null,
+      ultraResponse: diagnostics?.ultraResponse ?? null,
+    });
+    return res.status(status).json({
+      success: false,
+      status,
+      message: diagnostics?.message || "Falha ao testar login UltraFV3 do usuário.",
+      ultraResponse: diagnostics?.ultraResponse ?? null,
+      details,
+      correlationId: apiCorrelationId,
+    });
   }
 });
 

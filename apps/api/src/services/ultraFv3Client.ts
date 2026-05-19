@@ -23,6 +23,12 @@ type UltraFv3AuthenticationStatus =
   | "not_authenticated";
 
 export type UltraFv3Credentials = { username: string; password: string };
+export type UltraFv3LoginDiagnostic = {
+  status: number;
+  message: string;
+  ultraResponse: unknown;
+  correlationId: string;
+};
 
 type UltraFv3AuthPayload = {
   token?: string;
@@ -51,6 +57,23 @@ const maskBaseUrl = (value: string) => {
   }
 };
 
+const maskCpfCnpjLogin = (value: string) => {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return "***";
+  if (digits.length <= 4) return `${digits[0] ?? "*"}***`;
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+};
+
+const extractUltraMessage = (payload: unknown, status: number) => {
+  if (!payload || typeof payload !== "object") return `UltraFV3 login falhou com status ${status}.`;
+  const candidate = payload as Record<string, unknown>;
+  const fields = [candidate.message, candidate.error, candidate.details];
+  for (const field of fields) {
+    if (typeof field === "string" && field.trim()) return field.trim();
+  }
+  return `UltraFV3 login falhou com status ${status}.`;
+};
+
 export class UltraFv3IntegrationError extends Error {
   constructor(
     message: string,
@@ -62,6 +85,7 @@ export class UltraFv3IntegrationError extends Error {
       | "invalid_response"
       | "request_failed",
     readonly status?: number,
+    readonly diagnostics?: UltraFv3LoginDiagnostic,
   ) {
     super(message);
     this.name = "UltraFv3IntegrationError";
@@ -315,6 +339,8 @@ class UltraFv3Client {
       );
     }
 
+    const correlationId = randomUUID();
+    const maskedLogin = maskCpfCnpjLogin(credentials.username.trim());
     let response: Response;
     try {
       response = await this.fetchWithTimeout(
@@ -324,7 +350,7 @@ class UltraFv3Client {
           headers: DEFAULT_HEADERS,
           body: JSON.stringify({ username: credentials.username.trim(), password: credentials.password }),
         },
-        { method: "POST", path: "/auth/login", attempt: 1, correlationId: randomUUID() },
+        { method: "POST", path: "/auth/login", attempt: 1, correlationId },
       );
     } catch (error) {
       throw new UltraFv3IntegrationError(
@@ -333,29 +359,34 @@ class UltraFv3Client {
       );
     }
 
+    const ultraResponse = await this.safeJson(response);
+    const ultraMessage = extractUltraMessage(ultraResponse, response.status);
+    const diagnostics: UltraFv3LoginDiagnostic = { status: response.status, message: ultraMessage, ultraResponse, correlationId };
+    logApiEvent(response.ok ? "INFO" : "WARN", "[ultrafv3 auth seller] login response", {
+      correlationId,
+      authMode: "seller",
+      maskedLogin,
+      status: response.status,
+      message: ultraMessage,
+      ultraResponse,
+    });
+
     if (response.status === 401 || response.status === 403) {
-      throw new UltraFv3IntegrationError(
-        "Erro de autenticação no UltraFV3 para credencial do usuário.",
-        "auth_failed",
-        response.status,
-      );
+      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 para credencial do usuário: ${ultraMessage}`, "auth_failed", response.status, diagnostics);
     }
     if (response.status === 404) {
       throw new UltraFv3IntegrationError(
-        "Endpoint de autenticação do UltraFV3 inexistente: /auth/login.",
+        `Endpoint de autenticação do UltraFV3 inexistente: /auth/login. Detalhe: ${ultraMessage}`,
         "not_found",
         response.status,
+        diagnostics,
       );
     }
     if (!response.ok) {
-      throw new UltraFv3IntegrationError(
-        `UltraFV3 login de usuário falhou com status ${response.status}.`,
-        "request_failed",
-        response.status,
-      );
+      throw new UltraFv3IntegrationError(`UltraFV3 login de usuário falhou (status ${response.status}): ${ultraMessage}`, "request_failed", response.status, diagnostics);
     }
 
-    const payload = (await this.safeJson(response)) as UltraFv3AuthPayload | null;
+    const payload = ultraResponse as UltraFv3AuthPayload | null;
     const token = payload?.token || payload?.accessToken || payload?.access_token;
     if (!token) {
       throw new UltraFv3IntegrationError(
