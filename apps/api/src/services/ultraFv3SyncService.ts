@@ -80,6 +80,8 @@ const pickPartnerCode = (payload: Record<string, unknown>) =>
 const pickPartnerDocument = (payload: Record<string, unknown>) =>
   pickFirstString(payload, ["CNPJ", "CPF", "CGC", "DOCUMENTO", "CPFCNPJ", "CPF_CNPJ", "CNPJ_CPF", "NR_CNPJ_CPF", "cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
 
+const normalizeDocument = (value?: string | null) => normalizeCnpj(value);
+
 const toArray = (payload: unknown) => {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
@@ -481,6 +483,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
     }
 
     const cnpj = pickPartnerDocument(payload);
+    const normalizedDocument = normalizeDocument(cnpj);
     if (cnpj) diagnostics.receivedWithDocument += 1;
     else diagnostics.receivedWithoutDocument += 1;
     const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
@@ -490,7 +493,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "name", "corporateName", "razaoSocial", "nome"]) || "Cliente sem nome",
       fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
       cnpj: cnpj || undefined,
-      cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : undefined,
+      cnpjNormalized: normalizedDocument || undefined,
       city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
       state: normalizeState(state || "NI"),
       region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
@@ -499,10 +502,12 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
 
     if (existing) {
       const shouldPreserveCommercialLink = existing.ownerSellerId !== seller.id;
-      if (cnpj) diagnostics.updatedDocumentCount += 1;
+      if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
       await prisma.client.update({
         where: { id: existing.id },
-        data: shouldPreserveCommercialLink ? data : { ...data, ownerSellerId: seller.id },
+        data: shouldPreserveCommercialLink
+          ? { ...data, cnpj: cnpj ? cnpj : undefined, cnpjNormalized: normalizedDocument ? normalizedDocument : undefined }
+          : { ...data, ownerSellerId: seller.id, cnpj: cnpj ? cnpj : undefined, cnpjNormalized: normalizedDocument ? normalizedDocument : undefined },
       });
       diagnostics.updated += 1;
       if (shouldPreserveCommercialLink) {
@@ -510,7 +515,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
         warnings.push(`Cliente ERP ${code} já possui vínculo comercial com outro vendedor CRM; vínculo preservado por limitação de vendedor único por cliente.`);
       }
     } else {
-      await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null, ownerSellerId: seller.id } });
+      await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: normalizedDocument || null, ownerSellerId: seller.id } });
       diagnostics.created += 1;
     }
     syncedCount += 1;
@@ -556,14 +561,24 @@ export async function syncPartners(options?: RunSyncOptions) {
       const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
       if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks += 1;
       const cnpj = pickPartnerDocument(payload);
+      const normalizedDocument = normalizeDocument(cnpj);
       const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
-      const existing = await prisma.client.findFirst({ where: { code }, select: { id: true } });
+      const existing = await prisma.client.findFirst({
+        where: {
+          OR: [
+            { code },
+            ...(normalizedDocument ? [{ cnpjNormalized: normalizedDocument }] : [])
+          ]
+        },
+        orderBy: [{ erpUpdatedAt: "desc" }],
+        select: { id: true }
+      });
       const data = {
         code,
         name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]) || "Cliente sem nome",
         fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
         cnpj: cnpj || undefined,
-        cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : undefined,
+        cnpjNormalized: normalizedDocument || undefined,
         city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
         state: normalizeState(state || "NI"),
         region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
@@ -571,14 +586,21 @@ export async function syncPartners(options?: RunSyncOptions) {
         erpUpdatedAt: new Date()
       };
       if (existing) {
-        await prisma.client.update({ where: { id: existing.id }, data });
+        await prisma.client.update({
+          where: { id: existing.id },
+          data: {
+            ...data,
+            cnpj: cnpj ? cnpj : undefined,
+            cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+          }
+        });
         diagnostics.updated += 1;
-        if (cnpj) diagnostics.updatedDocumentCount = (diagnostics.updatedDocumentCount || 0) + 1;
+        if (normalizedDocument) diagnostics.updatedDocumentCount = (diagnostics.updatedDocumentCount || 0) + 1;
       } else {
-        await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null } });
+        await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: normalizedDocument || null } });
         diagnostics.created += 1;
       }
-      if (cnpj) diagnostics.receivedWithDocument = (diagnostics.receivedWithDocument || 0) + 1;
+      if (normalizedDocument) diagnostics.receivedWithDocument = (diagnostics.receivedWithDocument || 0) + 1;
       else diagnostics.receivedWithoutDocument = (diagnostics.receivedWithoutDocument || 0) + 1;
       syncedCount += 1;
       diagnostics.validAfterNormalization += 1;

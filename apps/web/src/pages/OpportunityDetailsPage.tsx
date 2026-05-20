@@ -738,7 +738,7 @@ export default function OpportunityDetailsPage() {
                         </div>
                         <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
                           <div className="rounded-2xl bg-slate-50 p-3"><span className="block text-xs text-slate-500">Código ERP</span><strong>{clientErpCode || "Sem vínculo"}</strong></div>
-                          <div className="rounded-2xl bg-slate-50 p-3"><span className="block text-xs text-slate-500">CNPJ</span><strong>{clientErpSummary?.cnpj || "-"}</strong></div>
+                          <div className="rounded-2xl bg-slate-50 p-3"><span className="block text-xs text-slate-500">CPF/CNPJ</span><strong>{clientErpSummary?.cnpj || "-"}</strong></div>
                         </div>
                       </section>
 

@@ -91,6 +91,7 @@ type OpportunityProduct = {
   groupName?: string | null;
   unit?: string | null;
   defaultPrice?: number | null;
+  stock?: number | null;
   status?: string;
 };
 
@@ -744,6 +745,7 @@ export default function OpportunitiesPage() {
         groupName: product.groupName || null,
         unit: product.unit || null,
         defaultPrice: Number(product?.price ?? product?.prices?.[0]?.price ?? product.defaultPrice ?? 0),
+        stock: Number(product?.stock ?? 0),
         status: product.status || ""
       }));
       setProductOptions(mappedOptions);
@@ -957,6 +959,10 @@ export default function OpportunitiesPage() {
 
 
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
+  const isOpportunitySaved = Boolean(editing);
+  const canAddOpportunityItem = isOpportunitySaved
+    && Boolean(itemDraft.productId && itemDraft.erpProductCode && itemDraft.unit)
+    && Number(itemDraft.quantity || 0) > 0;
   const itemsTotals = useMemo(() => opportunityItems.reduce(
     (acc, current) => {
       const currentTotals = calculateItemTotals(current);
@@ -1309,7 +1315,7 @@ export default function OpportunitiesPage() {
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              {!editing ? <span className="text-xs text-slate-500">Salve a oportunidade antes de adicionar produtos. O total dos produtos atualizará o valor da oportunidade.</span> : null}
+              {!isOpportunitySaved ? <span className="text-xs text-slate-500">Salve a oportunidade antes de adicionar produtos. O total dos produtos atualizará o valor da oportunidade.</span> : null}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1324,7 +1330,7 @@ export default function OpportunitiesPage() {
                     const value = event.target.value;
                     setProductSearch(value);
                     searchProducts(value).catch(() => null);
-                    const selected = productOptions.find((option) => `${option.erpProductCode} · ${option.name} · ${option.erpProductClassCode}` === value);
+                    const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name} — ${option.className || "Sem classificação"} — ${option.unit || "SEM UND"} — ${formatCurrencyBRL(Number(option.defaultPrice || 0))} — EST ${Number(option.stock || 0)}` === value);
                     if (!selected) return;
                     setItemDraft((current) => ({
                       ...current,
@@ -1339,7 +1345,7 @@ export default function OpportunitiesPage() {
                 />
                 <datalist id="opportunity-product-options">
                   {productOptions.map((product) => (
-                    <option key={product.id} value={`${product.erpProductCode} · ${product.name} · ${product.erpProductClassCode}`} />
+                    <option key={product.id} value={`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name} — ${product.className || "Sem classificação"} — ${product.unit || "SEM UND"} — ${formatCurrencyBRL(Number(product.defaultPrice || 0))} — EST ${Number(product.stock || 0)}`} />
                   ))}
                 </datalist>
                 {hasAttemptedProductSearch && productOptions.length === 0 ? (
@@ -1347,27 +1353,27 @@ export default function OpportunitiesPage() {
                 ) : null}
                 {itemDraft.productNameSnapshot ? (
                   <p className="text-xs text-slate-500">
-                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"}
+                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                   </p>
                 ) : null}
-                {!editing ? <p className="text-xs text-amber-700">Você já pode pesquisar produtos, mas precisa salvar a oportunidade antes de adicionar itens.</p> : null}
+                {!isOpportunitySaved ? <p className="text-xs text-amber-700">Salve a oportunidade antes de adicionar produtos.</p> : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
-                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Preço unitário</span>
-                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Desconto</span>
                 <div className="flex gap-2">
-                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))} disabled={!editing}>
+                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))} disabled={!isOpportunitySaved}>
                     <option value="value">R$</option>
                     <option value="percent">%</option>
                   </select>
-                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} disabled={!editing} />
+                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
                 </div>
               </label>
               <label className="space-y-1">
@@ -1378,11 +1384,11 @@ export default function OpportunitiesPage() {
 
             <label className="space-y-1">
               <span className="text-sm font-medium text-slate-700">Observação</span>
-              <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.notes} onChange={(e) => setItemDraft((current) => ({ ...current, notes: e.target.value }))} disabled={!editing} />
+              <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.notes} onChange={(e) => setItemDraft((current) => ({ ...current, notes: e.target.value }))} disabled={!isOpportunitySaved} />
             </label>
 
             <div className="flex justify-end">
-              <button type="button" className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400" onClick={() => persistOpportunityItem(itemDraft).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível salvar item")))} disabled={!editing}>
+              <button type="button" className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400" onClick={() => persistOpportunityItem(itemDraft).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível salvar item")))} disabled={!canAddOpportunityItem}>
                 {itemDraft.id ? "Atualizar item" : "Adicionar item"}
               </button>
             </div>
