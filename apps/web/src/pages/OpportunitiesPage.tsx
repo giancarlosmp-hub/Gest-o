@@ -306,6 +306,7 @@ export default function OpportunitiesPage() {
   const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
   const [productSearch, setProductSearch] = useState("");
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [hasAttemptedProductSearch, setHasAttemptedProductSearch] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
@@ -339,6 +340,7 @@ export default function OpportunitiesPage() {
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
   const opportunitiesRequestRef = useRef(0);
+  const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   const actionTodayFilter = searchParams.get("actionToday") === "true";
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
@@ -731,6 +733,7 @@ export default function OpportunitiesPage() {
     setHasAttemptedProductSearch(trimmed.length >= 2);
     if (trimmed.length < 2) {
       setProductOptions([]);
+      setIsProductDropdownOpen(false);
       return;
     }
     try {
@@ -749,10 +752,27 @@ export default function OpportunitiesPage() {
         status: product.status || ""
       }));
       setProductOptions(mappedOptions);
+      setIsProductDropdownOpen(mappedOptions.length > 0);
     } catch {
       setProductOptions([]);
+      setIsProductDropdownOpen(false);
     }
   }, []);
+
+  const handleSelectProduct = (product: OpportunityProduct) => {
+    setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
+    setItemDraft((current) => ({
+      ...current,
+      productId: product.id,
+      productNameSnapshot: product.name,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      unit: product.unit || "",
+      unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice
+    }));
+    setIsProductDropdownOpen(false);
+    productSearchInputRef.current?.blur();
+  };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
     if (!editing) {
@@ -857,12 +877,27 @@ export default function OpportunitiesPage() {
     const isEditing = Boolean(editing);
     setIsSaving(true);
     try {
-      if (editing) await api.put(`/opportunities/${editing}`, payload);
-      else await api.post("/opportunities", payload);
-      setForm(emptyForm);
-      setEditing(null);
-      setOpportunityModalMode("create");
-      setIsOpportunityModalOpen(false);
+      if (editing) {
+        await api.put(`/opportunities/${editing}`, payload);
+        setForm(emptyForm);
+        setEditing(null);
+        setOpportunityModalMode("create");
+        setIsOpportunityModalOpen(false);
+      } else {
+        const response = await api.post("/opportunities", payload);
+        const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id;
+        if (createdOpportunityId) {
+          setEditing(createdOpportunityId);
+          setOpportunityModalMode("edit");
+          setForm((current) => ({ ...current, value: current.value || String(toTwoDecimals(itemsTotals.netTotal)) }));
+          await loadOpportunityItems(createdOpportunityId);
+        } else {
+          setForm(emptyForm);
+          setEditing(null);
+          setOpportunityModalMode("create");
+          setIsOpportunityModalOpen(false);
+        }
+      }
       await invalidateOpportunitiesAndDashboardQueries();
       toast.success(isEditing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
@@ -962,7 +997,8 @@ export default function OpportunitiesPage() {
   const isOpportunitySaved = Boolean(editing);
   const canAddOpportunityItem = isOpportunitySaved
     && Boolean(itemDraft.productId && itemDraft.erpProductCode && itemDraft.unit)
-    && Number(itemDraft.quantity || 0) > 0;
+    && Number(itemDraft.quantity || 0) > 0
+    && Number(itemDraft.unitPrice || 0) >= 0;
   const itemsTotals = useMemo(() => opportunityItems.reduce(
     (acc, current) => {
       const currentTotals = calculateItemTotals(current);
@@ -1322,12 +1358,14 @@ export default function OpportunitiesPage() {
               <label className="space-y-1 sm:col-span-4">
                 <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
+                  ref={productSearchInputRef}
                   className="w-full rounded-lg border border-slate-200 p-2"
                   placeholder="Busque por código ERP, nome, classificação ou parte do nome"
                   value={productSearch}
                   onChange={(event) => {
                     const value = event.target.value;
                     setProductSearch(value);
+                    setIsProductDropdownOpen(value.trim().length >= 2);
                     searchProducts(value).catch(() => null);
                     const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name}` === value);
                     if (!selected) return;
@@ -1339,28 +1377,22 @@ export default function OpportunitiesPage() {
                       erpProductClassCode: selected.erpProductClassCode,
                       unit: selected.unit || "",
                       unitPrice: selected.defaultPrice != null ? String(selected.defaultPrice) : current.unitPrice
-                    }));
+                          }));
+                  }}
+                  onFocus={() => {
+                    if (productSearch.trim().length >= 2 && productOptions.length > 0) {
+                      setIsProductDropdownOpen(true);
+                    }
                   }}
                 />
-                {productSearch.trim().length >= 2 && productOptions.length > 0 ? (
+                {isProductDropdownOpen && productSearch.trim().length >= 2 && productOptions.length > 0 ? (
                   <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white">
                     {productOptions.map((product) => (
                       <button
                         key={product.id}
                         type="button"
                         className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
-                        onClick={() => {
-                          setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
-                          setItemDraft((current) => ({
-                            ...current,
-                            productId: product.id,
-                            productNameSnapshot: product.name,
-                            erpProductCode: product.erpProductCode,
-                            erpProductClassCode: product.erpProductClassCode,
-                            unit: product.unit || "",
-                            unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice
-                          }));
-                        }}
+                        onClick={() => handleSelectProduct(product)}
                       >
                         <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
                         <p className="text-xs text-slate-600">{product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} · EST {Number(product.stock || 0)}</p>
@@ -1412,6 +1444,9 @@ export default function OpportunitiesPage() {
                 {itemDraft.id ? "Atualizar item" : "Adicionar item"}
               </button>
             </div>
+            {!isOpportunitySaved ? (
+              <p className="text-right text-xs text-amber-700">Salve a oportunidade para adicionar este item.</p>
+            ) : null}
 
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
               <table className="min-w-full text-sm">
