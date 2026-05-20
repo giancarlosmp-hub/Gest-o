@@ -77,6 +77,9 @@ const pickFirstNumber = (payload: Record<string, unknown>, keys: string[]) => {
 const pickPartnerCode = (payload: Record<string, unknown>) =>
   pickFirstString(payload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
 
+const pickPartnerDocument = (payload: Record<string, unknown>) =>
+  pickFirstString(payload, ["CNPJ", "CPF", "CGC", "DOCUMENTO", "CPFCNPJ", "CPF_CNPJ", "CNPJ_CPF", "NR_CNPJ_CPF", "cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
+
 const toArray = (payload: unknown) => {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
@@ -358,14 +361,6 @@ export async function syncProducts(options?: RunSyncOptions) {
       const outOfLineByUltra = String(pickFirstValue(payload, ["IDN_FORA_LINHA"]) ?? "").trim().toUpperCase() === "S";
       const isSuspended = suspendedFlag === true || ["true", "1", "s", "sim", "suspenso"].includes(suspendedFlagNormalized) || ["suspended", "suspenso"].includes(status) || suspendedByUltra || outOfLineByUltra;
 
-      if (!isActive) {
-        diagnostics.invalidInactive += 1;
-        continue;
-      }
-      if (isSuspended) {
-        diagnostics.invalidSuspended += 1;
-        continue;
-      }
       if (!code) {
         diagnostics.invalidMissingCode += 1;
         continue;
@@ -374,13 +369,13 @@ export async function syncProducts(options?: RunSyncOptions) {
         diagnostics.invalidMissingUnit += 1;
         continue;
       }
-      if (!Number.isFinite(price) || price <= 0) {
-        diagnostics.invalidWithoutPrice += 1;
-        continue;
-      }
+      if (!isActive) diagnostics.invalidInactive += 1;
+      if (isSuspended) diagnostics.invalidSuspended += 1;
+      if (!Number.isFinite(price) || price <= 0) diagnostics.invalidWithoutPrice += 1;
 
       diagnostics.validAfterNormalization += 1;
       const stockNumber = stockQuantity === null ? null : Number(stockQuantity);
+      const normalizedPrice = Number.isFinite(price) && price > 0 ? price : 0;
       if (stockNumber !== null && Number.isFinite(stockNumber) && stockNumber <= 0) diagnostics.withoutStock += 1;
 
       const product = await prisma.product.upsert({
@@ -392,10 +387,10 @@ export async function syncProducts(options?: RunSyncOptions) {
           unit,
           brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
           stockQuantity: stockNumber !== null && Number.isFinite(stockNumber) ? stockNumber : null,
-          defaultPrice: price,
-          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || price,
-          isActive: true,
-          isSuspended: false,
+          defaultPrice: normalizedPrice,
+          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || normalizedPrice,
+          isActive,
+          isSuspended,
           rawErpPayload: payload as Prisma.InputJsonValue
         },
         create: {
@@ -407,10 +402,10 @@ export async function syncProducts(options?: RunSyncOptions) {
           unit,
           brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
           stockQuantity: stockNumber !== null && Number.isFinite(stockNumber) ? stockNumber : null,
-          defaultPrice: price,
-          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || price,
-          isActive: true,
-          isSuspended: false,
+          defaultPrice: normalizedPrice,
+          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || normalizedPrice,
+          isActive,
+          isSuspended,
           rawErpPayload: payload as Prisma.InputJsonValue
         }
       });
@@ -419,10 +414,12 @@ export async function syncProducts(options?: RunSyncOptions) {
       const existingPrice = await prisma.productPrice.findFirst({
         where: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null }
       });
-      if (existingPrice) {
-        await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price } });
-      } else {
-        await prisma.productPrice.create({ data: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null, price } });
+      if (normalizedPrice > 0) {
+        if (existingPrice) {
+          await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price: normalizedPrice } });
+        } else {
+          await prisma.productPrice.create({ data: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null, price: normalizedPrice } });
+        }
       }
       syncedCount += 1;
     }
@@ -464,6 +461,9 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
     created: 0,
     updated: 0,
     preservedCommercialLinkWarnings: 0,
+    receivedWithDocument: 0,
+    receivedWithoutDocument: 0,
+    updatedDocumentCount: 0,
   };
   const warnings: string[] = [];
   let syncedCount = 0;
@@ -480,15 +480,17 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       continue;
     }
 
-    const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
+    const cnpj = pickPartnerDocument(payload);
+    if (cnpj) diagnostics.receivedWithDocument += 1;
+    else diagnostics.receivedWithoutDocument += 1;
     const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
     const existing = await prisma.client.findFirst({ where: { code }, select: { id: true, ownerSellerId: true } });
     const data = {
       code,
       name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "name", "corporateName", "razaoSocial", "nome"]) || "Cliente sem nome",
       fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
-      cnpj: cnpj || null,
-      cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
+      cnpj: cnpj || undefined,
+      cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : undefined,
       city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
       state: normalizeState(state || "NI"),
       region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
@@ -497,6 +499,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
 
     if (existing) {
       const shouldPreserveCommercialLink = existing.ownerSellerId !== seller.id;
+      if (cnpj) diagnostics.updatedDocumentCount += 1;
       await prisma.client.update({
         where: { id: existing.id },
         data: shouldPreserveCommercialLink ? data : { ...data, ownerSellerId: seller.id },
@@ -507,7 +510,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
         warnings.push(`Cliente ERP ${code} já possui vínculo comercial com outro vendedor CRM; vínculo preservado por limitação de vendedor único por cliente.`);
       }
     } else {
-      await prisma.client.create({ data: { ...data, ownerSellerId: seller.id } });
+      await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null, ownerSellerId: seller.id } });
       diagnostics.created += 1;
     }
     syncedCount += 1;
@@ -539,7 +542,7 @@ export async function syncPartners(options?: RunSyncOptions) {
         .filter(([code]) => Boolean(code))
     );
 
-    const diagnostics = { received: rows.length, withoutCode: 0, fallbackSellerLinks: 0, updated: 0, created: 0, validAfterNormalization: 0, discardedAfterNormalization: 0 };
+    const diagnostics = { received: rows.length, withoutCode: 0, fallbackSellerLinks: 0, updated: 0, created: 0, validAfterNormalization: 0, discardedAfterNormalization: 0, receivedWithDocument: 0, receivedWithoutDocument: 0, updatedDocumentCount: 0 };
     let syncedCount = 0;
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
@@ -552,15 +555,15 @@ export async function syncPartners(options?: RunSyncOptions) {
       const sellerCode = pickFirstString(payload, ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"]);
       const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
       if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks += 1;
-      const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
+      const cnpj = pickPartnerDocument(payload);
       const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
       const existing = await prisma.client.findFirst({ where: { code }, select: { id: true } });
       const data = {
         code,
         name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]) || "Cliente sem nome",
         fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
-        cnpj: cnpj || null,
-        cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
+        cnpj: cnpj || undefined,
+        cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : undefined,
         city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
         state: normalizeState(state || "NI"),
         region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
@@ -570,10 +573,13 @@ export async function syncPartners(options?: RunSyncOptions) {
       if (existing) {
         await prisma.client.update({ where: { id: existing.id }, data });
         diagnostics.updated += 1;
+        if (cnpj) diagnostics.updatedDocumentCount = (diagnostics.updatedDocumentCount || 0) + 1;
       } else {
-        await prisma.client.create({ data });
+        await prisma.client.create({ data: { ...data, cnpj: cnpj || null, cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null } });
         diagnostics.created += 1;
       }
+      if (cnpj) diagnostics.receivedWithDocument = (diagnostics.receivedWithDocument || 0) + 1;
+      else diagnostics.receivedWithoutDocument = (diagnostics.receivedWithoutDocument || 0) + 1;
       syncedCount += 1;
       diagnostics.validAfterNormalization += 1;
     }

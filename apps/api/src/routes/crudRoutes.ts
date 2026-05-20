@@ -5669,20 +5669,41 @@ router.get("/products/search", async (req, res) => {
   const q = parsed.data.q;
   const products = await prisma.product.findMany({
     where: {
-      isActive: true,
-      isSuspended: false,
-      prices: { some: { price: { gt: 0 } } },
       OR: [
         { name: { contains: q, mode: "insensitive" } },
         { erpProductCode: { contains: q, mode: "insensitive" } },
-        { erpProductClassCode: { contains: q, mode: "insensitive" } }
+        { erpProductClassCode: { contains: q, mode: "insensitive" } },
+        { className: { contains: q, mode: "insensitive" } },
+        { brand: { contains: q, mode: "insensitive" } }
       ]
     },
     take: 30,
     orderBy: [{ name: "asc" }],
     include: { prices: { orderBy: [{ validFrom: "desc" }] } }
   });
-  return res.json(products);
+  return res.json(products.map((product) => {
+    const latestPrice = product.prices.find((item) => Number(item.price) > 0)?.price ?? product.defaultPrice ?? 0;
+    const stock = Number(product.stockQuantity || 0);
+    const status = product.isSuspended
+      ? "suspenso/fora de linha"
+      : latestPrice <= 0
+        ? "sem preço"
+        : stock <= 0
+          ? "sem estoque"
+          : "disponível";
+    return {
+      id: product.id,
+      name: product.name,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      unit: product.unit,
+      price: latestPrice,
+      stock,
+      brand: product.brand,
+      groupName: product.groupName,
+      status
+    };
+  }));
 });
 
 router.get("/products/:id", async (req, res) => {
