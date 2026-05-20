@@ -91,6 +91,7 @@ type OpportunityProduct = {
   groupName?: string | null;
   unit?: string | null;
   defaultPrice?: number | null;
+  status?: string;
 };
 
 type OpportunityItemForm = {
@@ -742,7 +743,8 @@ export default function OpportunitiesPage() {
         brand: product.brand || null,
         groupName: product.groupName || null,
         unit: product.unit || null,
-        defaultPrice: Number(product?.prices?.[0]?.price ?? product.defaultPrice ?? 0)
+        defaultPrice: Number(product?.price ?? product?.prices?.[0]?.price ?? product.defaultPrice ?? 0),
+        status: product.status || ""
       }));
       setProductOptions(mappedOptions);
     } catch {
@@ -1307,7 +1309,7 @@ export default function OpportunitiesPage() {
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              {!editing ? <span className="text-xs text-slate-500">Salve a oportunidade para persistir os itens. O total dos produtos atualizará o valor da oportunidade.</span> : null}
+              {!editing ? <span className="text-xs text-slate-500">Salve a oportunidade antes de adicionar produtos. O total dos produtos atualizará o valor da oportunidade.</span> : null}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1334,7 +1336,6 @@ export default function OpportunitiesPage() {
                       unitPrice: selected.defaultPrice != null ? String(selected.defaultPrice) : current.unitPrice
                     }));
                   }}
-                  disabled={!editing}
                 />
                 <datalist id="opportunity-product-options">
                   {productOptions.map((product) => (
@@ -1349,6 +1350,7 @@ export default function OpportunitiesPage() {
                     Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"}
                   </p>
                 ) : null}
+                {!editing ? <p className="text-xs text-amber-700">Você já pode pesquisar produtos, mas precisa salvar a oportunidade antes de adicionar itens.</p> : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
