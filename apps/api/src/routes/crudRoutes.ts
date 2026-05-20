@@ -5758,6 +5758,55 @@ router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
   });
 });
 
+const mergeDuplicatesSchema = z.object({
+  primaryClientId: z.string().min(1),
+  duplicateClientIds: z.array(z.string().min(1)).min(1),
+  reason: z.string().trim().optional()
+});
+
+router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "gerente"), validateBody(mergeDuplicatesSchema), async (req, res) => {
+  const { primaryClientId, duplicateClientIds, reason } = req.body as z.infer<typeof mergeDuplicatesSchema>;
+  const uniqueDuplicateIds = Array.from(new Set<string>(duplicateClientIds.filter((id: string) => id !== primaryClientId)));
+  if (uniqueDuplicateIds.length === 0) return res.status(400).json({ message: "Informe ao menos um cliente duplicado diferente do principal." });
+
+  const [primary, duplicates] = await Promise.all([
+    prisma.client.findUnique({ where: { id: primaryClientId } }),
+    prisma.client.findMany({ where: { id: { in: uniqueDuplicateIds } } })
+  ]);
+  if (!primary) return res.status(404).json({ message: "Cliente principal não encontrado." });
+  if (duplicates.length !== uniqueDuplicateIds.length) return res.status(404).json({ message: "Um ou mais clientes duplicados não foram encontrados." });
+
+  const now = new Date();
+  const archivedIds = await prisma.$transaction(async (tx) => {
+    for (const duplicate of duplicates) {
+      await tx.opportunity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+      await tx.activity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+      await tx.timelineEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+      await tx.contact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+      await tx.agendaEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+      await tx.agendaStop.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+
+      await tx.client.update({
+        where: { id: duplicate.id },
+        data: {
+          code: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
+          cnpjNormalized: null,
+          cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
+          name: `[ARQUIVADO] ${duplicate.name}`
+        }
+      });
+    }
+    return duplicates.map((item) => item.id);
+  });
+
+  return res.json({
+    message: "Mesclagem concluída com sucesso.",
+    primaryClientId,
+    archivedDuplicateIds: archivedIds,
+    reason: reason || null
+  });
+});
+
 router.get("/products/:id", async (req, res) => {
   const product = await prisma.product.findUnique({
     where: { id: req.params.id },

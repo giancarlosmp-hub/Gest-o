@@ -155,7 +155,7 @@ export default function ClientSearchSelect({
                   {client.fantasyName ? client.name : formatClientSecondary(client)}
                 </p>
                 {client.fantasyName ? <p className="text-xs text-slate-500">{formatClientSecondary(client)}</p> : null}
-                {client.cnpj ? <p className="text-xs text-slate-500">CNPJ: {client.cnpj}</p> : null}
+                {client.cnpj ? <p className="text-xs text-slate-500">CPF/CNPJ: {client.cnpj}</p> : null}
               </button>
             ))
           ) : (

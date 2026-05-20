@@ -1322,7 +1322,6 @@ export default function OpportunitiesPage() {
               <label className="space-y-1 sm:col-span-4">
                 <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
-                  list="opportunity-product-options"
                   className="w-full rounded-lg border border-slate-200 p-2"
                   placeholder="Busque por código ERP, nome, classificação ou parte do nome"
                   value={productSearch}
@@ -1330,7 +1329,7 @@ export default function OpportunitiesPage() {
                     const value = event.target.value;
                     setProductSearch(value);
                     searchProducts(value).catch(() => null);
-                    const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name} — ${option.className || "Sem classificação"} — ${option.unit || "SEM UND"} — ${formatCurrencyBRL(Number(option.defaultPrice || 0))} — EST ${Number(option.stock || 0)}` === value);
+                    const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name}` === value);
                     if (!selected) return;
                     setItemDraft((current) => ({
                       ...current,
@@ -1343,11 +1342,32 @@ export default function OpportunitiesPage() {
                     }));
                   }}
                 />
-                <datalist id="opportunity-product-options">
-                  {productOptions.map((product) => (
-                    <option key={product.id} value={`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name} — ${product.className || "Sem classificação"} — ${product.unit || "SEM UND"} — ${formatCurrencyBRL(Number(product.defaultPrice || 0))} — EST ${Number(product.stock || 0)}`} />
-                  ))}
-                </datalist>
+                {productSearch.trim().length >= 2 && productOptions.length > 0 ? (
+                  <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white">
+                    {productOptions.map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                        onClick={() => {
+                          setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
+                          setItemDraft((current) => ({
+                            ...current,
+                            productId: product.id,
+                            productNameSnapshot: product.name,
+                            erpProductCode: product.erpProductCode,
+                            erpProductClassCode: product.erpProductClassCode,
+                            unit: product.unit || "",
+                            unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice
+                          }));
+                        }}
+                      >
+                        <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
+                        <p className="text-xs text-slate-600">{product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} · EST {Number(product.stock || 0)}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 {hasAttemptedProductSearch && productOptions.length === 0 ? (
                   <p className="text-xs text-amber-700">Nenhum produto encontrado para essa busca.</p>
                 ) : null}
@@ -1356,24 +1376,24 @@ export default function OpportunitiesPage() {
                     Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                   </p>
                 ) : null}
-                {!isOpportunitySaved ? <p className="text-xs text-amber-700">Salve a oportunidade antes de adicionar produtos.</p> : null}
+                {!isOpportunitySaved ? <p className="text-xs text-amber-700">Você pode preparar produto, quantidade e observação agora. O item será adicionado após salvar a oportunidade.</p> : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
-                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} />
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Preço unitário</span>
-                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
+                <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.unitPrice} onChange={(e) => setItemDraft((current) => ({ ...current, unitPrice: sanitizeNumericInput(e.target.value) }))} />
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Desconto</span>
                 <div className="flex gap-2">
-                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))} disabled={!isOpportunitySaved}>
+                  <select className="rounded-lg border border-slate-200 p-2" value={itemDraft.discountType} onChange={(e) => setItemDraft((current) => ({ ...current, discountType: e.target.value as DiscountType }))}>
                     <option value="value">R$</option>
                     <option value="percent">%</option>
                   </select>
-                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} disabled={!isOpportunitySaved} />
+                  <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.discountValue} onChange={(e) => setItemDraft((current) => ({ ...current, discountValue: sanitizeNumericInput(e.target.value) }))} />
                 </div>
               </label>
               <label className="space-y-1">
@@ -1384,7 +1404,7 @@ export default function OpportunitiesPage() {
 
             <label className="space-y-1">
               <span className="text-sm font-medium text-slate-700">Observação</span>
-              <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.notes} onChange={(e) => setItemDraft((current) => ({ ...current, notes: e.target.value }))} disabled={!isOpportunitySaved} />
+              <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.notes} onChange={(e) => setItemDraft((current) => ({ ...current, notes: e.target.value }))} />
             </label>
 
             <div className="flex justify-end">
