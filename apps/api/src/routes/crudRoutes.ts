@@ -5696,6 +5696,7 @@ router.get("/products/search", async (req, res) => {
       name: product.name,
       erpProductCode: product.erpProductCode,
       erpProductClassCode: product.erpProductClassCode,
+      className: product.className,
       unit: product.unit,
       price: latestPrice,
       stock,
@@ -5704,6 +5705,57 @@ router.get("/products/search", async (req, res) => {
       status
     };
   }));
+});
+
+router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
+  const duplicatedDocuments = await prisma.client.groupBy({
+    by: ["cnpjNormalized"],
+    where: { cnpjNormalized: { not: null } },
+    _count: { cnpjNormalized: true },
+    having: {
+      cnpjNormalized: {
+        _count: { gt: 1 }
+      }
+    }
+  });
+
+  const details = await Promise.all(duplicatedDocuments.map(async (duplicate) => {
+    const normalized = duplicate.cnpjNormalized;
+    const clients = await prisma.client.findMany({
+      where: { cnpjNormalized: normalized || undefined },
+      orderBy: [{ createdAt: "asc" }],
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        fantasyName: true,
+        cnpj: true,
+        cnpjNormalized: true,
+        ownerSellerId: true,
+        createdAt: true,
+        _count: {
+          select: {
+            opportunities: true,
+            activities: true,
+            timelineEvents: true
+          }
+        }
+      }
+    });
+    return {
+      normalizedDocument: normalized,
+      totalClients: duplicate._count.cnpjNormalized,
+      clients
+    };
+  }));
+
+  return res.json({
+    duplicates: details,
+    instructions: [
+      "Não execute DELETE automático.",
+      "Ao mesclar, transfira oportunidades, atividades e histórico antes de desativar/arquivar o cadastro duplicado."
+    ]
+  });
 });
 
 router.get("/products/:id", async (req, res) => {
