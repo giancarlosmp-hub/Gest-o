@@ -74,6 +74,9 @@ const pickFirstNumber = (payload: Record<string, unknown>, keys: string[]) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const pickPartnerCode = (payload: Record<string, unknown>) =>
+  pickFirstString(payload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+
 const toArray = (payload: unknown) => {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
@@ -97,6 +100,11 @@ const sanitizePayloadForLog = (value: unknown, depth = 0): unknown => {
     const entries = Object.entries(record).slice(0, 15).map(([key, raw]) => {
       const lower = key.toLowerCase();
       if (/(token|password|authorization|senha)/i.test(lower)) return [key, "***"] as const;
+      if (/(cnpj|cpf|cgc)/i.test(lower) && typeof raw === "string") {
+        const digits = raw.replace(/\D/g, "");
+        const masked = digits.length > 4 ? `${"*".repeat(Math.max(digits.length - 4, 0))}${digits.slice(-4)}` : "***";
+        return [key, masked] as const;
+      }
       return [key, sanitizePayloadForLog(raw, depth + 1)] as const;
     });
     return Object.fromEntries(entries);
@@ -306,11 +314,9 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
 export async function syncConnection(options?: RunSyncOptions) {
   const resolved = await resolveReferenceCredentials();
   return runSync("connection", async (correlationId) => {
-    if (resolved.credentials) {
-      await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/health", resolved.credentials, correlationId);
-    } else {
-      await requestUltraFv3ReadOnlyWithRetry<unknown>("/health", correlationId);
-    }
+    const probeEndpoint = "/operations";
+    if (resolved.credentials) await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(probeEndpoint, resolved.credentials, correlationId);
+    else await requestUltraFv3ReadOnlyWithRetry<unknown>(probeEndpoint, correlationId);
     return { syncedCount: 1 };
   }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
@@ -321,6 +327,8 @@ export async function syncProducts(options?: RunSyncOptions) {
     const rows = await fetchUltraFv3Rows("/products", "products", correlationId, resolved.credentials);
     const diagnostics = {
       received: rows.length,
+      validAfterNormalization: 0,
+      discardedAfterNormalization: 0,
       invalidInactive: 0,
       invalidSuspended: 0,
       invalidMissingCode: 0,
@@ -333,11 +341,11 @@ export async function syncProducts(options?: RunSyncOptions) {
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       const payload = row as Record<string, unknown>;
-      const code = pickFirstString(payload, ["code", "erpProductCode", "codigo", "CODIGO", "produtoCodigo"]);
-      const classCode = pickFirstString(payload, ["classification", "erpProductClassCode", "classCode", "classe", "CLASSIFICACAO"]) || "default";
-      const unit = pickFirstString(payload, ["unit", "unidade", "UNIDADE", "unitCode", "un"]);
-      const price = pickFirstNumber(payload, ["price", "defaultPrice", "minPrice", "preco", "PRECO", "salePrice", "valor"]);
-      const stockQuantity = pickFirstValue(payload, ["stockQuantity", "stock", "estoque", "ESTOQUE", "availableStock"]);
+      const code = pickFirstString(payload, ["CODPRODUTO", "code", "erpProductCode", "codigo", "CODIGO", "produtoCodigo"]);
+      const classCode = pickFirstString(payload, ["CODPRODUTO_CLAS", "classification", "erpProductClassCode", "classCode", "classe", "CLASSIFICACAO"]);
+      const unit = pickFirstString(payload, ["UND_MEDIDA", "unit", "unidade", "UNIDADE", "unitCode", "un"]);
+      const price = pickFirstNumber(payload, ["PRECO", "price", "defaultPrice", "minPrice", "preco", "salePrice", "valor"]);
+      const stockQuantity = pickFirstValue(payload, ["QTD_ESTOQUE", "stockQuantity", "stock", "estoque", "ESTOQUE", "availableStock"]);
       const status = pickFirstString(payload, ["status", "situacao", "SITUACAO"]).toLowerCase();
       const activeFlag = pickFirstValue(payload, ["isActive", "active", "ativo", "ATIVO"]);
       const suspendedFlag = pickFirstValue(payload, ["isSuspended", "suspended", "suspenso", "SUSPENSO"]);
@@ -346,7 +354,9 @@ export async function syncProducts(options?: RunSyncOptions) {
       const isActive = activeFlag === null
         ? !["inactive", "inativo", "suspended", "suspenso"].includes(status)
         : activeFlag !== false && !["false", "0", "n", "nao", "não", "inativo"].includes(activeFlagNormalized);
-      const isSuspended = suspendedFlag === true || ["true", "1", "s", "sim", "suspenso"].includes(suspendedFlagNormalized) || ["suspended", "suspenso"].includes(status);
+      const suspendedByUltra = String(pickFirstValue(payload, ["SUSPENDER_PEDIDOS"]) ?? "").trim().toUpperCase() === "S";
+      const outOfLineByUltra = String(pickFirstValue(payload, ["IDN_FORA_LINHA"]) ?? "").trim().toUpperCase() === "S";
+      const isSuspended = suspendedFlag === true || ["true", "1", "s", "sim", "suspenso"].includes(suspendedFlagNormalized) || ["suspended", "suspenso"].includes(status) || suspendedByUltra || outOfLineByUltra;
 
       if (!isActive) {
         diagnostics.invalidInactive += 1;
@@ -369,35 +379,36 @@ export async function syncProducts(options?: RunSyncOptions) {
         continue;
       }
 
+      diagnostics.validAfterNormalization += 1;
       const stockNumber = stockQuantity === null ? null : Number(stockQuantity);
       if (stockNumber !== null && Number.isFinite(stockNumber) && stockNumber <= 0) diagnostics.withoutStock += 1;
 
       const product = await prisma.product.upsert({
-        where: { erpProductCode_erpProductClassCode: { erpProductCode: code, erpProductClassCode: classCode } },
+        where: { erpProductCode_erpProductClassCode: { erpProductCode: code, erpProductClassCode: classCode || "default" } },
         update: {
-          name: pickFirstString(payload, ["description", "name", "descricao", "NOME"]) || "Produto sem descrição",
-          className: pickFirstString(payload, ["classificationName", "className", "nomeClassificacao"]) || null,
-          groupName: pickFirstString(payload, ["group", "groupName", "grupo"]) || null,
+          name: pickFirstString(payload, ["DSCPRODUTO", "description", "name", "descricao", "NOME"]) || "Produto sem descrição",
+          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "classificationName", "className", "nomeClassificacao"]) || null,
+          groupName: pickFirstString(payload, ["DSCGRUPO", "group", "groupName", "grupo"]) || null,
           unit,
-          brand: pickFirstString(payload, ["brand", "marca"]) || null,
+          brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
           stockQuantity: stockNumber !== null && Number.isFinite(stockNumber) ? stockNumber : null,
           defaultPrice: price,
-          minPrice: pickFirstNumber(payload, ["minPrice", "precoMinimo"]) || price,
+          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || price,
           isActive: true,
           isSuspended: false,
           rawErpPayload: payload as Prisma.InputJsonValue
         },
         create: {
           erpProductCode: code,
-          erpProductClassCode: classCode,
-          name: pickFirstString(payload, ["description", "name", "descricao", "NOME"]) || "Produto sem descrição",
-          className: pickFirstString(payload, ["classificationName", "className", "nomeClassificacao"]) || null,
-          groupName: pickFirstString(payload, ["group", "groupName", "grupo"]) || null,
+          erpProductClassCode: classCode || "default",
+          name: pickFirstString(payload, ["DSCPRODUTO", "description", "name", "descricao", "NOME"]) || "Produto sem descrição",
+          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "classificationName", "className", "nomeClassificacao"]) || null,
+          groupName: pickFirstString(payload, ["DSCGRUPO", "group", "groupName", "grupo"]) || null,
           unit,
-          brand: pickFirstString(payload, ["brand", "marca"]) || null,
+          brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
           stockQuantity: stockNumber !== null && Number.isFinite(stockNumber) ? stockNumber : null,
           defaultPrice: price,
-          minPrice: pickFirstNumber(payload, ["minPrice", "precoMinimo"]) || price,
+          minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || price,
           isActive: true,
           isSuspended: false,
           rawErpPayload: payload as Prisma.InputJsonValue
@@ -416,7 +427,16 @@ export async function syncProducts(options?: RunSyncOptions) {
       syncedCount += 1;
     }
 
+    diagnostics.discardedAfterNormalization = Math.max(diagnostics.received - diagnostics.validAfterNormalization, 0);
     logApiEvent("INFO", "[ultrafv3 sync products] processed products payload", { correlationId, syncedCount, diagnostics });
+    logApiEvent("INFO", "[ultrafv3 sync products] normalization diagnostics", {
+      correlationId,
+      received: diagnostics.received,
+      validAfterNormalization: diagnostics.validAfterNormalization,
+      discardedAfterNormalization: diagnostics.discardedAfterNormalization,
+      sampleKeys: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>).slice(0, 15) : [],
+      sample: sanitizePayloadForLog(rows[0] ?? null),
+    });
     return { syncedCount, diagnostics };
   }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
@@ -454,7 +474,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       continue;
     }
     const payload = row as Record<string, unknown>;
-    const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+    const code = pickPartnerCode(payload);
     if (!code) {
       diagnostics.withoutCode += 1;
       continue;
@@ -465,8 +485,8 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
     const existing = await prisma.client.findFirst({ where: { code }, select: { id: true, ownerSellerId: true } });
     const data = {
       code,
-      name: pickFirstString(payload, ["corporateName", "name", "razaoSocial", "nome", "NOME"]) || "Cliente sem nome",
-      fantasyName: pickFirstString(payload, ["fantasyName", "nomeFantasia", "apelido"]) || null,
+      name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "name", "corporateName", "razaoSocial", "nome"]) || "Cliente sem nome",
+      fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
       cnpj: cnpj || null,
       cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
       city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
@@ -519,17 +539,17 @@ export async function syncPartners(options?: RunSyncOptions) {
         .filter(([code]) => Boolean(code))
     );
 
-    const diagnostics = { received: rows.length, withoutCode: 0, fallbackSellerLinks: 0, updated: 0, created: 0 };
+    const diagnostics = { received: rows.length, withoutCode: 0, fallbackSellerLinks: 0, updated: 0, created: 0, validAfterNormalization: 0, discardedAfterNormalization: 0 };
     let syncedCount = 0;
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;
       const payload = row as Record<string, unknown>;
-      const code = pickFirstString(payload, ["code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+      const code = pickPartnerCode(payload);
       if (!code) {
         diagnostics.withoutCode += 1;
         continue;
       }
-      const sellerCode = pickFirstString(payload, ["sellerCode", "salesmanCode", "codVendedor", "CODVENDEDOR", "vendedorCodigo", "VENDEDOR"]);
+      const sellerCode = pickFirstString(payload, ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"]);
       const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
       if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks += 1;
       const cnpj = pickFirstString(payload, ["cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
@@ -537,8 +557,8 @@ export async function syncPartners(options?: RunSyncOptions) {
       const existing = await prisma.client.findFirst({ where: { code }, select: { id: true } });
       const data = {
         code,
-        name: pickFirstString(payload, ["corporateName", "name", "razaoSocial", "nome", "NOME"]) || "Cliente sem nome",
-        fantasyName: pickFirstString(payload, ["fantasyName", "nomeFantasia", "apelido"]) || null,
+        name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]) || "Cliente sem nome",
+        fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
         cnpj: cnpj || null,
         cnpjNormalized: cnpj ? normalizeCnpj(cnpj) : null,
         city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
@@ -555,8 +575,18 @@ export async function syncPartners(options?: RunSyncOptions) {
         diagnostics.created += 1;
       }
       syncedCount += 1;
+      diagnostics.validAfterNormalization += 1;
     }
+    diagnostics.discardedAfterNormalization = Math.max(diagnostics.received - diagnostics.validAfterNormalization, 0);
     logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics, authMode: resolved.authMode, sellerId: resolved.sellerId, sellerName: resolved.sellerName });
+    logApiEvent("INFO", "[ultrafv3 sync partners] normalization diagnostics", {
+      correlationId,
+      received: diagnostics.received,
+      validAfterNormalization: diagnostics.validAfterNormalization,
+      discardedAfterNormalization: diagnostics.discardedAfterNormalization,
+      sampleKeys: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>).slice(0, 15) : [],
+      sample: sanitizePayloadForLog(rows[0] ?? null),
+    });
     return { syncedCount, diagnostics };
   }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
