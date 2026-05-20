@@ -81,6 +81,12 @@ const pickPartnerDocument = (payload: Record<string, unknown>) =>
   pickFirstString(payload, ["CNPJ", "CPF", "CGC", "DOCUMENTO", "CPFCNPJ", "CPF_CNPJ", "CNPJ_CPF", "NR_CNPJ_CPF", "cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
 
 const normalizeDocument = (value?: string | null) => normalizeCnpj(value);
+const resolveClientTypeFromDocument = (normalizedDocument?: string | null) => {
+  if (!normalizedDocument) return undefined;
+  if (normalizedDocument.length === 11) return "PF" as const;
+  if (normalizedDocument.length === 14) return "PJ" as const;
+  return undefined;
+};
 
 const toArray = (payload: unknown) => {
   if (Array.isArray(payload)) return payload;
@@ -384,7 +390,7 @@ export async function syncProducts(options?: RunSyncOptions) {
         where: { erpProductCode_erpProductClassCode: { erpProductCode: code, erpProductClassCode: classCode || "default" } },
         update: {
           name: pickFirstString(payload, ["DSCPRODUTO", "description", "name", "descricao", "NOME"]) || "Produto sem descrição",
-          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "classificationName", "className", "nomeClassificacao"]) || null,
+          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "DESCRICAO_CLASSE", "DSC_CLASSIFICACAO", "classificationName", "className", "nomeClassificacao"]) || null,
           groupName: pickFirstString(payload, ["DSCGRUPO", "group", "groupName", "grupo"]) || null,
           unit,
           brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
@@ -399,7 +405,7 @@ export async function syncProducts(options?: RunSyncOptions) {
           erpProductCode: code,
           erpProductClassCode: classCode || "default",
           name: pickFirstString(payload, ["DSCPRODUTO", "description", "name", "descricao", "NOME"]) || "Produto sem descrição",
-          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "classificationName", "className", "nomeClassificacao"]) || null,
+          className: pickFirstString(payload, ["DSCPRODUTO_CLAS", "DESCRICAO_CLASSE", "DSC_CLASSIFICACAO", "classificationName", "className", "nomeClassificacao"]) || null,
           groupName: pickFirstString(payload, ["DSCGRUPO", "group", "groupName", "grupo"]) || null,
           unit,
           brand: pickFirstString(payload, ["MARCA", "brand", "marca"]) || null,
@@ -487,7 +493,18 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
     if (cnpj) diagnostics.receivedWithDocument += 1;
     else diagnostics.receivedWithoutDocument += 1;
     const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
-    const existing = await prisma.client.findFirst({ where: { code }, select: { id: true, ownerSellerId: true } });
+    const existing = await prisma.client.findFirst({
+      where: {
+        OR: [
+          { code },
+          ...(normalizedDocument ? [{ cnpjNormalized: normalizedDocument }] : []),
+          ...(normalizedDocument && code ? [{ AND: [{ code }, { cnpjNormalized: normalizedDocument }] }] : [])
+        ]
+      },
+      orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
+      select: { id: true, ownerSellerId: true }
+    });
+    const derivedClientType = resolveClientTypeFromDocument(normalizedDocument);
     const data = {
       code,
       name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "name", "corporateName", "razaoSocial", "nome"]) || "Cliente sem nome",
@@ -497,6 +514,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
       state: normalizeState(state || "NI"),
       region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
+      clientType: derivedClientType,
       erpUpdatedAt: new Date()
     };
 
@@ -563,14 +581,16 @@ export async function syncPartners(options?: RunSyncOptions) {
       const cnpj = pickPartnerDocument(payload);
       const normalizedDocument = normalizeDocument(cnpj);
       const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
+      const derivedClientType = resolveClientTypeFromDocument(normalizedDocument);
       const existing = await prisma.client.findFirst({
         where: {
           OR: [
             { code },
-            ...(normalizedDocument ? [{ cnpjNormalized: normalizedDocument }] : [])
+            ...(normalizedDocument ? [{ cnpjNormalized: normalizedDocument }] : []),
+            ...(normalizedDocument && code ? [{ AND: [{ code }, { cnpjNormalized: normalizedDocument }] }] : [])
           ]
         },
-        orderBy: [{ erpUpdatedAt: "desc" }],
+        orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
         select: { id: true }
       });
       const data = {
@@ -582,6 +602,7 @@ export async function syncPartners(options?: RunSyncOptions) {
         city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
         state: normalizeState(state || "NI"),
         region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
+        clientType: derivedClientType,
         ownerSellerId,
         erpUpdatedAt: new Date()
       };
