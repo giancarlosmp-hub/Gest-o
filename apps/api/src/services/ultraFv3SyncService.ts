@@ -304,10 +304,15 @@ async function runSync(scope: UltraFv3SyncScope, runner: (correlationId: string)
 }
 
 export async function syncConnection(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
   return runSync("connection", async (correlationId) => {
-    await requestUltraFv3ReadOnlyWithRetry<unknown>("/health", correlationId);
+    if (resolved.credentials) {
+      await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>("/health", resolved.credentials, correlationId);
+    } else {
+      await requestUltraFv3ReadOnlyWithRetry<unknown>("/health", correlationId);
+    }
     return { syncedCount: 1 };
-  }, options);
+  }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
 
 export async function syncProducts(options?: RunSyncOptions) {
@@ -502,8 +507,9 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
 }
 
 export async function syncPartners(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
   return runSync("partners", async (correlationId) => {
-    const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId);
+    const rows = await fetchUltraFv3Rows("/partners", "partners", correlationId, resolved.credentials);
     const fallbackSeller = await prisma.user.findFirst({ where: { role: "vendedor", isActive: true }, select: { id: true } });
     if (!fallbackSeller) throw new Error("Nenhum vendedor ativo encontrado para vincular clientes sincronizados.");
 
@@ -550,9 +556,9 @@ export async function syncPartners(options?: RunSyncOptions) {
       }
       syncedCount += 1;
     }
-    logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics, authMode: "global" });
+    logApiEvent("INFO", "[ultrafv3 sync partners] processed partners payload", { correlationId, syncedCount, diagnostics, authMode: resolved.authMode, sellerId: resolved.sellerId, sellerName: resolved.sellerName });
     return { syncedCount, diagnostics };
-  }, options);
+  }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }
 
 export async function syncPartnersByUser(userId: string, options?: RunSyncOptions) {
