@@ -9,6 +9,8 @@ const uniqueTag = `ci-smoke-${Date.now()}`;
 const opportunityValue = 12345;
 const smokeEmail = process.env.SMOKE_EMAIL || "diretor@empresa.com";
 const smokePassword = process.env.SMOKE_PASSWORD || "123456";
+const minItemQuantity = 1;
+const minItemUnitPrice = 1;
 
 const request = async (path, options = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -102,6 +104,53 @@ const main = async () => {
   const summaryScopedAfterFollowUp = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}&search=${encodeURIComponent(uniqueTag)}`, { headers: authHeaders });
   assert(summaryScopedAfterFollowUp.overdueCount === 1, "Summary não refletiu overdueCount após atualizar followUpDate", summaryScopedAfterFollowUp);
   assert(Number(summaryScopedAfterFollowUp.overdueValue || 0) >= opportunityValue, "Summary não refletiu overdueValue após atualizar followUpDate", summaryScopedAfterFollowUp);
+
+  console.log("[compose-smoke] Buscar produto válido");
+  const productSearchTerms = ["ad", "se", "so", "mi", "fe"];
+  let selectedProduct = null;
+  for (const term of productSearchTerms) {
+    const products = await request(`/products/search?q=${encodeURIComponent(term)}`, { headers: authHeaders });
+    const candidate = Array.isArray(products)
+      ? products.find((item) => item?.id && item?.erpProductCode && item?.erpProductClassCode)
+      : null;
+    if (candidate) {
+      selectedProduct = candidate;
+      break;
+    }
+  }
+  assert(Boolean(selectedProduct?.id), "Nenhum produto válido encontrado para o smoke test", { terms: productSearchTerms });
+
+  console.log("[compose-smoke] Adicionar item na oportunidade");
+  const itemPayload = {
+    productId: selectedProduct.id,
+    erpProductCode: selectedProduct.erpProductCode,
+    erpProductClassCode: selectedProduct.erpProductClassCode,
+    productNameSnapshot: selectedProduct.name || `Produto ${selectedProduct.erpProductCode}`,
+    unit: selectedProduct.unit || "UN",
+    quantity: minItemQuantity,
+    unitPrice: Math.max(Number(selectedProduct.price || 0), minItemUnitPrice),
+    discountType: "value",
+    discountValue: 0,
+    notes: "item smoke"
+  };
+  const createdItem = await request(`/opportunities/${created.id}/items`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify(itemPayload)
+  });
+  assert(Boolean(createdItem?.id), "Falha ao adicionar item na oportunidade", { createdId: created.id, itemPayload, createdItem });
+
+  const itemsAfterAdd = await request(`/opportunities/${created.id}/items`, { headers: authHeaders });
+  const itemList = Array.isArray(itemsAfterAdd?.items) ? itemsAfterAdd.items : [];
+  assert(itemList.length > 0, "Inclusão do item não refletida na listagem da oportunidade", { createdId: created.id, itemsAfterAdd });
+  const insertedItem = itemList.find((item) => item.id === createdItem.id);
+  assert(Boolean(insertedItem), "Item criado não encontrado na listagem da oportunidade", { createdItemId: createdItem.id, itemList });
+  const expectedNetTotal = Number(itemPayload.quantity) * Number(itemPayload.unitPrice);
+  assert(Number(insertedItem.netTotal || 0) >= expectedNetTotal, "Total líquido do item não foi calculado como esperado", {
+    createdItemId: createdItem.id,
+    expectedNetTotal,
+    actualNetTotal: insertedItem.netTotal
+  });
 
   console.log("[compose-smoke] Encerrar oportunidade como ganho");
   await request(`/opportunities/${created.id}/close`, {
