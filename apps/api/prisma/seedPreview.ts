@@ -259,8 +259,27 @@ async function createPreviewDataset() {
 
   await cleanOldPreviewSeedData();
 
+  const previewProducts = [] as Array<{ id: string; unit: string | null; erpProductCode: string; erpProductClassCode: string; name: string; defaultPrice: number | null }>;
   for (const productTemplate of PREVIEW_PRODUCTS) {
-    const product = await prisma.product.create({
+    const product = await prisma.product.upsert({
+      where: {
+        erpProductCode_erpProductClassCode: {
+          erpProductCode: productTemplate.erpProductCode,
+          erpProductClassCode: productTemplate.erpProductClassCode
+        }
+      },
+      update: {
+        name: productTemplate.name,
+        className: productTemplate.className,
+        unit: productTemplate.unit,
+        brand: productTemplate.brand,
+        groupName: productTemplate.groupName,
+        defaultPrice: productTemplate.defaultPrice,
+        minPrice: productTemplate.minPrice,
+        stockQuantity: 120,
+        isActive: true,
+        isSuspended: false
+      },
       data: {
         erpProductCode: productTemplate.erpProductCode,
         erpProductClassCode: productTemplate.erpProductClassCode,
@@ -284,6 +303,7 @@ async function createPreviewDataset() {
         }
       }
     });
+    previewProducts.push(product);
 
     await prisma.productPrice.createMany({
       data: productTemplate.prices
@@ -298,14 +318,25 @@ async function createPreviewDataset() {
     });
   }
 
-  const clients = [];
+  const clients = [] as Array<{ id: string; city: string | null; ownerSellerId: string }>;
 
   for (const [index, clientTemplate] of PREVIEW_CLIENTS.entries()) {
     const ownerSeller = sellers[index % sellers.length];
     const seededName = `${PREVIEW_SEED_TAG} ${clientTemplate.name}`;
 
-    const client = await prisma.client.create({
-      data: {
+    const client = await prisma.client.upsert({
+      where: { name: seededName },
+      update: {
+        name: seededName,
+        city: clientTemplate.city,
+        state: clientTemplate.state,
+        region: clientTemplate.region,
+        segment: clientTemplate.segment,
+        potentialHa: 180 + index * 22,
+        farmSizeHa: 280 + index * 30,
+        ownerSellerId: ownerSeller.id
+      },
+      create: {
         name: seededName,
         city: clientTemplate.city,
         state: clientTemplate.state,
@@ -361,6 +392,29 @@ async function createPreviewDataset() {
         ownerSellerId: ownerSeller.id
       }
     });
+    if (template.stage === "ganho") {
+      const itemProduct = previewProducts[index % previewProducts.length];
+      const itemUnitPrice = Number(itemProduct.defaultPrice || 100);
+      await prisma.opportunityItem.create({
+        data: {
+          opportunityId: opportunity.id,
+          productId: itemProduct.id,
+          lineNumber: 1,
+          erpProductCode: itemProduct.erpProductCode,
+          erpProductClassCode: itemProduct.erpProductClassCode,
+          productNameSnapshot: itemProduct.name,
+          unit: itemProduct.unit || "SC",
+          quantity: 1,
+          unitPrice: itemUnitPrice,
+          discountType: "value",
+          discountValue: 0,
+          grossTotal: itemUnitPrice,
+          discountTotal: 0,
+          netTotal: itemUnitPrice,
+          notes: `${PREVIEW_SEED_TAG} item obrigatório para oportunidade ganha`
+        }
+      });
+    }
 
     const activityDueDate = addDays(now, (opportunityCounter % 2 === 0 ? -3 : 4) + index);
     const isDone = activityDueDate < now;
