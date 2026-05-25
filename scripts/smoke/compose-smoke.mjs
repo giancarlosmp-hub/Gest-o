@@ -74,7 +74,7 @@ const ensureSmokeProductViaPrisma = async () => {
         isSuspended: smokeProductSeed.isSuspended
       }
     });
-    return {
+    const resolvedProduct = {
       id: product.id,
       name: product.name,
       erpProductCode: product.erpProductCode,
@@ -82,6 +82,26 @@ const ensureSmokeProductViaPrisma = async () => {
       unit: product.unit || smokeProductSeed.unit,
       price: Number(product.defaultPrice || smokeProductSeed.defaultPrice)
     };
+    await prisma.productPrice.createMany({
+      skipDuplicates: true,
+      data: [{
+        productId: product.id,
+        erpPriceId: `SMOKE-${smokeProductSeed.erpProductCode}-${smokeProductSeed.erpProductClassCode}`,
+        branchCode: "01",
+        validFrom: new Date(),
+        price: resolvedProduct.price
+      }]
+    });
+    console.log("[compose-smoke] Produto smoke garantido via Prisma", resolvedProduct);
+    return resolvedProduct;
+  } catch (error) {
+    console.error("[compose-smoke] Erro ao garantir produto via Prisma", {
+      model: "Product/ProductPrice",
+      fields: smokeProductSeed,
+      message: error instanceof Error ? error.message : String(error),
+      error
+    });
+    throw error;
   } finally {
     await prisma.$disconnect();
   }

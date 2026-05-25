@@ -213,41 +213,6 @@ async function upsertSeller(name: string, email: string, region: string) {
   });
 }
 
-async function cleanOldPreviewSeedData() {
-  await prisma.activity.deleteMany({
-    where: {
-      notes: { contains: PREVIEW_SEED_TAG }
-    }
-  });
-
-  await prisma.agendaEvent.deleteMany({
-    where: {
-      title: { contains: PREVIEW_SEED_TAG }
-    }
-  });
-
-  await prisma.opportunity.deleteMany({
-    where: {
-      title: { contains: PREVIEW_SEED_TAG }
-    }
-  });
-
-  await prisma.productPrice.deleteMany();
-  await prisma.product.deleteMany();
-
-  await prisma.contact.deleteMany({
-    where: {
-      name: { contains: PREVIEW_SEED_TAG }
-    }
-  });
-
-  await prisma.client.deleteMany({
-    where: {
-      name: { contains: PREVIEW_SEED_TAG }
-    }
-  });
-}
-
 async function createPreviewDataset() {
   const now = new Date();
   const currentMonth = monthString(now);
@@ -256,8 +221,6 @@ async function createPreviewDataset() {
   const sellers = await Promise.all(
     PREVIEW_SELLERS.map((seller) => upsertSeller(seller.name, seller.email, seller.region))
   );
-
-  await cleanOldPreviewSeedData();
 
   const previewProducts = [] as Array<{ id: string; unit: string | null; erpProductCode: string; erpProductClassCode: string; name: string; defaultPrice: number | null }>;
   for (const productTemplate of PREVIEW_PRODUCTS) {
@@ -306,6 +269,7 @@ async function createPreviewDataset() {
     previewProducts.push(product);
 
     await prisma.productPrice.createMany({
+      skipDuplicates: true,
       data: productTemplate.prices
         .filter((price) => price.price > 0)
         .map((price) => ({
@@ -324,9 +288,14 @@ async function createPreviewDataset() {
     const ownerSeller = sellers[index % sellers.length];
     const seededName = `${PREVIEW_SEED_TAG} ${clientTemplate.name}`;
 
-    const client = await prisma.client.upsert({
-      where: { name: seededName },
-      update: {
+    const existingClient = await prisma.client.findFirst({
+      where: { name: seededName, ownerSellerId: ownerSeller.id },
+      orderBy: { createdAt: "asc" }
+    });
+    const client = existingClient
+      ? await prisma.client.update({
+      where: { id: existingClient.id },
+      data: {
         name: seededName,
         city: clientTemplate.city,
         state: clientTemplate.state,
@@ -335,8 +304,10 @@ async function createPreviewDataset() {
         potentialHa: 180 + index * 22,
         farmSizeHa: 280 + index * 30,
         ownerSellerId: ownerSeller.id
-      },
-      create: {
+      }
+    })
+      : await prisma.client.create({
+      data: {
         name: seededName,
         city: clientTemplate.city,
         state: clientTemplate.state,
@@ -372,31 +343,58 @@ async function createPreviewDataset() {
     const expectedCloseDate = addDays(now, template.daysFromNowExpectedClose);
     const closedAt = typeof template.closedAtOffset === "number" ? addDays(now, template.closedAtOffset) : null;
 
-    const opportunity = await prisma.opportunity.create({
-      data: {
-        title: `${PREVIEW_SEED_TAG} ${template.title}`,
-        value: template.value,
-        stage: template.stage,
-        crop: index % 2 === 0 ? "soja" : "milho",
-        season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
-        areaHa: 90 + index * 14,
-        productOffered: index % 2 === 0 ? "Tratamento de sementes" : "Defensivos",
-        proposalDate,
-        followUpDate,
-        expectedCloseDate,
-        closedAt,
-        lastContactAt: followUpDate,
-        probability: template.probability,
-        notes: `${PREVIEW_SEED_TAG} oportunidade para validação de dashboard e relatórios`,
-        clientId: client.id,
-        ownerSellerId: ownerSeller.id
-      }
+    const opportunityTitle = `${PREVIEW_SEED_TAG} ${template.title}`;
+    const existingOpportunity = await prisma.opportunity.findFirst({
+      where: { title: opportunityTitle, ownerSellerId: ownerSeller.id, clientId: client.id },
+      orderBy: { createdAt: "asc" }
+    });
+    const opportunityPayload = {
+      title: opportunityTitle,
+      value: template.value,
+      stage: template.stage,
+      crop: index % 2 === 0 ? "soja" : "milho",
+      season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
+      areaHa: 90 + index * 14,
+      productOffered: index % 2 === 0 ? "Tratamento de sementes" : "Defensivos",
+      proposalDate,
+      followUpDate,
+      expectedCloseDate,
+      closedAt,
+      lastContactAt: followUpDate,
+      probability: template.probability,
+      notes: `${PREVIEW_SEED_TAG} oportunidade para validação de dashboard e relatórios`,
+      clientId: client.id,
+      ownerSellerId: ownerSeller.id
+    };
+    const opportunity = existingOpportunity
+      ? await prisma.opportunity.update({
+      where: { id: existingOpportunity.id },
+      data: opportunityPayload
+    })
+      : await prisma.opportunity.create({
+      data: opportunityPayload
     });
     if (template.stage === "ganho") {
       const itemProduct = previewProducts[index % previewProducts.length];
       const itemUnitPrice = Number(itemProduct.defaultPrice || 100);
-      await prisma.opportunityItem.create({
-        data: {
+      await prisma.opportunityItem.upsert({
+        where: { opportunityId_lineNumber: { opportunityId: opportunity.id, lineNumber: 1 } },
+        update: {
+          productId: itemProduct.id,
+          erpProductCode: itemProduct.erpProductCode,
+          erpProductClassCode: itemProduct.erpProductClassCode,
+          productNameSnapshot: itemProduct.name,
+          unit: itemProduct.unit || "SC",
+          quantity: 1,
+          unitPrice: itemUnitPrice,
+          discountType: "value",
+          discountValue: 0,
+          grossTotal: itemUnitPrice,
+          discountTotal: 0,
+          netTotal: itemUnitPrice,
+          notes: `${PREVIEW_SEED_TAG} item obrigatório para oportunidade ganha`
+        },
+        create: {
           opportunityId: opportunity.id,
           productId: itemProduct.id,
           lineNumber: 1,
