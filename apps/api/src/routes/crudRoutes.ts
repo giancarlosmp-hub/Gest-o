@@ -5304,6 +5304,16 @@ router.patch("/opportunities/:id/close", async (req, res) => {
   if (!existingOpportunity) {
     return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
+  if (stage === "ganho") {
+    const itemsCount = await prisma.opportunityItem.count({
+      where: { opportunityId: existingOpportunity.id }
+    });
+    if (itemsCount === 0) {
+      return res.status(422).json({
+        message: "Adicione pelo menos um produto antes de marcar a oportunidade como ganha ou gerar pedido ERP."
+      });
+    }
+  }
 
   const closedAt = new Date();
   const shouldLogOpportunityDiagnostics = process.env.NODE_ENV !== "production";
