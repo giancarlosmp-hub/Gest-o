@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatters";
@@ -300,6 +300,7 @@ function SearchableSelect({
 export default function OpportunityDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [item, setItem] = useState<Opportunity | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -368,7 +369,14 @@ export default function OpportunityDetailsPage() {
     return typeof stockQuantity === "number" && stockQuantity < Number(opportunityItem.quantity || 0);
   });
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
-  const canGenerateErpOrder = item?.stage === "ganho";
+  const erpOrderEligibilityReasons = [
+    item?.stage !== "ganho" ? "A oportunidade precisa estar na etapa Ganha." : null,
+    opportunityItems.length === 0 ? "A oportunidade precisa ter pelo menos um item." : null,
+    !clientErpCode ? "Cliente sem código ERP vinculado." : null,
+    !sellerErpCode || !item?.ownerSeller?.erpOperatorCode?.trim() ? "Vendedor sem vínculo ERP/Login FV3 configurado." : null
+  ].filter(Boolean) as string[];
+  const canGenerateErpOrder = erpOrderEligibilityReasons.length === 0;
+  const erpOrderDisabledReason = erpOrderEligibilityReasons[0] || null;
 
   const setErpOrderField = (field: keyof Omit<ErpOrderForm, "simulateOnly">, value: string) => {
     setErpOrderForm((current) => ({ ...current, [field]: value }));
@@ -424,6 +432,14 @@ export default function OpportunityDetailsPage() {
     setShowErpOrderModal(true);
     loadErpOrderData().catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível preparar o pedido ERP")));
   };
+
+  useEffect(() => {
+    if (!item || searchParams.get("openErpOrder") !== "1") return;
+    if (!showErpOrderModal && canGenerateErpOrder) openErpOrderModal();
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("openErpOrder");
+    setSearchParams(nextParams, { replace: true });
+  }, [item?.id, canGenerateErpOrder, showErpOrderModal]);
 
   const onSendErpOrder = async () => {
     if (!item) return;
@@ -583,7 +599,7 @@ export default function OpportunityDetailsPage() {
             disabled={!canGenerateErpOrder}
             className="mobile-primary-button rounded-xl bg-gradient-to-r from-brand-700 to-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-900/20 hover:from-brand-800 hover:to-slate-950 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400"
             onClick={openErpOrderModal}
-            title={!canGenerateErpOrder ? "Disponível somente para oportunidade Ganha" : undefined}
+            title={!canGenerateErpOrder ? erpOrderDisabledReason || undefined : undefined}
           >
             Gerar pedido ERP
           </button>
@@ -594,6 +610,11 @@ export default function OpportunityDetailsPage() {
       {item.daysOverdue && item.daysOverdue > 0 ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
           Atenção: oportunidade atrasada há {item.daysOverdue} dia(s).
+        </div>
+      ) : null}
+      {!canGenerateErpOrder ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong>Gerar pedido ERP indisponível:</strong> {erpOrderDisabledReason}
         </div>
       ) : null}
 

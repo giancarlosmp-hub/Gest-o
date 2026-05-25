@@ -999,6 +999,19 @@ export default function OpportunitiesPage() {
     && Boolean(itemDraft.productId && itemDraft.erpProductCode && itemDraft.unit)
     && Number(itemDraft.quantity || 0) > 0
     && Number(itemDraft.unitPrice || 0) >= 0;
+  const addItemDisabledReason = !isOpportunitySaved
+    ? "Salve a oportunidade antes de adicionar itens."
+    : !itemDraft.productId
+      ? "Selecione um produto válido."
+      : !itemDraft.unit
+        ? "Selecione unidade de medida."
+        : !itemDraft.erpProductCode
+          ? "Produto sem código ERP."
+          : Number(itemDraft.quantity || 0) <= 0
+            ? "Informe quantidade maior que zero."
+            : Number(itemDraft.unitPrice || 0) < 0
+              ? "Informe preço maior ou igual a zero."
+              : null;
   const itemsTotals = useMemo(() => opportunityItems.reduce(
     (acc, current) => {
       const currentTotals = calculateItemTotals(current);
@@ -1147,6 +1160,14 @@ export default function OpportunitiesPage() {
     if (!closeOpportunityState || isQuickActionLoading) return;
     const didClose = await applyQuickStage(closeOpportunityState.stage, closeReason, closeOpportunityState.opportunityId);
     if (didClose) closeCloseModal();
+  };
+
+  const onConfirmGainAndGenerateErpOrder = async () => {
+    if (!closeOpportunityState || closeOpportunityState.stage !== "ganho" || isQuickActionLoading) return;
+    const didClose = await applyQuickStage("ganho", closeReason, closeOpportunityState.opportunityId);
+    if (!didClose) return;
+    closeCloseModal();
+    navigate(`/oportunidades/${closeOpportunityState.opportunityId}?openErpOrder=1`);
   };
 
   const onScheduleFollowUp = async (event: FormEvent) => {
@@ -1395,7 +1416,10 @@ export default function OpportunitiesPage() {
                         onClick={() => handleSelectProduct(product)}
                       >
                         <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
-                        <p className="text-xs text-slate-600">{product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} · EST {Number(product.stock || 0)}</p>
+                        <p className="text-xs text-slate-600">
+                          {product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} ·{" "}
+                          <strong className={Number(product.stock || 0) <= 0 ? "text-red-600" : "text-slate-800"}>ESTOQUE {Number(product.stock || 0)}</strong>
+                        </p>
                       </button>
                     ))}
                   </div>
@@ -1440,13 +1464,11 @@ export default function OpportunitiesPage() {
             </label>
 
             <div className="flex justify-end">
-              <button type="button" className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400" onClick={() => persistOpportunityItem(itemDraft).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível salvar item")))} disabled={!canAddOpportunityItem}>
+              <button type="button" className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:bg-slate-400" onClick={() => persistOpportunityItem(itemDraft).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível salvar item")))} disabled={!canAddOpportunityItem} title={addItemDisabledReason || undefined}>
                 {itemDraft.id ? "Atualizar item" : "Adicionar item"}
               </button>
             </div>
-            {!isOpportunitySaved ? (
-              <p className="text-right text-xs text-amber-700">Salve a oportunidade para adicionar este item.</p>
-            ) : null}
+            {addItemDisabledReason ? <p className="text-right text-xs text-amber-700">{addItemDisabledReason}</p> : null}
 
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
               <table className="min-w-full text-sm">
@@ -1891,6 +1913,11 @@ export default function OpportunitiesPage() {
               <button type="submit" disabled={isQuickActionLoading !== null} className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-slate-400">
                 {isQuickActionLoading ? "Encerrando..." : `Confirmar como ${stageLabel[closeOpportunityState.stage]}`}
               </button>
+              {closeOpportunityState.stage === "ganho" ? (
+                <button type="button" disabled={isQuickActionLoading !== null} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:bg-emerald-300" onClick={() => onConfirmGainAndGenerateErpOrder().catch(() => null)}>
+                  Confirmar ganho e gerar pedido ERP
+                </button>
+              ) : null}
             </div>
           </form>
         </div>
