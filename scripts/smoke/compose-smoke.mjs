@@ -10,7 +10,17 @@ const opportunityValue = 12345;
 const smokeEmail = process.env.SMOKE_EMAIL || "diretor@empresa.com";
 const smokePassword = process.env.SMOKE_PASSWORD || "123456";
 const minItemQuantity = 1;
-const minItemUnitPrice = 1;
+const minItemUnitPrice = 100;
+const smokeProductSeed = {
+  name: "Produto Smoke ERP",
+  erpProductCode: "SMOKE-001",
+  erpProductClassCode: "1",
+  unit: "SC",
+  defaultPrice: 100,
+  stockQuantity: 100,
+  isActive: true,
+  isSuspended: false
+};
 
 const request = async (path, options = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -40,6 +50,40 @@ const assert = (condition, message, details) => {
   if (!condition) {
     const suffix = details ? `\nDetails: ${JSON.stringify(details, null, 2)}` : "";
     throw new Error(`${message}${suffix}`);
+  }
+};
+
+const ensureSmokeProductViaPrisma = async () => {
+  const { PrismaClient } = await import("@prisma/client");
+  const prisma = new PrismaClient();
+  try {
+    const product = await prisma.product.upsert({
+      where: {
+        erpProductCode_erpProductClassCode: {
+          erpProductCode: smokeProductSeed.erpProductCode,
+          erpProductClassCode: smokeProductSeed.erpProductClassCode
+        }
+      },
+      create: smokeProductSeed,
+      update: {
+        name: smokeProductSeed.name,
+        unit: smokeProductSeed.unit,
+        defaultPrice: smokeProductSeed.defaultPrice,
+        stockQuantity: smokeProductSeed.stockQuantity,
+        isActive: smokeProductSeed.isActive,
+        isSuspended: smokeProductSeed.isSuspended
+      }
+    });
+    return {
+      id: product.id,
+      name: product.name,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      unit: product.unit || smokeProductSeed.unit,
+      price: Number(product.defaultPrice || smokeProductSeed.defaultPrice)
+    };
+  } finally {
+    await prisma.$disconnect();
   }
 };
 
@@ -106,7 +150,7 @@ const main = async () => {
   assert(Number(summaryScopedAfterFollowUp.overdueValue || 0) >= opportunityValue, "Summary não refletiu overdueValue após atualizar followUpDate", summaryScopedAfterFollowUp);
 
   console.log("[compose-smoke] Buscar produto válido");
-  const productSearchTerms = ["ad", "se", "so", "mi", "fe"];
+  const productSearchTerms = ["SMOKE-001", "Produto Smoke ERP", "ad", "se", "so", "mi", "fe"];
   let selectedProduct = null;
   for (const term of productSearchTerms) {
     const products = await request(`/products/search?q=${encodeURIComponent(term)}`, { headers: authHeaders });
@@ -118,7 +162,11 @@ const main = async () => {
       break;
     }
   }
-  assert(Boolean(selectedProduct?.id), "Nenhum produto válido encontrado para o smoke test", { terms: productSearchTerms });
+  if (!selectedProduct) {
+    console.log("[compose-smoke] Nenhum produto pesquisável encontrado; criando produto seed via Prisma");
+    selectedProduct = await ensureSmokeProductViaPrisma();
+  }
+  assert(Boolean(selectedProduct?.id), "Nenhum produto válido encontrado/criado para o smoke test", { terms: productSearchTerms, smokeProductSeed });
 
   console.log("[compose-smoke] Adicionar item na oportunidade");
   const itemPayload = {
@@ -128,7 +176,7 @@ const main = async () => {
     productNameSnapshot: selectedProduct.name || `Produto ${selectedProduct.erpProductCode}`,
     unit: selectedProduct.unit || "UN",
     quantity: minItemQuantity,
-    unitPrice: Math.max(Number(selectedProduct.price || 0), minItemUnitPrice),
+    unitPrice: minItemUnitPrice,
     discountType: "value",
     discountValue: 0,
     notes: "item smoke"
