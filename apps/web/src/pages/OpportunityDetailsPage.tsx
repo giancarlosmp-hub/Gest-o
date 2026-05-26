@@ -46,12 +46,20 @@ type Opportunity = {
   clientId: string;
   title: string;
   client?: string;
+  clientData?: {
+    id: string;
+    code?: string | null;
+    name?: string | null;
+    city?: string | null;
+    state?: string | null;
+  } | null;
   owner?: string;
   ownerSeller?: {
     id: string;
     name: string;
     erpCode?: string | null;
     erpOperatorCode?: string | null;
+    erpLoginUsername?: string | null;
   } | null;
   stage: Stage;
   value: number;
@@ -365,7 +373,9 @@ export default function OpportunityDetailsPage() {
   }, [item]);
 
   const sellerErpCode = item?.ownerSeller?.erpCode?.trim() || "";
-  const clientErpCode = clientErpSummary?.code?.trim() || "";
+  const clientErpCode = clientErpSummary?.code?.trim() || item?.clientData?.code?.trim() || "";
+  const sellerOperatorCode = item?.ownerSeller?.erpOperatorCode?.trim() || "";
+  const sellerLoginFv3 = item?.ownerSeller?.erpLoginUsername?.trim() || "";
   const itemsWithMissingErp = opportunityItems.filter((opportunityItem) => !opportunityItem.erpProductCode?.trim());
   const itemsWithInsufficientStock = opportunityItems.filter((opportunityItem) => {
     const stockQuantity = opportunityItem.product?.stockQuantity;
@@ -373,10 +383,12 @@ export default function OpportunityDetailsPage() {
   });
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
   const erpOrderEligibilityReasons = [
-    item?.stage !== "ganho" ? "A oportunidade precisa estar na etapa Ganha." : null,
-    opportunityItems.length === 0 ? "A oportunidade precisa ter pelo menos um item." : null,
-    !clientErpCode ? "Cliente sem código ERP vinculado." : null,
-    !sellerErpCode || !item?.ownerSeller?.erpOperatorCode?.trim() ? "Vendedor sem vínculo ERP/Login FV3 configurado." : null
+    item?.stage !== "ganho" ? "Oportunidade não ganha: mova para a etapa Ganha." : null,
+    opportunityItems.length === 0 ? "Oportunidade sem item: inclua ao menos um item antes de gerar pedido ERP." : null,
+    !clientErpCode ? "Cliente sem código ERP: campo ausente em client.code." : null,
+    !sellerErpCode ? "Vendedor sem CODVENDEDOR: campo ausente em ownerSeller.erpCode." : null,
+    !sellerOperatorCode ? "Vendedor sem OPERADOR: campo ausente em ownerSeller.erpOperatorCode." : null,
+    !sellerLoginFv3 ? "Vendedor sem Login FV3: campo ausente em ownerSeller.erpLoginUsername." : null
   ].filter(Boolean) as string[];
   const canGenerateErpOrder = erpOrderEligibilityReasons.length === 0;
   const erpOrderDisabledReason = erpOrderEligibilityReasons[0] || null;
