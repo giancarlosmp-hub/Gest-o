@@ -1168,10 +1168,47 @@ export default function OpportunitiesPage() {
 
   const onConfirmGainAndGenerateErpOrder = async () => {
     if (!closeOpportunityState || closeOpportunityState.stage !== "ganho" || isQuickActionLoading) return;
-    const didClose = await applyQuickStage("ganho", closeReason, closeOpportunityState.opportunityId);
+
+    const targetOpportunityId = closeOpportunityState.opportunityId;
+    const isSelectedOpportunityTarget = selectedOpportunity?.id === targetOpportunityId;
+    const hasOpportunityItems = isSelectedOpportunityTarget && opportunityItems.length > 0;
+
+    if (!hasOpportunityItems) {
+      setLoadingItems(true);
+      try {
+        const response = await api.get(`/opportunities/${targetOpportunityId}/items`);
+        const loadedItems = response.data?.items || [];
+        if (isSelectedOpportunityTarget) {
+          setOpportunityItems(loadedItems.map((item: any) => ({
+            id: item.id,
+            productId: item.productId || "",
+            productNameSnapshot: item.productNameSnapshot || "",
+            erpProductCode: item.erpProductCode || "",
+            erpProductClassCode: item.erpProductClassCode || "",
+            unit: item.unit || "",
+            quantity: String(item.quantity ?? 1),
+            unitPrice: String(item.unitPrice ?? 0),
+            discountType: (item.discountType || "value") as DiscountType,
+            discountValue: String(item.discountValue ?? 0),
+            notes: item.notes || ""
+          })));
+        }
+        if (loadedItems.length < 1) {
+          toast.error("Adicione pelo menos um produto antes de marcar como ganho e gerar pedido ERP.");
+          return;
+        }
+      } catch {
+        toast.error("Não foi possível validar os itens da oportunidade");
+        return;
+      } finally {
+        setLoadingItems(false);
+      }
+    }
+
+    const didClose = await applyQuickStage("ganho", closeReason, targetOpportunityId);
     if (!didClose) return;
     closeCloseModal();
-    navigate(`/oportunidades/${closeOpportunityState.opportunityId}?openErpOrder=1`);
+    navigate(`/oportunidades/${targetOpportunityId}?openErpOrder=1`);
   };
 
   const onScheduleFollowUp = async (event: FormEvent) => {
