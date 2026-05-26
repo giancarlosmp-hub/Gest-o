@@ -763,6 +763,13 @@ export default function OpportunitiesPage() {
   }, []);
 
   const handleSelectProduct = (product: OpportunityProduct) => {
+    const nextUnitPrice = product.defaultPrice != null ? String(product.defaultPrice) : itemDraft.unitPrice;
+    const canAddItem = Boolean(product.id)
+      && Boolean(product.erpProductCode)
+      && Boolean(product.unit)
+      && Number(itemDraft.quantity || 0) > 0
+      && Number(nextUnitPrice || 0) >= 0;
+
     setSelectedProduct(product);
     setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
     setItemDraft((current) => ({
@@ -777,6 +784,15 @@ export default function OpportunitiesPage() {
     setIsProductDropdownOpen(false);
     setProductOptions([]);
     productSearchInputRef.current?.blur();
+    console.debug("product-selection", {
+      selectedProductId: product.id,
+      productSearch: `${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      unit: product.unit || "",
+      unitPrice: nextUnitPrice,
+      canAddItem
+    });
   };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
@@ -1500,10 +1516,12 @@ export default function OpportunitiesPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <label className="space-y-1 sm:col-span-4">
+              <div className="sm:col-span-4">
                 <button type="button" className="inline-flex rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" onClick={() => syncProductsStock().catch(() => null)} disabled={isSyncingProducts}>
                   {isSyncingProducts ? "Atualizando estoque..." : "Atualizar estoque"}
                 </button>
+              </div>
+              <label className="space-y-1 sm:col-span-4">
                 <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
                   ref={productSearchInputRef}
@@ -1518,24 +1536,14 @@ export default function OpportunitiesPage() {
                     searchProducts(value).catch(() => null);
                     const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name}` === value);
                     if (!selected) return;
-                    setItemDraft((current) => ({
-                      ...current,
-                      productId: selected.id,
-                      productNameSnapshot: selected.name,
-                      erpProductCode: selected.erpProductCode,
-                      erpProductClassCode: selected.erpProductClassCode,
-                      unit: selected.unit || "",
-                      unitPrice: selected.defaultPrice != null ? String(selected.defaultPrice) : current.unitPrice
-                          }));
+                    handleSelectProduct(selected);
                   }}
                   onFocus={() => {
                     if (productSearch.trim().length >= 2 && productOptions.length > 0) {
                       setIsProductDropdownOpen(true);
                     }
                   }}
-                  onBlur={() => {
-                    window.setTimeout(() => setIsProductDropdownOpen(false), 100);
-                  }}
+                  onBlur={() => setIsProductDropdownOpen(false)}
                 />
                 {isProductDropdownOpen && productSearch.trim().length >= 2 && productOptions.length > 0 ? (
                   <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white overscroll-contain">
@@ -1544,8 +1552,10 @@ export default function OpportunitiesPage() {
                         key={product.id}
                         type="button"
                         className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => handleSelectProduct(product)}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          handleSelectProduct(product);
+                        }}
                       >
                         <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
                         <p className="text-xs text-slate-600">
