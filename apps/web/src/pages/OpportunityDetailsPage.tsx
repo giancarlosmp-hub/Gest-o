@@ -331,14 +331,17 @@ export default function OpportunityDetailsPage() {
     if (!id) return;
     setLoading(true);
     try {
-      const [opportunityResponse, eventsResponse, insightResponse] = await Promise.all([
+      const [opportunityResponse, eventsResponse, insightResponse, itemsResponse] = await Promise.all([
         api.get(`/opportunities/${id}`),
         api.get(`/events?opportunityId=${id}`),
-        api.post("/ai/opportunity-insight", { opportunityId: id })
+        api.post("/ai/opportunity-insight", { opportunityId: id }),
+        api.get(`/opportunities/${id}/items`)
       ]);
       setItem(opportunityResponse.data);
       setEvents(eventsResponse.data?.items || []);
       setInsight(insightResponse.data || null);
+      setOpportunityItems(Array.isArray(itemsResponse.data?.items) ? itemsResponse.data.items : []);
+      setOpportunityItemTotals(itemsResponse.data?.totals || { grossTotal: 0, discountTotal: 0, netTotal: 0 });
     } catch {
       toast.error("Não foi possível carregar a oportunidade");
       navigate("/oportunidades");
