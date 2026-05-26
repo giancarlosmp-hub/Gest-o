@@ -5655,6 +5655,16 @@ const mapOpportunityItemResponse = (item: any) => ({
 });
 
 
+const recalculateOpportunityValueFromItems = async (opportunityId: string) => {
+  const aggregate = await prisma.opportunityItem.aggregate({
+    where: { opportunityId },
+    _sum: { netTotal: true }
+  });
+  const recalculatedValue = Number(Number(aggregate._sum.netTotal || 0).toFixed(2));
+  await prisma.opportunity.update({ where: { id: opportunityId }, data: { value: recalculatedValue } });
+  return recalculatedValue;
+};
+
 router.get("/products", async (_req, res) => {
   const products = await prisma.product.findMany({
     orderBy: [{ name: "asc" }],
@@ -5883,6 +5893,8 @@ router.post("/opportunities/:id/items", async (req, res) => {
     include: { product: true }
   });
 
+  await recalculateOpportunityValueFromItems(req.params.id);
+
   return res.status(201).json(mapOpportunityItemResponse(created));
 });
 
@@ -5937,6 +5949,8 @@ router.put("/opportunities/:id/items/:itemId", async (req, res) => {
     include: { product: true }
   });
 
+  await recalculateOpportunityValueFromItems(req.params.id);
+
   return res.json(mapOpportunityItemResponse(updated));
 });
 
@@ -5948,6 +5962,7 @@ router.delete("/opportunities/:id/items/:itemId", async (req, res) => {
   if (!existing) return res.status(404).json({ message: "Item não encontrado" });
 
   await prisma.opportunityItem.delete({ where: { id: req.params.itemId } });
+  await recalculateOpportunityValueFromItems(req.params.id);
   return res.status(204).send();
 });
 
