@@ -306,6 +306,7 @@ export default function OpportunitiesPage() {
   const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
   const [productSearch, setProductSearch] = useState("");
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<OpportunityProduct | null>(null);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [hasAttemptedProductSearch, setHasAttemptedProductSearch] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
@@ -391,6 +392,7 @@ export default function OpportunitiesPage() {
     setItemDraft(emptyOpportunityItem);
     setProductSearch("");
     setProductOptions([]);
+    setSelectedProduct(null);
     setSubmitError(null);
     setOpportunityItems([]);
     setItemDraft(emptyOpportunityItem);
@@ -760,6 +762,7 @@ export default function OpportunitiesPage() {
   }, []);
 
   const handleSelectProduct = (product: OpportunityProduct) => {
+    setSelectedProduct(product);
     setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
     setItemDraft((current) => ({
       ...current,
@@ -775,7 +778,7 @@ export default function OpportunitiesPage() {
   };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
-    if (!editing) {
+    if (!savedOpportunityId) {
       toast.message("Salve a oportunidade para começar a adicionar produtos.");
       return;
     }
@@ -811,11 +814,11 @@ export default function OpportunitiesPage() {
     }
 
     if (draft.id) {
-      await api.put(`/opportunities/${editing}/items/${draft.id}`, payload);
+      await api.put(`/opportunities/${savedOpportunityId}/items/${draft.id}`, payload);
     } else {
-      await api.post(`/opportunities/${editing}/items`, payload);
+      await api.post(`/opportunities/${savedOpportunityId}/items`, payload);
     }
-    await loadOpportunityItems(editing);
+    await loadOpportunityItems(savedOpportunityId);
     setItemDraft(emptyOpportunityItem);
     toast.success(draft.id ? "Item atualizado" : "Item adicionado");
   };
@@ -920,7 +923,9 @@ export default function OpportunitiesPage() {
     setItemDraft(emptyOpportunityItem);
     setProductSearch("");
     setProductOptions([]);
+    setSelectedProduct(null);
     setSubmitError(null);
+    setSelectedProduct(null);
     setIsOpportunityModalOpen(true);
   };
 
@@ -938,6 +943,7 @@ export default function OpportunitiesPage() {
     setItemDraft(emptyOpportunityItem);
     setProductSearch("");
     setProductOptions([]);
+    setSelectedProduct(null);
   };
 
   const onEdit = (item: Opportunity) => {
@@ -962,6 +968,7 @@ export default function OpportunitiesPage() {
       ownerSellerId: item.ownerSellerId
     });
     setSubmitError(null);
+    setSelectedProduct(null);
     setIsOpportunityModalOpen(true);
     loadOpportunityItems(item.id).catch(() => null);
   };
@@ -994,20 +1001,17 @@ export default function OpportunitiesPage() {
 
 
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
-  const isOpportunitySaved = Boolean(editing);
+  const savedOpportunityId = editing;
+  const isOpportunitySaved = Boolean(savedOpportunityId);
   const canAddOpportunityItem = isOpportunitySaved
-    && Boolean(itemDraft.productId && itemDraft.erpProductCode && itemDraft.unit)
+    && Boolean(itemDraft.productId)
     && Number(itemDraft.quantity || 0) > 0
     && Number(itemDraft.unitPrice || 0) >= 0;
   const addItemDisabledReason = !isOpportunitySaved
     ? "Salve a oportunidade antes de adicionar itens."
     : !itemDraft.productId
       ? "Selecione um produto válido."
-      : !itemDraft.unit
-        ? "Selecione unidade de medida."
-        : !itemDraft.erpProductCode
-          ? "Produto sem código ERP."
-          : Number(itemDraft.quantity || 0) <= 0
+      : Number(itemDraft.quantity || 0) <= 0
             ? "Informe quantidade maior que zero."
             : Number(itemDraft.unitPrice || 0) < 0
               ? "Informe preço maior ou igual a zero."
@@ -1026,9 +1030,9 @@ export default function OpportunitiesPage() {
   const hasStructuredItems = opportunityItems.length > 0;
 
   useEffect(() => {
-    if (!hasStructuredItems) return;
+    if (!isOpportunitySaved) return;
     setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
-  }, [hasStructuredItems, itemsTotals.netTotal]);
+  }, [isOpportunitySaved, itemsTotals.netTotal]);
 
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
@@ -1386,6 +1390,7 @@ export default function OpportunitiesPage() {
                   onChange={(event) => {
                     const value = event.target.value;
                     setProductSearch(value);
+                    setSelectedProduct(null);
                     setIsProductDropdownOpen(value.trim().length >= 2);
                     searchProducts(value).catch(() => null);
                     const selected = productOptions.find((option) => `${option.erpProductCode} / ${option.erpProductClassCode} — ${option.name}` === value);
@@ -1429,7 +1434,7 @@ export default function OpportunitiesPage() {
                 ) : null}
                 {itemDraft.productNameSnapshot ? (
                   <p className="text-xs text-slate-500">
-                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
+                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                   </p>
                 ) : null}
                 {!isOpportunitySaved ? <p className="text-xs text-amber-700">Você pode preparar produto, quantidade e observação agora. O item será adicionado após salvar a oportunidade.</p> : null}
