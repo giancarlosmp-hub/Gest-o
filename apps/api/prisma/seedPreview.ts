@@ -213,18 +213,36 @@ async function upsertSeller(name: string, email: string, region: string) {
   });
 }
 
+function toPrismaErrorDetails(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return { name: "UnknownError", message: String(error), code: undefined, meta: undefined, stack: undefined };
+  }
+  const maybeError = error as { name?: string; message?: string; code?: string; meta?: unknown; stack?: string };
+  return {
+    name: maybeError.name,
+    message: maybeError.message,
+    code: maybeError.code,
+    meta: maybeError.meta,
+    stack: maybeError.stack
+  };
+}
+
 async function createPreviewDataset() {
-  const now = new Date();
-  const currentMonth = monthString(now);
-  const previousMonth = monthString(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  let currentStep = "init";
+  try {
+    const now = new Date();
+    const currentMonth = monthString(now);
+    const previousMonth = monthString(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 
-  const sellers = await Promise.all(
-    PREVIEW_SELLERS.map((seller) => upsertSeller(seller.name, seller.email, seller.region))
-  );
+    currentStep = "upsert user/vendedor";
+    const sellers = await Promise.all(
+      PREVIEW_SELLERS.map((seller) => upsertSeller(seller.name, seller.email, seller.region))
+    );
 
-  const previewProducts = [] as Array<{ id: string; unit: string | null; erpProductCode: string; erpProductClassCode: string; name: string; defaultPrice: number | null }>;
-  for (const productTemplate of PREVIEW_PRODUCTS) {
-    const product = await prisma.product.upsert({
+    const previewProducts = [] as Array<{ id: string; unit: string | null; erpProductCode: string; erpProductClassCode: string; name: string; defaultPrice: number | null }>;
+    for (const productTemplate of PREVIEW_PRODUCTS) {
+      currentStep = "upsert product";
+      const product = await prisma.product.upsert({
       where: {
         erpProductCode_erpProductClassCode: {
           erpProductCode: productTemplate.erpProductCode,
@@ -268,26 +286,28 @@ async function createPreviewDataset() {
     });
     previewProducts.push(product);
 
-    await prisma.productPrice.createMany({
-      skipDuplicates: true,
-      data: productTemplate.prices
-        .filter((price) => price.price > 0)
-        .map((price) => ({
-        productId: product.id,
-        erpPriceId: price.erpPriceId,
-        branchCode: price.branchCode,
-        validFrom: now,
-        price: price.price
-      }))
-    });
-  }
+      currentStep = "upsert productPrice";
+      await prisma.productPrice.createMany({
+        skipDuplicates: true,
+        data: productTemplate.prices
+          .filter((price) => price.price > 0)
+          .map((price) => ({
+          productId: product.id,
+          erpPriceId: price.erpPriceId,
+          branchCode: price.branchCode,
+          validFrom: now,
+          price: price.price
+        }))
+      });
+    }
 
-  const clients = [] as Array<{ id: string; city: string | null; ownerSellerId: string }>;
+    const clients = [] as Array<{ id: string; city: string | null; ownerSellerId: string }>;
 
   for (const [index, clientTemplate] of PREVIEW_CLIENTS.entries()) {
     const ownerSeller = sellers[index % sellers.length];
     const seededName = `${PREVIEW_SEED_TAG} ${clientTemplate.name}`;
 
+    currentStep = "upsert client";
     const existingClient = await prisma.client.findFirst({
       where: { name: seededName, ownerSellerId: ownerSeller.id },
       orderBy: { createdAt: "asc" }
@@ -366,6 +386,7 @@ async function createPreviewDataset() {
       clientId: client.id,
       ownerSellerId: ownerSeller.id
     };
+    currentStep = "upsert opportunity";
     const opportunity = existingOpportunity
       ? await prisma.opportunity.update({
       where: { id: existingOpportunity.id },
@@ -377,6 +398,7 @@ async function createPreviewDataset() {
     if (template.stage === "ganho") {
       const itemProduct = previewProducts[index % previewProducts.length];
       const itemUnitPrice = Number(itemProduct.defaultPrice || 100);
+      currentStep = "upsert opportunityItem";
       await prisma.opportunityItem.upsert({
         where: { opportunityId_lineNumber: { opportunityId: opportunity.id, lineNumber: 1 } },
         update: {
@@ -441,6 +463,7 @@ async function createPreviewDataset() {
     const startDate = withHour(addDays(now, template.startOffsetDays), template.startHour);
     const endDate = withHour(addDays(now, template.startOffsetDays), template.startHour + template.durationHours);
 
+    currentStep = "create agendaEvent";
     const createdAgenda = await prisma.agendaEvent.create({
       data: {
         title: `${PREVIEW_SEED_TAG} ${template.title}`,
@@ -458,6 +481,7 @@ async function createPreviewDataset() {
 
     if (template.withStops) {
       const stopClients = clients.slice(index, index + 3);
+      currentStep = "create agendaStop";
       await prisma.agendaStop.createMany({
         data: stopClients.map((stopClient, stopIndex) => ({
           agendaEventId: createdAgenda.id,
@@ -472,6 +496,7 @@ async function createPreviewDataset() {
   }
 
   for (const seller of sellers) {
+    currentStep = "upsert goal";
     await prisma.goal.upsert({
       where: { sellerId_month: { sellerId: seller.id, month: currentMonth } },
       update: { targetValue: 250000 },
@@ -493,13 +518,20 @@ async function createPreviewDataset() {
     });
   }
 
-  console.log("Preview seed concluído com sucesso.", {
+    console.log("Preview seed concluído com sucesso.", {
     sellers: sellers.length,
     clients: PREVIEW_CLIENTS.length,
     opportunities: OPPORTUNITY_TEMPLATES.length,
     agendaEvents: PREVIEW_AGENDA_TEMPLATES.length,
     tag: PREVIEW_SEED_TAG
-  });
+    });
+  } catch (error) {
+    console.error("[seedPreview] Falha durante createPreviewDataset", {
+      step: currentStep,
+      ...toPrismaErrorDetails(error)
+    });
+    throw error;
+  }
 }
 
 async function main() {

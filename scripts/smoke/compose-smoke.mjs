@@ -53,6 +53,19 @@ const assert = (condition, message, details) => {
   }
 };
 
+const toErrorDetails = (error) => {
+  if (!error || typeof error !== "object") {
+    return { name: "UnknownError", message: String(error), code: undefined, meta: undefined, stack: undefined };
+  }
+  return {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    meta: error.meta,
+    stack: error.stack
+  };
+};
+
 const ensureSmokeProductViaPrisma = async () => {
   const { PrismaClient } = await import("@prisma/client");
   const prisma = new PrismaClient();
@@ -95,11 +108,11 @@ const ensureSmokeProductViaPrisma = async () => {
     console.log("[compose-smoke] Produto smoke garantido via Prisma", resolvedProduct);
     return resolvedProduct;
   } catch (error) {
+    const errorDetails = toErrorDetails(error);
     console.error("[compose-smoke] Erro ao garantir produto via Prisma", {
       model: "Product/ProductPrice",
       fields: smokeProductSeed,
-      message: error instanceof Error ? error.message : String(error),
-      error
+      ...errorDetails
     });
     throw error;
   } finally {
