@@ -80,6 +80,16 @@ const pickPartnerCode = (payload: Record<string, unknown>) =>
 const pickPartnerDocument = (payload: Record<string, unknown>) =>
   pickFirstString(payload, ["CNPJ", "CPF", "CGC", "DOCUMENTO", "CPFCNPJ", "CPF_CNPJ", "CNPJ_CPF", "NR_CNPJ_CPF", "cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
 
+const pickPartnerAddress = (payload: Record<string, unknown>) => {
+  const street = pickFirstString(payload, ["ENDERECO", "LOGRADOURO", "RUA", "ADDRESS", "address", "logradouro"]);
+  const number = pickFirstString(payload, ["NUMERO", "NRO", "NUMBER", "addressNumber", "numero"]);
+  const district = pickFirstString(payload, ["BAIRRO", "DISTRICT", "bairro"]);
+  const complement = pickFirstString(payload, ["COMPLEMENTO", "COMPLEMENT", "complemento"]);
+  return [street, number, district, complement].filter(Boolean).join(", ");
+};
+
+const nonEmptyOrUndefined = (value: string) => (value.trim() ? value.trim() : undefined);
+
 const normalizeDocument = (value?: string | null) => normalizeCnpj(value);
 const resolveClientTypeFromDocument = (normalizedDocument?: string | null) => {
   if (!normalizedDocument) return undefined;
@@ -580,7 +590,6 @@ export async function syncPartners(options?: RunSyncOptions) {
       if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks += 1;
       const cnpj = pickPartnerDocument(payload);
       const normalizedDocument = normalizeDocument(cnpj);
-      const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
       const derivedClientType = resolveClientTypeFromDocument(normalizedDocument);
       const existing = await prisma.client.findFirst({
         where: {
@@ -593,27 +602,43 @@ export async function syncPartners(options?: RunSyncOptions) {
         orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
         select: { id: true }
       });
+      const mappedCity = pickFirstString(payload, ["city", "cidade", "CIDADE", "MUNICIPIO", "municipio"]);
+      const mappedState = pickFirstString(payload, ["state", "uf", "UF", "estado", "ESTADO"]);
+      const mappedRegion = pickFirstString(payload, ["region", "regiao", "REGIAO", "região", "REGIÃO", "cidadeAtuacao", "CIDADE_ATUACAO"]);
+      const mappedAddress = pickPartnerAddress(payload);
+      const mappedName = pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]);
+      const mappedFantasyName = pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]);
       const data = {
         code,
-        name: pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]) || "Cliente sem nome",
-        fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
+        name: mappedName || "Cliente sem nome",
+        fantasyName: mappedFantasyName || null,
         cnpj: cnpj || undefined,
         cnpjNormalized: normalizedDocument || undefined,
-        city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
-        state: normalizeState(state || "NI"),
-        region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
+        city: mappedCity || "Não informado",
+        state: normalizeState(mappedState || "NI"),
+        region: mappedRegion || "Não informado",
         clientType: derivedClientType,
         ownerSellerId,
+        segment: nonEmptyOrUndefined(mappedAddress),
         erpUpdatedAt: new Date()
       };
       if (existing) {
+        const current = await prisma.client.findUnique({
+          where: { id: existing.id },
+          select: { cnpj: true, cnpjNormalized: true, city: true, state: true, region: true, segment: true, ownerSellerId: true }
+        });
+        const safeData = {
+          ...data,
+          cnpj: cnpj ? cnpj : undefined,
+          cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+          city: mappedCity ? data.city : (current?.city || data.city),
+          state: mappedState ? data.state : (current?.state || data.state),
+          region: mappedRegion ? data.region : (current?.region || data.region),
+          segment: mappedAddress ? mappedAddress : (current?.segment || undefined),
+        };
         await prisma.client.update({
           where: { id: existing.id },
-          data: {
-            ...data,
-            cnpj: cnpj ? cnpj : undefined,
-            cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
-          }
+          data: safeData
         });
         diagnostics.updated += 1;
         if (normalizedDocument) diagnostics.updatedDocumentCount = (diagnostics.updatedDocumentCount || 0) + 1;
@@ -636,6 +661,24 @@ export async function syncPartners(options?: RunSyncOptions) {
       sampleKeys: rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0] as Record<string, unknown>).slice(0, 15) : [],
       sample: sanitizePayloadForLog(rows[0] ?? null),
     });
+    const firstPayload = rows.find((row) => row && typeof row === "object") as Record<string, unknown> | undefined;
+    if (firstPayload) {
+      const maskedDoc = (pickPartnerDocument(firstPayload) || "").replace(/\D/g, "").replace(/^(\d{0,3})\d+(\d{2})$/, "$1***$2");
+      logApiEvent("INFO", "[ultrafv3 sync partners] mapping diagnostics sample", {
+        correlationId,
+        rawKeys: Object.keys(firstPayload),
+        mapped: sanitizePayloadForLog({
+          code: pickPartnerCode(firstPayload),
+          name: pickFirstString(firstPayload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]),
+          fantasyName: pickFirstString(firstPayload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]),
+          cpfCnpjMasked: maskedDoc || null,
+          city: pickFirstString(firstPayload, ["city", "cidade", "CIDADE", "MUNICIPIO", "municipio"]),
+          state: pickFirstString(firstPayload, ["state", "uf", "UF", "estado", "ESTADO"]),
+          address: pickPartnerAddress(firstPayload),
+          sellerCode: pickFirstString(firstPayload, ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"])
+        }),
+      });
+    }
     return { syncedCount, diagnostics };
   }, { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined });
 }

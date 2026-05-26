@@ -226,7 +226,7 @@ export async function createErpOrderFromOpportunity(
   const clientErpCode = pickFirstString(clientPayload, ["code", "erpCode", "externalCode", "erpClientCode"])
     || pickFirstString(rawClientPayload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
   if (!clientErpCode)
-    throw Object.assign(new Error("Cliente inválido: cliente sem código ERP."), { status: 400 });
+    throw Object.assign(new Error(`Cliente sem código ERP para gerar pedido. opportunityId=${opportunity.id}; campos disponíveis: code=${String((opportunity.client as Record<string, unknown>).code || "")}, raw.PARCEIRO=${String(rawClientPayload.PARCEIRO || "")}, raw.CODPARCEIRO=${String(rawClientPayload.CODPARCEIRO || "")}, raw.CODCLIENTE=${String(rawClientPayload.CODCLIENTE || "")}. Sugestão: sincronizar /partners novamente (bug de sync se continuar vazio).`), { status: 400 });
 
   const sellerErpCode = opportunity.ownerSeller.erpCode?.trim();
   const operatorCode = opportunity.ownerSeller.erpOperatorCode?.trim();
@@ -236,7 +236,7 @@ export async function createErpOrderFromOpportunity(
       status: 400,
     });
   if (!operatorCode)
-    throw Object.assign(new Error("Vendedor sem operador ERP: informe o OPERADOR no cadastro do usuário."), {
+    throw Object.assign(new Error("Vendedor sem OPERADOR: campo ausente em ownerSeller.erpOperatorCode. Sugestão: testar Login FV3 do vendedor para capturar OPERADOR automaticamente."), {
       status: 400,
     });
   if (!sellerFv3Username || !opportunity.ownerSeller.erpLoginPasswordEncrypted)
