@@ -7221,12 +7221,26 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
   try {
     const password = decryptErpCredential(user.erpLoginPasswordEncrypted);
     const result = await ultraFv3Client.testLogin({ username: user.erpLoginUsername, password });
+    const tokenSalesman = normalizeOptionalString(result.tokenPayload?.salesman);
+    const tokenOperator = normalizeOptionalString(result.tokenPayload?.operator);
+    const tokenBranch = normalizeOptionalString(result.tokenPayload?.branch);
+    const tokenPartner = normalizeOptionalString(result.tokenPayload?.partner);
+    const persisted = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        erpCode: tokenSalesman ? { set: tokenSalesman } : undefined,
+        erpOperatorCode: tokenOperator ? { set: tokenOperator } : undefined,
+        region: tokenBranch || tokenPartner ? { set: `${tokenBranch || ""}${tokenBranch && tokenPartner ? " / " : ""}${tokenPartner || ""}`.trim() } : undefined,
+      },
+      select: { erpCode: true, erpOperatorCode: true, region: true }
+    });
     return res.status(200).json({
       success: true,
       status: 200,
-      message: "Login FV3 validado",
+      message: "Login FV3 validado. Vendedor apto para pedido ERP quando CODVENDEDOR e OPERADOR estiverem preenchidos.",
       maskedDocument: result.maskedDocument,
       tokenPayload: result.tokenPayload,
+      persistedLink: persisted,
       correlationId,
     });
   } catch (error) {
