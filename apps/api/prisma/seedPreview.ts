@@ -91,6 +91,18 @@ const PREVIEW_PRODUCTS = [
     defaultPrice: 58,
     minPrice: 52,
     prices: [{ erpPriceId: "P6301", branchCode: "01", price: 58 }]
+  },
+  {
+    erpProductCode: "9999",
+    erpProductClassCode: "PREVIEW",
+    name: "Produto Preview Teste Oportunidade",
+    className: "Teste Preview",
+    unit: "UN",
+    brand: "Preview QA",
+    groupName: "Validação",
+    defaultPrice: 49.9,
+    minPrice: 45,
+    prices: [{ erpPriceId: "P9999", branchCode: "01", price: 49.9 }]
   }
 ] as const;
 
