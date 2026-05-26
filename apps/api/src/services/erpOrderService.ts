@@ -31,7 +31,13 @@ type OrderParameterCodes = {
 type OpportunityForErpOrder = {
   id: string;
   stage: string;
-  client: { code: string | null };
+  client: {
+    code: string | null;
+    erpCode?: string | null;
+    externalCode?: string | null;
+    erpClientCode?: string | null;
+    rawPayload?: Prisma.JsonValue | null;
+  };
   ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode" | "erpLoginUsername" | "erpLoginPasswordEncrypted">;
   items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity"> | null }>;
 };
@@ -213,7 +219,12 @@ export async function createErpOrderFromOpportunity(
       { status: 400 },
     );
 
-  const clientErpCode = opportunity.client.code?.trim();
+  const clientPayload = opportunity.client as Record<string, unknown>;
+  const rawClientPayload = clientPayload.rawPayload && typeof clientPayload.rawPayload === "object"
+    ? (clientPayload.rawPayload as Record<string, unknown>)
+    : {};
+  const clientErpCode = pickFirstString(clientPayload, ["code", "erpCode", "externalCode", "erpClientCode"])
+    || pickFirstString(rawClientPayload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
   if (!clientErpCode)
     throw Object.assign(new Error("Cliente inválido: cliente sem código ERP."), { status: 400 });
 

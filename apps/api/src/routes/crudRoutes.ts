@@ -622,6 +622,15 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   plantingForecastDate: toIsoStringOrNull(opportunity.plantingForecastDate),
   createdAt: toIsoStringOrNull(opportunity.createdAt),
   client: opportunity.client?.name,
+  clientData: opportunity.client
+    ? {
+        id: opportunity.client.id,
+        code: opportunity.client.code ?? null,
+        name: opportunity.client.name ?? null,
+        city: opportunity.client.city ?? null,
+        state: opportunity.client.state ?? null,
+      }
+    : null,
   clientCity: opportunity.client?.city || null,
   clientState: opportunity.client?.state || null,
   owner: opportunity.ownerSeller?.name,
@@ -5977,6 +5986,7 @@ router.get("/opportunities/:id", async (req, res) => {
       client: {
         select: {
           id: true,
+          code: true,
           name: true,
           city: true,
           state: true
@@ -7065,7 +7075,7 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
 };
 
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
-router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente"), runUltraFv3Sync("products"));
+router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
 router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", "gerente"), async (req, res) => {
   try {
