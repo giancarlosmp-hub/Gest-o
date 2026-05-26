@@ -9,6 +9,18 @@ const uniqueTag = `ci-smoke-${Date.now()}`;
 const opportunityValue = 12345;
 const smokeEmail = process.env.SMOKE_EMAIL || "diretor@empresa.com";
 const smokePassword = process.env.SMOKE_PASSWORD || "123456";
+const minItemQuantity = 1;
+const minItemUnitPrice = 100;
+const smokeProductSeed = {
+  name: "Produto Smoke ERP",
+  erpProductCode: "SMOKE-001",
+  erpProductClassCode: "1",
+  unit: "SC",
+  defaultPrice: 100,
+  stockQuantity: 100,
+  isActive: true,
+  isSuspended: false
+};
 
 const request = async (path, options = {}) => {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -38,6 +50,73 @@ const assert = (condition, message, details) => {
   if (!condition) {
     const suffix = details ? `\nDetails: ${JSON.stringify(details, null, 2)}` : "";
     throw new Error(`${message}${suffix}`);
+  }
+};
+
+const toErrorDetails = (error) => {
+  if (!error || typeof error !== "object") {
+    return { name: "UnknownError", message: String(error), code: undefined, meta: undefined, stack: undefined };
+  }
+  return {
+    name: error.name,
+    message: error.message,
+    code: error.code,
+    meta: error.meta,
+    stack: error.stack
+  };
+};
+
+const ensureSmokeProductViaPrisma = async () => {
+  const { PrismaClient } = await import("@prisma/client");
+  const prisma = new PrismaClient();
+  try {
+    const product = await prisma.product.upsert({
+      where: {
+        erpProductCode_erpProductClassCode: {
+          erpProductCode: smokeProductSeed.erpProductCode,
+          erpProductClassCode: smokeProductSeed.erpProductClassCode
+        }
+      },
+      create: smokeProductSeed,
+      update: {
+        name: smokeProductSeed.name,
+        unit: smokeProductSeed.unit,
+        defaultPrice: smokeProductSeed.defaultPrice,
+        stockQuantity: smokeProductSeed.stockQuantity,
+        isActive: smokeProductSeed.isActive,
+        isSuspended: smokeProductSeed.isSuspended
+      }
+    });
+    const resolvedProduct = {
+      id: product.id,
+      name: product.name,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      unit: product.unit || smokeProductSeed.unit,
+      price: Number(product.defaultPrice || smokeProductSeed.defaultPrice)
+    };
+    await prisma.productPrice.createMany({
+      skipDuplicates: true,
+      data: [{
+        productId: product.id,
+        erpPriceId: `SMOKE-${smokeProductSeed.erpProductCode}-${smokeProductSeed.erpProductClassCode}`,
+        branchCode: "01",
+        validFrom: new Date(),
+        price: resolvedProduct.price
+      }]
+    });
+    console.log("[compose-smoke] Produto smoke garantido via Prisma", resolvedProduct);
+    return resolvedProduct;
+  } catch (error) {
+    const errorDetails = toErrorDetails(error);
+    console.error("[compose-smoke] Erro ao garantir produto via Prisma", {
+      model: "Product/ProductPrice",
+      fields: smokeProductSeed,
+      ...errorDetails
+    });
+    throw error;
+  } finally {
+    await prisma.$disconnect();
   }
 };
 
@@ -102,6 +181,57 @@ const main = async () => {
   const summaryScopedAfterFollowUp = await request(`/opportunities/summary?status=open&ownerSellerId=${seller.id}&search=${encodeURIComponent(uniqueTag)}`, { headers: authHeaders });
   assert(summaryScopedAfterFollowUp.overdueCount === 1, "Summary não refletiu overdueCount após atualizar followUpDate", summaryScopedAfterFollowUp);
   assert(Number(summaryScopedAfterFollowUp.overdueValue || 0) >= opportunityValue, "Summary não refletiu overdueValue após atualizar followUpDate", summaryScopedAfterFollowUp);
+
+  console.log("[compose-smoke] Buscar produto válido");
+  const productSearchTerms = ["SMOKE-001", "Produto Smoke ERP", "ad", "se", "so", "mi", "fe"];
+  let selectedProduct = null;
+  for (const term of productSearchTerms) {
+    const products = await request(`/products/search?q=${encodeURIComponent(term)}`, { headers: authHeaders });
+    const candidate = Array.isArray(products)
+      ? products.find((item) => item?.id && item?.erpProductCode && item?.erpProductClassCode)
+      : null;
+    if (candidate) {
+      selectedProduct = candidate;
+      break;
+    }
+  }
+  if (!selectedProduct) {
+    console.log("[compose-smoke] Nenhum produto pesquisável encontrado; criando produto seed via Prisma");
+    selectedProduct = await ensureSmokeProductViaPrisma();
+  }
+  assert(Boolean(selectedProduct?.id), "Nenhum produto válido encontrado/criado para o smoke test", { terms: productSearchTerms, smokeProductSeed });
+
+  console.log("[compose-smoke] Adicionar item na oportunidade");
+  const itemPayload = {
+    productId: selectedProduct.id,
+    erpProductCode: selectedProduct.erpProductCode,
+    erpProductClassCode: selectedProduct.erpProductClassCode,
+    productNameSnapshot: selectedProduct.name || `Produto ${selectedProduct.erpProductCode}`,
+    unit: selectedProduct.unit || "UN",
+    quantity: minItemQuantity,
+    unitPrice: minItemUnitPrice,
+    discountType: "value",
+    discountValue: 0,
+    notes: "item smoke"
+  };
+  const createdItem = await request(`/opportunities/${created.id}/items`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify(itemPayload)
+  });
+  assert(Boolean(createdItem?.id), "Falha ao adicionar item na oportunidade", { createdId: created.id, itemPayload, createdItem });
+
+  const itemsAfterAdd = await request(`/opportunities/${created.id}/items`, { headers: authHeaders });
+  const itemList = Array.isArray(itemsAfterAdd?.items) ? itemsAfterAdd.items : [];
+  assert(itemList.length > 0, "Inclusão do item não refletida na listagem da oportunidade", { createdId: created.id, itemsAfterAdd });
+  const insertedItem = itemList.find((item) => item.id === createdItem.id);
+  assert(Boolean(insertedItem), "Item criado não encontrado na listagem da oportunidade", { createdItemId: createdItem.id, itemList });
+  const expectedNetTotal = Number(itemPayload.quantity) * Number(itemPayload.unitPrice);
+  assert(Number(insertedItem.netTotal || 0) >= expectedNetTotal, "Total líquido do item não foi calculado como esperado", {
+    createdItemId: createdItem.id,
+    expectedNetTotal,
+    actualNetTotal: insertedItem.netTotal
+  });
 
   console.log("[compose-smoke] Encerrar oportunidade como ganho");
   await request(`/opportunities/${created.id}/close`, {

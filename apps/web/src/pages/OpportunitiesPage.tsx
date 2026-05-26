@@ -885,7 +885,7 @@ export default function OpportunitiesPage() {
         setIsOpportunityModalOpen(false);
       } else {
         const response = await api.post("/opportunities", payload);
-        const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id;
+        const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id || response.data?.data?.id;
         if (createdOpportunityId) {
           setEditing(createdOpportunityId);
           setOpportunityModalMode("edit");
@@ -994,14 +994,29 @@ export default function OpportunitiesPage() {
 
 
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
-  const isOpportunitySaved = Boolean(editing);
+  const editingId = editing || "";
+  const selectedProductId = itemDraft.productId || "";
+  const isOpportunitySaved = Boolean(editingId);
   const canAddOpportunityItem = isOpportunitySaved
-    && Boolean(itemDraft.productId && itemDraft.erpProductCode && itemDraft.unit)
+    && Boolean(selectedProductId && itemDraft.erpProductCode && itemDraft.unit)
     && Number(itemDraft.quantity || 0) > 0
     && Number(itemDraft.unitPrice || 0) >= 0;
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    console.info("[opportunity-item-gate]", {
+      isOpportunitySaved,
+      editingId,
+      selectedProductId,
+      erpProductCode: itemDraft.erpProductCode || "",
+      unit: itemDraft.unit || "",
+      quantity: Number(itemDraft.quantity || 0),
+      unitPrice: Number(itemDraft.unitPrice || 0),
+      canAddItem: canAddOpportunityItem
+    });
+  }, [canAddOpportunityItem, editingId, isOpportunitySaved, itemDraft.erpProductCode, itemDraft.quantity, itemDraft.unit, itemDraft.unitPrice, selectedProductId]);
   const addItemDisabledReason = !isOpportunitySaved
     ? "Salve a oportunidade antes de adicionar itens."
-    : !itemDraft.productId
+    : !selectedProductId
       ? "Selecione um produto válido."
       : !itemDraft.unit
         ? "Selecione unidade de medida."
@@ -1158,12 +1173,26 @@ export default function OpportunitiesPage() {
   const onConfirmCloseOpportunity = async (event: FormEvent) => {
     event.preventDefault();
     if (!closeOpportunityState || isQuickActionLoading) return;
+    if (closeOpportunityState.stage === "ganho") {
+      const response = await api.get(`/opportunities/${closeOpportunityState.opportunityId}/items`);
+      const itemCount = Array.isArray(response.data?.items) ? response.data.items.length : 0;
+      if (itemCount === 0) {
+        toast.error("Adicione pelo menos um produto antes de marcar a oportunidade como ganha ou gerar pedido ERP.");
+        return;
+      }
+    }
     const didClose = await applyQuickStage(closeOpportunityState.stage, closeReason, closeOpportunityState.opportunityId);
     if (didClose) closeCloseModal();
   };
 
   const onConfirmGainAndGenerateErpOrder = async () => {
     if (!closeOpportunityState || closeOpportunityState.stage !== "ganho" || isQuickActionLoading) return;
+    const response = await api.get(`/opportunities/${closeOpportunityState.opportunityId}/items`);
+    const itemCount = Array.isArray(response.data?.items) ? response.data.items.length : 0;
+    if (itemCount === 0) {
+      toast.error("Adicione pelo menos um produto antes de marcar a oportunidade como ganha ou gerar pedido ERP.");
+      return;
+    }
     const didClose = await applyQuickStage("ganho", closeReason, closeOpportunityState.opportunityId);
     if (!didClose) return;
     closeCloseModal();
