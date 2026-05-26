@@ -782,7 +782,7 @@ export default function OpportunitiesPage() {
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
     if (!savedOpportunityId) {
       const temporaryId = draft.id || `tmp-${Date.now()}`;
-      const localDraft = { ...draft, id: temporaryId };
+      const localDraft = { ...draft, productId: draft.productId || selectedProduct?.id || "", id: temporaryId };
       setOpportunityItems((current) => {
         const exists = current.some((item) => item.id === temporaryId);
         if (exists) return current.map((item) => item.id === temporaryId ? localDraft : item);
@@ -796,7 +796,7 @@ export default function OpportunitiesPage() {
       return;
     }
     const payload = {
-      productId: draft.productId || undefined,
+      productId: draft.productId || selectedProduct?.id || undefined,
       productNameSnapshot: draft.productNameSnapshot,
       erpProductCode: draft.erpProductCode,
       erpProductClassCode: draft.erpProductClassCode,
@@ -922,10 +922,11 @@ export default function OpportunitiesPage() {
       } else {
         const response = await api.post("/opportunities", payload);
         const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id;
+        const shouldOpenErpOrderAfterCreate = form.stage === "ganho";
         if (createdOpportunityId) {
           for (const draft of opportunityItems) {
             const itemPayload = {
-              productId: draft.productId || undefined,
+              productId: draft.productId || selectedProduct?.id || undefined,
               productNameSnapshot: draft.productNameSnapshot,
               erpProductCode: draft.erpProductCode,
               erpProductClassCode: draft.erpProductClassCode,
@@ -947,6 +948,14 @@ export default function OpportunitiesPage() {
           setOpportunityModalMode("edit");
           setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
           await loadOpportunityItems(createdOpportunityId);
+          const createdItemsResponse = await api.get(`/opportunities/${createdOpportunityId}/items`);
+          const persistedItems = Array.isArray(createdItemsResponse.data?.items) ? createdItemsResponse.data.items : [];
+          if (shouldOpenErpOrderAfterCreate) {
+            if (persistedItems.length < 1) {
+              throw new Error("Não foi possível confirmar ganho sem item. Adicione pelo menos um produto.");
+            }
+            navigate(`/oportunidades/${createdOpportunityId}?openErpOrder=1`);
+          }
         }
         setForm(emptyForm);
         setEditing(null);
@@ -1055,18 +1064,19 @@ export default function OpportunitiesPage() {
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
   const savedOpportunityId = editing;
   const isOpportunitySaved = Boolean(savedOpportunityId);
+  const effectiveProductId = itemDraft.productId || selectedProduct?.id || "";
   const canAddOpportunityItem = isOpportunitySaved
-    ? Boolean(itemDraft.productId)
+    ? Boolean(effectiveProductId)
       && Boolean(itemDraft.erpProductCode)
       && Boolean(itemDraft.unit)
       && Number(itemDraft.quantity || 0) > 0
       && Number(itemDraft.unitPrice || 0) >= 0
-    : Boolean(itemDraft.productId)
+    : Boolean(effectiveProductId)
       && Boolean(itemDraft.erpProductCode)
       && Boolean(itemDraft.unit)
     && Number(itemDraft.quantity || 0) > 0
     && Number(itemDraft.unitPrice || 0) >= 0;
-  const addItemDisabledReason = !itemDraft.productId
+  const addItemDisabledReason = !effectiveProductId
       ? "Selecione um produto válido."
       : !itemDraft.erpProductCode
         ? "Produto sem código ERP."
@@ -1491,6 +1501,9 @@ export default function OpportunitiesPage() {
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1 sm:col-span-4">
+                <button type="button" className="inline-flex rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60" onClick={() => syncProductsStock().catch(() => null)} disabled={isSyncingProducts}>
+                  {isSyncingProducts ? "Atualizando estoque..." : "Atualizar estoque"}
+                </button>
                 <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
                   ref={productSearchInputRef}
@@ -1531,6 +1544,7 @@ export default function OpportunitiesPage() {
                         key={product.id}
                         type="button"
                         className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                        onMouseDown={(event) => event.preventDefault()}
                         onClick={() => handleSelectProduct(product)}
                       >
                         <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
@@ -1551,9 +1565,6 @@ export default function OpportunitiesPage() {
                   </p>
                 ) : null}
                 {!isOpportunitySaved ? <p className="text-xs text-amber-700">Na nova oportunidade, o item é adicionado em uma lista temporária e salvo junto com a oportunidade.</p> : null}
-                <button type="button" className="mt-2 inline-flex rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-60" onClick={() => syncProductsStock().catch(() => null)} disabled={isSyncingProducts}>
-                  {isSyncingProducts ? "Atualizando estoque..." : "Atualizar estoque"}
-                </button>
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
