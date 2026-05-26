@@ -774,12 +774,23 @@ export default function OpportunitiesPage() {
       unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice
     }));
     setIsProductDropdownOpen(false);
+    setProductOptions([]);
     productSearchInputRef.current?.blur();
   };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
     if (!savedOpportunityId) {
-      toast.message("Salve a oportunidade para começar a adicionar produtos.");
+      const temporaryId = draft.id || `tmp-${Date.now()}`;
+      const localDraft = { ...draft, id: temporaryId };
+      setOpportunityItems((current) => {
+        const exists = current.some((item) => item.id === temporaryId);
+        if (exists) return current.map((item) => item.id === temporaryId ? localDraft : item);
+        return [...current, localDraft];
+      });
+      setItemDraft(emptyOpportunityItem);
+      setProductSearch("");
+      setSelectedProduct(null);
+      toast.success(draft.id ? "Item atualizado na lista" : "Item adicionado à lista");
       return;
     }
     const payload = {
@@ -824,7 +835,12 @@ export default function OpportunitiesPage() {
   };
 
   const removeOpportunityItem = async (itemId?: string) => {
-    if (!editing || !itemId) return;
+    if (!itemId) return;
+    if (!editing) {
+      setOpportunityItems((current) => current.filter((item) => item.id !== itemId));
+      toast.success("Item removido");
+      return;
+    }
     await api.delete(`/opportunities/${editing}/items/${itemId}`);
     await loadOpportunityItems(editing);
     toast.success("Item removido");
@@ -878,6 +894,12 @@ export default function OpportunitiesPage() {
     };
 
     const isEditing = Boolean(editing);
+    if (!isEditing && opportunityItems.length === 0) {
+      const errorMessage = "Adicione pelo menos um produto antes de salvar a oportunidade.";
+      setSubmitError(errorMessage);
+      toast.error(errorMessage);
+      return;
+    }
     setIsSaving(true);
     try {
       if (editing) {
@@ -890,16 +912,27 @@ export default function OpportunitiesPage() {
         const response = await api.post("/opportunities", payload);
         const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id;
         if (createdOpportunityId) {
+          await Promise.all(opportunityItems.map((draft) => api.post(`/opportunities/${createdOpportunityId}/items`, {
+            productId: draft.productId || undefined,
+            productNameSnapshot: draft.productNameSnapshot,
+            erpProductCode: draft.erpProductCode,
+            erpProductClassCode: draft.erpProductClassCode,
+            unit: draft.unit || undefined,
+            quantity: Number(draft.quantity || 0),
+            unitPrice: Number(draft.unitPrice || 0),
+            discountType: draft.discountType,
+            discountValue: Number(draft.discountValue || 0),
+            notes: draft.notes || undefined
+          })));
           setEditing(createdOpportunityId);
           setOpportunityModalMode("edit");
-          setForm((current) => ({ ...current, value: current.value || String(toTwoDecimals(itemsTotals.netTotal)) }));
+          setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
           await loadOpportunityItems(createdOpportunityId);
-        } else {
-          setForm(emptyForm);
-          setEditing(null);
-          setOpportunityModalMode("create");
-          setIsOpportunityModalOpen(false);
         }
+        setForm(emptyForm);
+        setEditing(null);
+        setOpportunityModalMode("create");
+        setIsOpportunityModalOpen(false);
       }
       await invalidateOpportunitiesAndDashboardQueries();
       toast.success(isEditing ? "Oportunidade atualizada" : "Oportunidade criada");
@@ -1004,13 +1037,22 @@ export default function OpportunitiesPage() {
   const savedOpportunityId = editing;
   const isOpportunitySaved = Boolean(savedOpportunityId);
   const canAddOpportunityItem = isOpportunitySaved
-    && Boolean(itemDraft.productId)
+    ? Boolean(itemDraft.productId)
+      && Boolean(itemDraft.erpProductCode)
+      && Boolean(itemDraft.unit)
+      && Number(itemDraft.quantity || 0) > 0
+      && Number(itemDraft.unitPrice || 0) >= 0
+    : Boolean(itemDraft.productId)
+      && Boolean(itemDraft.erpProductCode)
+      && Boolean(itemDraft.unit)
     && Number(itemDraft.quantity || 0) > 0
     && Number(itemDraft.unitPrice || 0) >= 0;
-  const addItemDisabledReason = !isOpportunitySaved
-    ? "Salve a oportunidade antes de adicionar itens."
-    : !itemDraft.productId
+  const addItemDisabledReason = !itemDraft.productId
       ? "Selecione um produto válido."
+      : !itemDraft.erpProductCode
+        ? "Produto sem código ERP."
+        : !itemDraft.unit
+          ? "Produto sem unidade."
       : Number(itemDraft.quantity || 0) <= 0
             ? "Informe quantidade maior que zero."
             : Number(itemDraft.unitPrice || 0) < 0
@@ -1030,9 +1072,8 @@ export default function OpportunitiesPage() {
   const hasStructuredItems = opportunityItems.length > 0;
 
   useEffect(() => {
-    if (!isOpportunitySaved) return;
     setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
-  }, [isOpportunitySaved, itemsTotals.netTotal]);
+  }, [itemsTotals.netTotal]);
 
   const openPipelineDrawer = (item: Opportunity) => {
     setSelectedOpportunity(item);
@@ -1411,9 +1452,9 @@ export default function OpportunitiesPage() {
         hasStructuredItems={hasStructuredItems}
         productsSection={
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              {!isOpportunitySaved ? <span className="text-xs text-slate-500">Salve a oportunidade antes de adicionar produtos. O total dos produtos atualizará o valor da oportunidade.</span> : null}
+              <span className="max-w-xl text-xs leading-relaxed text-slate-500">Adicione os produtos antes de salvar. O total dos itens atualizará automaticamente o valor da oportunidade.</span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1447,9 +1488,12 @@ export default function OpportunitiesPage() {
                       setIsProductDropdownOpen(true);
                     }
                   }}
+                  onBlur={() => {
+                    window.setTimeout(() => setIsProductDropdownOpen(false), 100);
+                  }}
                 />
                 {isProductDropdownOpen && productSearch.trim().length >= 2 && productOptions.length > 0 ? (
-                  <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white">
+                  <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white overscroll-contain">
                     {productOptions.map((product) => (
                       <button
                         key={product.id}
@@ -1474,7 +1518,7 @@ export default function OpportunitiesPage() {
                     Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                   </p>
                 ) : null}
-                {!isOpportunitySaved ? <p className="text-xs text-amber-700">Você pode preparar produto, quantidade e observação agora. O item será adicionado após salvar a oportunidade.</p> : null}
+                {!isOpportunitySaved ? <p className="text-xs text-amber-700">Na nova oportunidade, o item é adicionado em uma lista temporária e salvo junto com a oportunidade.</p> : null}
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
