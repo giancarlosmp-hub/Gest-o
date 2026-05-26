@@ -112,7 +112,7 @@ export default function CreateOpportunityModal({
         </div>
 
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
-          <div className="mobile-modal-body space-y-6 overscroll-contain">
+          <div className="mobile-modal-body space-y-6 overscroll-contain pb-24">
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Identificação</h4>
               <div className="grid gap-3 sm:grid-cols-2">

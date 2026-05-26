@@ -308,6 +308,7 @@ export default function OpportunitiesPage() {
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<OpportunityProduct | null>(null);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+  const [isSyncingProducts, setIsSyncingProducts] = useState(false);
   const [hasAttemptedProductSearch, setHasAttemptedProductSearch] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
@@ -790,6 +791,7 @@ export default function OpportunitiesPage() {
       setItemDraft(emptyOpportunityItem);
       setProductSearch("");
       setSelectedProduct(null);
+      setHasAttemptedProductSearch(false);
       toast.success(draft.id ? "Item atualizado na lista" : "Item adicionado à lista");
       return;
     }
@@ -831,7 +833,16 @@ export default function OpportunitiesPage() {
     }
     await loadOpportunityItems(savedOpportunityId);
     setItemDraft(emptyOpportunityItem);
+    setProductSearch("");
+    setSelectedProduct(null);
+    setHasAttemptedProductSearch(false);
     toast.success(draft.id ? "Item atualizado" : "Item adicionado");
+  };
+
+  const editOpportunityItem = (item: OpportunityItemForm) => {
+    setItemDraft(item);
+    setProductSearch(`${item.erpProductCode} / ${item.erpProductClassCode} — ${item.productNameSnapshot}`);
+    setSelectedProduct((current) => current?.id === item.productId ? current : null);
   };
 
   const removeOpportunityItem = async (itemId?: string) => {
@@ -912,18 +923,26 @@ export default function OpportunitiesPage() {
         const response = await api.post("/opportunities", payload);
         const createdOpportunityId = response.data?.id || response.data?.item?.id || response.data?.opportunity?.id;
         if (createdOpportunityId) {
-          await Promise.all(opportunityItems.map((draft) => api.post(`/opportunities/${createdOpportunityId}/items`, {
-            productId: draft.productId || undefined,
-            productNameSnapshot: draft.productNameSnapshot,
-            erpProductCode: draft.erpProductCode,
-            erpProductClassCode: draft.erpProductClassCode,
-            unit: draft.unit || undefined,
-            quantity: Number(draft.quantity || 0),
-            unitPrice: Number(draft.unitPrice || 0),
-            discountType: draft.discountType,
-            discountValue: Number(draft.discountValue || 0),
-            notes: draft.notes || undefined
-          })));
+          for (const draft of opportunityItems) {
+            const itemPayload = {
+              productId: draft.productId || undefined,
+              productNameSnapshot: draft.productNameSnapshot,
+              erpProductCode: draft.erpProductCode,
+              erpProductClassCode: draft.erpProductClassCode,
+              unit: draft.unit || undefined,
+              quantity: Number(draft.quantity || 0),
+              unitPrice: Number(draft.unitPrice || 0),
+              discountType: draft.discountType,
+              discountValue: Number(draft.discountValue || 0),
+              notes: draft.notes || undefined
+            };
+            try {
+              await api.post(`/opportunities/${createdOpportunityId}/items`, itemPayload);
+            } catch (itemError) {
+              const itemErrorMessage = getApiErrorMessage(itemError, "Falha ao salvar item da oportunidade.");
+              throw new Error(`Oportunidade criada, mas houve erro ao salvar item: ${itemErrorMessage}`);
+            }
+          }
           setEditing(createdOpportunityId);
           setOpportunityModalMode("edit");
           setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
@@ -937,7 +956,7 @@ export default function OpportunitiesPage() {
       await invalidateOpportunitiesAndDashboardQueries();
       toast.success(isEditing ? "Oportunidade atualizada" : "Oportunidade criada");
     } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Erro ao salvar oportunidade";
+      const errorMessage = getApiErrorMessage(error, "Erro ao salvar oportunidade");
       setSubmitError(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -1087,6 +1106,19 @@ export default function OpportunitiesPage() {
     setPipelineEvents([]);
     setPipelineEventsCursor(null);
     setPipelineFollowUpDate("");
+  };
+
+  const syncProductsStock = async () => {
+    setIsSyncingProducts(true);
+    try {
+      await api.post("/erp/ultrafv3/sync/products");
+      await searchProducts(productSearch);
+      toast.success("Estoque atualizado com sucesso.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível atualizar o estoque."));
+    } finally {
+      setIsSyncingProducts(false);
+    }
   };
 
   const loadPipelineEvents = async (opportunityId: string) => {
@@ -1519,6 +1551,9 @@ export default function OpportunitiesPage() {
                   </p>
                 ) : null}
                 {!isOpportunitySaved ? <p className="text-xs text-amber-700">Na nova oportunidade, o item é adicionado em uma lista temporária e salvo junto com a oportunidade.</p> : null}
+                <button type="button" className="mt-2 inline-flex rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 disabled:opacity-60" onClick={() => syncProductsStock().catch(() => null)} disabled={isSyncingProducts}>
+                  {isSyncingProducts ? "Atualizando estoque..." : "Atualizar estoque"}
+                </button>
               </label>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
@@ -1583,9 +1618,9 @@ export default function OpportunitiesPage() {
                         <td className="p-2">{opportunityItem.discountType === "percent" ? `${opportunityItem.discountValue}%` : formatCurrencyBRL(Number(opportunityItem.discountValue || 0))}</td>
                         <td className="p-2 font-medium">{formatCurrencyBRL(totals.netTotal)}</td>
                         <td className="p-2">
-                          <div className="flex gap-2">
-                            <button type="button" className="text-slate-700" onClick={() => setItemDraft(opportunityItem)}>Editar</button>
-                            <button type="button" className="text-red-600" onClick={() => removeOpportunityItem(opportunityItem.id).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível remover item")))}>Excluir</button>
+                          <div className="flex flex-wrap gap-2">
+                            <button type="button" className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => editOpportunityItem(opportunityItem)}>Editar</button>
+                            <button type="button" className="rounded border border-red-200 px-2 py-1 text-xs text-red-600" onClick={() => removeOpportunityItem(opportunityItem.id).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível remover item")))}>Remover</button>
                           </div>
                         </td>
                       </tr>
