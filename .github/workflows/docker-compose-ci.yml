@@ -37,6 +37,11 @@ jobs:
         env:
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
+          ADMIN_BOOTSTRAP_ENABLED: "true"
+          ADMIN_BOOTSTRAP_EMAIL: "diretor@empresa.com"
+          ADMIN_BOOTSTRAP_PASSWORD: "123456"
+          ADMIN_BOOTSTRAP_ROLE: "diretor"
+          ADMIN_BOOTSTRAP_REGION: "Nacional"
         run: docker compose up -d --build
 
       - name: Print API logs on failure
@@ -95,7 +100,7 @@ jobs:
         run: |
           docker compose logs api --tail=300
           docker compose ps
-          docker compose exec -T api node -e "const { PrismaClient } = require('@prisma/client'); (async () => { const prisma = new PrismaClient(); const user = await prisma.user.findUnique({ where: { email: 'admin@preview.local' } }); console.log('USER_LOOKUP_RESULT: ' + JSON.stringify(user)); await prisma.\$disconnect(); })().catch(async (error) => { console.error(error); process.exitCode = 1; });"
+          docker compose exec -T api node -e "const { PrismaClient } = require('@prisma/client'); (async () => { const prisma = new PrismaClient(); const [director, sellerCount] = await Promise.all([prisma.user.findUnique({ where: { email: 'diretor@empresa.com' }, select: { id: true, email: true, role: true, isActive: true, passwordHash: true } }), prisma.user.count({ where: { role: 'vendedor' } })]); console.log('SMOKE_DIRECTOR_LOOKUP_RESULT: ' + JSON.stringify(director && { ...director, passwordHashPrefix: director.passwordHash.slice(0, 4), passwordHashLength: director.passwordHash.length, passwordHash: undefined })); console.log('SMOKE_SELLER_COUNT: ' + sellerCount); await prisma.\$disconnect(); })().catch(async (error) => { console.error(error); process.exitCode = 1; });"
 
       - name: Smoke test opportunities + dashboard flow
         run: node scripts/smoke/compose-smoke.mjs
