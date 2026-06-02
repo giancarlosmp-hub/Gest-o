@@ -7207,6 +7207,75 @@ router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"
   });
 });
 
+router.get("/erp/ultrafv3/order-readiness/:opportunityId", authorize("diretor", "gerente"), async (req, res) => {
+  const opportunity = await prisma.opportunity.findUnique({
+    where: { id: req.params.opportunityId },
+    select: {
+      id: true,
+      stage: true,
+      ownerSellerId: true,
+      clientId: true,
+      ownerSeller: {
+        select: {
+          id: true,
+          name: true,
+          erpCode: true,
+          erpOperatorCode: true,
+          erpLoginUsername: true,
+          erpLoginPasswordEncrypted: true,
+        }
+      },
+      client: {
+        select: {
+          id: true,
+          name: true,
+          code: true,
+        }
+      },
+      _count: { select: { items: true } },
+    }
+  });
+
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada." });
+
+  const sellerErpCodePresent = Boolean(opportunity.ownerSeller?.erpCode?.trim());
+  const sellerOperatorPresent = Boolean(opportunity.ownerSeller?.erpOperatorCode?.trim());
+  const sellerLoginConfigured = Boolean(opportunity.ownerSeller?.erpLoginUsername?.trim() && opportunity.ownerSeller?.erpLoginPasswordEncrypted);
+  const clientErpCodePresent = Boolean(opportunity.client?.code?.trim());
+  const itemsCount = opportunity._count.items;
+  const missing = [
+    !sellerErpCodePresent ? "ownerSeller.erpCode" : null,
+    !sellerOperatorPresent ? "ownerSeller.erpOperatorCode" : null,
+    !sellerLoginConfigured ? "ownerSeller.erpLogin" : null,
+    !clientErpCodePresent ? "client.code" : null,
+    itemsCount <= 0 ? "items" : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return res.json({
+    opportunityId: opportunity.id,
+    canGenerate: missing.length === 0,
+    missing,
+    stage: opportunity.stage,
+    ownerSellerId: opportunity.ownerSellerId,
+    clientId: opportunity.clientId,
+    ownerSeller: {
+      id: opportunity.ownerSeller.id,
+      name: opportunity.ownerSeller.name,
+      erpCodePresent: sellerErpCodePresent,
+      erpOperatorCodePresent: sellerOperatorPresent,
+      erpLoginConfigured: sellerLoginConfigured,
+    },
+    client: {
+      id: opportunity.client.id,
+      name: opportunity.client.name,
+      erpCodePresent: clientErpCodePresent,
+    },
+    items: {
+      count: itemsCount,
+    },
+  });
+});
+
 router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async (req, res) => {
   const correlationId = randomUUID();
   const user = await prisma.user.findUnique({
@@ -7231,16 +7300,35 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
         erpCode: tokenSalesman ? { set: tokenSalesman } : undefined,
         erpOperatorCode: tokenOperator ? { set: tokenOperator } : undefined,
         region: tokenBranch || tokenPartner ? { set: `${tokenBranch || ""}${tokenBranch && tokenPartner ? " / " : ""}${tokenPartner || ""}`.trim() } : undefined,
+        erpLoginLastTestStatus: tokenOperator ? "success" : "success_missing_operator",
+        erpLoginLastTestAt: new Date(),
       },
-      select: { erpCode: true, erpOperatorCode: true, region: true }
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        erpCode: true,
+        erpOperatorCode: true,
+        region: true,
+        erpLoginUsername: true,
+        erpLoginPasswordEncrypted: true,
+        erpLoginLastTestStatus: true,
+        erpLoginLastTestAt: true,
+      }
     });
     return res.status(200).json({
       success: true,
       status: 200,
-      message: "Login FV3 validado. Vendedor apto para pedido ERP quando CODVENDEDOR e OPERADOR estiverem preenchidos.",
+      message: tokenOperator
+        ? "Login FV3 validado. OPERADOR persistido no vendedor."
+        : "Login FV3 validado, mas o token não retornou OPERADOR; revise o usuário no UltraFV3.",
       maskedDocument: result.maskedDocument,
       tokenPayload: result.tokenPayload,
-      persistedLink: persisted,
+      persistedLink: {
+        ...persisted,
+        erpLoginConfigured: Boolean(persisted.erpLoginUsername?.trim() && persisted.erpLoginPasswordEncrypted),
+        erpLoginPasswordEncrypted: undefined,
+      },
       correlationId,
     });
   } catch (error) {
@@ -7259,6 +7347,13 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
       details,
       ultraMessage: diagnostics?.message ?? null,
       ultraResponse: diagnostics?.ultraResponse ?? null,
+    });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        erpLoginLastTestStatus: `failed:${status}`,
+        erpLoginLastTestAt: new Date(),
+      },
     });
     return res.status(status).json({
       success: false,
@@ -7504,7 +7599,7 @@ router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema),
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
-const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, isActive: true, createdAt: true } as const;
+const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, erpLoginLastTestStatus: true, erpLoginLastTestAt: true, isActive: true, createdAt: true } as const;
 
 const sanitizeUserForList = (user: Prisma.UserGetPayload<{ select: typeof userListSelect }>) => {
   const { erpLoginPasswordEncrypted, ...safeUser } = user;
@@ -7546,7 +7641,7 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true } });
+    const user = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true, erpCode: true, erpOperatorCode: true } });
     if (!user) return res.status(404).json({ success: false, message: "Usuário não encontrado." });
     if (req.user!.role === "gerente" && (user.role === "diretor" || role === "diretor")) {
       return res.status(403).json({ success: false, message: "Gerentes não podem criar ou editar perfis diretores." });
@@ -7574,13 +7669,23 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
 
     const erpOption = await resolveErpSalesmanOption(erpCode);
     const resolvedErpCode = erpCode ? erpOption?.code ?? erpCode : null;
+    const shouldPreserveExistingOperator = Boolean(
+      resolvedErpCode &&
+      user.erpCode === resolvedErpCode &&
+      user.erpOperatorCode?.trim() &&
+      !erpOption?.erpOperatorCode &&
+      !erpOperatorCode
+    );
+    const resolvedErpOperatorCode = resolvedErpCode
+      ? erpOperatorCode ?? erpOption?.erpOperatorCode ?? (shouldPreserveExistingOperator ? user.erpOperatorCode : null)
+      : null;
     const data: Record<string, unknown> = {
       name,
       email,
       role,
       region,
       erpCode: resolvedErpCode,
-      erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null,
+      erpOperatorCode: resolvedErpOperatorCode,
       erpRawPayload: resolvedErpCode && erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : Prisma.JsonNull,
       erpLoginUsername: erpLoginUsername ?? null
     };
