@@ -1560,6 +1560,11 @@ export default function CrudSimplePage({
     try {
       const response = await api.post(`/users/${item.id}/erp-login/test`);
       const apiMessage = response.data?.message || "Login FV3 validado";
+      const updatedUser = response.data?.persistedLink;
+      if (updatedUser?.id) {
+        setItems((currentItems) => currentItems.map((currentItem) => currentItem.id === updatedUser.id ? { ...currentItem, ...updatedUser } : currentItem));
+      }
+      await load();
       toast.success(apiMessage);
     } catch (error: any) {
       const data = error.response?.data;

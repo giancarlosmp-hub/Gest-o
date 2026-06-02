@@ -77,6 +77,8 @@ model User {
   erpRawPayload             Json?
   erpLoginUsername          String?
   erpLoginPasswordEncrypted String?
+  erpLoginLastTestStatus    String?
+  erpLoginLastTestAt        DateTime?
   isActive                  Boolean                @default(true)
   createdAt                 DateTime               @default(now())
   clients                   Client[]
