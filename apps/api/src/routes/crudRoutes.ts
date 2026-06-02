@@ -634,6 +634,16 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
   clientCity: opportunity.client?.city || null,
   clientState: opportunity.client?.state || null,
   owner: opportunity.ownerSeller?.name,
+  ownerSeller: opportunity.ownerSeller
+    ? {
+        id: opportunity.ownerSeller.id,
+        name: opportunity.ownerSeller.name,
+        erpCode: opportunity.ownerSeller.erpCode ?? null,
+        erpOperatorCode: opportunity.ownerSeller.erpOperatorCode ?? null,
+        erpLoginUsername: opportunity.ownerSeller.erpLoginUsername ?? null,
+        erpLoginPasswordConfigured: Boolean(opportunity.ownerSeller.erpLoginPasswordEncrypted)
+      }
+    : null,
   daysOverdue: opportunity.expectedCloseDate ? getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart) : null,
   weightedValue: getWeightedValue(opportunity.value, opportunity.probability),
   risk: calculateOpportunityRisk(opportunity)
@@ -6015,8 +6025,21 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
   });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
+  const previousOrderCount = await prisma.erpOrderSync.count({ where: { opportunityId: opportunity.id } });
+
   try {
     const sync = await createErpOrderFromOpportunity(opportunity, parsed.data);
+    if (!parsed.data.simulateOnly) {
+      await prisma.timelineEvent.create({
+        data: {
+          type: "status",
+          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+          clientId: opportunity.clientId,
+          opportunityId: opportunity.id,
+          ownerSellerId: opportunity.ownerSellerId
+        }
+      });
+    }
     return res.status(201).json({
       id: sync.id,
       pedidoIdImportacao: sync.pedidoIdImportacao,
@@ -6029,6 +6052,17 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     });
   } catch (error: any) {
     const status = Number(error?.status || 502);
+    if (!parsed.data.simulateOnly) {
+      await prisma.timelineEvent.create({
+        data: {
+          type: "status",
+          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP falhou: ${error?.message || "Erro no envio ao ERP"}.`,
+          clientId: opportunity.clientId,
+          opportunityId: opportunity.id,
+          ownerSellerId: opportunity.ownerSellerId
+        }
+      });
+    }
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order route] order submission rejected", {
       opportunityId: req.params.id,
       httpStatus: status,

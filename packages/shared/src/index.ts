@@ -341,3 +341,64 @@ export interface AuthUser {
   role: Role;
   region?: string | null;
 }
+
+export type ErpOrderSyncReadinessStatus = "pending" | "sent" | "error";
+export type ErpOrderSyncReadinessOrderStatus = "pendente" | "faturado" | "parcial" | "cancelado" | "entregue" | null | undefined;
+
+export type ErpOrderReadinessInput = {
+  stage?: string | null;
+  itemCount?: number | null;
+  clientErpCode?: string | null;
+  sellerErpCode?: string | null;
+  sellerOperatorCode?: string | null;
+  sellerLoginFv3?: string | null;
+  sellerPasswordConfigured?: boolean | null;
+  paymentMethodCode?: string | null;
+  receivingConditionCode?: string | null;
+  priceTableCode?: string | null;
+  branchCode?: string | null;
+  operationCode?: string | null;
+  requireOrderParameters?: boolean;
+};
+
+export type ErpOrderReadinessResult = {
+  ready: boolean;
+  reasons: string[];
+  firstReason: string | null;
+};
+
+const hasTextValue = (value?: string | null) => Boolean(value?.trim());
+
+export const getErpOrderReadiness = (input: ErpOrderReadinessInput): ErpOrderReadinessResult => {
+  const reasons = [
+    input.stage !== "ganho" ? "Pedido ERP indisponível: oportunidade não está Ganha." : null,
+    Number(input.itemCount || 0) < 1 ? "Pedido ERP indisponível: oportunidade sem itens. Inclua pelo menos 1 item antes de gerar o pedido ERP." : null,
+    !hasTextValue(input.clientErpCode) ? "Pedido ERP indisponível: cliente sem código ERP." : null,
+    !hasTextValue(input.sellerErpCode) ? "Pedido ERP indisponível: vendedor sem CODVENDEDOR." : null,
+    !hasTextValue(input.sellerOperatorCode) ? "Pedido ERP indisponível: vendedor sem OPERADOR. Teste o login FV3 do vendedor em Configurações > Usuários." : null,
+    !hasTextValue(input.sellerLoginFv3) ? "Pedido ERP indisponível: vendedor sem Login FV3. Configure o Login FV3 em Configurações > Usuários." : null,
+    input.sellerPasswordConfigured === false ? "Pedido ERP indisponível: vendedor sem Senha FV3. Configure a Senha FV3 em Configurações > Usuários." : null,
+    input.requireOrderParameters && !hasTextValue(input.paymentMethodCode) ? "Pedido ERP indisponível: informe a forma de pagamento." : null,
+    input.requireOrderParameters && !hasTextValue(input.receivingConditionCode) ? "Pedido ERP indisponível: informe a condição de recebimento." : null,
+    input.requireOrderParameters && !hasTextValue(input.priceTableCode) ? "Pedido ERP indisponível: informe a tabela de preço." : null,
+    input.requireOrderParameters && !hasTextValue(input.branchCode) ? "Pedido ERP indisponível: informe a filial." : null,
+    input.requireOrderParameters && !hasTextValue(input.operationCode) ? "Pedido ERP indisponível: informe a operação." : null,
+  ].filter(Boolean) as string[];
+
+  return {
+    ready: reasons.length === 0,
+    reasons,
+    firstReason: reasons[0] || null,
+  };
+};
+
+export type ErpOrderSyncReadinessInput = {
+  status?: ErpOrderSyncReadinessStatus | null;
+  orderStatus?: ErpOrderSyncReadinessOrderStatus;
+};
+
+export const isSuccessfulErpOrderSync = (order: ErpOrderSyncReadinessInput) =>
+  order.status === "sent" && order.orderStatus !== "cancelado";
+
+export const isErpOrderSyncResendable = (order: ErpOrderSyncReadinessInput) =>
+  order.status === "error" || order.status === "pending" || order.orderStatus === "cancelado";

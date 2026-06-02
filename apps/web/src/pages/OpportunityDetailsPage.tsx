@@ -6,6 +6,7 @@ import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatt
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
+import { getErpOrderReadiness, isErpOrderSyncResendable, isSuccessfulErpOrderSync } from "@salesforce-pro/shared";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -60,6 +61,7 @@ type Opportunity = {
     erpCode?: string | null;
     erpOperatorCode?: string | null;
     erpLoginUsername?: string | null;
+    erpLoginPasswordConfigured?: boolean | null;
   } | null;
   stage: Stage;
   value: number;
@@ -339,17 +341,19 @@ export default function OpportunityDetailsPage() {
     if (!id) return;
     setLoading(true);
     try {
-      const [opportunityResponse, eventsResponse, insightResponse, itemsResponse] = await Promise.all([
+      const [opportunityResponse, eventsResponse, insightResponse, itemsResponse, erpOrdersResponse] = await Promise.all([
         api.get(`/opportunities/${id}`),
         api.get(`/events?opportunityId=${id}`),
         api.post("/ai/opportunity-insight", { opportunityId: id }),
-        api.get(`/opportunities/${id}/items`)
+        api.get(`/opportunities/${id}/items`),
+        api.get(`/opportunities/${id}/erp/orders`)
       ]);
       setItem(opportunityResponse.data);
       setEvents(eventsResponse.data?.items || []);
       setInsight(insightResponse.data || null);
       setOpportunityItems(Array.isArray(itemsResponse.data?.items) ? itemsResponse.data.items : []);
       setOpportunityItemTotals(itemsResponse.data?.totals || { grossTotal: 0, discountTotal: 0, netTotal: 0 });
+      setErpOrders(Array.isArray(erpOrdersResponse.data?.items) ? erpOrdersResponse.data.items : []);
     } catch {
       toast.error("Não foi possível carregar a oportunidade");
       navigate("/oportunidades");
@@ -376,22 +380,46 @@ export default function OpportunityDetailsPage() {
   const clientErpCode = clientErpSummary?.code?.trim() || item?.clientData?.code?.trim() || "";
   const sellerOperatorCode = item?.ownerSeller?.erpOperatorCode?.trim() || "";
   const sellerLoginFv3 = item?.ownerSeller?.erpLoginUsername?.trim() || "";
+  const sellerPasswordConfigured = item?.ownerSeller?.erpLoginPasswordConfigured !== false;
+  const successfulErpOrder = erpOrders.find(isSuccessfulErpOrderSync) || null;
+  const resendableErpOrder = erpOrders.find(isErpOrderSyncResendable) || null;
+  const isErpOrderResend = Boolean(resendableErpOrder && !successfulErpOrder);
   const itemsWithMissingErp = opportunityItems.filter((opportunityItem) => !opportunityItem.erpProductCode?.trim());
   const itemsWithInsufficientStock = opportunityItems.filter((opportunityItem) => {
     const stockQuantity = opportunityItem.product?.stockQuantity;
     return typeof stockQuantity === "number" && stockQuantity < Number(opportunityItem.quantity || 0);
   });
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
-  const erpOrderEligibilityReasons = [
-    item?.stage !== "ganho" ? "Oportunidade não ganha: mova para a etapa Ganha." : null,
-    opportunityItems.length === 0 ? "Oportunidade sem item: inclua ao menos um item antes de gerar pedido ERP." : null,
-    !clientErpCode ? "Cliente sem código ERP: campo ausente em client.code." : null,
-    !sellerErpCode ? "Vendedor sem CODVENDEDOR: campo ausente em ownerSeller.erpCode." : null,
-    !sellerOperatorCode ? "Vendedor sem OPERADOR: campo ausente em ownerSeller.erpOperatorCode." : null,
-    !sellerLoginFv3 ? "Vendedor sem Login FV3: campo ausente em ownerSeller.erpLoginUsername." : null
-  ].filter(Boolean) as string[];
-  const canGenerateErpOrder = erpOrderEligibilityReasons.length === 0;
-  const erpOrderDisabledReason = erpOrderEligibilityReasons[0] || null;
+  const erpOrderReadiness = getErpOrderReadiness({
+    stage: item?.stage,
+    itemCount: opportunityItems.length,
+    clientErpCode,
+    sellerErpCode,
+    sellerOperatorCode,
+    sellerLoginFv3,
+    sellerPasswordConfigured
+  });
+  const erpOrderSubmitReadiness = getErpOrderReadiness({
+    stage: item?.stage,
+    itemCount: opportunityItems.length,
+    clientErpCode,
+    sellerErpCode,
+    sellerOperatorCode,
+    sellerLoginFv3,
+    sellerPasswordConfigured,
+    paymentMethodCode: erpOrderForm.paymentMethodCode,
+    receivingConditionCode: erpOrderForm.receivingConditionCode,
+    priceTableCode: erpOrderForm.priceTableCode,
+    branchCode: erpOrderForm.branchCode,
+    operationCode: erpOrderForm.operationCode,
+    requireOrderParameters: true
+  });
+  const canOpenErpOrder = erpOrderReadiness.ready;
+  const canSubmitErpOrder = erpOrderSubmitReadiness.ready && !successfulErpOrder;
+  const erpOrderDisabledReason = erpOrderReadiness.firstReason;
+  const erpOrderSubmitDisabledReason = successfulErpOrder
+    ? `Pedido ERP já enviado com sucesso (${successfulErpOrder.erpOrderNumber || successfulErpOrder.numPedido || successfulErpOrder.pedidoIdImportacao}). Reenvio bloqueado para evitar duplicidade.`
+    : erpOrderSubmitReadiness.firstReason;
 
   const setErpOrderField = (field: keyof Omit<ErpOrderForm, "simulateOnly">, value: string) => {
     setErpOrderForm((current) => ({ ...current, [field]: value }));
@@ -450,11 +478,15 @@ export default function OpportunityDetailsPage() {
 
   useEffect(() => {
     if (!item || searchParams.get("openErpOrder") !== "1") return;
-    if (!showErpOrderModal && canGenerateErpOrder) openErpOrderModal();
+    if (!showErpOrderModal && canOpenErpOrder) {
+      openErpOrderModal();
+    } else if (!canOpenErpOrder && erpOrderDisabledReason) {
+      toast.error(erpOrderDisabledReason);
+    }
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete("openErpOrder");
     setSearchParams(nextParams, { replace: true });
-  }, [item?.id, canGenerateErpOrder, showErpOrderModal]);
+  }, [item?.id, canOpenErpOrder, showErpOrderModal]);
 
   const onSendErpOrder = async () => {
     if (!item) return;
@@ -472,6 +504,12 @@ export default function OpportunityDetailsPage() {
       const message = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
       const maybeResponse = (error as any)?.response?.data;
       setErpOrderFeedback({ status: "erro", pedidoIdImportacao: maybeResponse?.pedidoIdImportacao, message });
+      try {
+        const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
+        setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
+      } catch {
+        // mantém o feedback do erro principal mesmo se a atualização do histórico falhar
+      }
       toast.error(message);
     } finally {
       setSendingErpOrder(false);
@@ -611,12 +649,12 @@ export default function OpportunityDetailsPage() {
         <div className="mobile-action-stack md:justify-end">
           <button
             type="button"
-            disabled={!canGenerateErpOrder}
+            disabled={!canOpenErpOrder}
             className="mobile-primary-button rounded-xl bg-gradient-to-r from-brand-700 to-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand-900/20 hover:from-brand-800 hover:to-slate-950 disabled:cursor-not-allowed disabled:from-slate-300 disabled:to-slate-400"
             onClick={openErpOrderModal}
-            title={!canGenerateErpOrder ? erpOrderDisabledReason || undefined : undefined}
+            title={!canOpenErpOrder ? erpOrderDisabledReason || undefined : successfulErpOrder ? "Pedido ERP já enviado; abra para consultar o histórico." : undefined}
           >
-            Gerar pedido ERP
+            {successfulErpOrder ? "Ver pedido ERP" : isErpOrderResend ? "Gerar/Reenviar pedido ERP" : "Gerar pedido ERP"}
           </button>
           <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm" onClick={() => navigate("/oportunidades")}>Voltar</button>
         </div>
@@ -627,9 +665,9 @@ export default function OpportunityDetailsPage() {
           Atenção: oportunidade atrasada há {item.daysOverdue} dia(s).
         </div>
       ) : null}
-      {!canGenerateErpOrder ? (
+      {!canOpenErpOrder ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong>Gerar pedido ERP indisponível:</strong> {erpOrderDisabledReason}
+          <strong>Gerar pedido ERP indisponível:</strong> {erpOrderDisabledReason?.replace("Pedido ERP indisponível: ", "")}
         </div>
       ) : null}
 
@@ -896,6 +934,12 @@ export default function OpportunityDetailsPage() {
                         <div className="rounded-2xl border border-slate-100 p-3"><span className="block text-xs text-slate-500">Oportunidade</span><strong>{stageLabel[item.stage]}</strong></div>
                       </div>
 
+                      {erpOrderSubmitDisabledReason ? (
+                        <div className={`mt-5 rounded-2xl border p-4 text-sm ${successfulErpOrder ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                          <strong>{successfulErpOrder ? "Pedido ERP já enviado:" : "Pedido ERP indisponível:"}</strong> {erpOrderSubmitDisabledReason.replace("Pedido ERP indisponível: ", "")}
+                        </div>
+                      ) : null}
+
                       {erpOrderFeedback ? (
                         <div className={`mt-5 rounded-2xl border p-4 text-sm ${erpOrderFeedback.status !== "erro" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-red-200 bg-red-50 text-red-800"}`}>
                           <p className="font-bold">{erpOrderFeedback.status === "simulado" ? "Simulação ERP validada" : erpOrderFeedback.status === "enviado" ? "Pedido enviado" : "Erro ERP"}</p>
@@ -931,11 +975,11 @@ export default function OpportunityDetailsPage() {
 
                       <button
                         type="button"
-                        disabled={sendingErpOrder || loadingErpOrderData || !canGenerateErpOrder}
+                        disabled={sendingErpOrder || loadingErpOrderData || !canSubmitErpOrder}
                         onClick={onSendErpOrder}
                         className="mt-5 w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-slate-900/20 transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                       >
-                        {sendingErpOrder ? (erpOrderForm.simulateOnly ? "Validando simulação..." : "Enviando ao ERP...") : erpOrderForm.simulateOnly ? "Validar simulação ERP" : "Enviar pedido ao ERP"}
+                        {sendingErpOrder ? (erpOrderForm.simulateOnly ? "Validando simulação..." : "Enviando ao ERP...") : erpOrderForm.simulateOnly ? "Validar simulação ERP" : isErpOrderResend ? "Reenviar pedido ao ERP" : "Enviar pedido ao ERP"}
                       </button>
                       <p className="mt-3 text-center text-xs text-slate-500">O backend bloqueia cliente/vendedor sem ERP, oportunidade sem itens, preço zerado, estoque insuficiente e payload inválido antes do envio.</p>
                     </section>
