@@ -6051,7 +6051,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       await prisma.timelineEvent.create({
         data: {
           type: "status",
-          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP falhou: ${error?.message || "Erro no envio ao ERP"}.`,
+          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP falhou: ${error?.message || "Erro no envio ao ERP"}.${error?.ultraFv3Failure?.correlationId ? ` correlationId=${error.ultraFv3Failure.correlationId}; PEDIDO_ID_IMPORTACAO=${error.ultraFv3Failure.PEDIDO_ID_IMPORTACAO}.` : ""}`,
           clientId: opportunity.clientId,
           opportunityId: opportunity.id,
           ownerSellerId: opportunity.ownerSellerId
@@ -6072,6 +6072,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
       status: "erro",
       message: error?.message || "Erro no envio ao ERP",
+      ...(error?.ultraFv3Failure ? { ultraFv3: error.ultraFv3Failure } : {}),
       ...(error?.parameterDiagnostics || parameterDiagnostics)
     });
   }

@@ -14,8 +14,8 @@ const FRIENDLY_BY_STATUS: Record<number, string> = {
 
 const getResponseMessage = (data: unknown): string | null => {
   if (!data || typeof data !== "object") return null;
-  const payload = data as { message?: unknown; details?: unknown; error?: unknown };
-  for (const value of [payload.message, payload.details, payload.error]) {
+  const payload = data as { message?: unknown; details?: unknown; error?: unknown; erro?: unknown; Message?: unknown; Retorno?: unknown; ultraFv3?: { message?: unknown } };
+  for (const value of [payload.message, payload.ultraFv3?.message, payload.details, payload.error, payload.erro, payload.Message, payload.Retorno]) {
     if (typeof value === "string" && value.trim()) return value.trim();
   }
   return null;
