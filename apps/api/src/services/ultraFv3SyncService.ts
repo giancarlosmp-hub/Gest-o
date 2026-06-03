@@ -80,6 +80,12 @@ const pickPartnerCode = (payload: Record<string, unknown>) =>
 const pickPartnerDocument = (payload: Record<string, unknown>) =>
   pickFirstString(payload, ["CNPJ", "CPF", "CGC", "DOCUMENTO", "CPFCNPJ", "CPF_CNPJ", "CNPJ_CPF", "NR_CNPJ_CPF", "cpfCnpj", "cnpj", "cpf", "document", "documentNumber", "CNPJCPF"]);
 
+const partnerCityKeys = ["CIDADE", "DSC_CIDADE", "NOME_CIDADE", "MUNICIPIO", "CIDADE_PARCEIRO", "CID_CIDADE", "cidade", "city", "municipio"];
+const partnerStateKeys = ["UF", "ESTADO", "SIGLA_UF", "UF_PARCEIRO", "estado", "state", "uf"];
+
+const pickPartnerCity = (payload: Record<string, unknown>) => pickFirstString(payload, partnerCityKeys);
+const pickPartnerState = (payload: Record<string, unknown>) => pickFirstString(payload, partnerStateKeys);
+
 const pickPartnerAddress = (payload: Record<string, unknown>) => {
   const street = pickFirstString(payload, ["ENDERECO", "LOGRADOURO", "RUA", "ADDRESS", "address", "logradouro"]);
   const number = pickFirstString(payload, ["NUMERO", "NRO", "NUMBER", "addressNumber", "numero"]);
@@ -502,7 +508,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
     const normalizedDocument = normalizeDocument(cnpj);
     if (cnpj) diagnostics.receivedWithDocument += 1;
     else diagnostics.receivedWithoutDocument += 1;
-    const state = pickFirstString(payload, ["state", "uf", "UF", "estado"]);
+    const state = pickPartnerState(payload);
     const existing = await prisma.client.findFirst({
       where: {
         OR: [
@@ -512,8 +518,9 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
         ]
       },
       orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
-      select: { id: true, ownerSellerId: true }
+      select: { id: true, ownerSellerId: true, city: true, state: true }
     });
+    const mappedCity = pickPartnerCity(payload);
     const derivedClientType = resolveClientTypeFromDocument(normalizedDocument);
     const data = {
       code,
@@ -521,7 +528,7 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       fantasyName: pickFirstString(payload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]) || null,
       cnpj: cnpj || undefined,
       cnpjNormalized: normalizedDocument || undefined,
-      city: pickFirstString(payload, ["city", "cidade", "CIDADE"]) || "Não informado",
+      city: mappedCity || "Não informado",
       state: normalizeState(state || "NI"),
       region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
       clientType: derivedClientType,
@@ -534,8 +541,21 @@ async function persistPartnerRowsForSeller(rows: unknown[], seller: SellerSyncUs
       await prisma.client.update({
         where: { id: existing.id },
         data: shouldPreserveCommercialLink
-          ? { ...data, cnpj: cnpj ? cnpj : undefined, cnpjNormalized: normalizedDocument ? normalizedDocument : undefined }
-          : { ...data, ownerSellerId: seller.id, cnpj: cnpj ? cnpj : undefined, cnpjNormalized: normalizedDocument ? normalizedDocument : undefined },
+          ? {
+              ...data,
+              cnpj: cnpj ? cnpj : undefined,
+              cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+              city: mappedCity ? data.city : (existing.city || data.city),
+              state: state ? data.state : (existing.state || data.state),
+            }
+          : {
+              ...data,
+              ownerSellerId: seller.id,
+              cnpj: cnpj ? cnpj : undefined,
+              cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+              city: mappedCity ? data.city : (existing.city || data.city),
+              state: state ? data.state : (existing.state || data.state),
+            },
       });
       diagnostics.updated += 1;
       if (shouldPreserveCommercialLink) {
@@ -602,8 +622,8 @@ export async function syncPartners(options?: RunSyncOptions) {
         orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
         select: { id: true }
       });
-      const mappedCity = pickFirstString(payload, ["city", "cidade", "CIDADE", "MUNICIPIO", "municipio"]);
-      const mappedState = pickFirstString(payload, ["state", "uf", "UF", "estado", "ESTADO"]);
+      const mappedCity = pickPartnerCity(payload);
+      const mappedState = pickPartnerState(payload);
       const mappedRegion = pickFirstString(payload, ["region", "regiao", "REGIAO", "região", "REGIÃO", "cidadeAtuacao", "CIDADE_ATUACAO"]);
       const mappedAddress = pickPartnerAddress(payload);
       const mappedName = pickFirstString(payload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]);
@@ -672,8 +692,8 @@ export async function syncPartners(options?: RunSyncOptions) {
           name: pickFirstString(firstPayload, ["RAZAO_SOCIAL", "NOME", "corporateName", "name", "razaoSocial", "nome"]),
           fantasyName: pickFirstString(firstPayload, ["FANTASIA", "fantasyName", "nomeFantasia", "apelido"]),
           cpfCnpjMasked: maskedDoc || null,
-          city: pickFirstString(firstPayload, ["city", "cidade", "CIDADE", "MUNICIPIO", "municipio"]),
-          state: pickFirstString(firstPayload, ["state", "uf", "UF", "estado", "ESTADO"]),
+          city: pickPartnerCity(firstPayload),
+          state: pickPartnerState(firstPayload),
           address: pickPartnerAddress(firstPayload),
           sellerCode: pickFirstString(firstPayload, ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"])
         }),

@@ -16,30 +16,45 @@ type ErpReferenceOption = {
   id: string;
   code: string;
   name: string;
+  description: string;
   label: string;
   value: string;
+  raw: Record<string, unknown>;
 };
 
-const referenceOptionKeys: Record<ErpReferenceScope, { code: string[]; name: string[] }> = {
+type ReferenceOptionKeyMap = {
+  code: string[];
+  name: string[];
+  fallbackDescriptions?: Record<string, string>;
+};
+
+const referenceOptionKeys: Record<ErpReferenceScope, ReferenceOptionKeyMap> = {
   paymentMethods: {
-    code: ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "FORMA", "CODFORMAPAGAMENTO", "CODFORMA"],
-    name: ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "LABEL", "FORMA_PAGAMENTO", "DESCFORMAPAGAMENTO"],
+    code: ["FORMA", "CODFORMA", "COD_FORMA", "CODIGO", "code", "codigo", "id", "ID", "value"],
+    name: ["DESCRICAO", "DSCFORMA", "DSC_FORMA", "NOME", "name", "description", "descricao", "label", "LABEL"],
   },
   receivingConditions: {
-    code: ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "CODCONDREC", "CONDICAO", "CODCONDICAO"],
-    name: ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "LABEL", "CONDICAO_RECEBIMENTO", "DESCCONDREC"],
+    code: ["CODCONDREC", "CONDICAO", "COD_CONDICAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
+    name: ["DESCRICAO", "DSCCONDREC", "DSC_CONDICAO", "NOME", "name", "description", "descricao", "label", "LABEL"],
   },
   priceTables: {
-    code: ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "TABELA_PRECO", "CODTABELA", "CODTABPRECO"],
-    name: ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "LABEL", "TABELA", "DESCTABELA"],
+    code: ["TABELA", "CODTABELA", "COD_TABELA", "ID_TABELA", "priceTable", "code", "codigo", "CODIGO", "id", "ID", "value"],
+    name: ["DESCRICAO", "DESCRICAO_TABELA", "DSC_TABELA", "NOME", "NOME_TABELA", "TABELA_DESCRICAO", "name", "description", "descricao", "label", "LABEL"],
+    fallbackDescriptions: {
+      "1": "REVENDA / COOPERATIVA",
+      "2": "CONSUMIDOR FINAL",
+    },
   },
   branches: {
-    code: ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "CODFILIAL", "FILIAL"],
-    name: ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "LABEL", "fantasyName", "razaoSocial", "NOMEFILIAL"],
+    code: ["CODFILIAL", "FILIAL", "COD_FILIAL", "CODIGO", "code", "codigo", "id", "ID", "value"],
+    name: ["DESCRICAO", "DSCFILIAL", "NOME", "RAZAO_SOCIAL", "FANTASIA", "name", "description", "descricao", "label", "LABEL", "fantasyName", "razaoSocial"],
   },
   operations: {
-    code: ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "CODOPER", "OPERACAO", "CODOPE"],
-    name: ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "LABEL", "DESCOPER", "DESCRICAOOPERACAO"],
+    code: ["CODOPER", "OPERACAO", "COD_OPERACAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
+    name: ["DESCRICAO", "DSCOPER", "DSC_OPERACAO", "NOME", "OPERACAO_DESCRICAO", "name", "description", "descricao", "label", "LABEL"],
+    fallbackDescriptions: {
+      "100": "VENDA",
+    },
   },
 };
 
@@ -63,24 +78,51 @@ const toArray = (payload: unknown): unknown[] => {
   return [];
 };
 
+const normalizeCodeKey = (value: string) => value.trim().replace(/^0+(?=\d)/, "") || value.trim();
+
+const getFallbackDescription = (scope: ErpReferenceScope, code: string) => {
+  const normalizedCode = normalizeCodeKey(code);
+  return referenceOptionKeys[scope].fallbackDescriptions?.[normalizedCode] || "";
+};
+
 const toReferenceOptions = (scope: ErpReferenceScope, payload: unknown): ErpReferenceOption[] => {
   const keys = referenceOptionKeys[scope];
-  return toArray(payload)
+  const rows = toArray(payload);
+  const items = rows
     .map((row) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
       const code = readFirstText(record, keys.code);
       if (!code) return null;
-      const name = readFirstText(record, keys.name) || code;
+      const mappedDescription = readFirstText(record, keys.name);
+      const fallbackDescription = mappedDescription ? "" : getFallbackDescription(scope, code);
+      const description = mappedDescription || fallbackDescription;
+      const name = description || code;
+      const label = `${code} · ${description || name}`;
       return {
         id: readFirstText(record, ["id", "ID", "uuid", "UUID"]) || code,
         code,
         name,
-        label: name && name !== code ? `${code} · ${name}` : code,
+        description,
+        label,
         value: code,
+        raw: record,
       };
     })
     .filter((option): option is ErpReferenceOption => Boolean(option));
+
+  if (scope === "priceTables" || scope === "operations") {
+    const firstRecord = rows.find((row) => row && typeof row === "object") as Record<string, unknown> | undefined;
+    logApiEvent("INFO", "[ultrafv3 references] normalized local sync cache", {
+      scope,
+      cacheCount: rows.length,
+      sampleKeys: firstRecord ? Object.keys(firstRecord).slice(0, 20) : [],
+      normalizedCount: items.length,
+      sampleLabels: items.slice(0, 3).map((item) => item.label),
+    });
+  }
+
+  return items;
 };
 
 const wrapReference = (scope: ErpReferenceScope) => async (_req: any, res: any) => {
