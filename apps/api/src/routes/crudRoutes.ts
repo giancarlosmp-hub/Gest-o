@@ -61,7 +61,7 @@ import {
   syncOrderStatus
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
-import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
@@ -6003,6 +6003,106 @@ router.get("/opportunities/:id", async (req, res) => {
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   return res.json(serializeOpportunity(opportunity, todayStart));
+});
+
+
+const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
+  vendedorErp: payload.VENDEDOR ?? null,
+  operadorErp: payload.OPERADOR ?? null,
+  numPedidoSalesmen: payload.NUM_PEDIDO ?? null,
+  clienteErp: payload.PARCEIRO ?? null,
+  produtosErp: Array.isArray(payload.ITENS)
+    ? payload.ITENS.map((item) => ({
+        item: item.ITEM ?? null,
+        codigoProduto: item.CODPRODUTO ?? null,
+        classificacaoProduto: item.CODPRODUTO_CLAS ?? null,
+        quantidade: item.QTD_PEDIDO ?? null,
+        unidade: item.UND_MEDIDA ?? item.DESCRICAO_UNMED ?? null,
+        preco: item.PRECO ?? null,
+        precoLista: item.PRECO_LISTA ?? null,
+        valorBruto: item.VALOR_BRUTO ?? null,
+        valorDesconto: item.VALOR_DESCONTO ?? null,
+        valorLiquido: item.VALOR_LIQUIDO ?? null,
+      }))
+    : [],
+  formaPagamento: payload.FORMA ?? null,
+  condicaoRecebimento: payload.CODCONDREC ?? null,
+  tabelaPreco: payload.TABELA_PRECO ?? null,
+  filial: payload.CODFILIAL ?? null,
+  operacao: payload.CODOPER ?? null,
+});
+
+router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  const opportunityId = req.params.id;
+  req.correlationId = correlationId;
+  res.setHeader("x-correlation-id", correlationId);
+  logApiEvent("INFO", "[erp debug payload route] request started", {
+    opportunityId,
+    userId: req.user?.id ?? null,
+    correlationId,
+    requestId: req.requestId,
+  });
+
+  try {
+    const parsed = erpOrderGenerationSchema.safeParse({ ...req.query, simulateOnly: true });
+    if (!parsed.success) {
+      const message = parsed.error.issues[0]?.message || "Parâmetros inválidos";
+      throw Object.assign(new Error(`Parâmetros inválidos para debug do payload ERP: ${message}`), { status: 400 });
+    }
+
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, ...sellerWhere(req) },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+    });
+    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
+
+    const preview = await createErpOrderFromOpportunity(opportunity, parsed.data, { correlationId });
+    const payload = preview.payloadSent as UltraFv3OrderPayload;
+    const details = buildErpDebugPayloadDetails(payload);
+
+    logApiEvent("INFO", "[ERP DEBUG PAYLOAD]", {
+      opportunityId,
+      correlationId,
+      endpoint: "/orders",
+      willSubmitOrders: false,
+      ...details,
+      payload,
+      salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null,
+    });
+
+    return res.status(200).json({
+      correlationId,
+      simulated: true,
+      postOrdersSent: false,
+      endpoint: "/orders",
+      message: "Payload gerado para debug; nenhum POST /orders foi enviado ao UltraFV3.",
+      payload,
+      ...details,
+      salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null,
+    });
+  } catch (error: any) {
+    const statusCandidate = Number(error?.status || 502);
+    const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
+    const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Falha ao gerar debug do payload ERP.");
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp debug payload route] request failed", {
+      opportunityId,
+      correlationId,
+      httpStatus: status,
+      error: message,
+      diagnostics: error?.diagnostics || null,
+    });
+    return res.status(status).json({
+      correlationId,
+      simulated: true,
+      postOrdersSent: false,
+      payload: null,
+      status: "erro",
+      message,
+      salesmenDiagnostics: error?.diagnostics || null,
+      ...(error?.payload ? { invalidPayload: error.payload } : {}),
+    });
+  }
 });
 
 router.post("/opportunities/:id/erp/orders", async (req, res) => {
