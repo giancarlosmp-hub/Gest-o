@@ -118,8 +118,11 @@ type OpportunityItemTotals = {
 };
 
 type ErpOption = {
+  id: string;
   code: string;
+  name: string;
   label: string;
+  value: string;
   description?: string;
 };
 
@@ -210,20 +213,24 @@ const toErpOptions = (payload: unknown): ErpOption[] => {
     .map((row: unknown) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
-      const code = readFirstText(record, ["code", "codigo", "CODIGO", "id", "ID", "value", "COD", "cod", "CODFILIAL", "CODOPER", "CODCONDREC", "FORMA", "TABELA_PRECO"]);
+      const code = readFirstText(record, ["code", "codigo", "CODIGO", "value", "id", "ID", "COD", "cod", "CODFILIAL", "CODOPER", "CODCONDREC", "FORMA", "TABELA_PRECO"]);
       if (!code) return null;
-      const name = readFirstText(record, ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "fantasyName", "razaoSocial"]);
+      const name = readFirstText(record, ["name", "nome", "NOME", "description", "descricao", "DESCRICAO", "label", "fantasyName", "razaoSocial"]) || code;
       const detail = readFirstText(record, ["type", "tipo", "city", "cidade", "state", "uf"]);
+      const label = readFirstText(record, ["label", "LABEL"]) || (name !== code ? `${code} · ${name}` : code);
       return {
+        id: readFirstText(record, ["id", "ID", "uuid", "UUID"]) || code,
         code,
-        label: name ? `${name} · ${code}` : code,
+        name,
+        label,
+        value: readFirstText(record, ["value"]) || code,
         description: detail || undefined
       };
     })
     .filter((option: ErpOption | null): option is ErpOption => Boolean(option));
 };
 
-const firstOptionCode = (options: ErpOption[]) => options[0]?.code || "";
+const firstOptionCode = (options: ErpOption[]) => options[0]?.value || options[0]?.code || "";
 
 const statusPillClassName: Record<"success" | "warning" | "danger" | "neutral", string> = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -242,7 +249,8 @@ function SearchableSelect({
   options,
   loading,
   placeholder,
-  onChange
+  onChange,
+  emptyMessage
 }: {
   label: string;
   value: string;
@@ -250,8 +258,9 @@ function SearchableSelect({
   loading?: boolean;
   placeholder?: string;
   onChange: (value: string) => void;
+  emptyMessage?: string;
 }) {
-  const selectedOption = options.find((option) => option.code === value);
+  const selectedOption = options.find((option) => option.value === value || option.code === value);
   const [query, setQuery] = useState(selectedOption?.label || "");
   const [open, setOpen] = useState(false);
 
@@ -262,7 +271,7 @@ function SearchableSelect({
   const filteredOptions = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return options.slice(0, 20);
-    return options.filter((option) => `${option.label} ${option.code} ${option.description || ""}`.toLowerCase().includes(normalized)).slice(0, 20);
+    return options.filter((option) => `${option.label} ${option.code} ${option.name} ${option.description || ""}`.toLowerCase().includes(normalized)).slice(0, 20);
   }, [options, query]);
 
   return (
@@ -278,8 +287,8 @@ function SearchableSelect({
           const nextQuery = event.target.value;
           setQuery(nextQuery);
           setOpen(true);
-          const exact = options.find((option) => option.label === nextQuery || option.code === nextQuery);
-          onChange(exact?.code || "");
+          const exact = options.find((option) => option.label === nextQuery || option.code === nextQuery || option.value === nextQuery);
+          onChange(exact?.value || "");
         }}
         className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:bg-slate-100 disabled:text-slate-500"
       />
@@ -287,20 +296,20 @@ function SearchableSelect({
         <div className="absolute z-50 mt-2 max-h-64 w-full overflow-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/10">
           {filteredOptions.length ? filteredOptions.map((option) => (
             <button
-              key={`${label}-${option.code}`}
+              key={`${label}-${option.id}-${option.value}`}
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                onChange(option.code);
+                onChange(option.value);
                 setQuery(option.label);
                 setOpen(false);
               }}
-              className={`w-full rounded-xl px-3 py-2 text-left text-sm transition hover:bg-brand-50 ${option.code === value ? "bg-brand-50 text-brand-800" : "text-slate-700"}`}
+              className={`w-full rounded-xl px-3 py-2 text-left text-sm transition hover:bg-brand-50 ${option.value === value ? "bg-brand-50 text-brand-800" : "text-slate-700"}`}
             >
               <span className="block font-semibold">{option.label}</span>
               {option.description ? <span className="block text-xs text-slate-500">{option.description}</span> : null}
             </button>
-          )) : <div className="px-3 py-2 text-sm text-slate-500">Nenhuma opção encontrada.</div>}
+          )) : <div className="px-3 py-2 text-sm text-slate-500">{emptyMessage || "Nenhuma opção encontrada."}</div>}
         </div>
       ) : null}
     </label>
@@ -841,11 +850,11 @@ export default function OpportunityDetailsPage() {
                         <StatusPill tone="neutral">Selects pesquisáveis</StatusPill>
                       </div>
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                        <SearchableSelect label="Forma de pagamento" value={erpOrderForm.paymentMethodCode} options={paymentMethods} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("paymentMethodCode", value)} />
-                        <SearchableSelect label="Condição de recebimento" value={erpOrderForm.receivingConditionCode} options={receivingConditions} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("receivingConditionCode", value)} />
-                        <SearchableSelect label="Tabela de preço" value={erpOrderForm.priceTableCode} options={priceTables} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("priceTableCode", value)} />
-                        <SearchableSelect label="Filial" value={erpOrderForm.branchCode} options={branches} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("branchCode", value)} />
-                        <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} onChange={(value) => setErpOrderField("operationCode", value)} />
+                        <SearchableSelect label="Forma de pagamento" value={erpOrderForm.paymentMethodCode} options={paymentMethods} loading={loadingErpOrderData} emptyMessage="Não há formas de pagamento sincronizadas. Vá em Configurações > Integração ERP e sincronize Formas de pagamento." onChange={(value) => setErpOrderField("paymentMethodCode", value)} />
+                        <SearchableSelect label="Condição de recebimento" value={erpOrderForm.receivingConditionCode} options={receivingConditions} loading={loadingErpOrderData} emptyMessage="Não há condições de recebimento sincronizadas. Vá em Configurações > Integração ERP e sincronize Condições de recebimento." onChange={(value) => setErpOrderField("receivingConditionCode", value)} />
+                        <SearchableSelect label="Tabela de preço" value={erpOrderForm.priceTableCode} options={priceTables} loading={loadingErpOrderData} emptyMessage="Não há tabelas de preço sincronizadas. Vá em Configurações > Integração ERP e sincronize Tabelas de preço." onChange={(value) => setErpOrderField("priceTableCode", value)} />
+                        <SearchableSelect label="Filial" value={erpOrderForm.branchCode} options={branches} loading={loadingErpOrderData} emptyMessage="Não há filiais sincronizadas. Vá em Configurações > Integração ERP e sincronize Filiais." onChange={(value) => setErpOrderField("branchCode", value)} />
+                        <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} emptyMessage="Não há operações sincronizadas. Vá em Configurações > Integração ERP e sincronize Operações." onChange={(value) => setErpOrderField("operationCode", value)} />
                       </div>
                       <label className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                         <input
