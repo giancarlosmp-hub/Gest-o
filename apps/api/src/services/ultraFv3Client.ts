@@ -37,6 +37,14 @@ export type UltraFv3LoginDiagnostic = {
   ultraResponse: unknown;
   correlationId: string;
 };
+export type UltraFv3RequestDiagnostic = {
+  status: number;
+  endpoint: string;
+  method: string;
+  message: string;
+  ultraResponse: unknown;
+  correlationId: string;
+};
 
 type UltraFv3AuthPayload = {
   token?: string;
@@ -120,9 +128,10 @@ const maskCpfCnpjLogin = (value: string) => {
 };
 
 const extractUltraMessage = (payload: unknown, status: number) => {
+  if (typeof payload === "string" && payload.trim()) return payload.trim();
   if (!payload || typeof payload !== "object") return `UltraFV3 login falhou com status ${status}.`;
   const candidate = payload as Record<string, unknown>;
-  const fields = [candidate.message, candidate.error, candidate.details];
+  const fields = [candidate.message, candidate.error, candidate.erro, candidate.Message, candidate.Retorno, candidate.details];
   for (const field of fields) {
     if (typeof field === "string" && field.trim()) return field.trim();
   }
@@ -140,7 +149,7 @@ export class UltraFv3IntegrationError extends Error {
       | "invalid_response"
       | "request_failed",
     readonly status?: number,
-    readonly diagnostics?: UltraFv3LoginDiagnostic,
+    readonly diagnostics?: UltraFv3LoginDiagnostic | UltraFv3RequestDiagnostic,
   ) {
     super(message);
     this.name = "UltraFv3IntegrationError";
@@ -205,12 +214,13 @@ class UltraFv3Client {
     };
   }
 
-  private async safeJson(response: Response) {
+  private async safeJson(response: Response, allowPlainText = false) {
     const text = await response.text();
     if (!text) return null;
     try {
       return JSON.parse(text) as unknown;
     } catch {
+      if (allowPlainText) return text;
       throw new UltraFv3IntegrationError(
         "UltraFV3 retornou uma resposta inválida (JSON malformado).",
         "invalid_response",
@@ -499,13 +509,17 @@ class UltraFv3Client {
       { method, path, attempt: 1, correlationId },
     );
 
+    const ultraResponse = await this.safeJson(response, !response.ok);
+    const ultraMessage = extractUltraMessage(ultraResponse, response.status);
+    const diagnostics: UltraFv3RequestDiagnostic = { status: response.status, endpoint: path, method, message: ultraMessage, ultraResponse, correlationId };
+
     if (response.status === 401 || response.status === 403) {
       this.credentialTokenCache.delete(cacheKey);
-      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path} com credencial de usuário.`, "auth_failed", response.status);
+      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path} com credencial de usuário: ${ultraMessage}`, "auth_failed", response.status, diagnostics);
     }
-    if (response.status === 404) throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}.`, "not_found", response.status);
-    if (!response.ok) throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}.`, "request_failed", response.status);
-    return (await this.safeJson(response)) as T;
+    if (response.status === 404) throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}. Detalhe: ${ultraMessage}`, "not_found", response.status, diagnostics);
+    if (!response.ok) throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}: ${ultraMessage}`, "request_failed", response.status, diagnostics);
+    return ultraResponse as T;
   }
 
   async request<T>(

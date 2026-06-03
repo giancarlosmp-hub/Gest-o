@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
@@ -20,6 +20,96 @@ const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const SENSITIVE_KEY_PATTERN = /authorization|token|password|senha|secret|credential/i;
+const DOCUMENT_KEY_PATTERN = /document|documento|cpf|cnpj/i;
+
+const redactSensitiveText = (value: string) => value
+  .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer ***")
+  .replace(/(authorization|token|password|senha)\s*[:=]\s*[^,;\s]+/gi, "$1=***")
+  .replace(/\b(\d{3})\d{6}(\d{2})\b/g, "$1***$2")
+  .replace(/\b(\d{3})\d{9}(\d{2})\b/g, "$1***$2")
+  .replace(/\b(\d{3})[.]\d{3}[.]\d{3}-?(\d{2})\b/g, "$1.***-$2")
+  .replace(/\b(\d{2})[.]\d{3}[.]\d{3}[/]\d{4}-?(\d{2})\b/g, "$1.***-$2");
+
+const maskDocument = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  const digits = text.replace(/\D/g, "");
+  if (!digits) return text ? "***" : "";
+  if (digits.length <= 4) return "***";
+  return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
+};
+
+const sanitizeUltraValue = (value: unknown, key = ""): unknown => {
+  if (SENSITIVE_KEY_PATTERN.test(key)) return "***";
+  if (DOCUMENT_KEY_PATTERN.test(key)) return maskDocument(value);
+  if (typeof value === "string") return redactSensitiveText(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeUltraValue(item));
+  if (value && typeof value === "object")
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [childKey, sanitizeUltraValue(childValue, childKey)]));
+  return value;
+};
+
+const getResponseField = (payload: unknown, key: string) =>
+  payload && typeof payload === "object" && !Array.isArray(payload)
+    ? (payload as Record<string, unknown>)[key]
+    : undefined;
+
+const toUsefulText = (value: unknown) => {
+  if (typeof value === "string" && value.trim()) return redactSensitiveText(value.trim());
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value && typeof value === "object") return JSON.stringify(sanitizeUltraValue(value));
+  return "";
+};
+
+type SanitizedUltraOrderFailure = {
+  status: number | null;
+  endpoint: "/orders";
+  message: string;
+  error?: unknown;
+  erro?: unknown;
+  Message?: unknown;
+  Retorno?: unknown;
+  correlationId: string;
+  PEDIDO_ID_IMPORTACAO: string;
+  NUM_PEDIDO: string;
+  CODVENDEDOR: number;
+  OPERADOR: number;
+};
+
+const sanitizeUltraOrderFailure = (
+  error: unknown,
+  context: { pedidoIdImportacao: string; numPedido: string; codVendedor: number; operador: number },
+): SanitizedUltraOrderFailure => {
+  const integrationError = error instanceof UltraFv3IntegrationError ? error : null;
+  const diagnostics = integrationError?.diagnostics;
+  const response = diagnostics?.ultraResponse;
+  const fields = Object.fromEntries(
+    ["error", "erro", "Message", "Retorno"]
+      .map((key) => [key, getResponseField(response, key)] as const)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [key, sanitizeUltraValue(value, key)]),
+  );
+  const ultraMessage = toUsefulText(getResponseField(response, "message"))
+    || toUsefulText(getResponseField(response, "Message"))
+    || toUsefulText(getResponseField(response, "error"))
+    || toUsefulText(getResponseField(response, "erro"))
+    || toUsefulText(getResponseField(response, "Retorno"))
+    || diagnostics?.message
+    || (error instanceof Error ? error.message : String(error));
+  const status = diagnostics?.status ?? integrationError?.status ?? null;
+  return {
+    status,
+    endpoint: "/orders",
+    message: `UltraFV3 rejeitou POST /orders${status ? ` (status ${status})` : ""}: ${ultraMessage}`,
+    ...fields,
+    correlationId: diagnostics?.correlationId || context.pedidoIdImportacao,
+    PEDIDO_ID_IMPORTACAO: context.pedidoIdImportacao,
+    NUM_PEDIDO: context.numPedido,
+    CODVENDEDOR: context.codVendedor,
+    OPERADOR: context.operador,
+  };
+};
 
 type OrderParameterCodes = Pick<
   ErpOrderGenerationInput,
@@ -366,6 +456,8 @@ export async function createErpOrderFromOpportunity(
     });
   if (opportunity.items.some((item) => !item.erpProductCode?.trim()))
     throw Object.assign(new Error("Payload inválido: há item sem código ERP."), { status: 400 });
+  if (opportunity.items.some((item) => !item.erpProductClassCode?.trim()))
+    throw Object.assign(new Error("Payload inválido: há item sem classificação ERP (CODPRODUTO_CLAS)."), { status: 400 });
   if (opportunity.items.some((item) => !item.unit?.trim()))
     throw Object.assign(new Error("Payload inválido: há item sem unidade de medida."), {
       status: 400,
@@ -432,7 +524,7 @@ export async function createErpOrderFromOpportunity(
 
   const itens = opportunity.items.map((item) => ({
     CODPRODUTO: item.erpProductCode,
-    CLASSIFICACAO: item.erpProductClassCode,
+    CODPRODUTO_CLAS: item.erpProductClassCode,
     QTD_PEDIDO: Number(item.quantity),
     PRECO: Number(item.unitPrice),
     UND_MEDIDA: item.unit,
@@ -457,13 +549,13 @@ export async function createErpOrderFromOpportunity(
     DATA_EMISSAO: formatDateDot(now),
     DATA_ENTREGA: formatDateDot(now),
     TIPO_MOVIMENTO: "PEDIDO",
-    FORMA: params.paymentMethodCode,
-    CODCONDREC: params.receivingConditionCode,
+    FORMA_PAGAMENTO: params.paymentMethodCode,
+    CONDICAO_RECEBIMENTO: params.receivingConditionCode,
     TABELA_PRECO: params.priceTableCode,
-    CODFILIAL: params.branchCode,
-    CODOPER: params.operationCode,
+    FILIAL: params.branchCode,
+    OPERACAO: params.operationCode,
     PARCEIRO: clientErpCode,
-    VENDEDOR: numericSellerErpCode,
+    CODVENDEDOR: numericSellerErpCode,
     VALOR_BRUTO: valorBruto,
     VALOR_LIQUIDO: valorLiquido,
     ITENS: itens,
@@ -539,6 +631,12 @@ export async function createErpOrderFromOpportunity(
     erpOrderSyncId: sync.id,
   });
 
+  logApiEvent("INFO", "[erp order] sanitized final payload sent to UltraFV3", {
+    endpoint: "/orders",
+    correlationId: pedidoIdImportacao,
+    payload: sanitizeUltraValue({ ...payload, PARCEIRO: maskDocument(payload.PARCEIRO) }),
+  });
+
   try {
     const erpResponse = await ultraFv3Client.requestWithCredentials<unknown>("/orders", sellerCredentials, {
       method: "POST",
@@ -565,25 +663,24 @@ export async function createErpOrderFromOpportunity(
     });
     return updated;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const failure = sanitizeUltraOrderFailure(error, { pedidoIdImportacao, numPedido, codVendedor: numericSellerErpCode, operador: numericOperatorCode });
     await prisma.erpOrderSync.update({
       where: { id: sync.id },
       data: {
         status: ErpOrderSyncStatus.error,
-        erpResponse: toJson({ message }),
-        syncErrors: toJson([{ message, at: new Date().toISOString(), correlationId: pedidoIdImportacao }]),
+        erpResponse: toJson(failure),
+        syncErrors: toJson([{ ...failure, at: new Date().toISOString() }]),
       },
     });
     logApiEvent("ERROR", "[erp order] UltraFV3 order submission failed", {
       ...operationContext,
-      pedidoIdImportacao,
-      numPedido,
       erpOrderSyncId: sync.id,
-      error: message,
+      failure,
     });
-    throw Object.assign(error instanceof Error ? error : new Error(message), {
+    throw Object.assign(new Error(failure.message), {
       pedidoIdImportacao,
-      status: 502,
+      status: failure.status && failure.status >= 400 && failure.status < 600 ? failure.status : 502,
+      ultraFv3Failure: failure,
     });
   }
 }
