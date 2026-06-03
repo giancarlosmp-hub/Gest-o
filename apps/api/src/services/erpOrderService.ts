@@ -7,6 +7,7 @@ import {
   type User,
 } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
@@ -19,13 +20,68 @@ const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-type OrderParameterCodes = {
+type OrderParameterCodes = Pick<
+  ErpOrderGenerationInput,
+  "paymentMethodCode" | "receivingConditionCode" | "priceTableCode" | "branchCode" | "operationCode" | "simulateOnly"
+>;
+
+type NormalizedOrderParameterCodes = {
   paymentMethodCode: string;
   receivingConditionCode: string;
   priceTableCode: string;
   branchCode: string;
   operationCode: string;
-  simulateOnly?: boolean;
+  simulateOnly: boolean;
+};
+
+export type ErpOrderParameterDiagnostics = {
+  paymentMethodCodeRaw: unknown;
+  paymentMethodCodeNormalized: string;
+  receivingConditionCodeRaw: unknown;
+  receivingConditionCodeNormalized: string;
+  priceTableCodeRaw: unknown;
+  priceTableCodeNormalized: string;
+  branchCodeRaw: unknown;
+  branchCodeNormalized: string;
+  operationCodeRaw: unknown;
+  operationCodeNormalized: string;
+};
+
+const toSafeParameterRawValue = (value: ErpOrderParameterValue | undefined): unknown => {
+  if (typeof value === "string" || typeof value === "number" || value == null) return value ?? null;
+  if (typeof value !== "object" || Array.isArray(value)) return null;
+
+  const safe: Record<string, unknown> = {};
+  for (const key of ["code", "value", "label"] as const) {
+    const candidate = value[key];
+    if (typeof candidate === "string" || typeof candidate === "number") safe[key] = candidate;
+  }
+  return safe;
+};
+
+export const normalizeErpOrderParameterCodes = (params: Partial<OrderParameterCodes>): NormalizedOrderParameterCodes => ({
+  paymentMethodCode: normalizeErpParameterCode(params.paymentMethodCode),
+  receivingConditionCode: normalizeErpParameterCode(params.receivingConditionCode),
+  priceTableCode: normalizeErpParameterCode(params.priceTableCode),
+  branchCode: normalizeErpParameterCode(params.branchCode),
+  operationCode: normalizeErpParameterCode(params.operationCode),
+  simulateOnly: params.simulateOnly === true,
+});
+
+export const getErpOrderParameterDiagnostics = (params: Partial<OrderParameterCodes>): ErpOrderParameterDiagnostics => {
+  const normalized = normalizeErpOrderParameterCodes(params);
+  return {
+    paymentMethodCodeRaw: toSafeParameterRawValue(params.paymentMethodCode),
+    paymentMethodCodeNormalized: normalized.paymentMethodCode,
+    receivingConditionCodeRaw: toSafeParameterRawValue(params.receivingConditionCode),
+    receivingConditionCodeNormalized: normalized.receivingConditionCode,
+    priceTableCodeRaw: toSafeParameterRawValue(params.priceTableCode),
+    priceTableCodeNormalized: normalized.priceTableCode,
+    branchCodeRaw: toSafeParameterRawValue(params.branchCode),
+    branchCodeNormalized: normalized.branchCode,
+    operationCodeRaw: toSafeParameterRawValue(params.operationCode),
+    operationCodeNormalized: normalized.operationCode,
+  };
 };
 
 type OpportunityForErpOrder = {
@@ -109,11 +165,12 @@ const normalizeOrderStatus = (
 
 
 const referenceCodeKeys: Record<string, string[]> = {
-  priceTables: ["code", "codigo", "CODIGO", "id", "ID", "value", "TABELA_PRECO"],
-  operations: ["code", "codigo", "CODIGO", "id", "ID", "value", "CODOPER"],
+  priceTables: ["TABELA", "CODTABELA", "COD_TABELA", "ID_TABELA", "TABELA_PRECO", "code", "codigo", "CODIGO", "id", "ID", "value"],
+  operations: ["CODOPER", "OPERACAO", "COD_OPERACAO", "code", "codigo", "CODIGO", "id", "ID", "value"],
 };
 
 async function assertReferenceCode(scope: "priceTables" | "operations", code: string, message: string) {
+  const normalizedCode = normalizeErpParameterCode(code);
   const stored = await prisma.appConfig.findUnique({
     where: { key: `erp.ultrafv3.${scope}` },
     select: { value: true },
@@ -124,7 +181,7 @@ async function assertReferenceCode(scope: "priceTables" | "operations", code: st
     if (!rows.length) return;
     const exists = rows.some((row) => {
       if (!row || typeof row !== "object") return false;
-      return pickFirstString(row as Record<string, unknown>, referenceCodeKeys[scope]) === code;
+      return normalizeErpParameterCode(pickFirstString(row as Record<string, unknown>, referenceCodeKeys[scope])) === normalizedCode;
     });
     if (!exists) throw Object.assign(new Error(message), { status: 400 });
   } catch (error) {
@@ -211,8 +268,17 @@ async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: 
 
 export async function createErpOrderFromOpportunity(
   opportunity: OpportunityForErpOrder,
-  params: OrderParameterCodes,
+  rawParams: OrderParameterCodes,
 ) {
+  const params = normalizeErpOrderParameterCodes(rawParams);
+  const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
+  const missingParameter = Object.entries(params).find(([key, value]) => key !== "simulateOnly" && !value);
+  if (missingParameter)
+    throw Object.assign(new Error(`Payload inválido: código ERP ausente em ${missingParameter[0]}.`), {
+      status: 400,
+      parameterDiagnostics,
+    });
+
   if (opportunity.stage !== "ganho")
     throw Object.assign(
       new Error("Operação inválida: apenas oportunidades na etapa Ganha podem gerar pedido ERP."),
@@ -271,8 +337,13 @@ export async function createErpOrderFromOpportunity(
       { status: 400 },
     );
 
-  await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
-  await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
+  try {
+    await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
+    await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
+  } catch (error) {
+    if (error instanceof Error) Object.assign(error, { parameterDiagnostics });
+    throw error;
+  }
 
   const now = new Date();
   const pedidoIdImportacao = randomUUID();
@@ -282,6 +353,13 @@ export async function createErpOrderFromOpportunity(
     sellerErpCode,
     operatorCode,
     authMode: "seller",
+    orderParameterCodes: {
+      paymentMethodCode: params.paymentMethodCode,
+      receivingConditionCode: params.receivingConditionCode,
+      priceTableCode: params.priceTableCode,
+      branchCode: params.branchCode,
+      operationCode: params.operationCode,
+    },
   };
   logApiEvent(
     "INFO",

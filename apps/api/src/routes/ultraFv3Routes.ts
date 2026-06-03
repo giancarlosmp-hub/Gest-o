@@ -4,6 +4,7 @@ import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { authorize } from "../middlewares/authorize.js";
+import { normalizeErpParameterCode } from "@salesforce-pro/shared";
 
 const router = Router();
 
@@ -92,9 +93,13 @@ const toReferenceOptions = (scope: ErpReferenceScope, payload: unknown): ErpRefe
     .map((row) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
-      const code = readFirstText(record, keys.code);
+      const rawCode = readFirstText(record, keys.code);
+      const code = normalizeErpParameterCode(rawCode);
       if (!code) return null;
-      const mappedDescription = readFirstText(record, keys.name);
+      const rawDescription = readFirstText(record, keys.name);
+      const mappedDescription = rawDescription.startsWith(`${code} ·`)
+        ? rawDescription.slice(rawDescription.indexOf("·") + 1).trim()
+        : rawDescription;
       const fallbackDescription = mappedDescription ? "" : getFallbackDescription(scope, code);
       const description = mappedDescription || fallbackDescription;
       const name = description || code;

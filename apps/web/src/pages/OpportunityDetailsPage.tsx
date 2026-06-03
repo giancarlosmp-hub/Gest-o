@@ -6,7 +6,7 @@ import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatt
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
-import { getErpOrderReadiness, isErpOrderSyncResendable, isSuccessfulErpOrderSync } from "@salesforce-pro/shared";
+import { getErpOrderReadiness, isErpOrderSyncResendable, isSuccessfulErpOrderSync, normalizeErpParameterCode } from "@salesforce-pro/shared";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -213,7 +213,8 @@ const toErpOptions = (payload: unknown): ErpOption[] => {
     .map((row: unknown) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
-      const code = readFirstText(record, ["code", "codigo", "CODIGO", "value", "id", "ID", "COD", "cod", "CODFILIAL", "CODOPER", "CODCONDREC", "FORMA", "TABELA", "CODTABELA", "TABELA_PRECO"]);
+      const rawCode = readFirstText(record, ["code", "codigo", "CODIGO", "value", "id", "ID", "COD", "cod", "CODFILIAL", "CODOPER", "CODCONDREC", "FORMA", "TABELA", "CODTABELA", "TABELA_PRECO"]);
+      const code = normalizeErpParameterCode(rawCode);
       if (!code) return null;
       const description = readFirstText(record, ["description", "descricao", "DESCRICAO", "name", "nome", "NOME"]);
       const name = readFirstText(record, ["name", "nome", "NOME"]) || description || code;
@@ -223,7 +224,7 @@ const toErpOptions = (payload: unknown): ErpOption[] => {
         code,
         name,
         label,
-        value: readFirstText(record, ["value"]) || code,
+        value: code,
         description: description || undefined
       };
     })
@@ -236,7 +237,7 @@ const normalizeSearchText = (value: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-const firstOptionCode = (options: ErpOption[]) => options[0]?.value || options[0]?.code || "";
+const firstOptionCode = (options: ErpOption[]) => options[0]?.code || "";
 
 const statusPillClassName: Record<"success" | "warning" | "danger" | "neutral", string> = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -297,7 +298,7 @@ function SearchableSelect({
           setQuery(nextQuery);
           setOpen(true);
           const exact = options.find((option) => option.label === nextQuery || option.code === nextQuery || option.value === nextQuery);
-          onChange(exact?.value || "");
+          onChange(exact?.code || "");
         }}
         className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:bg-slate-100 disabled:text-slate-500"
       />
@@ -309,7 +310,7 @@ function SearchableSelect({
               type="button"
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
-                onChange(option.value);
+                onChange(option.code);
                 setQuery(option.label);
                 setOpen(false);
               }}

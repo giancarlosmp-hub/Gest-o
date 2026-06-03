@@ -342,6 +342,48 @@ export interface AuthUser {
   region?: string | null;
 }
 
+export type ErpOrderParameterValue = string | number | {
+  code?: unknown;
+  value?: unknown;
+  label?: unknown;
+  [key: string]: unknown;
+};
+
+const ERP_PARAMETER_CODE_KEYS = ["code", "codigo", "CODIGO", "value", "id", "ID", "FORMA", "CODCONDREC", "TABELA", "CODTABELA", "TABELA_PRECO", "CODFILIAL", "CODOPER", "label", "name"] as const;
+
+export const normalizeErpParameterCode = (value: unknown): string => {
+  if (typeof value === "number") return Number.isFinite(value) ? String(value) : "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    return trimmed.split("·", 1)[0]?.trim() || "";
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+
+  const record = value as Record<string, unknown>;
+  for (const key of ERP_PARAMETER_CODE_KEYS) {
+    const normalized = normalizeErpParameterCode(record[key]);
+    if (normalized) return normalized;
+  }
+  return "";
+};
+
+const erpOrderParameterValueSchema = z.custom<ErpOrderParameterValue>(
+  (value) => Boolean(normalizeErpParameterCode(value)),
+  { message: "Código ERP obrigatório." },
+);
+
+export const erpOrderGenerationSchema = z.object({
+  paymentMethodCode: erpOrderParameterValueSchema,
+  receivingConditionCode: erpOrderParameterValueSchema,
+  priceTableCode: erpOrderParameterValueSchema,
+  branchCode: erpOrderParameterValueSchema,
+  operationCode: erpOrderParameterValueSchema,
+  simulateOnly: z.boolean().optional().default(false),
+});
+
+export type ErpOrderGenerationInput = z.infer<typeof erpOrderGenerationSchema>;
+
 export type ErpOrderSyncReadinessStatus = "pending" | "sent" | "error";
 export type ErpOrderSyncReadinessOrderStatus = "pendente" | "faturado" | "parcial" | "cancelado" | "entregue" | null | undefined;
 
