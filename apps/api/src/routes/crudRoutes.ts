@@ -6170,8 +6170,12 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
         correlationId,
         pedidoIdImportacao: error?.pedidoIdImportacao,
         existingErpOrderSyncId: error?.existingErpOrderSyncId,
-        status: "erro",
+        status,
+        endpoint: error?.endpoint || error?.ultraFv3Failure?.endpoint || "/orders",
+        mensagem: message,
         message,
+        ...(Array.isArray(error?.errors) ? { errors: error.errors } : {}),
+        ...(error?.payload ? { payload: sanitizeErpOrderPayload(error.payload) } : {}),
         ...(error?.ultraFv3Failure ? { ultraFv3: sanitizeErpOrderPayload(error.ultraFv3Failure) } : {}),
         ...(error?.parameterDiagnostics || parameterDiagnostics)
       });
