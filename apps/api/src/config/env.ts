@@ -27,7 +27,8 @@ export const env = {
     process.env.CORS_ALLOWED_ORIGINS ||
     process.env.FRONTEND_URL ||
     ((process.env.NODE_ENV || "development") === "production" ? "" : "http://localhost:5173"),
-  apiRequestTimeoutMs: Number(process.env.API_REQUEST_TIMEOUT_MS || 15_000),
+  apiRequestTimeoutMs: toNumber(process.env.API_REQUEST_TIMEOUT_MS, 15_000),
+  erpOrderRequestTimeoutMs: toNumber(process.env.ERP_ORDER_REQUEST_TIMEOUT_MS, 50_000),
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "access-secret",
   jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "refresh-secret",
   frontendUrl:
