@@ -11,6 +11,7 @@ import ultraFv3Routes from "./routes/ultraFv3Routes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
+import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath, safeJsonStringify } from "./utils/erpOrderFailureResponse.js";
 import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./middlewares/rateLimit.js";
 
 export const app = express();
@@ -21,20 +22,21 @@ if (env.isProduction) {
 
 let _tcCache: { data: object; expiresAt: number } | null = null;
 
-const isErpOrderRequest = (req: Request) =>
-  req.method === "POST" && /^\/(?:api\/)?opportunities\/[^/]+\/erp\/orders\/?$/.test(req.path);
+const isErpOrderRequest = (req: Request) => isErpOrderEndpointPath(req.method, req.path);
 
 const sendControlledJson = (res: Response, status: number, payload: Record<string, unknown>) => {
   if (res.headersSent || res.writableEnded) return false;
 
   try {
-    res.status(status).type("application/json").send(JSON.stringify(payload));
+    res.status(status).type("application/json").send(safeJsonStringify(payload));
   } catch {
     if (!res.headersSent && !res.writableEnded) {
-      res.status(500).type("application/json").send(JSON.stringify({
-        status: "erro",
+      res.status(500).type("application/json").send(safeJsonStringify({
+        status: 500,
+        etapa: "serialize-response",
         message: "Erro interno ao preparar a resposta controlada.",
-        ...(typeof payload.correlationId === "string" ? { correlationId: payload.correlationId } : {}),
+        mensagemTecnica: "Erro interno ao preparar a resposta controlada.",
+        ...(typeof payload.correlationId === "string" ? { correlationId: payload.correlationId } : { correlationId: "unavailable" }),
       }));
     }
   }
@@ -73,6 +75,7 @@ app.use((req, res, next) => {
   let finalLogWritten = false;
   req.correlationId = correlationId;
   req.erpOrderRouteHit = false;
+  req.erpOrderFailureStage = "ingress";
   res.setHeader("x-correlation-id", correlationId);
 
   logApiEvent("INFO", "[erp order ingress] request received", {
@@ -117,11 +120,13 @@ app.use((req, res, next) => {
         requestId: req.requestId,
         timeoutMs,
       });
-      sendControlledJson(res, 504, {
-        status: "erro",
+      req.erpOrderFailureStage = req.erpOrderRouteHit === true ? "timeout" : "ingress";
+      sendControlledJson(res, 504, buildControlledErpOrderFailurePayload({
+        status: 504,
+        etapa: req.erpOrderFailureStage,
         message: "O envio ao ERP excedeu o tempo limite antes da resposta da API.",
         correlationId: req.correlationId,
-      });
+      }));
     });
   } else {
     req.setTimeout(timeoutMs);
@@ -139,13 +144,17 @@ app.use((req, res, next) => {
         timeoutMs,
       });
     }
-    sendControlledJson(res, status, {
-      ...(erpOrderRequest ? { status: "erro" } : {}),
-      message: erpOrderRequest
-        ? "O envio ao ERP excedeu o tempo limite antes da resposta da API."
-        : "Request timeout",
-      ...(req.correlationId ? { correlationId: req.correlationId } : {}),
-    });
+    if (erpOrderRequest) {
+      req.erpOrderFailureStage = req.erpOrderRouteHit === true ? "timeout" : "ingress";
+      sendControlledJson(res, status, buildControlledErpOrderFailurePayload({
+        status,
+        etapa: req.erpOrderFailureStage,
+        message: "O envio ao ERP excedeu o tempo limite antes da resposta da API.",
+        correlationId: req.correlationId,
+      }));
+      return;
+    }
+    sendControlledJson(res, status, { message: "Request timeout" });
   });
   next();
 });
@@ -252,9 +261,18 @@ app.use((err: any, req: any, res: any, next: any) => {
   if (res.headersSent) return next(err);
 
   const erpOrderRequest = isErpOrderRequest(req);
-  sendControlledJson(res, 500, {
-    ...(erpOrderRequest ? { status: "erro" } : {}),
-    message: erpOrderRequest ? "Erro interno controlado no envio ao ERP." : "Internal server error",
-    ...(req.correlationId ? { correlationId: req.correlationId } : {}),
-  });
+  if (erpOrderRequest) {
+    req.erpOrderFailureStage = req.erpOrderFailureStage || (err?.type === "entity.parse.failed" ? "body-parser" : "express-error");
+    const status = Number(err?.status || err?.statusCode || 500);
+    const httpStatus = status >= 400 && status < 600 ? status : 500;
+    sendControlledJson(res, httpStatus, buildControlledErpOrderFailurePayload({
+      status: httpStatus,
+      etapa: req.erpOrderFailureStage,
+      message: err instanceof Error ? err.message : "Erro interno controlado no envio ao ERP.",
+      correlationId: req.correlationId,
+    }));
+    return;
+  }
+
+  sendControlledJson(res, 500, { message: "Internal server error" });
 });

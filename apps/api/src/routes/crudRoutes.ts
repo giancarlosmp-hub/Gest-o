@@ -63,6 +63,7 @@ import {
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
+import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
 const router = Router();
@@ -6118,6 +6119,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
 
   req.correlationId = correlationId;
   req.erpOrderRouteHit = true;
+  req.erpOrderFailureStage = "handler";
   res.setHeader("x-correlation-id", correlationId);
   logApiEvent("INFO", "[erp order route] request started", {
     routeHit: true,
@@ -6162,14 +6164,17 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       timestamp: new Date().toISOString(),
       timeoutMs: ERP_ORDER_ROUTE_TIMEOUT_MS,
     });
-    res.status(504).json({
-      status: "erro",
+    req.erpOrderFailureStage = "timeout";
+    res.status(504).json(buildControlledErpOrderFailurePayload({
+      status: 504,
+      etapa: "timeout",
       message: "O envio ao ERP excedeu o tempo limite. Confirme o pedido no ERP antes de tentar novamente.",
       correlationId,
-    });
+    }));
   });
 
   try {
+    req.erpOrderFailureStage = "validate-payload";
     normalizedParams = normalizeErpOrderParameterCodes({});
     parameterDiagnostics = getErpOrderParameterDiagnostics({});
     const parsed = erpOrderGenerationSchema.safeParse(req.body);
@@ -6181,6 +6186,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
     parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);
 
+    req.erpOrderFailureStage = "load-opportunity";
     opportunity = await prisma.opportunity.findFirst({
       where: { id: opportunityId, ...sellerWhere(req) },
       include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
@@ -6188,10 +6194,12 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
 
     previousOrderCount = await prisma.erpOrderSync.count({ where: { opportunityId: opportunity.id } });
+    req.erpOrderFailureStage = "submit-order";
     const sync = await createErpOrderFromOpportunity(opportunity, parsed.data, { correlationId });
 
     if (!normalizedParams.simulateOnly) {
       try {
+        req.erpOrderFailureStage = "persist-timeline";
         await prisma.timelineEvent.create({
           data: {
             type: "status",
@@ -6210,6 +6218,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       }
     }
 
+    req.erpOrderFailureStage = "handler";
     if (res.headersSent || res.writableEnded) return;
     return res.status(201).json({
       correlationId,
@@ -6227,6 +6236,13 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
     const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Erro no envio ao ERP");
     const sanitizedStack = error instanceof Error && error.stack ? sanitizeErpOrderErrorMessage(error.stack) : null;
+    const failureEndpoint = error?.endpoint || error?.ultraFv3Failure?.endpoint || error?.diagnostics?.endpoint || null;
+    const failureStage = failureEndpoint === "/salesmen"
+      ? "resolve-salesman"
+      : failureEndpoint === "/orders"
+        ? "submit-order"
+        : req.erpOrderFailureStage || "handler";
+    req.erpOrderFailureStage = failureStage;
 
     if (opportunity && !normalizedParams.simulateOnly) {
       try {
@@ -6266,19 +6282,23 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
 
     if (res.headersSent || res.writableEnded) return;
     try {
-      return res.status(status).json({
+      const failurePayload = buildControlledErpOrderFailurePayload({
         correlationId,
-        pedidoIdImportacao: error?.pedidoIdImportacao,
-        existingErpOrderSyncId: error?.existingErpOrderSyncId,
         status,
-        endpoint: error?.endpoint || error?.ultraFv3Failure?.endpoint || "/orders",
-        mensagem: message,
+        etapa: failureStage,
         message,
-        ...(Array.isArray(error?.errors) ? { errors: error.errors } : {}),
-        ...(error?.payload ? { payload: sanitizeErpOrderPayload(error.payload) } : {}),
-        ...(error?.ultraFv3Failure ? { ultraFv3: sanitizeErpOrderPayload(error.ultraFv3Failure) } : {}),
-        ...(error?.parameterDiagnostics || parameterDiagnostics)
+        details: {
+          pedidoIdImportacao: error?.pedidoIdImportacao,
+          existingErpOrderSyncId: error?.existingErpOrderSyncId,
+          endpoint: failureEndpoint || "/orders",
+          mensagem: message,
+          ...(Array.isArray(error?.errors) ? { errors: error.errors } : {}),
+          ...(error?.payload ? { payload: sanitizeErpOrderPayload(error.payload) } : {}),
+          ...(error?.ultraFv3Failure ? { ultraFv3: sanitizeErpOrderPayload(error.ultraFv3Failure) } : {}),
+          ...(error?.parameterDiagnostics || parameterDiagnostics),
+        },
       });
+      return res.status(status).type("application/json").send(safeJsonStringify(failurePayload));
     } catch (responseError) {
       logApiEvent("ERROR", "[erp order route] failed to serialize controlled error response", {
         routeHit: true,
@@ -6290,11 +6310,12 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
         stack: responseError instanceof Error && responseError.stack ? sanitizeErpOrderErrorMessage(responseError.stack) : String(responseError),
       });
       if (res.headersSent || res.writableEnded) return;
-      return res.status(500).type("application/json").send(JSON.stringify({
-        status: "erro",
+      return res.status(500).type("application/json").send(safeJsonStringify(buildControlledErpOrderFailurePayload({
+        status: 500,
+        etapa: "serialize-response",
         message: "Erro interno ao preparar a resposta do envio ao ERP.",
         correlationId,
-      }));
+      })));
     }
   }
 });
