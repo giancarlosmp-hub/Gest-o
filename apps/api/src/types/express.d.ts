@@ -11,6 +11,8 @@ declare global {
     interface Request {
       user?: UserPayload;
       requestId?: string;
+      correlationId?: string;
+      erpOrderRouteHit?: boolean;
       rateLimit?: {
         limit: number;
         used: number;

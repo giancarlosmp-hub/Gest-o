@@ -2,6 +2,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import { randomUUID } from "node:crypto";
 import authRoutes from "./routes/authRoutes.js";
 import clientLookupRoutes from "./routes/clientLookupRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
@@ -42,10 +43,53 @@ app.use(
 );
 app.use(requestContextMiddleware);
 app.use((req, res, next) => {
+  const match = req.method === "POST" ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/erp\/orders\/?$/) : null;
+  if (!match) return next();
+
+  const correlationId = randomUUID();
+  const opportunityId = match[1];
+  const startedAt = Date.now();
+  let finalLogWritten = false;
+  req.correlationId = correlationId;
+  req.erpOrderRouteHit = false;
+  res.setHeader("x-correlation-id", correlationId);
+
+  logApiEvent("INFO", "[erp order ingress] request received", {
+    routeHit: false,
+    opportunityId,
+    correlationId,
+    requestId: req.requestId,
+    timestamp: new Date(startedAt).toISOString(),
+  });
+
+  const logFinal = (completion: "finish" | "close") => {
+    if (finalLogWritten) return;
+    finalLogWritten = true;
+    logApiEvent(res.statusCode >= 500 ? "ERROR" : res.statusCode >= 400 ? "WARN" : "INFO", "[erp order ingress] request finished", {
+      routeHit: req.erpOrderRouteHit === true,
+      opportunityId,
+      correlationId,
+      requestId: req.requestId,
+      timestamp: new Date().toISOString(),
+      completion,
+      responseFinished: res.writableEnded,
+      httpStatus: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  };
+
+  res.once("finish", () => logFinal("finish"));
+  res.once("close", () => logFinal("close"));
+  next();
+});
+app.use((req, res, next) => {
   req.setTimeout(env.apiRequestTimeoutMs);
   res.setTimeout(env.apiRequestTimeoutMs, () => {
     if (!res.headersSent) {
-      res.status(408).json({ message: "Request timeout" });
+      res.status(408).json({
+        message: "Request timeout",
+        ...(req.correlationId ? { correlationId: req.correlationId } : {}),
+      });
     }
   });
   next();
@@ -151,5 +195,8 @@ app.use((err: any, req: any, res: any, next: any) => {
   });
 
   if (res.headersSent) return next(err);
-  res.status(500).json({ message: "Internal server error" });
+  res.status(500).json({
+    message: "Internal server error",
+    ...(req.correlationId ? { correlationId: req.correlationId } : {}),
+  });
 });
