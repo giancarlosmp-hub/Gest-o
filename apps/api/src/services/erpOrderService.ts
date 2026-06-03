@@ -372,23 +372,24 @@ export async function createErpOrderFromOpportunity(
   const sync = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}, hashtext(${opportunity.id}))`;
 
-    const existingOpenSync = await tx.erpOrderSync.findFirst({
+    const existingSuccessfulSync = await tx.erpOrderSync.findFirst({
       where: {
         opportunityId: opportunity.id,
-        status: { in: [ErpOrderSyncStatus.pending, ErpOrderSyncStatus.sent] },
+        status: ErpOrderSyncStatus.sent,
+        NOT: { orderStatus: ErpOrderFulfillmentStatus.cancelado },
       },
       orderBy: [{ createdAt: "desc" }],
     });
 
-    if (existingOpenSync) {
+    if (existingSuccessfulSync) {
       throw Object.assign(
         new Error(
-          "Oportunidade já possui sincronização ERP pendente/enviada. Consulte o histórico antes de reenviar.",
+          "Oportunidade já possui pedido ERP enviado com sucesso. Reenvio bloqueado para evitar duplicidade.",
         ),
         {
           status: 409,
-          existingErpOrderSyncId: existingOpenSync.id,
-          pedidoIdImportacao: existingOpenSync.pedidoIdImportacao,
+          existingErpOrderSyncId: existingSuccessfulSync.id,
+          pedidoIdImportacao: existingSuccessfulSync.pedidoIdImportacao,
         },
       );
     }

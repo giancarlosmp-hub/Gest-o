@@ -1265,6 +1265,13 @@ export default function OpportunitiesPage() {
     if (didClose) closeCloseModal();
   };
 
+  const openWonOpportunityErpOrderFlow = (opportunityId: string) => {
+    setOpenCloseMenuId(null);
+    closeCloseModal();
+    closePipelineDrawer();
+    navigate(`/oportunidades/${opportunityId}?openErpOrder=1`);
+  };
+
   const onConfirmGainAndGenerateErpOrder = async () => {
     if (!closeOpportunityState || closeOpportunityState.stage !== "ganho" || isQuickActionLoading) return;
 
@@ -1709,6 +1716,9 @@ export default function OpportunitiesPage() {
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
+                      {item.stage === "ganho" ? (
+                        <button type="button" className="text-emerald-700" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
+                      ) : null}
                       {!["ganho", "perdido"].includes(item.stage) ? (
                         <span className="relative inline-block">
                           <button
@@ -1984,6 +1994,15 @@ export default function OpportunitiesPage() {
               >
                 Editar oportunidade
               </button>
+              {selectedOpportunity.stage === "ganho" ? (
+                <button
+                  type="button"
+                  className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
+                  onClick={() => openWonOpportunityErpOrderFlow(selectedOpportunity.id)}
+                >
+                  Gerar/Reenviar pedido ERP
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white"
