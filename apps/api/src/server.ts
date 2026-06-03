@@ -3,22 +3,20 @@ import { env } from "./config/env.js";
 import { prisma } from "./config/prisma.js";
 import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "./utils/databaseHealth.js";
-import { logApiEvent } from "./utils/logger.js";
+import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { startErpSyncScheduler } from "./jobs/erpSyncScheduler.js";
 
 console.log("SERVER STARTING...");
 
 process.on("unhandledRejection", (reason) => {
-  console.error("UNHANDLED REJECTION:", reason);
   logApiEvent("ERROR", "[process] Promise rejeitada sem tratamento", {
-    stack: reason instanceof Error ? reason.stack : String(reason),
+    error: sanitizePayload(reason instanceof Error ? { name: reason.name, message: reason.message, stack: reason.stack } : reason),
   });
 });
 
 process.on("uncaughtException", (error) => {
-  console.error("UNCAUGHT EXCEPTION:", error);
   logApiEvent("ERROR", "[process] Exceção não capturada", {
-    stack: error instanceof Error ? error.stack : String(error),
+    error: sanitizePayload({ name: error.name, message: error.message, stack: error.stack }),
   });
 });
 
