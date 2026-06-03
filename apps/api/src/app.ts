@@ -1,4 +1,4 @@
-import express from "express";
+import express, { type Request, type Response } from "express";
 import helmet from "helmet";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -20,6 +20,27 @@ if (env.isProduction) {
 }
 
 let _tcCache: { data: object; expiresAt: number } | null = null;
+
+const isErpOrderRequest = (req: Request) =>
+  req.method === "POST" && /^\/(?:api\/)?opportunities\/[^/]+\/erp\/orders\/?$/.test(req.path);
+
+const sendControlledJson = (res: Response, status: number, payload: Record<string, unknown>) => {
+  if (res.headersSent || res.writableEnded) return false;
+
+  try {
+    res.status(status).type("application/json").send(JSON.stringify(payload));
+  } catch {
+    if (!res.headersSent && !res.writableEnded) {
+      res.status(500).type("application/json").send(JSON.stringify({
+        status: "erro",
+        message: "Erro interno ao preparar a resposta controlada.",
+        ...(typeof payload.correlationId === "string" ? { correlationId: payload.correlationId } : {}),
+      }));
+    }
+  }
+
+  return true;
+};
 
 app.use(helmet());
 
@@ -43,7 +64,7 @@ app.use(
 );
 app.use(requestContextMiddleware);
 app.use((req, res, next) => {
-  const match = req.method === "POST" ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/erp\/orders\/?$/) : null;
+  const match = isErpOrderRequest(req) ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/erp\/orders\/?$/) : null;
   if (!match) return next();
 
   const correlationId = randomUUID();
@@ -83,14 +104,48 @@ app.use((req, res, next) => {
   next();
 });
 app.use((req, res, next) => {
-  req.setTimeout(env.apiRequestTimeoutMs);
-  res.setTimeout(env.apiRequestTimeoutMs, () => {
-    if (!res.headersSent) {
-      res.status(408).json({
-        message: "Request timeout",
-        ...(req.correlationId ? { correlationId: req.correlationId } : {}),
+  const erpOrderRequest = isErpOrderRequest(req);
+  const timeoutMs = erpOrderRequest ? env.erpOrderRequestTimeoutMs : env.apiRequestTimeoutMs;
+
+  if (erpOrderRequest) {
+    req.setTimeout(timeoutMs, () => {
+      logApiEvent("ERROR", "[erp order ingress] request socket timeout", {
+        routeHit: req.erpOrderRouteHit === true,
+        endpoint: req.originalUrl,
+        method: req.method,
+        correlationId: req.correlationId,
+        requestId: req.requestId,
+        timeoutMs,
+      });
+      sendControlledJson(res, 504, {
+        status: "erro",
+        message: "O envio ao ERP excedeu o tempo limite antes da resposta da API.",
+        correlationId: req.correlationId,
+      });
+    });
+  } else {
+    req.setTimeout(timeoutMs);
+  }
+  res.setTimeout(timeoutMs, () => {
+    if (res.headersSent || res.writableEnded) return;
+    const status = erpOrderRequest ? 504 : 408;
+    if (erpOrderRequest) {
+      logApiEvent("ERROR", "[erp order ingress] response timeout", {
+        routeHit: req.erpOrderRouteHit === true,
+        endpoint: req.originalUrl,
+        method: req.method,
+        correlationId: req.correlationId,
+        requestId: req.requestId,
+        timeoutMs,
       });
     }
+    sendControlledJson(res, status, {
+      ...(erpOrderRequest ? { status: "erro" } : {}),
+      message: erpOrderRequest
+        ? "O envio ao ERP excedeu o tempo limite antes da resposta da API."
+        : "Request timeout",
+      ...(req.correlationId ? { correlationId: req.correlationId } : {}),
+    });
   });
   next();
 });
@@ -195,8 +250,11 @@ app.use((err: any, req: any, res: any, next: any) => {
   });
 
   if (res.headersSent) return next(err);
-  res.status(500).json({
-    message: "Internal server error",
+
+  const erpOrderRequest = isErpOrderRequest(req);
+  sendControlledJson(res, 500, {
+    ...(erpOrderRequest ? { status: "erro" } : {}),
+    message: erpOrderRequest ? "Erro interno controlado no envio ao ERP." : "Internal server error",
     ...(req.correlationId ? { correlationId: req.correlationId } : {}),
   });
 });

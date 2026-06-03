@@ -1,5 +1,6 @@
 import express, { Router, type Request } from "express";
 import { prisma } from "../config/prisma.js";
+import { env } from "../config/env.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { validateBody } from "../middlewares/validate.js";
@@ -65,7 +66,7 @@ import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
 const router = Router();
-const ERP_ORDER_ROUTE_TIMEOUT_MS = 50_000;
+const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
 router.use(authMiddleware);
 router.use(appUsageRateLimit);
 
