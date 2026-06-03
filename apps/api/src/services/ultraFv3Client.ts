@@ -8,6 +8,7 @@ const DEFAULT_HEADERS = {
 };
 
 const ULTRAFV3_REQUEST_TIMEOUT_MS = 15_000;
+export const ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS = 10_000;
 const ULTRAFV3_GET_RETRY_DELAY_MS = 500;
 const RETRIABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -147,7 +148,8 @@ export class UltraFv3IntegrationError extends Error {
       | "auth_failed"
       | "not_found"
       | "invalid_response"
-      | "request_failed",
+      | "request_failed"
+      | "timeout",
     readonly status?: number,
     readonly diagnostics?: UltraFv3LoginDiagnostic | UltraFv3RequestDiagnostic,
   ) {
@@ -229,8 +231,8 @@ class UltraFv3Client {
     }
   }
 
-  private buildTimeoutSignal() {
-    return AbortSignal.timeout(ULTRAFV3_REQUEST_TIMEOUT_MS);
+  private buildTimeoutSignal(timeoutMs = ULTRAFV3_REQUEST_TIMEOUT_MS) {
+    return AbortSignal.timeout(timeoutMs);
   }
 
   private isTokenExpired(expiresAt = this.tokenExpiresAt) {
@@ -264,13 +266,13 @@ class UltraFv3Client {
   private async fetchWithTimeout(
     url: string,
     init: RequestInit,
-    context: { method: string; path: string; attempt: number; correlationId: string },
+    context: { method: string; path: string; attempt: number; correlationId: string; timeoutMs?: number },
   ) {
     const startedAt = Date.now();
     try {
       const response = await fetch(url, {
         ...init,
-        signal: this.buildTimeoutSignal(),
+        signal: this.buildTimeoutSignal(context.timeoutMs),
       });
       logApiEvent(
         response.ok ? "INFO" : "WARN",
@@ -282,6 +284,7 @@ class UltraFv3Client {
           correlationId: context.correlationId,
           status: response.status,
           durationMs: Date.now() - startedAt,
+          timeoutMs: context.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS,
         },
       );
       return response;
@@ -293,6 +296,7 @@ class UltraFv3Client {
         attempt: context.attempt,
         correlationId: context.correlationId,
         durationMs: Date.now() - startedAt,
+        timeoutMs: context.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS,
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -488,7 +492,7 @@ class UltraFv3Client {
   async requestWithCredentials<T>(
     path: string,
     credentials: UltraFv3Credentials,
-    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string>; correlationId?: string },
+    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string>; correlationId?: string; timeoutMs?: number },
   ): Promise<T> {
     const cacheKey = this.getCredentialCacheKey(credentials);
     let cached = this.credentialTokenCache.get(cacheKey);
@@ -499,15 +503,32 @@ class UltraFv3Client {
 
     const method = options?.method || "GET";
     const correlationId = options?.correlationId || randomUUID();
-    const response = await this.fetchWithTimeout(
-      `${this.baseUrl}${path}`,
-      {
+    let response: Response;
+    try {
+      response = await this.fetchWithTimeout(
+        `${this.baseUrl}${path}`,
+        {
+          method,
+          headers: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: `Bearer ${cached.token}` },
+          ...(method !== "GET" && options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+        },
+        { method, path, attempt: 1, correlationId, timeoutMs: options?.timeoutMs },
+      );
+    } catch (error) {
+      const timeoutMs = options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS;
+      const isTimeout = error instanceof Error && /abort|timeout|timed out/i.test(`${error.name} ${error.message}`);
+      const message = isTimeout
+        ? `UltraFV3 excedeu o timeout de ${timeoutMs}ms ao processar ${method} ${path}.`
+        : `UltraFV3 fora do ar ou inacessível ao processar ${method} ${path}: ${error instanceof Error ? error.message : String(error)}`;
+      throw new UltraFv3IntegrationError(message, isTimeout ? "timeout" : "unavailable", isTimeout ? 504 : 502, {
+        status: isTimeout ? 504 : 502,
+        endpoint: path,
         method,
-        headers: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: `Bearer ${cached.token}` },
-        ...(method !== "GET" && options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
-      },
-      { method, path, attempt: 1, correlationId },
-    );
+        message,
+        ultraResponse: null,
+        correlationId,
+      });
+    }
 
     const ultraResponse = await this.safeJson(response, !response.ok);
     const ultraMessage = extractUltraMessage(ultraResponse, response.status);

@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
@@ -49,6 +49,9 @@ const sanitizeUltraValue = (value: unknown, key = ""): unknown => {
     return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [childKey, sanitizeUltraValue(childValue, childKey)]));
   return value;
 };
+
+export const sanitizeErpOrderPayload = (payload: unknown) => sanitizeUltraValue(payload);
+export const sanitizeErpOrderErrorMessage = (message: unknown) => redactSensitiveText(String(message || "Falha ao gerar pedido ERP."));
 
 const getResponseField = (payload: unknown, key: string) =>
   payload && typeof payload === "object" && !Array.isArray(payload)
@@ -407,9 +410,10 @@ async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: 
   return { numPedido: validNumeroPedido, operatorCode, diagnostics };
 }
 
-export async function createErpOrderFromOpportunity(
+async function createErpOrderFromOpportunityUnsafe(
   opportunity: OpportunityForErpOrder,
   rawParams: OrderParameterCodes,
+  correlationId: string,
 ) {
   const params = normalizeErpOrderParameterCodes(rawParams);
   const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
@@ -485,7 +489,7 @@ export async function createErpOrderFromOpportunity(
   }
 
   const now = new Date();
-  const pedidoIdImportacao = randomUUID();
+  const pedidoIdImportacao = correlationId;
   const operationContext = {
     opportunityId: opportunity.id,
     sellerId: opportunity.ownerSeller.id,
@@ -507,6 +511,11 @@ export async function createErpOrderFromOpportunity(
   );
 
   await ultraFv3Client.authenticateWithCredentials(sellerCredentials);
+  logApiEvent("INFO", "[erp order] requesting UltraFV3 /salesmen order sequence", {
+    ...operationContext,
+    correlationId: pedidoIdImportacao,
+    endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+  });
   const sequenceResolution = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
   const numPedido = String(sequenceResolution.numPedido);
   const effectiveOperatorCode = operatorCode || sequenceResolution.operatorCode;
@@ -584,6 +593,7 @@ export async function createErpOrderFromOpportunity(
       statusSyncedAt: null,
       createdAt: now,
       updatedAt: now,
+      salesmenDiagnostics: sequenceResolution.diagnostics,
     };
   }
 
@@ -638,10 +648,17 @@ export async function createErpOrderFromOpportunity(
   });
 
   try {
+    logApiEvent("INFO", "[erp order] submitting UltraFV3 /orders", {
+      ...operationContext,
+      correlationId: pedidoIdImportacao,
+      erpOrderSyncId: sync.id,
+      timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
+    });
     const erpResponse = await ultraFv3Client.requestWithCredentials<unknown>("/orders", sellerCredentials, {
       method: "POST",
       body: payload,
       correlationId: pedidoIdImportacao,
+      timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
     });
     const erpOrderNumber = extractErpOrderNumber(erpResponse) || numPedido;
     const updated = await prisma.erpOrderSync.update({
@@ -664,14 +681,23 @@ export async function createErpOrderFromOpportunity(
     return updated;
   } catch (error) {
     const failure = sanitizeUltraOrderFailure(error, { pedidoIdImportacao, numPedido, codVendedor: numericSellerErpCode, operador: numericOperatorCode });
-    await prisma.erpOrderSync.update({
-      where: { id: sync.id },
-      data: {
-        status: ErpOrderSyncStatus.error,
-        erpResponse: toJson(failure),
-        syncErrors: toJson([{ ...failure, at: new Date().toISOString() }]),
-      },
-    });
+    try {
+      await prisma.erpOrderSync.update({
+        where: { id: sync.id },
+        data: {
+          status: ErpOrderSyncStatus.error,
+          erpResponse: toJson(failure),
+          syncErrors: toJson([{ ...failure, at: new Date().toISOString() }]),
+        },
+      });
+    } catch (persistenceError) {
+      logApiEvent("ERROR", "[erp order] failed to persist UltraFV3 submission failure", {
+        ...operationContext,
+        erpOrderSyncId: sync.id,
+        correlationId: pedidoIdImportacao,
+        error: persistenceError instanceof Error ? persistenceError.message : String(persistenceError),
+      });
+    }
     logApiEvent("ERROR", "[erp order] UltraFV3 order submission failed", {
       ...operationContext,
       erpOrderSyncId: sync.id,
@@ -679,9 +705,53 @@ export async function createErpOrderFromOpportunity(
     });
     throw Object.assign(new Error(failure.message), {
       pedidoIdImportacao,
-      status: failure.status && failure.status >= 400 && failure.status < 600 ? failure.status : 502,
+      status: error instanceof UltraFv3IntegrationError && error.code === "timeout" ? 504 : 502,
       ultraFv3Failure: failure,
     });
+  }
+}
+
+export async function createErpOrderFromOpportunity(
+  opportunity: OpportunityForErpOrder,
+  rawParams: OrderParameterCodes,
+  options: { correlationId?: string } = {},
+) {
+  const correlationId = options.correlationId || randomUUID();
+  const simulateOnly = rawParams.simulateOnly === true;
+  logApiEvent("INFO", "[erp order] generation flow started", {
+    opportunityId: opportunity.id,
+    correlationId,
+    simulateOnly,
+  });
+
+  try {
+    const result = await createErpOrderFromOpportunityUnsafe(opportunity, rawParams, correlationId);
+    logApiEvent("INFO", "[erp order] generation flow completed", {
+      opportunityId: opportunity.id,
+      correlationId,
+      simulateOnly,
+      erpOrderSyncId: result.id,
+      numPedido: result.numPedido,
+    });
+    return result;
+  } catch (error) {
+    const source = error && typeof error === "object" ? error as Record<string, unknown> : {};
+    const status = error instanceof UltraFv3IntegrationError
+      ? error.code === "timeout" ? 504 : 502
+      : typeof source.status === "number" ? source.status : 502;
+    const message = sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error);
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order] generation flow failed", {
+      opportunityId: opportunity.id,
+      correlationId,
+      simulateOnly,
+      status,
+      error: message,
+    });
+    if (error instanceof Error) {
+      Object.assign(error, { status, correlationId });
+      throw error;
+    }
+    throw Object.assign(new Error(message || "Falha ao gerar pedido ERP."), { status, correlationId });
   }
 }
 

@@ -139,6 +139,7 @@ type ErpOrderFeedback = {
   status: "enviado" | "simulado" | "erro";
   pedidoIdImportacao?: string;
   erpOrderNumber?: string | null;
+  correlationId?: string;
   message?: string;
 };
 
@@ -513,7 +514,7 @@ export default function OpportunityDetailsPage() {
     setErpOrderFeedback(null);
     try {
       const response = await api.post(`/opportunities/${item.id}/erp/orders`, erpOrderForm);
-      setErpOrderFeedback({ status: response.data?.simulated ? "simulado" : "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber });
+      setErpOrderFeedback({ status: response.data?.simulated ? "simulado" : "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber, correlationId: response.data?.correlationId });
       if (!response.data?.simulated) {
         const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
         setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
@@ -522,7 +523,7 @@ export default function OpportunityDetailsPage() {
     } catch (error) {
       const message = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
       const maybeResponse = (error as any)?.response?.data;
-      setErpOrderFeedback({ status: "erro", pedidoIdImportacao: maybeResponse?.pedidoIdImportacao, message });
+      setErpOrderFeedback({ status: "erro", pedidoIdImportacao: maybeResponse?.pedidoIdImportacao, correlationId: maybeResponse?.correlationId, message });
       try {
         const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
         setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
@@ -964,6 +965,7 @@ export default function OpportunityDetailsPage() {
                           <p className="font-bold">{erpOrderFeedback.status === "simulado" ? "Simulação ERP validada" : erpOrderFeedback.status === "enviado" ? "Pedido enviado" : "Erro ERP"}</p>
                           {erpOrderFeedback.pedidoIdImportacao ? <p className="mt-1 break-all">pedidoIdImportacao: <strong>{erpOrderFeedback.pedidoIdImportacao}</strong></p> : null}
                           {erpOrderFeedback.erpOrderNumber ? <p className="mt-1">Pedido ERP: <strong>{erpOrderFeedback.erpOrderNumber}</strong></p> : null}
+                          {erpOrderFeedback.correlationId ? <p className="mt-1 break-all">correlationId: <strong>{erpOrderFeedback.correlationId}</strong></p> : null}
                           {erpOrderFeedback.message ? <p className="mt-1">{erpOrderFeedback.message}</p> : null}
                         </div>
                       ) : null}

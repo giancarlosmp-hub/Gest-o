@@ -60,7 +60,7 @@ import {
   syncOrderStatus
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
-import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
@@ -6004,38 +6004,61 @@ router.get("/opportunities/:id", async (req, res) => {
 });
 
 router.post("/opportunities/:id/erp/orders", async (req, res) => {
-  const parsed = erpOrderGenerationSchema.safeParse(req.body);
-  if (!parsed.success) {
-    const message = parsed.error.issues[0]?.message || "Payload inválido";
-    const parameterDiagnostics = getErpOrderParameterDiagnostics(req.body || {});
-    logApiEvent("WARN", "[erp order route] invalid payload", { opportunityId: req.params.id, error: message, ...parameterDiagnostics });
-    return res.status(400).json({ message: `Payload inválido: ${message}`, ...parameterDiagnostics });
-  }
-  const normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
-  const parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);
+  const correlationId = randomUUID();
+  const opportunityId = req.params.id;
+  let normalizedParams = normalizeErpOrderParameterCodes({});
+  let parameterDiagnostics = getErpOrderParameterDiagnostics({});
+  let opportunity: any = null;
+  let previousOrderCount = 0;
 
-  const opportunity = await prisma.opportunity.findFirst({
-    where: { id: req.params.id, ...sellerWhere(req) },
-    include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+  logApiEvent("INFO", "[erp order route] request started", {
+    opportunityId,
+    correlationId,
+    requestId: req.requestId,
   });
-  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
-
-  const previousOrderCount = await prisma.erpOrderSync.count({ where: { opportunityId: opportunity.id } });
 
   try {
-    const sync = await createErpOrderFromOpportunity(opportunity, parsed.data);
-    if (!normalizedParams.simulateOnly) {
-      await prisma.timelineEvent.create({
-        data: {
-          type: "status",
-          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
-          clientId: opportunity.clientId,
-          opportunityId: opportunity.id,
-          ownerSellerId: opportunity.ownerSellerId
-        }
-      });
+    const parsed = erpOrderGenerationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      const message = parsed.error.issues[0]?.message || "Payload inválido";
+      parameterDiagnostics = getErpOrderParameterDiagnostics(req.body || {});
+      throw Object.assign(new Error(`Payload inválido: ${message}`), { status: 400, parameterDiagnostics });
     }
+    normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
+    parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);
+
+    opportunity = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, ...sellerWhere(req) },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+    });
+    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
+
+    previousOrderCount = await prisma.erpOrderSync.count({ where: { opportunityId: opportunity.id } });
+    const sync = await createErpOrderFromOpportunity(opportunity, parsed.data, { correlationId });
+
+    if (!normalizedParams.simulateOnly) {
+      try {
+        await prisma.timelineEvent.create({
+          data: {
+            type: "status",
+            description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+            clientId: opportunity.clientId,
+            opportunityId: opportunity.id,
+            ownerSellerId: opportunity.ownerSellerId
+          }
+        });
+      } catch (timelineError) {
+        logApiEvent("ERROR", "[erp order route] failed to persist success timeline", {
+          opportunityId,
+          correlationId,
+          error: timelineError instanceof Error ? timelineError.message : String(timelineError),
+        });
+      }
+    }
+
+    logApiEvent("INFO", "[erp order route] request completed", { opportunityId, correlationId, simulateOnly: normalizedParams.simulateOnly });
     return res.status(201).json({
+      correlationId,
       id: sync.id,
       pedidoIdImportacao: sync.pedidoIdImportacao,
       numPedido: sync.numPedido,
@@ -6046,32 +6069,47 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       response: sync.erpResponse
     });
   } catch (error: any) {
-    const status = Number(error?.status || 502);
-    if (!normalizedParams.simulateOnly) {
-      await prisma.timelineEvent.create({
-        data: {
-          type: "status",
-          description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP falhou: ${error?.message || "Erro no envio ao ERP"}.${error?.ultraFv3Failure?.correlationId ? ` correlationId=${error.ultraFv3Failure.correlationId}; PEDIDO_ID_IMPORTACAO=${error.ultraFv3Failure.PEDIDO_ID_IMPORTACAO}.` : ""}`,
-          clientId: opportunity.clientId,
-          opportunityId: opportunity.id,
-          ownerSellerId: opportunity.ownerSellerId
-        }
-      });
+    const statusCandidate = Number(error?.status || 502);
+    const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
+    const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Erro no envio ao ERP");
+
+    if (opportunity && !normalizedParams.simulateOnly) {
+      try {
+        await prisma.timelineEvent.create({
+          data: {
+            type: "status",
+            description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP falhou: ${message}. correlationId=${correlationId}${error?.ultraFv3Failure?.PEDIDO_ID_IMPORTACAO ? `; PEDIDO_ID_IMPORTACAO=${error.ultraFv3Failure.PEDIDO_ID_IMPORTACAO}` : ""}.`,
+            clientId: opportunity.clientId,
+            opportunityId: opportunity.id,
+            ownerSellerId: opportunity.ownerSellerId
+          }
+        });
+      } catch (timelineError) {
+        logApiEvent("ERROR", "[erp order route] failed to persist error timeline", {
+          opportunityId,
+          correlationId,
+          error: timelineError instanceof Error ? timelineError.message : String(timelineError),
+        });
+      }
     }
+
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order route] order submission rejected", {
-      opportunityId: req.params.id,
+      opportunityId,
+      correlationId,
+      requestId: req.requestId,
       httpStatus: status,
       pedidoIdImportacao: error?.pedidoIdImportacao,
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
       simulateOnly: normalizedParams.simulateOnly,
-      error: error?.message || "Erro no envio ao ERP",
+      error: message,
       ...parameterDiagnostics
     });
-    return res.status(status >= 400 && status < 600 ? status : 502).json({
+    return res.status(status).json({
+      correlationId,
       pedidoIdImportacao: error?.pedidoIdImportacao,
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
       status: "erro",
-      message: error?.message || "Erro no envio ao ERP",
+      message,
       ...(error?.ultraFv3Failure ? { ultraFv3: error.ultraFv3Failure } : {}),
       ...(error?.parameterDiagnostics || parameterDiagnostics)
     });
@@ -7237,6 +7275,53 @@ router.get("/erp/ultrafv3/auth/mode-diagnostics", authorize("diretor", "gerente"
         ? "Há credencial técnica global e os vendedores ativos possuem CODVENDEDOR/OPERADOR para montar pedidos."
         : "Configuração insuficiente para afirmar o modo: revise credencial global, vínculo CODVENDEDOR/OPERADOR e logins FV3 por vendedor.",
   });
+});
+
+router.get("/erp/ultrafv3/order-debug/:opportunityId", authorize("diretor", "gerente"), async (req, res) => {
+  const correlationId = randomUUID();
+  const opportunityId = req.params.opportunityId;
+  logApiEvent("INFO", "[erp order debug] request started", { opportunityId, correlationId, requestId: req.requestId });
+
+  try {
+    const parsed = erpOrderGenerationSchema.safeParse({ ...req.query, simulateOnly: true });
+    if (!parsed.success) {
+      const message = parsed.error.issues[0]?.message || "Parâmetros inválidos";
+      throw Object.assign(new Error(`Parâmetros inválidos para prévia do pedido ERP: ${message}`), { status: 400 });
+    }
+
+    const opportunity = await prisma.opportunity.findUnique({
+      where: { id: opportunityId },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+    });
+    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada."), { status: 404 });
+
+    const preview = await createErpOrderFromOpportunity(opportunity, parsed.data, { correlationId });
+    logApiEvent("INFO", "[erp order debug] preview completed without submission", { opportunityId, correlationId, numPedido: preview.numPedido });
+    return res.status(200).json({
+      correlationId,
+      readiness: { ready: true, message: "Payload validado; nenhum pedido foi enviado ao UltraFV3." },
+      payload: sanitizeErpOrderPayload(preview.payloadSent),
+      next: {
+        numPedido: preview.numPedido,
+        salesmen: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null,
+      },
+      simulated: true,
+    });
+  } catch (error: any) {
+    const statusCandidate = Number(error?.status || 502);
+    const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
+    const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Falha ao preparar prévia do pedido ERP.");
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order debug] preview failed", { opportunityId, correlationId, httpStatus: status, error: message });
+    return res.status(status).json({
+      correlationId,
+      readiness: { ready: false, message },
+      payload: null,
+      next: { numPedido: null, salesmen: error?.diagnostics || null },
+      status: "erro",
+      message,
+      ...(error?.ultraFv3Failure ? { ultraFv3: error.ultraFv3Failure } : {}),
+    });
+  }
 });
 
 router.get("/erp/ultrafv3/order-readiness/:opportunityId", authorize("diretor", "gerente"), async (req, res) => {
