@@ -15,7 +15,7 @@ import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
-const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen?date=01.01.1900 00:00:00";
+const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
 
@@ -76,13 +76,12 @@ type SanitizedUltraOrderFailure = {
   correlationId: string;
   PEDIDO_ID_IMPORTACAO: string;
   NUM_PEDIDO: string;
-  CODVENDEDOR: number;
-  OPERADOR: number;
+  payload: unknown;
 };
 
 const sanitizeUltraOrderFailure = (
   error: unknown,
-  context: { pedidoIdImportacao: string; numPedido: string; codVendedor: number; operador: number },
+  context: { pedidoIdImportacao: string; numPedido: string; payload: unknown },
 ): SanitizedUltraOrderFailure => {
   const integrationError = error instanceof UltraFv3IntegrationError ? error : null;
   const diagnostics = integrationError?.diagnostics;
@@ -109,8 +108,7 @@ const sanitizeUltraOrderFailure = (
     correlationId: diagnostics?.correlationId || context.pedidoIdImportacao,
     PEDIDO_ID_IMPORTACAO: context.pedidoIdImportacao,
     NUM_PEDIDO: context.numPedido,
-    CODVENDEDOR: context.codVendedor,
-    OPERADOR: context.operador,
+    payload: sanitizeErpOrderPayload(context.payload),
   };
 };
 
@@ -236,6 +234,100 @@ const formatDateDot = (date: Date) => {
   return `${day}.${month}.${year}`;
 };
 
+const roundMoney = (value: number) => Number(value.toFixed(2));
+
+const isBlankRequiredValue = (value: unknown) =>
+  value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+const ULTRAFV3_ORDER_REQUIRED_FIELDS = [
+  "PARCEIRO",
+  "NUM_PEDIDO",
+  "DATA_PEDIDO",
+  "DATA_PREV_ENTREGA",
+  "VENDEDOR",
+  "OPERADOR",
+  "CODOPER",
+  "CODFILIAL",
+  "TABELA_PRECO",
+  "CODCONDREC",
+  "FORMA",
+  "VALOR_BRUTO",
+  "VALOR_DESCONTO",
+  "VALOR_LIQUIDO",
+  "QTD_PEDIDO",
+  "TIPO_MOVIMENTO",
+  "ITENS",
+] as const;
+
+const ULTRAFV3_ORDER_FORBIDDEN_FIELDS = [
+  "CODVENDEDOR",
+  "FILIAL",
+  "OPERACAO",
+  "FORMA_PAGAMENTO",
+  "CONDICAO_RECEBIMENTO",
+] as const;
+
+const ULTRAFV3_ORDER_ITEM_REQUIRED_FIELDS = [
+  "CODPRODUTO",
+  "CODPRODUTO_CLAS",
+  "ITEM",
+  "QTD_PEDIDO",
+  "PRECO",
+  "PRECO_LISTA",
+  "VALOR_BRUTO",
+  "VALOR_DESCONTO",
+  "VALOR_LIQUIDO",
+  "DESCRICAO_UNMED",
+  "UND_MEDIDA",
+  "QTD_UNMED",
+  "MOTIVO_CANCELAMENTO",
+  "OBS",
+  "ICMS_DESON_DESCTO_FINANCEIRO",
+] as const;
+
+export type UltraFv3OrderPayload = Record<string, unknown> & {
+  PEDIDO_ID_IMPORTACAO: string;
+  NUM_PEDIDO: string;
+  ITENS: Array<Record<string, unknown>>;
+};
+
+export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
+  const errors: string[] = [];
+  for (const field of ULTRAFV3_ORDER_REQUIRED_FIELDS) {
+    if (field === "ITENS") {
+      if (!Array.isArray(payload.ITENS) || payload.ITENS.length === 0) errors.push("ITENS deve conter ao menos um item.");
+      continue;
+    }
+    if (isBlankRequiredValue(payload[field])) errors.push(`Campo obrigatório ausente: ${field}.`);
+  }
+  for (const field of ULTRAFV3_ORDER_FORBIDDEN_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(payload, field)) errors.push(`Campo não permitido no POST /orders: ${field}.`);
+  }
+  if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
+  if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
+    errors.push("PEDIDO_ID_IMPORTACAO deve ser UUID v4.");
+  }
+  if (payload.TIPO_MOVIMENTO !== "PEDIDO") errors.push('TIPO_MOVIMENTO deve ser "PEDIDO".');
+
+  payload.ITENS?.forEach((item, index) => {
+    const itemPath = `ITENS[${index}]`;
+    for (const field of ULTRAFV3_ORDER_ITEM_REQUIRED_FIELDS) {
+      if (field === "MOTIVO_CANCELAMENTO" || field === "OBS") {
+        if (item[field] === undefined || item[field] === null) errors.push(`Campo obrigatório ausente: ${itemPath}.${field}.`);
+        continue;
+      }
+      if (isBlankRequiredValue(item[field])) errors.push(`Campo obrigatório ausente: ${itemPath}.${field}.`);
+    }
+    if (item.ITEM !== index + 1) errors.push(`${itemPath}.ITEM deve ser sequencial iniciando em 1.`);
+    if (item.QTD_UNMED !== 1) errors.push(`${itemPath}.QTD_UNMED deve ser 1.`);
+    if (item.MOTIVO_CANCELAMENTO !== "") errors.push(`${itemPath}.MOTIVO_CANCELAMENTO deve ser string vazia.`);
+    if (item.OBS !== "") errors.push(`${itemPath}.OBS deve ser string vazia.`);
+    if (item.ICMS_DESON_DESCTO_FINANCEIRO !== "N") errors.push(`${itemPath}.ICMS_DESON_DESCTO_FINANCEIRO deve ser "N".`);
+  });
+
+  return errors;
+};
+
 const normalizeOrderStatus = (
   payload: Record<string, unknown>,
 ): ErpOrderFulfillmentStatus | null => {
@@ -327,8 +419,8 @@ const getNestedRecord = (payload: unknown, path: string[]) => {
 
 const resolveSalesmenPayload = (body: unknown) => {
   const candidates = [
-    { record: getNestedRecord(body, []), path: "body" },
     { record: getNestedRecord(body, ["data"]), path: "body.data" },
+    { record: getNestedRecord(body, []), path: "body" },
     { record: getNestedRecord(body, ["response", "data"]), path: "body.response.data" },
     { record: getNestedRecord(body, ["data", "data"]), path: "body.data.data" },
   ];
@@ -489,7 +581,7 @@ async function createErpOrderFromOpportunityUnsafe(
   }
 
   const now = new Date();
-  const pedidoIdImportacao = correlationId;
+  const pedidoIdImportacao = randomUUID();
   const operationContext = {
     opportunityId: opportunity.id,
     sellerId: opportunity.ownerSeller.id,
@@ -518,7 +610,7 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const sequenceResolution = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
   const numPedido = String(sequenceResolution.numPedido);
-  const effectiveOperatorCode = operatorCode || sequenceResolution.operatorCode;
+  const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
   if (!numPedido || !effectiveOperatorCode || !sequenceResolution.diagnostics.matchedSalesmanFound || !Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode)) {
@@ -531,44 +623,59 @@ async function createErpOrderFromOpportunityUnsafe(
     );
   }
 
-  const itens = opportunity.items.map((item) => ({
+  const itens = opportunity.items.map((item, index) => ({
     CODPRODUTO: item.erpProductCode,
     CODPRODUTO_CLAS: item.erpProductClassCode,
+    ITEM: index + 1,
     QTD_PEDIDO: Number(item.quantity),
     PRECO: Number(item.unitPrice),
+    PRECO_LISTA: Number(item.unitPrice),
+    VALOR_BRUTO: roundMoney(Number(item.grossTotal || 0)),
+    VALOR_DESCONTO: roundMoney(Number(item.discountTotal || 0)),
+    VALOR_LIQUIDO: roundMoney(Number(item.netTotal || 0)),
+    DESCRICAO_UNMED: item.unit,
     UND_MEDIDA: item.unit,
-    DESCONTO: Number(item.discountTotal || 0),
-    VALOR_LIQUIDO: Number(item.netTotal || 0),
+    QTD_UNMED: 1,
+    MOTIVO_CANCELAMENTO: "",
+    OBS: "",
+    ICMS_DESON_DESCTO_FINANCEIRO: "N",
   }));
-  const valorBruto = Number(
-    opportunity.items
-      .reduce((sum, item) => sum + Number(item.grossTotal || 0), 0)
-      .toFixed(2),
-  );
-  const valorLiquido = Number(
-    opportunity.items
-      .reduce((sum, item) => sum + Number(item.netTotal || 0), 0)
-      .toFixed(2),
-  );
+  const valorBruto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.grossTotal || 0), 0));
+  const valorDesconto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.discountTotal || 0), 0));
+  const valorLiquido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0));
+  const qtdPedido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
 
-  const payload = {
+  const payload: UltraFv3OrderPayload = {
     PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
     NUM_PEDIDO: String(numPedido),
-    OPERADOR: numericOperatorCode,
-    DATA_EMISSAO: formatDateDot(now),
-    DATA_ENTREGA: formatDateDot(now),
-    TIPO_MOVIMENTO: "PEDIDO",
-    FORMA_PAGAMENTO: params.paymentMethodCode,
-    CONDICAO_RECEBIMENTO: params.receivingConditionCode,
-    TABELA_PRECO: params.priceTableCode,
-    FILIAL: params.branchCode,
-    OPERACAO: params.operationCode,
     PARCEIRO: clientErpCode,
-    CODVENDEDOR: numericSellerErpCode,
+    DATA_PEDIDO: formatDateDot(now),
+    DATA_PREV_ENTREGA: formatDateDot(now),
+    VENDEDOR: numericSellerErpCode,
+    OPERADOR: numericOperatorCode,
+    CODOPER: params.operationCode,
+    CODFILIAL: params.branchCode,
+    TABELA_PRECO: params.priceTableCode,
+    CODCONDREC: params.receivingConditionCode,
+    FORMA: params.paymentMethodCode,
     VALOR_BRUTO: valorBruto,
+    VALOR_DESCONTO: valorDesconto,
     VALOR_LIQUIDO: valorLiquido,
+    QTD_PEDIDO: qtdPedido,
+    TIPO_MOVIMENTO: "PEDIDO",
     ITENS: itens,
   };
+
+  const payloadValidationErrors = validateUltraFv3OrderPayload(payload);
+  if (payloadValidationErrors.length) {
+    throw Object.assign(new Error("Payload UltraFV3 /orders inválido; envio bloqueado antes de chamar o ERP."), {
+      status: 400,
+      errors: payloadValidationErrors,
+      endpoint: "/orders",
+      payload: sanitizeErpOrderPayload(payload),
+      parameterDiagnostics,
+    });
+  }
 
   if (params.simulateOnly) {
     logApiEvent("INFO", "[erp order simulation] UltraFV3 order payload validated without submission", {
@@ -680,7 +787,7 @@ async function createErpOrderFromOpportunityUnsafe(
     });
     return updated;
   } catch (error) {
-    const failure = sanitizeUltraOrderFailure(error, { pedidoIdImportacao, numPedido, codVendedor: numericSellerErpCode, operador: numericOperatorCode });
+    const failure = sanitizeUltraOrderFailure(error, { pedidoIdImportacao, numPedido, payload });
     try {
       await prisma.erpOrderSync.update({
         where: { id: sync.id },
@@ -707,6 +814,8 @@ async function createErpOrderFromOpportunityUnsafe(
       pedidoIdImportacao,
       status: error instanceof UltraFv3IntegrationError && error.code === "timeout" ? 504 : 502,
       ultraFv3Failure: failure,
+      endpoint: failure.endpoint,
+      payload: failure.payload,
     });
   }
 }
