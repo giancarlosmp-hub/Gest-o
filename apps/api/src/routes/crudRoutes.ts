@@ -20,7 +20,8 @@ import {
   userResetPasswordSchema,
   userRoleUpdateSchema,
   userUpdateSchema,
-  weeklyVisitMinimumSchema
+  weeklyVisitMinimumSchema,
+  erpOrderGenerationSchema
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -59,7 +60,7 @@ import {
   syncOrderStatus
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
-import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 
@@ -296,15 +297,6 @@ const cultureQuerySchema = z.object({
   category: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
-});
-
-const erpOrderGenerationSchema = z.object({
-  paymentMethodCode: z.string().trim().min(1),
-  receivingConditionCode: z.string().trim().min(1),
-  priceTableCode: z.string().trim().min(1),
-  branchCode: z.string().trim().min(1),
-  operationCode: z.string().trim().min(1),
-  simulateOnly: z.boolean().optional().default(false)
 });
 
 const formatDateDot = (date: Date) => {
@@ -6015,9 +6007,12 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
   const parsed = erpOrderGenerationSchema.safeParse(req.body);
   if (!parsed.success) {
     const message = parsed.error.issues[0]?.message || "Payload inválido";
-    logApiEvent("WARN", "[erp order route] invalid payload", { opportunityId: req.params.id, error: message });
-    return res.status(400).json({ message: `Payload inválido: ${message}` });
+    const parameterDiagnostics = getErpOrderParameterDiagnostics(req.body || {});
+    logApiEvent("WARN", "[erp order route] invalid payload", { opportunityId: req.params.id, error: message, ...parameterDiagnostics });
+    return res.status(400).json({ message: `Payload inválido: ${message}`, ...parameterDiagnostics });
   }
+  const normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
+  const parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);
 
   const opportunity = await prisma.opportunity.findFirst({
     where: { id: req.params.id, ...sellerWhere(req) },
@@ -6029,7 +6024,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
 
   try {
     const sync = await createErpOrderFromOpportunity(opportunity, parsed.data);
-    if (!parsed.data.simulateOnly) {
+    if (!normalizedParams.simulateOnly) {
       await prisma.timelineEvent.create({
         data: {
           type: "status",
@@ -6047,12 +6042,12 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       erpOrderNumber: sync.erpOrderNumber,
       status: sync.status,
       orderStatus: sync.orderStatus,
-      simulated: parsed.data.simulateOnly,
+      simulated: normalizedParams.simulateOnly,
       response: sync.erpResponse
     });
   } catch (error: any) {
     const status = Number(error?.status || 502);
-    if (!parsed.data.simulateOnly) {
+    if (!normalizedParams.simulateOnly) {
       await prisma.timelineEvent.create({
         data: {
           type: "status",
@@ -6068,14 +6063,16 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       httpStatus: status,
       pedidoIdImportacao: error?.pedidoIdImportacao,
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
-      simulateOnly: parsed.data.simulateOnly,
-      error: error?.message || "Erro no envio ao ERP"
+      simulateOnly: normalizedParams.simulateOnly,
+      error: error?.message || "Erro no envio ao ERP",
+      ...parameterDiagnostics
     });
     return res.status(status >= 400 && status < 600 ? status : 502).json({
       pedidoIdImportacao: error?.pedidoIdImportacao,
       existingErpOrderSyncId: error?.existingErpOrderSyncId,
       status: "erro",
-      message: error?.message || "Erro no envio ao ERP"
+      message: error?.message || "Erro no envio ao ERP",
+      ...(error?.parameterDiagnostics || parameterDiagnostics)
     });
   }
 });
