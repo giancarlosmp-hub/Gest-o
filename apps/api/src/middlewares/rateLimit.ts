@@ -26,7 +26,10 @@ const createRateLimiter = (name: string, productionLimit: number, developmentLim
         remaining: details?.remaining,
       });
 
-      res.status(429).json({ message: "Muitas requisições. Tente novamente em instantes." });
+      res.status(429).json({
+        message: "Muitas requisições. Tente novamente em instantes.",
+        ...(req.correlationId ? { correlationId: req.correlationId } : {}),
+      });
     },
   });
 
