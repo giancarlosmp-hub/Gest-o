@@ -5635,18 +5635,65 @@ const normalizeOpportunityPriceTableCode = (value: unknown) => {
   return normalized || DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE;
 };
 
-const pickProductPriceForTable = (product: { defaultPrice?: number | null; prices?: Array<{ erpPriceId?: string | null; price: number; validFrom?: Date | null }> }, priceTableCode?: string | null) => {
+const priceTableMatches = (current: string | null | undefined, requested: string) => {
+  const normalizedCurrent = normalizeOpportunityPriceTableCode(current);
+  if (normalizedCurrent === requested) return true;
+  return requested === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE && (!current || normalizedCurrent === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE);
+};
+
+const parsePositivePrice = (value: unknown) => {
+  const parsed = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+};
+
+const pickRawPriceForTable = (rawPayload: unknown, priceTableCode: string) => {
+  const raw = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) ? rawPayload as Record<string, unknown> : {};
+  const compactCode = priceTableCode.replace(/\W/g, "");
+  const candidateKeys = [
+    `PRECO_TABELA_${priceTableCode}`,
+    `PRECO_TABELA${compactCode}`,
+    `PRECO_TAB_${priceTableCode}`,
+    `PRECO_TAB${compactCode}`,
+    `TABELA_${priceTableCode}_PRECO`,
+    `TABELA${compactCode}_PRECO`,
+    `PRECO${compactCode}`,
+    priceTableCode === "1" ? "PRECO_REVENDA" : "PRECO_CONSUMIDOR_FINAL",
+    priceTableCode === "1" ? "PRECO_COOPERATIVA" : "PRECO_CONSUMIDOR",
+  ];
+  for (const key of candidateKeys) {
+    const price = parsePositivePrice(raw[key]);
+    if (price) return price;
+  }
+
+  for (const value of Object.values(raw)) {
+    if (!Array.isArray(value)) continue;
+    for (const row of value) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      const record = row as Record<string, unknown>;
+      const tableCode = normalizeOpportunityPriceTableCode(record.TABELA_PRECO ?? record.CODTABELA ?? record.COD_TABELA ?? record.priceTableCode ?? record.tabelaPreco ?? record.tabela);
+      if (tableCode !== priceTableCode) continue;
+      const price = parsePositivePrice(record.PRECO ?? record.PRECO_LISTA ?? record.price ?? record.preco ?? record.valor);
+      if (price) return price;
+    }
+  }
+
+  return null;
+};
+
+const pickProductPriceForTable = (product: { defaultPrice?: number | null; rawErpPayload?: unknown; prices?: Array<{ erpPriceId?: string | null; price: number; validFrom?: Date | null }> }, priceTableCode?: string | null) => {
   const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
   const prices = product.prices || [];
-  const tablePrice = prices.find((item) => item.erpPriceId === normalizedPriceTableCode && Number(item.price) > 0);
+  const tablePrice = prices.find((item) => priceTableMatches(item.erpPriceId, normalizedPriceTableCode) && Number(item.price) > 0);
+  const rawTablePrice = tablePrice ? null : pickRawPriceForTable(product.rawErpPayload, normalizedPriceTableCode);
   const latestPositivePrice = prices.find((item) => Number(item.price) > 0);
   const fallbackPrice = Number(product.defaultPrice ?? latestPositivePrice?.price ?? 0);
+  const matchedPrice = tablePrice?.price ?? rawTablePrice;
 
   return {
-    price: Number(tablePrice?.price ?? fallbackPrice ?? 0),
+    price: Number(matchedPrice ?? fallbackPrice ?? 0),
     priceTableCode: normalizedPriceTableCode,
-    priceTableMatched: Boolean(tablePrice),
-    priceWarning: tablePrice ? null : `Sem preço sincronizado para a tabela ${normalizedPriceTableCode}; mantendo preço padrão/manual.`
+    priceTableMatched: Boolean(tablePrice || rawTablePrice),
+    priceWarning: tablePrice || rawTablePrice ? null : `Sem preço sincronizado para a tabela ${normalizedPriceTableCode}; mantendo preço padrão/manual.`
   };
 };
 
