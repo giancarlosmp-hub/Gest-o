@@ -6544,7 +6544,7 @@ const logErpOrderRouteDiagnostic = (
   });
 };
 
-router.post("/opportunities/:id/erp/orders", async (req, res) => {
+router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], async (req, res) => {
   try {
   const correlationId = req.correlationId || randomUUID();
   const opportunityId = req.params.id;
@@ -6651,7 +6651,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
         error: sanitizeErpOrderErrorMessage(message),
         ...parameterDiagnostics,
       });
-      throw Object.assign(new Error(`Payload inválido: ${message}`), { status: 400, parameterDiagnostics });
+      throw Object.assign(new Error(`Payload inválido: ${message}`), { status: 422, parameterDiagnostics });
     }
     normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
     parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);

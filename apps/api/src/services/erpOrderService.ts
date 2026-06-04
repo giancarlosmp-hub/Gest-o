@@ -16,6 +16,7 @@ import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWit
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
+const SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS = 10_000;
 const logErpOrderRouteStage = (
   message: "[ERP ORDER BEFORE SALESMEN]" | "[ERP ORDER AFTER SALESMEN]" | "[ERP ORDER BEFORE ULTRAFV3 ORDERS]" | "[ERP ORDER AFTER ULTRAFV3 ORDERS]",
   context: {
@@ -603,7 +604,7 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
       }
     }
 
-    const response = await ultraFv3Client.request<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, { correlationId: options.correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS });
+    const response = await ultraFv3Client.request<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, { correlationId: options.correlationId, timeoutMs: SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS });
     await prisma.appConfig.upsert({
       where: { key: SALESMEN_CONFIG_KEY },
       update: { value: JSON.stringify(response) },
@@ -612,7 +613,7 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
     return response;
   }
 
-  return requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID());
+  return requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID(), 1, SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS);
 }
 
 async function resolveSalesmanOrderSequenceUnsafe(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
@@ -678,7 +679,7 @@ async function createErpOrderFromOpportunityUnsafe(
   const missingParameter = Object.entries(params).find(([key, value]) => key !== "simulateOnly" && !value);
   if (missingParameter)
     throw Object.assign(new Error(`Payload inválido: código ERP ausente em ${missingParameter[0]}.`), {
-      status: 400,
+      status: 422,
       parameterDiagnostics,
     });
 
@@ -885,7 +886,7 @@ async function createErpOrderFromOpportunityUnsafe(
   const payloadValidationErrors = validateUltraFv3OrderPayload(payload);
   if (payloadValidationErrors.length) {
     throw Object.assign(new Error("Payload UltraFV3 /orders inválido; envio bloqueado antes de chamar o ERP."), {
-      status: 400,
+      status: 422,
       errors: payloadValidationErrors,
       endpoint: "/orders",
       payload: sanitizeErpOrderPayload(payload),
@@ -1113,7 +1114,7 @@ export async function createErpOrderFromOpportunity(
   } catch (error) {
     const source = error && typeof error === "object" ? error as Record<string, unknown> : {};
     const status = error instanceof UltraFv3IntegrationError
-      ? error.status ?? (error.code === "timeout" ? 504 : 502)
+      ? error.status ?? (error.code === "timeout" ? 504 : error.code === "unavailable" || error.code === "missing_credentials" ? 503 : 502)
       : typeof source.status === "number" ? source.status : 502;
     const message = sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error);
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order] generation flow failed", {

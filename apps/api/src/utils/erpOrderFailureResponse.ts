@@ -25,7 +25,7 @@ type ControlledErpOrderFailureInput = {
 };
 
 export const isErpOrderEndpointPath = (method: string, path: string) =>
-  method === "POST" && /^\/(?:api\/)?opportunities\/[^/]+\/erp\/orders\/?$/.test(path);
+  method === "POST" && /^\/(?:api\/)?opportunities\/[^/]+\/(?:erp\/)?orders\/?$/.test(path);
 
 export const sanitizeErpOrderTechnicalMessage = (value: unknown) => {
   const raw = value instanceof Error ? value.message : typeof value === "string" ? value : safeStringify(value);

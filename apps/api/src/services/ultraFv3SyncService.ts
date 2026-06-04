@@ -177,12 +177,12 @@ async function requestReadOnlyWithRetry<T>(endpoint: string, correlationId: stri
   throw lastError instanceof Error ? lastError : new Error(formatError(lastError));
 }
 
-export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
-  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.request<T>(endpoint, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }), attempts);
+export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS, timeoutMs = ULTRAFV3_REQUEST_TIMEOUT_MS) {
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.request<T>(endpoint, { correlationId, timeoutMs }), attempts);
 }
 
-export async function requestUltraFv3ReadOnlyWithCredentialsRetry<T>(endpoint: string, credentials: UltraFv3Credentials, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
-  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.requestWithCredentials<T>(endpoint, credentials, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }), attempts);
+export async function requestUltraFv3ReadOnlyWithCredentialsRetry<T>(endpoint: string, credentials: UltraFv3Credentials, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS, timeoutMs = ULTRAFV3_REQUEST_TIMEOUT_MS) {
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.requestWithCredentials<T>(endpoint, credentials, { correlationId, timeoutMs }), attempts);
 }
 
 async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, correlationId: string, credentials?: UltraFv3Credentials) {
