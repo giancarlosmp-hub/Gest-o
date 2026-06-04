@@ -12,6 +12,7 @@ import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath, safeJsonStringify } from "./utils/erpOrderFailureResponse.js";
+import { buildUltraFv3TimeoutPayload, isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS } from "./services/ultraFv3Client.js";
 import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./middlewares/rateLimit.js";
 
 export const app = express();
@@ -265,6 +266,15 @@ app.use((err: any, req: any, res: any, next: any) => {
     req.erpOrderFailureStage = req.erpOrderFailureStage || (err?.type === "entity.parse.failed" ? "body-parser" : "express-error");
     const status = Number(err?.status || err?.statusCode || 500);
     const httpStatus = status >= 400 && status < 600 ? status : 500;
+    if (httpStatus === 504 && isUltraFv3TimeoutError(err)) {
+      sendControlledJson(res, 504, buildUltraFv3TimeoutPayload({
+        correlationId: req.correlationId || err?.diagnostics?.correlationId,
+        endpoint: err?.diagnostics?.endpoint || "/orders",
+        method: err?.diagnostics?.method || "POST",
+        timeoutMs: err?.diagnostics?.timeoutMs || ULTRAFV3_REQUEST_TIMEOUT_MS,
+      }));
+      return;
+    }
     sendControlledJson(res, httpStatus, buildControlledErpOrderFailurePayload({
       status: httpStatus,
       etapa: req.erpOrderFailureStage,

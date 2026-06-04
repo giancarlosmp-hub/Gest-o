@@ -7,8 +7,8 @@ const DEFAULT_HEADERS = {
   Accept: "application/json",
 };
 
-const ULTRAFV3_REQUEST_TIMEOUT_MS = 15_000;
-export const ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS = 30_000;
+export const ULTRAFV3_REQUEST_TIMEOUT_MS = 30_000;
+export const ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS = ULTRAFV3_REQUEST_TIMEOUT_MS;
 const ULTRAFV3_GET_RETRY_DELAY_MS = 500;
 const RETRIABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 
@@ -37,6 +37,7 @@ export type UltraFv3LoginDiagnostic = {
   message: string;
   ultraResponse: unknown;
   correlationId: string;
+  timeoutMs?: number;
 };
 export type UltraFv3RequestDiagnostic = {
   status: number;
@@ -45,6 +46,7 @@ export type UltraFv3RequestDiagnostic = {
   message: string;
   ultraResponse: unknown;
   correlationId: string;
+  timeoutMs?: number;
 };
 
 type UltraFv3AuthPayload = {
@@ -138,6 +140,39 @@ const extractUltraMessage = (payload: unknown, status: number) => {
   }
   return `UltraFV3 login falhou com status ${status}.`;
 };
+
+const extractErrorCode = (error: unknown): string => {
+  if (!error || typeof error !== "object") return "";
+  const record = error as { code?: unknown; cause?: unknown };
+  if (typeof record.code === "string") return record.code;
+  const cause = record.cause;
+  if (cause && typeof cause === "object" && typeof (cause as { code?: unknown }).code === "string") {
+    return (cause as { code: string }).code;
+  }
+  return "";
+};
+
+export const isUltraFv3TimeoutError = (error: unknown) => {
+  if (error instanceof UltraFv3IntegrationError && error.code === "timeout") return true;
+  const code = extractErrorCode(error);
+  const text = error instanceof Error ? `${error.name} ${error.message} ${code}` : `${String(error)} ${code}`;
+  return /ECONNABORTED|ETIMEDOUT|abort|timeout|timed out/i.test(text);
+};
+
+const isUltraFv3NetworkResetError = (error: unknown) => {
+  const code = extractErrorCode(error);
+  const text = error instanceof Error ? `${error.name} ${error.message} ${code}` : `${String(error)} ${code}`;
+  return /ECONNRESET|socket hang up/i.test(text);
+};
+
+export const buildUltraFv3TimeoutPayload = (diagnostics: { correlationId?: string | null; endpoint: string; method: string; timeoutMs?: number }) => ({
+  status: "erro",
+  message: "Timeout ao comunicar com UltraFV3",
+  correlationId: diagnostics.correlationId || "unavailable",
+  endpoint: diagnostics.endpoint,
+  method: diagnostics.method,
+  timeoutMs: diagnostics.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS,
+});
 
 export class UltraFv3IntegrationError extends Error {
   constructor(
@@ -269,37 +304,58 @@ class UltraFv3Client {
     context: { method: string; path: string; attempt: number; correlationId: string; timeoutMs?: number },
   ) {
     const startedAt = Date.now();
+    const timeoutMs = context.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS;
+    logApiEvent("INFO", "[UltraFV3 HTTP START]", {
+      method: context.method,
+      path: context.path,
+      attempt: context.attempt,
+      correlationId: context.correlationId,
+      timeoutMs,
+    });
+
     try {
       const response = await fetch(url, {
         ...init,
-        signal: this.buildTimeoutSignal(context.timeoutMs),
+        signal: this.buildTimeoutSignal(timeoutMs),
       });
-      logApiEvent(
-        response.ok ? "INFO" : "WARN",
-        "[ultrafv3 http] request completed",
-        {
-          method: context.method,
-          path: context.path,
-          attempt: context.attempt,
-          correlationId: context.correlationId,
-          status: response.status,
-          durationMs: Date.now() - startedAt,
-          timeoutMs: context.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS,
-        },
-      );
+      logApiEvent(response.ok ? "INFO" : "WARN", response.ok ? "[UltraFV3 HTTP SUCCESS]" : "[UltraFV3 HTTP ERROR]", {
+        method: context.method,
+        path: context.path,
+        attempt: context.attempt,
+        correlationId: context.correlationId,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        timeoutMs,
+      });
       return response;
     } catch (error) {
-      const isTimeout = error instanceof Error && /abort|timeout|timed out/i.test(`${error.name} ${error.message}`);
-      logApiEvent("ERROR", isTimeout ? "[ultrafv3 timeout] request timed out" : "[ultrafv3 http] request failed", {
+      if (error instanceof UltraFv3IntegrationError) throw error;
+      const timedOut = isUltraFv3TimeoutError(error);
+      const reset = isUltraFv3NetworkResetError(error);
+      const status = timedOut ? 504 : reset ? 504 : 502;
+      const message = timedOut
+        ? "Timeout ao comunicar com UltraFV3"
+        : `UltraFV3 fora do ar ou inacessível ao processar ${context.method} ${context.path}: ${error instanceof Error ? error.message : String(error)}`;
+      const diagnostics: UltraFv3RequestDiagnostic = {
+        status,
+        endpoint: context.path,
+        method: context.method,
+        message,
+        ultraResponse: null,
+        correlationId: context.correlationId,
+        timeoutMs,
+      };
+      logApiEvent(status === 504 ? "ERROR" : "ERROR", status === 504 ? "[UltraFV3 HTTP TIMEOUT]" : "[UltraFV3 HTTP ERROR]", {
         method: context.method,
         path: context.path,
         attempt: context.attempt,
         correlationId: context.correlationId,
         durationMs: Date.now() - startedAt,
-        timeoutMs: context.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS,
+        timeoutMs,
         error: error instanceof Error ? error.message : String(error),
+        code: extractErrorCode(error) || undefined,
       });
-      throw error;
+      throw new UltraFv3IntegrationError(message, timedOut ? "timeout" : "unavailable", status, diagnostics);
     }
   }
 
@@ -321,12 +377,14 @@ class UltraFv3Client {
               password: env.ultraFv3Password,
             }),
           },
-          { method: "POST", path: "/auth/login", attempt: 1, correlationId: randomUUID() },
+          { method: "POST", path: "/auth/login", attempt: 1, correlationId: randomUUID(), timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS },
         );
       } catch (error) {
+        if (error instanceof UltraFv3IntegrationError) throw error;
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível durante autenticação: ${error instanceof Error ? error.message : String(error)}`,
           "unavailable",
+          502,
         );
       }
 
@@ -420,12 +478,14 @@ class UltraFv3Client {
           headers: DEFAULT_HEADERS,
           body: JSON.stringify({ document: formattedDocument, password: credentials.password, appVersion: ULTRAFV3_APP_VERSION }),
         },
-        { method: "POST", path: "/auth/login", attempt: 1, correlationId },
+        { method: "POST", path: "/auth/login", attempt: 1, correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS },
       );
     } catch (error) {
+      if (error instanceof UltraFv3IntegrationError) throw error;
       throw new UltraFv3IntegrationError(
         `UltraFV3 fora do ar ou inacessível durante autenticação de usuário ERP: ${error instanceof Error ? error.message : String(error)}`,
         "unavailable",
+        502,
       );
     }
 
@@ -512,27 +572,30 @@ class UltraFv3Client {
           headers: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: `Bearer ${cached.token}` },
           ...(method !== "GET" && options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
         },
-        { method, path, attempt: 1, correlationId, timeoutMs: options?.timeoutMs },
+        { method, path, attempt: 1, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS },
       );
     } catch (error) {
+      if (error instanceof UltraFv3IntegrationError) throw error;
       const timeoutMs = options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS;
-      const isTimeout = error instanceof Error && /abort|timeout|timed out/i.test(`${error.name} ${error.message}`);
+      const isTimeout = isUltraFv3TimeoutError(error);
+      const status = isTimeout || isUltraFv3NetworkResetError(error) ? 504 : 502;
       const message = isTimeout
-        ? `UltraFV3 excedeu o timeout de ${timeoutMs}ms ao processar ${method} ${path}.`
+        ? "Timeout ao comunicar com UltraFV3"
         : `UltraFV3 fora do ar ou inacessível ao processar ${method} ${path}: ${error instanceof Error ? error.message : String(error)}`;
-      throw new UltraFv3IntegrationError(message, isTimeout ? "timeout" : "unavailable", isTimeout ? 504 : 502, {
-        status: isTimeout ? 504 : 502,
+      throw new UltraFv3IntegrationError(message, isTimeout ? "timeout" : "unavailable", status, {
+        status,
         endpoint: path,
         method,
         message,
         ultraResponse: null,
         correlationId,
+        timeoutMs,
       });
     }
 
     const ultraResponse = await this.safeJson(response, !response.ok);
     const ultraMessage = extractUltraMessage(ultraResponse, response.status);
-    const diagnostics: UltraFv3RequestDiagnostic = { status: response.status, endpoint: path, method, message: ultraMessage, ultraResponse, correlationId };
+    const diagnostics: UltraFv3RequestDiagnostic = { status: response.status, endpoint: path, method, message: ultraMessage, ultraResponse, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS };
 
     if (response.status === 401 || response.status === 403) {
       this.credentialTokenCache.delete(cacheKey);
@@ -550,6 +613,7 @@ class UltraFv3Client {
       body?: unknown;
       headers?: Record<string, string>;
       correlationId?: string;
+      timeoutMs?: number;
     },
   ): Promise<T> {
     this.ensureConfig();
@@ -576,12 +640,14 @@ class UltraFv3Client {
         return await this.fetchWithTimeout(
           `${this.baseUrl}${path}`,
           requestInit,
-          { method, path, attempt, correlationId },
+          { method, path, attempt, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS },
         );
       } catch (error) {
+        if (error instanceof UltraFv3IntegrationError) throw error;
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível ao consultar ${path}: ${error instanceof Error ? error.message : String(error)}`,
           "unavailable",
+          502,
         );
       }
     };
@@ -590,7 +656,7 @@ class UltraFv3Client {
     try {
       response = await execute(1);
     } catch (error) {
-      if (method !== "GET") throw error;
+      if (method !== "GET" || isUltraFv3TimeoutError(error)) throw error;
       logApiEvent("WARN", "[ultrafv3 http] retrying unavailable GET failure", {
         method,
         path,

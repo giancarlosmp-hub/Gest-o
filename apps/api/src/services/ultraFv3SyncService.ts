@@ -1,7 +1,7 @@
 import { Prisma, ErpSyncRunStatus, ErpSyncTrigger } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
-import { ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
 import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
@@ -168,7 +168,7 @@ async function requestReadOnlyWithRetry<T>(endpoint: string, correlationId: stri
       return await requester();
     } catch (error) {
       lastError = error;
-      if (attempt >= attempts) break;
+      if (isUltraFv3TimeoutError(error) || attempt >= attempts) break;
       const delayMs = ERP_SYNC_READ_RETRY_BASE_DELAY_MS * attempt;
       logApiEvent("WARN", "[ultrafv3 sync] retrying read-only ERP request", { endpoint, correlationId, attempt, attempts, delayMs, error: formatError(error) });
       await sleep(delayMs);
@@ -178,11 +178,11 @@ async function requestReadOnlyWithRetry<T>(endpoint: string, correlationId: stri
 }
 
 export async function requestUltraFv3ReadOnlyWithRetry<T>(endpoint: string, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
-  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.request<T>(endpoint, { correlationId }), attempts);
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.request<T>(endpoint, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }), attempts);
 }
 
 export async function requestUltraFv3ReadOnlyWithCredentialsRetry<T>(endpoint: string, credentials: UltraFv3Credentials, correlationId: string, attempts = ERP_SYNC_READ_RETRY_ATTEMPTS) {
-  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.requestWithCredentials<T>(endpoint, credentials, { correlationId }), attempts);
+  return requestReadOnlyWithRetry<T>(endpoint, correlationId, () => ultraFv3Client.requestWithCredentials<T>(endpoint, credentials, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }), attempts);
 }
 
 async function fetchUltraFv3Rows(endpoint: string, scope: UltraFv3SyncScope, correlationId: string, credentials?: UltraFv3Credentials) {

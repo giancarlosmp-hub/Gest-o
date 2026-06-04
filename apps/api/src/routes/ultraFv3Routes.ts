@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { ultraFv3Client } from "../services/ultraFv3Client.js";
+import { buildUltraFv3TimeoutPayload, isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 import { authMiddleware } from "../middlewares/auth.js";
@@ -160,7 +160,7 @@ const wrapReference = (scope: ErpReferenceScope) => async (_req: any, res: any) 
 
 const wrap = (path: string) => async (_req: any, res: any) => {
   try {
-    const data = await ultraFv3Client.request(path);
+    const data = await ultraFv3Client.request(path, { timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS });
     return res.status(200).json(data);
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
@@ -168,6 +168,15 @@ const wrap = (path: string) => async (_req: any, res: any) => {
       path,
       error: details,
     });
+    const diagnostics = error && typeof error === "object" ? (error as { diagnostics?: { correlationId?: string; endpoint?: string; method?: string; timeoutMs?: number }; status?: number }) : {};
+    if (isUltraFv3TimeoutError(error) || diagnostics.status === 504) {
+      return res.status(504).json(buildUltraFv3TimeoutPayload({
+        correlationId: diagnostics.diagnostics?.correlationId,
+        endpoint: diagnostics.diagnostics?.endpoint || path,
+        method: diagnostics.diagnostics?.method || "GET",
+        timeoutMs: diagnostics.diagnostics?.timeoutMs || ULTRAFV3_REQUEST_TIMEOUT_MS,
+      }));
+    }
     return res.status(502).json({
       message: "Falha de integração UltraFV3.",
       details,
