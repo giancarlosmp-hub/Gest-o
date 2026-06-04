@@ -6008,6 +6008,166 @@ router.get("/opportunities/:id", async (req, res) => {
 });
 
 
+const ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS = [
+  "PARCEIRO",
+  "NUM_PEDIDO",
+  "DATA_PEDIDO",
+  "DATA_PREV_ENTREGA",
+  "VENDEDOR",
+  "OPERADOR",
+  "CODOPER",
+  "CODFILIAL",
+  "TABELA_PRECO",
+  "CODCONDREC",
+  "FORMA",
+  "TIPO_MOVIMENTO",
+  "PEDIDO_ID_IMPORTACAO",
+] as const;
+
+const ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS = [
+  "CODPRODUTO",
+  "CODPRODUTO_CLAS",
+  "ITEM",
+  "QTD_PEDIDO",
+  "PRECO",
+  "PRECO_LISTA",
+  "VALOR_BRUTO",
+  "VALOR_LIQUIDO",
+  "DESCRICAO_UNMED",
+  "UND_MEDIDA",
+  "MOTIVO_CANCELAMENTO",
+  "OBS",
+] as const;
+
+type ErpPayloadAuditDifference = {
+  path: string;
+  type: "missing" | "extra" | "type" | "format" | "value";
+  current: unknown;
+  expected: unknown;
+  message: string;
+};
+
+const pickAuditFields = <T extends readonly string[]>(record: Record<string, unknown>, fields: T) =>
+  Object.fromEntries(fields.map((field) => [field, record[field] ?? null]));
+
+const buildExpectedUltraFv3ProductionPayload = (payload: UltraFv3OrderPayload): UltraFv3OrderPayload => ({
+  ...pickAuditFields(payload, ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS),
+  ITENS: Array.isArray(payload.ITENS)
+    ? payload.ITENS.map((item) => pickAuditFields(item, ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS))
+    : [],
+}) as UltraFv3OrderPayload;
+
+const isAuditBlank = (value: unknown) =>
+  value === undefined || value === null || (typeof value === "string" && value.trim() === "");
+
+const addAuditRequiredFieldDifferences = (payload: UltraFv3OrderPayload, differences: ErpPayloadAuditDifference[]) => {
+  for (const field of ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS) {
+    const current = payload[field];
+    if (isAuditBlank(current)) {
+      differences.push({
+        path: field,
+        type: "missing",
+        current: current ?? null,
+        expected: "valor obrigatório",
+        message: `Campo obrigatório ausente no cabeçalho: ${field}.`,
+      });
+    }
+  }
+
+  if (typeof payload.NUM_PEDIDO !== "string") {
+    differences.push({ path: "NUM_PEDIDO", type: "type", current: payload.NUM_PEDIDO ?? null, expected: "string", message: "NUM_PEDIDO deve ser string." });
+  }
+  const datePattern = /^\d{2}\.\d{2}\.\d{4}$/;
+  for (const field of ["DATA_PEDIDO", "DATA_PREV_ENTREGA"] as const) {
+    if (typeof payload[field] !== "string" || !datePattern.test(payload[field])) {
+      differences.push({ path: field, type: "format", current: payload[field] ?? null, expected: "DD.MM.YYYY", message: `${field} deve estar no formato DD.MM.YYYY.` });
+    }
+  }
+  if (payload.TIPO_MOVIMENTO !== "PEDIDO") {
+    differences.push({ path: "TIPO_MOVIMENTO", type: "value", current: payload.TIPO_MOVIMENTO ?? null, expected: "PEDIDO", message: 'TIPO_MOVIMENTO deve ser "PEDIDO".' });
+  }
+
+  if (!Array.isArray(payload.ITENS) || payload.ITENS.length === 0) {
+    differences.push({ path: "ITENS", type: "missing", current: payload.ITENS ?? null, expected: "ao menos um item", message: "ITENS deve conter ao menos um item." });
+    return;
+  }
+
+  payload.ITENS.forEach((item, index) => {
+    for (const field of ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS) {
+      const current = item[field];
+      if ((field === "MOTIVO_CANCELAMENTO" || field === "OBS") ? current === undefined || current === null : isAuditBlank(current)) {
+        differences.push({
+          path: `ITENS[${index}].${field}`,
+          type: "missing",
+          current: current ?? null,
+          expected: "valor obrigatório",
+          message: `Campo obrigatório ausente no item ${index + 1}: ${field}.`,
+        });
+      }
+    }
+    if (item.ITEM !== index + 1) {
+      differences.push({ path: `ITENS[${index}].ITEM`, type: "value", current: item.ITEM ?? null, expected: index + 1, message: `ITENS[${index}].ITEM deve ser sequencial iniciando em 1.` });
+    }
+  });
+};
+
+const buildUltraFv3PayloadAudit = (payload: UltraFv3OrderPayload) => {
+  const expectedPayload = buildExpectedUltraFv3ProductionPayload(payload);
+  const differences: ErpPayloadAuditDifference[] = [];
+  const expectedHeaderSet = new Set<string>([...ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS, "ITENS"]);
+  const expectedItemSet = new Set<string>(ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS);
+
+  for (const field of Object.keys(payload)) {
+    if (!expectedHeaderSet.has(field)) {
+      differences.push({
+        path: field,
+        type: "extra",
+        current: payload[field],
+        expected: "campo ausente no payload UltraFV3 validado em produção",
+        message: `Campo extra no cabeçalho atual do CRM: ${field}.`,
+      });
+    }
+  }
+
+  if (Array.isArray(payload.ITENS)) {
+    payload.ITENS.forEach((item, index) => {
+      for (const field of Object.keys(item)) {
+        if (!expectedItemSet.has(field)) {
+          differences.push({
+            path: `ITENS[${index}].${field}`,
+            type: "extra",
+            current: item[field],
+            expected: "campo ausente no item UltraFV3 validado em produção",
+            message: `Campo extra no item ${index + 1} atual do CRM: ${field}.`,
+          });
+        }
+      }
+    });
+  }
+
+  addAuditRequiredFieldDifferences(payload, differences);
+
+  return {
+    currentPayload: payload,
+    expectedPayload,
+    correctedPayload: expectedPayload,
+    differences,
+    divergentFields: differences.map((difference) => difference.path),
+    requiredFields: {
+      header: ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS,
+      items: ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS,
+    },
+    fieldSources: {
+      NUM_PEDIDO: "Resolvido imediatamente antes da montagem do payload por GET /salesmen com credenciais do vendedor; o CRM lê NUMERO_PEDIDO em body.data, body, body.response.data ou body.data.data e valida como string.",
+      OPERADOR: "Resolvido do vendedor UltraFV3 retornado em /salesmen que casa com o CODVENDEDOR do usuário CRM; usa o campo OPERADOR do SALESMAN e só mantém erpOperatorCode do usuário como fallback interno.",
+      CODPRODUTO_CLAS: "Resolvido do item da oportunidade (OpportunityItem.erpProductClassCode), preenchido pela sincronização de produtos UltraFV3; se estiver vazio, o CRM usa lineNumber como fallback legado antes de bloquear item sem classificação.",
+    },
+    recommendation: differences.length
+      ? "Não fazer merge de alinhamento automático ainda: revisar os campos divergentes e confirmar com UltraFV3 se os campos extras devem ser removidos do envio real."
+      : "Payload atual do CRM já está alinhado à projeção validada em produção para os campos auditados; seguir com merge somente após validação manual do relatório.",
+  };
+};
+
 const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
   NUM_PEDIDO: payload.NUM_PEDIDO ?? null,
   PEDIDO_ID_IMPORTACAO: payload.PEDIDO_ID_IMPORTACAO ?? null,
@@ -6130,6 +6290,107 @@ const resolveErpDebugOrderParams = async (query: Request["query"]) => {
   const missingParams = ERP_DEBUG_ORDER_PARAM_FIELDS.filter((field) => !paramsResolved[field]);
   return { paramsReceived, rawResolvedParams, paramsResolved, missingParams };
 };
+
+router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  const opportunityId = req.params.id;
+  req.correlationId = correlationId;
+  res.setHeader("x-correlation-id", correlationId);
+  logApiEvent("INFO", "[erp payload audit route] request started", {
+    opportunityId,
+    userId: req.user?.id ?? null,
+    correlationId,
+    requestId: req.requestId,
+  });
+
+  let debugParamsContext: Awaited<ReturnType<typeof resolveErpDebugOrderParams>> | null = null;
+
+  try {
+    debugParamsContext = await resolveErpDebugOrderParams(req.query);
+    const { paramsReceived, rawResolvedParams, paramsResolved, missingParams } = debugParamsContext;
+    if (missingParams.length) {
+      throw Object.assign(new Error(`Parâmetro obrigatório ausente: ${missingParams[0]}`), {
+        status: 400,
+        paramsReceived,
+        paramsResolved,
+        missingParams,
+      });
+    }
+
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, ...sellerWhere(req) },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+    });
+    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404, paramsReceived, paramsResolved, missingParams });
+
+    const preview = await createErpOrderFromOpportunity(opportunity, paramsResolved, { correlationId });
+    const payload = preview.payloadSent as UltraFv3OrderPayload;
+    const audit = buildUltraFv3PayloadAudit(payload);
+    const salesmenDiagnostics = "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null;
+
+    logApiEvent("INFO", "[ERP PAYLOAD AUDIT]", {
+      opportunityId,
+      correlationId,
+      endpoint: "/orders",
+      willSubmitOrders: false,
+      paramsReceived,
+      rawResolvedParams,
+      paramsResolved,
+      missingParams,
+      divergentFields: audit.divergentFields,
+      differences: audit.differences,
+      salesmenDiagnostics,
+    });
+
+    return res.status(200).json({
+      correlationId,
+      simulated: true,
+      postOrdersSent: false,
+      endpoint: "/orders",
+      message: "Auditoria comparativa gerada; nenhum POST /orders foi enviado ao UltraFV3.",
+      paramsReceived,
+      paramsResolved,
+      missingParams,
+      payloadAtual: audit.currentPayload,
+      payloadEsperado: audit.expectedPayload,
+      payloadCorrigido: audit.correctedPayload,
+      diferencasEncontradas: audit.differences,
+      camposDivergentes: audit.divergentFields,
+      camposObrigatoriosValidados: audit.requiredFields,
+      origemDocumental: audit.fieldSources,
+      recomendacaoFinal: audit.recommendation,
+      salesmenDiagnostics,
+    });
+  } catch (error: any) {
+    const statusCandidate = Number(error?.status || 502);
+    const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
+    const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Falha ao gerar auditoria do payload ERP.");
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp payload audit route] request failed", {
+      opportunityId,
+      correlationId,
+      httpStatus: status,
+      error: message,
+      diagnostics: error?.diagnostics || null,
+    });
+    return res.status(status).json({
+      correlationId,
+      simulated: true,
+      postOrdersSent: false,
+      paramsReceived: error?.paramsReceived || debugParamsContext?.paramsReceived || null,
+      paramsResolved: error?.paramsResolved || debugParamsContext?.paramsResolved || null,
+      missingParams: Array.isArray(error?.missingParams) ? error.missingParams : debugParamsContext?.missingParams || [],
+      payloadAtual: null,
+      payloadEsperado: null,
+      payloadCorrigido: null,
+      diferencasEncontradas: [],
+      camposDivergentes: [],
+      status: "erro",
+      message,
+      salesmenDiagnostics: error?.diagnostics || null,
+      ...(error?.payload ? { invalidPayload: error.payload } : {}),
+    });
+  }
+});
 
 router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
   const correlationId = req.correlationId || randomUUID();
