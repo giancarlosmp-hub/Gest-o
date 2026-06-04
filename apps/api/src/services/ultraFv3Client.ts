@@ -332,7 +332,7 @@ class UltraFv3Client {
       if (error instanceof UltraFv3IntegrationError) throw error;
       const timedOut = isUltraFv3TimeoutError(error);
       const reset = isUltraFv3NetworkResetError(error);
-      const status = timedOut ? 504 : reset ? 504 : 502;
+      const status = timedOut ? 504 : reset ? 504 : 503;
       const message = timedOut
         ? "Timeout ao comunicar com UltraFV3"
         : `UltraFV3 fora do ar ou inacessível ao processar ${context.method} ${context.path}: ${error instanceof Error ? error.message : String(error)}`;
@@ -384,7 +384,7 @@ class UltraFv3Client {
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível durante autenticação: ${error instanceof Error ? error.message : String(error)}`,
           "unavailable",
-          502,
+          503,
         );
       }
 
@@ -485,7 +485,7 @@ class UltraFv3Client {
       throw new UltraFv3IntegrationError(
         `UltraFV3 fora do ar ou inacessível durante autenticação de usuário ERP: ${error instanceof Error ? error.message : String(error)}`,
         "unavailable",
-        502,
+        503,
       );
     }
 
@@ -578,7 +578,7 @@ class UltraFv3Client {
       if (error instanceof UltraFv3IntegrationError) throw error;
       const timeoutMs = options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS;
       const isTimeout = isUltraFv3TimeoutError(error);
-      const status = isTimeout || isUltraFv3NetworkResetError(error) ? 504 : 502;
+      const status = isTimeout || isUltraFv3NetworkResetError(error) ? 504 : 503;
       const message = isTimeout
         ? "Timeout ao comunicar com UltraFV3"
         : `UltraFV3 fora do ar ou inacessível ao processar ${method} ${path}: ${error instanceof Error ? error.message : String(error)}`;
@@ -647,7 +647,7 @@ class UltraFv3Client {
         throw new UltraFv3IntegrationError(
           `UltraFV3 fora do ar ou inacessível ao consultar ${path}: ${error instanceof Error ? error.message : String(error)}`,
           "unavailable",
-          502,
+          503,
         );
       }
     };

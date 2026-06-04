@@ -69,7 +69,7 @@ app.use(
 );
 app.use(requestContextMiddleware);
 app.use((req, res, next) => {
-  const match = isErpOrderRequest(req) ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/erp\/orders\/?$/) : null;
+  const match = isErpOrderRequest(req) ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/(?:erp\/)?orders\/?$/) : null;
   if (!match) return next();
 
   const correlationId = randomUUID();
