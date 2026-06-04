@@ -65,7 +65,7 @@ import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrd
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
-import { buildErpOrderPdf, getErpOrderPdfFilename, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
+import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -7056,7 +7056,9 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
   if (!order) return res.status(404).json({ message: "Pedido ERP enviado não encontrado para esta oportunidade" });
 
   try {
-    const pdf = buildErpOrderPdf(order as ErpOrderPdfRecord);
+    const pdfOrder = order as ErpOrderPdfRecord;
+    const company = await getErpOrderPdfCompany(prisma, pdfOrder);
+    const pdf = buildErpOrderPdf(pdfOrder, company);
     const filename = getErpOrderPdfFilename(order);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

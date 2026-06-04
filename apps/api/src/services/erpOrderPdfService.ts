@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { normalizeErpParameterCode } from "@salesforce-pro/shared";
 import {
   ErpOrderSyncStatus,
   Prisma,
@@ -7,11 +11,12 @@ import {
   type OpportunityItem,
   type Product,
   type User,
+  type PrismaClient,
 } from "@prisma/client";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
-const MARGIN = 36;
+const MARGIN = 24;
 const BRAND_GREEN = [25, 94, 62] as const;
 const BRAND_LIGHT = [239, 247, 241] as const;
 const BRAND_SOFT = [245, 250, 247] as const;
@@ -36,6 +41,29 @@ type PdfCell = {
   text: string;
   width: number;
   align?: "left" | "right" | "center";
+};
+
+type PdfPngImage = {
+  name: string;
+  width: number;
+  height: number;
+  colorSpace: "DeviceGray" | "DeviceRGB";
+  colors: number;
+  bitsPerComponent: number;
+  data: Buffer;
+};
+
+export type ErpOrderPdfCompany = {
+  legalName: string;
+  brandName: string;
+  cnpj: string;
+  stateRegistration: string;
+  address: string;
+  district: string;
+  city: string;
+  state: string;
+  cep: string;
+  phone: string;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -130,9 +158,65 @@ const wrapText = (text: string, maxChars: number) => {
   return lines.length ? lines : ["-"];
 };
 
+const readPngImageFromSvg = (svgPath: string, name: string): PdfPngImage | null => {
+  if (!existsSync(svgPath)) return null;
+  const svg = readFileSync(svgPath, "utf8");
+  const base64 = svg.match(/base64,([^\"]+)/)?.[1];
+  if (!base64) return null;
+  const png = Buffer.from(base64, "base64");
+  if (png.toString("ascii", 1, 4) !== "PNG") return null;
+
+  const width = png.readUInt32BE(16);
+  const height = png.readUInt32BE(20);
+  const bitsPerComponent = png[24];
+  const colorType = png[25];
+  const colorMap: Record<number, Pick<PdfPngImage, "colorSpace" | "colors">> = {
+    0: { colorSpace: "DeviceGray", colors: 1 },
+    2: { colorSpace: "DeviceRGB", colors: 3 },
+  };
+  const color = colorMap[colorType];
+  if (!color || bitsPerComponent !== 8) return null;
+
+  const idatChunks: Buffer[] = [];
+  let offset = 8;
+  while (offset < png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("ascii", offset + 4, offset + 8);
+    if (type === "IDAT") idatChunks.push(png.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  if (!idatChunks.length) return null;
+
+  return {
+    name,
+    width,
+    height,
+    bitsPerComponent,
+    colorSpace: color.colorSpace,
+    colors: color.colors,
+    data: Buffer.concat(idatChunks),
+  };
+};
+
+const loadDemetraLogo = () => {
+  const candidates = [
+    resolve(process.cwd(), "apps/web/public/brand/demetra-logo-dark.svg"),
+    resolve(process.cwd(), "../web/public/brand/demetra-logo-dark.svg"),
+    resolve(process.cwd(), "public/brand/demetra-logo-dark.svg"),
+  ];
+  for (const candidate of candidates) {
+    const image = readPngImageFromSvg(candidate, "ImDemetraLogo");
+    if (image) return image;
+  }
+  return null;
+};
+
+const DEMETRA_LOGO = loadDemetraLogo();
+
 class SimplePdf {
   private pages: PdfPage[] = [{ commands: [] }];
   private current = this.pages[0];
+  private images = DEMETRA_LOGO ? [DEMETRA_LOGO] : [];
 
   addPage() {
     this.current = { commands: [] };
@@ -165,6 +249,13 @@ class SimplePdf {
   ) {
     this.current.commands.push(
       `${color.map((c) => (c / 255).toFixed(3)).join(" ")} RG ${width} w ${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`,
+    );
+  }
+
+  image(name: string, x: number, y: number, width: number, height: number) {
+    if (!this.images.some((image) => image.name === name)) return;
+    this.current.commands.push(
+      `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /${name} Do Q`,
     );
   }
 
@@ -212,6 +303,21 @@ class SimplePdf {
     const fontBoldId = addObject(
       "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
     );
+    const imageObjectIds = new Map<string, number>();
+    for (const image of this.images) {
+      const stream = Buffer.concat([
+        Buffer.from(
+          `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /${image.colorSpace} /BitsPerComponent ${image.bitsPerComponent} /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${image.colors} /BitsPerComponent ${image.bitsPerComponent} /Columns ${image.width} >> /Length ${image.data.length} >>\nstream\n`,
+          "ascii",
+        ),
+        image.data,
+        Buffer.from("\nendstream", "ascii"),
+      ]);
+      imageObjectIds.set(image.name, addObject(stream));
+    }
+    const xObjectResources = Array.from(imageObjectIds.entries())
+      .map(([name, id]) => `/${name} ${id} 0 R`)
+      .join(" ");
     const pageIds: number[] = [];
 
     for (const page of this.pages) {
@@ -224,7 +330,7 @@ class SimplePdf {
         ]),
       );
       const pageId = addObject(
-        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >> >> /Contents ${streamId} 0 R >>`,
+        `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${PAGE_WIDTH} ${PAGE_HEIGHT}] /Resources << /Font << /F1 ${fontRegularId} 0 R /F2 ${fontBoldId} 0 R >>${xObjectResources ? ` /XObject << ${xObjectResources} >>` : ""} >> /Contents ${streamId} 0 R >>`,
       );
       pageIds.push(pageId);
     }
@@ -264,15 +370,131 @@ class SimplePdf {
 
 const getPayload = (order: ErpOrderPdfRecord) => asRecord(order.payloadSent);
 
-const DEMETRA_COMPANY = {
-  legalName: "DEMETRA AGRONEGOCIOS EIRELI ME",
-  brandName: "DEMETRA AGRO",
-  cnpj: "17.477.952/0001-90",
-  stateRegistration: "001.987.800.00-33",
-  address: "RUA SILVESTRE FERREIRA, 570",
-  city: "SÃO GOTARDO/MG",
-  cep: "38800-000",
-  phone: "(34) 3671-0000",
+const BRANCH_CODE_KEYS = [
+  "CODFILIAL",
+  "FILIAL",
+  "COD_FILIAL",
+  "CODIGO",
+  "code",
+  "codigo",
+  "id",
+  "ID",
+  "value",
+];
+
+const normalizeBranchRows = (value: unknown): Record<string, unknown>[] => {
+  if (Array.isArray(value)) return value.map(asRecord).filter((row) => Object.keys(row).length);
+  const record = asRecord(value);
+  for (const key of ["items", "data", "rows", "results", "content"]) {
+    const rows = record[key];
+    if (Array.isArray(rows)) return rows.map(asRecord).filter((row) => Object.keys(row).length);
+  }
+  return Object.keys(record).length ? [record] : [];
+};
+
+const parseAppConfigJson = (value: string | null | undefined) => {
+  if (!value) return [];
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return [];
+  }
+};
+
+const getBranchRawCode = (branch: Record<string, unknown>) =>
+  pickFirstString(branch, BRANCH_CODE_KEYS);
+
+const findPdfBranch = (
+  branches: Record<string, unknown>[],
+  branchCode: unknown,
+) => {
+  const normalizedTarget = normalizeErpParameterCode(cleanText(branchCode, ""));
+  if (normalizedTarget) {
+    const matched = branches.find((branch) =>
+      normalizeErpParameterCode(getBranchRawCode(branch)) === normalizedTarget,
+    );
+    if (matched) return matched;
+  }
+  return branches[0] || {};
+};
+
+const getBranchAddress = (branch: Record<string, unknown>) => {
+  const directAddress = pickFirstString(branch, [
+    "ENDERECO",
+    "ADDRESS",
+    "address",
+    "endereco",
+  ]);
+  const street = pickFirstString(branch, [
+    "LOGRADOURO",
+    "RUA",
+    "street",
+    "logradouro",
+  ]);
+  const number = pickFirstString(branch, ["NUMERO", "NRO", "number", "numero"]);
+  const complement = pickFirstString(branch, [
+    "COMPLEMENTO",
+    "COMPLEMENT",
+    "complemento",
+  ]);
+  return directAddress || [street, number, complement].filter(Boolean).join(", ");
+};
+
+const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
+  legalName: pickFirstString(branch, [
+    "RAZAO_SOCIAL",
+    "RAZAOSOCIAL",
+    "RAZAO",
+    "NOME",
+    "NOME_FILIAL",
+    "name",
+    "razaoSocial",
+    "legalName",
+  ]),
+  brandName: pickFirstString(branch, [
+    "FANTASIA",
+    "NOME_FANTASIA",
+    "NOMEFANTASIA",
+    "fantasyName",
+    "nomeFantasia",
+    "brandName",
+    "DESCRICAO",
+    "DSCFILIAL",
+  ]),
+  cnpj: formatDocument(pickFirstString(branch, ["CNPJ", "cnpj", "DOCUMENTO", "document"])),
+  stateRegistration: pickFirstString(branch, [
+    "IE",
+    "INSCRICAO_ESTADUAL",
+    "INSCRICAO",
+    "stateRegistration",
+    "inscricaoEstadual",
+  ]),
+  address: getBranchAddress(branch),
+  district: pickFirstString(branch, ["BAIRRO", "DISTRICT", "bairro", "district"]),
+  city: pickFirstString(branch, ["CIDADE", "MUNICIPIO", "city", "cidade"]),
+  state: pickFirstString(branch, ["UF", "ESTADO", "state", "uf"]),
+  cep: pickFirstString(branch, ["CEP", "ZIP", "zipCode", "cep"]),
+  phone: pickFirstString(branch, [
+    "FONE",
+    "TELEFONE",
+    "CELULAR",
+    "PHONE",
+    "phone",
+    "telefone",
+  ]),
+});
+
+export const getErpOrderPdfCompany = async (
+  prisma: Pick<PrismaClient, "appConfig">,
+  order: ErpOrderPdfRecord,
+): Promise<ErpOrderPdfCompany> => {
+  const stored = await prisma.appConfig.findUnique({
+    where: { key: "erp.ultrafv3.branches" },
+    select: { value: true },
+  });
+  const branches = normalizeBranchRows(parseAppConfigJson(stored?.value));
+  const branch = findPdfBranch(branches, getPayload(order).CODFILIAL);
+  return toPdfCompany(branch);
 };
 
 const ERP_ORDER_CLAUSES = [
@@ -378,68 +600,69 @@ const getClassification = (
   );
 };
 
-const drawHeader = (pdf: SimplePdf, orderNumber: string) => {
-  pdf.rect(0, PAGE_HEIGHT - 112, PAGE_WIDTH, 112, BRAND_GREEN);
-  pdf.rect(MARGIN, PAGE_HEIGHT - 84, 42, 42, [255, 255, 255]);
-  pdf.text("D", MARGIN + 12, PAGE_HEIGHT - 70, 20, BRAND_GREEN, "F2");
-  pdf.line(
-    MARGIN + 30,
-    PAGE_HEIGHT - 58,
-    MARGIN + 37,
-    PAGE_HEIGHT - 72,
-    BRAND_GREEN,
-    1.2,
-  );
+const drawHeader = (
+  pdf: SimplePdf,
+  orderNumber: string,
+  company: ErpOrderPdfCompany,
+) => {
+  pdf.rect(0, PAGE_HEIGHT - 94, PAGE_WIDTH, 94, BRAND_GREEN);
+  pdf.rect(MARGIN, PAGE_HEIGHT - 78, 38, 38, [255, 255, 255]);
+  if (DEMETRA_LOGO) {
+    pdf.image(DEMETRA_LOGO.name, MARGIN + 3, PAGE_HEIGHT - 75, 32, 32);
+  } else {
+    pdf.text("D", MARGIN + 11, PAGE_HEIGHT - 64, 18, BRAND_GREEN, "F2");
+  }
+  const companyCity = [company.city, company.state].filter(Boolean).join("/");
   pdf.text(
-    DEMETRA_COMPANY.legalName,
-    MARGIN + 54,
-    PAGE_HEIGHT - 50,
-    12,
+    cleanText(company.legalName),
+    MARGIN + 48,
+    PAGE_HEIGHT - 42,
+    11.2,
     [255, 255, 255],
     "F2",
   );
   pdf.text(
-    DEMETRA_COMPANY.brandName,
-    MARGIN + 54,
-    PAGE_HEIGHT - 66,
-    17,
-    [255, 255, 255],
+    cleanText(company.brandName),
+    MARGIN + 48,
+    PAGE_HEIGHT - 57,
+    10,
+    [221, 245, 229],
     "F2",
   );
   pdf.text(
-    `CNPJ: ${DEMETRA_COMPANY.cnpj}   IE: ${DEMETRA_COMPANY.stateRegistration}`,
-    MARGIN + 54,
-    PAGE_HEIGHT - 82,
-    8.5,
+    `${cleanText(company.address)} - ${cleanText(company.district)} - ${companyCity} - CEP ${cleanText(company.cep)}`,
+    MARGIN + 48,
+    PAGE_HEIGHT - 71,
+    7.2,
     [221, 245, 229],
   );
   pdf.text(
-    `${DEMETRA_COMPANY.address} - ${DEMETRA_COMPANY.city} - CEP ${DEMETRA_COMPANY.cep} - Fone ${DEMETRA_COMPANY.phone}`,
-    MARGIN + 54,
-    PAGE_HEIGHT - 96,
-    8,
+    `CNPJ: ${cleanText(company.cnpj)}   IE: ${cleanText(company.stateRegistration)}   Fone: ${cleanText(company.phone)}`,
+    MARGIN + 48,
+    PAGE_HEIGHT - 83,
+    7.2,
     [221, 245, 229],
   );
   pdf.rect(
     PAGE_WIDTH - MARGIN - 142,
-    PAGE_HEIGHT - 82,
-    142,
-    48,
+    PAGE_HEIGHT - 78,
+    132,
+    42,
     [255, 255, 255],
   );
   pdf.text(
     "PEDIDO DE VENDA",
-    PAGE_WIDTH - MARGIN - 130,
-    PAGE_HEIGHT - 52,
-    9,
+    PAGE_WIDTH - MARGIN - 122,
+    PAGE_HEIGHT - 51,
+    8,
     BRAND_GREEN,
     "F2",
   );
   pdf.text(
     `Nº ${orderNumber}`,
-    PAGE_WIDTH - MARGIN - 130,
-    PAGE_HEIGHT - 70,
-    14,
+    PAGE_WIDTH - MARGIN - 122,
+    PAGE_HEIGHT - 68,
+    12,
     BRAND_GREEN,
     "F2",
   );
@@ -472,13 +695,14 @@ const ensureSpace = (
   required: number,
   pageNumber: { value: number },
   orderNumber: string,
+  company: ErpOrderPdfCompany,
 ) => {
   if (y - required > 42) return y;
   drawFooter(pdf, pageNumber.value);
   pdf.addPage();
   pageNumber.value += 1;
-  drawHeader(pdf, orderNumber);
-  return PAGE_HEIGHT - 134;
+  drawHeader(pdf, orderNumber, company);
+  return PAGE_HEIGHT - 108;
 };
 
 const drawTableRow = (
@@ -546,7 +770,10 @@ export const getErpOrderPdfFilename = (
   return `pedido-erp-${orderNumber}.pdf`;
 };
 
-export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
+export const buildErpOrderPdf = (
+  order: ErpOrderPdfRecord,
+  company: ErpOrderPdfCompany,
+) => {
   if (order.status !== ErpOrderSyncStatus.sent)
     throw Object.assign(
       new Error(
@@ -565,16 +792,16 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
   );
   const pdf = new SimplePdf();
   const pageNumber = { value: 1 };
-  drawHeader(pdf, orderNumber);
+  drawHeader(pdf, orderNumber, company);
 
-  let y = PAGE_HEIGHT - 134;
-  pdf.rect(MARGIN, y - 54, PAGE_WIDTH - MARGIN * 2, 58, BRAND_LIGHT, BORDER);
+  let y = PAGE_HEIGHT - 108;
+  pdf.rect(MARGIN, y - 38, PAGE_WIDTH - MARGIN * 2, 42, BRAND_LIGHT, BORDER);
   drawLabelValue(
     pdf,
     "Data do pedido",
     formatDate(payload.DATA_PEDIDO || order.sentAt || order.createdAt),
     MARGIN + 12,
-    y - 20,
+    y - 16,
     105,
   );
   drawLabelValue(
@@ -582,7 +809,7 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Data de entrega",
     formatDate(payload.DATA_PREV_ENTREGA),
     MARGIN + 136,
-    y - 20,
+    y - 16,
     105,
   );
   drawLabelValue(
@@ -590,7 +817,7 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Número do pedido",
     orderNumber,
     MARGIN + 260,
-    y - 20,
+    y - 16,
     120,
   );
   drawLabelValue(
@@ -598,14 +825,14 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Tabela",
     cleanText(payload.TABELA_PRECO),
     MARGIN + 402,
-    y - 20,
+    y - 16,
     90,
   );
-  y -= 78;
+  y -= 56;
 
-  pdf.text("Dados do cliente", MARGIN, y, 12, BRAND_GREEN, "F2");
-  y -= 14;
-  pdf.rect(MARGIN, y - 82, PAGE_WIDTH - MARGIN * 2, 86, null, BORDER);
+  pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
+  y -= 12;
+  pdf.rect(MARGIN, y - 66, PAGE_WIDTH - MARGIN * 2, 70, null, BORDER);
   drawLabelValue(pdf, "Cliente", clientLegalName, MARGIN + 12, y - 18, 230);
   drawLabelValue(
     pdf,
@@ -628,7 +855,7 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Endereço",
     clientAddress.address,
     MARGIN + 12,
-    y - 56,
+    y - 50,
     220,
   );
   drawLabelValue(
@@ -636,7 +863,7 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Bairro",
     cleanText(clientAddress.district),
     MARGIN + 248,
-    y - 56,
+    y - 50,
     80,
   );
   drawLabelValue(
@@ -644,7 +871,7 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "Cidade/UF",
     `${cleanText(clientAddress.city)}/${cleanText(clientAddress.state)}`,
     MARGIN + 345,
-    y - 56,
+    y - 50,
     92,
   );
   drawLabelValue(
@@ -652,36 +879,23 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     "CEP / Telefone",
     [clientAddress.cep, clientAddress.phone].filter(Boolean).join(" / ") || "-",
     MARGIN + 455,
-    y - 56,
+    y - 50,
     70,
   );
   if (fantasyName && fantasyName !== clientLegalName)
-    pdf.text(`Fantasia: ${fantasyName}`, MARGIN + 12, y - 78, 8, MUTED);
-  y -= 108;
-
-  pdf.text("Dados do vendedor", MARGIN, y, 12, BRAND_GREEN, "F2");
-  y -= 14;
-  pdf.rect(MARGIN, y - 36, PAGE_WIDTH - MARGIN * 2, 40, BRAND_SOFT, BORDER);
+    pdf.text(`Fantasia: ${fantasyName}`, MARGIN + 12, y - 62, 7, MUTED);
   drawLabelValue(
     pdf,
     "Vendedor",
-    cleanText(order.opportunity.ownerSeller.name),
-    MARGIN + 12,
-    y - 18,
-    260,
+    `${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
+    MARGIN + 345,
+    y - 50,
+    160,
   );
-  drawLabelValue(
-    pdf,
-    "Código do vendedor",
-    cleanText(order.opportunity.ownerSeller.erpCode),
-    MARGIN + 300,
-    y - 18,
-    150,
-  );
-  y -= 62;
+  y -= 88;
 
-  pdf.text("Itens", MARGIN, y, 12, BRAND_GREEN, "F2");
-  y -= 14;
+  pdf.text("Itens", MARGIN, y, 10, BRAND_GREEN, "F2");
+  y -= 12;
   const columns: PdfCell[] = [
     { text: "Produto", width: 72 },
     { text: "Descrição", width: 218 },
@@ -691,11 +905,11 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     { text: "Unitário", width: 62, align: "right" },
     { text: "Total", width: 51, align: "right" },
   ];
-  drawTableRow(pdf, columns, MARGIN, y, 24, BRAND_GREEN, true);
-  y -= 24;
+  drawTableRow(pdf, columns, MARGIN, y, 20, BRAND_GREEN, true);
+  y -= 20;
 
   for (const item of order.opportunity.items) {
-    y = ensureSpace(pdf, y, 34, pageNumber, orderNumber);
+    y = ensureSpace(pdf, y, 24, pageNumber, orderNumber, company);
     const rawProduct = asRecord(item.product?.rawErpPayload);
     const reference = pickFirstString(rawProduct, [
       "REFERENCIA",
@@ -723,8 +937,8 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
       { text: formatCurrency(item.unitPrice), width: 62, align: "right" },
       { text: formatCurrency(item.netTotal), width: 51, align: "right" },
     ];
-    drawTableRow(pdf, cells, MARGIN, y, 34, null);
-    y -= 34;
+    drawTableRow(pdf, cells, MARGIN, y, 24, null);
+    y -= 24;
   }
 
   const grossTotal = order.opportunity.items.reduce(
@@ -739,10 +953,10 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     (sum, item) => sum + Number(item.netTotal || 0),
     0,
   );
-  y = ensureSpace(pdf, y, 118, pageNumber, orderNumber);
-  y -= 18;
-  pdf.rect(PAGE_WIDTH - MARGIN - 214, y - 100, 214, 106, BRAND_LIGHT, BORDER);
-  pdf.text("Totais", PAGE_WIDTH - MARGIN - 200, y - 12, 12, BRAND_GREEN, "F2");
+  y = ensureSpace(pdf, y, 96, pageNumber, orderNumber, company);
+  y -= 10;
+  pdf.rect(MARGIN, y - 72, PAGE_WIDTH - MARGIN * 2, 78, BRAND_LIGHT, BORDER);
+  pdf.text("Totais", MARGIN + 12, y - 10, 10, BRAND_GREEN, "F2");
   const totalRows = [
     ["Total Produtos", payload.VALOR_BRUTO ?? grossTotal],
     ["Acréscimos", payload.VALOR_ACRESCIMO ?? 0],
@@ -751,87 +965,74 @@ export const buildErpOrderPdf = (order: ErpOrderPdfRecord) => {
     ["Total Líquido", payload.VALOR_LIQUIDO ?? netTotal],
   ] as const;
   totalRows.forEach(([label, value], index) => {
-    const rowY = y - 30 - index * 16;
+    const column = index < 3 ? 0 : 1;
+    const row = index < 3 ? index : index - 3;
+    const labelX = MARGIN + 12 + column * 178;
+    const rowY = y - 26 - row * 14;
     pdf.text(
       label,
-      PAGE_WIDTH - MARGIN - 200,
+      labelX,
       rowY,
-      8.5,
+      7.6,
       index === 4 ? BRAND_GREEN : MUTED,
       index === 4 ? "F2" : "F1",
     );
     pdf.text(
       formatCurrencyLabel(value),
-      PAGE_WIDTH - MARGIN - 86,
+      labelX + 82,
       rowY,
-      8.5,
+      7.8,
       index === 4 ? BRAND_GREEN : SLATE,
       "F2",
     );
   });
+  pdf.text(
+    `Forma de Pagto: ${cleanText(payload.FORMA || "DINHEIRO/CHEQUE")}   Condição: ${cleanText(payload.CODCONDREC || "A VISTA")}`,
+    MARGIN + 12,
+    y - 66,
+    7.5,
+    SLATE,
+    "F2",
+  );
   const rawWeights = asRecord(payload.PESOS || payload);
   pdf.text(
-    `Peso Líq.: ${cleanText(rawWeights.PESO_LIQUIDO || rawWeights.PESO_LIQ || "-")}   Peso Bruto: ${cleanText(rawWeights.PESO_BRUTO || "-")}`,
-    PAGE_WIDTH - MARGIN - 200,
-    y - 96,
-    7.5,
+    `Transportadora / Pesos: Peso Bruto ${cleanText(rawWeights.PESO_BRUTO || "-")}   Peso Líquido ${cleanText(rawWeights.PESO_LIQUIDO || rawWeights.PESO_LIQ || "-")}`,
+    MARGIN + 310,
+    y - 66,
+    7,
     MUTED,
   );
+  y -= 88;
 
-  pdf.text("Condições comerciais", MARGIN, y - 12, 12, BRAND_GREEN, "F2");
-  drawLabelValue(
-    pdf,
-    "Forma de Pagto",
-    cleanText(payload.FORMA || "DINHEIRO/CHEQUE"),
-    MARGIN,
-    y - 34,
-    145,
-  );
-  drawLabelValue(
-    pdf,
-    "Condição",
-    cleanText(payload.CODCONDREC || "A VISTA"),
-    MARGIN + 165,
-    y - 34,
-    120,
-  );
-  drawLabelValue(
-    pdf,
-    "Tabela de preço",
-    cleanText(payload.TABELA_PRECO),
-    MARGIN,
-    y - 74,
-    160,
-  );
   const notes = cleanText(
     payload.OBS_PEDIDO || order.opportunity.notes,
     "Sem observações.",
   );
-  drawLabelValue(pdf, "Observações", notes, MARGIN + 165, y - 74, 160);
-  y -= 130;
+  pdf.rect(MARGIN, y - 28, PAGE_WIDTH - MARGIN * 2, 32, null, BORDER);
+  drawLabelValue(pdf, "Observações", notes, MARGIN + 12, y - 16, 500);
+  y -= 44;
 
-  y = ensureSpace(pdf, y, 78, pageNumber, orderNumber);
-  pdf.line(MARGIN + 58, y - 34, MARGIN + 230, y - 34, SLATE, 0.8);
-  pdf.text("Assinatura do Comprador", MARGIN + 86, y - 50, 9, SLATE, "F2");
-  y -= 72;
-
-  pdf.text("Cláusulas", MARGIN, y, 12, BRAND_GREEN, "F2");
-  y -= 16;
+  pdf.text("Cláusulas", MARGIN, y, 9.5, BRAND_GREEN, "F2");
+  y -= 12;
   for (const [index, clause] of ERP_ORDER_CLAUSES.entries()) {
-    const lines = wrapText(clause, 108);
-    y = ensureSpace(pdf, y, lines.length * 9 + 8, pageNumber, orderNumber);
+    const lines = wrapText(clause, 132);
+    y = ensureSpace(pdf, y, lines.length * 6.6 + 4, pageNumber, orderNumber, company);
     lines.forEach((line, lineIndex) =>
       pdf.text(
         line,
         MARGIN,
-        y - lineIndex * 9,
-        index === 0 ? 8.5 : 7.6,
+        y - lineIndex * 6.6,
+        index === 0 ? 6.8 : 6.4,
         SLATE,
         index === 0 ? "F2" : "F1",
       ),
     );
-    y -= lines.length * 9 + 6;
+    y -= lines.length * 6.6 + 4;
   }
+
+  y = ensureSpace(pdf, y, 42, pageNumber, orderNumber, company);
+  pdf.line(MARGIN + 66, y - 20, MARGIN + 250, y - 20, SLATE, 0.8);
+  pdf.text("Assinatura do Comprador", MARGIN + 98, y - 34, 8, SLATE, "F2");
 
   drawFooter(pdf, pageNumber.value);
   return pdf.buffer();
