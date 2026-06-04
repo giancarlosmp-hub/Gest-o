@@ -60,7 +60,7 @@ import {
   syncSalesmen,
   syncOrderStatus
 } from "../services/ultraFv3SyncService.js";
-import { ultraFv3Client } from "../services/ultraFv3Client.js";
+import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
@@ -150,7 +150,7 @@ const loadErpSalesmenOptions = async (): Promise<ErpSalesmenOptionsResponse> => 
 
   if (!rows.length) {
     try {
-      const consulted = await ultraFv3Client.request("/salesmen");
+      const consulted = await ultraFv3Client.request("/salesmen", { timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS });
       rows = Array.isArray(consulted) ? consulted : [];
       await prisma.appConfig.upsert({
         where: { key: "erp.ultrafv3.salesmen" },
@@ -6730,6 +6730,15 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
 
     if (res.headersSent || res.writableEnded) return;
     try {
+      if (status === 504 && (failureEndpoint === "/orders" || failureEndpoint === "/salesmen" || error?.diagnostics?.endpoint)) {
+        return res.status(504).type("application/json").send(safeJsonStringify(buildUltraFv3TimeoutPayload({
+          correlationId,
+          endpoint: failureEndpoint || error?.diagnostics?.endpoint || "/orders",
+          method: error?.diagnostics?.method || (failureEndpoint === "/salesmen" ? "GET" : "POST"),
+          timeoutMs: error?.diagnostics?.timeoutMs || ULTRAFV3_REQUEST_TIMEOUT_MS,
+        })));
+      }
+
       const failurePayload = buildControlledErpOrderFailurePayload({
         correlationId,
         status,

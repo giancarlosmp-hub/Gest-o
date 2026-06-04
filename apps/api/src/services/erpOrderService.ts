@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
@@ -576,7 +576,7 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
       }
     }
 
-    const response = await ultraFv3Client.request<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, { correlationId: options.correlationId });
+    const response = await ultraFv3Client.request<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, { correlationId: options.correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS });
     await prisma.appConfig.upsert({
       where: { key: SALESMEN_CONFIG_KEY },
       update: { value: JSON.stringify(response) },
@@ -992,9 +992,10 @@ async function createErpOrderFromOpportunityUnsafe(
     });
     throw Object.assign(new Error(failure.message), {
       pedidoIdImportacao,
-      status: error instanceof UltraFv3IntegrationError && error.code === "timeout" ? 504 : 502,
+      status: error instanceof UltraFv3IntegrationError ? error.status ?? (error.code === "timeout" ? 504 : 502) : 502,
       ultraFv3Failure: failure,
       endpoint: failure.endpoint,
+      diagnostics: error instanceof UltraFv3IntegrationError ? error.diagnostics : undefined,
       payload: failure.payload,
     });
   }
@@ -1042,7 +1043,7 @@ export async function createErpOrderFromOpportunity(
   } catch (error) {
     const source = error && typeof error === "object" ? error as Record<string, unknown> : {};
     const status = error instanceof UltraFv3IntegrationError
-      ? error.code === "timeout" ? 504 : 502
+      ? error.status ?? (error.code === "timeout" ? 504 : 502)
       : typeof source.status === "number" ? source.status : 502;
     const message = sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error);
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order] generation flow failed", {
