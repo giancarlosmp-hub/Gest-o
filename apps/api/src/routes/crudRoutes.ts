@@ -5885,14 +5885,15 @@ router.post("/opportunities/:id/items", async (req, res) => {
   });
 
   const { grossTotal, discountTotal, netTotal, discountType, discountValue } = computeOpportunityItemTotals(payload);
+  const nextLineNumber = payload.lineNumber || (maxLine._max.lineNumber || 0) + 1;
 
   const created = await prisma.opportunityItem.create({
     data: {
       opportunityId: req.params.id,
       productId: payload.productId || null,
-      lineNumber: payload.lineNumber || (maxLine._max.lineNumber || 0) + 1,
+      lineNumber: nextLineNumber,
       erpProductCode: payload.erpProductCode || product?.erpProductCode || "manual",
-      erpProductClassCode: payload.erpProductClassCode || product?.erpProductClassCode || "manual",
+      erpProductClassCode: payload.erpProductClassCode || product?.erpProductClassCode || String(nextLineNumber),
       productNameSnapshot: payload.productNameSnapshot || product?.name || "Item sem produto",
       unit: payload.unit || product?.unit || null,
       quantity: payload.quantity,
@@ -6008,6 +6009,26 @@ router.get("/opportunities/:id", async (req, res) => {
 
 
 const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
+  NUM_PEDIDO: payload.NUM_PEDIDO ?? null,
+  PEDIDO_ID_IMPORTACAO: payload.PEDIDO_ID_IMPORTACAO ?? null,
+  PARCEIRO: payload.PARCEIRO ?? null,
+  CODVENDEDOR: payload.VENDEDOR ?? null,
+  OPERADOR: payload.OPERADOR ?? null,
+  TABELA_PRECO: payload.TABELA_PRECO ?? null,
+  FORMA_PAGAMENTO: payload.FORMA ?? null,
+  CONDICAO_RECEBIMENTO: payload.CODCONDREC ?? null,
+  FILIAL: payload.CODFILIAL ?? null,
+  OPERACAO: payload.CODOPER ?? null,
+  itens: Array.isArray(payload.ITENS)
+    ? payload.ITENS.map((item) => ({
+        ITEM: item.ITEM ?? null,
+        CODPRODUTO: item.CODPRODUTO ?? null,
+        CODPRODUTO_CLAS: item.CODPRODUTO_CLAS ?? null,
+        quantidade: item.QTD_PEDIDO ?? null,
+        unidade: item.UND_MEDIDA ?? item.DESCRICAO_UNMED ?? null,
+        preco: item.PRECO ?? null,
+      }))
+    : [],
   vendedorErp: payload.VENDEDOR ?? null,
   operadorErp: payload.OPERADOR ?? null,
   numPedidoSalesmen: payload.NUM_PEDIDO ?? null,

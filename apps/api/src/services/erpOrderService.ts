@@ -19,6 +19,33 @@ const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
 
+class ErpOrderSubmissionMutex {
+  private tail: Promise<void> = Promise.resolve();
+
+  async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = this.tail;
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
+const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
+
+const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode" | "lineNumber">) => {
+  const directClassCode = item.erpProductClassCode?.trim();
+  if (directClassCode) return directClassCode;
+  const lineNumber = Number(item.lineNumber);
+  return Number.isInteger(lineNumber) && lineNumber > 0 ? String(lineNumber) : "";
+};
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const SENSITIVE_KEY_PATTERN = /authorization|token|password|senha|secret|credential/i;
@@ -552,8 +579,9 @@ async function createErpOrderFromOpportunityUnsafe(
     });
   if (opportunity.items.some((item) => !item.erpProductCode?.trim()))
     throw Object.assign(new Error("Payload inválido: há item sem código ERP."), { status: 400 });
-  if (opportunity.items.some((item) => !item.erpProductClassCode?.trim()))
-    throw Object.assign(new Error("Payload inválido: há item sem classificação ERP (CODPRODUTO_CLAS)."), { status: 400 });
+  const itemWithoutProductClass = opportunity.items.find((item) => !resolveOrderItemProductClassCode(item));
+  if (itemWithoutProductClass)
+    throw Object.assign(new Error(`Payload inválido: item ${itemWithoutProductClass.lineNumber} sem classificação ERP (CODPRODUTO_CLAS). Se o produto aparece como "Linha ${itemWithoutProductClass.lineNumber} · ${itemWithoutProductClass.unit || "sem unidade"}", confirme o CODPRODUTO_CLAS sincronizado ou informe a linha como classificação.`), { status: 400 });
   if (opportunity.items.some((item) => !item.unit?.trim()))
     throw Object.assign(new Error("Payload inválido: há item sem unidade de medida."), {
       status: 400,
@@ -625,7 +653,7 @@ async function createErpOrderFromOpportunityUnsafe(
 
   const itens = opportunity.items.map((item, index) => ({
     CODPRODUTO: item.erpProductCode,
-    CODPRODUTO_CLAS: item.erpProductClassCode,
+    CODPRODUTO_CLAS: resolveOrderItemProductClassCode(item),
     ITEM: index + 1,
     QTD_PEDIDO: Number(item.quantity),
     PRECO: Number(item.unitPrice),
@@ -751,6 +779,10 @@ async function createErpOrderFromOpportunityUnsafe(
   logApiEvent("INFO", "[erp order] sanitized final payload sent to UltraFV3", {
     endpoint: "/orders",
     correlationId: pedidoIdImportacao,
+    NUM_PEDIDO: payload.NUM_PEDIDO,
+    PEDIDO_ID_IMPORTACAO: payload.PEDIDO_ID_IMPORTACAO,
+    CODVENDEDOR: payload.VENDEDOR,
+    OPERADOR: payload.OPERADOR,
     payload: sanitizeUltraValue({ ...payload, PARCEIRO: maskDocument(payload.PARCEIRO) }),
   });
 
@@ -834,7 +866,23 @@ export async function createErpOrderFromOpportunity(
   });
 
   try {
-    const result = await createErpOrderFromOpportunityUnsafe(opportunity, rawParams, correlationId);
+    const runGeneration = () => createErpOrderFromOpportunityUnsafe(opportunity, rawParams, correlationId);
+    const result = simulateOnly
+      ? await runGeneration()
+      : await erpOrderSubmissionMutex.runExclusive(async () => {
+          logApiEvent("INFO", "[erp order] acquired global UltraFV3 submission lock", {
+            opportunityId: opportunity.id,
+            correlationId,
+          });
+          try {
+            return await runGeneration();
+          } finally {
+            logApiEvent("INFO", "[erp order] released global UltraFV3 submission lock", {
+              opportunityId: opportunity.id,
+              correlationId,
+            });
+          }
+        });
     logApiEvent("INFO", "[erp order] generation flow completed", {
       opportunityId: opportunity.id,
       correlationId,
