@@ -5624,8 +5624,31 @@ router.get("/opportunities/import/dictionary", async (_req, res) => {
 
 
 const productSearchQuerySchema = z.object({
-  q: z.string().trim().min(1).max(120)
+  q: z.string().trim().min(1).max(120),
+  priceTableCode: z.string().trim().min(1).max(60).optional()
 });
+
+const DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE = "1";
+
+const normalizeOpportunityPriceTableCode = (value: unknown) => {
+  const normalized = normalizeOptionalString(value);
+  return normalized || DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE;
+};
+
+const pickProductPriceForTable = (product: { defaultPrice?: number | null; prices?: Array<{ erpPriceId?: string | null; price: number; validFrom?: Date | null }> }, priceTableCode?: string | null) => {
+  const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
+  const prices = product.prices || [];
+  const tablePrice = prices.find((item) => item.erpPriceId === normalizedPriceTableCode && Number(item.price) > 0);
+  const latestPositivePrice = prices.find((item) => Number(item.price) > 0);
+  const fallbackPrice = Number(product.defaultPrice ?? latestPositivePrice?.price ?? 0);
+
+  return {
+    price: Number(tablePrice?.price ?? fallbackPrice ?? 0),
+    priceTableCode: normalizedPriceTableCode,
+    priceTableMatched: Boolean(tablePrice),
+    priceWarning: tablePrice ? null : `Sem preço sincronizado para a tabela ${normalizedPriceTableCode}; mantendo preço padrão/manual.`
+  };
+};
 
 const opportunityItemPayloadSchema = z.object({
   productId: z.string().optional(),
@@ -5692,6 +5715,7 @@ router.get("/products/search", async (req, res) => {
   const parsed = productSearchQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ message: "Parâmetro q é obrigatório" });
   const q = parsed.data.q;
+  const requestedPriceTableCode = normalizeOpportunityPriceTableCode(parsed.data.priceTableCode);
   const products = await prisma.product.findMany({
     where: {
       OR: [
@@ -5707,11 +5731,11 @@ router.get("/products/search", async (req, res) => {
     include: { prices: { orderBy: [{ validFrom: "desc" }] } }
   });
   return res.json(products.map((product) => {
-    const latestPrice = product.prices.find((item) => Number(item.price) > 0)?.price ?? product.defaultPrice ?? 0;
+    const pickedPrice = pickProductPriceForTable(product, requestedPriceTableCode);
     const stock = Number(product.stockQuantity || 0);
     const status = product.isSuspended
       ? "suspenso/fora de linha"
-      : latestPrice <= 0
+      : pickedPrice.price <= 0
         ? "sem preço"
         : stock <= 0
           ? "sem estoque"
@@ -5723,7 +5747,10 @@ router.get("/products/search", async (req, res) => {
       erpProductClassCode: product.erpProductClassCode,
       className: product.className,
       unit: product.unit,
-      price: latestPrice,
+      price: pickedPrice.price,
+      priceTableCode: pickedPrice.priceTableCode,
+      priceTableMatched: pickedPrice.priceTableMatched,
+      priceWarning: pickedPrice.priceWarning,
       stock,
       brand: product.brand,
       groupName: product.groupName,
@@ -6638,10 +6665,18 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
     req.erpOrderFailureStage = "validate-payload";
     normalizedParams = normalizeErpOrderParameterCodes({});
     parameterDiagnostics = getErpOrderParameterDiagnostics({});
-    const parsed = erpOrderGenerationSchema.safeParse(req.body);
+    const opportunityParameterDefaults = await prisma.opportunity.findFirst({
+      where: { id: opportunityId, ...sellerWhere(req) },
+      select: { priceTableCode: true }
+    });
+    const erpOrderRequestBody = {
+      ...(req.body || {}),
+      priceTableCode: normalizeOptionalString(req.body?.priceTableCode) || normalizeOpportunityPriceTableCode(opportunityParameterDefaults?.priceTableCode)
+    };
+    const parsed = erpOrderGenerationSchema.safeParse(erpOrderRequestBody);
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message || "Payload inválido";
-      parameterDiagnostics = getErpOrderParameterDiagnostics(req.body || {});
+      parameterDiagnostics = getErpOrderParameterDiagnostics(erpOrderRequestBody);
       logApiEvent("WARN", "[erp order route] request payload validation failed before UltraFV3", {
         routeHit: true,
         correlationId,
@@ -6977,7 +7012,7 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
     const pdf = buildErpOrderPdf(order as ErpOrderPdfRecord);
     const filename = getErpOrderPdfFilename(order);
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Length", String(pdf.length));
     return res.status(200).send(pdf);
   } catch (error) {

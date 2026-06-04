@@ -22,6 +22,7 @@ type FormState = {
   notes: string;
   clientId: string;
   ownerSellerId: string;
+  priceTableCode: string;
 };
 
 type ClientOption = {
@@ -32,6 +33,7 @@ type ClientOption = {
   cnpj?: string | null;
 };
 type SellerOption = { id: string; name: string };
+type PriceTableOption = { code: string; label: string };
 
 type CreateOpportunityModalProps = {
   open: boolean;
@@ -57,6 +59,8 @@ type CreateOpportunityModalProps = {
   onSelectExisting: (client: ExistingClientSummary) => void;
   productsSection?: ReactNode;
   hasStructuredItems?: boolean;
+  priceTableOptions?: PriceTableOption[];
+  priceTableWarning?: string;
 };
 
 export default function CreateOpportunityModal({
@@ -82,7 +86,9 @@ export default function CreateOpportunityModal({
   onClientCreated,
   onSelectExisting,
   productsSection,
-  hasStructuredItems = false
+  hasStructuredItems = false,
+  priceTableOptions = [],
+  priceTableWarning = ""
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -153,6 +159,14 @@ export default function CreateOpportunityModal({
                 <label className="space-y-1">
                   <span className={labelClassName}>Etapa *</span>
                   <select required className={fieldClassName} value={form.stage} onChange={(e) => onFormChange({ ...form, stage: e.target.value as Stage })}>{stages.map((stage) => <option key={stage} value={stage}>{stageLabel[stage]}</option>)}</select>
+                </label>
+                <label className="space-y-1 sm:col-span-2">
+                  <span className={labelClassName}>Tabela de preço ERP *</span>
+                  <select required className={fieldClassName} value={form.priceTableCode || "1"} onChange={(e) => onFormChange({ ...form, priceTableCode: e.target.value })}>
+                    {(priceTableOptions.length ? priceTableOptions : [{ code: "1", label: "1 · REVENDA / COOPERATIVA" }]).map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+                  </select>
+                  <p className={helpClassName}>Define o preço sugerido dos produtos e será usado como padrão no pedido ERP.</p>
+                  {priceTableWarning ? <p className="text-xs text-amber-700">{priceTableWarning}</p> : null}
                 </label>
               </div>
             </section>
