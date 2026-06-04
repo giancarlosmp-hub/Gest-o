@@ -1,0 +1,2 @@
+ALTER TABLE "Opportunity"
+  ADD COLUMN IF NOT EXISTS "priceTableCode" TEXT DEFAULT '1';

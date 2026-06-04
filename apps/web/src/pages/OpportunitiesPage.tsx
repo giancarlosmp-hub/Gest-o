@@ -44,6 +44,7 @@ type Opportunity = {
   productOffered?: string | null;
   plantingForecastDate?: string | null;
   expectedTicketPerHa?: number | null;
+  priceTableCode?: string | null;
   risk?: OpportunityRisk;
 };
 
@@ -93,6 +94,9 @@ type OpportunityProduct = {
   defaultPrice?: number | null;
   stock?: number | null;
   status?: string;
+  priceTableCode?: string;
+  priceTableMatched?: boolean;
+  priceWarning?: string | null;
 };
 
 type OpportunityItemForm = {
@@ -126,6 +130,7 @@ type FormState = {
   notes: string;
   clientId: string;
   ownerSellerId: string;
+  priceTableCode: string;
 };
 
 type DragOpportunityPayload = {
@@ -143,6 +148,32 @@ type CloseOpportunityState = {
 
 const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
 const cropSelectOptions = ["soja", "milho", "trigo", "pasto", "cobertura", "outros"];
+
+
+type PriceTableOption = { code: string; label: string };
+
+const readOptionText = (source: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = source[key];
+    if (value !== null && value !== undefined && String(value).trim()) return String(value).trim();
+  }
+  return "";
+};
+
+const toPriceTableOptions = (payload: unknown): PriceTableOption[] => {
+  const rows = Array.isArray(payload) ? payload : Array.isArray((payload as any)?.items) ? (payload as any).items : Array.isArray((payload as any)?.data) ? (payload as any).data : [];
+  return rows
+    .map((row: unknown) => {
+      if (!row || typeof row !== "object") return null;
+      const record = row as Record<string, unknown>;
+      const code = readOptionText(record, ["code", "codigo", "CODIGO", "value", "id", "ID", "TABELA", "CODTABELA", "TABELA_PRECO"]);
+      if (!code) return null;
+      const description = readOptionText(record, ["description", "descricao", "DESCRICAO", "name", "nome", "NOME"]);
+      const label = readOptionText(record, ["label", "LABEL"]) || `${code} · ${description || code}`;
+      return { code, label };
+    })
+    .filter((option: PriceTableOption | null): option is PriceTableOption => Boolean(option));
+};
 
 const stageLabel: Record<Stage, string> = {
   prospeccao: "Prospecção",
@@ -219,7 +250,8 @@ const emptyForm: FormState = {
   lastContactAt: "",
   notes: "",
   clientId: "",
-  ownerSellerId: ""
+  ownerSellerId: "",
+  priceTableCode: "1"
 };
 
 const emptyOpportunityItem: OpportunityItemForm = {
@@ -306,6 +338,8 @@ export default function OpportunitiesPage() {
   const [itemDraft, setItemDraft] = useState<OpportunityItemForm>(emptyOpportunityItem);
   const [productSearch, setProductSearch] = useState("");
   const [productOptions, setProductOptions] = useState<OpportunityProduct[]>([]);
+  const [priceTableOptions, setPriceTableOptions] = useState<PriceTableOption[]>([]);
+  const [priceTableWarning, setPriceTableWarning] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<OpportunityProduct | null>(null);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
@@ -353,6 +387,17 @@ export default function OpportunitiesPage() {
   }, [search]);
 
   useEffect(() => {
+    api.get("/erp/ultrafv3/price-tables")
+      .then((response) => {
+        const options = toPriceTableOptions(response.data);
+        setPriceTableOptions(options.length ? options : [{ code: "1", label: "1 · REVENDA / COOPERATIVA" }]);
+      })
+      .catch(() => {
+        setPriceTableOptions([{ code: "1", label: "1 · REVENDA / COOPERATIVA" }]);
+      });
+  }, []);
+
+  useEffect(() => {
     const savedMode = localStorage.getItem(PIPELINE_VIEW_STORAGE_KEY);
     if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
   }, []);
@@ -387,7 +432,8 @@ export default function OpportunitiesPage() {
     setOpportunityModalMode("create");
     setForm({
       ...emptyForm,
-      ownerSellerId: isSeller && user?.id ? user.id : ""
+      ownerSellerId: isSeller && user?.id ? user.id : "",
+      priceTableCode: "1"
     });
     setOpportunityItems([]);
     setItemDraft(emptyOpportunityItem);
@@ -740,7 +786,7 @@ export default function OpportunitiesPage() {
       return;
     }
     try {
-      const response = await api.get(`/products/search?q=${encodeURIComponent(trimmed)}`);
+      const response = await api.get(`/products/search?q=${encodeURIComponent(trimmed)}&priceTableCode=${encodeURIComponent(form.priceTableCode || "1")}`);
       const mappedOptions = (response.data || []).map((product: any) => ({
         id: product.id,
         name: product.name || "",
@@ -752,7 +798,10 @@ export default function OpportunitiesPage() {
         unit: product.unit || null,
         defaultPrice: Number(product?.price ?? product?.prices?.[0]?.price ?? product.defaultPrice ?? 0),
         stock: Number(product?.stock ?? 0),
-        status: product.status || ""
+        status: product.status || "",
+        priceTableCode: product.priceTableCode || form.priceTableCode || "1",
+        priceTableMatched: Boolean(product.priceTableMatched),
+        priceWarning: product.priceWarning || null
       }));
       setProductOptions(mappedOptions);
       setIsProductDropdownOpen(mappedOptions.length > 0);
@@ -760,7 +809,7 @@ export default function OpportunitiesPage() {
       setProductOptions([]);
       setIsProductDropdownOpen(false);
     }
-  }, []);
+  }, [form.priceTableCode]);
 
   const handleSelectProduct = (product: OpportunityProduct) => {
     const nextUnitPrice = product.defaultPrice != null ? String(product.defaultPrice) : itemDraft.unitPrice;
@@ -771,6 +820,8 @@ export default function OpportunitiesPage() {
       && Number(nextUnitPrice || 0) >= 0;
 
     setSelectedProduct(product);
+    setPriceTableWarning(product.priceWarning || "");
+    if (product.priceWarning) toast.warning(product.priceWarning);
     setProductSearch(`${product.erpProductCode} / ${product.erpProductClassCode} — ${product.name}`);
     setItemDraft((current) => ({
       ...current,
@@ -807,6 +858,7 @@ export default function OpportunitiesPage() {
       setItemDraft(emptyOpportunityItem);
       setProductSearch("");
       setSelectedProduct(null);
+      setPriceTableWarning("");
       setHasAttemptedProductSearch(false);
       toast.success(draft.id ? "Item atualizado na lista" : "Item adicionado à lista");
       return;
@@ -859,6 +911,7 @@ export default function OpportunitiesPage() {
     setItemDraft(item);
     setProductSearch(`${item.erpProductCode} / ${item.erpProductClassCode} — ${item.productNameSnapshot}`);
     setSelectedProduct((current) => current?.id === item.productId ? current : null);
+    setPriceTableWarning("");
   };
 
   const removeOpportunityItem = async (itemId?: string) => {
@@ -917,7 +970,8 @@ export default function OpportunitiesPage() {
       areaHa: form.areaHa ? Number(form.areaHa) : undefined,
       productOffered: form.productOffered || undefined,
       plantingForecastDate: form.plantingForecastDate || undefined,
-      expectedTicketPerHa: form.expectedTicketPerHa ? Number(form.expectedTicketPerHa) : undefined
+      expectedTicketPerHa: form.expectedTicketPerHa ? Number(form.expectedTicketPerHa) : undefined,
+      priceTableCode: form.priceTableCode || "1"
     };
 
     const isEditing = Boolean(editing);
@@ -994,7 +1048,8 @@ export default function OpportunitiesPage() {
     setOpportunityModalMode("create");
     setForm({
       ...emptyForm,
-      ownerSellerId: isSeller && user?.id ? user.id : ""
+      ownerSellerId: isSeller && user?.id ? user.id : "",
+      priceTableCode: "1"
     });
     setOpportunityItems([]);
     setItemDraft(emptyOpportunityItem);
@@ -1014,7 +1069,8 @@ export default function OpportunitiesPage() {
     setEditing(null);
     setForm({
       ...emptyForm,
-      ownerSellerId: isSeller && user?.id ? user.id : ""
+      ownerSellerId: isSeller && user?.id ? user.id : "",
+      priceTableCode: "1"
     });
     setOpportunityItems([]);
     setItemDraft(emptyOpportunityItem);
@@ -1042,7 +1098,8 @@ export default function OpportunitiesPage() {
       expectedTicketPerHa: item.expectedTicketPerHa ? String(item.expectedTicketPerHa) : "",
       notes: item.notes ?? "",
       clientId: item.clientId,
-      ownerSellerId: item.ownerSellerId
+      ownerSellerId: item.ownerSellerId,
+      priceTableCode: item.priceTableCode || "1"
     });
     setSubmitError(null);
     setSelectedProduct(null);
@@ -1508,18 +1565,29 @@ export default function OpportunitiesPage() {
         cropOptions={cropSelectOptions}
         onClose={closeOpportunityModal}
         onSubmit={submit}
-        onFormChange={setForm}
+        onFormChange={(nextForm) => {
+          if (nextForm.priceTableCode !== form.priceTableCode) {
+            setPriceTableWarning("");
+            setSelectedProduct(null);
+            setProductSearch("");
+            setProductOptions([]);
+            setItemDraft(emptyOpportunityItem);
+          }
+          setForm(nextForm);
+        }}
         sanitizeNumericInput={sanitizeNumericInput}
         ownerSellerId={isSeller && user?.id ? user.id : form.ownerSellerId || undefined}
         requireOwnerSeller={user?.role === "diretor" || user?.role === "gerente"}
         onClientCreated={selectExistingClient}
         onSelectExisting={selectExistingClient}
         hasStructuredItems={hasStructuredItems}
+        priceTableOptions={priceTableOptions}
+        priceTableWarning={priceTableWarning}
         productsSection={
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Produtos da oportunidade</h4>
-              <span className="max-w-xl text-xs leading-relaxed text-slate-500">Adicione os produtos antes de salvar. O total dos itens atualizará automaticamente o valor da oportunidade.</span>
+              <span className="max-w-xl text-xs leading-relaxed text-slate-500">Adicione os produtos antes de salvar. O total dos itens atualizará automaticamente o valor da oportunidade. Preços sugeridos respeitam a tabela {form.priceTableCode || "1"} quando houver sincronização.</span>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1581,6 +1649,7 @@ export default function OpportunitiesPage() {
                     Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                   </p>
                 ) : null}
+                {priceTableWarning ? <p className="text-xs text-amber-700">{priceTableWarning}</p> : null}
                 {!isOpportunitySaved ? <p className="text-xs text-amber-700">Na nova oportunidade, o item é adicionado em uma lista temporária e salvo junto com a oportunidade.</p> : null}
               </label>
               <label className="space-y-1">

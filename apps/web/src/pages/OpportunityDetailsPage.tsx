@@ -77,6 +77,7 @@ type Opportunity = {
   expectedTicketPerHa?: number | null;
   lastContactAt?: string | null;
   notes?: string | null;
+  priceTableCode?: string | null;
   daysOverdue?: number | null;
 };
 
@@ -107,6 +108,7 @@ type OpportunityItem = {
     erpProductCode?: string | null;
     stockQuantity?: number | null;
     className?: string | null;
+    unit?: string | null;
     defaultPrice?: number | null;
     minPrice?: number | null;
   } | null;
@@ -495,7 +497,7 @@ export default function OpportunityDetailsPage() {
         ...current,
         paymentMethodCode: current.paymentMethodCode || firstOptionCode(nextPaymentMethods),
         receivingConditionCode: current.receivingConditionCode || firstOptionCode(nextReceivingConditions),
-        priceTableCode: current.priceTableCode || firstOptionCode(nextPriceTables),
+        priceTableCode: current.priceTableCode || item.priceTableCode || firstOptionCode(nextPriceTables) || "1",
         branchCode: current.branchCode || firstOptionCode(nextBranches),
         operationCode: defaultSalesOperationCode,
         expectedDeliveryDate: current.expectedDeliveryDate || getTodayDateInputValue()
@@ -576,21 +578,38 @@ export default function OpportunityDetailsPage() {
 
   const onDownloadErpOrderPdf = async (order: ErpOrderSync) => {
     if (!item) return;
-    const pdfWindow = window.open("", "_blank", "noopener,noreferrer");
     setDownloadingErpOrderPdfId(order.id);
     try {
       const response = await api.get(`/opportunities/${item.id}/erp/orders/${order.id}/pdf`, { responseType: "blob" });
-      const blob = new Blob([response.data], { type: "application/pdf" });
-      const url = window.URL.createObjectURL(blob);
-      if (pdfWindow) {
-        pdfWindow.location.href = url;
-      } else {
-        window.open(url, "_blank", "noopener,noreferrer");
+      const contentType = String(response.headers?.["content-type"] || response.data?.type || "").toLowerCase();
+      if (!contentType.includes("application/pdf")) {
+        const errorText = response.data instanceof Blob ? await response.data.text() : "";
+        throw new Error(errorText || "O backend não retornou um PDF válido. Verifique sua sessão e tente novamente.");
       }
+      const orderNumber = order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao;
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pedido-erp-${orderNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
       window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
-    } catch (error) {
-      pdfWindow?.close();
-      toast.error(getApiErrorMessage(error, "Não foi possível gerar o PDF do pedido ERP"));
+      toast.success("PDF do pedido ERP baixado");
+    } catch (error: any) {
+      let message = getApiErrorMessage(error, "Não foi possível gerar o PDF do pedido ERP. Verifique sua sessão e tente novamente.");
+      const errorBlob = error?.response?.data;
+      if (errorBlob instanceof Blob) {
+        try {
+          const text = await errorBlob.text();
+          const parsed = text ? JSON.parse(text) : null;
+          message = parsed?.message || text || message;
+        } catch {
+          // mantém a mensagem amigável quando a resposta de erro não for JSON.
+        }
+      }
+      toast.error(message);
     } finally {
       setDownloadingErpOrderPdfId(null);
     }
@@ -847,7 +866,7 @@ export default function OpportunityDetailsPage() {
       {showErpOrderModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm md:p-6" onClick={() => setShowErpOrderModal(false)}>
           <div className="flex max-h-[92vh] w-full max-w-7xl flex-col overflow-hidden rounded-[2rem] border border-white/20 bg-slate-50 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="relative overflow-hidden bg-gradient-to-br from-slate-950 via-brand-900 to-slate-800 px-5 py-5 text-white md:px-7">
+            <div className="relative bg-gradient-to-br from-slate-950 via-brand-900 to-slate-800 px-5 pb-7 pt-5 text-white md:px-7 md:pb-8">
               <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
               <div className="relative flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
@@ -855,7 +874,7 @@ export default function OpportunityDetailsPage() {
                   <h3 className="mt-2 text-2xl font-bold md:text-3xl">Gerar pedido ERP</h3>
                   <p className="mt-2 max-w-3xl text-sm text-slate-200">Revise vínculos, estoque, itens e parâmetros comerciais antes do envio. As validações críticas permanecem no backend.</p>
                 </div>
-                <button type="button" className="rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/10" onClick={() => setShowErpOrderModal(false)}>Fechar</button>
+                <button type="button" className="shrink-0 self-start rounded-full border border-white/20 px-4 py-2 text-sm font-semibold text-white/90 hover:bg-white/10 md:ml-4" onClick={() => setShowErpOrderModal(false)}>Fechar</button>
               </div>
             </div>
 
@@ -954,7 +973,10 @@ export default function OpportunityDetailsPage() {
                           <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                             <tr>
                               <th className="px-5 py-3 font-semibold">Produto</th>
-                              <th className="px-5 py-3 font-semibold">ERP</th>
+                              <th className="px-5 py-3 font-semibold">Cód. ERP</th>
+                              <th className="px-5 py-3 font-semibold">Classificação</th>
+                              <th className="px-5 py-3 font-semibold">Class.</th>
+                              <th className="px-5 py-3 font-semibold">Und.</th>
                               <th className="px-5 py-3 font-semibold">Qtd.</th>
                               <th className="px-5 py-3 font-semibold">Estoque</th>
                               <th className="px-5 py-3 font-semibold">Preço</th>
@@ -971,10 +993,11 @@ export default function OpportunityDetailsPage() {
                                 <tr key={opportunityItem.id} className="align-top">
                                   <td className="px-5 py-4">
                                     <p className="font-semibold text-slate-900">{opportunityItem.productNameSnapshot}</p>
-                                    <p className="text-xs text-slate-500">Linha {opportunityItem.lineNumber} · {opportunityItem.unit || "sem unidade"}</p>
-                                    {opportunityItem.product?.className ? <p className="text-xs font-medium text-slate-600">Classificação: {opportunityItem.product.className}</p> : null}
                                   </td>
                                   <td className="px-5 py-4 text-slate-700">{opportunityItem.erpProductCode || "-"}</td>
+                                  <td className="px-5 py-4 text-slate-700">{opportunityItem.product?.className || "-"}</td>
+                                  <td className="px-5 py-4 text-slate-700">{opportunityItem.erpProductClassCode || "-"}</td>
+                                  <td className="px-5 py-4 text-slate-700">{opportunityItem.unit || opportunityItem.product?.unit || "-"}</td>
                                   <td className="px-5 py-4 text-slate-700">{Number(opportunityItem.quantity || 0).toLocaleString("pt-BR")}</td>
                                   <td className="px-5 py-4 text-slate-700">{typeof stockQuantity === "number" ? stockQuantity.toLocaleString("pt-BR") : "Não informado"}</td>
                                   <td className="px-5 py-4 text-slate-700">{formatCurrencyBRL(opportunityItem.unitPrice || 0)}</td>
@@ -988,7 +1011,7 @@ export default function OpportunityDetailsPage() {
                                 </tr>
                               );
                             }) : (
-                              <tr><td colSpan={7} className="px-5 py-8 text-center text-slate-500">Nenhum produto cadastrado na oportunidade.</td></tr>
+                              <tr><td colSpan={10} className="px-5 py-8 text-center text-slate-500">Nenhum produto cadastrado na oportunidade.</td></tr>
                             )}
                           </tbody>
                         </table>

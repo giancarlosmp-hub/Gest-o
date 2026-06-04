@@ -95,6 +95,7 @@ export const opportunitySchema = z.object({
   lastContactAt: z.string().optional(),
   probability: z.number().int().min(0).max(100).optional(),
   notes: z.string().max(2000).optional(),
+  priceTableCode: z.string().trim().min(1).max(60).optional(),
   clientId: z.string(),
   ownerSellerId: z.string().optional()
 });
