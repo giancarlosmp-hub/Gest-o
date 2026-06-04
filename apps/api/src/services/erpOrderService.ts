@@ -16,6 +16,33 @@ import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWit
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
+const logErpOrderRouteStage = (
+  message: "[ERP ORDER BEFORE SALESMEN]" | "[ERP ORDER AFTER SALESMEN]" | "[ERP ORDER BEFORE ULTRAFV3 ORDERS]" | "[ERP ORDER AFTER ULTRAFV3 ORDERS]",
+  context: {
+    correlationId: string;
+    opportunityId: string;
+    userId: string | null;
+    routeStage: string;
+    startedAt: number;
+    pedidoIdImportacao?: string;
+    erpOrderSyncId?: string;
+    endpoint?: string;
+  },
+  extra: Record<string, unknown> = {},
+) => {
+  logApiEvent("INFO", message, {
+    correlationId: context.correlationId,
+    opportunityId: context.opportunityId,
+    userId: context.userId,
+    durationMs: Date.now() - context.startedAt,
+    routeStage: context.routeStage,
+    ...(context.pedidoIdImportacao ? { pedidoIdImportacao: context.pedidoIdImportacao } : {}),
+    ...(context.erpOrderSyncId ? { erpOrderSyncId: context.erpOrderSyncId } : {}),
+    ...(context.endpoint ? { endpoint: context.endpoint } : {}),
+    ...extra,
+  });
+};
+
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
 
@@ -645,6 +672,7 @@ async function createErpOrderFromOpportunityUnsafe(
   rawParams: OrderParameterCodes,
   correlationId: string,
 ) {
+  const routeStageStartedAt = Date.now();
   const params = normalizeErpOrderParameterCodes(rawParams);
   const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
   const missingParameter = Object.entries(params).find(([key, value]) => key !== "simulateOnly" && !value);
@@ -746,12 +774,33 @@ async function createErpOrderFromOpportunityUnsafe(
   );
 
   await ultraFv3Client.authenticateWithCredentials(sellerCredentials);
+  logErpOrderRouteStage("[ERP ORDER BEFORE SALESMEN]", {
+    correlationId,
+    opportunityId: opportunity.id,
+    userId: opportunity.ownerSeller.id,
+    routeStage: "before-salesmen",
+    startedAt: routeStageStartedAt,
+    pedidoIdImportacao,
+    endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+  });
   logApiEvent("INFO", "[erp order] requesting UltraFV3 /salesmen order sequence", {
     ...operationContext,
     correlationId: pedidoIdImportacao,
+    routeCorrelationId: correlationId,
     endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
   });
   const sequenceResolution = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
+  logErpOrderRouteStage("[ERP ORDER AFTER SALESMEN]", {
+    correlationId,
+    opportunityId: opportunity.id,
+    userId: opportunity.ownerSeller.id,
+    routeStage: "after-salesmen",
+    startedAt: routeStageStartedAt,
+    pedidoIdImportacao,
+    endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+  }, {
+    salesmenDiagnostics: sequenceResolution.diagnostics,
+  });
   const numPedido = String(sequenceResolution.numPedido);
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
   const numericSellerErpCode = Number(sellerErpCode);
@@ -935,9 +984,20 @@ async function createErpOrderFromOpportunityUnsafe(
   });
 
   try {
+    logErpOrderRouteStage("[ERP ORDER BEFORE ULTRAFV3 ORDERS]", {
+      correlationId,
+      opportunityId: opportunity.id,
+      userId: opportunity.ownerSeller.id,
+      routeStage: "before-ultrafv3-orders",
+      startedAt: routeStageStartedAt,
+      pedidoIdImportacao,
+      erpOrderSyncId: sync.id,
+      endpoint: "/orders",
+    }, { timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS });
     logApiEvent("INFO", "[erp order] submitting UltraFV3 /orders", {
       ...operationContext,
       correlationId: pedidoIdImportacao,
+      routeCorrelationId: correlationId,
       erpOrderSyncId: sync.id,
       timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
     });
@@ -965,6 +1025,16 @@ async function createErpOrderFromOpportunityUnsafe(
       erpOrderNumber,
       erpOrderSyncId: sync.id,
     });
+    logErpOrderRouteStage("[ERP ORDER AFTER ULTRAFV3 ORDERS]", {
+      correlationId,
+      opportunityId: opportunity.id,
+      userId: opportunity.ownerSeller.id,
+      routeStage: "after-ultrafv3-orders",
+      startedAt: routeStageStartedAt,
+      pedidoIdImportacao,
+      erpOrderSyncId: sync.id,
+      endpoint: "/orders",
+    }, { erpOrderNumber });
     return updated;
   } catch (error) {
     const failure = sanitizeUltraOrderFailure(error, { pedidoIdImportacao, numPedido, payload });

@@ -6522,6 +6522,28 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
   }
 });
 
+const logErpOrderRouteDiagnostic = (
+  level: "INFO" | "WARN" | "ERROR",
+  message: "[ERP ORDER ROUTE HIT]" | "[ERP ORDER ERROR]",
+  context: {
+    correlationId: string;
+    opportunityId: string;
+    userId: string | null;
+    startedAt: number;
+    routeStage: string;
+  },
+  extra: Record<string, unknown> = {},
+) => {
+  logApiEvent(level, message, {
+    correlationId: context.correlationId,
+    opportunityId: context.opportunityId,
+    userId: context.userId,
+    durationMs: Date.now() - context.startedAt,
+    routeStage: context.routeStage,
+    ...extra,
+  });
+};
+
 router.post("/opportunities/:id/erp/orders", async (req, res) => {
   try {
   const correlationId = req.correlationId || randomUUID();
@@ -6543,6 +6565,16 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     opportunityId,
     userId: req.user?.id ?? null,
     correlationId,
+    requestId: req.requestId,
+    timestamp: routeTimestamp,
+  });
+  logErpOrderRouteDiagnostic("INFO", "[ERP ORDER ROUTE HIT]", {
+    correlationId,
+    opportunityId,
+    userId: req.user?.id ?? null,
+    startedAt: routeStartedAt,
+    routeStage: "route-hit",
+  }, {
     requestId: req.requestId,
     timestamp: routeTimestamp,
   });
@@ -6712,6 +6744,20 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
       }
     }
 
+    logErpOrderRouteDiagnostic(status >= 500 ? "ERROR" : "WARN", "[ERP ORDER ERROR]", {
+      correlationId,
+      opportunityId,
+      userId: req.user?.id ?? null,
+      startedAt: routeStartedAt,
+      routeStage: failureStage,
+    }, {
+      requestId: req.requestId,
+      httpStatus: status,
+      endpoint: failureEndpoint || "/orders",
+      error: message,
+      pedidoIdImportacao: error?.pedidoIdImportacao,
+    });
+
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order route] order submission rejected", {
       routeHit: true,
       opportunityId,
@@ -6779,6 +6825,16 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     const fallbackCorrelationId = req.correlationId || randomUUID();
     req.correlationId = fallbackCorrelationId;
     const message = sanitizeErpOrderErrorMessage(fatalError instanceof Error ? fatalError.message : String(fatalError));
+    logApiEvent("ERROR", "[ERP ORDER ERROR]", {
+      correlationId: fallbackCorrelationId,
+      opportunityId: req.params.id,
+      userId: req.user?.id ?? null,
+      durationMs: 0,
+      routeStage: req.erpOrderFailureStage || "handler",
+      requestId: req.requestId,
+      error: message,
+    });
+
     logApiEvent("ERROR", "[erp order route] unhandled handler failure contained", {
       routeHit: true,
       opportunityId: req.params.id,
@@ -6823,54 +6879,50 @@ router.get("/opportunities/:id/erp/last-order-error", async (req, res) => {
     const opportunity = await prisma.opportunity.findFirst({ where: { id: opportunityId, ...sellerWhere(req) }, select: { id: true } });
     if (!opportunity) return res.status(404).json({ correlationId, message: "Oportunidade não encontrada" });
 
-    const [lastErroredSync, lastErrorTimeline] = await Promise.all([
+    const [lastErpOrderSync, lastTimelineEvent] = await Promise.all([
       prisma.erpOrderSync.findFirst({
-        where: { opportunityId, status: ErpOrderSyncStatus.error },
+        where: { opportunityId },
         orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
       }),
       prisma.timelineEvent.findFirst({
-        where: {
-          opportunityId,
-          OR: [
-            { description: { contains: "pedido ERP falhou", mode: "insensitive" } },
-            { description: { contains: "correlationId=", mode: "insensitive" } },
-          ],
-        },
+        where: { opportunityId },
         orderBy: [{ createdAt: "desc" }],
       }),
     ]);
 
-    if (!lastErroredSync && !lastErrorTimeline) {
-      return res.status(200).json({ correlationId, item: null, message: "Nenhum erro de pedido ERP encontrado para esta oportunidade." });
+    if (!lastErpOrderSync && !lastTimelineEvent) {
+      return res.status(200).json({ correlationId, lastErpOrderSync: null, lastTimelineEvent: null, item: null, message: "Nenhum pedido ERP ou evento de timeline encontrado para esta oportunidade." });
     }
 
-    const syncErrorEntry = pickLatestSyncErrorEntry(lastErroredSync?.syncErrors);
-    const syncResponse = lastErroredSync?.erpResponse && typeof lastErroredSync.erpResponse === "object" && !Array.isArray(lastErroredSync.erpResponse)
-      ? lastErroredSync.erpResponse as Record<string, unknown>
+    const syncErrorEntry = pickLatestSyncErrorEntry(lastErpOrderSync?.syncErrors);
+    const syncResponse = lastErpOrderSync?.erpResponse && typeof lastErpOrderSync.erpResponse === "object" && !Array.isArray(lastErpOrderSync.erpResponse)
+      ? lastErpOrderSync.erpResponse as Record<string, unknown>
       : null;
     const rawSource = syncErrorEntry || syncResponse || null;
     const nestedUltra = rawSource?.ultraFv3 && typeof rawSource.ultraFv3 === "object" && !Array.isArray(rawSource.ultraFv3)
       ? rawSource.ultraFv3 as Record<string, unknown>
       : null;
     const rawStatus = rawSource?.status ?? nestedUltra?.status ?? syncResponse?.status ?? null;
-    const status = typeof rawStatus === "number" ? rawStatus : Number.isFinite(Number(rawStatus)) ? Number(rawStatus) : lastErroredSync ? 502 : 500;
-    const message = readSanitizedErrorText(rawSource?.message, nestedUltra?.message, syncResponse?.message, lastErrorTimeline?.description) || "Erro de pedido ERP sem mensagem detalhada.";
-    const sourceCorrelationId = readSanitizedErrorText(rawSource?.correlationId, nestedUltra?.correlationId, lastErroredSync?.pedidoIdImportacao) || correlationId;
-    const payload = rawSource?.payload ?? nestedUltra?.payload ?? lastErroredSync?.payloadSent ?? null;
+    const status = typeof rawStatus === "number" ? rawStatus : Number.isFinite(Number(rawStatus)) ? Number(rawStatus) : lastErpOrderSync ? 502 : 500;
+    const message = readSanitizedErrorText(rawSource?.message, nestedUltra?.message, syncResponse?.message, lastTimelineEvent?.description) || "Erro de pedido ERP sem mensagem detalhada.";
+    const sourceCorrelationId = readSanitizedErrorText(rawSource?.correlationId, nestedUltra?.correlationId, lastErpOrderSync?.pedidoIdImportacao) || correlationId;
+    const payload = rawSource?.payload ?? nestedUltra?.payload ?? lastErpOrderSync?.payloadSent ?? null;
 
     return res.status(200).json({
       correlationId,
+      lastErpOrderSync: lastErpOrderSync ? sanitizeErpOrderPayload(lastErpOrderSync) : null,
+      lastTimelineEvent: lastTimelineEvent ? sanitizeErpOrderPayload(lastTimelineEvent) : null,
       item: {
-        source: lastErroredSync ? "ErpOrderSync" : "timeline",
-        erpOrderSyncId: lastErroredSync?.id ?? null,
-        timelineEventId: lastErrorTimeline?.id ?? null,
-        createdAt: lastErroredSync?.createdAt ?? lastErrorTimeline?.createdAt ?? null,
-        updatedAt: lastErroredSync?.updatedAt ?? null,
+        source: lastErpOrderSync ? "ErpOrderSync" : "timeline",
+        erpOrderSyncId: lastErpOrderSync?.id ?? null,
+        timelineEventId: lastTimelineEvent?.id ?? null,
+        createdAt: lastErpOrderSync?.createdAt ?? lastTimelineEvent?.createdAt ?? null,
+        updatedAt: lastErpOrderSync?.updatedAt ?? null,
         payload: payload ? sanitizeErpOrderPayload(payload) : null,
         correlationId: sourceCorrelationId,
         status,
         message,
-        rawError: rawSource ? sanitizeErpOrderPayload(rawSource) : lastErrorTimeline ? { description: sanitizeErpOrderErrorMessage(lastErrorTimeline.description) } : null,
+        rawError: rawSource ? sanitizeErpOrderPayload(rawSource) : lastTimelineEvent ? { description: sanitizeErpOrderErrorMessage(lastTimelineEvent.description) } : null,
       },
     });
   } catch (error) {
