@@ -30,7 +30,7 @@ export type ErpOrderPdfRecord = ErpOrderSync & {
     ownerSeller: Pick<User, "name" | "erpCode">;
     items: Array<
       OpportunityItem & {
-        product?: Pick<Product, "className" | "unit" | "rawErpPayload"> | null;
+        product?: Pick<Product, "name" | "className" | "unit" | "rawErpPayload"> | null;
       }
     >;
   };
@@ -66,6 +66,14 @@ export type ErpOrderPdfCompany = {
   phone: string;
 };
 
+export type ErpOrderPdfMetadata = {
+  branch?: Record<string, unknown>;
+  paymentMethod?: Record<string, unknown> | null;
+  paymentMethodDescription?: string;
+  receivingCondition?: Record<string, unknown> | null;
+  receivingConditionDescription?: string;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -84,6 +92,16 @@ const pickFirstString = (source: Record<string, unknown>, keys: string[]) => {
     if (value) return value;
   }
   return "";
+};
+
+const pickFirstNumber = (source: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = source[key];
+    if (value == null || value === "") continue;
+    const parsed = Number(String(value).replace(",", "."));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
 };
 
 const formatCurrency = (value: unknown) =>
@@ -461,8 +479,10 @@ const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
     "DESCRICAO",
     "DSCFILIAL",
   ]),
-  cnpj: formatDocument(pickFirstString(branch, ["CNPJ", "cnpj", "DOCUMENTO", "document"])),
+  cnpj: formatDocument(pickFirstString(branch, ["CGC", "cgc", "CNPJ", "cnpj", "DOCUMENTO", "document"])),
   stateRegistration: pickFirstString(branch, [
+    "INSCESTADUAL",
+    "inscEstadual",
     "IE",
     "INSCRICAO_ESTADUAL",
     "INSCRICAO",
@@ -481,20 +501,100 @@ const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
     "PHONE",
     "phone",
     "telefone",
+    "fone",
   ]),
 });
+
+const getStoredReferenceRows = async (
+  prisma: Pick<PrismaClient, "appConfig">,
+  key: string,
+) => {
+  const stored = await prisma.appConfig.findUnique({
+    where: { key },
+    select: { value: true },
+  });
+  return normalizeBranchRows(parseAppConfigJson(stored?.value));
+};
+
+export const getErpOrderPdfBranch = async (
+  prisma: Pick<PrismaClient, "appConfig">,
+  order: ErpOrderPdfRecord,
+) => {
+  const branches = await getStoredReferenceRows(prisma, "erp.ultrafv3.branches");
+  return findPdfBranch(branches, getPayload(order).CODFILIAL);
+};
 
 export const getErpOrderPdfCompany = async (
   prisma: Pick<PrismaClient, "appConfig">,
   order: ErpOrderPdfRecord,
-): Promise<ErpOrderPdfCompany> => {
-  const stored = await prisma.appConfig.findUnique({
-    where: { key: "erp.ultrafv3.branches" },
-    select: { value: true },
-  });
-  const branches = normalizeBranchRows(parseAppConfigJson(stored?.value));
-  const branch = findPdfBranch(branches, getPayload(order).CODFILIAL);
-  return toPdfCompany(branch);
+): Promise<ErpOrderPdfCompany> => toPdfCompany(await getErpOrderPdfBranch(prisma, order));
+
+const findReferenceByCode = (
+  rows: Record<string, unknown>[],
+  code: unknown,
+  codeKeys: string[],
+) => {
+  const normalizedTarget = normalizeErpParameterCode(cleanText(code, ""));
+  if (!normalizedTarget) return null;
+  return (
+    rows.find((row) =>
+      normalizeErpParameterCode(pickFirstString(row, codeKeys)) === normalizedTarget,
+    ) || null
+  );
+};
+
+const getReferenceDescription = (
+  row: Record<string, unknown> | null,
+  nameKeys: string[],
+) => (row ? pickFirstString(row, nameKeys) : "");
+
+export const getErpOrderPdfMetadata = async (
+  prisma: Pick<PrismaClient, "appConfig">,
+  order: ErpOrderPdfRecord,
+): Promise<ErpOrderPdfMetadata> => {
+  const payload = getPayload(order);
+  const [branch, paymentRows, receivingRows] = await Promise.all([
+    getErpOrderPdfBranch(prisma, order),
+    getStoredReferenceRows(prisma, "erp.ultrafv3.paymentMethods"),
+    getStoredReferenceRows(prisma, "erp.ultrafv3.receivingConditions"),
+  ]);
+  const paymentMethod = findReferenceByCode(
+    paymentRows,
+    payload.FORMA,
+    ["FORMA", "CODFORMA", "COD_FORMA", "CODIGO", "code", "codigo", "id", "ID", "value"],
+  );
+  const receivingCondition = findReferenceByCode(
+    receivingRows,
+    payload.CODCONDREC,
+    ["CODCONDREC", "CONDICAO", "COD_CONDICAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
+  );
+  return {
+    branch,
+    paymentMethod,
+    paymentMethodDescription: getReferenceDescription(paymentMethod, [
+      "DESCRICAO",
+      "DSCFORMA",
+      "DSC_FORMA",
+      "dscForma",
+      "NOME",
+      "name",
+      "description",
+      "descricao",
+      "label",
+    ]),
+    receivingCondition,
+    receivingConditionDescription: getReferenceDescription(receivingCondition, [
+      "DESCRICAO",
+      "DSCCONDREC",
+      "DSC_CONDICAO",
+      "dscCondRec",
+      "NOME",
+      "name",
+      "description",
+      "descricao",
+      "label",
+    ]),
+  };
 };
 
 const ERP_ORDER_CLAUSES = [
@@ -584,20 +684,59 @@ const getClientAddressParts = (
   };
 };
 
-const getClassification = (
+
+const getClientFantasyName = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
+  const raw = getClientRaw(client);
+  return (
+    pickFirstString(raw, ["FANTASIA", "NOME_FANTASIA", "fantasia", "fantasyName"]) ||
+    cleanText(client.fantasyName, "")
+  );
+};
+
+const getClientDocument = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
+  const raw = getClientRaw(client);
+  return formatDocument(
+    pickFirstString(raw, ["CNPJ", "CPF", "CGC", "cnpj", "cpf", "documento"]) || client.cnpj,
+  );
+};
+
+const getProductDescription = (
   item: ErpOrderPdfRecord["opportunity"]["items"][number],
 ) => {
   const raw = asRecord(item.product?.rawErpPayload);
-  return (
-    item.product?.className ||
+  const name =
+    pickFirstString(raw, ["DSCPRODUTO", "DESCRICAO", "NOME", "dscProduto", "name"]) ||
+    item.product?.name ||
+    item.productNameSnapshot;
+  const classification =
     pickFirstString(raw, [
       "DSCPRODUTO_CLAS",
+      "DESCRICAO_CLASSIFICACAO",
       "DESCRICAO_CLASSE",
       "DSC_CLASSIFICACAO",
-    ]) ||
-    item.erpProductClassCode ||
-    "-"
-  );
+      "dscProdutoClas",
+      "classification",
+    ]) || item.product?.className || "";
+  return [cleanText(name, ""), cleanText(classification, "")]
+    .filter(Boolean)
+    .join(" ") || "-";
+};
+
+const getProductWeight = (
+  item: ErpOrderPdfRecord["opportunity"]["items"][number],
+) => {
+  const raw = asRecord(item.product?.rawErpPayload);
+  return pickFirstNumber(raw, [
+    "PESO_PRODUTO",
+    "PESOPRODUTO",
+    "pesoProduto",
+    "PESO_BRUTO",
+    "pesoBruto",
+    "PESO_EMBALAGEM",
+    "pesoEmbalagem",
+    "PESO_LIQUIDO",
+    "pesoLiquido",
+  ]);
 };
 
 const drawHeader = (
@@ -606,16 +745,16 @@ const drawHeader = (
   company: ErpOrderPdfCompany,
 ) => {
   pdf.rect(0, PAGE_HEIGHT - 94, PAGE_WIDTH, 94, BRAND_GREEN);
-  pdf.rect(MARGIN, PAGE_HEIGHT - 78, 38, 38, [255, 255, 255]);
+  pdf.rect(MARGIN, PAGE_HEIGHT - 84, 66, 52, [255, 255, 255]);
   if (DEMETRA_LOGO) {
-    pdf.image(DEMETRA_LOGO.name, MARGIN + 3, PAGE_HEIGHT - 75, 32, 32);
+    pdf.image(DEMETRA_LOGO.name, MARGIN + 3, PAGE_HEIGHT - 80, 60, 42);
   } else {
-    pdf.text("D", MARGIN + 11, PAGE_HEIGHT - 64, 18, BRAND_GREEN, "F2");
+    pdf.text("D", MARGIN + 25, PAGE_HEIGHT - 62, 18, BRAND_GREEN, "F2");
   }
   const companyCity = [company.city, company.state].filter(Boolean).join("/");
   pdf.text(
     cleanText(company.legalName),
-    MARGIN + 48,
+    MARGIN + 78,
     PAGE_HEIGHT - 42,
     11.2,
     [255, 255, 255],
@@ -623,7 +762,7 @@ const drawHeader = (
   );
   pdf.text(
     cleanText(company.brandName),
-    MARGIN + 48,
+    MARGIN + 78,
     PAGE_HEIGHT - 57,
     10,
     [221, 245, 229],
@@ -631,41 +770,31 @@ const drawHeader = (
   );
   pdf.text(
     `${cleanText(company.address)} - ${cleanText(company.district)} - ${companyCity} - CEP ${cleanText(company.cep)}`,
-    MARGIN + 48,
+    MARGIN + 78,
     PAGE_HEIGHT - 71,
     7.2,
     [221, 245, 229],
   );
   pdf.text(
     `CNPJ: ${cleanText(company.cnpj)}   IE: ${cleanText(company.stateRegistration)}   Fone: ${cleanText(company.phone)}`,
-    MARGIN + 48,
+    MARGIN + 78,
     PAGE_HEIGHT - 83,
     7.2,
     [221, 245, 229],
   );
+  const emittedAt = new Date().toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+  });
   pdf.rect(
-    PAGE_WIDTH - MARGIN - 142,
+    PAGE_WIDTH - MARGIN - 132,
     PAGE_HEIGHT - 78,
-    132,
+    122,
     42,
     [255, 255, 255],
   );
-  pdf.text(
-    "PEDIDO DE VENDA",
-    PAGE_WIDTH - MARGIN - 122,
-    PAGE_HEIGHT - 51,
-    8,
-    BRAND_GREEN,
-    "F2",
-  );
-  pdf.text(
-    `Nº ${orderNumber}`,
-    PAGE_WIDTH - MARGIN - 122,
-    PAGE_HEIGHT - 68,
-    12,
-    BRAND_GREEN,
-    "F2",
-  );
+  pdf.text("Emissão", PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 50, 7, MUTED, "F2");
+  pdf.text(emittedAt, PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 63, 7, BRAND_GREEN, "F2");
+  pdf.text("Página 1", PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 75, 7, BRAND_GREEN, "F2");
 };
 
 const drawFooter = (pdf: SimplePdf, pageNumber: number) => {
@@ -773,6 +902,7 @@ export const getErpOrderPdfFilename = (
 export const buildErpOrderPdf = (
   order: ErpOrderPdfRecord,
   company: ErpOrderPdfCompany,
+  metadata: ErpOrderPdfMetadata = {},
 ) => {
   if (order.status !== ErpOrderSyncStatus.sent)
     throw Object.assign(
@@ -786,7 +916,7 @@ export const buildErpOrderPdf = (
   const client = order.opportunity.client;
   const clientAddress = getClientAddressParts(client);
   const clientLegalName = getClientLegalName(client);
-  const fantasyName = cleanText(client.fantasyName, "");
+  const fantasyName = getClientFantasyName(client);
   const orderNumber = cleanText(
     order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao,
   );
@@ -795,40 +925,26 @@ export const buildErpOrderPdf = (
   drawHeader(pdf, orderNumber, company);
 
   let y = PAGE_HEIGHT - 108;
-  pdf.rect(MARGIN, y - 38, PAGE_WIDTH - MARGIN * 2, 42, BRAND_LIGHT, BORDER);
+  pdf.text(`Pedido de Venda Nº: ${orderNumber}`, 206, y + 12, 13, BRAND_GREEN, "F2");
+  y -= 14;
+  pdf.rect(MARGIN, y - 32, PAGE_WIDTH - MARGIN * 2, 36, BRAND_LIGHT, BORDER);
   drawLabelValue(
     pdf,
     "Data do pedido",
     formatDate(payload.DATA_PEDIDO || order.sentAt || order.createdAt),
-    MARGIN + 12,
-    y - 16,
-    105,
+    MARGIN + 110,
+    y - 13,
+    130,
   );
   drawLabelValue(
     pdf,
     "Data de entrega",
     formatDate(payload.DATA_PREV_ENTREGA),
-    MARGIN + 136,
-    y - 16,
-    105,
+    MARGIN + 330,
+    y - 13,
+    130,
   );
-  drawLabelValue(
-    pdf,
-    "Número do pedido",
-    orderNumber,
-    MARGIN + 260,
-    y - 16,
-    120,
-  );
-  drawLabelValue(
-    pdf,
-    "Tabela",
-    cleanText(payload.TABELA_PRECO),
-    MARGIN + 402,
-    y - 16,
-    90,
-  );
-  y -= 56;
+  y -= 48;
 
   pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
@@ -845,7 +961,7 @@ export const buildErpOrderPdf = (
   drawLabelValue(
     pdf,
     "CNPJ/CPF",
-    formatDocument(client.cnpj),
+    getClientDocument(client),
     MARGIN + 350,
     y - 18,
     150,
@@ -868,16 +984,16 @@ export const buildErpOrderPdf = (
   );
   drawLabelValue(
     pdf,
-    "Cidade/UF",
-    `${cleanText(clientAddress.city)}/${cleanText(clientAddress.state)}`,
+    "Cidade/UF/CEP",
+    `${cleanText(clientAddress.city)}/${cleanText(clientAddress.state)} - CEP: ${cleanText(clientAddress.cep)}`,
     MARGIN + 345,
     y - 50,
     92,
   );
   drawLabelValue(
     pdf,
-    "CEP / Telefone",
-    [clientAddress.cep, clientAddress.phone].filter(Boolean).join(" / ") || "-",
+    "Fone",
+    cleanText(clientAddress.phone),
     MARGIN + 455,
     y - 50,
     70,
@@ -926,7 +1042,7 @@ export const buildErpOrderPdf = (
             .join("/") || "-",
         width: 72,
       },
-      { text: cleanText(item.productNameSnapshot), width: 218 },
+      { text: getProductDescription(item), width: 218 },
       { text: reference || "-", width: 66, align: "center" },
       { text: formatNumber(item.quantity, 2), width: 42, align: "right" },
       {
@@ -986,31 +1102,46 @@ export const buildErpOrderPdf = (
       "F2",
     );
   });
+  const paymentMethodLabel = cleanText(
+    metadata.paymentMethodDescription || payload.FORMA,
+  );
+  const receivingConditionLabel = cleanText(
+    metadata.receivingConditionDescription || payload.CODCONDREC,
+  );
   pdf.text(
-    `Forma de Pagto: ${cleanText(payload.FORMA || "DINHEIRO/CHEQUE")}   Condição: ${cleanText(payload.CODCONDREC || "A VISTA")}`,
+    `Forma de Pagto: ${paymentMethodLabel}   Condição: ${receivingConditionLabel}`,
     MARGIN + 12,
     y - 66,
     7.5,
     SLATE,
     "F2",
   );
-  const rawWeights = asRecord(payload.PESOS || payload);
-  pdf.text(
-    `Transportadora / Pesos: Peso Bruto ${cleanText(rawWeights.PESO_BRUTO || "-")}   Peso Líquido ${cleanText(rawWeights.PESO_LIQUIDO || rawWeights.PESO_LIQ || "-")}`,
-    MARGIN + 310,
-    y - 66,
-    7,
-    MUTED,
+  const totalWeight = order.opportunity.items.reduce(
+    (sum, item) => sum + getProductWeight(item) * Number(item.quantity || 0),
+    0,
   );
-  y -= 88;
+  y -= 84;
+
+  pdf.text("Transportadora", MARGIN, y, 9.5, BRAND_GREEN, "F2");
+  y -= 12;
+  pdf.rect(MARGIN, y - 18, PAGE_WIDTH - MARGIN * 2, 22, null, BORDER);
+  pdf.text(
+    `Peso Bruto: ${formatNumber(totalWeight, 2)} KG   |   Peso Líquido: ${formatNumber(totalWeight, 2)} KG`,
+    MARGIN + 12,
+    y - 10,
+    8,
+    SLATE,
+    "F2",
+  );
+  y -= 32;
 
   const notes = cleanText(
     payload.OBS_PEDIDO || order.opportunity.notes,
     "Sem observações.",
   );
-  pdf.rect(MARGIN, y - 28, PAGE_WIDTH - MARGIN * 2, 32, null, BORDER);
+  pdf.rect(MARGIN, y - 34, PAGE_WIDTH - MARGIN * 2, 38, null, BORDER);
   drawLabelValue(pdf, "Observações", notes, MARGIN + 12, y - 16, 500);
-  y -= 44;
+  y -= 48;
 
   pdf.text("Cláusulas", MARGIN, y, 9.5, BRAND_GREEN, "F2");
   y -= 12;
@@ -1031,8 +1162,8 @@ export const buildErpOrderPdf = (
   }
 
   y = ensureSpace(pdf, y, 42, pageNumber, orderNumber, company);
-  pdf.line(MARGIN + 66, y - 20, MARGIN + 250, y - 20, SLATE, 0.8);
-  pdf.text("Assinatura do Comprador", MARGIN + 98, y - 34, 8, SLATE, "F2");
+  pdf.line(196, y - 20, 398, y - 20, SLATE, 0.8);
+  pdf.text("Assinatura do Comprador", 238, y - 34, 8, SLATE, "F2");
 
   drawFooter(pdf, pageNumber.value);
   return pdf.buffer();

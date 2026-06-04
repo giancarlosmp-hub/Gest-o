@@ -65,7 +65,7 @@ import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrd
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
-import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
+import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -7047,7 +7047,7 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
         include: {
           client: true,
           ownerSeller: { select: { name: true, erpCode: true } },
-          items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { className: true, unit: true, rawErpPayload: true } } } },
+          items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { name: true, className: true, unit: true, rawErpPayload: true } } } },
         },
       },
     },
@@ -7057,8 +7057,17 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
 
   try {
     const pdfOrder = order as ErpOrderPdfRecord;
-    const company = await getErpOrderPdfCompany(prisma, pdfOrder);
-    const pdf = buildErpOrderPdf(pdfOrder, company);
+    const [company, metadata] = await Promise.all([
+      getErpOrderPdfCompany(prisma, pdfOrder),
+      getErpOrderPdfMetadata(prisma, pdfOrder),
+    ]);
+    console.log("=== PDF DEBUG ===");
+    console.log("Branch:", JSON.stringify(metadata.branch, null, 2));
+    console.log("Client:", JSON.stringify(pdfOrder.opportunity.client, null, 2));
+    console.log("Items:", JSON.stringify(pdfOrder.opportunity.items, null, 2));
+    console.log("PaymentMethod:", JSON.stringify(metadata.paymentMethod, null, 2));
+    console.log("ReceivingCondition:", JSON.stringify(metadata.receivingCondition, null, 2));
+    const pdf = buildErpOrderPdf(pdfOrder, company, metadata);
     const filename = getErpOrderPdfFilename(order);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
