@@ -10,7 +10,10 @@
     "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "@salesforce-pro/shared": ["packages/shared/dist"]
-    }
+      "@salesforce-pro/shared": [
+        "packages/shared/dist"
+      ]
+    },
+    "ignoreDeprecations": "6.0"
   }
 }

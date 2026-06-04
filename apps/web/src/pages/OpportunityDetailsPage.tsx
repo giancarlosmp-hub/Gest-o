@@ -366,6 +366,7 @@ export default function OpportunityDetailsPage() {
   const [erpOperationDefaultAlert, setErpOperationDefaultAlert] = useState("");
   const [erpOrders, setErpOrders] = useState<ErpOrderSync[]>([]);
   const [syncingErpOrderStatus, setSyncingErpOrderStatus] = useState(false);
+  const [downloadingErpOrderPdfId, setDownloadingErpOrderPdfId] = useState<string | null>(null);
 
   const load = async () => {
     if (!id) return;
@@ -570,6 +571,28 @@ export default function OpportunityDetailsPage() {
       toast.error(getApiErrorMessage(error, "Não foi possível atualizar status ERP"));
     } finally {
       setSyncingErpOrderStatus(false);
+    }
+  };
+
+  const onDownloadErpOrderPdf = async (order: ErpOrderSync) => {
+    if (!item) return;
+    const pdfWindow = window.open("", "_blank", "noopener,noreferrer");
+    setDownloadingErpOrderPdfId(order.id);
+    try {
+      const response = await api.get(`/opportunities/${item.id}/erp/orders/${order.id}/pdf`, { responseType: "blob" });
+      const blob = new Blob([response.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      if (pdfWindow) {
+        pdfWindow.location.href = url;
+      } else {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      pdfWindow?.close();
+      toast.error(getApiErrorMessage(error, "Não foi possível gerar o PDF do pedido ERP"));
+    } finally {
+      setDownloadingErpOrderPdfId(null);
     }
   };
 
@@ -1022,8 +1045,22 @@ export default function OpportunityDetailsPage() {
                                   <StatusPill tone={order.status === "sent" ? "success" : order.status === "error" ? "danger" : "warning"}>{order.status === "sent" ? "enviado" : order.status === "error" ? "erro" : "pendente"}</StatusPill>
                                   {order.orderStatus ? <StatusPill tone={order.orderStatus === "cancelado" ? "danger" : order.orderStatus === "pendente" ? "warning" : "success"}>{order.orderStatus}</StatusPill> : null}
                                 </div>
-                                <p className="mt-2 break-all text-xs text-slate-600">Importação: {order.pedidoIdImportacao}</p>
-                                <p className="text-xs text-slate-600">Pedido: {order.erpOrderNumber || order.numPedido || "-"}</p>
+                                <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+                                  <div>
+                                    <p className="break-all text-xs text-slate-600">Importação: {order.pedidoIdImportacao}</p>
+                                    <p className="text-xs text-slate-600">Pedido: {order.erpOrderNumber || order.numPedido || "-"}</p>
+                                  </div>
+                                  {order.status === "sent" ? (
+                                    <button
+                                      type="button"
+                                      className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-bold text-brand-800 transition hover:bg-brand-100 disabled:cursor-wait disabled:opacity-60"
+                                      disabled={downloadingErpOrderPdfId === order.id}
+                                      onClick={() => onDownloadErpOrderPdf(order)}
+                                    >
+                                      {downloadingErpOrderPdfId === order.id ? "Gerando PDF..." : "Baixar PDF"}
+                                    </button>
+                                  ) : null}
+                                </div>
                               </div>
                             ))}
                           </div>

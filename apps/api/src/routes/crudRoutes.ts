@@ -65,6 +65,7 @@ import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrd
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
+import { buildErpOrderPdf, getErpOrderPdfFilename, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -6947,6 +6948,49 @@ router.get("/opportunities/:id/erp/orders", async (req, res) => {
   });
 
   return res.status(200).json({ items: orders });
+});
+
+router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
+  const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) }, select: { id: true } });
+  if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
+
+  const order = await prisma.erpOrderSync.findFirst({
+    where: {
+      id: req.params.orderId,
+      opportunityId: req.params.id,
+      status: ErpOrderSyncStatus.sent,
+    },
+    include: {
+      opportunity: {
+        include: {
+          client: true,
+          ownerSeller: { select: { name: true, erpCode: true } },
+          items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { className: true, unit: true, rawErpPayload: true } } } },
+        },
+      },
+    },
+  });
+
+  if (!order) return res.status(404).json({ message: "Pedido ERP enviado não encontrado para esta oportunidade" });
+
+  try {
+    const pdf = buildErpOrderPdf(order as ErpOrderPdfRecord);
+    const filename = getErpOrderPdfFilename(order);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Content-Length", String(pdf.length));
+    return res.status(200).send(pdf);
+  } catch (error) {
+    const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+    const message = error instanceof Error ? error.message : "Falha ao gerar PDF do pedido ERP.";
+    logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order pdf route] PDF generation failed", {
+      opportunityId: req.params.id,
+      erpOrderSyncId: req.params.orderId,
+      userId: req.user?.id ?? null,
+      error: message,
+    });
+    return res.status(status).json({ message });
+  }
 });
 
 router.post("/opportunities/:id/erp/orders/status", async (req, res) => {
