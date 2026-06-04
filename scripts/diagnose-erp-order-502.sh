@@ -13,8 +13,11 @@ section() {
 }
 
 filter_endpoint() {
-  rg -n --color never "${CF_RAY}|${ENDPOINT_REGEX}|erp order|ultrafv3|UltraFV3|/salesmen|/orders|origin_bad_gateway|502|timeout|restart|exited|OOM|Killed" || true
+  rg -n --color never "${CF_RAY}|${ENDPOINT_REGEX}|erp order|ERP ORDER|ultrafv3|UltraFV3|/salesmen|/orders|origin_bad_gateway|502|timeout|restart|exited|OOM|Killed" || true
 }
+
+section "Compose status"
+docker compose -f "$COMPOSE_FILE" ps || true
 
 section "Docker containers"
 docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' | filter_endpoint
@@ -29,6 +32,14 @@ fi
 
 section "Docker events around incident"
 docker events --since "$SINCE" --until "$UNTIL" --filter container="$API_CONTAINER" 2>/dev/null | filter_endpoint
+
+section "API restart count"
+if [[ -n "$API_CONTAINER" ]]; then
+  docker inspect "$API_CONTAINER" --format '{{.RestartCount}}' || true
+fi
+
+section "API logs last 30 minutes"
+docker compose -f "$COMPOSE_FILE" logs --since=30m api 2>&1 | filter_endpoint
 
 section "API logs around incident"
 if [[ -n "$API_CONTAINER" ]]; then
@@ -53,5 +64,5 @@ for file in /var/log/nginx/access.log /var/log/nginx/error.log /var/log/nginx/*a
 
 section "Health after incident"
 if [[ -n "$API_CONTAINER" ]]; then
-  docker exec "$API_CONTAINER" node -e "require('http').get('http://127.0.0.1:4000/health',res=>{console.log('api health',res.statusCode);res.resume();}).on('error',err=>{console.error(err.message);process.exit(1)})" || true
+  docker exec "$API_CONTAINER" node -e "require('http').get('http://127.0.0.1:4000/system/health/runtime',res=>{console.log('api health',res.statusCode);res.resume();}).on('error',err=>{console.error(err.message);process.exit(1)})" || true
 fi

@@ -17,6 +17,8 @@ import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./m
 
 export const app = express();
 
+const processStartedAt = new Date();
+
 if (env.isProduction) {
   app.set("trust proxy", 1);
 }
@@ -168,6 +170,18 @@ app.get("/health", (_req, res) => {
     status: "ok",
     timestamp: new Date().toISOString(),
     version: env.appVersion,
+  });
+});
+
+app.get("/system/health/runtime", (_req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    pid: process.pid,
+    memoryUsage: process.memoryUsage(),
+    startedAt: processStartedAt.toISOString(),
+    version: env.appVersion,
+    nodeVersion: process.version,
   });
 });
 
