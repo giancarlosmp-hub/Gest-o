@@ -30,7 +30,7 @@ import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType, OpportunityStage, Prisma, type User } from "@prisma/client";
+import { ActivityType, ClientType, ErpOrderSyncStatus, OpportunityStage, Prisma, type User } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
@@ -6523,6 +6523,7 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
 });
 
 router.post("/opportunities/:id/erp/orders", async (req, res) => {
+  try {
   const correlationId = req.correlationId || randomUUID();
   const opportunityId = req.params.id;
   const routeStartedAt = Date.now();
@@ -6570,23 +6571,34 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
   // O fluxo pode incluir autenticação, consulta de vendedor e POST /orders. Ele precisa
   // de um orçamento maior que o timeout global da API, mas ainda menor que o proxy externo.
   res.setTimeout(ERP_ORDER_ROUTE_TIMEOUT_MS, () => {
-    if (res.headersSent || res.writableEnded) return;
-    logApiEvent("ERROR", "[erp order route] controlled route timeout", {
-      routeHit: true,
-      opportunityId,
-      userId: req.user?.id ?? null,
-      correlationId,
-      requestId: req.requestId,
-      timestamp: new Date().toISOString(),
-      timeoutMs: ERP_ORDER_ROUTE_TIMEOUT_MS,
-    });
-    req.erpOrderFailureStage = "timeout";
-    res.status(504).json(buildControlledErpOrderFailurePayload({
-      status: 504,
-      etapa: "timeout",
-      message: "O envio ao ERP excedeu o tempo limite. Confirme o pedido no ERP antes de tentar novamente.",
-      correlationId,
-    }));
+    try {
+      if (res.headersSent || res.writableEnded) return;
+      logApiEvent("ERROR", "[erp order route] controlled route timeout", {
+        routeHit: true,
+        opportunityId,
+        userId: req.user?.id ?? null,
+        correlationId,
+        requestId: req.requestId,
+        timestamp: new Date().toISOString(),
+        timeoutMs: ERP_ORDER_ROUTE_TIMEOUT_MS,
+      });
+      req.erpOrderFailureStage = "timeout";
+      res.status(504).type("application/json").send(safeJsonStringify(buildControlledErpOrderFailurePayload({
+        status: 504,
+        etapa: "timeout",
+        message: "O envio ao ERP excedeu o tempo limite. Confirme o pedido no ERP antes de tentar novamente.",
+        correlationId,
+      })));
+    } catch (timeoutError) {
+      logApiEvent("ERROR", "[erp order route] failed to write controlled timeout response", {
+        routeHit: true,
+        opportunityId,
+        userId: req.user?.id ?? null,
+        correlationId,
+        requestId: req.requestId,
+        error: timeoutError instanceof Error ? sanitizeErpOrderErrorMessage(timeoutError.message) : sanitizeErpOrderErrorMessage(String(timeoutError)),
+      });
+    }
   });
 
   try {
@@ -6597,10 +6609,30 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message || "Payload inválido";
       parameterDiagnostics = getErpOrderParameterDiagnostics(req.body || {});
+      logApiEvent("WARN", "[erp order route] request payload validation failed before UltraFV3", {
+        routeHit: true,
+        correlationId,
+        opportunityId,
+        userId: req.user?.id ?? null,
+        payloadValidado: false,
+        requestId: req.requestId,
+        error: sanitizeErpOrderErrorMessage(message),
+        ...parameterDiagnostics,
+      });
       throw Object.assign(new Error(`Payload inválido: ${message}`), { status: 400, parameterDiagnostics });
     }
     normalizedParams = normalizeErpOrderParameterCodes(parsed.data);
     parameterDiagnostics = getErpOrderParameterDiagnostics(parsed.data);
+    logApiEvent("INFO", "[erp order route] request payload validated before UltraFV3", {
+      routeHit: true,
+      correlationId,
+      opportunityId,
+      userId: req.user?.id ?? null,
+      payloadValidado: true,
+      requestId: req.requestId,
+      simulateOnly: normalizedParams.simulateOnly,
+      ...parameterDiagnostics,
+    });
 
     req.erpOrderFailureStage = "load-opportunity";
     opportunity = await prisma.opportunity.findFirst({
@@ -6733,6 +6765,114 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
         correlationId,
       })));
     }
+  }
+  } catch (fatalError) {
+    const fallbackCorrelationId = req.correlationId || randomUUID();
+    req.correlationId = fallbackCorrelationId;
+    const message = sanitizeErpOrderErrorMessage(fatalError instanceof Error ? fatalError.message : String(fatalError));
+    logApiEvent("ERROR", "[erp order route] unhandled handler failure contained", {
+      routeHit: true,
+      opportunityId: req.params.id,
+      userId: req.user?.id ?? null,
+      correlationId: fallbackCorrelationId,
+      requestId: req.requestId,
+      payloadValidado: false,
+      error: message,
+    });
+    if (res.headersSent || res.writableEnded) return;
+    res.setHeader("x-correlation-id", fallbackCorrelationId);
+    return res.status(500).type("application/json").send(safeJsonStringify(buildControlledErpOrderFailurePayload({
+      status: 500,
+      etapa: "handler",
+      message,
+      correlationId: fallbackCorrelationId,
+    })));
+  }
+});
+
+
+const pickLatestSyncErrorEntry = (syncErrors: unknown): Record<string, unknown> | null => {
+  const rows = Array.isArray(syncErrors) ? syncErrors : syncErrors && typeof syncErrors === "object" ? [syncErrors] : [];
+  const firstObject = rows.find((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)));
+  return firstObject || null;
+};
+
+const readSanitizedErrorText = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return sanitizeErpOrderErrorMessage(value.trim());
+  }
+  return null;
+};
+
+router.get("/opportunities/:id/erp/last-order-error", async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  const opportunityId = req.params.id;
+  req.correlationId = correlationId;
+  res.setHeader("x-correlation-id", correlationId);
+
+  try {
+    const opportunity = await prisma.opportunity.findFirst({ where: { id: opportunityId, ...sellerWhere(req) }, select: { id: true } });
+    if (!opportunity) return res.status(404).json({ correlationId, message: "Oportunidade não encontrada" });
+
+    const [lastErroredSync, lastErrorTimeline] = await Promise.all([
+      prisma.erpOrderSync.findFirst({
+        where: { opportunityId, status: ErpOrderSyncStatus.error },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      }),
+      prisma.timelineEvent.findFirst({
+        where: {
+          opportunityId,
+          OR: [
+            { description: { contains: "pedido ERP falhou", mode: "insensitive" } },
+            { description: { contains: "correlationId=", mode: "insensitive" } },
+          ],
+        },
+        orderBy: [{ createdAt: "desc" }],
+      }),
+    ]);
+
+    if (!lastErroredSync && !lastErrorTimeline) {
+      return res.status(200).json({ correlationId, item: null, message: "Nenhum erro de pedido ERP encontrado para esta oportunidade." });
+    }
+
+    const syncErrorEntry = pickLatestSyncErrorEntry(lastErroredSync?.syncErrors);
+    const syncResponse = lastErroredSync?.erpResponse && typeof lastErroredSync.erpResponse === "object" && !Array.isArray(lastErroredSync.erpResponse)
+      ? lastErroredSync.erpResponse as Record<string, unknown>
+      : null;
+    const rawSource = syncErrorEntry || syncResponse || null;
+    const nestedUltra = rawSource?.ultraFv3 && typeof rawSource.ultraFv3 === "object" && !Array.isArray(rawSource.ultraFv3)
+      ? rawSource.ultraFv3 as Record<string, unknown>
+      : null;
+    const rawStatus = rawSource?.status ?? nestedUltra?.status ?? syncResponse?.status ?? null;
+    const status = typeof rawStatus === "number" ? rawStatus : Number.isFinite(Number(rawStatus)) ? Number(rawStatus) : lastErroredSync ? 502 : 500;
+    const message = readSanitizedErrorText(rawSource?.message, nestedUltra?.message, syncResponse?.message, lastErrorTimeline?.description) || "Erro de pedido ERP sem mensagem detalhada.";
+    const sourceCorrelationId = readSanitizedErrorText(rawSource?.correlationId, nestedUltra?.correlationId, lastErroredSync?.pedidoIdImportacao) || correlationId;
+    const payload = rawSource?.payload ?? nestedUltra?.payload ?? lastErroredSync?.payloadSent ?? null;
+
+    return res.status(200).json({
+      correlationId,
+      item: {
+        source: lastErroredSync ? "ErpOrderSync" : "timeline",
+        erpOrderSyncId: lastErroredSync?.id ?? null,
+        timelineEventId: lastErrorTimeline?.id ?? null,
+        createdAt: lastErroredSync?.createdAt ?? lastErrorTimeline?.createdAt ?? null,
+        updatedAt: lastErroredSync?.updatedAt ?? null,
+        payload: payload ? sanitizeErpOrderPayload(payload) : null,
+        correlationId: sourceCorrelationId,
+        status,
+        message,
+        rawError: rawSource ? sanitizeErpOrderPayload(rawSource) : lastErrorTimeline ? { description: sanitizeErpOrderErrorMessage(lastErrorTimeline.description) } : null,
+      },
+    });
+  } catch (error) {
+    const message = sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : String(error));
+    logApiEvent("ERROR", "[erp last order error route] request failed", {
+      opportunityId,
+      userId: req.user?.id ?? null,
+      correlationId,
+      error: message,
+    });
+    return res.status(500).json({ correlationId, status: 500, message });
   }
 });
 

@@ -76,6 +76,27 @@ const sanitizeUltraValue = (value: unknown, key = ""): unknown => {
 export const sanitizeErpOrderPayload = (payload: unknown) => sanitizeUltraValue(payload);
 export const sanitizeErpOrderErrorMessage = (message: unknown) => redactSensitiveText(String(message || "Falha ao gerar pedido ERP."));
 
+const buildFinalValidatedOrderPayloadLog = (payload: UltraFv3OrderPayload) => ({
+  NUM_PEDIDO: payload.NUM_PEDIDO,
+  PARCEIRO: maskDocument(payload.PARCEIRO),
+  VENDEDOR: payload.VENDEDOR,
+  OPERADOR: payload.OPERADOR,
+  CODOPER: payload.CODOPER,
+  CODFILIAL: payload.CODFILIAL,
+  TABELA_PRECO: payload.TABELA_PRECO,
+  CODCONDREC: payload.CODCONDREC,
+  FORMA: payload.FORMA,
+  DATA_PEDIDO: payload.DATA_PEDIDO,
+  DATA_PREV_ENTREGA: payload.DATA_PREV_ENTREGA,
+  ITENS: payload.ITENS.map((item) => ({
+    CODPRODUTO: item["CODPRODUTO"],
+    CODPRODUTO_CLAS: item["CODPRODUTO_CLAS"],
+    QTD_PEDIDO: item["QTD_PEDIDO"],
+    PRECO: item["PRECO"],
+    UND_MEDIDA: item["UND_MEDIDA"],
+  })),
+});
+
 const getResponseField = (payload: unknown, key: string) =>
   payload && typeof payload === "object" && !Array.isArray(payload)
     ? (payload as Record<string, unknown>)[key]
@@ -408,11 +429,11 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
     }
     if (item.PEDIDO_ID !== null) errors.push(`${itemPath}.PEDIDO_ID deve ser null.`);
     if (item.ITEM !== index + 1) errors.push(`${itemPath}.ITEM deve ser sequencial iniciando em 1.`);
-    if (typeof item.CODPRODUTO !== "number" || !Number.isFinite(item.CODPRODUTO)) errors.push(`${itemPath}.CODPRODUTO deve ser number.`);
-    if (typeof item.CODPRODUTO_CLAS !== "number" || !Number.isFinite(item.CODPRODUTO_CLAS)) errors.push(`${itemPath}.CODPRODUTO_CLAS deve ser number.`);
-    if (typeof item.PRECO !== "number" || !Number.isFinite(item.PRECO) || item.PRECO <= 0) errors.push(`${itemPath}.PRECO deve ser number maior que 0.`);
+    if (typeof item["CODPRODUTO"] !== "number" || !Number.isFinite(item["CODPRODUTO"])) errors.push(`${itemPath}.CODPRODUTO deve ser number.`);
+    if (typeof item["CODPRODUTO_CLAS"] !== "number" || !Number.isFinite(item["CODPRODUTO_CLAS"])) errors.push(`${itemPath}.CODPRODUTO_CLAS deve ser number.`);
+    if (typeof item["PRECO"] !== "number" || !Number.isFinite(item["PRECO"]) || item["PRECO"] <= 0) errors.push(`${itemPath}.PRECO deve ser number maior que 0.`);
     if (item.VALOR_ACRESCIMO !== 0) errors.push(`${itemPath}.VALOR_ACRESCIMO deve ser 0.`);
-    if (typeof item.UND_MEDIDA !== "string" || !item.UND_MEDIDA.trim()) errors.push(`${itemPath}.UND_MEDIDA deve ser string preenchida.`);
+    if (typeof item["UND_MEDIDA"] !== "string" || !item["UND_MEDIDA"].trim()) errors.push(`${itemPath}.UND_MEDIDA deve ser string preenchida.`);
     if (typeof item.DESCRICAO_UNMED !== "string" || !item.DESCRICAO_UNMED.trim()) errors.push(`${itemPath}.DESCRICAO_UNMED deve ser string preenchida.`);
     if (item.QTD_UNMED !== 1) errors.push(`${itemPath}.QTD_UNMED deve ser 1.`);
     if (item.PESO_EMBALAGEM !== 0) errors.push(`${itemPath}.PESO_EMBALAGEM deve ser 0.`);
@@ -773,10 +794,10 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const classificationDiagnostics = itens.map((item) => ({
     ITEM: item.ITEM,
-    CODPRODUTO: item.CODPRODUTO,
-    CODPRODUTO_CLAS: item.CODPRODUTO_CLAS,
+    CODPRODUTO: item["CODPRODUTO"],
+    CODPRODUTO_CLAS: item["CODPRODUTO_CLAS"],
     descricaoClassificacao: item.DESCRICAO_CLASSIFICACAO,
-    unidadeEnviada: item.UND_MEDIDA,
+    unidadeEnviada: item["UND_MEDIDA"],
     descricaoUnidadeEnviada: item.DESCRICAO_UNMED,
   }));
 
@@ -822,6 +843,14 @@ async function createErpOrderFromOpportunityUnsafe(
       parameterDiagnostics,
     });
   }
+
+  logApiEvent("INFO", "[erp order] final validated UltraFV3 /orders payload", {
+    ...operationContext,
+    correlationId: pedidoIdImportacao,
+    payloadValidado: true,
+    endpoint: "/orders",
+    payload: buildFinalValidatedOrderPayloadLog(payload),
+  });
 
   if (params.simulateOnly) {
     logApiEvent("INFO", "[erp order simulation] UltraFV3 order payload validated without submission", {

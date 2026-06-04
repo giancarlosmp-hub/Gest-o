@@ -243,7 +243,11 @@ const normalizeSearchText = (value: string) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
+const DEFAULT_ERP_OPERATION_CODE = "100";
+const DEFAULT_ERP_OPERATION_LABEL = "CODOPER 100 · VENDAS";
+
 const firstOptionCode = (options: ErpOption[]) => options[0]?.code || "";
+const findDefaultSalesOperationCode = (options: ErpOption[]) => options.find((option) => option.code === DEFAULT_ERP_OPERATION_CODE)?.code || "";
 
 const statusPillClassName: Record<"success" | "warning" | "danger" | "neutral", string> = {
   success: "border-emerald-200 bg-emerald-50 text-emerald-700",
@@ -359,6 +363,7 @@ export default function OpportunityDetailsPage() {
   const [operations, setOperations] = useState<ErpOption[]>([]);
   const [erpOrderForm, setErpOrderForm] = useState<ErpOrderForm>(emptyErpOrderForm);
   const [erpOrderFeedback, setErpOrderFeedback] = useState<ErpOrderFeedback | null>(null);
+  const [erpOperationDefaultAlert, setErpOperationDefaultAlert] = useState("");
   const [erpOrders, setErpOrders] = useState<ErpOrderSync[]>([]);
   const [syncingErpOrderStatus, setSyncingErpOrderStatus] = useState(false);
 
@@ -471,6 +476,8 @@ export default function OpportunityDetailsPage() {
       const nextPriceTables = toErpOptions(priceTablesResponse.data);
       const nextBranches = toErpOptions(branchesResponse.data);
       const nextOperations = toErpOptions(operationsResponse.data);
+      const defaultSalesOperationCode = findDefaultSalesOperationCode(nextOperations);
+      const missingDefaultSalesOperationMessage = `Operação padrão ${DEFAULT_ERP_OPERATION_LABEL} não foi encontrada na lista sincronizada. Sincronize Operações no ERP antes de gerar o pedido; a operação ficará vazia para evitar selecionar 99 · VENDA CONDICIONAL automaticamente.`;
 
       setOpportunityItems(Array.isArray(itemsResponse.data?.items) ? itemsResponse.data.items : []);
       setOpportunityItemTotals(itemsResponse.data?.totals || { grossTotal: 0, discountTotal: 0, netTotal: 0 });
@@ -481,13 +488,15 @@ export default function OpportunityDetailsPage() {
       setBranches(nextBranches);
       setOperations(nextOperations);
       setErpOrders(Array.isArray(erpOrdersResponse.data?.items) ? erpOrdersResponse.data.items : []);
+      setErpOperationDefaultAlert(defaultSalesOperationCode ? "" : missingDefaultSalesOperationMessage);
+      if (!defaultSalesOperationCode) toast.warning(missingDefaultSalesOperationMessage);
       setErpOrderForm((current) => ({
         ...current,
         paymentMethodCode: current.paymentMethodCode || firstOptionCode(nextPaymentMethods),
         receivingConditionCode: current.receivingConditionCode || firstOptionCode(nextReceivingConditions),
         priceTableCode: current.priceTableCode || firstOptionCode(nextPriceTables),
         branchCode: current.branchCode || firstOptionCode(nextBranches),
-        operationCode: current.operationCode || firstOptionCode(nextOperations),
+        operationCode: defaultSalesOperationCode,
         expectedDeliveryDate: current.expectedDeliveryDate || getTodayDateInputValue()
       }));
     } catch (error) {
@@ -531,9 +540,12 @@ export default function OpportunityDetailsPage() {
       }
       toast.success(response.data?.simulated ? "Simulação ERP validada sem envio real" : "Pedido enviado ao ERP");
     } catch (error) {
-      const message = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
       const maybeResponse = (error as any)?.response?.data;
-      setErpOrderFeedback({ status: "erro", pedidoIdImportacao: maybeResponse?.pedidoIdImportacao, correlationId: maybeResponse?.correlationId, message });
+      const maybeHeaders = (error as any)?.response?.headers || {};
+      const errorCorrelationId = maybeResponse?.correlationId || maybeHeaders["x-correlation-id"] || maybeHeaders["X-Correlation-Id"];
+      const baseMessage = getApiErrorMessage(error, "Erro ERP ao enviar pedido");
+      const message = errorCorrelationId && !baseMessage.includes(String(errorCorrelationId)) ? `${baseMessage} (correlationId: ${errorCorrelationId})` : baseMessage;
+      setErpOrderFeedback({ status: "erro", pedidoIdImportacao: maybeResponse?.pedidoIdImportacao, correlationId: errorCorrelationId, message });
       try {
         const ordersResponse = await api.get(`/opportunities/${item.id}/erp/orders`);
         setErpOrders(Array.isArray(ordersResponse.data?.items) ? ordersResponse.data.items : []);
@@ -875,7 +887,10 @@ export default function OpportunityDetailsPage() {
                         <SearchableSelect label="Condição de recebimento" value={erpOrderForm.receivingConditionCode} options={receivingConditions} loading={loadingErpOrderData} emptyMessage="Não há condições de recebimento sincronizadas. Vá em Configurações > Integração ERP e sincronize Condições de recebimento." onChange={(value) => setErpOrderField("receivingConditionCode", value)} />
                         <SearchableSelect label="Tabela de preço" value={erpOrderForm.priceTableCode} options={priceTables} loading={loadingErpOrderData} emptyMessage="Nenhuma tabela de preço sincronizada. Vá em Configurações > Integração ERP e sincronize Tabelas de preço." onChange={(value) => setErpOrderField("priceTableCode", value)} />
                         <SearchableSelect label="Filial" value={erpOrderForm.branchCode} options={branches} loading={loadingErpOrderData} emptyMessage="Não há filiais sincronizadas. Vá em Configurações > Integração ERP e sincronize Filiais." onChange={(value) => setErpOrderField("branchCode", value)} />
-                        <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} emptyMessage="Não há operações sincronizadas. Vá em Configurações > Integração ERP e sincronize Operações." onChange={(value) => setErpOrderField("operationCode", value)} />
+                        <div>
+                          <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} emptyMessage="Não há operações sincronizadas. Vá em Configurações > Integração ERP e sincronize Operações." onChange={(value) => setErpOrderField("operationCode", value)} />
+                          {erpOperationDefaultAlert ? <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{erpOperationDefaultAlert}</p> : null}
+                        </div>
                         <label className="block text-sm">
                           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Data prevista de entrega *</span>
                           <input
