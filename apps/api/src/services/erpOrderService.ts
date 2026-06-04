@@ -40,12 +40,7 @@ class ErpOrderSubmissionMutex {
 const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
 const erpOrderNumPedidoMutex = new ErpOrderSubmissionMutex();
 
-const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode" | "lineNumber">) => {
-  const directClassCode = item.erpProductClassCode?.trim();
-  if (directClassCode) return directClassCode;
-  const lineNumber = Number(item.lineNumber);
-  return Number.isInteger(lineNumber) && lineNumber > 0 ? String(lineNumber) : "";
-};
+const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode">) => item.erpProductClassCode?.trim() || "";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -142,7 +137,7 @@ const sanitizeUltraOrderFailure = (
 
 type OrderParameterCodes = Pick<
   ErpOrderGenerationInput,
-  "paymentMethodCode" | "receivingConditionCode" | "priceTableCode" | "branchCode" | "operationCode" | "simulateOnly"
+  "paymentMethodCode" | "receivingConditionCode" | "priceTableCode" | "branchCode" | "operationCode" | "expectedDeliveryDate" | "simulateOnly"
 >;
 
 type NormalizedOrderParameterCodes = {
@@ -151,6 +146,7 @@ type NormalizedOrderParameterCodes = {
   priceTableCode: string;
   branchCode: string;
   operationCode: string;
+  expectedDeliveryDate: string;
   simulateOnly: boolean;
 };
 
@@ -165,6 +161,8 @@ export type ErpOrderParameterDiagnostics = {
   branchCodeNormalized: string;
   operationCodeRaw: unknown;
   operationCodeNormalized: string;
+  expectedDeliveryDateRaw: unknown;
+  expectedDeliveryDateNormalized: string;
 };
 
 const toSafeParameterRawValue = (value: ErpOrderParameterValue | undefined): unknown => {
@@ -185,6 +183,7 @@ export const normalizeErpOrderParameterCodes = (params: Partial<OrderParameterCo
   priceTableCode: normalizeErpParameterCode(params.priceTableCode),
   branchCode: normalizeErpParameterCode(params.branchCode),
   operationCode: normalizeErpParameterCode(params.operationCode),
+  expectedDeliveryDate: typeof params.expectedDeliveryDate === "string" ? params.expectedDeliveryDate.trim() : "",
   simulateOnly: params.simulateOnly === true,
 });
 
@@ -201,6 +200,8 @@ export const getErpOrderParameterDiagnostics = (params: Partial<OrderParameterCo
     branchCodeNormalized: normalized.branchCode,
     operationCodeRaw: toSafeParameterRawValue(params.operationCode),
     operationCodeNormalized: normalized.operationCode,
+    expectedDeliveryDateRaw: typeof params.expectedDeliveryDate === "string" ? params.expectedDeliveryDate : null,
+    expectedDeliveryDateNormalized: normalized.expectedDeliveryDate,
   };
 };
 
@@ -215,7 +216,7 @@ type OpportunityForErpOrder = {
     rawPayload?: Prisma.JsonValue | null;
   };
   ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode" | "erpLoginUsername" | "erpLoginPasswordEncrypted">;
-  items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity"> | null }>;
+  items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity" | "unit" | "className" | "rawErpPayload"> | null }>;
 };
 
 const pickFirstValue = (payload: Record<string, unknown>, keys: string[]) => {
@@ -264,6 +265,42 @@ const formatDateDot = (date: Date) => {
 
 const roundMoney = (value: number) => Number(value.toFixed(2));
 
+const parseIsoDateOnlyAsUtc = (value: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  return date;
+};
+
+const toUltraNumber = (value: unknown) => {
+  const numberValue = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  return Number.isFinite(numberValue) ? numberValue : Number.NaN;
+};
+
+const getRawProductPayload = (item: OpportunityForErpOrder["items"][number]) =>
+  item.product?.rawErpPayload && typeof item.product.rawErpPayload === "object" && !Array.isArray(item.product.rawErpPayload)
+    ? item.product.rawErpPayload as Record<string, unknown>
+    : {};
+
+const resolveOrderItemProductClassDescription = (item: OpportunityForErpOrder["items"][number]) => {
+  const rawPayload = getRawProductPayload(item);
+  return item.product?.className?.trim()
+    || pickFirstString(rawPayload, ["DSCPRODUTO_CLAS", "DESCRICAO_CLASSE", "DSC_CLASSIFICACAO", "classificationName", "className", "nomeClassificacao"])
+    || null;
+};
+
+const resolveOrderItemUnitFields = (item: OpportunityForErpOrder["items"][number]) => {
+  const rawPayload = getRawProductPayload(item);
+  const unit = (item.unit?.trim() || item.product?.unit?.trim() || pickFirstString(rawPayload, ["UND_MEDIDA", "unit", "unidade", "UNIDADE", "unitCode", "un"])).toUpperCase();
+  const rawDescription = pickFirstString(rawPayload, ["DESCRICAO_UNMED", "DSCUNMED", "DESCRICAO_UNIDADE", "DSC_UNIDADE", "unitDescription", "descricaoUnidade"]);
+  const descricaoUnmed = rawDescription || (unit === "SC" ? "SACO" : unit);
+  return { UND_MEDIDA: unit, DESCRICAO_UNMED: descricaoUnmed.toUpperCase() };
+};
+
 const isBlankRequiredValue = (value: unknown) =>
   value === undefined || value === null || (typeof value === "string" && value.trim() === "");
 
@@ -280,10 +317,16 @@ const ULTRAFV3_ORDER_REQUIRED_FIELDS = [
   "CODCONDREC",
   "FORMA",
   "VALOR_BRUTO",
+  "VALOR_ACRESCIMO",
   "VALOR_DESCONTO",
   "VALOR_LIQUIDO",
   "QTD_PEDIDO",
+  "PRIORIDADE",
   "TIPO_MOVIMENTO",
+  "PEDIDO_ID_IMPORTACAO",
+  "DATA_CANCELAMENTO",
+  "OBS_PEDIDO",
+  "OBSERVACAO_INTERNA",
   "ITENS",
 ] as const;
 
@@ -296,6 +339,7 @@ const ULTRAFV3_ORDER_FORBIDDEN_FIELDS = [
 ] as const;
 
 const ULTRAFV3_ORDER_ITEM_REQUIRED_FIELDS = [
+  "PEDIDO_ID",
   "CODPRODUTO",
   "CODPRODUTO_CLAS",
   "ITEM",
@@ -303,12 +347,16 @@ const ULTRAFV3_ORDER_ITEM_REQUIRED_FIELDS = [
   "PRECO",
   "PRECO_LISTA",
   "VALOR_BRUTO",
+  "VALOR_ACRESCIMO",
   "VALOR_DESCONTO",
   "VALOR_LIQUIDO",
   "DESCRICAO_UNMED",
   "UND_MEDIDA",
   "QTD_UNMED",
+  "PESO_EMBALAGEM",
+  "PESO_PRODUTO",
   "MOTIVO_CANCELAMENTO",
+  "VALOR_ICMS_DESON",
   "OBS",
   "ICMS_DESON_DESCTO_FINANCEIRO",
 ] as const;
@@ -326,11 +374,23 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
       if (!Array.isArray(payload.ITENS) || payload.ITENS.length === 0) errors.push("ITENS deve conter ao menos um item.");
       continue;
     }
-    if (isBlankRequiredValue(payload[field])) errors.push(`Campo obrigatório ausente: ${field}.`);
+    if (["PEDIDO_ID", "OBSERVACAO_INTERNA"].includes(field) ? payload[field] !== null : ["DATA_CANCELAMENTO", "OBS_PEDIDO"].includes(field) ? payload[field] === undefined || payload[field] === null : isBlankRequiredValue(payload[field])) errors.push(`Campo obrigatório ausente: ${field}.`);
   }
   for (const field of ULTRAFV3_ORDER_FORBIDDEN_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(payload, field)) errors.push(`Campo não permitido no POST /orders: ${field}.`);
   }
+  const datePattern = /^\d{2}\.\d{2}\.\d{4}$/;
+  for (const field of ["PARCEIRO", "VENDEDOR", "OPERADOR", "CODOPER", "CODFILIAL", "TABELA_PRECO", "CODCONDREC", "FORMA"] as const) {
+    if (typeof payload[field] !== "number" || !Number.isFinite(payload[field])) errors.push(`${field} deve ser number.`);
+  }
+  for (const field of ["DATA_PEDIDO", "DATA_PREV_ENTREGA"] as const) {
+    if (typeof payload[field] !== "string" || !datePattern.test(payload[field])) errors.push(`${field} deve estar no formato DD.MM.YYYY.`);
+  }
+  if (payload.PEDIDO_ID !== null) errors.push("PEDIDO_ID deve ser null.");
+  if (payload.VALOR_ACRESCIMO !== 0) errors.push("VALOR_ACRESCIMO deve ser 0.");
+  if (payload.DATA_CANCELAMENTO !== "") errors.push("DATA_CANCELAMENTO deve ser string vazia.");
+  if (payload.OBS_PEDIDO !== "") errors.push("OBS_PEDIDO deve ser string vazia.");
+  if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
   if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
     errors.push("PEDIDO_ID_IMPORTACAO deve ser UUID v4.");
@@ -344,12 +404,22 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
         if (item[field] === undefined || item[field] === null) errors.push(`Campo obrigatório ausente: ${itemPath}.${field}.`);
         continue;
       }
-      if (isBlankRequiredValue(item[field])) errors.push(`Campo obrigatório ausente: ${itemPath}.${field}.`);
+      if (["PEDIDO_ID", "PESO_PRODUTO"].includes(field) ? item[field] !== null : isBlankRequiredValue(item[field])) errors.push(`Campo obrigatório ausente: ${itemPath}.${field}.`);
     }
+    if (item.PEDIDO_ID !== null) errors.push(`${itemPath}.PEDIDO_ID deve ser null.`);
     if (item.ITEM !== index + 1) errors.push(`${itemPath}.ITEM deve ser sequencial iniciando em 1.`);
+    if (typeof item.CODPRODUTO !== "number" || !Number.isFinite(item.CODPRODUTO)) errors.push(`${itemPath}.CODPRODUTO deve ser number.`);
+    if (typeof item.CODPRODUTO_CLAS !== "number" || !Number.isFinite(item.CODPRODUTO_CLAS)) errors.push(`${itemPath}.CODPRODUTO_CLAS deve ser number.`);
+    if (typeof item.PRECO !== "number" || !Number.isFinite(item.PRECO) || item.PRECO <= 0) errors.push(`${itemPath}.PRECO deve ser number maior que 0.`);
+    if (item.VALOR_ACRESCIMO !== 0) errors.push(`${itemPath}.VALOR_ACRESCIMO deve ser 0.`);
+    if (typeof item.UND_MEDIDA !== "string" || !item.UND_MEDIDA.trim()) errors.push(`${itemPath}.UND_MEDIDA deve ser string preenchida.`);
+    if (typeof item.DESCRICAO_UNMED !== "string" || !item.DESCRICAO_UNMED.trim()) errors.push(`${itemPath}.DESCRICAO_UNMED deve ser string preenchida.`);
     if (item.QTD_UNMED !== 1) errors.push(`${itemPath}.QTD_UNMED deve ser 1.`);
+    if (item.PESO_EMBALAGEM !== 0) errors.push(`${itemPath}.PESO_EMBALAGEM deve ser 0.`);
+    if (item.PESO_PRODUTO !== null) errors.push(`${itemPath}.PESO_PRODUTO deve ser null.`);
     if (item.MOTIVO_CANCELAMENTO !== "") errors.push(`${itemPath}.MOTIVO_CANCELAMENTO deve ser string vazia.`);
     if (item.OBS !== "") errors.push(`${itemPath}.OBS deve ser string vazia.`);
+    if (item.VALOR_ICMS_DESON !== 0) errors.push(`${itemPath}.VALOR_ICMS_DESON deve ser 0.`);
     if (item.ICMS_DESON_DESCTO_FINANCEIRO !== "N") errors.push(`${itemPath}.ICMS_DESON_DESCTO_FINANCEIRO deve ser "N".`);
   });
 
@@ -575,6 +645,7 @@ async function createErpOrderFromOpportunityUnsafe(
     : {};
   const clientErpCode = pickFirstString(clientPayload, ["code", "erpCode", "externalCode", "erpClientCode"])
     || pickFirstString(rawClientPayload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+  const numericClientErpCode = toUltraNumber(clientErpCode);
   if (!clientErpCode)
     throw Object.assign(new Error(`Cliente sem código ERP para gerar pedido. opportunityId=${opportunity.id}; campos disponíveis: code=${String((opportunity.client as Record<string, unknown>).code || "")}, raw.PARCEIRO=${String(rawClientPayload.PARCEIRO || "")}, raw.CODPARCEIRO=${String(rawClientPayload.CODPARCEIRO || "")}, raw.CODCLIENTE=${String(rawClientPayload.CODCLIENTE || "")}. Sugestão: sincronizar /partners novamente (bug de sync se continuar vazio).`), { status: 400 });
 
@@ -601,7 +672,7 @@ async function createErpOrderFromOpportunityUnsafe(
     throw Object.assign(new Error("Payload inválido: há item sem código ERP."), { status: 400 });
   const itemWithoutProductClass = opportunity.items.find((item) => !resolveOrderItemProductClassCode(item));
   if (itemWithoutProductClass)
-    throw Object.assign(new Error(`Payload inválido: item ${itemWithoutProductClass.lineNumber} sem classificação ERP (CODPRODUTO_CLAS). Se o produto aparece como "Linha ${itemWithoutProductClass.lineNumber} · ${itemWithoutProductClass.unit || "sem unidade"}", confirme o CODPRODUTO_CLAS sincronizado ou informe a linha como classificação.`), { status: 400 });
+    throw Object.assign(new Error(`Payload inválido: item ${itemWithoutProductClass.lineNumber} sem classificação ERP (CODPRODUTO_CLAS). Produto ${itemWithoutProductClass.productNameSnapshot} / Linha ${itemWithoutProductClass.lineNumber} · ${itemWithoutProductClass.unit || "sem unidade"}. Confirme a classificação sincronizada antes de enviar ao UltraFV3.`), { status: 400 });
   if (opportunity.items.some((item) => !item.unit?.trim()))
     throw Object.assign(new Error("Payload inválido: há item sem unidade de medida."), {
       status: 400,
@@ -629,6 +700,9 @@ async function createErpOrderFromOpportunityUnsafe(
   }
 
   const now = new Date();
+  const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);
+  if (!expectedDeliveryDate)
+    throw Object.assign(new Error("Payload inválido: Data prevista de entrega obrigatória no formato YYYY-MM-DD."), { status: 400, parameterDiagnostics });
   const pedidoIdImportacao = randomUUID();
   const operationContext = {
     opportunityId: opportunity.id,
@@ -671,47 +745,71 @@ async function createErpOrderFromOpportunityUnsafe(
     );
   }
 
-  const itens = opportunity.items.map((item, index) => ({
-    CODPRODUTO: item.erpProductCode,
-    CODPRODUTO_CLAS: resolveOrderItemProductClassCode(item),
-    ITEM: index + 1,
-    QTD_PEDIDO: Number(item.quantity),
-    PRECO: Number(item.unitPrice),
-    PRECO_LISTA: Number(item.unitPrice),
-    VALOR_BRUTO: roundMoney(Number(item.grossTotal || 0)),
-    VALOR_DESCONTO: roundMoney(Number(item.discountTotal || 0)),
-    VALOR_LIQUIDO: roundMoney(Number(item.netTotal || 0)),
-    DESCRICAO_UNMED: item.unit,
-    UND_MEDIDA: item.unit,
-    QTD_UNMED: 1,
-    MOTIVO_CANCELAMENTO: "",
-    OBS: "",
-    ICMS_DESON_DESCTO_FINANCEIRO: "N",
+  const itens = opportunity.items.map((item, index) => {
+    const unitFields = resolveOrderItemUnitFields(item);
+    return {
+      PEDIDO_ID: null,
+      ITEM: index + 1,
+      CODPRODUTO: toUltraNumber(item.erpProductCode),
+      CODPRODUTO_CLAS: toUltraNumber(resolveOrderItemProductClassCode(item)),
+      QTD_PEDIDO: Number(item.quantity),
+      PRECO: Number(item.unitPrice),
+      PRECO_LISTA: Number(item.unitPrice),
+      VALOR_BRUTO: roundMoney(Number(item.grossTotal || 0)),
+      VALOR_ACRESCIMO: 0,
+      VALOR_DESCONTO: roundMoney(Number(item.discountTotal || 0)),
+      VALOR_LIQUIDO: roundMoney(Number(item.netTotal || 0)),
+      DESCRICAO_UNMED: unitFields.DESCRICAO_UNMED,
+      UND_MEDIDA: unitFields.UND_MEDIDA,
+      QTD_UNMED: 1,
+      PESO_EMBALAGEM: 0,
+      PESO_PRODUTO: null,
+      MOTIVO_CANCELAMENTO: "",
+      OBS: "",
+      VALOR_ICMS_DESON: 0,
+      ICMS_DESON_DESCTO_FINANCEIRO: "N",
+      DESCRICAO_CLASSIFICACAO: resolveOrderItemProductClassDescription(item),
+    };
+  });
+  const classificationDiagnostics = itens.map((item) => ({
+    ITEM: item.ITEM,
+    CODPRODUTO: item.CODPRODUTO,
+    CODPRODUTO_CLAS: item.CODPRODUTO_CLAS,
+    descricaoClassificacao: item.DESCRICAO_CLASSIFICACAO,
+    unidadeEnviada: item.UND_MEDIDA,
+    descricaoUnidadeEnviada: item.DESCRICAO_UNMED,
   }));
+
   const valorBruto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.grossTotal || 0), 0));
   const valorDesconto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.discountTotal || 0), 0));
   const valorLiquido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0));
   const qtdPedido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
 
   const payload: UltraFv3OrderPayload = {
-    PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
+    PEDIDO_ID: null,
+    PARCEIRO: numericClientErpCode,
     NUM_PEDIDO: String(numPedido),
-    PARCEIRO: clientErpCode,
     DATA_PEDIDO: formatDateDot(now),
-    DATA_PREV_ENTREGA: formatDateDot(now),
+    DATA_PREV_ENTREGA: formatDateDot(expectedDeliveryDate),
     VENDEDOR: numericSellerErpCode,
     OPERADOR: numericOperatorCode,
-    CODOPER: params.operationCode,
-    CODFILIAL: params.branchCode,
-    TABELA_PRECO: params.priceTableCode,
-    CODCONDREC: params.receivingConditionCode,
-    FORMA: params.paymentMethodCode,
+    CODOPER: toUltraNumber(params.operationCode),
+    CODFILIAL: toUltraNumber(params.branchCode),
+    TABELA_PRECO: toUltraNumber(params.priceTableCode),
+    CODCONDREC: toUltraNumber(params.receivingConditionCode),
+    FORMA: toUltraNumber(params.paymentMethodCode),
     VALOR_BRUTO: valorBruto,
+    VALOR_ACRESCIMO: 0,
     VALOR_DESCONTO: valorDesconto,
     VALOR_LIQUIDO: valorLiquido,
     QTD_PEDIDO: qtdPedido,
+    PRIORIDADE: 9,
     TIPO_MOVIMENTO: "PEDIDO",
-    ITENS: itens,
+    PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
+    DATA_CANCELAMENTO: "",
+    OBS_PEDIDO: "",
+    OBSERVACAO_INTERNA: null,
+    ITENS: itens.map(({ DESCRICAO_CLASSIFICACAO, ...item }) => item),
   };
 
   const payloadValidationErrors = validateUltraFv3OrderPayload(payload);
@@ -749,6 +847,7 @@ async function createErpOrderFromOpportunityUnsafe(
       createdAt: now,
       updatedAt: now,
       salesmenDiagnostics: sequenceResolution.diagnostics,
+      classificationDiagnostics,
     };
   }
 

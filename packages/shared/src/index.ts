@@ -379,6 +379,7 @@ export const erpOrderGenerationSchema = z.object({
   priceTableCode: erpOrderParameterValueSchema,
   branchCode: erpOrderParameterValueSchema,
   operationCode: erpOrderParameterValueSchema,
+  expectedDeliveryDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Data prevista de entrega obrigatória no formato YYYY-MM-DD."),
   simulateOnly: z.boolean().optional().default(false),
 });
 
