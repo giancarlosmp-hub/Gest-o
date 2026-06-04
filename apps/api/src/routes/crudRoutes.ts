@@ -6009,6 +6009,7 @@ router.get("/opportunities/:id", async (req, res) => {
 
 
 const ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS = [
+  "PEDIDO_ID",
   "PARCEIRO",
   "NUM_PEDIDO",
   "DATA_PEDIDO",
@@ -6020,23 +6021,40 @@ const ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS = [
   "TABELA_PRECO",
   "CODCONDREC",
   "FORMA",
+  "VALOR_BRUTO",
+  "VALOR_ACRESCIMO",
+  "VALOR_DESCONTO",
+  "VALOR_LIQUIDO",
+  "QTD_PEDIDO",
+  "PRIORIDADE",
   "TIPO_MOVIMENTO",
   "PEDIDO_ID_IMPORTACAO",
+  "DATA_CANCELAMENTO",
+  "OBS_PEDIDO",
+  "OBSERVACAO_INTERNA",
 ] as const;
 
 const ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS = [
+  "PEDIDO_ID",
+  "ITEM",
   "CODPRODUTO",
   "CODPRODUTO_CLAS",
-  "ITEM",
   "QTD_PEDIDO",
   "PRECO",
   "PRECO_LISTA",
   "VALOR_BRUTO",
+  "VALOR_ACRESCIMO",
+  "VALOR_DESCONTO",
   "VALOR_LIQUIDO",
   "DESCRICAO_UNMED",
   "UND_MEDIDA",
+  "QTD_UNMED",
+  "PESO_EMBALAGEM",
+  "PESO_PRODUTO",
   "MOTIVO_CANCELAMENTO",
   "OBS",
+  "VALOR_ICMS_DESON",
+  "ICMS_DESON_DESCTO_FINANCEIRO",
 ] as const;
 
 type ErpPayloadAuditDifference = {
@@ -6063,7 +6081,7 @@ const isAuditBlank = (value: unknown) =>
 const addAuditRequiredFieldDifferences = (payload: UltraFv3OrderPayload, differences: ErpPayloadAuditDifference[]) => {
   for (const field of ULTRAFV3_AUDIT_EXPECTED_HEADER_FIELDS) {
     const current = payload[field];
-    if (isAuditBlank(current)) {
+    if (["PEDIDO_ID", "OBSERVACAO_INTERNA"].includes(field) ? current !== null : ["DATA_CANCELAMENTO", "OBS_PEDIDO"].includes(field) ? current === undefined || current === null : isAuditBlank(current)) {
       differences.push({
         path: field,
         type: "missing",
@@ -6095,7 +6113,7 @@ const addAuditRequiredFieldDifferences = (payload: UltraFv3OrderPayload, differe
   payload.ITENS.forEach((item, index) => {
     for (const field of ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS) {
       const current = item[field];
-      if ((field === "MOTIVO_CANCELAMENTO" || field === "OBS") ? current === undefined || current === null : isAuditBlank(current)) {
+      if (["PEDIDO_ID", "PESO_PRODUTO"].includes(field) ? current !== null : ["MOTIVO_CANCELAMENTO", "OBS"].includes(field) ? current === undefined || current === null : isAuditBlank(current)) {
         differences.push({
           path: `ITENS[${index}].${field}`,
           type: "missing",
@@ -6160,7 +6178,8 @@ const buildUltraFv3PayloadAudit = (payload: UltraFv3OrderPayload) => {
     fieldSources: {
       NUM_PEDIDO: "Resolvido imediatamente antes da montagem do payload por GET /salesmen com credenciais do vendedor; o CRM lê NUMERO_PEDIDO em body.data, body, body.response.data ou body.data.data e valida como string.",
       OPERADOR: "Resolvido do vendedor UltraFV3 retornado em /salesmen que casa com o CODVENDEDOR do usuário CRM; usa o campo OPERADOR do SALESMAN e só mantém erpOperatorCode do usuário como fallback interno.",
-      CODPRODUTO_CLAS: "Resolvido do item da oportunidade (OpportunityItem.erpProductClassCode), preenchido pela sincronização de produtos UltraFV3; se estiver vazio, o CRM usa lineNumber como fallback legado antes de bloquear item sem classificação.",
+      CODPRODUTO_CLAS: "Resolvido do item da oportunidade (OpportunityItem.erpProductClassCode), preenchido pela sincronização de produtos UltraFV3; se estiver vazio, o CRM bloqueia antes do POST /orders.",
+      DESCRICAO_UNMED: "Resolvida do payload sincronizado do produto; para UND_MEDIDA SC, o CRM envia descrição compatível com SACO.",
     },
     recommendation: differences.length
       ? "Não fazer merge de alinhamento automático ainda: revisar os campos divergentes e confirmar com UltraFV3 se os campos extras devem ser removidos do envio real."
@@ -6172,6 +6191,8 @@ const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
   NUM_PEDIDO: payload.NUM_PEDIDO ?? null,
   PEDIDO_ID_IMPORTACAO: payload.PEDIDO_ID_IMPORTACAO ?? null,
   PARCEIRO: payload.PARCEIRO ?? null,
+  DATA_PEDIDO: payload.DATA_PEDIDO ?? null,
+  DATA_PREV_ENTREGA: payload.DATA_PREV_ENTREGA ?? null,
   CODVENDEDOR: payload.VENDEDOR ?? null,
   OPERADOR: payload.OPERADOR ?? null,
   TABELA_PRECO: payload.TABELA_PRECO ?? null,
@@ -6184,6 +6205,10 @@ const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
         ITEM: item.ITEM ?? null,
         CODPRODUTO: item.CODPRODUTO ?? null,
         CODPRODUTO_CLAS: item.CODPRODUTO_CLAS ?? null,
+        descricaoClassificacao: (item as Record<string, unknown>).DESCRICAO_CLASSIFICACAO ?? null,
+        DESCRICAO_UNMED: item.DESCRICAO_UNMED ?? null,
+        UND_MEDIDA: item.UND_MEDIDA ?? null,
+        unidadeEnviada: item.UND_MEDIDA ?? null,
         quantidade: item.QTD_PEDIDO ?? null,
         unidade: item.UND_MEDIDA ?? item.DESCRICAO_UNMED ?? null,
         preco: item.PRECO ?? null,
@@ -6198,6 +6223,9 @@ const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
         item: item.ITEM ?? null,
         codigoProduto: item.CODPRODUTO ?? null,
         classificacaoProduto: item.CODPRODUTO_CLAS ?? null,
+        descricaoClassificacao: (item as Record<string, unknown>).DESCRICAO_CLASSIFICACAO ?? null,
+        descricaoUnidade: item.DESCRICAO_UNMED ?? null,
+        unidadeEnviada: item.UND_MEDIDA ?? null,
         quantidade: item.QTD_PEDIDO ?? null,
         unidade: item.UND_MEDIDA ?? item.DESCRICAO_UNMED ?? null,
         preco: item.PRECO ?? null,
@@ -6220,6 +6248,7 @@ const ERP_DEBUG_ORDER_PARAM_FIELDS = [
   "priceTableCode",
   "branchCode",
   "operationCode",
+  "expectedDeliveryDate",
 ] as const;
 
 type ErpDebugOrderParamField = typeof ERP_DEBUG_ORDER_PARAM_FIELDS[number];
@@ -6231,6 +6260,7 @@ const ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS: Record<ErpDebugOrderParamField, string>
   priceTableCode: "erp.ultrafv3.priceTables",
   branchCode: "erp.ultrafv3.branches",
   operationCode: "erp.ultrafv3.operations",
+  expectedDeliveryDate: "",
 };
 
 const pickDebugQueryValue = (value: unknown): unknown => {
@@ -6255,6 +6285,8 @@ const parseErpDebugConfigRows = (value: string | null | undefined): unknown[] =>
   return [];
 };
 
+const formatDateInput = (date: Date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+
 const loadErpDebugFallbackParams = async (): Promise<Partial<Record<ErpDebugOrderParamField, unknown>>> => {
   const configs = await prisma.appConfig.findMany({
     where: { key: { in: Object.values(ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS) } },
@@ -6264,6 +6296,7 @@ const loadErpDebugFallbackParams = async (): Promise<Partial<Record<ErpDebugOrde
 
   return Object.fromEntries(
     ERP_DEBUG_ORDER_PARAM_FIELDS.map((field) => {
+      if (field === "expectedDeliveryDate") return [field, formatDateInput(new Date())];
       const rows = parseErpDebugConfigRows(configByKey.get(ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS[field]));
       return [field, rows[0] ?? null];
     }),
@@ -6319,7 +6352,7 @@ router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
 
     const opportunity = await prisma.opportunity.findFirst({
       where: { id: opportunityId, ...sellerWhere(req) },
-      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
     });
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404, paramsReceived, paramsResolved, missingParams });
 
@@ -6327,6 +6360,7 @@ router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
     const payload = preview.payloadSent as UltraFv3OrderPayload;
     const audit = buildUltraFv3PayloadAudit(payload);
     const salesmenDiagnostics = "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null;
+    const classificationDiagnostics = "classificationDiagnostics" in preview ? preview.classificationDiagnostics : [];
 
     logApiEvent("INFO", "[ERP PAYLOAD AUDIT]", {
       opportunityId,
@@ -6340,6 +6374,7 @@ router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
       divergentFields: audit.divergentFields,
       differences: audit.differences,
       salesmenDiagnostics,
+      classificationDiagnostics,
     });
 
     return res.status(200).json({
@@ -6360,6 +6395,7 @@ router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
       origemDocumental: audit.fieldSources,
       recomendacaoFinal: audit.recommendation,
       salesmenDiagnostics,
+      classificationDiagnostics,
     });
   } catch (error: any) {
     const statusCandidate = Number(error?.status || 502);
@@ -6420,7 +6456,7 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
 
     const opportunity = await prisma.opportunity.findFirst({
       where: { id: opportunityId, ...sellerWhere(req) },
-      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
     });
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404, paramsReceived, paramsResolved, missingParams });
 
@@ -6428,6 +6464,7 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
     const payload = preview.payloadSent as UltraFv3OrderPayload;
     const details = buildErpDebugPayloadDetails(payload);
     const salesmenDiagnostics = "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null;
+    const classificationDiagnostics = "classificationDiagnostics" in preview ? preview.classificationDiagnostics : [];
 
     logApiEvent("INFO", "[ERP DEBUG PAYLOAD]", {
       opportunityId,
@@ -6441,6 +6478,7 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
       ...details,
       payload,
       salesmenDiagnostics,
+      classificationDiagnostics,
     });
 
     return res.status(200).json({
@@ -6455,6 +6493,7 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
       payload,
       ...details,
       salesmenDiagnostics,
+      classificationDiagnostics,
     });
   } catch (error: any) {
     const statusCandidate = Number(error?.status || 502);
@@ -6566,7 +6605,7 @@ router.post("/opportunities/:id/erp/orders", async (req, res) => {
     req.erpOrderFailureStage = "load-opportunity";
     opportunity = await prisma.opportunity.findFirst({
       where: { id: opportunityId, ...sellerWhere(req) },
-      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
     });
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
 
@@ -7872,7 +7911,7 @@ router.get("/erp/ultrafv3/order-debug/:opportunityId", authorize("diretor", "ger
 
     const opportunity = await prisma.opportunity.findUnique({
       where: { id: opportunityId },
-      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
     });
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada."), { status: 404 });
 

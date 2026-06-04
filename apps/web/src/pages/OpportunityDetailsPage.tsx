@@ -106,6 +106,7 @@ type OpportunityItem = {
     id: string;
     erpProductCode?: string | null;
     stockQuantity?: number | null;
+    className?: string | null;
     defaultPrice?: number | null;
     minPrice?: number | null;
   } | null;
@@ -132,6 +133,7 @@ type ErpOrderForm = {
   priceTableCode: string;
   branchCode: string;
   operationCode: string;
+  expectedDeliveryDate: string;
   simulateOnly: boolean;
 };
 
@@ -188,12 +190,15 @@ const dateTimeFormatter = new Intl.DateTimeFormat("pt-BR", {
   timeStyle: "short"
 });
 
+const getTodayDateInputValue = () => new Date().toISOString().slice(0, 10);
+
 const emptyErpOrderForm: ErpOrderForm = {
   paymentMethodCode: "",
   receivingConditionCode: "",
   priceTableCode: "",
   branchCode: "",
   operationCode: "",
+  expectedDeliveryDate: getTodayDateInputValue(),
   simulateOnly: false
 };
 
@@ -435,7 +440,7 @@ export default function OpportunityDetailsPage() {
     requireOrderParameters: true
   });
   const canOpenErpOrder = erpOrderReadiness.ready;
-  const canSubmitErpOrder = erpOrderSubmitReadiness.ready && !successfulErpOrder;
+  const canSubmitErpOrder = erpOrderSubmitReadiness.ready && Boolean(erpOrderForm.expectedDeliveryDate) && !successfulErpOrder;
   const erpOrderDisabledReason = erpOrderReadiness.firstReason;
   const erpOrderSubmitDisabledReason = successfulErpOrder
     ? `Pedido ERP já enviado com sucesso (${successfulErpOrder.erpOrderNumber || successfulErpOrder.numPedido || successfulErpOrder.pedidoIdImportacao}). Reenvio bloqueado para evitar duplicidade.`
@@ -482,7 +487,8 @@ export default function OpportunityDetailsPage() {
         receivingConditionCode: current.receivingConditionCode || firstOptionCode(nextReceivingConditions),
         priceTableCode: current.priceTableCode || firstOptionCode(nextPriceTables),
         branchCode: current.branchCode || firstOptionCode(nextBranches),
-        operationCode: current.operationCode || firstOptionCode(nextOperations)
+        operationCode: current.operationCode || firstOptionCode(nextOperations),
+        expectedDeliveryDate: current.expectedDeliveryDate || getTodayDateInputValue()
       }));
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível carregar dados do ERP"));
@@ -513,6 +519,10 @@ export default function OpportunityDetailsPage() {
     setSendingErpOrder(true);
     setErpOrderFeedback(null);
     try {
+      if (!erpOrderForm.expectedDeliveryDate) {
+        toast.error("Informe a Data prevista de entrega antes de enviar o pedido ERP.");
+        return;
+      }
       const response = await api.post(`/opportunities/${item.id}/erp/orders`, erpOrderForm);
       setErpOrderFeedback({ status: response.data?.simulated ? "simulado" : "enviado", pedidoIdImportacao: response.data?.pedidoIdImportacao, erpOrderNumber: response.data?.erpOrderNumber, correlationId: response.data?.correlationId });
       if (!response.data?.simulated) {
@@ -866,6 +876,16 @@ export default function OpportunityDetailsPage() {
                         <SearchableSelect label="Tabela de preço" value={erpOrderForm.priceTableCode} options={priceTables} loading={loadingErpOrderData} emptyMessage="Nenhuma tabela de preço sincronizada. Vá em Configurações > Integração ERP e sincronize Tabelas de preço." onChange={(value) => setErpOrderField("priceTableCode", value)} />
                         <SearchableSelect label="Filial" value={erpOrderForm.branchCode} options={branches} loading={loadingErpOrderData} emptyMessage="Não há filiais sincronizadas. Vá em Configurações > Integração ERP e sincronize Filiais." onChange={(value) => setErpOrderField("branchCode", value)} />
                         <SearchableSelect label="Operação" value={erpOrderForm.operationCode} options={operations} loading={loadingErpOrderData} emptyMessage="Não há operações sincronizadas. Vá em Configurações > Integração ERP e sincronize Operações." onChange={(value) => setErpOrderField("operationCode", value)} />
+                        <label className="block text-sm">
+                          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Data prevista de entrega *</span>
+                          <input
+                            type="date"
+                            required
+                            value={erpOrderForm.expectedDeliveryDate}
+                            onChange={(event) => setErpOrderField("expectedDeliveryDate", event.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-medium text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                          />
+                        </label>
                       </div>
                       <label className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                         <input
@@ -914,6 +934,7 @@ export default function OpportunityDetailsPage() {
                                   <td className="px-5 py-4">
                                     <p className="font-semibold text-slate-900">{opportunityItem.productNameSnapshot}</p>
                                     <p className="text-xs text-slate-500">Linha {opportunityItem.lineNumber} · {opportunityItem.unit || "sem unidade"}</p>
+                                    {opportunityItem.product?.className ? <p className="text-xs font-medium text-slate-600">Classificação: {opportunityItem.product.className}</p> : null}
                                   </td>
                                   <td className="px-5 py-4 text-slate-700">{opportunityItem.erpProductCode || "-"}</td>
                                   <td className="px-5 py-4 text-slate-700">{Number(opportunityItem.quantity || 0).toLocaleString("pt-BR")}</td>
