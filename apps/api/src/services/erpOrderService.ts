@@ -38,6 +38,7 @@ class ErpOrderSubmissionMutex {
 }
 
 const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
+const erpOrderNumPedidoMutex = new ErpOrderSubmissionMutex();
 
 const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode" | "lineNumber">) => {
   const directClassCode = item.erpProductClassCode?.trim();
@@ -496,7 +497,7 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
   return requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID());
 }
 
-async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
+async function resolveSalesmanOrderSequenceUnsafe(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   const body = await loadSalesmenBody({ forceRefresh: true, credentials, correlationId });
   const { numeroPedido, numeroPedidoPathUsed, salesmen } = resolveSalesmenPayload(body);
   const matchedSalesman = salesmen.find((row) => {
@@ -527,6 +528,25 @@ async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: 
   };
   logApiEvent(validNumeroPedido && matchedSalesman ? "INFO" : "WARN", "[erp order] resolved UltraFV3 salesman order sequence", diagnostics);
   return { numPedido: validNumeroPedido, operatorCode, diagnostics };
+}
+
+async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
+  return erpOrderNumPedidoMutex.runExclusive(async () => {
+    logApiEvent("INFO", "[erp order] acquired NUM_PEDIDO generation lock", {
+      sellerErpCode,
+      correlationId,
+      endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+    });
+    try {
+      return await resolveSalesmanOrderSequenceUnsafe(sellerErpCode, credentials, correlationId);
+    } finally {
+      logApiEvent("INFO", "[erp order] released NUM_PEDIDO generation lock", {
+        sellerErpCode,
+        correlationId,
+        endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+      });
+    }
+  });
 }
 
 async function createErpOrderFromOpportunityUnsafe(
