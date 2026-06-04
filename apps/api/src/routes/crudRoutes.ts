@@ -6033,6 +6033,83 @@ const buildErpDebugPayloadDetails = (payload: UltraFv3OrderPayload) => ({
   operacao: payload.CODOPER ?? null,
 });
 
+const ERP_DEBUG_ORDER_PARAM_FIELDS = [
+  "paymentMethodCode",
+  "receivingConditionCode",
+  "priceTableCode",
+  "branchCode",
+  "operationCode",
+] as const;
+
+type ErpDebugOrderParamField = typeof ERP_DEBUG_ORDER_PARAM_FIELDS[number];
+type ErpDebugOrderParamInput = Parameters<typeof normalizeErpOrderParameterCodes>[0];
+
+const ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS: Record<ErpDebugOrderParamField, string> = {
+  paymentMethodCode: "erp.ultrafv3.paymentMethods",
+  receivingConditionCode: "erp.ultrafv3.receivingConditions",
+  priceTableCode: "erp.ultrafv3.priceTables",
+  branchCode: "erp.ultrafv3.branches",
+  operationCode: "erp.ultrafv3.operations",
+};
+
+const pickDebugQueryValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
+};
+
+const parseErpDebugConfigRows = (value: string | null | undefined): unknown[] => {
+  if (!value?.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const key of ["data", "items", "rows", "result", "results", "content"]) {
+        if (Array.isArray(record[key])) return record[key] as unknown[];
+      }
+    }
+  } catch {
+    return [];
+  }
+  return [];
+};
+
+const loadErpDebugFallbackParams = async (): Promise<Partial<Record<ErpDebugOrderParamField, unknown>>> => {
+  const configs = await prisma.appConfig.findMany({
+    where: { key: { in: Object.values(ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS) } },
+    select: { key: true, value: true },
+  });
+  const configByKey = new Map(configs.map((config) => [config.key, config.value]));
+
+  return Object.fromEntries(
+    ERP_DEBUG_ORDER_PARAM_FIELDS.map((field) => {
+      const rows = parseErpDebugConfigRows(configByKey.get(ERP_DEBUG_ORDER_PARAM_CONFIG_KEYS[field]));
+      return [field, rows[0] ?? null];
+    }),
+  ) as Partial<Record<ErpDebugOrderParamField, unknown>>;
+};
+
+const resolveErpDebugOrderParams = async (query: Request["query"]) => {
+  const fallbackParams = await loadErpDebugFallbackParams();
+  const paramsReceived = Object.fromEntries(
+    ERP_DEBUG_ORDER_PARAM_FIELDS.map((field) => [
+      field,
+      Object.prototype.hasOwnProperty.call(query, field) ? pickDebugQueryValue(query[field]) : null,
+    ]),
+  ) as Record<ErpDebugOrderParamField, unknown>;
+
+  const rawResolvedParams = Object.fromEntries(
+    ERP_DEBUG_ORDER_PARAM_FIELDS.map((field) => [
+      field,
+      paramsReceived[field] !== null ? paramsReceived[field] : fallbackParams[field] ?? null,
+    ]),
+  ) as Record<ErpDebugOrderParamField, unknown>;
+
+  const paramsResolved = normalizeErpOrderParameterCodes({ ...rawResolvedParams, simulateOnly: true } as ErpDebugOrderParamInput);
+  const missingParams = ERP_DEBUG_ORDER_PARAM_FIELDS.filter((field) => !paramsResolved[field]);
+  return { paramsReceived, rawResolvedParams, paramsResolved, missingParams };
+};
+
 router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
   const correlationId = req.correlationId || randomUUID();
   const opportunityId = req.params.id;
@@ -6045,31 +6122,43 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
     requestId: req.requestId,
   });
 
+  let debugParamsContext: Awaited<ReturnType<typeof resolveErpDebugOrderParams>> | null = null;
+
   try {
-    const parsed = erpOrderGenerationSchema.safeParse({ ...req.query, simulateOnly: true });
-    if (!parsed.success) {
-      const message = parsed.error.issues[0]?.message || "Parâmetros inválidos";
-      throw Object.assign(new Error(`Parâmetros inválidos para debug do payload ERP: ${message}`), { status: 400 });
+    debugParamsContext = await resolveErpDebugOrderParams(req.query);
+    const { paramsReceived, rawResolvedParams, paramsResolved, missingParams } = debugParamsContext;
+    if (missingParams.length) {
+      throw Object.assign(new Error(`Parâmetro obrigatório ausente: ${missingParams[0]}`), {
+        status: 400,
+        paramsReceived,
+        paramsResolved,
+        missingParams,
+      });
     }
 
     const opportunity = await prisma.opportunity.findFirst({
       where: { id: opportunityId, ...sellerWhere(req) },
       include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true } } } } }
     });
-    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
+    if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404, paramsReceived, paramsResolved, missingParams });
 
-    const preview = await createErpOrderFromOpportunity(opportunity, parsed.data, { correlationId });
+    const preview = await createErpOrderFromOpportunity(opportunity, paramsResolved, { correlationId });
     const payload = preview.payloadSent as UltraFv3OrderPayload;
     const details = buildErpDebugPayloadDetails(payload);
+    const salesmenDiagnostics = "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null;
 
     logApiEvent("INFO", "[ERP DEBUG PAYLOAD]", {
       opportunityId,
       correlationId,
       endpoint: "/orders",
       willSubmitOrders: false,
+      paramsReceived,
+      rawResolvedParams,
+      paramsResolved,
+      missingParams,
       ...details,
       payload,
-      salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null,
+      salesmenDiagnostics,
     });
 
     return res.status(200).json({
@@ -6078,9 +6167,12 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
       postOrdersSent: false,
       endpoint: "/orders",
       message: "Payload gerado para debug; nenhum POST /orders foi enviado ao UltraFV3.",
+      paramsReceived,
+      paramsResolved,
+      missingParams,
       payload,
       ...details,
-      salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null,
+      salesmenDiagnostics,
     });
   } catch (error: any) {
     const statusCandidate = Number(error?.status || 502);
@@ -6097,6 +6189,9 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
       correlationId,
       simulated: true,
       postOrdersSent: false,
+      paramsReceived: error?.paramsReceived || debugParamsContext?.paramsReceived || null,
+      paramsResolved: error?.paramsResolved || debugParamsContext?.paramsResolved || null,
+      missingParams: Array.isArray(error?.missingParams) ? error.missingParams : debugParamsContext?.missingParams || [],
       payload: null,
       status: "erro",
       message,

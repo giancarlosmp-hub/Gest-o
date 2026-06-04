@@ -56,6 +56,8 @@ Objetivo: executar a primeira sincronização segura em produção/preview após
    - [ ] Selecionar uma oportunidade `ganho` controlada, com cliente ERP e itens válidos.
    - [ ] Gerar pedido com **Simulação ERP** ativada.
    - [ ] Conferir payload, `NUM_PEDIDO`, vendedor, operador, filial, operação, forma, condição e tabela sem enviar `/orders` real.
+   - [ ] Testar o debug aberto por navegador com query string completa, por exemplo: `/api/opportunities/:id/erp/debug-payload?paymentMethodCode=1&receivingConditionCode=1&priceTableCode=1&branchCode=1&operationCode=100`.
+   - [ ] Conferir que o JSON do debug retorna `paramsReceived`, `paramsResolved`, `missingParams`, `payload`, `salesmenDiagnostics` e `postOrdersSent: false`.
 
 10. **Enviar primeiro pedido real controlado**
     - [ ] Remover **Simulação ERP** somente após validação do payload.
