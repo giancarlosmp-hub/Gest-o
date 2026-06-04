@@ -13,6 +13,7 @@ declare global {
       requestId?: string;
       correlationId?: string;
       erpOrderRouteHit?: boolean;
+      erpOrderFailureStage?: string;
       rateLimit?: {
         limit: number;
         used: number;

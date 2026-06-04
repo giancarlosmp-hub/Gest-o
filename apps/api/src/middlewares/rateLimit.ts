@@ -1,6 +1,7 @@
 import rateLimit from "express-rate-limit";
 import { env } from "../config/env.js";
 import { logApiEvent } from "../utils/logger.js";
+import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath } from "../utils/erpOrderFailureResponse.js";
 
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const isProduction = env.isProduction;
@@ -25,6 +26,17 @@ const createRateLimiter = (name: string, productionLimit: number, developmentLim
         limit: details?.limit,
         remaining: details?.remaining,
       });
+
+      if (isErpOrderEndpointPath(req.method, req.path)) {
+        req.erpOrderFailureStage = "rate-limit";
+        res.status(429).json(buildControlledErpOrderFailurePayload({
+          status: 429,
+          etapa: "rate-limit",
+          message: "Muitas requisições. Tente novamente em instantes.",
+          correlationId: req.correlationId,
+        }));
+        return;
+      }
 
       res.status(429).json({
         message: "Muitas requisições. Tente novamente em instantes.",
