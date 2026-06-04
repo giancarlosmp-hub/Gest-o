@@ -930,7 +930,7 @@ async function createErpOrderFromOpportunityUnsafe(
   }
 
   const sync = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}, hashtext(${opportunity.id}))`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}::integer, hashtext(${opportunity.id})::integer)`;
 
     const existingSuccessfulSync = await tx.erpOrderSync.findFirst({
       where: {
