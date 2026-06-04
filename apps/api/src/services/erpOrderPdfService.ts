@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { deflateSync, inflateSync } from "node:zlib";
 
 import { normalizeErpParameterCode } from "@salesforce-pro/shared";
 import {
@@ -51,6 +52,8 @@ type PdfPngImage = {
   colors: number;
   bitsPerComponent: number;
   data: Buffer;
+  decodeParms?: string;
+  softMaskData?: Buffer;
 };
 
 export type ErpOrderPdfCompany = {
@@ -176,56 +179,142 @@ const wrapText = (text: string, maxChars: number) => {
   return lines.length ? lines : ["-"];
 };
 
-const readPngImageFromSvg = (svgPath: string, name: string): PdfPngImage | null => {
-  if (!existsSync(svgPath)) return null;
-  const svg = readFileSync(svgPath, "utf8");
-  const base64 = svg.match(/base64,([^\"]+)/)?.[1];
-  if (!base64) return null;
-  const png = Buffer.from(base64, "base64");
+const parsePngChunks = (png: Buffer) => {
+  const chunks: Array<{ type: string; data: Buffer }> = [];
+  let offset = 8;
+  while (offset + 12 <= png.length) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("ascii", offset + 4, offset + 8);
+    chunks.push({ type, data: png.subarray(offset + 8, offset + 8 + length) });
+    offset += 12 + length;
+  }
+  return chunks;
+};
+
+const paethPredictor = (left: number, up: number, upperLeft: number) => {
+  const prediction = left + up - upperLeft;
+  const leftDistance = Math.abs(prediction - left);
+  const upDistance = Math.abs(prediction - up);
+  const upperLeftDistance = Math.abs(prediction - upperLeft);
+  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance) return left;
+  return upDistance <= upperLeftDistance ? up : upperLeft;
+};
+
+const unfilterPngScanlines = (
+  inflated: Buffer,
+  width: number,
+  height: number,
+  bytesPerPixel: number,
+) => {
+  const rowLength = width * bytesPerPixel;
+  const output = Buffer.alloc(rowLength * height);
+  let inputOffset = 0;
+  for (let row = 0; row < height; row += 1) {
+    const filter = inflated[inputOffset++];
+    const rowOffset = row * rowLength;
+    for (let column = 0; column < rowLength; column += 1) {
+      const raw = inflated[inputOffset++];
+      const left = column >= bytesPerPixel ? output[rowOffset + column - bytesPerPixel] : 0;
+      const up = row > 0 ? output[rowOffset - rowLength + column] : 0;
+      const upperLeft = row > 0 && column >= bytesPerPixel
+        ? output[rowOffset - rowLength + column - bytesPerPixel]
+        : 0;
+      const value =
+        filter === 0
+          ? raw
+          : filter === 1
+            ? raw + left
+            : filter === 2
+              ? raw + up
+              : filter === 3
+                ? raw + Math.floor((left + up) / 2)
+                : filter === 4
+                  ? raw + paethPredictor(left, up, upperLeft)
+                  : raw;
+      output[rowOffset + column] = value & 0xff;
+    }
+  }
+  return output;
+};
+
+const readPngImage = (pngPath: string, name: string): PdfPngImage | null => {
+  if (!existsSync(pngPath)) return null;
+  const png = readFileSync(pngPath);
   if (png.toString("ascii", 1, 4) !== "PNG") return null;
 
   const width = png.readUInt32BE(16);
   const height = png.readUInt32BE(20);
   const bitsPerComponent = png[24];
   const colorType = png[25];
-  const colorMap: Record<number, Pick<PdfPngImage, "colorSpace" | "colors">> = {
-    0: { colorSpace: "DeviceGray", colors: 1 },
-    2: { colorSpace: "DeviceRGB", colors: 3 },
-  };
-  const color = colorMap[colorType];
-  if (!color || bitsPerComponent !== 8) return null;
+  if (bitsPerComponent !== 8) return null;
 
-  const idatChunks: Buffer[] = [];
-  let offset = 8;
-  while (offset < png.length) {
-    const length = png.readUInt32BE(offset);
-    const type = png.toString("ascii", offset + 4, offset + 8);
-    if (type === "IDAT") idatChunks.push(png.subarray(offset + 8, offset + 8 + length));
-    offset += 12 + length;
+  const chunks = parsePngChunks(png);
+  const idatData = Buffer.concat(
+    chunks.filter((chunk) => chunk.type === "IDAT").map((chunk) => chunk.data),
+  );
+  if (!idatData.length) return null;
+
+  if (colorType === 0) {
+    return {
+      name,
+      width,
+      height,
+      bitsPerComponent,
+      colorSpace: "DeviceGray",
+      colors: 1,
+      data: idatData,
+      decodeParms: `/Predictor 15 /Colors 1 /BitsPerComponent ${bitsPerComponent} /Columns ${width}`,
+    };
   }
-  if (!idatChunks.length) return null;
+
+  if (colorType === 2) {
+    return {
+      name,
+      width,
+      height,
+      bitsPerComponent,
+      colorSpace: "DeviceRGB",
+      colors: 3,
+      data: idatData,
+      decodeParms: `/Predictor 15 /Colors 3 /BitsPerComponent ${bitsPerComponent} /Columns ${width}`,
+    };
+  }
+
+  if (colorType !== 6) return null;
+
+  const rgba = unfilterPngScanlines(inflateSync(idatData), width, height, 4);
+  const rgb = Buffer.alloc(width * height * 3);
+  const alpha = Buffer.alloc(width * height);
+  for (let source = 0, rgbIndex = 0, alphaIndex = 0; source < rgba.length; source += 4) {
+    rgb[rgbIndex++] = rgba[source];
+    rgb[rgbIndex++] = rgba[source + 1];
+    rgb[rgbIndex++] = rgba[source + 2];
+    alpha[alphaIndex++] = rgba[source + 3];
+  }
 
   return {
     name,
     width,
     height,
     bitsPerComponent,
-    colorSpace: color.colorSpace,
-    colors: color.colors,
-    data: Buffer.concat(idatChunks),
+    colorSpace: "DeviceRGB",
+    colors: 3,
+    data: deflateSync(rgb),
+    softMaskData: deflateSync(alpha),
   };
 };
 
 const loadDemetraLogo = () => {
   const candidates = [
-    resolve(process.cwd(), "apps/web/public/brand/demetra-logo-dark.svg"),
-    resolve(process.cwd(), "../web/public/brand/demetra-logo-dark.svg"),
-    resolve(process.cwd(), "public/brand/demetra-logo-dark.svg"),
+    resolve(process.cwd(), "apps/web/public/brand/demetra-logo-dark.png"),
+    resolve(process.cwd(), "../web/public/brand/demetra-logo-dark.png"),
+    resolve(process.cwd(), "public/brand/demetra-logo-dark.png"),
   ];
   for (const candidate of candidates) {
-    const image = readPngImageFromSvg(candidate, "ImDemetraLogo");
+    const image = readPngImage(candidate, "ImDemetraLogo");
     if (image) return image;
   }
+  console.warn("[erp order pdf] Demetra PNG logo not found or unsupported", { candidates });
   return null;
 };
 
@@ -323,9 +412,25 @@ class SimplePdf {
     );
     const imageObjectIds = new Map<string, number>();
     for (const image of this.images) {
+      const softMaskId = image.softMaskData
+        ? addObject(
+            Buffer.concat([
+              Buffer.from(
+                `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceGray /BitsPerComponent ${image.bitsPerComponent} /Filter /FlateDecode /Length ${image.softMaskData.length} >>\nstream\n`,
+                "ascii",
+              ),
+              image.softMaskData,
+              Buffer.from("\nendstream", "ascii"),
+            ]),
+          )
+        : null;
+      const decodeParms = image.decodeParms
+        ? ` /DecodeParms << ${image.decodeParms} >>`
+        : "";
+      const softMaskRef = softMaskId ? ` /SMask ${softMaskId} 0 R` : "";
       const stream = Buffer.concat([
         Buffer.from(
-          `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /${image.colorSpace} /BitsPerComponent ${image.bitsPerComponent} /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors ${image.colors} /BitsPerComponent ${image.bitsPerComponent} /Columns ${image.width} >> /Length ${image.data.length} >>\nstream\n`,
+          `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /${image.colorSpace} /BitsPerComponent ${image.bitsPerComponent} /Filter /FlateDecode${decodeParms}${softMaskRef} /Length ${image.data.length} >>\nstream\n`,
           "ascii",
         ),
         image.data,
@@ -502,7 +607,7 @@ const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
     "phone",
     "telefone",
     "fone",
-  ]),
+  ]) || "(45) 99152-0239",
 });
 
 const getStoredReferenceRows = async (
@@ -610,12 +715,17 @@ const ERP_ORDER_CLAUSES = [
 const getClientRaw = (client: ErpOrderPdfRecord["opportunity"]["client"]) =>
   asRecord(client.rawPayload);
 
+const getClientSource = (client: ErpOrderPdfRecord["opportunity"]["client"]) => ({
+  ...getClientRaw(client),
+  ...(client as unknown as Record<string, unknown>),
+});
+
 const getClientLegalName = (
   client: ErpOrderPdfRecord["opportunity"]["client"],
 ) => {
-  const raw = getClientRaw(client);
+  const source = getClientSource(client);
   return (
-    pickFirstString(raw, [
+    pickFirstString(source, [
       "RAZAO_SOCIAL",
       "RAZAOSOCIAL",
       "NOME",
@@ -630,8 +740,8 @@ const getClientLegalName = (
 const getClientAddressParts = (
   client: ErpOrderPdfRecord["opportunity"]["client"],
 ) => {
-  const raw = getClientRaw(client);
-  const street = pickFirstString(raw, [
+  const source = getClientSource(client);
+  const street = pickFirstString(source, [
     "ENDERECO",
     "LOGRADOURO",
     "RUA",
@@ -639,14 +749,15 @@ const getClientAddressParts = (
     "address",
     "logradouro",
   ]);
-  const number = pickFirstString(raw, [
+  const number = pickFirstString(source, [
     "NUMERO",
     "NRO",
     "NUMBER",
+    "number",
     "addressNumber",
     "numero",
   ]);
-  const complement = pickFirstString(raw, [
+  const complement = pickFirstString(source, [
     "COMPLEMENTO",
     "COMPLEMENT",
     "complemento",
@@ -654,9 +765,9 @@ const getClientAddressParts = (
   return {
     address:
       [street, number, complement].filter(Boolean).join(", ") || street || "-",
-    district: pickFirstString(raw, ["BAIRRO", "DISTRICT", "bairro"]),
+    district: pickFirstString(source, ["BAIRRO", "DISTRICT", "bairro", "neighborhood"]),
     city:
-      pickFirstString(raw, [
+      pickFirstString(source, [
         "CIDADE",
         "DSC_CIDADE",
         "MUNICIPIO",
@@ -664,7 +775,7 @@ const getClientAddressParts = (
         "city",
       ]) || client.city,
     state:
-      pickFirstString(raw, [
+      pickFirstString(source, [
         "UF",
         "ESTADO",
         "SIGLA_UF",
@@ -672,31 +783,35 @@ const getClientAddressParts = (
         "state",
         "uf",
       ]) || client.state,
-    cep: pickFirstString(raw, ["CEP", "ZIP", "zipCode", "cep"]),
-    phone: pickFirstString(raw, [
+    cep: pickFirstString(source, ["CEP", "ZIP", "zipCode", "cep", "postalCode"]),
+    phone: pickFirstString(source, [
       "FONE",
       "TELEFONE",
       "CELULAR",
       "PHONE",
       "phone",
       "telefone",
+      "MOBILE",
+      "mobile",
+      "CELULAR2",
+      "celular",
     ]),
   };
 };
 
 
 const getClientFantasyName = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
-  const raw = getClientRaw(client);
+  const source = getClientSource(client);
   return (
-    pickFirstString(raw, ["FANTASIA", "NOME_FANTASIA", "fantasia", "fantasyName"]) ||
+    pickFirstString(source, ["FANTASIA", "NOME_FANTASIA", "fantasia", "fantasyName"]) ||
     cleanText(client.fantasyName, "")
   );
 };
 
 const getClientDocument = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
-  const raw = getClientRaw(client);
+  const source = getClientSource(client);
   return formatDocument(
-    pickFirstString(raw, ["CNPJ", "CPF", "CGC", "cnpj", "cpf", "documento"]) || client.cnpj,
+    pickFirstString(source, ["CNPJ", "CPF", "CGC", "cnpj", "cpf", "documento"]) || client.cnpj,
   );
 };
 
@@ -818,6 +933,18 @@ const drawLabelValue = (
     );
 };
 
+const getWrappedLines = (text: string, width: number, fontSize = 7.5) =>
+  wrapText(text, Math.max(4, Math.floor(width / (fontSize * 0.65))));
+
+const getTableRowHeight = (cells: PdfCell[], header = false) => {
+  const fontSize = header ? 7.2 : 7.5;
+  const maxLines = cells.reduce(
+    (max, cell) => Math.max(max, getWrappedLines(cell.text, cell.width, fontSize).length),
+    1,
+  );
+  return Math.max(header ? 20 : 24, 12 + maxLines * 9);
+};
+
 const ensureSpace = (
   pdf: SimplePdf,
   y: number,
@@ -853,8 +980,7 @@ const drawTableRow = (
     );
   let cursor = x;
   for (const cell of cells) {
-    const maxChars = Math.max(4, Math.floor(cell.width / (header ? 5.2 : 4.9)));
-    const lines = wrapText(cell.text, maxChars).slice(0, 2);
+    const lines = getWrappedLines(cell.text, cell.width, header ? 7.2 : 7.5);
     lines.forEach((line, index) => {
       const textX =
         cell.align === "right"
@@ -985,7 +1111,9 @@ export const buildErpOrderPdf = (
   drawLabelValue(
     pdf,
     "Cidade/UF/CEP",
-    `${cleanText(clientAddress.city)}/${cleanText(clientAddress.state)} - CEP: ${cleanText(clientAddress.cep)}`,
+    [clientAddress.city, clientAddress.state, clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : null]
+      .filter(Boolean)
+      .join("/"),
     MARGIN + 345,
     y - 50,
     92,
@@ -1021,11 +1149,11 @@ export const buildErpOrderPdf = (
     { text: "Unitário", width: 62, align: "right" },
     { text: "Total", width: 51, align: "right" },
   ];
-  drawTableRow(pdf, columns, MARGIN, y, 20, BRAND_GREEN, true);
-  y -= 20;
+  const headerRowHeight = getTableRowHeight(columns, true);
+  drawTableRow(pdf, columns, MARGIN, y, headerRowHeight, BRAND_GREEN, true);
+  y -= headerRowHeight;
 
   for (const item of order.opportunity.items) {
-    y = ensureSpace(pdf, y, 24, pageNumber, orderNumber, company);
     const rawProduct = asRecord(item.product?.rawErpPayload);
     const reference = pickFirstString(rawProduct, [
       "REFERENCIA",
@@ -1053,8 +1181,10 @@ export const buildErpOrderPdf = (
       { text: formatCurrency(item.unitPrice), width: 62, align: "right" },
       { text: formatCurrency(item.netTotal), width: 51, align: "right" },
     ];
-    drawTableRow(pdf, cells, MARGIN, y, 24, null);
-    y -= 24;
+    const rowHeight = getTableRowHeight(cells);
+    y = ensureSpace(pdf, y, rowHeight, pageNumber, orderNumber, company);
+    drawTableRow(pdf, cells, MARGIN, y, rowHeight, null);
+    y -= rowHeight;
   }
 
   const grossTotal = order.opportunity.items.reduce(
@@ -1139,9 +1269,15 @@ export const buildErpOrderPdf = (
     payload.OBS_PEDIDO || order.opportunity.notes,
     "Sem observações.",
   );
-  pdf.rect(MARGIN, y - 34, PAGE_WIDTH - MARGIN * 2, 38, null, BORDER);
-  drawLabelValue(pdf, "Observações", notes, MARGIN + 12, y - 16, 500);
-  y -= 48;
+  const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 24, 8);
+  const notesHeight = Math.max(38, 26 + noteLines.length * 10);
+  y = ensureSpace(pdf, y, notesHeight + 12, pageNumber, orderNumber, company);
+  pdf.rect(MARGIN, y - notesHeight + 4, PAGE_WIDTH - MARGIN * 2, notesHeight, null, BORDER);
+  pdf.text("OBSERVAÇÕES", MARGIN + 12, y - 12, 7.5, MUTED, "F2");
+  noteLines.forEach((line, index) =>
+    pdf.text(line, MARGIN + 12, y - 26 - index * 10, 8, SLATE, index === 0 ? "F2" : "F1"),
+  );
+  y -= notesHeight + 10;
 
   pdf.text("Cláusulas", MARGIN, y, 9.5, BRAND_GREEN, "F2");
   y -= 12;
@@ -1162,8 +1298,12 @@ export const buildErpOrderPdf = (
   }
 
   y = ensureSpace(pdf, y, 42, pageNumber, orderNumber, company);
-  pdf.line(196, y - 20, 398, y - 20, SLATE, 0.8);
-  pdf.text("Assinatura do Comprador", 238, y - 34, 8, SLATE, "F2");
+  const signatureLineWidth = 200;
+  const signatureLineX = (PAGE_WIDTH - signatureLineWidth) / 2;
+  pdf.line(signatureLineX, y - 20, signatureLineX + signatureLineWidth, y - 20, SLATE, 0.8);
+  const signatureLabel = "Assinatura do Comprador";
+  const signatureLabelWidth = signatureLabel.length * 4.2;
+  pdf.text(signatureLabel, (PAGE_WIDTH - signatureLabelWidth) / 2, y - 34, 8, SLATE, "F2");
 
   drawFooter(pdf, pageNumber.value);
   return pdf.buffer();
