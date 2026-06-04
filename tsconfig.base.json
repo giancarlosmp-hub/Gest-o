@@ -13,7 +13,6 @@
       "@salesforce-pro/shared": [
         "packages/shared/dist"
       ]
-    },
-    "ignoreDeprecations": "6.0"
+    }
   }
 }

@@ -140,7 +140,7 @@ class SimplePdf {
     objects[pagesId - 1] = Buffer.from(`${pagesId} 0 obj\n<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageIds.length} >>\nendobj\n`, "ascii");
 
     const header = Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "binary");
-    const chunks = [header];
+    const chunks: Uint8Array[] = [header];
     const offsets = [0];
     let offset = header.length;
     for (const object of objects) {
