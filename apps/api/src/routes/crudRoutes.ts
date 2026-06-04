@@ -7057,10 +7057,22 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
 
   try {
     const pdfOrder = order as ErpOrderPdfRecord;
+    const orderData = { clientErpCode: pdfOrder.opportunity.client.code };
+    const diagnosticClient = await prisma.client.findFirst({
+      where: { code: String(orderData.clientErpCode) },
+    });
+    console.log("CLIENT FIELDS:", JSON.stringify(diagnosticClient, null, 2));
     const [company, metadata] = await Promise.all([
       getErpOrderPdfCompany(prisma, pdfOrder),
       getErpOrderPdfMetadata(prisma, pdfOrder),
     ]);
+    const branchDelegate = (prisma as unknown as {
+      branch?: { findFirst: (args: { where: { code: string } }) => Promise<unknown> };
+    }).branch;
+    const diagnosticBranch = branchDelegate
+      ? await branchDelegate.findFirst({ where: { code: "1" } })
+      : metadata.branch;
+    console.log("BRANCH FIELDS:", JSON.stringify(diagnosticBranch, null, 2));
     console.log("=== PDF DEBUG ===");
     console.log("Branch:", JSON.stringify(metadata.branch, null, 2));
     console.log("Client:", JSON.stringify(pdfOrder.opportunity.client, null, 2));
