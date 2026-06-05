@@ -240,6 +240,49 @@ const pickPartnerCode = (payload: Record<string, unknown>) =>
     "partnerCode",
   ]);
 
+const PARTNERS_CONFIG_KEY = "erp.ultrafv3.partners";
+
+const normalizePartnerCacheCode = (value: string) =>
+  value.trim().replace(/^0+(?=\d)/, "") || value.trim();
+
+const getPartnerCacheKey = (row: unknown) =>
+  row && typeof row === "object"
+    ? normalizePartnerCacheCode(pickPartnerCode(row as Record<string, unknown>))
+    : "";
+
+const parseCachedRows = (value?: string | null) => {
+  if (!value) return [];
+  try {
+    return toArray(JSON.parse(value));
+  } catch {
+    return [];
+  }
+};
+
+const cachePartnerRows = async (rows: unknown[]) => {
+  const stored = await prisma.appConfig.findUnique({
+    where: { key: PARTNERS_CONFIG_KEY },
+    select: { value: true },
+  });
+  const merged = new Map<string, unknown>();
+  for (const row of parseCachedRows(stored?.value)) {
+    const key = getPartnerCacheKey(row);
+    if (key) merged.set(key, row);
+  }
+  for (const row of rows) {
+    const key = getPartnerCacheKey(row);
+    if (key) merged.set(key, row);
+  }
+  await prisma.appConfig.upsert({
+    where: { key: PARTNERS_CONFIG_KEY },
+    update: { value: JSON.stringify([...merged.values()]) },
+    create: {
+      key: PARTNERS_CONFIG_KEY,
+      value: JSON.stringify([...merged.values()]),
+    },
+  });
+};
+
 const pickPartnerDocument = (payload: Record<string, unknown>) =>
   pickFirstString(payload, [
     "CNPJ",
@@ -1327,6 +1370,7 @@ export async function syncPartners(options?: RunSyncOptions) {
         correlationId,
         resolved.credentials,
       );
+      await cachePartnerRows(rows);
       const fallbackSeller = await prisma.user.findFirst({
         where: { role: "vendedor", isActive: true },
         select: { id: true },
@@ -1609,6 +1653,7 @@ export async function syncPartnersByUser(
           correlationId,
         );
       const rows = toArray(response);
+      await cachePartnerRows(rows);
       const candidateCounts = getCandidateCounts(response);
       const rootKeys =
         response && typeof response === "object" && !Array.isArray(response)
