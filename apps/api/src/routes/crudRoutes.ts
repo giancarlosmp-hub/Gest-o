@@ -7057,30 +7057,17 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
 
   try {
     const pdfOrder = order as ErpOrderPdfRecord;
-    const orderData = { clientErpCode: pdfOrder.opportunity.client.code };
-    const diagnosticClient = await prisma.client.findFirst({
-      where: { code: String(orderData.clientErpCode) },
-    });
-    console.log("CLIENT FIELDS:", JSON.stringify(diagnosticClient, null, 2));
+    const regenerate = req.query.regenerate === "true";
     const [company, metadata] = await Promise.all([
       getErpOrderPdfCompany(prisma, pdfOrder),
       getErpOrderPdfMetadata(prisma, pdfOrder),
     ]);
-    const branchDelegate = (prisma as unknown as {
-      branch?: { findFirst: (args: { where: { code: string } }) => Promise<unknown> };
-    }).branch;
-    const diagnosticBranch = branchDelegate
-      ? await branchDelegate.findFirst({ where: { code: "1" } })
-      : metadata.branch;
-    console.log("BRANCH FIELDS:", JSON.stringify(diagnosticBranch, null, 2));
-    console.log("=== PDF DEBUG ===");
-    console.log("Branch:", JSON.stringify(metadata.branch, null, 2));
-    console.log("Client:", JSON.stringify(pdfOrder.opportunity.client, null, 2));
-    console.log("Items:", JSON.stringify(pdfOrder.opportunity.items, null, 2));
-    console.log("PaymentMethod:", JSON.stringify(metadata.paymentMethod, null, 2));
-    console.log("ReceivingCondition:", JSON.stringify(metadata.receivingCondition, null, 2));
-    const pdf = buildErpOrderPdf(pdfOrder, company, metadata);
+    const pdf = buildErpOrderPdf(pdfOrder, company, metadata, {
+      logRawFields: true,
+      regenerate,
+    });
     const filename = getErpOrderPdfFilename(order);
+    if (regenerate) res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Content-Length", String(pdf.length));

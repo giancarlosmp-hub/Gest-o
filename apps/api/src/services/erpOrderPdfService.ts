@@ -77,6 +77,11 @@ export type ErpOrderPdfMetadata = {
   receivingConditionDescription?: string;
 };
 
+type BuildErpOrderPdfOptions = {
+  logRawFields?: boolean;
+  regenerate?: boolean;
+};
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -1029,6 +1034,7 @@ export const buildErpOrderPdf = (
   order: ErpOrderPdfRecord,
   company: ErpOrderPdfCompany,
   metadata: ErpOrderPdfMetadata = {},
+  options: BuildErpOrderPdfOptions = {},
 ) => {
   if (order.status !== ErpOrderSyncStatus.sent)
     throw Object.assign(
@@ -1040,6 +1046,12 @@ export const buildErpOrderPdf = (
 
   const payload = getPayload(order);
   const client = order.opportunity.client;
+
+  if (options.logRawFields) {
+    console.log("CLIENT FIELDS:", JSON.stringify(getClientSource(client), null, 2));
+    console.log("BRANCH FIELDS:", JSON.stringify(metadata.branch ?? null, null, 2));
+    console.log("PDF REGENERATION:", JSON.stringify({ forced: Boolean(options.regenerate) }));
+  }
   const clientAddress = getClientAddressParts(client);
   const clientLegalName = getClientLegalName(client);
   const fantasyName = getClientFantasyName(client);
