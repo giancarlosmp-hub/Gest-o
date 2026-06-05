@@ -31,7 +31,10 @@ export type ErpOrderPdfRecord = ErpOrderSync & {
     ownerSeller: Pick<User, "name" | "erpCode">;
     items: Array<
       OpportunityItem & {
-        product?: Pick<Product, "name" | "className" | "unit" | "rawErpPayload"> | null;
+        product?: Pick<
+          Product,
+          "name" | "className" | "unit" | "rawErpPayload"
+        > | null;
       }
     >;
   };
@@ -71,6 +74,7 @@ export type ErpOrderPdfCompany = {
 
 export type ErpOrderPdfMetadata = {
   branch?: Record<string, unknown>;
+  partner?: Record<string, unknown> | null;
   paymentMethod?: Record<string, unknown> | null;
   paymentMethodDescription?: string;
   receivingCondition?: Record<string, unknown> | null;
@@ -201,7 +205,8 @@ const paethPredictor = (left: number, up: number, upperLeft: number) => {
   const leftDistance = Math.abs(prediction - left);
   const upDistance = Math.abs(prediction - up);
   const upperLeftDistance = Math.abs(prediction - upperLeft);
-  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance) return left;
+  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance)
+    return left;
   return upDistance <= upperLeftDistance ? up : upperLeft;
 };
 
@@ -219,11 +224,15 @@ const unfilterPngScanlines = (
     const rowOffset = row * rowLength;
     for (let column = 0; column < rowLength; column += 1) {
       const raw = inflated[inputOffset++];
-      const left = column >= bytesPerPixel ? output[rowOffset + column - bytesPerPixel] : 0;
+      const left =
+        column >= bytesPerPixel
+          ? output[rowOffset + column - bytesPerPixel]
+          : 0;
       const up = row > 0 ? output[rowOffset - rowLength + column] : 0;
-      const upperLeft = row > 0 && column >= bytesPerPixel
-        ? output[rowOffset - rowLength + column - bytesPerPixel]
-        : 0;
+      const upperLeft =
+        row > 0 && column >= bytesPerPixel
+          ? output[rowOffset - rowLength + column - bytesPerPixel]
+          : 0;
       const value =
         filter === 0
           ? raw
@@ -290,7 +299,11 @@ const readPngImage = (pngPath: string, name: string): PdfPngImage | null => {
   const rgba = unfilterPngScanlines(inflateSync(idatData), width, height, 4);
   const rgb = Buffer.alloc(width * height * 3);
   const alpha = Buffer.alloc(width * height);
-  for (let source = 0, rgbIndex = 0, alphaIndex = 0; source < rgba.length; source += 4) {
+  for (
+    let source = 0, rgbIndex = 0, alphaIndex = 0;
+    source < rgba.length;
+    source += 4
+  ) {
     rgb[rgbIndex++] = rgba[source];
     rgb[rgbIndex++] = rgba[source + 1];
     rgb[rgbIndex++] = rgba[source + 2];
@@ -319,7 +332,9 @@ const loadDemetraLogo = () => {
     const image = readPngImage(candidate, "ImDemetraLogo");
     if (image) return image;
   }
-  console.warn("[erp order pdf] Demetra PNG logo not found or unsupported", { candidates });
+  console.warn("[erp order pdf] Demetra PNG logo not found or unsupported", {
+    candidates,
+  });
   return null;
 };
 
@@ -511,11 +526,13 @@ const BRANCH_CODE_KEYS = [
 ];
 
 const normalizeBranchRows = (value: unknown): Record<string, unknown>[] => {
-  if (Array.isArray(value)) return value.map(asRecord).filter((row) => Object.keys(row).length);
+  if (Array.isArray(value))
+    return value.map(asRecord).filter((row) => Object.keys(row).length);
   const record = asRecord(value);
   for (const key of ["items", "data", "rows", "results", "content"]) {
     const rows = record[key];
-    if (Array.isArray(rows)) return rows.map(asRecord).filter((row) => Object.keys(row).length);
+    if (Array.isArray(rows))
+      return rows.map(asRecord).filter((row) => Object.keys(row).length);
   }
   return Object.keys(record).length ? [record] : [];
 };
@@ -532,14 +549,48 @@ const parseAppConfigJson = (value: string | null | undefined) => {
 const getBranchRawCode = (branch: Record<string, unknown>) =>
   pickFirstString(branch, BRANCH_CODE_KEYS);
 
+const PARTNER_CODE_KEYS = [
+  "PARCEIRO",
+  "CODPARCEIRO",
+  "CODCLIENTE",
+  "COD_CLIENTE",
+  "code",
+  "erpCode",
+  "codigo",
+  "CODIGO",
+  "partnerCode",
+];
+
+const PARTNER_DOCUMENT_KEYS = [
+  "CNPJ",
+  "CPF",
+  "CGC",
+  "DOCUMENTO",
+  "CPFCNPJ",
+  "CPF_CNPJ",
+  "CNPJ_CPF",
+  "NR_CNPJ_CPF",
+  "cpfCnpj",
+  "cnpj",
+  "cpf",
+  "document",
+  "documentNumber",
+  "CNPJCPF",
+];
+
+const getPartnerRawCode = (partner: Record<string, unknown>) =>
+  pickFirstString(partner, PARTNER_CODE_KEYS);
+
 const findPdfBranch = (
   branches: Record<string, unknown>[],
   branchCode: unknown,
 ) => {
   const normalizedTarget = normalizeErpParameterCode(cleanText(branchCode, ""));
   if (normalizedTarget) {
-    const matched = branches.find((branch) =>
-      normalizeErpParameterCode(getBranchRawCode(branch)) === normalizedTarget,
+    const matched = branches.find(
+      (branch) =>
+        normalizeErpParameterCode(getBranchRawCode(branch)) ===
+        normalizedTarget,
     );
     if (matched) return matched;
   }
@@ -565,7 +616,9 @@ const getBranchAddress = (branch: Record<string, unknown>) => {
     "COMPLEMENT",
     "complemento",
   ]);
-  return directAddress || [street, number, complement].filter(Boolean).join(", ");
+  return (
+    directAddress || [street, number, complement].filter(Boolean).join(", ")
+  );
 };
 
 const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
@@ -589,7 +642,16 @@ const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
     "DESCRICAO",
     "DSCFILIAL",
   ]),
-  cnpj: formatDocument(pickFirstString(branch, ["CGC", "cgc", "CNPJ", "cnpj", "DOCUMENTO", "document"])),
+  cnpj: formatDocument(
+    pickFirstString(branch, [
+      "CGC",
+      "cgc",
+      "CNPJ",
+      "cnpj",
+      "DOCUMENTO",
+      "document",
+    ]),
+  ),
   stateRegistration: pickFirstString(branch, [
     "INSCESTADUAL",
     "inscEstadual",
@@ -600,19 +662,25 @@ const toPdfCompany = (branch: Record<string, unknown>): ErpOrderPdfCompany => ({
     "inscricaoEstadual",
   ]),
   address: getBranchAddress(branch),
-  district: pickFirstString(branch, ["BAIRRO", "DISTRICT", "bairro", "district"]),
+  district: pickFirstString(branch, [
+    "BAIRRO",
+    "DISTRICT",
+    "bairro",
+    "district",
+  ]),
   city: pickFirstString(branch, ["CIDADE", "MUNICIPIO", "city", "cidade"]),
   state: pickFirstString(branch, ["UF", "ESTADO", "state", "uf"]),
   cep: pickFirstString(branch, ["CEP", "ZIP", "zipCode", "cep"]),
-  phone: pickFirstString(branch, [
-    "FONE",
-    "TELEFONE",
-    "CELULAR",
-    "PHONE",
-    "phone",
-    "telefone",
-    "fone",
-  ]) || "(45) 99152-0239",
+  phone:
+    pickFirstString(branch, [
+      "FONE",
+      "TELEFONE",
+      "CELULAR",
+      "PHONE",
+      "phone",
+      "telefone",
+      "fone",
+    ]) || "(45) 99152-0239",
 });
 
 const getStoredReferenceRows = async (
@@ -630,14 +698,56 @@ export const getErpOrderPdfBranch = async (
   prisma: Pick<PrismaClient, "appConfig">,
   order: ErpOrderPdfRecord,
 ) => {
-  const branches = await getStoredReferenceRows(prisma, "erp.ultrafv3.branches");
+  const branches = await getStoredReferenceRows(
+    prisma,
+    "erp.ultrafv3.branches",
+  );
   return findPdfBranch(branches, getPayload(order).CODFILIAL);
+};
+
+const findPdfPartner = (
+  partners: Record<string, unknown>[],
+  client: ErpOrderPdfRecord["opportunity"]["client"],
+) => {
+  const normalizedCode = normalizeErpParameterCode(cleanText(client.code, ""));
+  if (normalizedCode) {
+    const matched = partners.find(
+      (partner) =>
+        normalizeErpParameterCode(getPartnerRawCode(partner)) ===
+        normalizedCode,
+    );
+    if (matched) return matched;
+  }
+
+  const normalizedDocument = cleanText(client.cnpj, "").replace(/\D/g, "");
+  if (normalizedDocument) {
+    const matched = partners.find(
+      (partner) =>
+        pickFirstString(partner, PARTNER_DOCUMENT_KEYS).replace(/\D/g, "") ===
+        normalizedDocument,
+    );
+    if (matched) return matched;
+  }
+
+  return null;
+};
+
+export const getErpOrderPdfPartner = async (
+  prisma: Pick<PrismaClient, "appConfig">,
+  order: ErpOrderPdfRecord,
+) => {
+  const partners = await getStoredReferenceRows(
+    prisma,
+    "erp.ultrafv3.partners",
+  );
+  return findPdfPartner(partners, order.opportunity.client);
 };
 
 export const getErpOrderPdfCompany = async (
   prisma: Pick<PrismaClient, "appConfig">,
   order: ErpOrderPdfRecord,
-): Promise<ErpOrderPdfCompany> => toPdfCompany(await getErpOrderPdfBranch(prisma, order));
+): Promise<ErpOrderPdfCompany> =>
+  toPdfCompany(await getErpOrderPdfBranch(prisma, order));
 
 const findReferenceByCode = (
   rows: Record<string, unknown>[],
@@ -647,8 +757,10 @@ const findReferenceByCode = (
   const normalizedTarget = normalizeErpParameterCode(cleanText(code, ""));
   if (!normalizedTarget) return null;
   return (
-    rows.find((row) =>
-      normalizeErpParameterCode(pickFirstString(row, codeKeys)) === normalizedTarget,
+    rows.find(
+      (row) =>
+        normalizeErpParameterCode(pickFirstString(row, codeKeys)) ===
+        normalizedTarget,
     ) || null
   );
 };
@@ -663,23 +775,41 @@ export const getErpOrderPdfMetadata = async (
   order: ErpOrderPdfRecord,
 ): Promise<ErpOrderPdfMetadata> => {
   const payload = getPayload(order);
-  const [branch, paymentRows, receivingRows] = await Promise.all([
+  const [branch, partner, paymentRows, receivingRows] = await Promise.all([
     getErpOrderPdfBranch(prisma, order),
+    getErpOrderPdfPartner(prisma, order),
     getStoredReferenceRows(prisma, "erp.ultrafv3.paymentMethods"),
     getStoredReferenceRows(prisma, "erp.ultrafv3.receivingConditions"),
   ]);
-  const paymentMethod = findReferenceByCode(
-    paymentRows,
-    payload.FORMA,
-    ["FORMA", "CODFORMA", "COD_FORMA", "CODIGO", "code", "codigo", "id", "ID", "value"],
-  );
+  const paymentMethod = findReferenceByCode(paymentRows, payload.FORMA, [
+    "FORMA",
+    "CODFORMA",
+    "COD_FORMA",
+    "CODIGO",
+    "code",
+    "codigo",
+    "id",
+    "ID",
+    "value",
+  ]);
   const receivingCondition = findReferenceByCode(
     receivingRows,
     payload.CODCONDREC,
-    ["CODCONDREC", "CONDICAO", "COD_CONDICAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
+    [
+      "CODCONDREC",
+      "CONDICAO",
+      "COD_CONDICAO",
+      "CODIGO",
+      "code",
+      "codigo",
+      "id",
+      "ID",
+      "value",
+    ],
   );
   return {
     branch,
+    partner,
     paymentMethod,
     paymentMethodDescription: getReferenceDescription(paymentMethod, [
       "DESCRICAO",
@@ -720,15 +850,20 @@ const ERP_ORDER_CLAUSES = [
 const getClientRaw = (client: ErpOrderPdfRecord["opportunity"]["client"]) =>
   asRecord(client.rawPayload);
 
-const getClientSource = (client: ErpOrderPdfRecord["opportunity"]["client"]) => ({
+const getClientSource = (
+  client: ErpOrderPdfRecord["opportunity"]["client"],
+  partner?: Record<string, unknown> | null,
+) => ({
   ...getClientRaw(client),
+  ...asRecord(partner),
   ...(client as unknown as Record<string, unknown>),
 });
 
 const getClientLegalName = (
   client: ErpOrderPdfRecord["opportunity"]["client"],
+  partner?: Record<string, unknown> | null,
 ) => {
-  const source = getClientSource(client);
+  const source = getClientSource(client, partner);
   return (
     pickFirstString(source, [
       "RAZAO_SOCIAL",
@@ -744,8 +879,9 @@ const getClientLegalName = (
 
 const getClientAddressParts = (
   client: ErpOrderPdfRecord["opportunity"]["client"],
+  partner?: Record<string, unknown> | null,
 ) => {
-  const source = getClientSource(client);
+  const source = getClientSource(client, partner);
   const street = pickFirstString(source, [
     "ENDERECO",
     "LOGRADOURO",
@@ -770,12 +906,20 @@ const getClientAddressParts = (
   return {
     address:
       [street, number, complement].filter(Boolean).join(", ") || street || "-",
-    district: pickFirstString(source, ["BAIRRO", "DISTRICT", "bairro", "neighborhood"]),
+    district: pickFirstString(source, [
+      "BAIRRO",
+      "DISTRICT",
+      "bairro",
+      "neighborhood",
+    ]),
     city:
       pickFirstString(source, [
         "CIDADE",
         "DSC_CIDADE",
         "MUNICIPIO",
+        "NOME_CIDADE",
+        "CIDADE_PARCEIRO",
+        "CID_CIDADE",
         "cidade",
         "city",
       ]) || client.city,
@@ -788,10 +932,18 @@ const getClientAddressParts = (
         "state",
         "uf",
       ]) || client.state,
-    cep: pickFirstString(source, ["CEP", "ZIP", "zipCode", "cep", "postalCode"]),
+    cep: pickFirstString(source, [
+      "CEP",
+      "ZIP",
+      "zipCode",
+      "cep",
+      "postalCode",
+    ]),
     phone: pickFirstString(source, [
       "FONE",
       "TELEFONE",
+      "TELEFONE1",
+      "TELEFONE2",
       "CELULAR",
       "PHONE",
       "phone",
@@ -804,19 +956,35 @@ const getClientAddressParts = (
   };
 };
 
-
-const getClientFantasyName = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
-  const source = getClientSource(client);
+const getClientFantasyName = (
+  client: ErpOrderPdfRecord["opportunity"]["client"],
+  partner?: Record<string, unknown> | null,
+) => {
+  const source = getClientSource(client, partner);
   return (
-    pickFirstString(source, ["FANTASIA", "NOME_FANTASIA", "fantasia", "fantasyName"]) ||
-    cleanText(client.fantasyName, "")
+    pickFirstString(source, [
+      "FANTASIA",
+      "NOME_FANTASIA",
+      "fantasia",
+      "fantasyName",
+    ]) || cleanText(client.fantasyName, "")
   );
 };
 
-const getClientDocument = (client: ErpOrderPdfRecord["opportunity"]["client"]) => {
-  const source = getClientSource(client);
+const getClientDocument = (
+  client: ErpOrderPdfRecord["opportunity"]["client"],
+  partner?: Record<string, unknown> | null,
+) => {
+  const source = getClientSource(client, partner);
   return formatDocument(
-    pickFirstString(source, ["CNPJ", "CPF", "CGC", "cnpj", "cpf", "documento"]) || client.cnpj,
+    pickFirstString(source, [
+      "CNPJ",
+      "CPF",
+      "CGC",
+      "cnpj",
+      "cpf",
+      "documento",
+    ]) || client.cnpj,
   );
 };
 
@@ -825,7 +993,13 @@ const getProductDescription = (
 ) => {
   const raw = asRecord(item.product?.rawErpPayload);
   const name =
-    pickFirstString(raw, ["DSCPRODUTO", "DESCRICAO", "NOME", "dscProduto", "name"]) ||
+    pickFirstString(raw, [
+      "DSCPRODUTO",
+      "DESCRICAO",
+      "NOME",
+      "dscProduto",
+      "name",
+    ]) ||
     item.product?.name ||
     item.productNameSnapshot;
   const classification =
@@ -836,10 +1010,14 @@ const getProductDescription = (
       "DSC_CLASSIFICACAO",
       "dscProdutoClas",
       "classification",
-    ]) || item.product?.className || "";
-  return [cleanText(name, ""), cleanText(classification, "")]
-    .filter(Boolean)
-    .join(" ") || "-";
+    ]) ||
+    item.product?.className ||
+    "";
+  return (
+    [cleanText(name, ""), cleanText(classification, "")]
+      .filter(Boolean)
+      .join(" ") || "-"
+  );
 };
 
 const getProductWeight = (
@@ -912,9 +1090,30 @@ const drawHeader = (
     42,
     [255, 255, 255],
   );
-  pdf.text("Emissão", PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 50, 7, MUTED, "F2");
-  pdf.text(emittedAt, PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 63, 7, BRAND_GREEN, "F2");
-  pdf.text("Página 1", PAGE_WIDTH - MARGIN - 122, PAGE_HEIGHT - 75, 7, BRAND_GREEN, "F2");
+  pdf.text(
+    "Emissão",
+    PAGE_WIDTH - MARGIN - 122,
+    PAGE_HEIGHT - 50,
+    7,
+    MUTED,
+    "F2",
+  );
+  pdf.text(
+    emittedAt,
+    PAGE_WIDTH - MARGIN - 122,
+    PAGE_HEIGHT - 63,
+    7,
+    BRAND_GREEN,
+    "F2",
+  );
+  pdf.text(
+    "Página 1",
+    PAGE_WIDTH - MARGIN - 122,
+    PAGE_HEIGHT - 75,
+    7,
+    BRAND_GREEN,
+    "F2",
+  );
 };
 
 const drawFooter = (pdf: SimplePdf, pageNumber: number) => {
@@ -944,7 +1143,8 @@ const getWrappedLines = (text: string, width: number, fontSize = 7.5) =>
 const getTableRowHeight = (cells: PdfCell[], header = false) => {
   const fontSize = header ? 7.2 : 7.5;
   const maxLines = cells.reduce(
-    (max, cell) => Math.max(max, getWrappedLines(cell.text, cell.width, fontSize).length),
+    (max, cell) =>
+      Math.max(max, getWrappedLines(cell.text, cell.width, fontSize).length),
     1,
   );
   return Math.max(header ? 20 : 24, 12 + maxLines * 9);
@@ -1048,13 +1248,26 @@ export const buildErpOrderPdf = (
   const client = order.opportunity.client;
 
   if (options.logRawFields) {
-    console.log("CLIENT FIELDS:", JSON.stringify(getClientSource(client), null, 2));
-    console.log("BRANCH FIELDS:", JSON.stringify(metadata.branch ?? null, null, 2));
-    console.log("PDF REGENERATION:", JSON.stringify({ forced: Boolean(options.regenerate) }));
+    console.log(
+      "CLIENT FIELDS:",
+      JSON.stringify(getClientSource(client, metadata.partner), null, 2),
+    );
+    console.log(
+      "BRANCH FIELDS:",
+      JSON.stringify(metadata.branch ?? null, null, 2),
+    );
+    console.log(
+      "PARTNER FIELDS:",
+      JSON.stringify(metadata.partner ?? null, null, 2),
+    );
+    console.log(
+      "PDF REGENERATION:",
+      JSON.stringify({ forced: Boolean(options.regenerate) }),
+    );
   }
-  const clientAddress = getClientAddressParts(client);
-  const clientLegalName = getClientLegalName(client);
-  const fantasyName = getClientFantasyName(client);
+  const clientAddress = getClientAddressParts(client, metadata.partner);
+  const clientLegalName = getClientLegalName(client, metadata.partner);
+  const fantasyName = getClientFantasyName(client, metadata.partner);
   const orderNumber = cleanText(
     order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao,
   );
@@ -1063,7 +1276,14 @@ export const buildErpOrderPdf = (
   drawHeader(pdf, orderNumber, company);
 
   let y = PAGE_HEIGHT - 108;
-  pdf.text(`Pedido de Venda Nº: ${orderNumber}`, 206, y + 12, 13, BRAND_GREEN, "F2");
+  pdf.text(
+    `Pedido de Venda Nº: ${orderNumber}`,
+    206,
+    y + 12,
+    13,
+    BRAND_GREEN,
+    "F2",
+  );
   y -= 14;
   pdf.rect(MARGIN, y - 32, PAGE_WIDTH - MARGIN * 2, 36, BRAND_LIGHT, BORDER);
   drawLabelValue(
@@ -1099,7 +1319,7 @@ export const buildErpOrderPdf = (
   drawLabelValue(
     pdf,
     "CNPJ/CPF",
-    getClientDocument(client),
+    getClientDocument(client, metadata.partner),
     MARGIN + 350,
     y - 18,
     150,
@@ -1123,7 +1343,11 @@ export const buildErpOrderPdf = (
   drawLabelValue(
     pdf,
     "Cidade/UF/CEP",
-    [clientAddress.city, clientAddress.state, clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : null]
+    [
+      clientAddress.city,
+      clientAddress.state,
+      clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : null,
+    ]
       .filter(Boolean)
       .join("/"),
     MARGIN + 345,
@@ -1284,10 +1508,24 @@ export const buildErpOrderPdf = (
   const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 24, 8);
   const notesHeight = Math.max(38, 26 + noteLines.length * 10);
   y = ensureSpace(pdf, y, notesHeight + 12, pageNumber, orderNumber, company);
-  pdf.rect(MARGIN, y - notesHeight + 4, PAGE_WIDTH - MARGIN * 2, notesHeight, null, BORDER);
+  pdf.rect(
+    MARGIN,
+    y - notesHeight + 4,
+    PAGE_WIDTH - MARGIN * 2,
+    notesHeight,
+    null,
+    BORDER,
+  );
   pdf.text("OBSERVAÇÕES", MARGIN + 12, y - 12, 7.5, MUTED, "F2");
   noteLines.forEach((line, index) =>
-    pdf.text(line, MARGIN + 12, y - 26 - index * 10, 8, SLATE, index === 0 ? "F2" : "F1"),
+    pdf.text(
+      line,
+      MARGIN + 12,
+      y - 26 - index * 10,
+      8,
+      SLATE,
+      index === 0 ? "F2" : "F1",
+    ),
   );
   y -= notesHeight + 10;
 
@@ -1295,7 +1533,14 @@ export const buildErpOrderPdf = (
   y -= 12;
   for (const [index, clause] of ERP_ORDER_CLAUSES.entries()) {
     const lines = wrapText(clause, 132);
-    y = ensureSpace(pdf, y, lines.length * 6.6 + 4, pageNumber, orderNumber, company);
+    y = ensureSpace(
+      pdf,
+      y,
+      lines.length * 6.6 + 4,
+      pageNumber,
+      orderNumber,
+      company,
+    );
     lines.forEach((line, lineIndex) =>
       pdf.text(
         line,
@@ -1312,10 +1557,24 @@ export const buildErpOrderPdf = (
   y = ensureSpace(pdf, y, 42, pageNumber, orderNumber, company);
   const signatureLineWidth = 200;
   const signatureLineX = (PAGE_WIDTH - signatureLineWidth) / 2;
-  pdf.line(signatureLineX, y - 20, signatureLineX + signatureLineWidth, y - 20, SLATE, 0.8);
+  pdf.line(
+    signatureLineX,
+    y - 20,
+    signatureLineX + signatureLineWidth,
+    y - 20,
+    SLATE,
+    0.8,
+  );
   const signatureLabel = "Assinatura do Comprador";
   const signatureLabelWidth = signatureLabel.length * 4.2;
-  pdf.text(signatureLabel, (PAGE_WIDTH - signatureLabelWidth) / 2, y - 34, 8, SLATE, "F2");
+  pdf.text(
+    signatureLabel,
+    (PAGE_WIDTH - signatureLabelWidth) / 2,
+    y - 34,
+    8,
+    SLATE,
+    "F2",
+  );
 
   drawFooter(pdf, pageNumber.value);
   return pdf.buffer();
