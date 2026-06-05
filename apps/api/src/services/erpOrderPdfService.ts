@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import { normalizeErpParameterCode } from "@salesforce-pro/shared";
@@ -322,15 +323,32 @@ const readPngImage = (pngPath: string, name: string): PdfPngImage | null => {
   };
 };
 
+const currentDir = dirname(fileURLToPath(import.meta.url));
+
 const loadDemetraLogo = () => {
   const candidates = [
-    resolve(process.cwd(), "apps/web/public/brand/demetra-logo-dark.png"),
-    resolve(process.cwd(), "../web/public/brand/demetra-logo-dark.png"),
-    resolve(process.cwd(), "public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "apps/web/public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "../web/public/brand/demetra-logo-dark.png"),
+    join(currentDir, "../../../web/public/brand/demetra-logo-dark.png"),
+    "/app/apps/web/public/brand/demetra-logo-dark.png",
+    join(currentDir, "../public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "apps/api/dist/public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "apps/api/public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "public/brand/demetra-logo-dark.png"),
   ];
   for (const candidate of candidates) {
+    if (!existsSync(candidate)) {
+      console.log("[erp order pdf] Logo não encontrada em:", candidate);
+      continue;
+    }
+
     const image = readPngImage(candidate, "ImDemetraLogo");
-    if (image) return image;
+    if (image) {
+      console.log("[erp order pdf] Logo encontrada em:", candidate);
+      return image;
+    }
+
+    console.warn("[erp order pdf] Logo encontrada, mas PNG não suportado em:", candidate);
   }
   console.warn("[erp order pdf] Demetra PNG logo not found or unsupported", {
     candidates,
@@ -1137,6 +1155,30 @@ const drawLabelValue = (
     );
 };
 
+const drawDateBoxField = (
+  pdf: SimplePdf,
+  label: string,
+  value: string,
+  x: number,
+  rectY: number,
+) => {
+  pdf.text(label.toUpperCase(), x, rectY + 22, 7.5, MUTED, "F2");
+  pdf.text(value, x, rectY + 9, 9.5, SLATE, "F2");
+};
+
+const drawMultilineLabelValue = (
+  pdf: SimplePdf,
+  label: string,
+  lines: string[],
+  x: number,
+  y: number,
+) => {
+  pdf.text(label.toUpperCase(), x, y + 14, 7.5, MUTED, "F2");
+  lines.slice(0, 2).forEach((line, index) =>
+    pdf.text(line, x, y - index * 10, 8.5, SLATE, index === 0 ? "F2" : "F1"),
+  );
+};
+
 const getWrappedLines = (text: string, width: number, fontSize = 7.5) =>
   wrapText(text, Math.max(4, Math.floor(width / (fontSize * 0.65))));
 
@@ -1285,28 +1327,27 @@ export const buildErpOrderPdf = (
     "F2",
   );
   y -= 14;
-  pdf.rect(MARGIN, y - 32, PAGE_WIDTH - MARGIN * 2, 36, BRAND_LIGHT, BORDER);
-  drawLabelValue(
+  const dateBoxY = y - 32;
+  pdf.rect(MARGIN, dateBoxY, PAGE_WIDTH - MARGIN * 2, 36, BRAND_LIGHT, BORDER);
+  drawDateBoxField(
     pdf,
     "Data do pedido",
     formatDate(payload.DATA_PEDIDO || order.sentAt || order.createdAt),
     MARGIN + 110,
-    y - 13,
-    130,
+    dateBoxY,
   );
-  drawLabelValue(
+  drawDateBoxField(
     pdf,
     "Data de entrega",
     formatDate(payload.DATA_PREV_ENTREGA),
     MARGIN + 330,
-    y - 13,
-    130,
+    dateBoxY,
   );
   y -= 48;
 
   pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
-  pdf.rect(MARGIN, y - 66, PAGE_WIDTH - MARGIN * 2, 70, null, BORDER);
+  pdf.rect(MARGIN, y - 78, PAGE_WIDTH - MARGIN * 2, 82, null, BORDER);
   drawLabelValue(pdf, "Cliente", clientLegalName, MARGIN + 12, y - 18, 230);
   drawLabelValue(
     pdf,
@@ -1340,19 +1381,15 @@ export const buildErpOrderPdf = (
     y - 50,
     80,
   );
-  drawLabelValue(
+  drawMultilineLabelValue(
     pdf,
     "Cidade/UF/CEP",
     [
-      clientAddress.city,
-      clientAddress.state,
-      clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join("/"),
+      [clientAddress.city, clientAddress.state].filter(Boolean).join("/"),
+      clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : "",
+    ].filter(Boolean),
     MARGIN + 345,
     y - 50,
-    92,
   );
   drawLabelValue(
     pdf,
@@ -1362,16 +1399,16 @@ export const buildErpOrderPdf = (
     y - 50,
     70,
   );
-  if (fantasyName && fantasyName !== clientLegalName)
-    pdf.text(`Fantasia: ${fantasyName}`, MARGIN + 12, y - 62, 7, MUTED);
   drawLabelValue(
     pdf,
     "Vendedor",
     `${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
-    MARGIN + 345,
-    y - 50,
-    160,
+    MARGIN + 12,
+    y - 70,
+    300,
   );
+  if (fantasyName && fantasyName !== clientLegalName)
+    pdf.text(`Fantasia: ${fantasyName}`, MARGIN + 330, y - 70, 7, MUTED);
   y -= 88;
 
   pdf.text("Itens", MARGIN, y, 10, BRAND_GREEN, "F2");
