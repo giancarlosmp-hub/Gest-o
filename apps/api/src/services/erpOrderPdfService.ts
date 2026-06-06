@@ -26,6 +26,9 @@ const BRAND_SOFT = [245, 250, 247] as const;
 const SLATE = [51, 65, 85] as const;
 const MUTED = [100, 116, 139] as const;
 const BORDER = [203, 213, 225] as const;
+const HEADER_HEIGHT = 112;
+const HEADER_BOTTOM_Y = PAGE_HEIGHT - HEADER_HEIGHT;
+const CONTENT_TOP_Y = HEADER_BOTTOM_Y - 16;
 
 export type ErpOrderPdfRecord = ErpOrderSync & {
   opportunity: Opportunity & {
@@ -174,12 +177,29 @@ const escapePdfText = (text: string) =>
     .replace(/[^\x00-\xFF\\]/g, "");
 
 const wrapText = (text: string, maxChars: number) => {
+  const safeMaxChars = Math.max(4, maxChars);
   const words = cleanText(text).split(" ");
   const lines: string[] = [];
   let current = "";
+
+  const pushLongWord = (word: string) => {
+    for (let index = 0; index < word.length; index += safeMaxChars) {
+      lines.push(word.slice(index, index + safeMaxChars));
+    }
+  };
+
   for (const word of words) {
+    if (word.length > safeMaxChars) {
+      if (current) {
+        lines.push(current);
+        current = "";
+      }
+      pushLongWord(word);
+      continue;
+    }
+
     const next = current ? `${current} ${word}` : word;
-    if (next.length > maxChars && current) {
+    if (next.length > safeMaxChars && current) {
       lines.push(current);
       current = word;
     } else {
@@ -327,16 +347,24 @@ const readPngImage = (pngPath: string, name: string): PdfPngImage | null => {
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const loadDemetraLogo = () => {
-  const candidates = [
-    join(process.cwd(), "apps/web/public/brand/demetra-logo-light.png"),
-    join(process.cwd(), "../web/public/brand/demetra-logo-light.png"),
-    join(currentDir, "../../../web/public/brand/demetra-logo-light.png"),
-    "/app/apps/web/public/brand/demetra-logo-light.png",
-    join(currentDir, "../public/brand/demetra-logo-light.png"),
-    join(process.cwd(), "apps/api/dist/public/brand/demetra-logo-light.png"),
-    join(process.cwd(), "apps/api/public/brand/demetra-logo-light.png"),
-    join(process.cwd(), "public/brand/demetra-logo-light.png"),
+  const assetNames = [
+    "demetra-logo-light.png",
+    "demetra-logo-dark.png",
+    "favicon.png",
   ];
+  const baseDirs = [
+    join(process.cwd(), "apps/web/public/brand"),
+    join(process.cwd(), "../web/public/brand"),
+    join(currentDir, "../../../web/public/brand"),
+    "/app/apps/web/public/brand",
+    join(currentDir, "../public/brand"),
+    join(process.cwd(), "apps/api/dist/public/brand"),
+    join(process.cwd(), "apps/api/public/brand"),
+    join(process.cwd(), "public/brand"),
+  ];
+  const candidates = baseDirs.flatMap((baseDir) =>
+    assetNames.map((assetName) => join(baseDir, assetName)),
+  );
   for (const candidate of candidates) {
     if (!existsSync(candidate)) {
       console.log("[erp order pdf] Logo não encontrada em:", candidate);
@@ -1070,84 +1098,100 @@ const getProductWeight = (
 
 const drawHeader = (
   pdf: SimplePdf,
-  orderNumber: string,
+  _orderNumber: string,
   company: ErpOrderPdfCompany,
+  pageNumber = 1,
 ) => {
-  pdf.rect(0, PAGE_HEIGHT - 94, PAGE_WIDTH, 94, BRAND_GREEN);
+  pdf.rect(0, HEADER_BOTTOM_Y, PAGE_WIDTH, HEADER_HEIGHT, BRAND_GREEN);
+  pdf.line(
+    MARGIN,
+    HEADER_BOTTOM_Y + 2,
+    PAGE_WIDTH - MARGIN,
+    HEADER_BOTTOM_Y + 2,
+    BRAND_ORANGE,
+    1.2,
+  );
+
+  const logoAreaWidth = 74;
+  const logoAreaHeight = 74;
+  const logoAreaX = MARGIN;
+  const logoAreaY = HEADER_BOTTOM_Y + (HEADER_HEIGHT - logoAreaHeight) / 2;
   if (DEMETRA_LOGO) {
-    const logoSize = containImageSize(DEMETRA_LOGO, 58, 58);
+    const logoSize = containImageSize(
+      DEMETRA_LOGO,
+      logoAreaWidth,
+      logoAreaHeight,
+    );
     pdf.image(
       DEMETRA_LOGO.name,
-      MARGIN + (58 - logoSize.width) / 2,
-      PAGE_HEIGHT - 82 + (58 - logoSize.height) / 2,
+      logoAreaX + (logoAreaWidth - logoSize.width) / 2,
+      logoAreaY + (logoAreaHeight - logoSize.height) / 2,
       logoSize.width,
       logoSize.height,
     );
-  } else {
-    pdf.text("D", MARGIN + 23, PAGE_HEIGHT - 60, 18, [255, 255, 255], "F2");
   }
-  pdf.line(MARGIN, PAGE_HEIGHT - 92, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 92, BRAND_ORANGE, 1.2);
+
+  const centerX = MARGIN + logoAreaWidth + 18;
+  const rightCardWidth = 132;
+  const rightCardX = PAGE_WIDTH - MARGIN - rightCardWidth;
+  const centerWidth = rightCardX - centerX - 18;
   const companyCity = [company.city, company.state].filter(Boolean).join("/");
+  const addressLines = wrapText(
+    `${cleanText(company.address)} - ${cleanText(company.district)} - ${companyCity} - CEP ${cleanText(company.cep)}`,
+    Math.floor(centerWidth / (7.1 * 0.54)),
+  ).slice(0, 2);
+
   pdf.text(
     cleanText(company.legalName),
-    MARGIN + 78,
-    PAGE_HEIGHT - 42,
+    centerX,
+    PAGE_HEIGHT - 36,
     11.2,
     [255, 255, 255],
     "F2",
   );
   pdf.text(
     cleanText(company.brandName),
-    MARGIN + 78,
-    PAGE_HEIGHT - 57,
+    centerX,
+    PAGE_HEIGHT - 52,
     10,
     [221, 245, 229],
     "F2",
   );
-  pdf.text(
-    `${cleanText(company.address)} - ${cleanText(company.district)} - ${companyCity} - CEP ${cleanText(company.cep)}`,
-    MARGIN + 78,
-    PAGE_HEIGHT - 71,
-    7.2,
-    [221, 245, 229],
+  addressLines.forEach((line, index) =>
+    pdf.text(
+      line,
+      centerX,
+      PAGE_HEIGHT - 67 - index * 10,
+      7.1,
+      [221, 245, 229],
+    ),
   );
   pdf.text(
     `CNPJ: ${cleanText(company.cnpj)}   IE: ${cleanText(company.stateRegistration)}   Fone: ${cleanText(company.phone)}`,
-    MARGIN + 78,
-    PAGE_HEIGHT - 83,
-    7.2,
+    centerX,
+    HEADER_BOTTOM_Y + 16,
+    7.1,
     [221, 245, 229],
   );
+
   const emittedAt = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
   });
-  pdf.rect(
-    PAGE_WIDTH - MARGIN - 132,
-    PAGE_HEIGHT - 78,
-    122,
-    42,
-    [255, 255, 255],
-  );
-  pdf.text(
-    "Emissão",
-    PAGE_WIDTH - MARGIN - 122,
-    PAGE_HEIGHT - 50,
-    7,
-    MUTED,
-    "F2",
-  );
+  const rightCardY = HEADER_BOTTOM_Y + 31;
+  pdf.rect(rightCardX, rightCardY, rightCardWidth, 54, [255, 255, 255]);
+  pdf.text("Emissão", rightCardX + 10, rightCardY + 36, 7, MUTED, "F2");
   pdf.text(
     emittedAt,
-    PAGE_WIDTH - MARGIN - 122,
-    PAGE_HEIGHT - 63,
+    rightCardX + 10,
+    rightCardY + 23,
     7,
     BRAND_GREEN,
     "F2",
   );
   pdf.text(
-    "Página 1",
-    PAGE_WIDTH - MARGIN - 122,
-    PAGE_HEIGHT - 75,
+    `Página ${pageNumber}`,
+    rightCardX + 10,
+    rightCardY + 10,
     7,
     BRAND_GREEN,
     "F2",
@@ -1169,14 +1213,23 @@ const drawLabelValue = (
   options: { fontSize?: number; maxLines?: number } = {},
 ) => {
   const fontSize = options.fontSize ?? 8.5;
-  const lineGap = fontSize + 2.2;
-  const lines = wrapText(value, Math.max(12, Math.floor(width / (fontSize * 0.58))))
-    .slice(0, options.maxLines ?? 3);
+  const lineGap = fontSize + 3.2;
+  const lines = wrapText(
+    value,
+    Math.max(12, Math.floor(width / (fontSize * 0.58))),
+  ).slice(0, options.maxLines ?? 3);
   pdf.text(label.toUpperCase(), x, y + 12, 7, MUTED, "F2");
   lines.forEach((line, index) =>
-    pdf.text(line, x, y - index * lineGap, fontSize, SLATE, index === 0 ? "F2" : "F1"),
+    pdf.text(
+      line,
+      x,
+      y - index * lineGap,
+      fontSize,
+      SLATE,
+      index === 0 ? "F2" : "F1",
+    ),
   );
-  return 15 + lines.length * lineGap;
+  return 17 + lines.length * lineGap;
 };
 
 const drawDateBoxField = (
@@ -1227,8 +1280,8 @@ const ensureSpace = (
   drawFooter(pdf, pageNumber.value);
   pdf.addPage();
   pageNumber.value += 1;
-  drawHeader(pdf, orderNumber, company);
-  return PAGE_HEIGHT - 108;
+  drawHeader(pdf, orderNumber, company, pageNumber.value);
+  return CONTENT_TOP_Y;
 };
 
 const drawTableRow = (
@@ -1338,20 +1391,31 @@ export const buildErpOrderPdf = (
   );
   const pdf = new SimplePdf();
   const pageNumber = { value: 1 };
-  drawHeader(pdf, orderNumber, company);
+  drawHeader(pdf, orderNumber, company, pageNumber.value);
 
-  let y = PAGE_HEIGHT - 108;
+  let y = CONTENT_TOP_Y;
+  const orderBandHeight = 34;
+  const orderBandY = y - orderBandHeight;
+  pdf.rect(
+    MARGIN,
+    orderBandY,
+    PAGE_WIDTH - MARGIN * 2,
+    orderBandHeight,
+    BRAND_SOFT,
+    BORDER,
+  );
   pdf.text(
     `Pedido de Venda Nº: ${orderNumber}`,
-    206,
-    y + 12,
+    MARGIN + 14,
+    orderBandY + 12,
     13,
     BRAND_GREEN,
     "F2",
   );
-  y -= 14;
-  const dateBoxY = y - 32;
-  pdf.rect(MARGIN, dateBoxY, PAGE_WIDTH - MARGIN * 2, 36, BRAND_LIGHT, BORDER);
+  y = orderBandY - 14;
+  const dateBoxHeight = 40;
+  const dateBoxY = y - dateBoxHeight;
+  pdf.rect(MARGIN, dateBoxY, PAGE_WIDTH - MARGIN * 2, dateBoxHeight, BRAND_LIGHT, BORDER);
   drawDateBoxField(
     pdf,
     "Data do pedido",
@@ -1366,7 +1430,7 @@ export const buildErpOrderPdf = (
     MARGIN + 330,
     dateBoxY,
   );
-  y -= 48;
+  y = dateBoxY - 22;
 
   pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
@@ -1415,10 +1479,11 @@ export const buildErpOrderPdf = (
     ),
   );
 
-  const secondRowY = firstRowY - firstRowHeight - 6;
+  const secondRowY = firstRowY - firstRowHeight - 10;
   const addressWidth = 246;
   const districtWidth = 126;
-  const cityWidth = clientInnerWidth - addressWidth - districtWidth - clientGap * 2;
+  const cityWidth =
+    clientInnerWidth - addressWidth - districtWidth - clientGap * 2;
   const secondRowHeight = Math.max(
     drawLabelValue(
       pdf,
@@ -1427,7 +1492,7 @@ export const buildErpOrderPdf = (
       clientBoxX + clientPadding,
       secondRowY,
       addressWidth,
-      { fontSize: 8.2, maxLines: 3 },
+      { fontSize: 8.2, maxLines: 4 },
     ),
     drawLabelValue(
       pdf,
@@ -1436,7 +1501,7 @@ export const buildErpOrderPdf = (
       clientBoxX + clientPadding + addressWidth + clientGap,
       secondRowY,
       districtWidth,
-      { fontSize: 8.2, maxLines: 3 },
+      { fontSize: 8.2, maxLines: 4 },
     ),
     drawMultilineLabelValue(
       pdf,
@@ -1451,7 +1516,7 @@ export const buildErpOrderPdf = (
     ),
   );
 
-  const thirdRowY = secondRowY - secondRowHeight - 6;
+  const thirdRowY = secondRowY - secondRowHeight - 10;
   const thirdRowHeight = Math.max(
     drawLabelValue(
       pdf,
@@ -1485,10 +1550,17 @@ export const buildErpOrderPdf = (
   );
 
   const clientBoxHeight = Math.max(
-    86,
-    firstRowHeight + secondRowHeight + thirdRowHeight + 42,
+    98,
+    firstRowHeight + secondRowHeight + thirdRowHeight + 52,
   );
-  pdf.rect(clientBoxX, y - clientBoxHeight, clientBoxWidth, clientBoxHeight + 4, null, BORDER);
+  pdf.rect(
+    clientBoxX,
+    y - clientBoxHeight,
+    clientBoxWidth,
+    clientBoxHeight + 4,
+    null,
+    BORDER,
+  );
   pdf.line(
     clientBoxX,
     y - clientBoxHeight + 4,
