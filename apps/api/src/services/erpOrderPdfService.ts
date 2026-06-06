@@ -19,8 +19,9 @@ import {
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const MARGIN = 24;
-const BRAND_GREEN = [25, 94, 62] as const;
-const BRAND_LIGHT = [239, 247, 241] as const;
+const BRAND_GREEN = [11, 60, 29] as const;
+const BRAND_ORANGE = [245, 158, 11] as const;
+const BRAND_LIGHT = [239, 248, 241] as const;
 const BRAND_SOFT = [245, 250, 247] as const;
 const SLATE = [51, 65, 85] as const;
 const MUTED = [100, 116, 139] as const;
@@ -327,14 +328,14 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const loadDemetraLogo = () => {
   const candidates = [
-    join(process.cwd(), "apps/web/public/brand/demetra-logo-dark.png"),
-    join(process.cwd(), "../web/public/brand/demetra-logo-dark.png"),
-    join(currentDir, "../../../web/public/brand/demetra-logo-dark.png"),
-    "/app/apps/web/public/brand/demetra-logo-dark.png",
-    join(currentDir, "../public/brand/demetra-logo-dark.png"),
-    join(process.cwd(), "apps/api/dist/public/brand/demetra-logo-dark.png"),
-    join(process.cwd(), "apps/api/public/brand/demetra-logo-dark.png"),
-    join(process.cwd(), "public/brand/demetra-logo-dark.png"),
+    join(process.cwd(), "apps/web/public/brand/demetra-logo-light.png"),
+    join(process.cwd(), "../web/public/brand/demetra-logo-light.png"),
+    join(currentDir, "../../../web/public/brand/demetra-logo-light.png"),
+    "/app/apps/web/public/brand/demetra-logo-light.png",
+    join(currentDir, "../public/brand/demetra-logo-light.png"),
+    join(process.cwd(), "apps/api/dist/public/brand/demetra-logo-light.png"),
+    join(process.cwd(), "apps/api/public/brand/demetra-logo-light.png"),
+    join(process.cwd(), "public/brand/demetra-logo-light.png"),
   ];
   for (const candidate of candidates) {
     if (!existsSync(candidate)) {
@@ -357,6 +358,18 @@ const loadDemetraLogo = () => {
 };
 
 const DEMETRA_LOGO = loadDemetraLogo();
+
+const containImageSize = (
+  image: Pick<PdfPngImage, "width" | "height">,
+  maxWidth: number,
+  maxHeight: number,
+) => {
+  const ratio = Math.min(maxWidth / image.width, maxHeight / image.height);
+  return {
+    width: image.width * ratio,
+    height: image.height * ratio,
+  };
+};
 
 class SimplePdf {
   private pages: PdfPage[] = [{ commands: [] }];
@@ -1061,12 +1074,19 @@ const drawHeader = (
   company: ErpOrderPdfCompany,
 ) => {
   pdf.rect(0, PAGE_HEIGHT - 94, PAGE_WIDTH, 94, BRAND_GREEN);
-  pdf.rect(MARGIN, PAGE_HEIGHT - 84, 66, 52, [255, 255, 255]);
   if (DEMETRA_LOGO) {
-    pdf.image(DEMETRA_LOGO.name, MARGIN + 3, PAGE_HEIGHT - 80, 60, 42);
+    const logoSize = containImageSize(DEMETRA_LOGO, 58, 58);
+    pdf.image(
+      DEMETRA_LOGO.name,
+      MARGIN + (58 - logoSize.width) / 2,
+      PAGE_HEIGHT - 82 + (58 - logoSize.height) / 2,
+      logoSize.width,
+      logoSize.height,
+    );
   } else {
-    pdf.text("D", MARGIN + 25, PAGE_HEIGHT - 62, 18, BRAND_GREEN, "F2");
+    pdf.text("D", MARGIN + 23, PAGE_HEIGHT - 60, 18, [255, 255, 255], "F2");
   }
+  pdf.line(MARGIN, PAGE_HEIGHT - 92, PAGE_WIDTH - MARGIN, PAGE_HEIGHT - 92, BRAND_ORANGE, 1.2);
   const companyCity = [company.city, company.state].filter(Boolean).join("/");
   pdf.text(
     cleanText(company.legalName),
@@ -1146,13 +1166,17 @@ const drawLabelValue = (
   x: number,
   y: number,
   width: number,
+  options: { fontSize?: number; maxLines?: number } = {},
 ) => {
-  pdf.text(label.toUpperCase(), x, y + 14, 7.5, MUTED, "F2");
-  wrapText(value, Math.max(18, Math.floor(width / 5.2)))
-    .slice(0, 2)
-    .forEach((line, index) =>
-      pdf.text(line, x, y - index * 11, 9.5, SLATE, index === 0 ? "F2" : "F1"),
-    );
+  const fontSize = options.fontSize ?? 8.5;
+  const lineGap = fontSize + 2.2;
+  const lines = wrapText(value, Math.max(12, Math.floor(width / (fontSize * 0.58))))
+    .slice(0, options.maxLines ?? 3);
+  pdf.text(label.toUpperCase(), x, y + 12, 7, MUTED, "F2");
+  lines.forEach((line, index) =>
+    pdf.text(line, x, y - index * lineGap, fontSize, SLATE, index === 0 ? "F2" : "F1"),
+  );
+  return 15 + lines.length * lineGap;
 };
 
 const drawDateBoxField = (
@@ -1172,12 +1196,11 @@ const drawMultilineLabelValue = (
   lines: string[],
   x: number,
   y: number,
-) => {
-  pdf.text(label.toUpperCase(), x, y + 14, 7.5, MUTED, "F2");
-  lines.slice(0, 2).forEach((line, index) =>
-    pdf.text(line, x, y - index * 10, 8.5, SLATE, index === 0 ? "F2" : "F1"),
-  );
-};
+  width = 120,
+) =>
+  drawLabelValue(pdf, label, lines.filter(Boolean).join(" "), x, y, width, {
+    fontSize: 8.5,
+  });
 
 const getWrappedLines = (text: string, width: number, fontSize = 7.5) =>
   wrapText(text, Math.max(4, Math.floor(width / (fontSize * 0.65))));
@@ -1347,69 +1370,134 @@ export const buildErpOrderPdf = (
 
   pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
-  pdf.rect(MARGIN, y - 78, PAGE_WIDTH - MARGIN * 2, 82, null, BORDER);
-  drawLabelValue(pdf, "Cliente", clientLegalName, MARGIN + 12, y - 18, 230);
-  drawLabelValue(
-    pdf,
-    "Código ERP",
-    cleanText(client.code),
-    MARGIN + 260,
-    y - 18,
-    70,
+
+  const clientBoxX = MARGIN;
+  const clientBoxWidth = PAGE_WIDTH - MARGIN * 2;
+  const clientPadding = 12;
+  const clientGap = 12;
+  const clientInnerWidth = clientBoxWidth - clientPadding * 2;
+  const firstRowY = y - 18;
+  const clientNameWidth = 250;
+  const clientCodeWidth = 76;
+  const clientDocWidth =
+    clientInnerWidth - clientNameWidth - clientCodeWidth - clientGap * 2;
+  const firstRowHeight = Math.max(
+    drawLabelValue(
+      pdf,
+      "Cliente",
+      clientLegalName,
+      clientBoxX + clientPadding,
+      firstRowY,
+      clientNameWidth,
+      { fontSize: 8.8, maxLines: 3 },
+    ),
+    drawLabelValue(
+      pdf,
+      "Código ERP",
+      cleanText(client.code),
+      clientBoxX + clientPadding + clientNameWidth + clientGap,
+      firstRowY,
+      clientCodeWidth,
+      { fontSize: 8.6, maxLines: 2 },
+    ),
+    drawLabelValue(
+      pdf,
+      "CNPJ/CPF",
+      getClientDocument(client, metadata.partner),
+      clientBoxX +
+        clientPadding +
+        clientNameWidth +
+        clientCodeWidth +
+        clientGap * 2,
+      firstRowY,
+      clientDocWidth,
+      { fontSize: 8.6, maxLines: 2 },
+    ),
   );
-  drawLabelValue(
-    pdf,
-    "CNPJ/CPF",
-    getClientDocument(client, metadata.partner),
-    MARGIN + 350,
-    y - 18,
-    150,
+
+  const secondRowY = firstRowY - firstRowHeight - 6;
+  const addressWidth = 246;
+  const districtWidth = 126;
+  const cityWidth = clientInnerWidth - addressWidth - districtWidth - clientGap * 2;
+  const secondRowHeight = Math.max(
+    drawLabelValue(
+      pdf,
+      "Endereço",
+      clientAddress.address,
+      clientBoxX + clientPadding,
+      secondRowY,
+      addressWidth,
+      { fontSize: 8.2, maxLines: 3 },
+    ),
+    drawLabelValue(
+      pdf,
+      "Bairro",
+      cleanText(clientAddress.district),
+      clientBoxX + clientPadding + addressWidth + clientGap,
+      secondRowY,
+      districtWidth,
+      { fontSize: 8.2, maxLines: 3 },
+    ),
+    drawMultilineLabelValue(
+      pdf,
+      "Cidade/UF/CEP",
+      [
+        [clientAddress.city, clientAddress.state].filter(Boolean).join("/"),
+        clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : "",
+      ].filter(Boolean),
+      clientBoxX + clientPadding + addressWidth + districtWidth + clientGap * 2,
+      secondRowY,
+      cityWidth,
+    ),
   );
-  drawLabelValue(
-    pdf,
-    "Endereço",
-    clientAddress.address,
-    MARGIN + 12,
-    y - 50,
-    220,
+
+  const thirdRowY = secondRowY - secondRowHeight - 6;
+  const thirdRowHeight = Math.max(
+    drawLabelValue(
+      pdf,
+      "Fone",
+      cleanText(clientAddress.phone),
+      clientBoxX + clientPadding,
+      thirdRowY,
+      150,
+      { fontSize: 8.3, maxLines: 2 },
+    ),
+    drawLabelValue(
+      pdf,
+      "Vendedor",
+      `${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
+      clientBoxX + clientPadding + 166,
+      thirdRowY,
+      190,
+      { fontSize: 8.3, maxLines: 2 },
+    ),
+    fantasyName && fantasyName !== clientLegalName
+      ? drawLabelValue(
+          pdf,
+          "Fantasia",
+          fantasyName,
+          clientBoxX + clientPadding + 372,
+          thirdRowY,
+          145,
+          { fontSize: 8.3, maxLines: 2 },
+        )
+      : 0,
   );
-  drawLabelValue(
-    pdf,
-    "Bairro",
-    cleanText(clientAddress.district),
-    MARGIN + 248,
-    y - 50,
-    80,
+
+  const clientBoxHeight = Math.max(
+    86,
+    firstRowHeight + secondRowHeight + thirdRowHeight + 42,
   );
-  drawMultilineLabelValue(
-    pdf,
-    "Cidade/UF/CEP",
-    [
-      [clientAddress.city, clientAddress.state].filter(Boolean).join("/"),
-      clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : "",
-    ].filter(Boolean),
-    MARGIN + 345,
-    y - 50,
+  pdf.rect(clientBoxX, y - clientBoxHeight, clientBoxWidth, clientBoxHeight + 4, null, BORDER);
+  pdf.line(
+    clientBoxX,
+    y - clientBoxHeight + 4,
+    clientBoxX + clientBoxWidth,
+    y - clientBoxHeight + 4,
+    BRAND_ORANGE,
+    0.6,
   );
-  drawLabelValue(
-    pdf,
-    "Fone",
-    cleanText(clientAddress.phone),
-    MARGIN + 455,
-    y - 50,
-    70,
-  );
-  drawLabelValue(
-    pdf,
-    "Vendedor",
-    `${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
-    MARGIN + 12,
-    y - 70,
-    300,
-  );
-  if (fantasyName && fantasyName !== clientLegalName)
-    pdf.text(`Fantasia: ${fantasyName}`, MARGIN + 330, y - 70, 7, MUTED);
-  y -= 88;
+  y -= clientBoxHeight + 10;
 
   pdf.text("Itens", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
