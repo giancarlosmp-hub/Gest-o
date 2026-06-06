@@ -202,7 +202,15 @@ function AppLayoutShell() {
           <button className="rounded-md p-1 text-brand-700" onClick={() => setMobileOpen(true)} aria-label="Abrir menu">
             <Menu />
           </button>
-          <BrandLogo context="header" tone="dark" compact className="min-w-0" />
+          <BrandLogo
+            context="header"
+            tone="dark"
+            showText
+            className="min-w-0 flex-1"
+            textClassName="min-w-0"
+            brandNameClassName="font-bold text-brand-700"
+            taglineClassName="font-medium text-slate-700"
+          />
           <button
             className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-700 px-2.5 py-2 text-xs font-medium text-white hover:bg-brand-800"
             onClick={logout}
