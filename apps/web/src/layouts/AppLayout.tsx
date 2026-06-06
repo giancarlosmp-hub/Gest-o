@@ -25,6 +25,7 @@ import { canAccessRoute, type AppRoute } from "../lib/authorization";
 import { useReminders } from "../hooks/useReminders";
 import MobileActionBar from "../components/mobile/MobileActionBar";
 import SidebarItem from "../components/sidebar/SidebarItem";
+import SidebarBrand from "../components/sidebar/SidebarBrand";
 import { SidebarProvider, useSidebar } from "../context/SidebarContext";
 
 type SidebarNavItem = {
@@ -150,14 +151,7 @@ function AppLayoutShell() {
   ) => (
     <>
       {options?.showBrand === false ? null : (
-        <div className="mb-4 flex h-11 items-center overflow-hidden px-2">
-          <div className={expanded ? "block" : "hidden"}>
-            <BrandLogo context="sidebar" tone="light" showText className="min-w-0" />
-          </div>
-          <div className={expanded ? "hidden" : "flex w-full justify-center"}>
-            <BrandLogo context="sidebar" tone="light" compact />
-          </div>
-        </div>
+        <SidebarBrand expanded={expanded} className="mb-4 px-2" />
       )}
 
       <nav className="flex-1 space-y-1.5">
@@ -223,8 +217,8 @@ function AppLayoutShell() {
         <div className="fixed inset-0 z-[60] md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 h-full w-[84%] max-w-[280px] bg-brand-700 px-3 py-4 text-white shadow-2xl">
-            <div className="mb-3 flex items-center justify-between px-1">
-              <BrandLogo context="header" tone="light" compact />
+            <div className="mb-3 flex items-center justify-between gap-2 px-1">
+              <SidebarBrand expanded className="flex-1" />
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
