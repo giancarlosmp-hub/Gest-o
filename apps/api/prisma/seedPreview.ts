@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from "@prisma/client";
+import { AgendaEventStatus, AgendaEventType, OpportunityStage, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
@@ -106,6 +106,110 @@ const PREVIEW_PRODUCTS = [
   }
 ] as const;
 
+
+type PreviewTerritoryCityTemplate = {
+  city: string;
+  state: "PR" | "SC" | "MS";
+  ibgeCode?: string;
+};
+
+type PreviewTerritoryStatusTemplate = PreviewTerritoryCityTemplate & {
+  status: "green" | "yellow";
+  value: number;
+};
+
+const ANA_WEST_SOUTHWEST_PR_TERRITORY: PreviewTerritoryCityTemplate[] = [
+  { city: "Toledo", state: "PR" },
+  { city: "Cascavel", state: "PR" },
+  { city: "Marechal Cândido Rondon", state: "PR" },
+  { city: "Palotina", state: "PR" },
+  { city: "Assis Chateaubriand", state: "PR" },
+  { city: "Cafelândia", state: "PR" },
+  { city: "Santa Helena", state: "PR" },
+  { city: "Medianeira", state: "PR" },
+  { city: "Foz do Iguaçu", state: "PR" },
+  { city: "São Miguel do Iguaçu", state: "PR" },
+  { city: "Matelândia", state: "PR" },
+  { city: "Corbélia", state: "PR" },
+  { city: "Jesuítas", state: "PR" },
+  { city: "Tupãssi", state: "PR" },
+  { city: "Nova Aurora", state: "PR" },
+  { city: "Quatro Pontes", state: "PR" },
+  { city: "Mercedes", state: "PR" },
+  { city: "Pato Bragado", state: "PR" },
+  { city: "Entre Rios do Oeste", state: "PR" },
+  { city: "Guaíra", state: "PR" },
+  { city: "Francisco Beltrão", state: "PR" },
+  { city: "Pato Branco", state: "PR" },
+  { city: "Dois Vizinhos", state: "PR" },
+  { city: "Realeza", state: "PR" },
+  { city: "Capanema", state: "PR" },
+  { city: "Ampére", state: "PR" },
+  { city: "Chopinzinho", state: "PR" },
+  { city: "Coronel Vivida", state: "PR" }
+];
+
+const BRUNO_NORTHWEST_SC_TERRITORY: PreviewTerritoryCityTemplate[] = [
+  { city: "Umuarama", state: "PR" },
+  { city: "Cianorte", state: "PR" },
+  { city: "Campo Mourão", state: "PR" },
+  { city: "Goioerê", state: "PR" },
+  { city: "Maringá", state: "PR" },
+  { city: "Paranavaí", state: "PR" },
+  { city: "Loanda", state: "PR" },
+  { city: "Terra Rica", state: "PR" },
+  { city: "Iporã", state: "PR" },
+  { city: "Cruzeiro do Oeste", state: "PR" },
+  { city: "Chapecó", state: "SC" },
+  { city: "Xanxerê", state: "SC" },
+  { city: "São Miguel do Oeste", state: "SC" },
+  { city: "Concórdia", state: "SC" },
+  { city: "Joaçaba", state: "SC" },
+  { city: "Campo Erê", state: "SC" },
+  { city: "Maravilha", state: "SC" },
+  { city: "Pinhalzinho", state: "SC" }
+];
+
+const CARLA_MS_TERRITORY: PreviewTerritoryCityTemplate[] = [
+  { city: "Ponta Porã", state: "MS" },
+  { city: "Dourados", state: "MS" },
+  { city: "Maracaju", state: "MS" },
+  { city: "Naviraí", state: "MS" },
+  { city: "Amambai", state: "MS" },
+  { city: "Mundo Novo", state: "MS" },
+  { city: "Itaquiraí", state: "MS" },
+  { city: "Sidrolândia", state: "MS" }
+];
+
+const PREVIEW_TERRITORIES_BY_SELLER_EMAIL: Record<string, PreviewTerritoryCityTemplate[]> = {
+  "ana.preview@preview.local": ANA_WEST_SOUTHWEST_PR_TERRITORY,
+  "bruno.preview@preview.local": BRUNO_NORTHWEST_SC_TERRITORY,
+  "carla.preview@preview.local": CARLA_MS_TERRITORY
+};
+
+const ANA_TERRITORY_COLOR_FIXTURES: PreviewTerritoryStatusTemplate[] = [
+  { city: "Toledo", state: "PR", status: "green", value: 128000 },
+  { city: "Cascavel", state: "PR", status: "green", value: 96000 },
+  { city: "Palotina", state: "PR", status: "yellow", value: 54000 },
+  { city: "Marechal Cândido Rondon", state: "PR", status: "yellow", value: 47000 }
+];
+
+const BRUNO_TERRITORY_COLOR_FIXTURES: PreviewTerritoryStatusTemplate[] = [
+  { city: "Umuarama", state: "PR", status: "green", value: 76000 },
+  { city: "Chapecó", state: "SC", status: "yellow", value: 43000 }
+];
+
+const CARLA_TERRITORY_COLOR_FIXTURES: PreviewTerritoryStatusTemplate[] = [
+  { city: "Dourados", state: "MS", status: "green", value: 88000 },
+  { city: "Ponta Porã", state: "MS", status: "yellow", value: 39000 }
+];
+
+const PREVIEW_TERRITORY_STATUS_BY_SELLER_EMAIL: Record<string, PreviewTerritoryStatusTemplate[]> = {
+  "ana.preview@preview.local": ANA_TERRITORY_COLOR_FIXTURES,
+  "bruno.preview@preview.local": BRUNO_TERRITORY_COLOR_FIXTURES,
+  "carla.preview@preview.local": CARLA_TERRITORY_COLOR_FIXTURES
+};
+
 const PREVIEW_CLIENTS: PreviewClientTemplate[] = [
   { name: "Fazenda Horizonte", city: "Ribeirão Preto", state: "SP", region: "Sudeste", segment: "Soja" },
   { name: "Sítio Boa Safra", city: "Uberaba", state: "MG", region: "Sudeste", segment: "Milho" },
@@ -120,7 +224,7 @@ const PREVIEW_CLIENTS: PreviewClientTemplate[] = [
 ];
 
 type SeedOpportunityTemplate = {
-  stage: Prisma.OpportunityStage;
+  stage: OpportunityStage;
   title: string;
   daysFromNowProposal: number;
   daysFromNowFollowUp: number;
@@ -132,11 +236,11 @@ type SeedOpportunityTemplate = {
 
 type PreviewAgendaTemplate = {
   title: string;
-  type: Prisma.AgendaEventType;
+  type: AgendaEventType;
   startOffsetDays: number;
   startHour: number;
   durationHours: number;
-  status: Prisma.AgendaEventStatus;
+  status: AgendaEventStatus;
   notes: string;
   withStops?: boolean;
 };
@@ -225,7 +329,18 @@ async function upsertSeller(name: string, email: string, region: string) {
   });
 }
 
-async function cleanOldPreviewSeedData() {
+async function cleanOldPreviewSeedData(sellerIds: string[]) {
+  await prisma.erpOrderSync.deleteMany({
+    where: {
+      sellerId: { in: sellerIds },
+      pedidoIdImportacao: { contains: PREVIEW_SEED_TAG }
+    }
+  });
+
+  await prisma.sellerTerritoryCity.deleteMany({
+    where: { sellerId: { in: sellerIds } }
+  });
+
   await prisma.activity.deleteMany({
     where: {
       notes: { contains: PREVIEW_SEED_TAG }
@@ -260,6 +375,97 @@ async function cleanOldPreviewSeedData() {
   });
 }
 
+async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertSeller>>[], now: Date) {
+  let territoryCityCount = 0;
+  let territoryOpportunityCount = 0;
+  let territoryOrderCount = 0;
+
+  for (const seller of sellers) {
+    const territory = PREVIEW_TERRITORIES_BY_SELLER_EMAIL[seller.email] ?? [];
+    if (territory.length > 0) {
+      await prisma.sellerTerritoryCity.createMany({
+        data: territory.map((territoryCity) => ({
+          sellerId: seller.id,
+          city: territoryCity.city,
+          state: territoryCity.state,
+          ibgeCode: territoryCity.ibgeCode
+        })),
+        skipDuplicates: true
+      });
+      territoryCityCount += territory.length;
+    }
+
+    const colorFixtures = PREVIEW_TERRITORY_STATUS_BY_SELLER_EMAIL[seller.email] ?? [];
+    for (const [index, fixture] of colorFixtures.entries()) {
+      const client = await prisma.client.create({
+        data: {
+          name: `${PREVIEW_SEED_TAG} Cliente Território ${fixture.city}`,
+          city: fixture.city,
+          state: fixture.state,
+          region: fixture.state === "MS" ? "Centro-Oeste" : "Sul",
+          segment: index % 2 === 0 ? "Soja" : "Milho",
+          potentialHa: 420 + index * 35,
+          farmSizeHa: 650 + index * 45,
+          ownerSellerId: seller.id
+        }
+      });
+
+      const opportunity = await prisma.opportunity.create({
+        data: {
+          title: `${PREVIEW_SEED_TAG} Território ${fixture.city}`,
+          value: fixture.value,
+          stage: fixture.status === "green" ? "ganho" : "proposta",
+          crop: "soja",
+          season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
+          areaHa: 120 + index * 18,
+          productOffered: "Pacote Demetra Preview",
+          proposalDate: addDays(now, -Math.min(index + 1, 12)),
+          followUpDate: addDays(now, fixture.status === "green" ? -1 : 3),
+          expectedCloseDate: addDays(now, fixture.status === "green" ? -1 : 10),
+          closedAt: fixture.status === "green" ? addDays(now, -1) : null,
+          lastContactAt: addDays(now, -1),
+          probability: fixture.status === "green" ? 100 : 70,
+          notes: `${PREVIEW_SEED_TAG} oportunidade criada para validar cores do mapa de territórios no preview`,
+          clientId: client.id,
+          ownerSellerId: seller.id
+        }
+      });
+      territoryOpportunityCount += 1;
+
+      if (fixture.status === "green") {
+        await prisma.erpOrderSync.create({
+          data: {
+            opportunityId: opportunity.id,
+            sellerId: seller.id,
+            pedidoIdImportacao: `${PREVIEW_SEED_TAG}-territory-${seller.id}-${index}`,
+            numPedido: `PV-${String(index + 1).padStart(4, "0")}`,
+            erpOrderNumber: `ERP-PV-${String(index + 1).padStart(4, "0")}`,
+            status: "sent",
+            orderStatus: "faturado",
+            payloadSent: {
+              previewSeed: true,
+              source: PREVIEW_SEED_TAG,
+              city: fixture.city,
+              state: fixture.state,
+              note: "Pedido ERP fictício criado somente pelo seed de preview; não chama UltraFV3."
+            },
+            erpResponse: {
+              previewSeed: true,
+              message: "Pedido fictício de preview marcado como enviado."
+            },
+            sentAt: now,
+            createdAt: now,
+            updatedAt: now
+          }
+        });
+        territoryOrderCount += 1;
+      }
+    }
+  }
+
+  return { territoryCityCount, territoryOpportunityCount, territoryOrderCount };
+}
+
 async function createPreviewDataset() {
   const now = new Date();
   const currentMonth = monthString(now);
@@ -269,7 +475,7 @@ async function createPreviewDataset() {
     PREVIEW_SELLERS.map((seller) => upsertSeller(seller.name, seller.email, seller.region))
   );
 
-  await cleanOldPreviewSeedData();
+  await cleanOldPreviewSeedData(sellers.map((seller) => seller.id));
 
   for (const productTemplate of PREVIEW_PRODUCTS) {
     const product = await prisma.product.create({
@@ -391,6 +597,8 @@ async function createPreviewDataset() {
     opportunityCounter += 1;
   }
 
+  const territorySeedSummary = await seedPreviewTerritories(sellers, now);
+
   for (const [index, template] of PREVIEW_AGENDA_TEMPLATES.entries()) {
     const ownerSeller = sellers[index % sellers.length];
     const client = clients[index % clients.length];
@@ -458,6 +666,9 @@ async function createPreviewDataset() {
     clients: PREVIEW_CLIENTS.length,
     opportunities: OPPORTUNITY_TEMPLATES.length,
     agendaEvents: PREVIEW_AGENDA_TEMPLATES.length,
+    territoryCities: territorySeedSummary.territoryCityCount,
+    territoryOpportunities: territorySeedSummary.territoryOpportunityCount,
+    territoryOrders: territorySeedSummary.territoryOrderCount,
     tag: PREVIEW_SEED_TAG
   });
 }

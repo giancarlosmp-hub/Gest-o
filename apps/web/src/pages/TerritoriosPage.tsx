@@ -42,11 +42,15 @@ type TerritoryCoverageResponse = {
 };
 
 
-const PARANA_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-41-mun.json";
-const PARANA_GEOJSON_SOURCE = "tbrugz/geodata-br (GeoJSON por estado com fonte IBGE, CC0-1.0)";
-const PARANA_GEOJSON_SIZE_LABEL = "aprox. 1,52 MB";
-const MAP_WIDTH = 900;
-const MAP_HEIGHT = 620;
+const TERRITORY_GEOJSON_STATES = [
+  { uf: "PR", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-41-mun.json" },
+  { uf: "SC", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-42-mun.json" },
+  { uf: "MS", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-50-mun.json" }
+] as const;
+const TERRITORY_GEOJSON_SOURCE = "tbrugz/geodata-br (GeoJSON por UF com fonte IBGE, CC0-1.0)";
+const TERRITORY_GEOJSON_SIZE_LABEL = "aprox. 3 MB somando PR, SC e MS";
+const MAP_WIDTH = 1100;
+const MAP_HEIGHT = 760;
 const MAP_PADDING = 18;
 
 type GeoJsonPosition = [number, number] | [number, number, number];
@@ -58,15 +62,15 @@ type GeoJsonGeometry = {
   coordinates: GeoJsonPolygon | GeoJsonMultiPolygon;
 };
 
-type ParanaMunicipalityFeature = {
+type TerritoryMunicipalityFeature = {
   type: "Feature";
   properties: Record<string, string | number | null | undefined>;
   geometry: GeoJsonGeometry | null;
 };
 
-type ParanaMunicipalityGeoJson = {
+type TerritoryMunicipalityGeoJson = {
   type: "FeatureCollection";
-  features: ParanaMunicipalityFeature[];
+  features: TerritoryMunicipalityFeature[];
 };
 
 type ProjectedBounds = {
@@ -101,16 +105,28 @@ function normalizeCityKey(value: string) {
     .toUpperCase();
 }
 
-function getFeatureCityName(feature: ParanaMunicipalityFeature) {
+function getFeatureCityName(feature: TerritoryMunicipalityFeature) {
   const props = feature.properties ?? {};
   const candidate = props.name ?? props.nome ?? props.NM_MUN ?? props.NM_MUNICIP ?? props.description ?? props.municipio ?? props.MUNICIPIO;
   return String(candidate ?? "Município");
 }
 
-function getFeatureIbgeCode(feature: ParanaMunicipalityFeature) {
+function getFeatureIbgeCode(feature: TerritoryMunicipalityFeature) {
   const props = feature.properties ?? {};
   const candidate = props.id ?? props.codigo_ibge ?? props.CD_MUN ?? props.CD_GEOCMU ?? props.geocodigo;
   return candidate === undefined || candidate === null ? "" : String(candidate);
+}
+
+function getFeatureState(feature: TerritoryMunicipalityFeature) {
+  const props = feature.properties ?? {};
+  const explicitState = props.__state ?? props.uf ?? props.UF ?? props.state;
+  if (explicitState) return String(explicitState).toUpperCase();
+
+  const ibgeCode = getFeatureIbgeCode(feature);
+  if (ibgeCode.startsWith("41")) return "PR";
+  if (ibgeCode.startsWith("42")) return "SC";
+  if (ibgeCode.startsWith("50")) return "MS";
+  return "";
 }
 
 function getPolygons(geometry: GeoJsonGeometry | null): GeoJsonPolygon[] {
@@ -120,7 +136,7 @@ function getPolygons(geometry: GeoJsonGeometry | null): GeoJsonPolygon[] {
   return [];
 }
 
-function calculateBounds(features: ParanaMunicipalityFeature[]): ProjectedBounds {
+function calculateBounds(features: TerritoryMunicipalityFeature[]): ProjectedBounds {
   const bounds = features.reduce<ProjectedBounds>((acc, feature) => {
     getPolygons(feature.geometry).forEach((polygon) => {
       polygon.forEach((ring) => {
@@ -166,7 +182,7 @@ function polygonToPath(polygon: GeoJsonPolygon, bounds: ProjectedBounds) {
     .join(" ");
 }
 
-function featureToPath(feature: ParanaMunicipalityFeature, bounds: ProjectedBounds) {
+function featureToPath(feature: TerritoryMunicipalityFeature, bounds: ProjectedBounds) {
   return getPolygons(feature.geometry).map((polygon) => polygonToPath(polygon, bounds)).join(" ");
 }
 
@@ -182,10 +198,10 @@ function getTooltipText(city: TerritoryCity, sellerName?: string) {
   ].join("\n");
 }
 
-function createOutOfTerritoryCity(city: string): TerritoryCity {
+function createOutOfTerritoryCity(city: string, state: string): TerritoryCity {
   return {
     city,
-    state: "PR",
+    state,
     status: "out_of_territory",
     statusLabel: "Fora do território",
     orderCount: 0,
@@ -266,7 +282,7 @@ export default function TerritoriosPage() {
   const [coverage, setCoverage] = useState<TerritoryCoverageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [paranaGeoJson, setParanaGeoJson] = useState<ParanaMunicipalityGeoJson | null>(null);
+  const [territoryGeoJson, setTerritoryGeoJson] = useState<TerritoryMunicipalityGeoJson | null>(null);
   const [geoJsonError, setGeoJsonError] = useState<string | null>(null);
   const [selectedCity, setSelectedCity] = useState<TerritoryCity | null>(null);
 
@@ -288,7 +304,7 @@ export default function TerritoriosPage() {
     });
     return map;
   }, [visualCities]);
-  const geoBounds = useMemo(() => calculateBounds(paranaGeoJson?.features ?? []), [paranaGeoJson]);
+  const geoBounds = useMemo(() => calculateBounds(territoryGeoJson?.features ?? []), [territoryGeoJson]);
   const missingCities = Math.max((coverage?.summary.totalCities ?? 0) - (coverage?.summary.positiveCities ?? 0), 0);
 
   useEffect(() => {
@@ -314,20 +330,24 @@ export default function TerritoriosPage() {
     let mounted = true;
     setGeoJsonError(null);
 
-    fetch(PARANA_GEOJSON_URL)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        return response.json() as Promise<ParanaMunicipalityGeoJson>;
-      })
-      .then((data) => {
+    Promise.all(TERRITORY_GEOJSON_STATES.map(async ({ uf, url }) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ao carregar ${uf}`);
+      }
+      const data = await response.json() as TerritoryMunicipalityGeoJson;
+      return data.features.map((feature) => ({
+        ...feature,
+        properties: { ...feature.properties, __state: uf }
+      }));
+    }))
+      .then((stateFeatures) => {
         if (!mounted) return;
-        setParanaGeoJson(data);
+        setTerritoryGeoJson({ type: "FeatureCollection", features: stateFeatures.flat() });
       })
       .catch(() => {
         if (!mounted) return;
-        setGeoJsonError("Não foi possível carregar o GeoJSON dos municípios do Paraná. Recarregue a página ou verifique a rede.");
+        setGeoJsonError("Não foi possível carregar o GeoJSON dos municípios de PR, SC e MS. Recarregue a página ou verifique a rede.");
       });
 
     return () => { mounted = false; };
@@ -433,8 +453,8 @@ export default function TerritoriosPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Mapa real dos municípios do Paraná</h2>
-              <p className="text-sm text-slate-500">GeoJSON simplificado por UF, colorido somente com o status calculado pelo backend.</p>
+              <h2 className="text-lg font-bold text-slate-900">Mapa real dos municípios de PR, SC e MS</h2>
+              <p className="text-sm text-slate-500">GeoJSON por UF, colorido somente com o status calculado pelo backend para a região de atuação Demetra.</p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
               {Object.entries(statusStyles).map(([status, style]) => (
@@ -446,28 +466,28 @@ export default function TerritoriosPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="min-h-[340px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="min-h-[520px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
               {loading ? (
-                <div className="flex h-full min-h-[340px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando território...</div>
+                <div className="flex h-full min-h-[520px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando território...</div>
               ) : geoJsonError ? (
-                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500">
+                <div className="flex h-full min-h-[520px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500">
                   <AlertCircle className="text-amber-500" size={22} />
                   <span>{geoJsonError}</span>
                 </div>
-              ) : paranaGeoJson ? (
+              ) : territoryGeoJson ? (
                 <svg
-                  className="h-full min-h-[340px] w-full touch-manipulation"
+                  className="h-full min-h-[520px] w-full touch-manipulation"
                   role="img"
-                  aria-label="Mapa de cobertura comercial dos municípios do Paraná"
+                  aria-label="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
                   viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
                 >
                   <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
-                  {paranaGeoJson.features.map((feature) => {
+                  {territoryGeoJson.features.map((feature) => {
                     const featureCityName = getFeatureCityName(feature);
                     const city = citiesByIbgeCode.get(getFeatureIbgeCode(feature))
                       ?? citiesByNormalizedName.get(normalizeCityKey(featureCityName))
-                      ?? createOutOfTerritoryCity(featureCityName);
+                      ?? createOutOfTerritoryCity(featureCityName, getFeatureState(feature));
                     const isSelected = selectedCity ? normalizeCityKey(selectedCity.city) === normalizeCityKey(featureCityName) : false;
                     const path = featureToPath(feature, geoBounds);
                     if (!path) return null;
@@ -499,7 +519,7 @@ export default function TerritoriosPage() {
                   })}
                 </svg>
               ) : (
-                <div className="flex h-full min-h-[340px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando mapa do Paraná...</div>
+                <div className="flex h-full min-h-[520px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando mapa de PR, SC e MS...</div>
               )}
             </div>
 
@@ -531,7 +551,7 @@ export default function TerritoriosPage() {
 
           <div className="mt-3 flex flex-col gap-1 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>Biblioteca: React + SVG GeoJSON (sem dependência externa de mapa nesta etapa).</span>
-            <span>Origem: {PARANA_GEOJSON_SOURCE}; tamanho {PARANA_GEOJSON_SIZE_LABEL}.</span>
+            <span>Origem: {TERRITORY_GEOJSON_SOURCE}; tamanho {TERRITORY_GEOJSON_SIZE_LABEL}.</span>
           </div>
         </div>
 
