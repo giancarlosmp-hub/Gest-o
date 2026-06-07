@@ -26,9 +26,9 @@ const BRAND_SOFT = [245, 250, 247] as const;
 const SLATE = [51, 65, 85] as const;
 const MUTED = [100, 116, 139] as const;
 const BORDER = [203, 213, 225] as const;
-const HEADER_HEIGHT = 112;
+const HEADER_HEIGHT = 86;
 const HEADER_BOTTOM_Y = PAGE_HEIGHT - HEADER_HEIGHT;
-const CONTENT_TOP_Y = HEADER_BOTTOM_Y - 16;
+const CONTENT_TOP_Y = HEADER_BOTTOM_Y - 12;
 
 export type ErpOrderPdfRecord = ErpOrderSync & {
   opportunity: Opportunity & {
@@ -1112,8 +1112,8 @@ const drawHeader = (
     1.2,
   );
 
-  const logoAreaWidth = 74;
-  const logoAreaHeight = 74;
+  const logoAreaWidth = 58;
+  const logoAreaHeight = 58;
   const logoAreaX = MARGIN;
   const logoAreaY = HEADER_BOTTOM_Y + (HEADER_HEIGHT - logoAreaHeight) / 2;
   if (DEMETRA_LOGO) {
@@ -1131,68 +1131,79 @@ const drawHeader = (
     );
   }
 
-  const centerX = MARGIN + logoAreaWidth + 18;
-  const rightCardWidth = 132;
+  const centerX = MARGIN + logoAreaWidth + 14;
+  const rightCardWidth = 118;
   const rightCardX = PAGE_WIDTH - MARGIN - rightCardWidth;
-  const centerWidth = rightCardX - centerX - 18;
+  const centerWidth = rightCardX - centerX - 14;
   const companyCity = [company.city, company.state].filter(Boolean).join("/");
-  const addressLines = wrapText(
-    `${cleanText(company.address)} - ${cleanText(company.district)} - ${companyCity} - CEP ${cleanText(company.cep)}`,
-    Math.floor(centerWidth / (7.1 * 0.54)),
-  ).slice(0, 2);
-
-  pdf.text(
-    cleanText(company.legalName),
-    centerX,
-    PAGE_HEIGHT - 36,
-    11.2,
-    [255, 255, 255],
-    "F2",
-  );
-  pdf.text(
-    cleanText(company.brandName),
-    centerX,
-    PAGE_HEIGHT - 52,
-    10,
-    [221, 245, 229],
-    "F2",
-  );
-  addressLines.forEach((line, index) =>
+  const headerLines = [
+    {
+      text: cleanText(company.legalName),
+      size: 10.3,
+      color: [255, 255, 255] as const,
+      font: "F2",
+    },
+    {
+      text: cleanText(company.brandName),
+      size: 8.8,
+      color: [221, 245, 229] as const,
+      font: "F2",
+    },
+    {
+      text: `${cleanText(company.address)} - ${cleanText(company.district)}`,
+      size: 6.9,
+      color: [221, 245, 229] as const,
+      font: "F1",
+    },
+    {
+      text: `${companyCity} - CEP ${cleanText(company.cep)}`,
+      size: 6.9,
+      color: [221, 245, 229] as const,
+      font: "F1",
+    },
+    {
+      text: `CNPJ: ${cleanText(company.cnpj)} | IE: ${cleanText(company.stateRegistration)} | Fone: ${cleanText(company.phone)}`,
+      size: 6.8,
+      color: [221, 245, 229] as const,
+      font: "F1",
+    },
+  ];
+  let lineY = PAGE_HEIGHT - 28;
+  for (const line of headerLines) {
+    const wrapped = wrapText(
+      line.text,
+      Math.max(20, Math.floor(centerWidth / (line.size * 0.5))),
+    ).slice(0, 1);
     pdf.text(
-      line,
+      wrapped[0] || "-",
       centerX,
-      PAGE_HEIGHT - 67 - index * 10,
-      7.1,
-      [221, 245, 229],
-    ),
-  );
-  pdf.text(
-    `CNPJ: ${cleanText(company.cnpj)}   IE: ${cleanText(company.stateRegistration)}   Fone: ${cleanText(company.phone)}`,
-    centerX,
-    HEADER_BOTTOM_Y + 16,
-    7.1,
-    [221, 245, 229],
-  );
+      lineY,
+      line.size,
+      line.color,
+      line.font,
+    );
+    lineY -= line.size + 3;
+  }
 
   const emittedAt = new Date().toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
   });
-  const rightCardY = HEADER_BOTTOM_Y + 31;
-  pdf.rect(rightCardX, rightCardY, rightCardWidth, 54, [255, 255, 255]);
-  pdf.text("Emissão", rightCardX + 10, rightCardY + 36, 7, MUTED, "F2");
+  const rightCardY = HEADER_BOTTOM_Y + 22;
+  pdf.rect(rightCardX, rightCardY, rightCardWidth, 44, [255, 255, 255]);
+  pdf.text("Emissão", rightCardX + 8, rightCardY + 30, 6.6, MUTED, "F2");
   pdf.text(
     emittedAt,
-    rightCardX + 10,
-    rightCardY + 23,
-    7,
+    rightCardX + 8,
+    rightCardY + 18,
+    6.4,
     BRAND_GREEN,
     "F2",
   );
   pdf.text(
     `Página ${pageNumber}`,
-    rightCardX + 10,
-    rightCardY + 10,
-    7,
+    rightCardX + 8,
+    rightCardY + 7,
+    6.6,
     BRAND_GREEN,
     "F2",
   );
@@ -1259,13 +1270,13 @@ const getWrappedLines = (text: string, width: number, fontSize = 7.5) =>
   wrapText(text, Math.max(4, Math.floor(width / (fontSize * 0.65))));
 
 const getTableRowHeight = (cells: PdfCell[], header = false) => {
-  const fontSize = header ? 7.2 : 7.5;
+  const fontSize = header ? 7 : 7.1;
   const maxLines = cells.reduce(
     (max, cell) =>
       Math.max(max, getWrappedLines(cell.text, cell.width, fontSize).length),
     1,
   );
-  return Math.max(header ? 20 : 24, 12 + maxLines * 9);
+  return Math.max(header ? 18 : 20, 10 + maxLines * 8);
 };
 
 const ensureSpace = (
@@ -1276,7 +1287,7 @@ const ensureSpace = (
   orderNumber: string,
   company: ErpOrderPdfCompany,
 ) => {
-  if (y - required > 42) return y;
+  if (y - required > 34) return y;
   drawFooter(pdf, pageNumber.value);
   pdf.addPage();
   pageNumber.value += 1;
@@ -1303,7 +1314,7 @@ const drawTableRow = (
     );
   let cursor = x;
   for (const cell of cells) {
-    const lines = getWrappedLines(cell.text, cell.width, header ? 7.2 : 7.5);
+    const lines = getWrappedLines(cell.text, cell.width, header ? 7 : 7.1);
     lines.forEach((line, index) => {
       const textX =
         cell.align === "right"
@@ -1317,8 +1328,8 @@ const drawTableRow = (
       pdf.text(
         line,
         textX,
-        y - 10 - index * 9,
-        header ? 7.2 : 7.5,
+        y - 9 - index * 8,
+        header ? 7 : 7.1,
         header ? [255, 255, 255] : SLATE,
         header ? "F2" : "F1",
       );
@@ -1394,7 +1405,13 @@ export const buildErpOrderPdf = (
   drawHeader(pdf, orderNumber, company, pageNumber.value);
 
   let y = CONTENT_TOP_Y;
-  const orderBandHeight = 34;
+  const orderDate = formatDate(
+    payload.DATA_PEDIDO || order.sentAt || order.createdAt,
+  );
+  const deliveryForecastDate = formatDate(payload.DATA_PREV_ENTREGA);
+  const orderSummary = `Pedido de Venda Nº: ${orderNumber}     Data do Pedido: ${orderDate}     Previsão de Entrega: ${deliveryForecastDate}`;
+  const orderSummaryLines = wrapText(orderSummary, 104).slice(0, 2);
+  const orderBandHeight = orderSummaryLines.length > 1 ? 34 : 24;
   const orderBandY = y - orderBandHeight;
   pdf.rect(
     MARGIN,
@@ -1404,155 +1421,42 @@ export const buildErpOrderPdf = (
     BRAND_SOFT,
     BORDER,
   );
-  pdf.text(
-    `Pedido de Venda Nº: ${orderNumber}`,
-    MARGIN + 14,
-    orderBandY + 12,
-    13,
-    BRAND_GREEN,
-    "F2",
+  orderSummaryLines.forEach((line, index) =>
+    pdf.text(
+      line,
+      MARGIN + 12,
+      orderBandY + orderBandHeight - 15 - index * 10,
+      9,
+      BRAND_GREEN,
+      "F2",
+    ),
   );
-  y = orderBandY - 14;
-  const dateBoxHeight = 40;
-  const dateBoxY = y - dateBoxHeight;
-  pdf.rect(MARGIN, dateBoxY, PAGE_WIDTH - MARGIN * 2, dateBoxHeight, BRAND_LIGHT, BORDER);
-  drawDateBoxField(
-    pdf,
-    "Data do pedido",
-    formatDate(payload.DATA_PEDIDO || order.sentAt || order.createdAt),
-    MARGIN + 110,
-    dateBoxY,
-  );
-  drawDateBoxField(
-    pdf,
-    "Data de entrega",
-    formatDate(payload.DATA_PREV_ENTREGA),
-    MARGIN + 330,
-    dateBoxY,
-  );
-  y = dateBoxY - 22;
+  y = orderBandY - 10;
 
-  pdf.text("Dados do cliente", MARGIN, y, 10, BRAND_GREEN, "F2");
-  y -= 12;
+  pdf.text("Dados do cliente", MARGIN, y, 9, BRAND_GREEN, "F2");
+  y -= 8;
 
   const clientBoxX = MARGIN;
   const clientBoxWidth = PAGE_WIDTH - MARGIN * 2;
-  const clientPadding = 12;
-  const clientGap = 12;
+  const clientPadding = 10;
   const clientInnerWidth = clientBoxWidth - clientPadding * 2;
-  const firstRowY = y - 18;
-  const clientNameWidth = 250;
-  const clientCodeWidth = 76;
-  const clientDocWidth =
-    clientInnerWidth - clientNameWidth - clientCodeWidth - clientGap * 2;
-  const firstRowHeight = Math.max(
-    drawLabelValue(
-      pdf,
-      "Cliente",
-      clientLegalName,
-      clientBoxX + clientPadding,
-      firstRowY,
-      clientNameWidth,
-      { fontSize: 8.8, maxLines: 3 },
-    ),
-    drawLabelValue(
-      pdf,
-      "Código ERP",
-      cleanText(client.code),
-      clientBoxX + clientPadding + clientNameWidth + clientGap,
-      firstRowY,
-      clientCodeWidth,
-      { fontSize: 8.6, maxLines: 2 },
-    ),
-    drawLabelValue(
-      pdf,
-      "CNPJ/CPF",
-      getClientDocument(client, metadata.partner),
-      clientBoxX +
-        clientPadding +
-        clientNameWidth +
-        clientCodeWidth +
-        clientGap * 2,
-      firstRowY,
-      clientDocWidth,
-      { fontSize: 8.6, maxLines: 2 },
+  const cityState = [clientAddress.city, clientAddress.state]
+    .filter(Boolean)
+    .join("/");
+  const clientLines = [
+    `Cliente: ${clientLegalName}     Fantasia: ${cleanText(fantasyName, "-")}     Cód. ERP: ${cleanText(client.code)}`,
+    `CNPJ/CPF: ${getClientDocument(client, metadata.partner)}     Fone: ${cleanText(clientAddress.phone)}`,
+    `Endereço: ${clientAddress.address}`,
+    `Bairro: ${cleanText(clientAddress.district)}     Cidade/UF: ${cityState || "-"}     CEP: ${cleanText(clientAddress.cep)}`,
+    `Vendedor: ${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
+  ].flatMap((line) =>
+    wrapText(line, Math.floor(clientInnerWidth / (7.4 * 0.52))).slice(
+      0,
+      2,
     ),
   );
-
-  const secondRowY = firstRowY - firstRowHeight - 10;
-  const addressWidth = 246;
-  const districtWidth = 126;
-  const cityWidth =
-    clientInnerWidth - addressWidth - districtWidth - clientGap * 2;
-  const secondRowHeight = Math.max(
-    drawLabelValue(
-      pdf,
-      "Endereço",
-      clientAddress.address,
-      clientBoxX + clientPadding,
-      secondRowY,
-      addressWidth,
-      { fontSize: 8.2, maxLines: 4 },
-    ),
-    drawLabelValue(
-      pdf,
-      "Bairro",
-      cleanText(clientAddress.district),
-      clientBoxX + clientPadding + addressWidth + clientGap,
-      secondRowY,
-      districtWidth,
-      { fontSize: 8.2, maxLines: 4 },
-    ),
-    drawMultilineLabelValue(
-      pdf,
-      "Cidade/UF/CEP",
-      [
-        [clientAddress.city, clientAddress.state].filter(Boolean).join("/"),
-        clientAddress.cep ? `CEP: ${clientAddress.cep.trim()}` : "",
-      ].filter(Boolean),
-      clientBoxX + clientPadding + addressWidth + districtWidth + clientGap * 2,
-      secondRowY,
-      cityWidth,
-    ),
-  );
-
-  const thirdRowY = secondRowY - secondRowHeight - 10;
-  const thirdRowHeight = Math.max(
-    drawLabelValue(
-      pdf,
-      "Fone",
-      cleanText(clientAddress.phone),
-      clientBoxX + clientPadding,
-      thirdRowY,
-      150,
-      { fontSize: 8.3, maxLines: 2 },
-    ),
-    drawLabelValue(
-      pdf,
-      "Vendedor",
-      `${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
-      clientBoxX + clientPadding + 166,
-      thirdRowY,
-      190,
-      { fontSize: 8.3, maxLines: 2 },
-    ),
-    fantasyName && fantasyName !== clientLegalName
-      ? drawLabelValue(
-          pdf,
-          "Fantasia",
-          fantasyName,
-          clientBoxX + clientPadding + 372,
-          thirdRowY,
-          145,
-          { fontSize: 8.3, maxLines: 2 },
-        )
-      : 0,
-  );
-
-  const clientBoxHeight = Math.max(
-    98,
-    firstRowHeight + secondRowHeight + thirdRowHeight + 52,
-  );
+  const clientLineGap = 9.5;
+  const clientBoxHeight = Math.max(58, 17 + clientLines.length * clientLineGap);
   pdf.rect(
     clientBoxX,
     y - clientBoxHeight,
@@ -1569,7 +1473,17 @@ export const buildErpOrderPdf = (
     BRAND_ORANGE,
     0.6,
   );
-  y -= clientBoxHeight + 10;
+  clientLines.forEach((line, index) =>
+    pdf.text(
+      line,
+      clientBoxX + clientPadding,
+      y - 12 - index * clientLineGap,
+      7.4,
+      SLATE,
+      index === 0 ? "F2" : "F1",
+    ),
+  );
+  y -= clientBoxHeight + 8;
 
   pdf.text("Itens", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
@@ -1632,10 +1546,10 @@ export const buildErpOrderPdf = (
     (sum, item) => sum + Number(item.netTotal || 0),
     0,
   );
-  y = ensureSpace(pdf, y, 96, pageNumber, orderNumber, company);
-  y -= 10;
-  pdf.rect(MARGIN, y - 72, PAGE_WIDTH - MARGIN * 2, 78, BRAND_LIGHT, BORDER);
-  pdf.text("Totais", MARGIN + 12, y - 10, 10, BRAND_GREEN, "F2");
+  y = ensureSpace(pdf, y, 72, pageNumber, orderNumber, company);
+  y -= 7;
+  pdf.rect(MARGIN, y - 54, PAGE_WIDTH - MARGIN * 2, 60, BRAND_LIGHT, BORDER);
+  pdf.text("Totais", MARGIN + 10, y - 8, 9, BRAND_GREEN, "F2");
   const totalRows = [
     ["Total Produtos", payload.VALOR_BRUTO ?? grossTotal],
     ["Acréscimos", payload.VALOR_ACRESCIMO ?? 0],
@@ -1646,13 +1560,13 @@ export const buildErpOrderPdf = (
   totalRows.forEach(([label, value], index) => {
     const column = index < 3 ? 0 : 1;
     const row = index < 3 ? index : index - 3;
-    const labelX = MARGIN + 12 + column * 178;
-    const rowY = y - 26 - row * 14;
+    const labelX = MARGIN + 10 + column * 178;
+    const rowY = y - 21 - row * 11;
     pdf.text(
       label,
       labelX,
       rowY,
-      7.6,
+      7.2,
       index === 4 ? BRAND_GREEN : MUTED,
       index === 4 ? "F2" : "F1",
     );
@@ -1660,7 +1574,7 @@ export const buildErpOrderPdf = (
       formatCurrencyLabel(value),
       labelX + 82,
       rowY,
-      7.8,
+      7.4,
       index === 4 ? BRAND_GREEN : SLATE,
       "F2",
     );
@@ -1674,8 +1588,8 @@ export const buildErpOrderPdf = (
   pdf.text(
     `Forma de Pagto: ${paymentMethodLabel}   Condição: ${receivingConditionLabel}`,
     MARGIN + 12,
-    y - 66,
-    7.5,
+    y - 48,
+    7.2,
     SLATE,
     "F2",
   );
@@ -1683,27 +1597,27 @@ export const buildErpOrderPdf = (
     (sum, item) => sum + getProductWeight(item) * Number(item.quantity || 0),
     0,
   );
-  y -= 84;
+  y -= 64;
 
-  pdf.text("Transportadora", MARGIN, y, 9.5, BRAND_GREEN, "F2");
-  y -= 12;
-  pdf.rect(MARGIN, y - 18, PAGE_WIDTH - MARGIN * 2, 22, null, BORDER);
+  pdf.text("Transportadora", MARGIN, y, 9, BRAND_GREEN, "F2");
+  y -= 9;
+  pdf.rect(MARGIN, y - 15, PAGE_WIDTH - MARGIN * 2, 18, null, BORDER);
   pdf.text(
     `Peso Bruto: ${formatNumber(totalWeight, 2)} KG   |   Peso Líquido: ${formatNumber(totalWeight, 2)} KG`,
     MARGIN + 12,
-    y - 10,
-    8,
+    y - 9,
+    7.4,
     SLATE,
     "F2",
   );
-  y -= 32;
+  y -= 24;
 
   const notes = cleanText(
     payload.OBS_PEDIDO || order.opportunity.notes,
     "Sem observações.",
   );
-  const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 24, 8);
-  const notesHeight = Math.max(38, 26 + noteLines.length * 10);
+  const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 20, 7.4);
+  const notesHeight = Math.max(30, 22 + noteLines.length * 8.8);
   y = ensureSpace(pdf, y, notesHeight + 12, pageNumber, orderNumber, company);
   pdf.rect(
     MARGIN,
@@ -1713,27 +1627,27 @@ export const buildErpOrderPdf = (
     null,
     BORDER,
   );
-  pdf.text("OBSERVAÇÕES", MARGIN + 12, y - 12, 7.5, MUTED, "F2");
+  pdf.text("OBSERVAÇÕES", MARGIN + 10, y - 10, 7.2, MUTED, "F2");
   noteLines.forEach((line, index) =>
     pdf.text(
       line,
-      MARGIN + 12,
-      y - 26 - index * 10,
-      8,
+      MARGIN + 10,
+      y - 22 - index * 8.8,
+      7.4,
       SLATE,
       index === 0 ? "F2" : "F1",
     ),
   );
-  y -= notesHeight + 10;
+  y -= notesHeight + 7;
 
-  pdf.text("Cláusulas", MARGIN, y, 9.5, BRAND_GREEN, "F2");
-  y -= 12;
+  pdf.text("Cláusulas", MARGIN, y, 9, BRAND_GREEN, "F2");
+  y -= 9;
   for (const [index, clause] of ERP_ORDER_CLAUSES.entries()) {
-    const lines = wrapText(clause, 132);
+    const lines = wrapText(clause, 148);
     y = ensureSpace(
       pdf,
       y,
-      lines.length * 6.6 + 4,
+      lines.length * 5.8 + 3,
       pageNumber,
       orderNumber,
       company,
@@ -1742,23 +1656,23 @@ export const buildErpOrderPdf = (
       pdf.text(
         line,
         MARGIN,
-        y - lineIndex * 6.6,
-        index === 0 ? 6.8 : 6.4,
+        y - lineIndex * 5.8,
+        index === 0 ? 6.2 : 5.9,
         SLATE,
         index === 0 ? "F2" : "F1",
       ),
     );
-    y -= lines.length * 6.6 + 4;
+    y -= lines.length * 5.8 + 3;
   }
 
-  y = ensureSpace(pdf, y, 42, pageNumber, orderNumber, company);
+  y = ensureSpace(pdf, y, 34, pageNumber, orderNumber, company);
   const signatureLineWidth = 200;
   const signatureLineX = (PAGE_WIDTH - signatureLineWidth) / 2;
   pdf.line(
     signatureLineX,
-    y - 20,
+    y - 16,
     signatureLineX + signatureLineWidth,
-    y - 20,
+    y - 16,
     SLATE,
     0.8,
   );
@@ -1767,8 +1681,8 @@ export const buildErpOrderPdf = (
   pdf.text(
     signatureLabel,
     (PAGE_WIDTH - signatureLabelWidth) / 2,
-    y - 34,
-    8,
+    y - 28,
+    7.6,
     SLATE,
     "F2",
   );
