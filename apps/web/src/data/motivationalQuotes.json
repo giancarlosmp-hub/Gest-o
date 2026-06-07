@@ -1,62 +1,2552 @@
 [
-  { "text": "O sucesso nasce do querer, da determinação e persistência em se chegar a um objetivo.", "author": "José de Alencar", "category": "persistencia" },
-  { "text": "A persistência realiza o impossível.", "author": "Provérbio chinês", "category": "persistencia" },
-  { "text": "A disciplina é a ponte entre metas e realizações.", "author": "Jim Rohn", "category": "disciplina" },
-  { "text": "Grandes coisas nunca vêm de zonas de conforto.", "author": "Anônimo", "category": "coragem" },
-  { "text": "Faça o que puder, com o que tiver, onde estiver.", "author": "Theodore Roosevelt", "category": "acao" },
-  { "text": "A melhor maneira de prever o futuro é criá-lo.", "author": "Peter Drucker", "category": "visao" },
-  { "text": "Não espere por oportunidades. Crie-as.", "author": "Anônimo", "category": "acao" },
-  { "text": "A excelência não é um ato, mas um hábito.", "author": "Aristóteles", "category": "excelencia" },
-  { "text": "Quem caminha sozinho pode até chegar mais rápido, mas aquele que vai acompanhado chega mais longe.", "author": "Provérbio africano", "category": "equipe" },
-  { "text": "O segredo de seguir em frente é começar.", "author": "Mark Twain", "category": "acao" },
-  { "text": "A sorte favorece a mente bem preparada.", "author": "Louis Pasteur", "category": "preparacao" },
-  { "text": "Planejar é trazer o futuro para o presente para que você possa fazer algo agora.", "author": "Alan Lakein", "category": "planejamento" },
-  { "text": "Energia e persistência conquistam todas as coisas.", "author": "Benjamin Franklin", "category": "persistencia" },
-  { "text": "O campo recompensa quem entende o tempo, respeita o processo e age com consistência.", "author": "Demetra Agro Performance", "category": "agro" },
-  { "text": "Cada visita bem feita planta confiança para a próxima colheita.", "author": "Demetra Agro Performance", "category": "comercial" },
-  { "text": "Rotina forte transforma potencial em resultado previsível.", "author": "Demetra Agro Performance", "category": "disciplina" },
-  { "text": "Dados bem usados encurtam o caminho entre intenção e performance.", "author": "Demetra Agro Performance", "category": "gestao" },
-  { "text": "O cliente percebe valor quando a preparação encontra a necessidade certa.", "author": "Demetra Agro Performance", "category": "cliente" },
-  { "text": "Resultados consistentes começam com prioridades claras logo cedo.", "author": "Demetra Agro Performance", "category": "prioridade" },
-  { "text": "Toda negociação avança melhor quando existe escuta, clareza e próximo passo.", "author": "Demetra Agro Performance", "category": "vendas" },
-  { "text": "Quem registra bem hoje decide melhor amanhã.", "author": "Demetra Agro Performance", "category": "gestao" },
-  { "text": "Produtividade é escolher o que importa e executar sem perder o foco.", "author": "Demetra Agro Performance", "category": "produtividade" },
-  { "text": "A melhor agenda é aquela que transforma intenção em presença no cliente.", "author": "Demetra Agro Performance", "category": "agenda" },
-  { "text": "Uma oportunidade cuidada no tempo certo vale mais que muitas esquecidas.", "author": "Demetra Agro Performance", "category": "pipeline" },
-  { "text": "Consistência comercial é visitar, acompanhar, registrar e evoluir todos os dias.", "author": "Demetra Agro Performance", "category": "comercial" },
-  { "text": "A liderança começa quando a execução diária reflete o compromisso assumido.", "author": "Demetra Agro Performance", "category": "lideranca" },
-  { "text": "Foco no cliente, disciplina no processo e coragem na execução geram performance.", "author": "Demetra Agro Performance", "category": "performance" },
-  { "text": "A colheita de grandes resultados começa com pequenas ações bem repetidas.", "author": "Demetra Agro Performance", "category": "agro" },
-  { "text": "Quando a meta parece distante, a próxima ação precisa ficar ainda mais clara.", "author": "Demetra Agro Performance", "category": "metas" },
-  { "text": "Oportunidade boa não espera; ela responde a quem acompanha com método.", "author": "Demetra Agro Performance", "category": "pipeline" },
-  { "text": "A confiança do produtor cresce onde existe presença, técnica e compromisso.", "author": "Demetra Agro Performance", "category": "cliente" },
-  { "text": "Cada follow-up no prazo protege valor e fortalece relacionamento.", "author": "Demetra Agro Performance", "category": "follow-up" },
-  { "text": "Gestão comercial é transformar informação em ação antes que o risco cresça.", "author": "Demetra Agro Performance", "category": "gestao" },
-  { "text": "A diferença entre promessa e resultado está na execução do dia.", "author": "Demetra Agro Performance", "category": "execucao" },
-  { "text": "Um bom roteiro economiza tempo, aumenta presença e melhora conversas.", "author": "Demetra Agro Performance", "category": "agenda" },
-  { "text": "Venda consultiva começa com perguntas melhores e termina com decisões mais seguras.", "author": "Demetra Agro Performance", "category": "vendas" },
-  { "text": "O produtor valoriza quem chega preparado, acompanha de perto e entrega solução.", "author": "Demetra Agro Performance", "category": "cliente" },
-  { "text": "O melhor indicador é aquele que provoca uma ação inteligente ainda hoje.", "author": "Demetra Agro Performance", "category": "indicadores" },
-  { "text": "Alta performance não depende de pressa; depende de constância no que é essencial.", "author": "Demetra Agro Performance", "category": "performance" },
-  { "text": "Quando todos veem a prioridade do dia, a equipe executa com mais alinhamento.", "author": "Demetra Agro Performance", "category": "equipe" },
-  { "text": "Uma visita produtiva começa antes da estrada: começa no planejamento.", "author": "Demetra Agro Performance", "category": "planejamento" },
-  { "text": "Cuidar do pipeline é cuidar do futuro da carteira.", "author": "Demetra Agro Performance", "category": "pipeline" },
-  { "text": "A rotina comercial certa torna o resultado menos acidental e mais construído.", "author": "Demetra Agro Performance", "category": "disciplina" },
-  { "text": "No agro, tempo certo e decisão certa caminham juntos.", "author": "Demetra Agro Performance", "category": "agro" },
-  { "text": "Quem entende o cliente com profundidade vende com mais verdade.", "author": "Demetra Agro Performance", "category": "cliente" },
-  { "text": "Meta sem agenda vira intenção; agenda com execução vira resultado.", "author": "Demetra Agro Performance", "category": "metas" },
-  { "text": "A próxima melhor ação é sempre mais poderosa que a preocupação sem movimento.", "author": "Demetra Agro Performance", "category": "acao" },
-  { "text": "O acompanhamento certo reduz surpresa e aumenta previsibilidade.", "author": "Demetra Agro Performance", "category": "follow-up" },
-  { "text": "Tecnologia só gera valor quando ajuda pessoas a agir melhor.", "author": "Demetra Agro Performance", "category": "tecnologia" },
-  { "text": "Performance nasce quando estratégia, rotina e relacionamento trabalham juntos.", "author": "Demetra Agro Performance", "category": "performance" },
-  { "text": "A visita de hoje pode ser o começo do resultado que a safra vai lembrar.", "author": "Demetra Agro Performance", "category": "agro" },
-  { "text": "Mais importante que ter muitos dados é saber qual ação eles pedem agora.", "author": "Demetra Agro Performance", "category": "gestao" },
-  { "text": "A disciplina diária protege a carteira nos dias fáceis e nos dias difíceis.", "author": "Demetra Agro Performance", "category": "disciplina" },
-  { "text": "Quando o próximo passo está claro, a equipe avança com confiança.", "author": "Demetra Agro Performance", "category": "equipe" },
-  { "text": "O relacionamento se fortalece quando a promessa encontra cumprimento.", "author": "Demetra Agro Performance", "category": "cliente" },
-  { "text": "Pipeline saudável é resultado de atenção diária, não de urgência tardia.", "author": "Demetra Agro Performance", "category": "pipeline" },
-  { "text": "A execução consistente transforma metas grandes em vitórias administráveis.", "author": "Demetra Agro Performance", "category": "execucao" },
-  { "text": "Cada registro completo aumenta a inteligência comercial da equipe inteira.", "author": "Demetra Agro Performance", "category": "gestao" },
-  { "text": "Quem começa o dia priorizando decide melhor durante o caminho.", "author": "Demetra Agro Performance", "category": "prioridade" },
-  { "text": "O cliente não compra apenas produto; compra segurança na decisão.", "author": "Demetra Agro Performance", "category": "vendas" }
+  {
+    "text": "A função da liderança é produzir mais líderes, não mais seguidores.",
+    "author": "Ralph Nader",
+    "category": "Liderança"
+  },
+  {
+    "text": "Liderar é servir a um propósito maior que o próprio cargo.",
+    "author": "Simon Sinek",
+    "category": "Liderança"
+  },
+  {
+    "text": "Antes de liderar pessoas, aprenda a liderar a si mesmo.",
+    "author": "John Maxwell",
+    "category": "Liderança"
+  },
+  {
+    "text": "Grandes líderes assumem a responsabilidade quando algo falha.",
+    "author": "Jocko Willink",
+    "category": "Liderança"
+  },
+  {
+    "text": "A liderança aparece quando a pressão revela o caráter.",
+    "author": "Bernardinho",
+    "category": "Liderança"
+  },
+  {
+    "text": "Um líder excelente simplifica o caminho para que outros avancem.",
+    "author": "Jack Welch",
+    "category": "Liderança"
+  },
+  {
+    "text": "Liderar é clarear prioridades quando o ambiente fica complexo, e esse padrão transforma intenção em resultado.",
+    "author": "Abilio Diniz",
+    "category": "Liderança"
+  },
+  {
+    "text": "O exemplo diário comunica mais que qualquer discurso de liderança, porque a consistência sustenta o progresso.",
+    "author": "Flávio Augusto",
+    "category": "Liderança"
+  },
+  {
+    "text": "Uma decisão corajosa protege a equipe de mil dúvidas pequenas, quando existe responsabilidade no próximo passo.",
+    "author": "Bernardinho",
+    "category": "Liderança"
+  },
+  {
+    "text": "Líderes fortes elevam o padrão sem diminuir as pessoas, e fortalece a confiança de quem caminha junto.",
+    "author": "Ayrton Senna",
+    "category": "Liderança"
+  },
+  {
+    "text": "A confiança cresce quando promessa, ação e consequência caminham juntas, sem abrir mão de aprendizado e humildade.",
+    "author": "Steve Jobs",
+    "category": "Liderança"
+  },
+  {
+    "text": "Quem lidera bem transforma pressão em direção e aprendizado, quando a decisão é acompanhada de ação.",
+    "author": "Tim Cook",
+    "category": "Liderança"
+  },
+  {
+    "text": "A melhor liderança combina firmeza no propósito e humildade na escuta, e torna a rotina mais forte que a desculpa.",
+    "author": "Jack Welch",
+    "category": "Liderança"
+  },
+  {
+    "text": "Liderar é clarear prioridades quando o ambiente fica complexo, quando o propósito permanece claro.",
+    "author": "Peter Drucker",
+    "category": "Liderança"
+  },
+  {
+    "text": "O exemplo diário comunica mais que qualquer discurso de liderança, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Liderança"
+  },
+  {
+    "text": "Uma decisão corajosa protege a equipe de mil dúvidas pequenas, porque excelência começa nos fundamentos.",
+    "author": "Elon Musk",
+    "category": "Liderança"
+  },
+  {
+    "text": "Líderes fortes elevam o padrão sem diminuir as pessoas, quando cada detalhe recebe atenção prática.",
+    "author": "Jeff Bezos",
+    "category": "Liderança"
+  },
+  {
+    "text": "A confiança cresce quando promessa, ação e consequência caminham juntas, e preserva energia para o que realmente importa.",
+    "author": "Warren Buffett",
+    "category": "Liderança"
+  },
+  {
+    "text": "Quem lidera bem transforma pressão em direção e aprendizado, quando a meta é grande e o caminho exige constância.",
+    "author": "Napoleon Hill",
+    "category": "Liderança"
+  },
+  {
+    "text": "A melhor liderança combina firmeza no propósito e humildade na escuta, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Zig Ziglar",
+    "category": "Liderança"
+  },
+  {
+    "text": "Liderar é clarear prioridades quando o ambiente fica complexo, quando a comunicação é simples e direta.",
+    "author": "Jim Rohn",
+    "category": "Liderança"
+  },
+  {
+    "text": "O exemplo diário comunica mais que qualquer discurso de liderança, e transforma pressão em foco construtivo.",
+    "author": "Dale Carnegie",
+    "category": "Liderança"
+  },
+  {
+    "text": "Uma decisão corajosa protege a equipe de mil dúvidas pequenas, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Henry Ford",
+    "category": "Liderança"
+  },
+  {
+    "text": "Líderes fortes elevam o padrão sem diminuir as pessoas, e mostra que preparo também é estratégia.",
+    "author": "Andrew Carnegie",
+    "category": "Liderança"
+  },
+  {
+    "text": "A confiança cresce quando promessa, ação e consequência caminham juntas, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Sam Walton",
+    "category": "Liderança"
+  },
+  {
+    "text": "Quem lidera bem transforma pressão em direção e aprendizado, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Theodore Roosevelt",
+    "category": "Liderança"
+  },
+  {
+    "text": "A melhor liderança combina firmeza no propósito e humildade na escuta, quando disciplina e coragem trabalham juntas.",
+    "author": "Tony Robbins",
+    "category": "Liderança"
+  },
+  {
+    "text": "Liderar é clarear prioridades quando o ambiente fica complexo, e substitui improviso por maturidade operacional.",
+    "author": "Brian Tracy",
+    "category": "Liderança"
+  },
+  {
+    "text": "O exemplo diário comunica mais que qualquer discurso de liderança, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "John Maxwell",
+    "category": "Liderança"
+  },
+  {
+    "text": "Uma decisão corajosa protege a equipe de mil dúvidas pequenas, e converte experiência em decisões melhores.",
+    "author": "Simon Sinek",
+    "category": "Liderança"
+  },
+  {
+    "text": "Líderes fortes elevam o padrão sem diminuir as pessoas, quando a execução acompanha a visão.",
+    "author": "Jack Ma",
+    "category": "Liderança"
+  },
+  {
+    "text": "A confiança cresce quando promessa, ação e consequência caminham juntas, e prova que confiança se constrói em cada entrega.",
+    "author": "Bill Gates",
+    "category": "Liderança"
+  },
+  {
+    "text": "Quem lidera bem transforma pressão em direção e aprendizado, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Larry Page",
+    "category": "Liderança"
+  },
+  {
+    "text": "A melhor liderança combina firmeza no propósito e humildade na escuta, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Eric Schmidt",
+    "category": "Liderança"
+  },
+  {
+    "text": "Você não constrói um negócio; constrói pessoas, e pessoas constroem o negócio.",
+    "author": "Zig Ziglar",
+    "category": "Vendas"
+  },
+  {
+    "text": "Vender é entender necessidades antes de apresentar soluções.",
+    "author": "Brian Tracy",
+    "category": "Vendas"
+  },
+  {
+    "text": "Clientes não lembram apenas do preço; lembram de como foram tratados.",
+    "author": "Sam Walton",
+    "category": "Vendas"
+  },
+  {
+    "text": "A confiança é o ativo mais valioso de qualquer negociação.",
+    "author": "Dale Carnegie",
+    "category": "Vendas"
+  },
+  {
+    "text": "Obceque-se pelo cliente, não pela concorrência.",
+    "author": "Jeff Bezos",
+    "category": "Vendas"
+  },
+  {
+    "text": "A melhor venda começa com escuta verdadeira.",
+    "author": "Mary Kay Ash",
+    "category": "Vendas"
+  },
+  {
+    "text": "Vendas crescem quando o cliente percebe valor antes de perceber preço, e esse padrão transforma intenção em resultado.",
+    "author": "Indra Nooyi",
+    "category": "Vendas"
+  },
+  {
+    "text": "A agenda comercial revela a seriedade da meta, porque a consistência sustenta o progresso.",
+    "author": "Satya Nadella",
+    "category": "Vendas"
+  },
+  {
+    "text": "Follow-up consistente é respeito pelo cliente e pelo próprio resultado, quando existe responsabilidade no próximo passo.",
+    "author": "Michael Jordan",
+    "category": "Vendas"
+  },
+  {
+    "text": "Uma boa pergunta abre mais portas que uma apresentação longa, e fortalece a confiança de quem caminha junto.",
+    "author": "Vince Lombardi",
+    "category": "Vendas"
+  },
+  {
+    "text": "Relacionamento sem entrega vira simpatia; entrega com relacionamento vira parceria, sem abrir mão de aprendizado e humildade.",
+    "author": "Phil Jackson",
+    "category": "Vendas"
+  },
+  {
+    "text": "Pipeline saudável é disciplina visível em oportunidades reais, quando a decisão é acompanhada de ação.",
+    "author": "Stephen Covey",
+    "category": "Vendas"
+  },
+  {
+    "text": "Toda negociação melhora quando a solução conversa com a dor certa, e torna a rotina mais forte que a desculpa.",
+    "author": "James Clear",
+    "category": "Vendas"
+  },
+  {
+    "text": "Vendas crescem quando o cliente percebe valor antes de perceber preço, quando o propósito permanece claro.",
+    "author": "Angela Duckworth",
+    "category": "Vendas"
+  },
+  {
+    "text": "A agenda comercial revela a seriedade da meta, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Carol Dweck",
+    "category": "Vendas"
+  },
+  {
+    "text": "Follow-up consistente é respeito pelo cliente e pelo próprio resultado, porque excelência começa nos fundamentos.",
+    "author": "Sheryl Sandberg",
+    "category": "Vendas"
+  },
+  {
+    "text": "Uma boa pergunta abre mais portas que uma apresentação longa, quando cada detalhe recebe atenção prática.",
+    "author": "Mary Barra",
+    "category": "Vendas"
+  },
+  {
+    "text": "Relacionamento sem entrega vira simpatia; entrega com relacionamento vira parceria, e preserva energia para o que realmente importa.",
+    "author": "Howard Schultz",
+    "category": "Vendas"
+  },
+  {
+    "text": "Pipeline saudável é disciplina visível em oportunidades reais, quando a meta é grande e o caminho exige constância.",
+    "author": "Richard Branson",
+    "category": "Vendas"
+  },
+  {
+    "text": "Toda negociação melhora quando a solução conversa com a dor certa, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Reid Hoffman",
+    "category": "Vendas"
+  },
+  {
+    "text": "Vendas crescem quando o cliente percebe valor antes de perceber preço, quando a comunicação é simples e direta.",
+    "author": "Marc Benioff",
+    "category": "Vendas"
+  },
+  {
+    "text": "A agenda comercial revela a seriedade da meta, e transforma pressão em foco construtivo.",
+    "author": "Clayton Christensen",
+    "category": "Vendas"
+  },
+  {
+    "text": "Follow-up consistente é respeito pelo cliente e pelo próprio resultado, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Ken Blanchard",
+    "category": "Vendas"
+  },
+  {
+    "text": "Uma boa pergunta abre mais portas que uma apresentação longa, e mostra que preparo também é estratégia.",
+    "author": "Tom Peters",
+    "category": "Vendas"
+  },
+  {
+    "text": "Relacionamento sem entrega vira simpatia; entrega com relacionamento vira parceria, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Seth Godin",
+    "category": "Vendas"
+  },
+  {
+    "text": "Pipeline saudável é disciplina visível em oportunidades reais, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Gary Vaynerchuk",
+    "category": "Vendas"
+  },
+  {
+    "text": "Toda negociação melhora quando a solução conversa com a dor certa, quando disciplina e coragem trabalham juntas.",
+    "author": "Daniel Goleman",
+    "category": "Vendas"
+  },
+  {
+    "text": "Vendas crescem quando o cliente percebe valor antes de perceber preço, e substitui improviso por maturidade operacional.",
+    "author": "Brené Brown",
+    "category": "Vendas"
+  },
+  {
+    "text": "A agenda comercial revela a seriedade da meta, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Ray Dalio",
+    "category": "Vendas"
+  },
+  {
+    "text": "Follow-up consistente é respeito pelo cliente e pelo próprio resultado, e converte experiência em decisões melhores.",
+    "author": "Charles Munger",
+    "category": "Vendas"
+  },
+  {
+    "text": "Uma boa pergunta abre mais portas que uma apresentação longa, quando a execução acompanha a visão.",
+    "author": "Michael Porter",
+    "category": "Vendas"
+  },
+  {
+    "text": "Relacionamento sem entrega vira simpatia; entrega com relacionamento vira parceria, e prova que confiança se constrói em cada entrega.",
+    "author": "Jim Collins",
+    "category": "Vendas"
+  },
+  {
+    "text": "Pipeline saudável é disciplina visível em oportunidades reais, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Lao-Tsé",
+    "category": "Vendas"
+  },
+  {
+    "text": "Toda negociação melhora quando a solução conversa com a dor certa, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Confúcio",
+    "category": "Vendas"
+  },
+  {
+    "text": "A disciplina é a ponte entre metas e realizações.",
+    "author": "Jim Rohn",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Somos o que repetidamente fazemos; excelência é hábito.",
+    "author": "Aristóteles",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Pequenas melhorias diárias produzem resultados extraordinários.",
+    "author": "James Clear",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A consistência vence a intensidade quando o objetivo é duradouro.",
+    "author": "Tony Robbins",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é fazer o que precisa ser feito, mesmo sem vontade.",
+    "author": "Brian Tracy",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A rotina certa protege o resultado nos dias difíceis.",
+    "author": "Bernardinho",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é escolher o futuro no lugar do conforto imediato, e esse padrão transforma intenção em resultado.",
+    "author": "Aristóteles",
+    "category": "Disciplina"
+  },
+  {
+    "text": "O padrão de hoje constrói o resultado que amanhã parecerá sorte, porque a consistência sustenta o progresso.",
+    "author": "Sêneca",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A meta fica mais leve quando a rotina fica mais forte, quando existe responsabilidade no próximo passo.",
+    "author": "Marco Aurélio",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Consistência transforma capacidade em confiança, e fortalece a confiança de quem caminha junto.",
+    "author": "Benjamin Franklin",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Quem domina o próprio calendário domina grande parte do resultado, sem abrir mão de aprendizado e humildade.",
+    "author": "Thomas Edison",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é liberdade conquistada antes da urgência chegar, quando a decisão é acompanhada de ação.",
+    "author": "Albert Einstein",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A repetição inteligente transforma esforço em competência, e torna a rotina mais forte que a desculpa.",
+    "author": "Nelson Mandela",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é escolher o futuro no lugar do conforto imediato, quando o propósito permanece claro.",
+    "author": "Mahatma Gandhi",
+    "category": "Disciplina"
+  },
+  {
+    "text": "O padrão de hoje constrói o resultado que amanhã parecerá sorte, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Martin Luther King Jr.",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A meta fica mais leve quando a rotina fica mais forte, porque excelência começa nos fundamentos.",
+    "author": "Walt Disney",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Consistência transforma capacidade em confiança, quando cada detalhe recebe atenção prática.",
+    "author": "Oprah Winfrey",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Quem domina o próprio calendário domina grande parte do resultado, e preserva energia para o que realmente importa.",
+    "author": "Mary Kay Ash",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é liberdade conquistada antes da urgência chegar, quando a meta é grande e o caminho exige constância.",
+    "author": "T. Harv Eker",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A repetição inteligente transforma esforço em competência, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Og Mandino",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é escolher o futuro no lugar do conforto imediato, quando a comunicação é simples e direta.",
+    "author": "Ralph Waldo Emerson",
+    "category": "Disciplina"
+  },
+  {
+    "text": "O padrão de hoje constrói o resultado que amanhã parecerá sorte, e transforma pressão em foco construtivo.",
+    "author": "Booker T. Washington",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A meta fica mais leve quando a rotina fica mais forte, quando as escolhas diárias respeitam o objetivo.",
+    "author": "George Washington Carver",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Consistência transforma capacidade em confiança, e mostra que preparo também é estratégia.",
+    "author": "Soichiro Honda",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Quem domina o próprio calendário domina grande parte do resultado, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Akio Morita",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é liberdade conquistada antes da urgência chegar, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Carlos Brito",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A repetição inteligente transforma esforço em competência, quando disciplina e coragem trabalham juntas.",
+    "author": "Luiza Helena Trajano",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é escolher o futuro no lugar do conforto imediato, e substitui improviso por maturidade operacional.",
+    "author": "Roberto Rodrigues",
+    "category": "Disciplina"
+  },
+  {
+    "text": "O padrão de hoje constrói o resultado que amanhã parecerá sorte, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Alysson Paolinelli",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A meta fica mais leve quando a rotina fica mais forte, e converte experiência em decisões melhores.",
+    "author": "Norman Borlaug",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Consistência transforma capacidade em confiança, quando a execução acompanha a visão.",
+    "author": "Abilio Diniz",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Quem domina o próprio calendário domina grande parte do resultado, e prova que confiança se constrói em cada entrega.",
+    "author": "Flávio Augusto",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Disciplina é liberdade conquistada antes da urgência chegar, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Bernardinho",
+    "category": "Disciplina"
+  },
+  {
+    "text": "A repetição inteligente transforma esforço em competência, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Ayrton Senna",
+    "category": "Disciplina"
+  },
+  {
+    "text": "Energia e persistência conquistam todas as coisas.",
+    "author": "Benjamin Franklin",
+    "category": "Persistência"
+  },
+  {
+    "text": "Nossa maior fraqueza está em desistir cedo demais.",
+    "author": "Thomas Edison",
+    "category": "Persistência"
+  },
+  {
+    "text": "O sucesso costuma chegar a quem continua tentando.",
+    "author": "Napoleon Hill",
+    "category": "Persistência"
+  },
+  {
+    "text": "Eu não falhei; encontrei maneiras que não funcionam.",
+    "author": "Thomas Edison",
+    "category": "Persistência"
+  },
+  {
+    "text": "A vitória pertence a quem suporta mais uma tentativa.",
+    "author": "Ayrton Senna",
+    "category": "Persistência"
+  },
+  {
+    "text": "A coragem de continuar separa desejo de conquista.",
+    "author": "Winston Churchill",
+    "category": "Persistência"
+  },
+  {
+    "text": "Persistir é ajustar o método sem abandonar o propósito, e esse padrão transforma intenção em resultado.",
+    "author": "Steve Jobs",
+    "category": "Persistência"
+  },
+  {
+    "text": "O obstáculo testa se a vontade é maior que a conveniência, porque a consistência sustenta o progresso.",
+    "author": "Tim Cook",
+    "category": "Persistência"
+  },
+  {
+    "text": "A próxima tentativa carrega tudo que a tentativa anterior ensinou, quando existe responsabilidade no próximo passo.",
+    "author": "Jack Welch",
+    "category": "Persistência"
+  },
+  {
+    "text": "Resiliência é aprender rápido sem perder energia, e fortalece a confiança de quem caminha junto.",
+    "author": "Peter Drucker",
+    "category": "Persistência"
+  },
+  {
+    "text": "Quem permanece no jogo aumenta as chances de encontrar a virada, sem abrir mão de aprendizado e humildade.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Persistência"
+  },
+  {
+    "text": "A derrota só encerra o caminho quando vira desistência, quando a decisão é acompanhada de ação.",
+    "author": "Elon Musk",
+    "category": "Persistência"
+  },
+  {
+    "text": "A constância transforma tropeços em experiência útil, e torna a rotina mais forte que a desculpa.",
+    "author": "Jeff Bezos",
+    "category": "Persistência"
+  },
+  {
+    "text": "Persistir é ajustar o método sem abandonar o propósito, quando o propósito permanece claro.",
+    "author": "Warren Buffett",
+    "category": "Persistência"
+  },
+  {
+    "text": "O obstáculo testa se a vontade é maior que a conveniência, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Napoleon Hill",
+    "category": "Persistência"
+  },
+  {
+    "text": "A próxima tentativa carrega tudo que a tentativa anterior ensinou, porque excelência começa nos fundamentos.",
+    "author": "Zig Ziglar",
+    "category": "Persistência"
+  },
+  {
+    "text": "Resiliência é aprender rápido sem perder energia, quando cada detalhe recebe atenção prática.",
+    "author": "Jim Rohn",
+    "category": "Persistência"
+  },
+  {
+    "text": "Quem permanece no jogo aumenta as chances de encontrar a virada, e preserva energia para o que realmente importa.",
+    "author": "Dale Carnegie",
+    "category": "Persistência"
+  },
+  {
+    "text": "A derrota só encerra o caminho quando vira desistência, quando a meta é grande e o caminho exige constância.",
+    "author": "Henry Ford",
+    "category": "Persistência"
+  },
+  {
+    "text": "A constância transforma tropeços em experiência útil, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Andrew Carnegie",
+    "category": "Persistência"
+  },
+  {
+    "text": "Persistir é ajustar o método sem abandonar o propósito, quando a comunicação é simples e direta.",
+    "author": "Sam Walton",
+    "category": "Persistência"
+  },
+  {
+    "text": "O obstáculo testa se a vontade é maior que a conveniência, e transforma pressão em foco construtivo.",
+    "author": "Theodore Roosevelt",
+    "category": "Persistência"
+  },
+  {
+    "text": "A próxima tentativa carrega tudo que a tentativa anterior ensinou, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Tony Robbins",
+    "category": "Persistência"
+  },
+  {
+    "text": "Resiliência é aprender rápido sem perder energia, e mostra que preparo também é estratégia.",
+    "author": "Brian Tracy",
+    "category": "Persistência"
+  },
+  {
+    "text": "Quem permanece no jogo aumenta as chances de encontrar a virada, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "John Maxwell",
+    "category": "Persistência"
+  },
+  {
+    "text": "A derrota só encerra o caminho quando vira desistência, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Simon Sinek",
+    "category": "Persistência"
+  },
+  {
+    "text": "A constância transforma tropeços em experiência útil, quando disciplina e coragem trabalham juntas.",
+    "author": "Jack Ma",
+    "category": "Persistência"
+  },
+  {
+    "text": "Persistir é ajustar o método sem abandonar o propósito, e substitui improviso por maturidade operacional.",
+    "author": "Bill Gates",
+    "category": "Persistência"
+  },
+  {
+    "text": "O obstáculo testa se a vontade é maior que a conveniência, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Larry Page",
+    "category": "Persistência"
+  },
+  {
+    "text": "A próxima tentativa carrega tudo que a tentativa anterior ensinou, e converte experiência em decisões melhores.",
+    "author": "Eric Schmidt",
+    "category": "Persistência"
+  },
+  {
+    "text": "Resiliência é aprender rápido sem perder energia, quando a execução acompanha a visão.",
+    "author": "Indra Nooyi",
+    "category": "Persistência"
+  },
+  {
+    "text": "Quem permanece no jogo aumenta as chances de encontrar a virada, e prova que confiança se constrói em cada entrega.",
+    "author": "Satya Nadella",
+    "category": "Persistência"
+  },
+  {
+    "text": "A derrota só encerra o caminho quando vira desistência, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Michael Jordan",
+    "category": "Persistência"
+  },
+  {
+    "text": "A constância transforma tropeços em experiência útil, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Vince Lombardi",
+    "category": "Persistência"
+  },
+  {
+    "text": "Quer você pense que pode ou que não pode, você está certo.",
+    "author": "Henry Ford",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A mente é tudo; você se torna aquilo que pensa.",
+    "author": "Buda",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O crescimento começa quando trocamos desculpas por responsabilidade.",
+    "author": "Carol Dweck",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A qualidade dos pensamentos define a qualidade das decisões.",
+    "author": "Marco Aurélio",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Acredite que é possível e você já estará no meio do caminho.",
+    "author": "Theodore Roosevelt",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Uma mente aberta aprende até com os obstáculos.",
+    "author": "Satya Nadella",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Mentalidade forte troca culpa por aprendizado e ação, e esse padrão transforma intenção em resultado.",
+    "author": "Phil Jackson",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O limite mais caro costuma ser aquele aceito sem questionamento, porque a consistência sustenta o progresso.",
+    "author": "Stephen Covey",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Crescer exige humildade para aprender e coragem para mudar, quando existe responsabilidade no próximo passo.",
+    "author": "James Clear",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A ambição saudável organiza energia em direção a um propósito, e fortalece a confiança de quem caminha junto.",
+    "author": "Angela Duckworth",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Uma mente treinada enxerga oportunidade onde outros veem apenas esforço, sem abrir mão de aprendizado e humildade.",
+    "author": "Carol Dweck",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A forma de interpretar o problema define a qualidade da resposta, quando a decisão é acompanhada de ação.",
+    "author": "Sheryl Sandberg",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A visão de longo prazo reduz o peso das frustrações momentâneas, e torna a rotina mais forte que a desculpa.",
+    "author": "Mary Barra",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Mentalidade forte troca culpa por aprendizado e ação, quando o propósito permanece claro.",
+    "author": "Howard Schultz",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O limite mais caro costuma ser aquele aceito sem questionamento, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Richard Branson",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Crescer exige humildade para aprender e coragem para mudar, porque excelência começa nos fundamentos.",
+    "author": "Reid Hoffman",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A ambição saudável organiza energia em direção a um propósito, quando cada detalhe recebe atenção prática.",
+    "author": "Marc Benioff",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Uma mente treinada enxerga oportunidade onde outros veem apenas esforço, e preserva energia para o que realmente importa.",
+    "author": "Clayton Christensen",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A forma de interpretar o problema define a qualidade da resposta, quando a meta é grande e o caminho exige constância.",
+    "author": "Ken Blanchard",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A visão de longo prazo reduz o peso das frustrações momentâneas, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Tom Peters",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Mentalidade forte troca culpa por aprendizado e ação, quando a comunicação é simples e direta.",
+    "author": "Seth Godin",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O limite mais caro costuma ser aquele aceito sem questionamento, e transforma pressão em foco construtivo.",
+    "author": "Gary Vaynerchuk",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Crescer exige humildade para aprender e coragem para mudar, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Daniel Goleman",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A ambição saudável organiza energia em direção a um propósito, e mostra que preparo também é estratégia.",
+    "author": "Brené Brown",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Uma mente treinada enxerga oportunidade onde outros veem apenas esforço, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Ray Dalio",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A forma de interpretar o problema define a qualidade da resposta, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Charles Munger",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A visão de longo prazo reduz o peso das frustrações momentâneas, quando disciplina e coragem trabalham juntas.",
+    "author": "Michael Porter",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Mentalidade forte troca culpa por aprendizado e ação, e substitui improviso por maturidade operacional.",
+    "author": "Jim Collins",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O limite mais caro costuma ser aquele aceito sem questionamento, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Lao-Tsé",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Crescer exige humildade para aprender e coragem para mudar, e converte experiência em decisões melhores.",
+    "author": "Confúcio",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A ambição saudável organiza energia em direção a um propósito, quando a execução acompanha a visão.",
+    "author": "Aristóteles",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "Uma mente treinada enxerga oportunidade onde outros veem apenas esforço, e prova que confiança se constrói em cada entrega.",
+    "author": "Sêneca",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A forma de interpretar o problema define a qualidade da resposta, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Marco Aurélio",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "A visão de longo prazo reduz o peso das frustrações momentâneas, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Benjamin Franklin",
+    "category": "Mentalidade"
+  },
+  {
+    "text": "O que pode ser medido pode ser melhorado.",
+    "author": "Peter Drucker",
+    "category": "Gestão"
+  },
+  {
+    "text": "A cultura come a estratégia no café da manhã.",
+    "author": "Peter Drucker",
+    "category": "Gestão"
+  },
+  {
+    "text": "Gestão é fazer as coisas certas acontecerem com pessoas certas.",
+    "author": "Jack Welch",
+    "category": "Gestão"
+  },
+  {
+    "text": "Sem dados, você é apenas mais uma pessoa com opinião.",
+    "author": "W. Edwards Deming",
+    "category": "Gestão"
+  },
+  {
+    "text": "Planos são inúteis, mas planejar é indispensável.",
+    "author": "Dwight Eisenhower",
+    "category": "Gestão"
+  },
+  {
+    "text": "Controle o que importa e simplifique o que atrapalha.",
+    "author": "Ray Dalio",
+    "category": "Gestão"
+  },
+  {
+    "text": "Gestão boa transforma informação em decisão e decisão em rotina, e esse padrão transforma intenção em resultado.",
+    "author": "Thomas Edison",
+    "category": "Gestão"
+  },
+  {
+    "text": "Indicadores só têm valor quando orientam conversas e ações melhores, porque a consistência sustenta o progresso.",
+    "author": "Albert Einstein",
+    "category": "Gestão"
+  },
+  {
+    "text": "O gestor protege o foco removendo ruído do caminho, quando existe responsabilidade no próximo passo.",
+    "author": "Nelson Mandela",
+    "category": "Gestão"
+  },
+  {
+    "text": "Processos claros reduzem dependência de heroísmo, e fortalece a confiança de quem caminha junto.",
+    "author": "Mahatma Gandhi",
+    "category": "Gestão"
+  },
+  {
+    "text": "A cadência certa transforma acompanhamento em melhoria contínua, sem abrir mão de aprendizado e humildade.",
+    "author": "Martin Luther King Jr.",
+    "category": "Gestão"
+  },
+  {
+    "text": "Quem gerencia bem antecipa riscos antes que eles cobrem urgência, quando a decisão é acompanhada de ação.",
+    "author": "Walt Disney",
+    "category": "Gestão"
+  },
+  {
+    "text": "Boas metas alinham energia, recurso e responsabilidade, e torna a rotina mais forte que a desculpa.",
+    "author": "Oprah Winfrey",
+    "category": "Gestão"
+  },
+  {
+    "text": "Gestão boa transforma informação em decisão e decisão em rotina, quando o propósito permanece claro.",
+    "author": "Mary Kay Ash",
+    "category": "Gestão"
+  },
+  {
+    "text": "Indicadores só têm valor quando orientam conversas e ações melhores, e aproxima a equipe de resultados mensuráveis.",
+    "author": "T. Harv Eker",
+    "category": "Gestão"
+  },
+  {
+    "text": "O gestor protege o foco removendo ruído do caminho, porque excelência começa nos fundamentos.",
+    "author": "Og Mandino",
+    "category": "Gestão"
+  },
+  {
+    "text": "Processos claros reduzem dependência de heroísmo, quando cada detalhe recebe atenção prática.",
+    "author": "Ralph Waldo Emerson",
+    "category": "Gestão"
+  },
+  {
+    "text": "A cadência certa transforma acompanhamento em melhoria contínua, e preserva energia para o que realmente importa.",
+    "author": "Booker T. Washington",
+    "category": "Gestão"
+  },
+  {
+    "text": "Quem gerencia bem antecipa riscos antes que eles cobrem urgência, quando a meta é grande e o caminho exige constância.",
+    "author": "George Washington Carver",
+    "category": "Gestão"
+  },
+  {
+    "text": "Boas metas alinham energia, recurso e responsabilidade, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Soichiro Honda",
+    "category": "Gestão"
+  },
+  {
+    "text": "Gestão boa transforma informação em decisão e decisão em rotina, quando a comunicação é simples e direta.",
+    "author": "Akio Morita",
+    "category": "Gestão"
+  },
+  {
+    "text": "Indicadores só têm valor quando orientam conversas e ações melhores, e transforma pressão em foco construtivo.",
+    "author": "Carlos Brito",
+    "category": "Gestão"
+  },
+  {
+    "text": "O gestor protege o foco removendo ruído do caminho, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Luiza Helena Trajano",
+    "category": "Gestão"
+  },
+  {
+    "text": "Processos claros reduzem dependência de heroísmo, e mostra que preparo também é estratégia.",
+    "author": "Roberto Rodrigues",
+    "category": "Gestão"
+  },
+  {
+    "text": "A cadência certa transforma acompanhamento em melhoria contínua, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Alysson Paolinelli",
+    "category": "Gestão"
+  },
+  {
+    "text": "Quem gerencia bem antecipa riscos antes que eles cobrem urgência, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Norman Borlaug",
+    "category": "Gestão"
+  },
+  {
+    "text": "Boas metas alinham energia, recurso e responsabilidade, quando disciplina e coragem trabalham juntas.",
+    "author": "Abilio Diniz",
+    "category": "Gestão"
+  },
+  {
+    "text": "Gestão boa transforma informação em decisão e decisão em rotina, e substitui improviso por maturidade operacional.",
+    "author": "Flávio Augusto",
+    "category": "Gestão"
+  },
+  {
+    "text": "Indicadores só têm valor quando orientam conversas e ações melhores, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Bernardinho",
+    "category": "Gestão"
+  },
+  {
+    "text": "O gestor protege o foco removendo ruído do caminho, e converte experiência em decisões melhores.",
+    "author": "Ayrton Senna",
+    "category": "Gestão"
+  },
+  {
+    "text": "Processos claros reduzem dependência de heroísmo, quando a execução acompanha a visão.",
+    "author": "Steve Jobs",
+    "category": "Gestão"
+  },
+  {
+    "text": "A cadência certa transforma acompanhamento em melhoria contínua, e prova que confiança se constrói em cada entrega.",
+    "author": "Tim Cook",
+    "category": "Gestão"
+  },
+  {
+    "text": "Quem gerencia bem antecipa riscos antes que eles cobrem urgência, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Jack Welch",
+    "category": "Gestão"
+  },
+  {
+    "text": "Boas metas alinham energia, recurso e responsabilidade, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Peter Drucker",
+    "category": "Gestão"
+  },
+  {
+    "text": "Preço é o que você paga; valor é o que você leva.",
+    "author": "Warren Buffett",
+    "category": "Negócios"
+  },
+  {
+    "text": "Um negócio precisa criar cliente e entregar valor.",
+    "author": "Peter Drucker",
+    "category": "Negócios"
+  },
+  {
+    "text": "O lucro é consequência de servir bem ao mercado.",
+    "author": "Sam Walton",
+    "category": "Negócios"
+  },
+  {
+    "text": "Não tenha medo de abrir mão do bom para buscar o excelente.",
+    "author": "Jim Collins",
+    "category": "Negócios"
+  },
+  {
+    "text": "A reputação leva anos para construir e minutos para destruir.",
+    "author": "Warren Buffett",
+    "category": "Negócios"
+  },
+  {
+    "text": "Negócios fortes nascem de problemas importantes bem resolvidos.",
+    "author": "Flávio Augusto",
+    "category": "Negócios"
+  },
+  {
+    "text": "Negócios duráveis resolvem dores importantes com execução confiável, e esse padrão transforma intenção em resultado.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Negócios"
+  },
+  {
+    "text": "Margem saudável começa em valor percebido e disciplina operacional, porque a consistência sustenta o progresso.",
+    "author": "Elon Musk",
+    "category": "Negócios"
+  },
+  {
+    "text": "O mercado recompensa quem aprende mais rápido que a concorrência, quando existe responsabilidade no próximo passo.",
+    "author": "Jeff Bezos",
+    "category": "Negócios"
+  },
+  {
+    "text": "Crescimento sem caixa e cultura pode virar fragilidade, e fortalece a confiança de quem caminha junto.",
+    "author": "Warren Buffett",
+    "category": "Negócios"
+  },
+  {
+    "text": "A melhor estratégia é difícil de copiar porque nasce de escolhas coerentes, sem abrir mão de aprendizado e humildade.",
+    "author": "Napoleon Hill",
+    "category": "Negócios"
+  },
+  {
+    "text": "Reputação é capital acumulado em cada entrega cumprida, quando a decisão é acompanhada de ação.",
+    "author": "Zig Ziglar",
+    "category": "Negócios"
+  },
+  {
+    "text": "Empresas fortes protegem clientes, caixa e cultura, e torna a rotina mais forte que a desculpa.",
+    "author": "Jim Rohn",
+    "category": "Negócios"
+  },
+  {
+    "text": "Negócios duráveis resolvem dores importantes com execução confiável, quando o propósito permanece claro.",
+    "author": "Dale Carnegie",
+    "category": "Negócios"
+  },
+  {
+    "text": "Margem saudável começa em valor percebido e disciplina operacional, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Henry Ford",
+    "category": "Negócios"
+  },
+  {
+    "text": "O mercado recompensa quem aprende mais rápido que a concorrência, porque excelência começa nos fundamentos.",
+    "author": "Andrew Carnegie",
+    "category": "Negócios"
+  },
+  {
+    "text": "Crescimento sem caixa e cultura pode virar fragilidade, quando cada detalhe recebe atenção prática.",
+    "author": "Sam Walton",
+    "category": "Negócios"
+  },
+  {
+    "text": "A melhor estratégia é difícil de copiar porque nasce de escolhas coerentes, e preserva energia para o que realmente importa.",
+    "author": "Theodore Roosevelt",
+    "category": "Negócios"
+  },
+  {
+    "text": "Reputação é capital acumulado em cada entrega cumprida, quando a meta é grande e o caminho exige constância.",
+    "author": "Tony Robbins",
+    "category": "Negócios"
+  },
+  {
+    "text": "Empresas fortes protegem clientes, caixa e cultura, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Brian Tracy",
+    "category": "Negócios"
+  },
+  {
+    "text": "Negócios duráveis resolvem dores importantes com execução confiável, quando a comunicação é simples e direta.",
+    "author": "John Maxwell",
+    "category": "Negócios"
+  },
+  {
+    "text": "Margem saudável começa em valor percebido e disciplina operacional, e transforma pressão em foco construtivo.",
+    "author": "Simon Sinek",
+    "category": "Negócios"
+  },
+  {
+    "text": "O mercado recompensa quem aprende mais rápido que a concorrência, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Jack Ma",
+    "category": "Negócios"
+  },
+  {
+    "text": "Crescimento sem caixa e cultura pode virar fragilidade, e mostra que preparo também é estratégia.",
+    "author": "Bill Gates",
+    "category": "Negócios"
+  },
+  {
+    "text": "A melhor estratégia é difícil de copiar porque nasce de escolhas coerentes, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Larry Page",
+    "category": "Negócios"
+  },
+  {
+    "text": "Reputação é capital acumulado em cada entrega cumprida, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Eric Schmidt",
+    "category": "Negócios"
+  },
+  {
+    "text": "Empresas fortes protegem clientes, caixa e cultura, quando disciplina e coragem trabalham juntas.",
+    "author": "Indra Nooyi",
+    "category": "Negócios"
+  },
+  {
+    "text": "Negócios duráveis resolvem dores importantes com execução confiável, e substitui improviso por maturidade operacional.",
+    "author": "Satya Nadella",
+    "category": "Negócios"
+  },
+  {
+    "text": "Margem saudável começa em valor percebido e disciplina operacional, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Michael Jordan",
+    "category": "Negócios"
+  },
+  {
+    "text": "O mercado recompensa quem aprende mais rápido que a concorrência, e converte experiência em decisões melhores.",
+    "author": "Vince Lombardi",
+    "category": "Negócios"
+  },
+  {
+    "text": "Crescimento sem caixa e cultura pode virar fragilidade, quando a execução acompanha a visão.",
+    "author": "Phil Jackson",
+    "category": "Negócios"
+  },
+  {
+    "text": "A melhor estratégia é difícil de copiar porque nasce de escolhas coerentes, e prova que confiança se constrói em cada entrega.",
+    "author": "Stephen Covey",
+    "category": "Negócios"
+  },
+  {
+    "text": "Reputação é capital acumulado em cada entrega cumprida, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "James Clear",
+    "category": "Negócios"
+  },
+  {
+    "text": "Empresas fortes protegem clientes, caixa e cultura, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Angela Duckworth",
+    "category": "Negócios"
+  },
+  {
+    "text": "Excelência não é talento isolado; é padrão repetido sob pressão.",
+    "author": "Bernardinho",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Você não vence por acaso; vence por preparação.",
+    "author": "Ayrton Senna",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "O talento vence jogos, mas trabalho em equipe ganha campeonatos.",
+    "author": "Michael Jordan",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A diferença entre comum e extraordinário é o extra.",
+    "author": "Jimmy Johnson",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performance alta exige foco alto.",
+    "author": "Tony Robbins",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A preparação silenciosa sustenta os grandes resultados.",
+    "author": "Vince Lombardi",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Alta performance combina preparo, foco e revisão honesta, e esse padrão transforma intenção em resultado.",
+    "author": "Carol Dweck",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "O padrão vencedor é construído quando ninguém está aplaudindo, porque a consistência sustenta o progresso.",
+    "author": "Sheryl Sandberg",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Resultados excepcionais exigem conversas francas e metas claras, quando existe responsabilidade no próximo passo.",
+    "author": "Mary Barra",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performar bem é repetir fundamentos sob pressão, e fortalece a confiança de quem caminha junto.",
+    "author": "Howard Schultz",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A excelência cresce quando o feedback chega antes da desculpa, sem abrir mão de aprendizado e humildade.",
+    "author": "Richard Branson",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Quem treina com intenção compete com mais serenidade, quando a decisão é acompanhada de ação.",
+    "author": "Reid Hoffman",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performance sustentável nasce de energia bem direcionada, e torna a rotina mais forte que a desculpa.",
+    "author": "Marc Benioff",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Alta performance combina preparo, foco e revisão honesta, quando o propósito permanece claro.",
+    "author": "Clayton Christensen",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "O padrão vencedor é construído quando ninguém está aplaudindo, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Ken Blanchard",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Resultados excepcionais exigem conversas francas e metas claras, porque excelência começa nos fundamentos.",
+    "author": "Tom Peters",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performar bem é repetir fundamentos sob pressão, quando cada detalhe recebe atenção prática.",
+    "author": "Seth Godin",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A excelência cresce quando o feedback chega antes da desculpa, e preserva energia para o que realmente importa.",
+    "author": "Gary Vaynerchuk",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Quem treina com intenção compete com mais serenidade, quando a meta é grande e o caminho exige constância.",
+    "author": "Daniel Goleman",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performance sustentável nasce de energia bem direcionada, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Brené Brown",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Alta performance combina preparo, foco e revisão honesta, quando a comunicação é simples e direta.",
+    "author": "Ray Dalio",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "O padrão vencedor é construído quando ninguém está aplaudindo, e transforma pressão em foco construtivo.",
+    "author": "Charles Munger",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Resultados excepcionais exigem conversas francas e metas claras, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Michael Porter",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performar bem é repetir fundamentos sob pressão, e mostra que preparo também é estratégia.",
+    "author": "Jim Collins",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A excelência cresce quando o feedback chega antes da desculpa, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Lao-Tsé",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Quem treina com intenção compete com mais serenidade, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Confúcio",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performance sustentável nasce de energia bem direcionada, quando disciplina e coragem trabalham juntas.",
+    "author": "Aristóteles",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Alta performance combina preparo, foco e revisão honesta, e substitui improviso por maturidade operacional.",
+    "author": "Sêneca",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "O padrão vencedor é construído quando ninguém está aplaudindo, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Marco Aurélio",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Resultados excepcionais exigem conversas francas e metas claras, e converte experiência em decisões melhores.",
+    "author": "Benjamin Franklin",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performar bem é repetir fundamentos sob pressão, quando a execução acompanha a visão.",
+    "author": "Thomas Edison",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "A excelência cresce quando o feedback chega antes da desculpa, e prova que confiança se constrói em cada entrega.",
+    "author": "Albert Einstein",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Quem treina com intenção compete com mais serenidade, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Nelson Mandela",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Performance sustentável nasce de energia bem direcionada, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Mahatma Gandhi",
+    "category": "Alta Performance"
+  },
+  {
+    "text": "Inovação distingue um líder de um seguidor.",
+    "author": "Steve Jobs",
+    "category": "Inovação"
+  },
+  {
+    "text": "Seja teimoso na visão e flexível nos detalhes.",
+    "author": "Jeff Bezos",
+    "category": "Inovação"
+  },
+  {
+    "text": "Grandes avanços começam quando alguém questiona o óbvio.",
+    "author": "Elon Musk",
+    "category": "Inovação"
+  },
+  {
+    "text": "A tecnologia só importa quando melhora a vida das pessoas.",
+    "author": "Tim Cook",
+    "category": "Inovação"
+  },
+  {
+    "text": "A inovação floresce onde o erro inteligente vira aprendizado.",
+    "author": "Eric Schmidt",
+    "category": "Inovação"
+  },
+  {
+    "text": "Se você não canibalizar seu produto, alguém fará isso por você.",
+    "author": "Steve Jobs",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovar é resolver melhor um problema que todos aprenderam a tolerar, e esse padrão transforma intenção em resultado.",
+    "author": "Martin Luther King Jr.",
+    "category": "Inovação"
+  },
+  {
+    "text": "A curiosidade abre caminhos onde a rotina só vê limites, porque a consistência sustenta o progresso.",
+    "author": "Walt Disney",
+    "category": "Inovação"
+  },
+  {
+    "text": "Experimentos pequenos reduzem o custo de grandes aprendizados, quando existe responsabilidade no próximo passo.",
+    "author": "Oprah Winfrey",
+    "category": "Inovação"
+  },
+  {
+    "text": "Tecnologia sem adoção é invenção sem impacto, e fortalece a confiança de quem caminha junto.",
+    "author": "Mary Kay Ash",
+    "category": "Inovação"
+  },
+  {
+    "text": "A pergunta certa pode valer mais que a resposta mais rápida, sem abrir mão de aprendizado e humildade.",
+    "author": "T. Harv Eker",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovação consistente nasce de inconformismo disciplinado, quando a decisão é acompanhada de ação.",
+    "author": "Og Mandino",
+    "category": "Inovação"
+  },
+  {
+    "text": "Toda ruptura relevante começa com uma hipótese bem testada, e torna a rotina mais forte que a desculpa.",
+    "author": "Ralph Waldo Emerson",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovar é resolver melhor um problema que todos aprenderam a tolerar, quando o propósito permanece claro.",
+    "author": "Booker T. Washington",
+    "category": "Inovação"
+  },
+  {
+    "text": "A curiosidade abre caminhos onde a rotina só vê limites, e aproxima a equipe de resultados mensuráveis.",
+    "author": "George Washington Carver",
+    "category": "Inovação"
+  },
+  {
+    "text": "Experimentos pequenos reduzem o custo de grandes aprendizados, porque excelência começa nos fundamentos.",
+    "author": "Soichiro Honda",
+    "category": "Inovação"
+  },
+  {
+    "text": "Tecnologia sem adoção é invenção sem impacto, quando cada detalhe recebe atenção prática.",
+    "author": "Akio Morita",
+    "category": "Inovação"
+  },
+  {
+    "text": "A pergunta certa pode valer mais que a resposta mais rápida, e preserva energia para o que realmente importa.",
+    "author": "Carlos Brito",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovação consistente nasce de inconformismo disciplinado, quando a meta é grande e o caminho exige constância.",
+    "author": "Luiza Helena Trajano",
+    "category": "Inovação"
+  },
+  {
+    "text": "Toda ruptura relevante começa com uma hipótese bem testada, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Roberto Rodrigues",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovar é resolver melhor um problema que todos aprenderam a tolerar, quando a comunicação é simples e direta.",
+    "author": "Alysson Paolinelli",
+    "category": "Inovação"
+  },
+  {
+    "text": "A curiosidade abre caminhos onde a rotina só vê limites, e transforma pressão em foco construtivo.",
+    "author": "Norman Borlaug",
+    "category": "Inovação"
+  },
+  {
+    "text": "Experimentos pequenos reduzem o custo de grandes aprendizados, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Abilio Diniz",
+    "category": "Inovação"
+  },
+  {
+    "text": "Tecnologia sem adoção é invenção sem impacto, e mostra que preparo também é estratégia.",
+    "author": "Flávio Augusto",
+    "category": "Inovação"
+  },
+  {
+    "text": "A pergunta certa pode valer mais que a resposta mais rápida, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Bernardinho",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovação consistente nasce de inconformismo disciplinado, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Ayrton Senna",
+    "category": "Inovação"
+  },
+  {
+    "text": "Toda ruptura relevante começa com uma hipótese bem testada, quando disciplina e coragem trabalham juntas.",
+    "author": "Steve Jobs",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovar é resolver melhor um problema que todos aprenderam a tolerar, e substitui improviso por maturidade operacional.",
+    "author": "Tim Cook",
+    "category": "Inovação"
+  },
+  {
+    "text": "A curiosidade abre caminhos onde a rotina só vê limites, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Jack Welch",
+    "category": "Inovação"
+  },
+  {
+    "text": "Experimentos pequenos reduzem o custo de grandes aprendizados, e converte experiência em decisões melhores.",
+    "author": "Peter Drucker",
+    "category": "Inovação"
+  },
+  {
+    "text": "Tecnologia sem adoção é invenção sem impacto, quando a execução acompanha a visão.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Inovação"
+  },
+  {
+    "text": "A pergunta certa pode valer mais que a resposta mais rápida, e prova que confiança se constrói em cada entrega.",
+    "author": "Elon Musk",
+    "category": "Inovação"
+  },
+  {
+    "text": "Inovação consistente nasce de inconformismo disciplinado, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Jeff Bezos",
+    "category": "Inovação"
+  },
+  {
+    "text": "Toda ruptura relevante começa com uma hipótese bem testada, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Warren Buffett",
+    "category": "Inovação"
+  },
+  {
+    "text": "Sucesso é ir de fracasso em fracasso sem perder entusiasmo.",
+    "author": "Winston Churchill",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso deixa pistas.",
+    "author": "Tony Robbins",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso é a soma de pequenos esforços repetidos diariamente.",
+    "author": "Robert Collier",
+    "category": "Sucesso"
+  },
+  {
+    "text": "A felicidade é a chave do sucesso quando você ama o que faz.",
+    "author": "Albert Schweitzer",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso nasce de decisão, trabalho e aprendizado contínuo.",
+    "author": "Abilio Diniz",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sonhe grande, pois dá o mesmo trabalho que sonhar pequeno.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso sustentável é resultado que não exige perder valores, e esse padrão transforma intenção em resultado.",
+    "author": "Napoleon Hill",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Grandes conquistas começam quando a decisão vira compromisso diário, porque a consistência sustenta o progresso.",
+    "author": "Zig Ziglar",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso aumenta quando preparo encontra oportunidade, quando existe responsabilidade no próximo passo.",
+    "author": "Jim Rohn",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Vencer sem aprender é frágil; aprender enquanto vence é vantagem, e fortalece a confiança de quem caminha junto.",
+    "author": "Dale Carnegie",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O reconhecimento chega depois que o padrão já foi construído, sem abrir mão de aprendizado e humildade.",
+    "author": "Henry Ford",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso real melhora a vida de quem produz e de quem é servido, quando a decisão é acompanhada de ação.",
+    "author": "Andrew Carnegie",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Resultados sólidos nascem de escolhas repetidas com coragem, e torna a rotina mais forte que a desculpa.",
+    "author": "Sam Walton",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso sustentável é resultado que não exige perder valores, quando o propósito permanece claro.",
+    "author": "Theodore Roosevelt",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Grandes conquistas começam quando a decisão vira compromisso diário, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Tony Robbins",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso aumenta quando preparo encontra oportunidade, porque excelência começa nos fundamentos.",
+    "author": "Brian Tracy",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Vencer sem aprender é frágil; aprender enquanto vence é vantagem, quando cada detalhe recebe atenção prática.",
+    "author": "John Maxwell",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O reconhecimento chega depois que o padrão já foi construído, e preserva energia para o que realmente importa.",
+    "author": "Simon Sinek",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso real melhora a vida de quem produz e de quem é servido, quando a meta é grande e o caminho exige constância.",
+    "author": "Jack Ma",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Resultados sólidos nascem de escolhas repetidas com coragem, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Bill Gates",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso sustentável é resultado que não exige perder valores, quando a comunicação é simples e direta.",
+    "author": "Larry Page",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Grandes conquistas começam quando a decisão vira compromisso diário, e transforma pressão em foco construtivo.",
+    "author": "Eric Schmidt",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso aumenta quando preparo encontra oportunidade, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Indra Nooyi",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Vencer sem aprender é frágil; aprender enquanto vence é vantagem, e mostra que preparo também é estratégia.",
+    "author": "Satya Nadella",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O reconhecimento chega depois que o padrão já foi construído, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Michael Jordan",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso real melhora a vida de quem produz e de quem é servido, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Vince Lombardi",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Resultados sólidos nascem de escolhas repetidas com coragem, quando disciplina e coragem trabalham juntas.",
+    "author": "Phil Jackson",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso sustentável é resultado que não exige perder valores, e substitui improviso por maturidade operacional.",
+    "author": "Stephen Covey",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Grandes conquistas começam quando a decisão vira compromisso diário, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "James Clear",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O sucesso aumenta quando preparo encontra oportunidade, e converte experiência em decisões melhores.",
+    "author": "Angela Duckworth",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Vencer sem aprender é frágil; aprender enquanto vence é vantagem, quando a execução acompanha a visão.",
+    "author": "Carol Dweck",
+    "category": "Sucesso"
+  },
+  {
+    "text": "O reconhecimento chega depois que o padrão já foi construído, e prova que confiança se constrói em cada entrega.",
+    "author": "Sheryl Sandberg",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sucesso real melhora a vida de quem produz e de quem é servido, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Mary Barra",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Resultados sólidos nascem de escolhas repetidas com coragem, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Howard Schultz",
+    "category": "Sucesso"
+  },
+  {
+    "text": "Sozinhos podemos fazer pouco; juntos podemos fazer muito.",
+    "author": "Helen Keller",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Nenhum de nós é tão inteligente quanto todos nós juntos.",
+    "author": "Ken Blanchard",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Equipes fortes transformam diferenças em complementaridade.",
+    "author": "Phil Jackson",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "A confiança é a cola invisível das grandes equipes.",
+    "author": "Patrick Lencioni",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "O compromisso individual sustenta o resultado coletivo.",
+    "author": "Vince Lombardi",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Times vencedores compartilham propósito antes de compartilhar tarefas.",
+    "author": "Simon Sinek",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Equipe alinhada reduz atrito e multiplica velocidade, e esse padrão transforma intenção em resultado.",
+    "author": "Richard Branson",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Confiança permite discordar sem quebrar o compromisso coletivo, porque a consistência sustenta o progresso.",
+    "author": "Reid Hoffman",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "O melhor time não elimina diferenças; organiza talentos complementares, quando existe responsabilidade no próximo passo.",
+    "author": "Marc Benioff",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Colaboração verdadeira aparece quando o resultado coletivo vale mais que o ego, e fortalece a confiança de quem caminha junto.",
+    "author": "Clayton Christensen",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Times fortes compartilham informações antes que virem problemas, sem abrir mão de aprendizado e humildade.",
+    "author": "Ken Blanchard",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "A vitória coletiva começa em responsabilidades individuais bem assumidas, quando a decisão é acompanhada de ação.",
+    "author": "Tom Peters",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Um time maduro transforma conflito em clareza, e torna a rotina mais forte que a desculpa.",
+    "author": "Seth Godin",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Equipe alinhada reduz atrito e multiplica velocidade, quando o propósito permanece claro.",
+    "author": "Gary Vaynerchuk",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Confiança permite discordar sem quebrar o compromisso coletivo, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Daniel Goleman",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "O melhor time não elimina diferenças; organiza talentos complementares, porque excelência começa nos fundamentos.",
+    "author": "Brené Brown",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Colaboração verdadeira aparece quando o resultado coletivo vale mais que o ego, quando cada detalhe recebe atenção prática.",
+    "author": "Ray Dalio",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Times fortes compartilham informações antes que virem problemas, e preserva energia para o que realmente importa.",
+    "author": "Charles Munger",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "A vitória coletiva começa em responsabilidades individuais bem assumidas, quando a meta é grande e o caminho exige constância.",
+    "author": "Michael Porter",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Um time maduro transforma conflito em clareza, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Jim Collins",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Equipe alinhada reduz atrito e multiplica velocidade, quando a comunicação é simples e direta.",
+    "author": "Lao-Tsé",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Confiança permite discordar sem quebrar o compromisso coletivo, e transforma pressão em foco construtivo.",
+    "author": "Confúcio",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "O melhor time não elimina diferenças; organiza talentos complementares, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Aristóteles",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Colaboração verdadeira aparece quando o resultado coletivo vale mais que o ego, e mostra que preparo também é estratégia.",
+    "author": "Sêneca",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Times fortes compartilham informações antes que virem problemas, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Marco Aurélio",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "A vitória coletiva começa em responsabilidades individuais bem assumidas, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Benjamin Franklin",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Um time maduro transforma conflito em clareza, quando disciplina e coragem trabalham juntas.",
+    "author": "Thomas Edison",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Equipe alinhada reduz atrito e multiplica velocidade, e substitui improviso por maturidade operacional.",
+    "author": "Albert Einstein",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Confiança permite discordar sem quebrar o compromisso coletivo, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Nelson Mandela",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "O melhor time não elimina diferenças; organiza talentos complementares, e converte experiência em decisões melhores.",
+    "author": "Mahatma Gandhi",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Colaboração verdadeira aparece quando o resultado coletivo vale mais que o ego, quando a execução acompanha a visão.",
+    "author": "Martin Luther King Jr.",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Times fortes compartilham informações antes que virem problemas, e prova que confiança se constrói em cada entrega.",
+    "author": "Walt Disney",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "A vitória coletiva começa em responsabilidades individuais bem assumidas, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Oprah Winfrey",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Um time maduro transforma conflito em clareza, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Mary Kay Ash",
+    "category": "Trabalho em Equipe"
+  },
+  {
+    "text": "Ideias são fáceis; execução é tudo.",
+    "author": "John Doerr",
+    "category": "Execução"
+  },
+  {
+    "text": "A estratégia sem execução é apenas intenção.",
+    "author": "Larry Bossidy",
+    "category": "Execução"
+  },
+  {
+    "text": "Faça o que puder, com o que tiver, onde estiver.",
+    "author": "Theodore Roosevelt",
+    "category": "Execução"
+  },
+  {
+    "text": "O segredo de seguir em frente é começar.",
+    "author": "Mark Twain",
+    "category": "Execução"
+  },
+  {
+    "text": "A ação vence a dúvida quando existe clareza de prioridade.",
+    "author": "Peter Drucker",
+    "category": "Execução"
+  },
+  {
+    "text": "Entrega consistente transforma plano em credibilidade.",
+    "author": "Satya Nadella",
+    "category": "Execução"
+  },
+  {
+    "text": "Execução é transformar prioridade em próximo passo visível, e esse padrão transforma intenção em resultado.",
+    "author": "T. Harv Eker",
+    "category": "Execução"
+  },
+  {
+    "text": "O plano melhora quando encontra a realidade e continua avançando, porque a consistência sustenta o progresso.",
+    "author": "Og Mandino",
+    "category": "Execução"
+  },
+  {
+    "text": "Ação sem foco dispersa energia; foco sem ação desperdiça visão, quando existe responsabilidade no próximo passo.",
+    "author": "Ralph Waldo Emerson",
+    "category": "Execução"
+  },
+  {
+    "text": "Quem executa mede, aprende e corrige sem dramatizar, e fortalece a confiança de quem caminha junto.",
+    "author": "Booker T. Washington",
+    "category": "Execução"
+  },
+  {
+    "text": "A entrega de hoje sustenta a confiança na promessa de amanhã, sem abrir mão de aprendizado e humildade.",
+    "author": "George Washington Carver",
+    "category": "Execução"
+  },
+  {
+    "text": "Velocidade útil nasce de clareza, cadência e responsabilidade, quando a decisão é acompanhada de ação.",
+    "author": "Soichiro Honda",
+    "category": "Execução"
+  },
+  {
+    "text": "A execução disciplinada reduz a distância entre intenção e resultado, e torna a rotina mais forte que a desculpa.",
+    "author": "Akio Morita",
+    "category": "Execução"
+  },
+  {
+    "text": "Execução é transformar prioridade em próximo passo visível, quando o propósito permanece claro.",
+    "author": "Carlos Brito",
+    "category": "Execução"
+  },
+  {
+    "text": "O plano melhora quando encontra a realidade e continua avançando, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Luiza Helena Trajano",
+    "category": "Execução"
+  },
+  {
+    "text": "Ação sem foco dispersa energia; foco sem ação desperdiça visão, porque excelência começa nos fundamentos.",
+    "author": "Roberto Rodrigues",
+    "category": "Execução"
+  },
+  {
+    "text": "Quem executa mede, aprende e corrige sem dramatizar, quando cada detalhe recebe atenção prática.",
+    "author": "Alysson Paolinelli",
+    "category": "Execução"
+  },
+  {
+    "text": "A entrega de hoje sustenta a confiança na promessa de amanhã, e preserva energia para o que realmente importa.",
+    "author": "Norman Borlaug",
+    "category": "Execução"
+  },
+  {
+    "text": "Velocidade útil nasce de clareza, cadência e responsabilidade, quando a meta é grande e o caminho exige constância.",
+    "author": "Abilio Diniz",
+    "category": "Execução"
+  },
+  {
+    "text": "A execução disciplinada reduz a distância entre intenção e resultado, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Flávio Augusto",
+    "category": "Execução"
+  },
+  {
+    "text": "Execução é transformar prioridade em próximo passo visível, quando a comunicação é simples e direta.",
+    "author": "Bernardinho",
+    "category": "Execução"
+  },
+  {
+    "text": "O plano melhora quando encontra a realidade e continua avançando, e transforma pressão em foco construtivo.",
+    "author": "Ayrton Senna",
+    "category": "Execução"
+  },
+  {
+    "text": "Ação sem foco dispersa energia; foco sem ação desperdiça visão, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Steve Jobs",
+    "category": "Execução"
+  },
+  {
+    "text": "Quem executa mede, aprende e corrige sem dramatizar, e mostra que preparo também é estratégia.",
+    "author": "Tim Cook",
+    "category": "Execução"
+  },
+  {
+    "text": "A entrega de hoje sustenta a confiança na promessa de amanhã, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Jack Welch",
+    "category": "Execução"
+  },
+  {
+    "text": "Velocidade útil nasce de clareza, cadência e responsabilidade, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Peter Drucker",
+    "category": "Execução"
+  },
+  {
+    "text": "A execução disciplinada reduz a distância entre intenção e resultado, quando disciplina e coragem trabalham juntas.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Execução"
+  },
+  {
+    "text": "Execução é transformar prioridade em próximo passo visível, e substitui improviso por maturidade operacional.",
+    "author": "Elon Musk",
+    "category": "Execução"
+  },
+  {
+    "text": "O plano melhora quando encontra a realidade e continua avançando, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Jeff Bezos",
+    "category": "Execução"
+  },
+  {
+    "text": "Ação sem foco dispersa energia; foco sem ação desperdiça visão, e converte experiência em decisões melhores.",
+    "author": "Warren Buffett",
+    "category": "Execução"
+  },
+  {
+    "text": "Quem executa mede, aprende e corrige sem dramatizar, quando a execução acompanha a visão.",
+    "author": "Napoleon Hill",
+    "category": "Execução"
+  },
+  {
+    "text": "A entrega de hoje sustenta a confiança na promessa de amanhã, e prova que confiança se constrói em cada entrega.",
+    "author": "Zig Ziglar",
+    "category": "Execução"
+  },
+  {
+    "text": "Velocidade útil nasce de clareza, cadência e responsabilidade, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Jim Rohn",
+    "category": "Execução"
+  },
+  {
+    "text": "A execução disciplinada reduz a distância entre intenção e resultado, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Dale Carnegie",
+    "category": "Execução"
+  },
+  {
+    "text": "O principal é manter o principal como principal.",
+    "author": "Stephen Covey",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Foco é dizer não a centenas de boas ideias.",
+    "author": "Steve Jobs",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Não confunda movimento com progresso.",
+    "author": "Denzel Washington",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A simplicidade é a sofisticação máxima.",
+    "author": "Leonardo da Vinci",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Tempo é o recurso mais democrático e menos recuperável.",
+    "author": "Brian Tracy",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Produtividade é prioridade aplicada com constância.",
+    "author": "James Clear",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Produtividade é fazer primeiro o que mais move o resultado, e esse padrão transforma intenção em resultado.",
+    "author": "Henry Ford",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Agenda cheia não é sinônimo de dia produtivo, porque a consistência sustenta o progresso.",
+    "author": "Andrew Carnegie",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Eliminar distrações é uma forma prática de respeitar a meta, quando existe responsabilidade no próximo passo.",
+    "author": "Sam Walton",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A clareza economiza horas que a pressa desperdiça, e fortalece a confiança de quem caminha junto.",
+    "author": "Theodore Roosevelt",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Priorizar bem é aceitar que nem tudo merece o mesmo esforço, sem abrir mão de aprendizado e humildade.",
+    "author": "Tony Robbins",
+    "category": "Produtividade"
+  },
+  {
+    "text": "O trabalho profundo transforma tempo em vantagem, quando a decisão é acompanhada de ação.",
+    "author": "Brian Tracy",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A produtividade cresce quando energia e prioridade trabalham juntas, e torna a rotina mais forte que a desculpa.",
+    "author": "John Maxwell",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Produtividade é fazer primeiro o que mais move o resultado, quando o propósito permanece claro.",
+    "author": "Simon Sinek",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Agenda cheia não é sinônimo de dia produtivo, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Jack Ma",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Eliminar distrações é uma forma prática de respeitar a meta, porque excelência começa nos fundamentos.",
+    "author": "Bill Gates",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A clareza economiza horas que a pressa desperdiça, quando cada detalhe recebe atenção prática.",
+    "author": "Larry Page",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Priorizar bem é aceitar que nem tudo merece o mesmo esforço, e preserva energia para o que realmente importa.",
+    "author": "Eric Schmidt",
+    "category": "Produtividade"
+  },
+  {
+    "text": "O trabalho profundo transforma tempo em vantagem, quando a meta é grande e o caminho exige constância.",
+    "author": "Indra Nooyi",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A produtividade cresce quando energia e prioridade trabalham juntas, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Satya Nadella",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Produtividade é fazer primeiro o que mais move o resultado, quando a comunicação é simples e direta.",
+    "author": "Michael Jordan",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Agenda cheia não é sinônimo de dia produtivo, e transforma pressão em foco construtivo.",
+    "author": "Vince Lombardi",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Eliminar distrações é uma forma prática de respeitar a meta, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Phil Jackson",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A clareza economiza horas que a pressa desperdiça, e mostra que preparo também é estratégia.",
+    "author": "Stephen Covey",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Priorizar bem é aceitar que nem tudo merece o mesmo esforço, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "James Clear",
+    "category": "Produtividade"
+  },
+  {
+    "text": "O trabalho profundo transforma tempo em vantagem, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Angela Duckworth",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A produtividade cresce quando energia e prioridade trabalham juntas, quando disciplina e coragem trabalham juntas.",
+    "author": "Carol Dweck",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Produtividade é fazer primeiro o que mais move o resultado, e substitui improviso por maturidade operacional.",
+    "author": "Sheryl Sandberg",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Agenda cheia não é sinônimo de dia produtivo, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Mary Barra",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Eliminar distrações é uma forma prática de respeitar a meta, e converte experiência em decisões melhores.",
+    "author": "Howard Schultz",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A clareza economiza horas que a pressa desperdiça, quando a execução acompanha a visão.",
+    "author": "Richard Branson",
+    "category": "Produtividade"
+  },
+  {
+    "text": "Priorizar bem é aceitar que nem tudo merece o mesmo esforço, e prova que confiança se constrói em cada entrega.",
+    "author": "Reid Hoffman",
+    "category": "Produtividade"
+  },
+  {
+    "text": "O trabalho profundo transforma tempo em vantagem, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Marc Benioff",
+    "category": "Produtividade"
+  },
+  {
+    "text": "A produtividade cresce quando energia e prioridade trabalham juntas, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Clayton Christensen",
+    "category": "Produtividade"
+  },
+  {
+    "text": "O maior risco é não correr risco algum.",
+    "author": "Mark Zuckerberg",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Se algo é importante o bastante, tente mesmo que as chances sejam contra você.",
+    "author": "Elon Musk",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreender é transformar problemas reais em soluções sustentáveis.",
+    "author": "Flávio Augusto",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A melhor forma de prever o futuro é criá-lo.",
+    "author": "Peter Drucker",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Comece pequeno, pense grande e aprenda rápido.",
+    "author": "Jack Ma",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empresas admiráveis nascem de clientes bem atendidos.",
+    "author": "Luiza Helena Trajano",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreender é aprender com o mercado sem perder a visão, e esse padrão transforma intenção em resultado.",
+    "author": "Ken Blanchard",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Toda empresa começa pequena diante do problema que decide resolver, porque a consistência sustenta o progresso.",
+    "author": "Tom Peters",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "O empreendedor transforma incerteza em teste, teste em dado e dado em decisão, quando existe responsabilidade no próximo passo.",
+    "author": "Seth Godin",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Coragem empreendedora não dispensa números; ela precisa deles, e fortalece a confiança de quem caminha junto.",
+    "author": "Gary Vaynerchuk",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Quem empreende cria pontes entre necessidade, solução e confiança, sem abrir mão de aprendizado e humildade.",
+    "author": "Daniel Goleman",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A primeira versão perfeita é menos valiosa que a primeira versão aprendendo, quando a decisão é acompanhada de ação.",
+    "author": "Brené Brown",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreendedorismo forte combina sonho grande e caixa atento, e torna a rotina mais forte que a desculpa.",
+    "author": "Ray Dalio",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreender é aprender com o mercado sem perder a visão, quando o propósito permanece claro.",
+    "author": "Charles Munger",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Toda empresa começa pequena diante do problema que decide resolver, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Michael Porter",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "O empreendedor transforma incerteza em teste, teste em dado e dado em decisão, porque excelência começa nos fundamentos.",
+    "author": "Jim Collins",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Coragem empreendedora não dispensa números; ela precisa deles, quando cada detalhe recebe atenção prática.",
+    "author": "Lao-Tsé",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Quem empreende cria pontes entre necessidade, solução e confiança, e preserva energia para o que realmente importa.",
+    "author": "Confúcio",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A primeira versão perfeita é menos valiosa que a primeira versão aprendendo, quando a meta é grande e o caminho exige constância.",
+    "author": "Aristóteles",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreendedorismo forte combina sonho grande e caixa atento, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Sêneca",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreender é aprender com o mercado sem perder a visão, quando a comunicação é simples e direta.",
+    "author": "Marco Aurélio",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Toda empresa começa pequena diante do problema que decide resolver, e transforma pressão em foco construtivo.",
+    "author": "Benjamin Franklin",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "O empreendedor transforma incerteza em teste, teste em dado e dado em decisão, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Thomas Edison",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Coragem empreendedora não dispensa números; ela precisa deles, e mostra que preparo também é estratégia.",
+    "author": "Albert Einstein",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Quem empreende cria pontes entre necessidade, solução e confiança, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Nelson Mandela",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A primeira versão perfeita é menos valiosa que a primeira versão aprendendo, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Mahatma Gandhi",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreendedorismo forte combina sonho grande e caixa atento, quando disciplina e coragem trabalham juntas.",
+    "author": "Martin Luther King Jr.",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreender é aprender com o mercado sem perder a visão, e substitui improviso por maturidade operacional.",
+    "author": "Walt Disney",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Toda empresa começa pequena diante do problema que decide resolver, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Oprah Winfrey",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "O empreendedor transforma incerteza em teste, teste em dado e dado em decisão, e converte experiência em decisões melhores.",
+    "author": "Mary Kay Ash",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Coragem empreendedora não dispensa números; ela precisa deles, quando a execução acompanha a visão.",
+    "author": "T. Harv Eker",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Quem empreende cria pontes entre necessidade, solução e confiança, e prova que confiança se constrói em cada entrega.",
+    "author": "Og Mandino",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A primeira versão perfeita é menos valiosa que a primeira versão aprendendo, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Ralph Waldo Emerson",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "Empreendedorismo forte combina sonho grande e caixa atento, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Booker T. Washington",
+    "category": "Empreendedorismo"
+  },
+  {
+    "text": "A agricultura é a base da economia e da estabilidade das nações.",
+    "author": "Norman Borlaug",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Produzir alimento é uma missão de ciência, gestão e responsabilidade.",
+    "author": "Alysson Paolinelli",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "O campo moderno une tradição, tecnologia e eficiência.",
+    "author": "Roberto Rodrigues",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A produtividade sustentável nasce do respeito ao solo e aos dados.",
+    "author": "Norman Borlaug",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "No agro, planejamento certo transforma safra em oportunidade.",
+    "author": "Roberto Rodrigues",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Quem serve o produtor serve o futuro da sociedade.",
+    "author": "Alysson Paolinelli",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "No campo, resultado nasce de calendário, técnica e relacionamento, e esse padrão transforma intenção em resultado.",
+    "author": "George Washington Carver",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A safra recompensa quem combina observação local com gestão profissional, porque a consistência sustenta o progresso.",
+    "author": "Soichiro Honda",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Tecnologia no agro vale quando chega à decisão do produtor, quando existe responsabilidade no próximo passo.",
+    "author": "Akio Morita",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Solo bem cuidado é patrimônio produtivo de longo prazo, e fortalece a confiança de quem caminha junto.",
+    "author": "Carlos Brito",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "O produtor valoriza quem entende risco, tempo e margem, sem abrir mão de aprendizado e humildade.",
+    "author": "Luiza Helena Trajano",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Agronegócio forte une produtividade, sustentabilidade e confiança, quando a decisão é acompanhada de ação.",
+    "author": "Roberto Rodrigues",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A gestão rural moderna transforma dado em decisão no tempo certo, e torna a rotina mais forte que a desculpa.",
+    "author": "Alysson Paolinelli",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "No campo, resultado nasce de calendário, técnica e relacionamento, quando o propósito permanece claro.",
+    "author": "Norman Borlaug",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A safra recompensa quem combina observação local com gestão profissional, e aproxima a equipe de resultados mensuráveis.",
+    "author": "Abilio Diniz",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Tecnologia no agro vale quando chega à decisão do produtor, porque excelência começa nos fundamentos.",
+    "author": "Flávio Augusto",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Solo bem cuidado é patrimônio produtivo de longo prazo, quando cada detalhe recebe atenção prática.",
+    "author": "Bernardinho",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "O produtor valoriza quem entende risco, tempo e margem, e preserva energia para o que realmente importa.",
+    "author": "Ayrton Senna",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Agronegócio forte une produtividade, sustentabilidade e confiança, quando a meta é grande e o caminho exige constância.",
+    "author": "Steve Jobs",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A gestão rural moderna transforma dado em decisão no tempo certo, e cria vantagem antes que a oportunidade apareça.",
+    "author": "Tim Cook",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "No campo, resultado nasce de calendário, técnica e relacionamento, quando a comunicação é simples e direta.",
+    "author": "Jack Welch",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A safra recompensa quem combina observação local com gestão profissional, e transforma pressão em foco construtivo.",
+    "author": "Peter Drucker",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Tecnologia no agro vale quando chega à decisão do produtor, quando as escolhas diárias respeitam o objetivo.",
+    "author": "Jorge Paulo Lemann",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Solo bem cuidado é patrimônio produtivo de longo prazo, e mostra que preparo também é estratégia.",
+    "author": "Elon Musk",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "O produtor valoriza quem entende risco, tempo e margem, quando aprender rápido vale mais que parecer perfeito.",
+    "author": "Jeff Bezos",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Agronegócio forte une produtividade, sustentabilidade e confiança, e mantém o compromisso mesmo diante do desconforto.",
+    "author": "Warren Buffett",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A gestão rural moderna transforma dado em decisão no tempo certo, quando disciplina e coragem trabalham juntas.",
+    "author": "Napoleon Hill",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "No campo, resultado nasce de calendário, técnica e relacionamento, e substitui improviso por maturidade operacional.",
+    "author": "Zig Ziglar",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A safra recompensa quem combina observação local com gestão profissional, quando o cliente, a equipe e o resultado permanecem no centro.",
+    "author": "Jim Rohn",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Tecnologia no agro vale quando chega à decisão do produtor, e converte experiência em decisões melhores.",
+    "author": "Dale Carnegie",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Solo bem cuidado é patrimônio produtivo de longo prazo, quando a execução acompanha a visão.",
+    "author": "Henry Ford",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "O produtor valoriza quem entende risco, tempo e margem, e prova que confiança se constrói em cada entrega.",
+    "author": "Andrew Carnegie",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "Agronegócio forte une produtividade, sustentabilidade e confiança, quando a simplicidade elimina ruídos desnecessários.",
+    "author": "Sam Walton",
+    "category": "Agronegócio"
+  },
+  {
+    "text": "A gestão rural moderna transforma dado em decisão no tempo certo, e ajuda pessoas a performarem com mais clareza.",
+    "author": "Theodore Roosevelt",
+    "category": "Agronegócio"
+  }
 ]
