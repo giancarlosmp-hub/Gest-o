@@ -7,6 +7,7 @@ import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
+import motivationalQuotes from "../data/motivationalQuotes.json";
 
 type Activity = {
   id: string;
@@ -103,6 +104,32 @@ type TodayPriority = {
   suggestedAction: string;
 };
 
+type MotivationalQuote = {
+  text: string;
+  author: string;
+  category: string;
+};
+
+function getSessionMotivationalQuote(userId?: string): MotivationalQuote {
+  const fallbackQuote = motivationalQuotesList[0] ?? {
+    text: "Resultados consistentes começam com prioridades claras logo cedo.",
+    author: "Demetra Agro Performance",
+    category: "prioridade"
+  };
+
+  if (typeof window === "undefined" || motivationalQuotesList.length === 0) return fallbackQuote;
+
+  const storageKey = `${MOTIVATIONAL_QUOTE_STORAGE_KEY}:${userId || "anon"}`;
+  const storedIndex = Number(window.sessionStorage.getItem(storageKey));
+  if (Number.isInteger(storedIndex) && storedIndex >= 0 && storedIndex < motivationalQuotesList.length) {
+    return motivationalQuotesList[storedIndex];
+  }
+
+  const selectedIndex = Math.floor(Math.random() * motivationalQuotesList.length);
+  window.sessionStorage.setItem(storageKey, String(selectedIndex));
+  return motivationalQuotesList[selectedIndex] ?? fallbackQuote;
+}
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour <= 11) return "Bom dia";
@@ -155,6 +182,8 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
+const MOTIVATIONAL_QUOTE_STORAGE_KEY = "central-do-dia-motivational-quote";
+const motivationalQuotesList = motivationalQuotes as MotivationalQuote[];
 const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
 type PanelId = (typeof defaultPanelOrder)[number];
 
@@ -345,6 +374,7 @@ export default function HomePage() {
       }).format(new Date()),
     []
   );
+  const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(user?.id), [user?.id]);
 
   const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();
@@ -686,14 +716,48 @@ export default function HomePage() {
     </button>
   );
 
+  const renderCentralDayHero = (showStartRoute: boolean) => (
+    <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
+          <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
+        </div>
+
+        {showStartRoute && (
+          <Link
+            to={`/agenda?${startRouteSearch}`}
+            className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+          >
+            Iniciar roteiro
+          </Link>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 text-brand-900">
+        <SunMoon size={22} />
+        <div>
+          <h2 className="text-xl font-bold">
+            {getGreeting()}, {user?.name ?? "Usuário"}
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 capitalize">{todayDateLabel}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-brand-100 bg-white/75 p-4 text-slate-800">
+        <p className="text-sm font-semibold text-brand-800">💡 Inspiração do Dia</p>
+        <blockquote className="mt-2 text-base leading-relaxed text-slate-800">
+          “{inspirationalQuote.text}”
+        </blockquote>
+        <p className="mt-2 text-sm font-medium text-slate-600">— {inspirationalQuote.author}</p>
+      </div>
+    </section>
+  );
+
   if (isMobile) {
     return (
       <div className="flex flex-col gap-5 pb-4">
-        <section className="rounded-2xl border border-brand-100 bg-brand-50 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Hoje</p>
-          <h1 className="mt-2 text-3xl font-bold text-brand-900">Hoje</h1>
-          <p className="mt-2 text-base text-slate-700 capitalize">{todayDateLabel}</p>
-        </section>
+        {renderCentralDayHero(false)}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Resumo do dia</h2>
@@ -849,32 +913,7 @@ export default function HomePage() {
         )}
       </section>
 
-      <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
-            <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
-          </div>
-
-          <Link
-            to={`/agenda?${startRouteSearch}`}
-            className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
-          >
-            Iniciar roteiro
-          </Link>
-        </div>
-
-        <div className="mt-3 flex items-center gap-3 text-brand-900">
-          <SunMoon size={22} />
-          <h2 className="text-xl font-bold">
-            {getGreeting()}, {user?.name ?? "Usuário"}
-          </h2>
-        </div>
-
-        <p className="mt-2 text-sm text-slate-600">
-          {getGreeting()} · Hoje: <span className="capitalize">{todayDateLabel}</span>
-        </p>
-      </section>
+      {renderCentralDayHero(true)}
 
       <section className="flex flex-col gap-4">
         <article className={blockClass} style={{ order: panelOrder.indexOf("routine") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("routine")}>
