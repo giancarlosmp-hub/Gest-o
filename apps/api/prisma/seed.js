@@ -64,10 +64,21 @@ const baseCultures = [
 
 const cityByRegion = {
   Sudeste: ["Ribeirão Preto", "Uberaba", "Patrocínio"],
-  Sul: ["Londrina", "Cascavel", "Passo Fundo"],
+  Sul: ["Toledo", "Cascavel", "Marechal Cândido Rondon"],
   Nordeste: ["Luís Eduardo Magalhães", "Barreiras", "Balsas"],
   "Centro-Oeste": ["Sorriso", "Rio Verde", "Dourados"]
 };
+
+const westernParanaTerritoryCities = [
+  "Toledo",
+  "Cascavel",
+  "Marechal Cândido Rondon",
+  "Palotina",
+  "Assis Chateaubriand",
+  "Cafelândia",
+  "Santa Helena",
+  "Medianeira"
+];
 
 async function main() {
   const realUsersCount = await prisma.user.count({
@@ -101,6 +112,7 @@ async function main() {
   await prisma.agendaStop.deleteMany();
   await prisma.agendaEvent.deleteMany();
   await prisma.goal.deleteMany();
+  await prisma.sellerTerritoryCity.deleteMany();
   await prisma.sale.deleteMany();
   await prisma.activity.deleteMany();
   await prisma.opportunity.deleteMany();
@@ -123,6 +135,13 @@ async function main() {
   for (const seller of vendedores) {
     if (!firstSellerId) firstSellerId = seller.id;
     await prisma.goal.create({ data: { month, targetValue: 100000, sellerId: seller.id } });
+
+    if (seller.region === "Sul") {
+      await prisma.sellerTerritoryCity.createMany({
+        data: westernParanaTerritoryCities.map((city) => ({ sellerId: seller.id, state: "PR", city })),
+        skipDuplicates: true
+      });
+    }
 
     const cities = cityByRegion[seller.region] || ["São Paulo"];
 

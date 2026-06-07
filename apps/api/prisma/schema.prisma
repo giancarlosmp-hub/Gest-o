@@ -92,6 +92,7 @@ model User {
   activityKpis              ActivityKPI[]
   sales                     Sale[]
   agendaEvents              AgendaEvent[]
+  territoryCities           SellerTerritoryCity[]
 }
 
 model Client {
@@ -320,6 +321,21 @@ model Sale {
   sellerId  String
   seller    User     @relation(fields: [sellerId], references: [id])
   createdAt DateTime @default(now())
+}
+
+model SellerTerritoryCity {
+  id        String   @id @default(cuid())
+  sellerId  String
+  seller    User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  state     String
+  city      String
+  ibgeCode  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sellerId, state, city])
+  @@index([sellerId])
+  @@index([state, city])
 }
 
 model AppConfig {
