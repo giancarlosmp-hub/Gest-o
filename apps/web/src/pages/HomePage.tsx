@@ -745,11 +745,10 @@ export default function HomePage() {
       </div>
 
       <div className="mt-5 rounded-xl border border-brand-100 bg-white/75 p-4 text-slate-800">
-        <p className="text-sm font-semibold text-brand-800">💡 Inspiração do Dia</p>
-        <blockquote className="mt-2 text-base leading-relaxed text-slate-800">
+        <blockquote className="text-base leading-relaxed text-slate-800">
           “{inspirationalQuote.text}”
         </blockquote>
-        <p className="mt-2 text-sm font-medium text-slate-600">— {inspirationalQuote.author}</p>
+        <p className="mt-2 text-sm font-semibold text-[#F59E0B]">— {inspirationalQuote.author}</p>
       </div>
     </section>
   );
