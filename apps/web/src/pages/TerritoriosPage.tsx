@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, CircleDollarSign, MapPinned, Search, Target, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle2, CircleDollarSign, Info, MapPinned, Target, TrendingUp } from "lucide-react";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
@@ -20,6 +20,7 @@ type TerritoryCity = {
   state: string;
   status: TerritoryCityStatus;
   statusLabel: string;
+  ibgeCode?: string | number | null;
   orderCount: number;
   soldValue: number;
   openOpportunityCount: number;
@@ -39,6 +40,168 @@ type TerritoryCoverageResponse = {
   cities: TerritoryCity[];
   outOfTerritoryPreview?: TerritoryCity[];
 };
+
+
+const PARANA_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-41-mun.json";
+const PARANA_GEOJSON_SOURCE = "tbrugz/geodata-br (GeoJSON por estado com fonte IBGE, CC0-1.0)";
+const PARANA_GEOJSON_SIZE_LABEL = "aprox. 1,52 MB";
+const MAP_WIDTH = 900;
+const MAP_HEIGHT = 620;
+const MAP_PADDING = 18;
+
+type GeoJsonPosition = [number, number] | [number, number, number];
+type GeoJsonPolygon = GeoJsonPosition[][];
+type GeoJsonMultiPolygon = GeoJsonPolygon[];
+
+type GeoJsonGeometry = {
+  type: "Polygon" | "MultiPolygon";
+  coordinates: GeoJsonPolygon | GeoJsonMultiPolygon;
+};
+
+type ParanaMunicipalityFeature = {
+  type: "Feature";
+  properties: Record<string, string | number | null | undefined>;
+  geometry: GeoJsonGeometry | null;
+};
+
+type ParanaMunicipalityGeoJson = {
+  type: "FeatureCollection";
+  features: ParanaMunicipalityFeature[];
+};
+
+type ProjectedBounds = {
+  minLon: number;
+  maxLon: number;
+  minLat: number;
+  maxLat: number;
+};
+
+const statusFillColors: Record<TerritoryCityStatus, string> = {
+  positive: "#10b981",
+  opportunity: "#f59e0b",
+  no_sale: "#ef4444",
+  out_of_territory: "#cbd5e1"
+};
+
+const statusStrokeColors: Record<TerritoryCityStatus, string> = {
+  positive: "#047857",
+  opportunity: "#b45309",
+  no_sale: "#b91c1c",
+  out_of_territory: "#94a3b8"
+};
+
+function normalizeCityKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function getFeatureCityName(feature: ParanaMunicipalityFeature) {
+  const props = feature.properties ?? {};
+  const candidate = props.name ?? props.nome ?? props.NM_MUN ?? props.NM_MUNICIP ?? props.description ?? props.municipio ?? props.MUNICIPIO;
+  return String(candidate ?? "Município");
+}
+
+function getFeatureIbgeCode(feature: ParanaMunicipalityFeature) {
+  const props = feature.properties ?? {};
+  const candidate = props.id ?? props.codigo_ibge ?? props.CD_MUN ?? props.CD_GEOCMU ?? props.geocodigo;
+  return candidate === undefined || candidate === null ? "" : String(candidate);
+}
+
+function getPolygons(geometry: GeoJsonGeometry | null): GeoJsonPolygon[] {
+  if (!geometry) return [];
+  if (geometry.type === "Polygon") return [geometry.coordinates as GeoJsonPolygon];
+  if (geometry.type === "MultiPolygon") return geometry.coordinates as GeoJsonMultiPolygon;
+  return [];
+}
+
+function calculateBounds(features: ParanaMunicipalityFeature[]): ProjectedBounds {
+  const bounds = features.reduce<ProjectedBounds>((acc, feature) => {
+    getPolygons(feature.geometry).forEach((polygon) => {
+      polygon.forEach((ring) => {
+        ring.forEach(([lon, lat]) => {
+          acc.minLon = Math.min(acc.minLon, lon);
+          acc.maxLon = Math.max(acc.maxLon, lon);
+          acc.minLat = Math.min(acc.minLat, lat);
+          acc.maxLat = Math.max(acc.maxLat, lat);
+        });
+      });
+    });
+    return acc;
+  }, { minLon: Infinity, maxLon: -Infinity, minLat: Infinity, maxLat: -Infinity });
+
+  return Number.isFinite(bounds.minLon) ? bounds : { minLon: -54, maxLon: -48, minLat: -27, maxLat: -22 };
+}
+
+function projectPosition([lon, lat]: GeoJsonPosition, bounds: ProjectedBounds) {
+  const lonRange = bounds.maxLon - bounds.minLon || 1;
+  const latRange = bounds.maxLat - bounds.minLat || 1;
+  const drawableWidth = MAP_WIDTH - MAP_PADDING * 2;
+  const drawableHeight = MAP_HEIGHT - MAP_PADDING * 2;
+  const scale = Math.min(drawableWidth / lonRange, drawableHeight / latRange);
+  const mapPixelWidth = lonRange * scale;
+  const mapPixelHeight = latRange * scale;
+  const offsetX = (MAP_WIDTH - mapPixelWidth) / 2;
+  const offsetY = (MAP_HEIGHT - mapPixelHeight) / 2;
+
+  return {
+    x: offsetX + (lon - bounds.minLon) * scale,
+    y: offsetY + (bounds.maxLat - lat) * scale
+  };
+}
+
+function polygonToPath(polygon: GeoJsonPolygon, bounds: ProjectedBounds) {
+  return polygon
+    .map((ring) => ring
+      .map((position, index) => {
+        const point = projectPosition(position, bounds);
+        return `${index === 0 ? "M" : "L"}${point.x.toFixed(2)},${point.y.toFixed(2)}`;
+      })
+      .join(" ") + " Z")
+    .join(" ");
+}
+
+function featureToPath(feature: ParanaMunicipalityFeature, bounds: ProjectedBounds) {
+  return getPolygons(feature.geometry).map((polygon) => polygonToPath(polygon, bounds)).join(" ");
+}
+
+function getTooltipText(city: TerritoryCity, sellerName?: string) {
+  return [
+    `Cidade: ${city.city}`,
+    `UF: ${city.state}`,
+    `Status: ${city.statusLabel || statusStyles[city.status].label}`,
+    `Vendedor: ${sellerName ?? "-"}`,
+    `Pedidos ERP: ${city.orderCount}`,
+    `Valor vendido: ${formatCurrencyBRL(city.soldValue)}`,
+    `Oportunidades abertas: ${city.openOpportunityCount}`
+  ].join("\n");
+}
+
+function createOutOfTerritoryCity(city: string): TerritoryCity {
+  return {
+    city,
+    state: "PR",
+    status: "out_of_territory",
+    statusLabel: "Fora do território",
+    orderCount: 0,
+    soldValue: 0,
+    openOpportunityCount: 0
+  };
+}
+
+function DetailRow({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-3">
+      <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd className="mt-1 font-bold text-slate-900">{value}</dd>
+    </div>
+  );
+}
 
 const statusStyles: Record<TerritoryCityStatus, { badge: string; card: string; dot: string; label: string }> = {
   positive: {
@@ -103,9 +266,29 @@ export default function TerritoriosPage() {
   const [coverage, setCoverage] = useState<TerritoryCoverageResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [paranaGeoJson, setParanaGeoJson] = useState<ParanaMunicipalityGeoJson | null>(null);
+  const [geoJsonError, setGeoJsonError] = useState<string | null>(null);
+  const [selectedCity, setSelectedCity] = useState<TerritoryCity | null>(null);
 
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
   const visualCities = useMemo(() => [...(coverage?.cities ?? []), ...(coverage?.outOfTerritoryPreview ?? [])], [coverage]);
+  const citiesByNormalizedName = useMemo(() => {
+    const map = new Map<string, TerritoryCity>();
+    visualCities.forEach((city) => {
+      map.set(normalizeCityKey(city.city), city);
+    });
+    return map;
+  }, [visualCities]);
+  const citiesByIbgeCode = useMemo(() => {
+    const map = new Map<string, TerritoryCity>();
+    visualCities.forEach((city) => {
+      if (city.ibgeCode !== undefined && city.ibgeCode !== null) {
+        map.set(String(city.ibgeCode), city);
+      }
+    });
+    return map;
+  }, [visualCities]);
+  const geoBounds = useMemo(() => calculateBounds(paranaGeoJson?.features ?? []), [paranaGeoJson]);
   const missingCities = Math.max((coverage?.summary.totalCities ?? 0) - (coverage?.summary.positiveCities ?? 0), 0);
 
   useEffect(() => {
@@ -126,6 +309,33 @@ export default function TerritoriosPage() {
 
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    setGeoJsonError(null);
+
+    fetch(PARANA_GEOJSON_URL)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        return response.json() as Promise<ParanaMunicipalityGeoJson>;
+      })
+      .then((data) => {
+        if (!mounted) return;
+        setParanaGeoJson(data);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setGeoJsonError("Não foi possível carregar o GeoJSON dos municípios do Paraná. Recarregue a página ou verifique a rede.");
+      });
+
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    setSelectedCity(null);
+  }, [selectedSellerId, month]);
 
   useEffect(() => {
     if (!selectedSellerId) return;
@@ -219,41 +429,109 @@ export default function TerritoriosPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(520px,1.4fr)]">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(520px,1fr)]">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className="text-lg font-bold text-slate-900">Mapa visual por cidades</h2>
-              <p className="text-sm text-slate-500">MVP em cards; TODO: evoluir para React Leaflet com GeoJSON simplificado do Paraná.</p>
+              <h2 className="text-lg font-bold text-slate-900">Mapa real dos municípios do Paraná</h2>
+              <p className="text-sm text-slate-500">GeoJSON simplificado por UF, colorido somente com o status calculado pelo backend.</p>
             </div>
-            <Search className="text-slate-400" size={20} />
+            <div className="flex flex-wrap gap-2 text-xs font-semibold text-slate-600">
+              {Object.entries(statusStyles).map(([status, style]) => (
+                <span key={status} className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1 ring-1 ring-slate-200">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: statusFillColors[status as TerritoryCityStatus] }} />
+                  {style.label}
+                </span>
+              ))}
+            </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {loading ? (
-              <p className="col-span-full rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Carregando território...</p>
-            ) : visualCities.length === 0 ? (
-              <p className="col-span-full rounded-xl bg-slate-50 p-4 text-sm text-slate-500">Nenhuma cidade vinculada ao território deste vendedor.</p>
-            ) : visualCities.map((city) => {
-              const style = statusStyles[city.status];
-              return (
-                <article key={`${city.state}-${city.city}-${city.status}`} className={`rounded-2xl border p-4 ${style.card}`} title={`${city.city}\n${coverage?.seller.name ?? "Vendedor"}\n${style.label}\nValor vendido: ${formatCurrencyBRL(city.soldValue)}\nPedidos: ${city.orderCount}\nOportunidades: ${city.openOpportunityCount}`}>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-h-[340px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+              {loading ? (
+                <div className="flex h-full min-h-[340px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando território...</div>
+              ) : geoJsonError ? (
+                <div className="flex h-full min-h-[340px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500">
+                  <AlertCircle className="text-amber-500" size={22} />
+                  <span>{geoJsonError}</span>
+                </div>
+              ) : paranaGeoJson ? (
+                <svg
+                  className="h-full min-h-[340px] w-full touch-manipulation"
+                  role="img"
+                  aria-label="Mapa de cobertura comercial dos municípios do Paraná"
+                  viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+                >
+                  <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
+                  {paranaGeoJson.features.map((feature) => {
+                    const featureCityName = getFeatureCityName(feature);
+                    const city = citiesByIbgeCode.get(getFeatureIbgeCode(feature))
+                      ?? citiesByNormalizedName.get(normalizeCityKey(featureCityName))
+                      ?? createOutOfTerritoryCity(featureCityName);
+                    const isSelected = selectedCity ? normalizeCityKey(selectedCity.city) === normalizeCityKey(featureCityName) : false;
+                    const path = featureToPath(feature, geoBounds);
+                    if (!path) return null;
+
+                    return (
+                      <path
+                        key={`${feature.properties.id ?? featureCityName}`}
+                        d={path}
+                        fill={statusFillColors[city.status]}
+                        stroke={isSelected ? "#0f172a" : statusStrokeColors[city.status]}
+                        strokeWidth={isSelected ? 2.4 : 0.7}
+                        vectorEffect="non-scaling-stroke"
+                        opacity={city.status === "out_of_territory" ? 0.7 : 0.92}
+                        className="cursor-pointer transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        tabIndex={0}
+                        role="button"
+                        aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
+                        onClick={() => setSelectedCity(city)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedCity(city);
+                          }
+                        }}
+                      >
+                        <title>{getTooltipText(city, coverage?.seller.name)}</title>
+                      </path>
+                    );
+                  })}
+                </svg>
+              ) : (
+                <div className="flex h-full min-h-[340px] items-center justify-center p-6 text-sm font-semibold text-slate-500">Carregando mapa do Paraná...</div>
+              )}
+            </div>
+
+            <aside className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              {selectedCity ? (
+                <div>
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="font-bold text-slate-900">{city.city}</h3>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{city.state}</p>
+                      <h3 className="text-lg font-bold text-slate-900">{selectedCity.city}</h3>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{selectedCity.state}</p>
                     </div>
-                    <span className={`mt-1 h-3 w-3 rounded-full ${style.dot}`} />
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusStyles[selectedCity.status].badge}`}>{selectedCity.statusLabel}</span>
                   </div>
-                  <p className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${style.badge}`}>{style.label}</p>
-                  <dl className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-                    <div><dt>Pedidos</dt><dd className="font-bold text-slate-900">{city.orderCount}</dd></div>
-                    <div><dt>Oport.</dt><dd className="font-bold text-slate-900">{city.openOpportunityCount}</dd></div>
-                    <div><dt>Vendido</dt><dd className="font-bold text-slate-900">{formatCurrencyBRL(city.soldValue)}</dd></div>
+                  <dl className="mt-4 grid gap-3">
+                    <DetailRow label="Vendedor" value={coverage?.seller.name ?? "-"} />
+                    <DetailRow label="Pedidos ERP" value={selectedCity.orderCount} />
+                    <DetailRow label="Valor vendido" value={formatCurrencyBRL(selectedCity.soldValue)} />
+                    <DetailRow label="Oportunidades abertas" value={selectedCity.openOpportunityCount} />
                   </dl>
-                </article>
-              );
-            })}
+                </div>
+              ) : (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-center text-sm text-slate-500">
+                  <Info className="text-brand-500" size={24} />
+                  <p>Clique ou toque em um município para ver os detalhes da cobertura.</p>
+                </div>
+              )}
+            </aside>
+          </div>
+
+          <div className="mt-3 flex flex-col gap-1 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <span>Biblioteca: React + SVG GeoJSON (sem dependência externa de mapa nesta etapa).</span>
+            <span>Origem: {PARANA_GEOJSON_SOURCE}; tamanho {PARANA_GEOJSON_SIZE_LABEL}.</span>
           </div>
         </div>
 
