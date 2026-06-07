@@ -24,6 +24,8 @@ export type UltraFv3SyncScope =
   | "paymentMethods"
   | "receivingConditions"
   | "priceTables"
+  | "priceVariations"
+  | "prices"
   | "branches"
   | "operations"
   | "orderStatus";
@@ -1975,6 +1977,10 @@ async function syncReferenceData(
 
 export const syncPriceTables = (options?: RunSyncOptions) =>
   syncReferenceData("priceTables", "/price-tables", options, ["/priceTables"]);
+export const syncPriceVariations = (options?: RunSyncOptions) =>
+  syncReferenceData("priceVariations", "/priceVariations", options);
+export const syncPrices = (options?: RunSyncOptions) =>
+  syncReferenceData("prices", "/prices", options);
 export const syncPaymentMethods = (options?: RunSyncOptions) =>
   syncReferenceData("paymentMethods", "/payment-methods", options, [
     "/paymentMethods",
@@ -2056,6 +2062,8 @@ export async function getUltraFv3SyncStatus() {
     "paymentMethods",
     "receivingConditions",
     "priceTables",
+    "priceVariations",
+    "prices",
     "branches",
     "operations",
   ];

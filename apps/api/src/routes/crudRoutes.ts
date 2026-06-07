@@ -55,6 +55,8 @@ import {
   syncPartnersForAllConfiguredSellers,
   syncPaymentMethods,
   syncPriceTables,
+  syncPriceVariations,
+  syncPrices,
   syncProducts,
   syncReceivingConditions,
   syncSalesmen,
@@ -66,6 +68,7 @@ import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
+import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -5628,72 +5631,33 @@ const productSearchQuerySchema = z.object({
   priceTableCode: z.string().trim().min(1).max(60).optional()
 });
 
-const DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE = "1";
+const loadOpportunityPriceRules = async () => {
+  const configs = await prisma.appConfig.findMany({
+    where: { key: { in: ["erp.ultrafv3.priceVariations", "erp.ultrafv3.prices"] } },
+    select: { key: true, value: true },
+  });
+  const configByKey = new Map(configs.map((config) => [config.key, config.value]));
 
-const normalizeOpportunityPriceTableCode = (value: unknown) => {
-  const normalized = normalizeOptionalString(value);
-  return normalized || DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE;
-};
-
-const priceTableMatches = (current: string | null | undefined, requested: string) => {
-  const normalizedCurrent = normalizeOpportunityPriceTableCode(current);
-  if (normalizedCurrent === requested) return true;
-  return requested === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE && (!current || normalizedCurrent === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE);
-};
-
-const parsePositivePrice = (value: unknown) => {
-  const parsed = Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-};
-
-const pickRawPriceForTable = (rawPayload: unknown, priceTableCode: string) => {
-  const raw = rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload) ? rawPayload as Record<string, unknown> : {};
-  const compactCode = priceTableCode.replace(/\W/g, "");
-  const candidateKeys = [
-    `PRECO_TABELA_${priceTableCode}`,
-    `PRECO_TABELA${compactCode}`,
-    `PRECO_TAB_${priceTableCode}`,
-    `PRECO_TAB${compactCode}`,
-    `TABELA_${priceTableCode}_PRECO`,
-    `TABELA${compactCode}_PRECO`,
-    `PRECO${compactCode}`,
-    priceTableCode === "1" ? "PRECO_REVENDA" : "PRECO_CONSUMIDOR_FINAL",
-    priceTableCode === "1" ? "PRECO_COOPERATIVA" : "PRECO_CONSUMIDOR",
-  ];
-  for (const key of candidateKeys) {
-    const price = parsePositivePrice(raw[key]);
-    if (price) return price;
-  }
-
-  for (const value of Object.values(raw)) {
-    if (!Array.isArray(value)) continue;
-    for (const row of value) {
-      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
-      const record = row as Record<string, unknown>;
-      const tableCode = normalizeOpportunityPriceTableCode(record.TABELA_PRECO ?? record.CODTABELA ?? record.COD_TABELA ?? record.priceTableCode ?? record.tabelaPreco ?? record.tabela);
-      if (tableCode !== priceTableCode) continue;
-      const price = parsePositivePrice(record.PRECO ?? record.PRECO_LISTA ?? record.price ?? record.preco ?? record.valor);
-      if (price) return price;
+  const parseRows = (value: string | undefined) => {
+    if (!value?.trim()) return [];
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === "object") {
+        const record = parsed as Record<string, unknown>;
+        for (const key of ["items", "data", "rows", "results", "content"]) {
+          if (Array.isArray(record[key])) return record[key] as unknown[];
+        }
+      }
+    } catch {
+      return [];
     }
-  }
-
-  return null;
-};
-
-const pickProductPriceForTable = (product: { defaultPrice?: number | null; rawErpPayload?: unknown; prices?: Array<{ erpPriceId?: string | null; price: number; validFrom?: Date | null }> }, priceTableCode?: string | null) => {
-  const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
-  const prices = product.prices || [];
-  const tablePrice = prices.find((item) => priceTableMatches(item.erpPriceId, normalizedPriceTableCode) && Number(item.price) > 0);
-  const rawTablePrice = tablePrice ? null : pickRawPriceForTable(product.rawErpPayload, normalizedPriceTableCode);
-  const latestPositivePrice = prices.find((item) => Number(item.price) > 0);
-  const fallbackPrice = Number(product.defaultPrice ?? latestPositivePrice?.price ?? 0);
-  const matchedPrice = tablePrice?.price ?? rawTablePrice;
+    return [];
+  };
 
   return {
-    price: Number(matchedPrice ?? fallbackPrice ?? 0),
-    priceTableCode: normalizedPriceTableCode,
-    priceTableMatched: Boolean(tablePrice || rawTablePrice),
-    priceWarning: tablePrice || rawTablePrice ? null : `Sem preço sincronizado para a tabela ${normalizedPriceTableCode}; mantendo preço padrão/manual.`
+    priceVariations: parseRows(configByKey.get("erp.ultrafv3.priceVariations")),
+    erpPrices: parseRows(configByKey.get("erp.ultrafv3.prices")),
   };
 };
 
@@ -5763,6 +5727,7 @@ router.get("/products/search", async (req, res) => {
   if (!parsed.success) return res.status(400).json({ message: "Parâmetro q é obrigatório" });
   const q = parsed.data.q;
   const requestedPriceTableCode = normalizeOpportunityPriceTableCode(parsed.data.priceTableCode);
+  const priceRules = await loadOpportunityPriceRules();
   const products = await prisma.product.findMany({
     where: {
       OR: [
@@ -5778,7 +5743,12 @@ router.get("/products/search", async (req, res) => {
     include: { prices: { orderBy: [{ validFrom: "desc" }] } }
   });
   return res.json(products.map((product) => {
-    const pickedPrice = pickProductPriceForTable(product, requestedPriceTableCode);
+    const pickedPrice = calculateOpportunityPriceForTable({
+      product,
+      priceTableCode: requestedPriceTableCode,
+      priceVariations: priceRules.priceVariations,
+      erpPrices: priceRules.erpPrices,
+    });
     const stock = Number(product.stockQuantity || 0);
     const status = product.isSuspended
       ? "suspenso/fora de linha"
@@ -5798,6 +5768,7 @@ router.get("/products/search", async (req, res) => {
       priceTableCode: pickedPrice.priceTableCode,
       priceTableMatched: pickedPrice.priceTableMatched,
       priceWarning: pickedPrice.priceWarning,
+      priceSource: pickedPrice.source,
       stock,
       brand: product.brand,
       groupName: product.groupName,
@@ -8082,6 +8053,8 @@ const ultraFv3SyncHandlers = {
   paymentMethods: syncPaymentMethods,
   receivingConditions: syncReceivingConditions,
   priceTables: syncPriceTables,
+  priceVariations: syncPriceVariations,
+  prices: syncPrices,
   branches: syncBranches,
   operations: syncOperations
 } as const;
@@ -8128,6 +8101,8 @@ router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runU
 router.post("/erp/ultrafv3/sync/payment-methods", authorize("diretor", "gerente"), runUltraFv3Sync("paymentMethods"));
 router.post("/erp/ultrafv3/sync/receiving-conditions", authorize("diretor", "gerente"), runUltraFv3Sync("receivingConditions"));
 router.post("/erp/ultrafv3/sync/price-tables", authorize("diretor", "gerente"), runUltraFv3Sync("priceTables"));
+router.post("/erp/ultrafv3/sync/price-variations", authorize("diretor", "gerente"), runUltraFv3Sync("priceVariations"));
+router.post("/erp/ultrafv3/sync/prices", authorize("diretor", "gerente"), runUltraFv3Sync("prices"));
 router.post("/erp/ultrafv3/sync/branches", authorize("diretor", "gerente"), runUltraFv3Sync("branches"));
 router.post("/erp/ultrafv3/sync/operations", authorize("diretor", "gerente"), runUltraFv3Sync("operations"));
 router.post("/erp/ultrafv3/sync/order-status", authorize("diretor", "gerente"), async (_req, res) => {
