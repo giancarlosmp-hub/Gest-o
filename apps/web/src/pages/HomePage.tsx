@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getSessionMotivationalQuote } from "../lib/dailyQuote";
 import api from "../lib/apiClient";
 import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
-import motivationalQuotes from "../data/motivationalQuotes.json";
 
 type Activity = {
   id: string;
@@ -104,32 +104,6 @@ type TodayPriority = {
   suggestedAction: string;
 };
 
-type MotivationalQuote = {
-  text: string;
-  author: string;
-  category: string;
-};
-
-function getSessionMotivationalQuote(userId?: string): MotivationalQuote {
-  const fallbackQuote = motivationalQuotesList[0] ?? {
-    text: "Resultados consistentes começam com prioridades claras logo cedo.",
-    author: "Demetra Agro Performance",
-    category: "prioridade"
-  };
-
-  if (typeof window === "undefined" || motivationalQuotesList.length === 0) return fallbackQuote;
-
-  const storageKey = `${MOTIVATIONAL_QUOTE_STORAGE_KEY}:${userId || "anon"}`;
-  const storedIndex = Number(window.sessionStorage.getItem(storageKey));
-  if (Number.isInteger(storedIndex) && storedIndex >= 0 && storedIndex < motivationalQuotesList.length) {
-    return motivationalQuotesList[storedIndex];
-  }
-
-  const selectedIndex = Math.floor(Math.random() * motivationalQuotesList.length);
-  window.sessionStorage.setItem(storageKey, String(selectedIndex));
-  return motivationalQuotesList[selectedIndex] ?? fallbackQuote;
-}
-
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour <= 11) return "Bom dia";
@@ -182,8 +156,6 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
-const MOTIVATIONAL_QUOTE_STORAGE_KEY = "central-do-dia-motivational-quote";
-const motivationalQuotesList = motivationalQuotes as MotivationalQuote[];
 const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
 type PanelId = (typeof defaultPanelOrder)[number];
 
@@ -374,7 +346,7 @@ export default function HomePage() {
       }).format(new Date()),
     []
   );
-  const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(user?.id), [user?.id]);
+  const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(), [user?.id]);
 
   const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
     const { start, end } = getTodayBoundaries();

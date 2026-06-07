@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import api, { clearSession, setAccessToken } from "../lib/apiClient";
+import { clearCurrentDailyQuoteIndex, selectNewDailyQuoteForLogin } from "../lib/dailyQuote";
 
 export type UserRole = "diretor" | "gerente" | "vendedor";
 
@@ -13,14 +14,6 @@ type AuthContextType = {
 };
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
-const MOTIVATIONAL_QUOTE_SESSION_PREFIX = "central-do-dia-motivational-quote:";
-
-const clearMotivationalQuoteSession = () => {
-  Object.keys(sessionStorage)
-    .filter((key) => key.startsWith(MOTIVATIONAL_QUOTE_SESSION_PREFIX))
-    .forEach((key) => sessionStorage.removeItem(key));
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (email: string, password: string) => {
     const { data } = await api.post("/auth/login", { email, password });
-    clearMotivationalQuoteSession();
+    selectNewDailyQuoteForLogin();
     setAccessToken(data.accessToken);
     setUser(data.user);
   };
@@ -59,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await api.post("/auth/logout");
     } finally {
       clearSession();
-      clearMotivationalQuoteSession();
+      clearCurrentDailyQuoteIndex();
       setUser(null);
     }
   };
