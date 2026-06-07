@@ -377,7 +377,10 @@ const loadDemetraLogo = () => {
       return image;
     }
 
-    console.warn("[erp order pdf] Logo encontrada, mas PNG não suportado em:", candidate);
+    console.warn(
+      "[erp order pdf] Logo encontrada, mas PNG não suportado em:",
+      candidate,
+    );
   }
   console.warn("[erp order pdf] Demetra PNG logo not found or unsupported", {
     candidates,
@@ -904,7 +907,12 @@ const ERP_ORDER_CLAUSES = [
   "CLÁUSULA 4 – Autorizo a emissão da Nota Fiscal de Venda Entrega Futura a partir desta data, nas condições e prazos após liberação do departamento financeiro.",
   "CLÁUSULA 5 – Não havendo pagamento, ou, havendo atraso de alguma das parcelas deste pedido de venda, a mesma poderá ser cancelada automaticamente, independentemente de notificação expressa.",
   "CLÁUSULA 6 – O comprador está de acordo com as cláusulas acima redigidas neste pedido de venda.",
-];
+].map((clause) => cleanText(clause));
+
+const ITEMS_SECTION_TOP_GAP = 12;
+const TOTALS_PANEL_HEIGHT = 76;
+const CLAUSE_WRAP_CHARS = 164;
+const CLAUSE_LINE_GAP = 5.4;
 
 const getClientRaw = (client: ErpOrderPdfRecord["opportunity"]["client"]) =>
   asRecord(client.rawPayload);
@@ -1191,14 +1199,7 @@ const drawHeader = (
   const rightCardY = HEADER_BOTTOM_Y + 22;
   pdf.rect(rightCardX, rightCardY, rightCardWidth, 44, [255, 255, 255]);
   pdf.text("Emissão", rightCardX + 8, rightCardY + 30, 6.6, MUTED, "F2");
-  pdf.text(
-    emittedAt,
-    rightCardX + 8,
-    rightCardY + 18,
-    6.4,
-    BRAND_GREEN,
-    "F2",
-  );
+  pdf.text(emittedAt, rightCardX + 8, rightCardY + 18, 6.4, BRAND_GREEN, "F2");
   pdf.text(
     `Página ${pageNumber}`,
     rightCardX + 8,
@@ -1450,10 +1451,7 @@ export const buildErpOrderPdf = (
     `Bairro: ${cleanText(clientAddress.district)}     Cidade/UF: ${cityState || "-"}     CEP: ${cleanText(clientAddress.cep)}`,
     `Vendedor: ${cleanText(order.opportunity.ownerSeller.name)} (${cleanText(order.opportunity.ownerSeller.erpCode)})`,
   ].flatMap((line) =>
-    wrapText(line, Math.floor(clientInnerWidth / (7.4 * 0.52))).slice(
-      0,
-      2,
-    ),
+    wrapText(line, Math.floor(clientInnerWidth / (7.4 * 0.52))).slice(0, 2),
   );
   const clientLineGap = 9.5;
   const clientBoxHeight = Math.max(58, 17 + clientLines.length * clientLineGap);
@@ -1483,7 +1481,7 @@ export const buildErpOrderPdf = (
       index === 0 ? "F2" : "F1",
     ),
   );
-  y -= clientBoxHeight + 8;
+  y -= clientBoxHeight + ITEMS_SECTION_TOP_GAP;
 
   pdf.text("Itens", MARGIN, y, 10, BRAND_GREEN, "F2");
   y -= 12;
@@ -1546,9 +1544,23 @@ export const buildErpOrderPdf = (
     (sum, item) => sum + Number(item.netTotal || 0),
     0,
   );
-  y = ensureSpace(pdf, y, 72, pageNumber, orderNumber, company);
-  y -= 7;
-  pdf.rect(MARGIN, y - 54, PAGE_WIDTH - MARGIN * 2, 60, BRAND_LIGHT, BORDER);
+  y = ensureSpace(
+    pdf,
+    y,
+    TOTALS_PANEL_HEIGHT + 12,
+    pageNumber,
+    orderNumber,
+    company,
+  );
+  y -= 6;
+  pdf.rect(
+    MARGIN,
+    y - TOTALS_PANEL_HEIGHT + 6,
+    PAGE_WIDTH - MARGIN * 2,
+    TOTALS_PANEL_HEIGHT,
+    BRAND_LIGHT,
+    BORDER,
+  );
   pdf.text("Totais", MARGIN + 10, y - 8, 9, BRAND_GREEN, "F2");
   const totalRows = [
     ["Total Produtos", payload.VALOR_BRUTO ?? grossTotal],
@@ -1561,7 +1573,7 @@ export const buildErpOrderPdf = (
     const column = index < 3 ? 0 : 1;
     const row = index < 3 ? index : index - 3;
     const labelX = MARGIN + 10 + column * 178;
-    const rowY = y - 21 - row * 11;
+    const rowY = y - 21 - row * 10.5;
     pdf.text(
       label,
       labelX,
@@ -1586,10 +1598,18 @@ export const buildErpOrderPdf = (
     metadata.receivingConditionDescription || payload.CODCONDREC,
   );
   pdf.text(
-    `Forma de Pagto: ${paymentMethodLabel}   Condição: ${receivingConditionLabel}`,
+    `Forma de Pagto: ${paymentMethodLabel}`,
     MARGIN + 12,
-    y - 48,
-    7.2,
+    y - 54,
+    7.8,
+    SLATE,
+    "F2",
+  );
+  pdf.text(
+    `Condição: ${receivingConditionLabel}`,
+    MARGIN + 12,
+    y - 64,
+    7.8,
     SLATE,
     "F2",
   );
@@ -1597,10 +1617,10 @@ export const buildErpOrderPdf = (
     (sum, item) => sum + getProductWeight(item) * Number(item.quantity || 0),
     0,
   );
-  y -= 64;
+  y -= TOTALS_PANEL_HEIGHT + 5;
 
   pdf.text("Transportadora", MARGIN, y, 9, BRAND_GREEN, "F2");
-  y -= 9;
+  y -= 8;
   pdf.rect(MARGIN, y - 15, PAGE_WIDTH - MARGIN * 2, 18, null, BORDER);
   pdf.text(
     `Peso Bruto: ${formatNumber(totalWeight, 2)} KG   |   Peso Líquido: ${formatNumber(totalWeight, 2)} KG`,
@@ -1610,14 +1630,14 @@ export const buildErpOrderPdf = (
     SLATE,
     "F2",
   );
-  y -= 24;
+  y -= 22;
 
   const notes = cleanText(
     payload.OBS_PEDIDO || order.opportunity.notes,
     "Sem observações.",
   );
   const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 20, 7.4);
-  const notesHeight = Math.max(30, 22 + noteLines.length * 8.8);
+  const notesHeight = Math.max(28, 20 + noteLines.length * 8.2);
   y = ensureSpace(pdf, y, notesHeight + 12, pageNumber, orderNumber, company);
   pdf.rect(
     MARGIN,
@@ -1632,37 +1652,31 @@ export const buildErpOrderPdf = (
     pdf.text(
       line,
       MARGIN + 10,
-      y - 22 - index * 8.8,
+      y - 21 - index * 8.2,
       7.4,
       SLATE,
       index === 0 ? "F2" : "F1",
     ),
   );
-  y -= notesHeight + 7;
+  y -= notesHeight + 6;
 
   pdf.text("Cláusulas", MARGIN, y, 9, BRAND_GREEN, "F2");
-  y -= 9;
+  y -= 8;
   for (const [index, clause] of ERP_ORDER_CLAUSES.entries()) {
-    const lines = wrapText(clause, 148);
-    y = ensureSpace(
-      pdf,
-      y,
-      lines.length * 5.8 + 3,
-      pageNumber,
-      orderNumber,
-      company,
-    );
+    const lines = wrapText(clause, CLAUSE_WRAP_CHARS);
+    const clauseHeight = lines.length * CLAUSE_LINE_GAP + 2;
+    y = ensureSpace(pdf, y, clauseHeight, pageNumber, orderNumber, company);
     lines.forEach((line, lineIndex) =>
       pdf.text(
         line,
         MARGIN,
-        y - lineIndex * 5.8,
-        index === 0 ? 6.2 : 5.9,
+        y - lineIndex * CLAUSE_LINE_GAP,
+        index === 0 ? 6.2 : 5.8,
         SLATE,
         index === 0 ? "F2" : "F1",
       ),
     );
-    y -= lines.length * 5.8 + 3;
+    y -= clauseHeight;
   }
 
   y = ensureSpace(pdf, y, 34, pageNumber, orderNumber, company);
