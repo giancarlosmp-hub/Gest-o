@@ -198,6 +198,8 @@ router.get(
   wrapReference("receivingConditions"),
 );
 router.get("/erp/ultrafv3/price-tables", ...erpReferenceAccess, wrapReference("priceTables"));
+router.get("/erp/ultrafv3/price-variations", ...erpAccess, wrap("/priceVariations"));
+router.get("/erp/ultrafv3/prices", ...erpAccess, wrap("/prices"));
 router.get("/erp/ultrafv3/branches", ...erpReferenceAccess, wrapReference("branches"));
 router.get("/erp/ultrafv3/operations", ...erpReferenceAccess, wrapReference("operations"));
 router.get("/erp/ultrafv3/salesmen", ...erpAccess, wrap("/salesmen"));

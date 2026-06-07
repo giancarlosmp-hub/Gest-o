@@ -12,6 +12,8 @@ type SyncScopeKey =
   | "paymentMethods"
   | "receivingConditions"
   | "priceTables"
+  | "priceVariations"
+  | "prices"
   | "branches"
   | "operations";
 
@@ -99,6 +101,8 @@ const SYNC_CARDS: SyncCardConfig[] = [
   { key: "paymentMethods", title: "Formas de pagamento", endpoint: "payment-methods", description: "Sincroniza formas de pagamento disponíveis para emissão de pedidos." },
   { key: "receivingConditions", title: "Condições de pagamento", endpoint: "receiving-conditions", description: "Sincroniza condições comerciais de recebimento retornadas pelo UltraFV3." },
   { key: "priceTables", title: "Tabelas de preço", endpoint: "price-tables", description: "Sincroniza tabelas de preço oficiais do UltraFV3." },
+  { key: "priceVariations", title: "Variações por tabela", endpoint: "price-variations", description: "Sincroniza /priceVariations para calcular preço por tabela e grupo na oportunidade." },
+  { key: "prices", title: "Preços calculados", endpoint: "prices", description: "Sincroniza /prices como fallback de preço por produto e classificação." },
   { key: "branches", title: "Filiais", endpoint: "branches", description: "Sincroniza filiais disponíveis para operação comercial." },
   { key: "operations", title: "Operações", endpoint: "operations", description: "Sincroniza operações fiscais/comerciais exigidas no pedido ERP." },
 ];
