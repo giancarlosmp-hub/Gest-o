@@ -9,6 +9,7 @@ import {
   FlaskConical,
   LayoutDashboard,
   LogOut,
+  MapPinned,
   Menu,
   MessageCircle,
   Settings,
@@ -72,6 +73,7 @@ const items: SidebarNavItem[] = [
   { id: "atividades", label: "Atividades", path: "/atividades", icon: CheckSquare },
   { id: "agenda", label: "Agenda", path: "/agenda", icon: Calendar },
   { id: "whatsapp", label: "WhatsApp", path: "/whatsapp", icon: MessageCircle },
+  { id: "territorios", label: "Territórios", path: "/territórios", icon: MapPinned },
   {
     id: "assistente-tecnico",
     label: "Assistente Técnico",

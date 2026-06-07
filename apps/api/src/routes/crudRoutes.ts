@@ -306,6 +306,22 @@ const cultureQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+
+const normalizeTerritoryCityKey = (city?: string | null) =>
+  normalizeText(city)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const parseTerritoryMonth = (monthParam: unknown) => {
+  const rawMonth = typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
+  const [year, month] = rawMonth.split("-").map(Number);
+  const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+  return { rawMonth, start, end };
+};
+
 const formatDateDot = (date: Date) => {
   const day = String(date.getUTCDate()).padStart(2, "0");
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
@@ -8647,6 +8663,149 @@ router.put("/activity-kpis/:sellerId", authorize("diretor", "gerente"), validate
 router.post("/goals", authorize("diretor", "gerente"), validateBody(goalSchema), async (req, res) => res.status(201).json(await prisma.goal.create({ data: req.body })));
 router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchema.partial()), async (req, res) => res.json(await prisma.goal.update({ where: { id: req.params.id }, data: req.body })));
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+
+
+router.get("/territories/sellers", async (req, res) => {
+  if (req.user?.role === "vendedor") {
+    const currentUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, name: true, role: true, isActive: true }
+    });
+    return res.json(currentUser ? [currentUser] : []);
+  }
+
+  const users = await prisma.user.findMany({
+    where: { role: "vendedor", isActive: true },
+    select: { id: true, name: true, role: true, isActive: true },
+    orderBy: { name: "asc" }
+  });
+  return res.json(users);
+});
+
+router.get("/territories/coverage", async (req, res) => {
+  const { rawMonth, start, end } = parseTerritoryMonth(req.query.month);
+  const requestedSellerId = typeof req.query.sellerId === "string" ? req.query.sellerId : undefined;
+  const sellerId = req.user?.role === "vendedor" ? req.user.id : requestedSellerId;
+
+  if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para consultar territórios." });
+
+  const seller = await prisma.user.findUnique({
+    where: { id: sellerId },
+    select: { id: true, name: true, role: true, isActive: true }
+  });
+  if (!seller || seller.role !== "vendedor") return res.status(404).json({ message: "Vendedor não encontrado." });
+
+  const territoryCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId },
+    orderBy: [{ state: "asc" }, { city: "asc" }]
+  });
+
+  const [erpOrders, openOpportunities] = await Promise.all([
+    prisma.erpOrderSync.findMany({
+      where: {
+        sellerId,
+        status: ErpOrderSyncStatus.sent,
+        createdAt: { gte: start, lt: end }
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        opportunity: {
+          select: {
+            id: true,
+            title: true,
+            value: true,
+            client: { select: { city: true, state: true } }
+          }
+        }
+      }
+    }),
+    prisma.opportunity.findMany({
+      where: {
+        ownerSellerId: sellerId,
+        stage: { in: [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] },
+        proposalDate: { gte: start, lt: end }
+      },
+      select: {
+        id: true,
+        value: true,
+        stage: true,
+        client: { select: { city: true, state: true } }
+      }
+    })
+  ]);
+
+  const ordersByCity = new Map<string, { orderCount: number; soldValue: number }>();
+  for (const order of erpOrders) {
+    const client = order.opportunity.client;
+    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const current = ordersByCity.get(key) ?? { orderCount: 0, soldValue: 0 };
+    current.orderCount += 1;
+    current.soldValue += Number(order.opportunity.value || 0);
+    ordersByCity.set(key, current);
+  }
+
+  const opportunitiesByCity = new Map<string, { openOpportunityCount: number }>();
+  for (const opportunity of openOpportunities) {
+    const client = opportunity.client;
+    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const current = opportunitiesByCity.get(key) ?? { openOpportunityCount: 0 };
+    current.openOpportunityCount += 1;
+    opportunitiesByCity.set(key, current);
+  }
+
+  const cities = territoryCities.map((territoryCity) => {
+    const normalizedKey = `${normalizeState(territoryCity.state)}::${normalizeTerritoryCityKey(territoryCity.city)}`;
+    const orderMetrics = ordersByCity.get(normalizedKey) ?? { orderCount: 0, soldValue: 0 };
+    const opportunityMetrics = opportunitiesByCity.get(normalizedKey) ?? { openOpportunityCount: 0 };
+    const status = orderMetrics.orderCount > 0
+      ? "positive"
+      : opportunityMetrics.openOpportunityCount > 0
+        ? "opportunity"
+        : "no_sale";
+
+    return {
+      id: territoryCity.id,
+      city: territoryCity.city,
+      state: normalizeState(territoryCity.state),
+      ibgeCode: territoryCity.ibgeCode,
+      status,
+      statusLabel: status === "positive" ? "Cidade positivada" : status === "opportunity" ? "Oportunidade aberta" : "Sem venda no mês",
+      orderCount: orderMetrics.orderCount,
+      soldValue: orderMetrics.soldValue,
+      openOpportunityCount: opportunityMetrics.openOpportunityCount
+    };
+  });
+
+  const positiveCities = cities.filter((city) => city.status === "positive").length;
+  const opportunityCities = cities.filter((city) => city.status === "opportunity").length;
+  const noSaleCities = cities.filter((city) => city.status === "no_sale").length;
+  const totalCities = cities.length;
+  const soldValue = cities.reduce((sum, city) => sum + city.soldValue, 0);
+
+  return res.json({
+    month: rawMonth,
+    seller,
+    rules: {
+      positive: "Verde quando existe pedido ERP enviado no mês para cliente da cidade.",
+      opportunity: "Amarelo quando existe oportunidade aberta no mês e nenhum pedido ERP enviado na cidade.",
+      noSale: "Vermelho quando a cidade pertence ao território, sem pedido ERP e sem oportunidade aberta.",
+      outOfTerritory: "Cinza reservado para cidades fora do território no mapa real."
+    },
+    summary: {
+      totalCities,
+      positiveCities,
+      opportunityCities,
+      noSaleCities,
+      coveragePercent: totalCities > 0 ? (positiveCities / totalCities) * 100 : 0,
+      soldValue
+    },
+    cities,
+    outOfTerritoryPreview: [
+      { city: "Fora do território", state: "PR", status: "out_of_territory", statusLabel: "Fora do território", orderCount: 0, soldValue: 0, openOpportunityCount: 0 }
+    ]
+  });
+});
 
 const userListSelect = { id: true, name: true, email: true, role: true, region: true, erpCode: true, erpOperatorCode: true, erpRawPayload: true, erpLoginUsername: true, erpLoginPasswordEncrypted: true, erpLoginLastTestStatus: true, erpLoginLastTestAt: true, isActive: true, createdAt: true } as const;
 
