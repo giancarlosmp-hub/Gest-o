@@ -18,7 +18,8 @@
     "seed:fixture:clean": "tsx prisma/seedTestFixture.ts --clean",
     "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit",
     "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts",
-    "admin:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js"
+    "admin:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js",
+    "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

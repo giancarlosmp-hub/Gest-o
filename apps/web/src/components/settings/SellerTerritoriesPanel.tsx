@@ -21,28 +21,42 @@ type TerritoryCity = {
   ibgeCode?: string | null;
 };
 
+type TerritoryCityLink = TerritoryCity & { sellerName: string };
+
+type OfficialCity = {
+  city: string;
+  state: string;
+  ibgeCode?: string | null;
+};
+
 type DraftCity = TerritoryCity & { draftId: string; isNew?: boolean };
 
 const ufOptions = ["PR", "MS", "SC"];
 
-const normalizeText = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+const normalizeText = (value: string) => value
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/['’]/g, "")
+  .replace(/[^a-zA-Z0-9]+/g, " ")
+  .trim()
+  .replace(/\s+/g, " ")
+  .toLowerCase();
 
 const normalizeCity = (city: string) => city.replace(/\s+/g, " ").trim();
 const normalizeState = (state: string) => state.trim().toUpperCase();
 
-function parseBulkCities(text: string): Array<{ city: string; state: string }> {
+function parseBulkCities(text: string): Array<{ city: string; state: string; raw: string }> {
   return text
     .split(/\r?\n|;/)
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
       const [city = "", state = ""] = line.split("/").map((part) => part.trim());
-      return { city: normalizeCity(city), state: normalizeState(state) };
-    })
-    .filter((item) => item.city && ufOptions.includes(item.state));
+      return { city: normalizeCity(city), state: normalizeState(state), raw: line };
+    });
 }
 
-function buildDraftKey(city: Pick<DraftCity, "city" | "state">) {
+function buildDraftKey(city: Pick<DraftCity | OfficialCity | TerritoryCityLink, "city" | "state">) {
   return `${normalizeState(city.state)}::${normalizeText(city.city)}`;
 }
 
@@ -54,9 +68,13 @@ export default function SellerTerritoriesPanel() {
   const [search, setSearch] = useState("");
   const [ufFilter, setUfFilter] = useState("");
   const [newCity, setNewCity] = useState("");
-  const [newState, setNewState] = useState("PR");
-  const [newIbgeCode, setNewIbgeCode] = useState("");
+  const [newState, setNewState] = useState("");
   const [bulkText, setBulkText] = useState("");
+  const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const [officialCities, setOfficialCities] = useState<OfficialCity[]>([]);
+  const [allOfficialCities, setAllOfficialCities] = useState<OfficialCity[]>([]);
+  const [linkedCities, setLinkedCities] = useState<TerritoryCityLink[]>([]);
+  const [loadingOfficialCities, setLoadingOfficialCities] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +82,8 @@ export default function SellerTerritoriesPanel() {
   const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId);
   const canEditSelectedSeller = Boolean(selectedSeller?.canEdit);
   const isSellerViewer = user?.role === "vendedor";
+  const selectedOfficialCity = useMemo(() => officialCities.find((city) => buildDraftKey(city) === `${normalizeState(newState)}::${normalizeText(newCity)}`) ?? null, [newCity, newState, officialCities]);
+  const newCityPlaceholder = newState ? "Busque uma cidade oficial" : "Selecione uma UF primeiro";
 
   const filteredCities = useMemo(() => {
     const normalizedSearch = normalizeText(search);
@@ -105,6 +125,59 @@ export default function SellerTerritoriesPanel() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    api.get<OfficialCity[]>("/territories/config/official-cities")
+      .then(({ data }) => {
+        if (mounted) setAllOfficialCities(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (mounted) setAllOfficialCities([]);
+      });
+
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!canEditSelectedSeller) return;
+    let mounted = true;
+
+    api.get<TerritoryCityLink[]>("/territories/config/city-links")
+      .then(({ data }) => {
+        if (mounted) setLinkedCities(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (mounted) setLinkedCities([]);
+      });
+
+    return () => { mounted = false; };
+  }, [canEditSelectedSeller]);
+
+  useEffect(() => {
+    setNewCity("");
+    setLoadingOfficialCities(Boolean(newState));
+    if (!newState) {
+      setOfficialCities([]);
+      setLoadingOfficialCities(false);
+      return;
+    }
+
+    let mounted = true;
+    api.get<OfficialCity[]>("/territories/config/official-cities", { params: { uf: newState } })
+      .then(({ data }) => {
+        if (mounted) setOfficialCities(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (mounted) setOfficialCities([]);
+      })
+      .finally(() => {
+        if (mounted) setLoadingOfficialCities(false);
+      });
+
+    return () => { mounted = false; };
+  }, [newState]);
+
+  useEffect(() => {
     if (!selectedSellerId) return;
     let mounted = true;
     setLoading(true);
@@ -127,12 +200,17 @@ export default function SellerTerritoriesPanel() {
     return () => { mounted = false; };
   }, [selectedSellerId]);
 
+  const findLinkedCityConflict = (city: Pick<OfficialCity, "city" | "state">) => {
+    const key = buildDraftKey(city);
+    return linkedCities.find((linkedCity) => linkedCity.sellerId !== selectedSellerId && buildDraftKey(linkedCity) === key) ?? null;
+  };
+
   const addCityToDraft = () => {
-    if (!canEditSelectedSeller) return;
-    const city = normalizeCity(newCity);
-    const state = normalizeState(newState);
-    if (!city || !ufOptions.includes(state)) {
-      toast.error("Informe Cidade e UF válidas.");
+    if (!canEditSelectedSeller || !selectedOfficialCity) return;
+
+    const conflict = findLinkedCityConflict(selectedOfficialCity);
+    if (conflict) {
+      toast.error(`Esta cidade já está vinculada ao vendedor ${conflict.sellerName}. Remova do território atual antes de transferir.`);
       return;
     }
 
@@ -140,21 +218,20 @@ export default function SellerTerritoriesPanel() {
       id: `new-${Date.now()}`,
       draftId: `new-${Date.now()}`,
       sellerId: selectedSellerId,
-      city,
-      state,
-      ibgeCode: newIbgeCode.trim() || null,
+      city: selectedOfficialCity.city,
+      state: selectedOfficialCity.state,
+      ibgeCode: selectedOfficialCity.ibgeCode ?? null,
       isNew: true
     };
 
     setCities((current) => {
       if (current.some((item) => buildDraftKey(item) === buildDraftKey(draft))) {
-        toast.warning("Cidade já está na lista do vendedor.");
+        toast.warning("Esta cidade já está vinculada a este vendedor.");
         return current;
       }
-      return [...current, draft].sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city));
+      return [...current, draft].sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city, "pt-BR"));
     });
     setNewCity("");
-    setNewIbgeCode("");
   };
 
   const addBulkCitiesToDraft = () => {
@@ -165,25 +242,59 @@ export default function SellerTerritoriesPanel() {
       return;
     }
 
+    setBulkErrors([]);
     setCities((current) => {
       const knownKeys = new Set(current.map(buildDraftKey));
+      const batchKeys = new Set<string>();
       const drafts: DraftCity[] = [];
+      const errors: string[] = [];
+
       parsedCities.forEach((item, index) => {
-        const key = `${item.state}::${normalizeText(item.city)}`;
-        if (knownKeys.has(key)) return;
+        if (!ufOptions.includes(item.state)) {
+          errors.push(`UF inválida: ${item.raw}`);
+          return;
+        }
+
+        const officialCity = allOfficialCities.find((city) => city.state === item.state && normalizeText(city.city) === normalizeText(item.city));
+        if (!officialCity) {
+          errors.push(`Cidade não encontrada: ${item.city}/${item.state}`);
+          return;
+        }
+
+        const key = buildDraftKey(officialCity);
+        if (batchKeys.has(key)) {
+          errors.push(`Cidade duplicada no lote: ${officialCity.city}/${officialCity.state}`);
+          return;
+        }
+        batchKeys.add(key);
+
+        if (knownKeys.has(key)) {
+          errors.push("Esta cidade já está vinculada a este vendedor.");
+          return;
+        }
+
+        const conflict = findLinkedCityConflict(officialCity);
+        if (conflict) {
+          errors.push(`Esta cidade já está vinculada ao vendedor ${conflict.sellerName}. Remova do território atual antes de transferir.`);
+          return;
+        }
+
         knownKeys.add(key);
         drafts.push({
           id: `bulk-${Date.now()}-${index}`,
           draftId: `bulk-${Date.now()}-${index}`,
           sellerId: selectedSellerId,
-          city: item.city,
-          state: item.state,
-          ibgeCode: null,
+          city: officialCity.city,
+          state: officialCity.state,
+          ibgeCode: officialCity.ibgeCode ?? null,
           isNew: true
         });
       });
-      toast.success(`${drafts.length} cidade(s) adicionada(s) ao rascunho.`);
-      return [...current, ...drafts].sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city));
+
+      setBulkErrors(errors);
+      if (drafts.length > 0) toast.success(`${drafts.length} cidade(s) adicionada(s) ao rascunho.`);
+      if (errors.length > 0) toast.warning(`${errors.length} item(ns) do lote precisam de ajuste.`);
+      return [...current, ...drafts].sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city, "pt-BR"));
     });
     setBulkText("");
   };
@@ -271,9 +382,18 @@ export default function SellerTerritoriesPanel() {
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
                   value={newCity}
                   onChange={(event) => setNewCity(event.target.value)}
-                  placeholder="Ex.: Toledo"
-                  disabled={!canEditSelectedSeller}
+                  placeholder={newCityPlaceholder}
+                  list="official-territory-cities"
+                  disabled={!canEditSelectedSeller || !newState || loadingOfficialCities}
                 />
+                <datalist id="official-territory-cities">
+                  {officialCities.map((city) => (
+                    <option key={`${city.state}-${city.ibgeCode ?? city.city}`} value={city.city}>{city.city}/{city.state}</option>
+                  ))}
+                </datalist>
+                {newCity && !selectedOfficialCity ? (
+                  <span className="mt-1 block text-xs font-semibold text-amber-700">Selecione uma cidade oficial da lista.</span>
+                ) : null}
               </label>
               <label className="text-sm font-semibold text-slate-700">
                 UF
@@ -283,24 +403,25 @@ export default function SellerTerritoriesPanel() {
                   onChange={(event) => setNewState(event.target.value)}
                   disabled={!canEditSelectedSeller}
                 >
+                  <option value="">UF</option>
                   {ufOptions.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
                 </select>
               </label>
             </div>
             <label className="block text-sm font-semibold text-slate-700">
-              Código IBGE opcional
+              Código IBGE
               <input
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-100"
-                value={newIbgeCode}
-                onChange={(event) => setNewIbgeCode(event.target.value)}
-                placeholder="Opcional"
-                disabled={!canEditSelectedSeller}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700 disabled:bg-slate-100"
+                value={selectedOfficialCity?.ibgeCode ?? ""}
+                placeholder="Preenchido automaticamente quando disponível"
+                disabled
+                readOnly
               />
             </label>
             <button
               type="button"
               onClick={addCityToDraft}
-              disabled={!canEditSelectedSeller}
+              disabled={!canEditSelectedSeller || !selectedOfficialCity}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <Plus size={16} /> Adicionar cidade
@@ -321,11 +442,19 @@ export default function SellerTerritoriesPanel() {
             <button
               type="button"
               onClick={addBulkCitiesToDraft}
-              disabled={!canEditSelectedSeller}
+              disabled={!canEditSelectedSeller || allOfficialCities.length === 0}
               className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
             >
               <Upload size={16} /> Processar lote
             </button>
+            {bulkErrors.length > 0 ? (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                <p className="font-bold">Itens não adicionados:</p>
+                <ul className="mt-1 list-disc space-y-1 pl-4">
+                  {bulkErrors.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </aside>
 
