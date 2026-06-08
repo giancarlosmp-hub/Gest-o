@@ -1,0 +1,42 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_environment:
+        description: 'Digite production para confirmar o deploy manual em produção'
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-production:
+    name: Deploy production to /apps/gest-o
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.confirm_environment == 'production'
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            cd /apps/gest-o
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+            bash scripts/deploy-production.sh
