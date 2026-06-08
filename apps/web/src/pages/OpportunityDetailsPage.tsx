@@ -65,6 +65,8 @@ type Opportunity = {
     id: string;
     code?: string | null;
     name?: string | null;
+    fantasyName?: string | null;
+    cnpj?: string | null;
     city?: string | null;
     state?: string | null;
   } | null;
@@ -548,6 +550,16 @@ export default function OpportunityDetailsPage() {
   const sellerLoginFv3 = item?.ownerSeller?.erpLoginUsername?.trim() || "";
   const sellerPasswordConfigured =
     item?.ownerSeller?.erpLoginPasswordConfigured !== false;
+  const opportunityClientSummary = {
+    name: item?.clientData?.name || item?.client || "-",
+    fantasyName: clientErpSummary?.fantasyName || item?.clientData?.fantasyName || null,
+    code: clientErpSummary?.code || item?.clientData?.code || null,
+    cnpj: clientErpSummary?.cnpj || item?.clientData?.cnpj || null,
+    city: clientErpSummary?.city || item?.clientData?.city || null,
+    state: clientErpSummary?.state || item?.clientData?.state || null
+  };
+  const opportunityClientLocation = [opportunityClientSummary.city, opportunityClientSummary.state].filter(Boolean).join("/") || "-";
+  const opportunitySellerName = item?.ownerSeller?.name || item?.owner || "-";
   const successfulErpOrder = erpOrders.find(isSuccessfulErpOrderSync) || null;
   const resendableErpOrder = erpOrders.find(isErpOrderSyncResendable) || null;
   const isErpOrderResend = Boolean(resendableErpOrder && !successfulErpOrder);
@@ -1050,20 +1062,32 @@ export default function OpportunityDetailsPage() {
             <strong>Título:</strong> {item.title}
           </p>
           <p>
-            <strong>Cliente:</strong>{" "}
+            <strong>Nome/Razão social:</strong>{" "}
             {item.clientId ? (
               <Link
                 className="text-brand-700"
                 to={`/clientes/${item.clientId}`}
               >
-                {item.client || "-"}
+                {opportunityClientSummary.name}
               </Link>
             ) : (
-              item.client || "-"
+              opportunityClientSummary.name
             )}
           </p>
           <p>
-            <strong>Vendedor:</strong> {item.owner || "-"}
+            <strong>Nome fantasia:</strong> {opportunityClientSummary.fantasyName || "-"}
+          </p>
+          <p>
+            <strong>Código ERP:</strong> {opportunityClientSummary.code || "Sem vínculo"}
+          </p>
+          <p>
+            <strong>CNPJ/CPF:</strong> {opportunityClientSummary.cnpj || "-"}
+          </p>
+          <p>
+            <strong>Cidade/UF:</strong> {opportunityClientLocation}
+          </p>
+          <p>
+            <strong>Vendedor responsável:</strong> {opportunitySellerName}
           </p>
           <p>
             <strong>Etapa:</strong> {stageLabel[item.stage]}

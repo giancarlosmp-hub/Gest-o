@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useRef } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { ExistingClientSummary } from "../../lib/clientDuplicateCheck";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 import QuickCreateClientSection from "../clients/QuickCreateClientSection";
@@ -61,6 +61,7 @@ type CreateOpportunityModalProps = {
   hasStructuredItems?: boolean;
   priceTableOptions?: PriceTableOption[];
   priceTableWarning?: string;
+  shouldConfirmClose?: boolean;
 };
 
 export default function CreateOpportunityModal({
@@ -88,16 +89,34 @@ export default function CreateOpportunityModal({
   productsSection,
   hasStructuredItems = false,
   priceTableOptions = [],
-  priceTableWarning = ""
+  priceTableWarning = "",
+  shouldConfirmClose = false
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
   const helpClassName = "text-xs text-slate-500";
 
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
+
+  const requestClose = () => {
+    if (shouldConfirmClose) {
+      setShowCancelConfirmation(true);
+      return;
+    }
+    onClose();
+  };
+
+  const discardChanges = () => {
+    setShowCancelConfirmation(false);
+    onClose();
+  };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setShowCancelConfirmation(false);
+      return;
+    }
     titleInputRef.current?.focus();
   }, [open]);
 
@@ -105,14 +124,14 @@ export default function CreateOpportunityModal({
   if (!open) return null;
 
   return (
-    <div className="mobile-modal-shell" role="dialog" aria-modal="true" onClick={onClose}>
+    <div className="mobile-modal-shell" role="dialog" aria-modal="true" onClick={requestClose}>
       <div
-        className="mobile-modal-panel h-full max-w-full sm:max-w-3xl"
+        className="mobile-modal-panel relative h-full max-w-full sm:max-w-3xl"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
           <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-          <button type="button" className="rounded-md border border-slate-200 px-3 py-1 text-sm text-slate-600" onClick={onClose}>
+          <button type="button" className="rounded-md border border-slate-200 px-3 py-1 text-sm text-slate-600" onClick={requestClose}>
             Fechar
           </button>
         </div>
@@ -260,7 +279,7 @@ export default function CreateOpportunityModal({
           </div>
 
           <div className="mobile-modal-footer sticky bottom-0 z-10 border-t border-slate-200 bg-white shadow-[0_-8px_24px_rgba(15,23,42,0.06)] sm:shadow-none">
-            <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={onClose}>
+            <button type="button" className="mobile-secondary-half rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={requestClose}>
               Cancelar
             </button>
             <button type="submit" disabled={isSaving} className="mobile-primary-button rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-500">
@@ -268,6 +287,23 @@ export default function CreateOpportunityModal({
             </button>
           </div>
         </form>
+
+        {showCancelConfirmation ? (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/40 px-4" onClick={() => setShowCancelConfirmation(false)}>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" role="alertdialog" aria-modal="true" aria-labelledby="cancel-opportunity-title" onClick={(event) => event.stopPropagation()}>
+              <h4 id="cancel-opportunity-title" className="text-lg font-semibold text-slate-900">Descartar alterações?</h4>
+              <p className="mt-2 text-sm text-slate-600">Existem informações preenchidas. Deseja realmente cancelar? Os dados não salvos serão perdidos.</p>
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700" onClick={() => setShowCancelConfirmation(false)}>
+                  Continuar editando
+                </button>
+                <button type="button" className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white" onClick={discardChanges}>
+                  Descartar alterações
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

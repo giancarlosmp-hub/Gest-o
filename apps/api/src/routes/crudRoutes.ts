@@ -642,6 +642,8 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
         id: opportunity.client.id,
         code: opportunity.client.code ?? null,
         name: opportunity.client.name ?? null,
+        fantasyName: opportunity.client.fantasyName ?? null,
+        cnpj: opportunity.client.cnpj ?? null,
         city: opportunity.client.city ?? null,
         state: opportunity.client.state ?? null,
       }
@@ -5108,7 +5110,7 @@ router.get("/opportunities", async (req, res) => {
   const baseQuery = {
     where,
     include: {
-      client: { select: { id: true, name: true, city: true, state: true } },
+      client: { select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true } },
       ownerSeller: { select: { id: true, name: true } }
     },
     orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }] as Prisma.Enumerable<Prisma.OpportunityOrderByWithRelationInput>
@@ -5363,7 +5365,7 @@ router.patch("/opportunities/:id/close", async (req, res) => {
         },
         include: {
           client: {
-            select: { id: true, name: true, city: true, state: true }
+            select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true }
           },
           ownerSeller: {
             select: { id: true, name: true }
@@ -5439,7 +5441,7 @@ router.patch("/opportunities/:id/closed-report", async (req, res) => {
     },
     include: {
       client: {
-        select: { id: true, name: true, city: true, state: true }
+        select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true }
       },
       ownerSeller: {
         select: { id: true, name: true }
@@ -5497,7 +5499,7 @@ router.patch("/opportunities/:id/closed-report", async (req, res) => {
       },
       include: {
         client: {
-          select: { id: true, name: true, city: true, state: true }
+          select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true }
         },
         ownerSeller: {
           select: { id: true, name: true }
@@ -6056,6 +6058,8 @@ router.get("/opportunities/:id", async (req, res) => {
           id: true,
           code: true,
           name: true,
+          fantasyName: true,
+          cnpj: true,
           city: true,
           state: true
         }
