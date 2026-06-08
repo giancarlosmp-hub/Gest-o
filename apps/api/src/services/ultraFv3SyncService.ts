@@ -9,6 +9,7 @@ import {
 } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
+import { getMissingErpRuntimeConfig } from "./erpRuntimeConfig.js";
 import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
@@ -58,6 +59,7 @@ export type RunSyncOptions = {
   sellerName?: string;
   authMode?: "global" | "seller" | "seller_reference";
   writeStatus?: boolean;
+  correlationId?: string;
 };
 type LockAcquireResult =
   | { acquired: true; runId: string }
@@ -680,7 +682,7 @@ async function runSync(
   runner: (correlationId: string) => Promise<SyncResult>,
   options: RunSyncOptions = {},
 ) {
-  const correlationId = randomUUID();
+  const correlationId = options.correlationId ?? randomUUID();
   const startedAt = Date.now();
   const startedAtDate = new Date();
   const trigger = options.trigger ?? ErpSyncTrigger.manual;
@@ -2000,6 +2002,113 @@ export const syncSalesmen = (options?: RunSyncOptions) =>
     "/vendedores",
   ]);
 
+
+export type UltraFv3FullSyncStep = {
+  scope: Exclude<UltraFv3SyncScope, "orderStatus">;
+  label: string;
+  result: SyncResult;
+};
+
+export type UltraFv3FullSyncResult = {
+  success: true;
+  durationMs: number;
+  correlationId: string;
+  stats: {
+    clients: number;
+    products: number;
+    priceTables: number;
+    prices: number;
+    operations: number;
+    branches: number;
+  };
+  steps: UltraFv3FullSyncStep[];
+};
+
+const FULL_SYNC_STEPS: Array<{
+  scope: Exclude<UltraFv3SyncScope, "orderStatus">;
+  label: string;
+  run: (options?: RunSyncOptions) => Promise<SyncResult>;
+}> = [
+  { scope: "connection", label: "Conexão", run: syncConnection },
+  { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
+  { scope: "partners", label: "Clientes", run: syncPartners },
+  { scope: "products", label: "Produtos", run: syncProducts },
+  { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
+  { scope: "prices", label: "Preços calculados", run: syncPrices },
+  { scope: "priceVariations", label: "Variações por tabela", run: syncPriceVariations },
+  { scope: "receivingConditions", label: "Condições de pagamento", run: syncReceivingConditions },
+  { scope: "paymentMethods", label: "Formas de pagamento", run: syncPaymentMethods },
+  { scope: "branches", label: "Filiais", run: syncBranches },
+  { scope: "operations", label: "Operações", run: syncOperations },
+];
+
+export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult> {
+  const correlationId = randomUUID();
+  const startedAt = Date.now();
+  const steps: UltraFv3FullSyncStep[] = [];
+
+  logApiEvent("INFO", "[ultrafv3 sync-all] full ERP sync started", {
+    correlationId,
+    totalSteps: FULL_SYNC_STEPS.length,
+    steps: FULL_SYNC_STEPS.map((step) => step.scope),
+  });
+
+  try {
+    for (const [index, step] of FULL_SYNC_STEPS.entries()) {
+      logApiEvent("INFO", "[ultrafv3 sync-all] step started", {
+        correlationId,
+        scope: step.scope,
+        label: step.label,
+        step: index + 1,
+        totalSteps: FULL_SYNC_STEPS.length,
+      });
+      const result = await step.run({ correlationId, failIfLocked: true });
+      steps.push({ scope: step.scope, label: step.label, result });
+      logApiEvent("INFO", "[ultrafv3 sync-all] step finished", {
+        correlationId,
+        scope: step.scope,
+        label: step.label,
+        step: index + 1,
+        totalSteps: FULL_SYNC_STEPS.length,
+        syncedCount: result.syncedCount,
+      });
+    }
+
+    const durationMs = Date.now() - startedAt;
+    const countByScope = new Map(steps.map((step) => [step.scope, step.result.syncedCount]));
+    const response: UltraFv3FullSyncResult = {
+      success: true,
+      durationMs,
+      correlationId,
+      stats: {
+        clients: countByScope.get("partners") ?? 0,
+        products: countByScope.get("products") ?? 0,
+        priceTables: countByScope.get("priceTables") ?? 0,
+        prices: countByScope.get("prices") ?? 0,
+        operations: countByScope.get("operations") ?? 0,
+        branches: countByScope.get("branches") ?? 0,
+      },
+      steps,
+    };
+
+    logApiEvent("INFO", "[ultrafv3 sync-all] full ERP sync finished", response);
+    return response;
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    logApiEvent("ERROR", "[ultrafv3 sync-all] full ERP sync failed", {
+      correlationId,
+      durationMs,
+      completedSteps: steps.map((step) => step.scope),
+      error: formatError(error),
+    });
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+      correlationId,
+      durationMs,
+      completedSteps: steps.map((step) => step.scope),
+    });
+  }
+}
+
 const getLatestSyncError = (
   statuses: Record<UltraFv3SyncScope, SyncStatusPayload>,
 ) => {
@@ -2018,6 +2127,8 @@ export function getUltraFv3IntegrationDiagnostics(
   statuses: Record<UltraFv3SyncScope, SyncStatusPayload>,
 ): UltraFv3IntegrationDiagnostics {
   const clientDiagnostics = ultraFv3Client.getDiagnostics();
+  const preventiveMissingConfig = getMissingErpRuntimeConfig();
+  const mergedMissingConfig = Array.from(new Set([...clientDiagnostics.missingConfig, ...preventiveMissingConfig]));
   const lastError = clientDiagnostics.lastError || getLatestSyncError(statuses);
   const hasAuthError = lastError
     ? /autentica|usuário|usuario|senha|401|403/i.test(lastError)
@@ -2031,8 +2142,8 @@ export function getUltraFv3IntegrationDiagnostics(
 
   let guidance =
     "Configuração mínima presente. Use o card Conexão UltraFV3 para validar autenticação e disponibilidade antes das sincronizações.";
-  if (clientDiagnostics.missingConfig.length > 0) {
-    guidance = `Configure ${clientDiagnostics.missingConfig.join(", ")} no .env do backend/API e reinicie o serviço antes de sincronizar.`;
+  if (mergedMissingConfig.length > 0) {
+    guidance = `Configure ${mergedMissingConfig.join(", ")} no .env do backend/API e reinicie o serviço antes de sincronizar.`;
   } else if (authenticationStatus === "auth_failed") {
     guidance =
       "Revise ULTRAFV3_USERNAME e ULTRAFV3_PASSWORD no backend/API e valide se o usuário tem permissão na API UltraFV3.";
@@ -2046,7 +2157,9 @@ export function getUltraFv3IntegrationDiagnostics(
 
   return {
     ...clientDiagnostics,
-    authenticationStatus,
+    missingConfig: mergedMissingConfig,
+    isConfigured: mergedMissingConfig.length === 0,
+    authenticationStatus: mergedMissingConfig.length > 0 ? "missing_config" : authenticationStatus,
     lastError,
     guidance,
   };

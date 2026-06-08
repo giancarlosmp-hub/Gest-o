@@ -5,6 +5,7 @@ import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "./utils/databaseHealth.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { startErpSyncScheduler } from "./jobs/erpSyncScheduler.js";
+import { validateErpRuntimeConfigOnStartup } from "./services/erpRuntimeConfig.js";
 
 console.log("SERVER STARTING...");
 
@@ -38,6 +39,7 @@ async function start() {
   await waitForDatabase();
   await validateDatabaseHealth();
   await ensureAdminBootstrap();
+  validateErpRuntimeConfigOnStartup();
   app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });

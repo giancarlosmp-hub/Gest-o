@@ -75,6 +75,29 @@ type AuthModeDiagnostics = {
   rationale: string;
 };
 
+type FullSyncResponse = {
+  success: true;
+  durationMs: number;
+  correlationId: string;
+  stats: {
+    clients: number;
+    products: number;
+    priceTables: number;
+    prices: number;
+    operations: number;
+    branches: number;
+  };
+};
+
+type FullSyncProgress = {
+  isRunning: boolean;
+  startedAt: number | null;
+  currentStep: string;
+  completedSteps: number;
+  percent: number;
+  correlationId?: string;
+};
+
 type SyncStatusResponse = {
   status: Record<SyncScopeKey, SyncScopeStatus>;
   integration?: IntegrationDiagnostics;
@@ -91,6 +114,20 @@ type SyncCardConfig = {
   countLabel?: string;
   description: string;
 };
+
+const FULL_SYNC_STEPS: Array<{ key: Exclude<SyncScopeKey, "orderStatus">; label: string }> = [
+  { key: "connection", label: "Conexão" },
+  { key: "salesmen", label: "Vendedores" },
+  { key: "partners", label: "Clientes" },
+  { key: "products", label: "Produtos" },
+  { key: "priceTables", label: "Tabelas de preço" },
+  { key: "prices", label: "Preços calculados" },
+  { key: "priceVariations", label: "Variações por tabela" },
+  { key: "receivingConditions", label: "Condições de pagamento" },
+  { key: "paymentMethods", label: "Formas de pagamento" },
+  { key: "branches", label: "Filiais" },
+  { key: "operations", label: "Operações" },
+];
 
 const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
@@ -151,8 +188,16 @@ export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
   const [authMode, setAuthMode] = useState<AuthModeDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<SyncScopeKey | "allSellers" | null>(null);
+  const [running, setRunning] = useState<SyncScopeKey | "allSellers" | "syncAll" | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showFullSyncModal, setShowFullSyncModal] = useState(false);
+  const [fullSyncProgress, setFullSyncProgress] = useState<FullSyncProgress>({
+    isRunning: false,
+    startedAt: null,
+    currentStep: "Aguardando confirmação",
+    completedSteps: 0,
+    percent: 0,
+  });
 
   const load = async () => {
     const [statusResponse, authModeResponse] = await Promise.all([
@@ -206,6 +251,65 @@ export default function ErpIntegrationPanel() {
     }
   };
 
+
+  const calculateFullSyncProgress = (statusData: SyncStatusResponse | null, startedAt: number | null) => {
+    if (!startedAt || !statusData) return { completedSteps: 0, currentStep: FULL_SYNC_STEPS[0]?.label ?? "Iniciando", percent: 0, correlationId: undefined };
+    const completedSteps = FULL_SYNC_STEPS.filter((step) => {
+      const status = statusData.status?.[step.key];
+      const syncedAt = status?.lastSyncAt ? new Date(status.lastSyncAt).getTime() : 0;
+      return status?.status === "success" && syncedAt >= startedAt;
+    }).length;
+    const runningStep = FULL_SYNC_STEPS.find((step) => statusData.status?.[step.key]?.status === "running");
+    const nextStep = FULL_SYNC_STEPS[completedSteps];
+    const currentStep = runningStep?.label || nextStep?.label || "Finalizando";
+    const activeStatus = runningStep ? statusData.status?.[runningStep.key] : undefined;
+    return {
+      completedSteps,
+      currentStep,
+      percent: Math.min(99, Math.round((completedSteps / FULL_SYNC_STEPS.length) * 100)),
+      correlationId: activeStatus?.correlationId,
+    };
+  };
+
+  const refreshFullSyncProgress = async (startedAt: number) => {
+    const statusResponse = await api.get<SyncStatusResponse>("/erp/ultrafv3/sync/status");
+    setData(statusResponse.data);
+    const progress = calculateFullSyncProgress(statusResponse.data, startedAt);
+    setFullSyncProgress((current) => ({ ...current, ...progress }));
+  };
+
+  const runFullSync = async () => {
+    const startedAt = Date.now();
+    setShowFullSyncModal(false);
+    setRunning("syncAll");
+    setFullSyncProgress({ isRunning: true, startedAt, currentStep: FULL_SYNC_STEPS[0]?.label ?? "Iniciando", completedSteps: 0, percent: 0 });
+    const timer = window.setInterval(() => {
+      refreshFullSyncProgress(startedAt).catch(() => undefined);
+    }, 2_000);
+
+    try {
+      const response = await api.post<FullSyncResponse>("/erp/sync-all");
+      window.clearInterval(timer);
+      await load();
+      setFullSyncProgress({
+        isRunning: false,
+        startedAt,
+        currentStep: "Sincronização completa finalizada",
+        completedSteps: FULL_SYNC_STEPS.length,
+        percent: 100,
+        correlationId: response.data.correlationId,
+      });
+      toast.success(`Sincronização Completa ERP finalizada em ${response.data.durationMs}ms.`);
+    } catch (error) {
+      window.clearInterval(timer);
+      await load().catch(() => undefined);
+      setFullSyncProgress((current) => ({ ...current, isRunning: false }));
+      toast.error(getApiErrorMessage(error, "Não foi possível executar a Sincronização Completa ERP."));
+    } finally {
+      setRunning(null);
+    }
+  };
+
   const summary = useMemo(() => {
     const statuses = data ? Object.values(data.status) : [];
     const errors = statuses.filter((item) => item?.status === "error").length;
@@ -240,8 +344,12 @@ export default function ErpIntegrationPanel() {
   const hasGlobalCredentials = authMode?.hasGlobalCredentials ?? false;
   const hasAnyCredentialPath = hasGlobalCredentials || hasSellerFallback;
   const hasBaseUrlConfigured = Boolean(integration?.baseUrl);
-  const canSyncReferenceCards = hasBaseUrlConfigured && hasAnyCredentialPath;
-  const configGuidanceMessage = !hasBaseUrlConfigured
+  const orderBlockingMissingConfig = missingConfig.filter((item) => item === "ULTRAFV3_BASE_URL" || item === "ERP_CREDENTIAL_ENCRYPTION_KEY");
+  const hasPreventiveConfig = orderBlockingMissingConfig.length === 0;
+  const canSyncReferenceCards = hasBaseUrlConfigured && hasAnyCredentialPath && hasPreventiveConfig;
+  const configGuidanceMessage = missingConfig.includes("ERP_CREDENTIAL_ENCRYPTION_KEY")
+    ? "Configure ERP_CREDENTIAL_ENCRYPTION_KEY para habilitar credenciais por vendedor e desbloquear envios de pedidos ERP."
+    : !hasBaseUrlConfigured
     ? "Configure ULTRAFV3_BASE_URL para habilitar as sincronizações."
     : !hasAnyCredentialPath
       ? "Sem credenciais válidas: configure ULTRAFV3_USERNAME/ULTRAFV3_PASSWORD ou Login FV3/Senha FV3 de pelo menos 1 vendedor ativo."
@@ -297,6 +405,41 @@ export default function ErpIntegrationPanel() {
             </p>
           </div>
         </div>
+      </div>
+
+      {orderBlockingMissingConfig.length ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <strong>Configuração preventiva ERP incompleta.</strong> Variáveis ausentes: <span className="font-mono font-semibold">{orderBlockingMissingConfig.join(", ")}</span>. O envio de pedidos ERP fica bloqueado até corrigir o ambiente da API e reiniciar o serviço.
+        </div>
+      ) : null}
+
+      <div className="rounded-xl border border-brand-200 bg-gradient-to-r from-brand-700 to-emerald-700 p-4 text-white shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h4 className="text-base font-semibold">Sincronização Completa ERP</h4>
+            <p className="mt-1 text-sm text-white/85">Sincroniza todos os catálogos UltraFV3 em sequência, sem execução paralela, parando no primeiro erro crítico.</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-brand-800 shadow-sm disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+            disabled={running !== null || !canSyncReferenceCards}
+            onClick={() => setShowFullSyncModal(true)}
+          >
+            Sincronização Completa ERP
+          </button>
+        </div>
+        {(fullSyncProgress.isRunning || fullSyncProgress.percent > 0) ? (
+          <div className="mt-4 rounded-lg bg-white/10 p-3 ring-1 ring-white/20">
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span>Etapa atual: {fullSyncProgress.currentStep}</span>
+              <span>{fullSyncProgress.percent}%</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20">
+              <div className="h-full rounded-full bg-white transition-all" style={{ width: `${fullSyncProgress.percent}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-white/80">{fullSyncProgress.completedSteps}/{FULL_SYNC_STEPS.length} etapas concluídas{fullSyncProgress.correlationId ? ` · correlationId: ${fullSyncProgress.correlationId}` : ""}</p>
+          </div>
+        ) : null}
       </div>
 
 
@@ -501,6 +644,24 @@ export default function ErpIntegrationPanel() {
           );
         })}
       </div>
+
+      {showFullSyncModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-slate-900">Sincronização Completa ERP</h3>
+            <p className="mt-3 text-sm text-slate-700">Toda a estrutura ERP será sincronizada novamente.<br />Deseja continuar?</p>
+            <ul className="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
+              {FULL_SYNC_STEPS.map((step) => (
+                <li key={step.key} className="flex items-center gap-2"><span className="text-emerald-600">✓</span>{step.label}</li>
+              ))}
+            </ul>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50" onClick={() => setShowFullSyncModal(false)}>Cancelar</button>
+              <button type="button" className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800" onClick={runFullSync}>Iniciar sincronização</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
