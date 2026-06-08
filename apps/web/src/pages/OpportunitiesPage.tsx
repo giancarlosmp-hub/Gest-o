@@ -407,20 +407,21 @@ export default function OpportunitiesPage() {
   useEffect(() => {
     if (!user) return;
 
-    if (user.role === "vendedor") {
-      setSellerOptions([{ id: user.id, name: user.name }]);
-      return;
-    }
-
-    api.get("/users")
+    api.get("/opportunities/seller-options")
       .then((response) => {
         const activeSellers = (Array.isArray(response.data) ? response.data : [])
-          .filter((item: any) => item?.role === "vendedor" && item?.isActive !== false && item?.id && item?.name)
+          .filter((item: any) => item?.id && item?.name)
           .map((item: any) => ({ id: item.id, name: item.name } as SellerOption))
           .sort((a: SellerOption, b: SellerOption) => a.name.localeCompare(b.name, "pt-BR"));
         setSellerOptions(activeSellers);
       })
-      .catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível carregar vendedores ativos")));
+      .catch((error) => {
+        if (user.role === "vendedor") {
+          setSellerOptions([{ id: user.id, name: user.name }]);
+          return;
+        }
+        toast.error(getApiErrorMessage(error, "Não foi possível carregar vendedores ativos"));
+      });
   }, [user]);
 
 
