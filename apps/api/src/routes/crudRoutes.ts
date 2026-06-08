@@ -1,4 +1,5 @@
 import express, { Router, type Request } from "express";
+import { inflateRawSync } from "node:zlib";
 import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { authMiddleware } from "../middlewares/auth.js";
@@ -8782,6 +8783,218 @@ const territoryBulkCitySchema = z.object({
   text: z.string().min(1).max(20_000)
 });
 
+const TERRITORY_KML_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+const TERRITORY_KML_IMPORT_ALLOWED_EXTENSIONS = [".kml", ".kmz"] as const;
+
+type TerritoryKmlImportItemStatus = "to_add" | "already_seller" | "conflict" | "not_found" | "duplicate_file";
+type TerritoryKmlImportItem = {
+  sourceName: string;
+  city: string | null;
+  state: TerritoryAllowedState | null;
+  ibgeCode: string | null;
+  status: TerritoryKmlImportItemStatus;
+  message: string;
+  sellerName?: string;
+};
+
+const territoryKmlConfirmSchema = z.object({
+  sellerId: z.string().trim().min(1),
+  cities: z.array(territoryCityInputSchema).max(500)
+});
+
+const decodeXmlEntities = (value: string) => value
+  .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+  .replace(/&lt;/g, "<")
+  .replace(/&gt;/g, ">")
+  .replace(/&quot;/g, '\"')
+  .replace(/&apos;/g, "'")
+  .replace(/&amp;/g, "&");
+
+const stripXmlTags = (value: string) => decodeXmlEntities(value.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+
+const extractPlacemarkNamesFromKml = (kml: string) => {
+  const names: string[] = [];
+  const placemarkRegex = /<(?:\w+:)?Placemark\b[\s\S]*?<\/(?:\w+:)?Placemark>/gi;
+  let placemarkMatch: RegExpExecArray | null;
+  while ((placemarkMatch = placemarkRegex.exec(kml)) !== null) {
+    const placemarkXml = placemarkMatch[0];
+    const nameMatch = placemarkXml.match(/<(?:\w+:)?name\b[^>]*>([\s\S]*?)<\/(?:\w+:)?name>/i);
+    if (!nameMatch) continue;
+    const name = stripXmlTags(nameMatch[1]);
+    if (name) names.push(name);
+  }
+  return names;
+};
+
+const inflateZipData = (method: number, compressed: Buffer) => {
+  if (method === 0) return Buffer.from(compressed);
+  if (method === 8) return inflateRawSync(compressed, { finishFlush: 2 });
+  return null;
+};
+
+const readZipLocalFile = (buffer: Buffer, offset: number, centralDirectorySizes?: { compressedSize: number; uncompressedSize: number; method: number }) => {
+  if (buffer.readUInt32LE(offset) !== 0x04034b50) return null;
+  const method = centralDirectorySizes?.method ?? buffer.readUInt16LE(offset + 8);
+  const compressedSize = centralDirectorySizes?.compressedSize ?? buffer.readUInt32LE(offset + 18);
+  const uncompressedSize = centralDirectorySizes?.uncompressedSize ?? buffer.readUInt32LE(offset + 22);
+  const fileNameLength = buffer.readUInt16LE(offset + 26);
+  const extraLength = buffer.readUInt16LE(offset + 28);
+  const nameStart = offset + 30;
+  const dataStart = nameStart + fileNameLength + extraLength;
+  const name = buffer.subarray(nameStart, nameStart + fileNameLength).toString("utf8");
+  if (dataStart + compressedSize > buffer.length || uncompressedSize > TERRITORY_KML_IMPORT_MAX_BYTES) return null;
+  const data = inflateZipData(method, buffer.subarray(dataStart, dataStart + compressedSize));
+  if (!data) return null;
+  return { name, data, nextOffset: dataStart + compressedSize };
+};
+
+const findZipEndOfCentralDirectory = (buffer: Buffer) => {
+  const minOffset = Math.max(0, buffer.length - 65_557);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  return -1;
+};
+
+const extractFirstKmlFromKmzCentralDirectory = (buffer: Buffer) => {
+  const eocdOffset = findZipEndOfCentralDirectory(buffer);
+  if (eocdOffset < 0) return null;
+  const entries = buffer.readUInt16LE(eocdOffset + 10);
+  let centralOffset = buffer.readUInt32LE(eocdOffset + 16);
+
+  for (let index = 0; index < entries && centralOffset + 46 <= buffer.length; index += 1) {
+    if (buffer.readUInt32LE(centralOffset) !== 0x02014b50) return null;
+    const method = buffer.readUInt16LE(centralOffset + 10);
+    const compressedSize = buffer.readUInt32LE(centralOffset + 20);
+    const uncompressedSize = buffer.readUInt32LE(centralOffset + 24);
+    const fileNameLength = buffer.readUInt16LE(centralOffset + 28);
+    const extraLength = buffer.readUInt16LE(centralOffset + 30);
+    const commentLength = buffer.readUInt16LE(centralOffset + 32);
+    const localHeaderOffset = buffer.readUInt32LE(centralOffset + 42);
+    const nameStart = centralOffset + 46;
+    const name = buffer.subarray(nameStart, nameStart + fileNameLength).toString("utf8");
+    if (name.toLowerCase().endsWith(".kml") && !name.endsWith("/")) {
+      const entry = readZipLocalFile(buffer, localHeaderOffset, { compressedSize, uncompressedSize, method });
+      return entry?.data.toString("utf8") ?? null;
+    }
+    centralOffset = nameStart + fileNameLength + extraLength + commentLength;
+  }
+
+  return null;
+};
+
+const extractFirstKmlFromKmz = (buffer: Buffer) => {
+  const centralDirectoryKml = extractFirstKmlFromKmzCentralDirectory(buffer);
+  if (centralDirectoryKml) return centralDirectoryKml;
+
+  let offset = 0;
+  while (offset + 30 <= buffer.length) {
+    const entry = readZipLocalFile(buffer, offset);
+    if (!entry) {
+      offset += 1;
+      continue;
+    }
+    if (entry.name.toLowerCase().endsWith(".kml") && !entry.name.endsWith("/")) return entry.data.toString("utf8");
+    offset = entry.nextOffset;
+  }
+  return null;
+};
+
+const getKmlTextFromImportFile = (fileName: string, fileBuffer: Buffer) => {
+  const normalizedName = fileName.toLowerCase();
+  if (normalizedName.endsWith(".kml")) return fileBuffer.toString("utf8");
+  if (normalizedName.endsWith(".kmz")) return extractFirstKmlFromKmz(fileBuffer);
+  return null;
+};
+
+const parseMultipartFormData = (req: Request) => {
+  const contentType = req.headers["content-type"] ?? "";
+  const boundaryMatch = String(contentType).match(/boundary=(?:(?:"([^"]+)")|([^;]+))/i);
+  if (!boundaryMatch) return null;
+  const boundary = `--${boundaryMatch[1] ?? boundaryMatch[2]}`;
+  const rawBody = Buffer.isBuffer(req.body) ? req.body.toString("binary") : "";
+  const fields = new Map<string, string>();
+  let file: { fileName: string; buffer: Buffer } | null = null;
+
+  for (const part of rawBody.split(boundary)) {
+    if (!part || part === "--\r\n" || part === "--") continue;
+    const headerEnd = part.indexOf("\r\n\r\n");
+    if (headerEnd < 0) continue;
+    const rawHeaders = part.slice(0, headerEnd);
+    let content = part.slice(headerEnd + 4);
+    if (content.endsWith("\r\n")) content = content.slice(0, -2);
+    if (content.endsWith("--")) content = content.slice(0, -2);
+    const nameMatch = rawHeaders.match(/name="([^"]+)"/i);
+    if (!nameMatch) continue;
+    const fieldName = nameMatch[1];
+    const fileNameMatch = rawHeaders.match(/filename="([^"]*)"/i);
+    if (fileNameMatch) {
+      file = { fileName: fileNameMatch[1], buffer: Buffer.from(content, "binary") };
+    } else {
+      fields.set(fieldName, Buffer.from(content, "binary").toString("utf8").trim());
+    }
+  }
+
+  return { fields, file };
+};
+
+const resolveOfficialCityFromPlacemarkName = async (name: string) => {
+  const matches: OfficialTerritoryCity[] = [];
+  for (const state of TERRITORY_ALLOWED_STATES) {
+    const city = await findOfficialTerritoryCity(state, name);
+    if (city) matches.push(city);
+  }
+  return matches.length === 1 ? matches[0] : null;
+};
+
+const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[]) => {
+  const existingCities = await prisma.sellerTerritoryCity.findMany({
+    select: { sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true } } }
+  });
+  const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityNormalizedKey(city.state, city.city), city]));
+  const seenInFile = new Set<string>();
+  const items: TerritoryKmlImportItem[] = [];
+
+  for (const sourceName of placemarkNames) {
+    const officialCity = await resolveOfficialCityFromPlacemarkName(sourceName);
+    if (!officialCity) {
+      items.push({ sourceName, city: null, state: null, ibgeCode: null, status: "not_found", message: `Cidade não encontrada no catálogo oficial: ${sourceName}.` });
+      continue;
+    }
+
+    const key = getTerritoryCityNormalizedKey(officialCity.state, officialCity.city);
+    if (seenInFile.has(key)) {
+      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "duplicate_file", message: "Cidade duplicada no arquivo de importação." });
+      continue;
+    }
+    seenInFile.add(key);
+
+    const existing = existingByKey.get(key);
+    if (existing?.sellerId === sellerId) {
+      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "already_seller", message: "Esta cidade já está vinculada a este vendedor." });
+      continue;
+    }
+    if (existing && existing.sellerId !== sellerId) {
+      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "conflict", sellerName: existing.seller.name, message: `Esta cidade já está vinculada ao vendedor ${existing.seller.name}.` });
+      continue;
+    }
+
+    items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "to_add", message: "Cidade válida para importação." });
+  }
+
+  const summary = {
+    totalRead: placemarkNames.length,
+    valid: items.filter((item) => item.status !== "not_found").length,
+    alreadySeller: items.filter((item) => item.status === "already_seller").length,
+    linkedToOtherSeller: items.filter((item) => item.status === "conflict").length,
+    notFound: items.filter((item) => item.status === "not_found").length,
+    duplicateInFile: items.filter((item) => item.status === "duplicate_file").length,
+    toAdd: items.filter((item) => item.status === "to_add").length
+  };
+
+  return { summary, items, citiesToAdd: items.filter((item) => item.status === "to_add").map((item) => ({ city: item.city!, state: item.state!, ibgeCode: item.ibgeCode })) };
+};
+
 const OPEN_TERRITORY_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
 
 const toTerritoryCityResponse = (city: { id: string; sellerId: string; city: string; state: string; ibgeCode: string | null }) => ({
@@ -8964,6 +9177,66 @@ router.get("/territories/config/city-links", authorize("diretor", "gerente"), as
   });
 
   return res.json(cities.map((city) => ({ ...toTerritoryCityResponse(city), sellerName: city.seller.name })));
+});
+
+router.post("/territories/config/import-kml-preview", authorize("diretor", "gerente"), express.raw({ type: ["multipart/form-data", "application/vnd.google-earth.kmz", "application/vnd.google-earth.kml+xml", "application/octet-stream", "text/xml", "application/xml"], limit: TERRITORY_KML_IMPORT_MAX_BYTES }), async (req, res) => {
+  const parsed = parseMultipartFormData(req);
+  const sellerId = parsed?.fields.get("sellerId") ?? (typeof req.query.sellerId === "string" ? req.query.sellerId : "");
+  const uploadedFile = parsed?.file;
+
+  if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para importar territórios." });
+  const access = await assertTerritorySellerAccess(req, sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+  if (!uploadedFile) return res.status(400).json({ message: "Envie um arquivo .kml ou .kmz." });
+  if (uploadedFile.buffer.length > TERRITORY_KML_IMPORT_MAX_BYTES) return res.status(413).json({ message: "Arquivo excede o limite de 8 MB." });
+
+  const extension = uploadedFile.fileName.toLowerCase().slice(uploadedFile.fileName.lastIndexOf("."));
+  if (!TERRITORY_KML_IMPORT_ALLOWED_EXTENSIONS.includes(extension as (typeof TERRITORY_KML_IMPORT_ALLOWED_EXTENSIONS)[number])) {
+    return res.status(400).json({ message: "Formato inválido. Envie um arquivo .kml ou .kmz." });
+  }
+
+  const kmlText = getKmlTextFromImportFile(uploadedFile.fileName, uploadedFile.buffer);
+  if (!kmlText) return res.status(400).json({ message: "Não foi possível localizar um arquivo .kml válido para processar." });
+
+  const placemarkNames = extractPlacemarkNamesFromKml(kmlText);
+  const preview = await buildTerritoryKmlImportPreview(sellerId, placemarkNames);
+  return res.json({ fileName: uploadedFile.fileName, sellerId, ...preview });
+});
+
+router.post("/territories/config/import-kml-confirm", authorize("diretor", "gerente"), validateBody(territoryKmlConfirmSchema), async (req, res) => {
+  const { sellerId } = req.body;
+  const access = await assertTerritorySellerAccess(req, sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const officialValidation = await validateOfficialTerritoryCities(req.body.cities);
+  if (officialValidation.errors.length > 0) return res.status(400).json({ message: officialValidation.errors[0], errors: officialValidation.errors });
+
+  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true } });
+  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityNormalizedKey(city.state, city.city)));
+  const citiesToCreate: OfficialTerritoryCity[] = [];
+
+  for (const city of officialValidation.cities) {
+    const key = getTerritoryCityNormalizedKey(city.state, city.city);
+    if (existingKeys.has(key)) continue;
+    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city);
+    if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
+    existingKeys.add(key);
+    citiesToCreate.push(city);
+  }
+
+  if (citiesToCreate.length > 0) {
+    await prisma.sellerTerritoryCity.createMany({
+      data: citiesToCreate.map((city) => ({ sellerId, ...city })),
+      skipDuplicates: true
+    });
+  }
+
+  const savedCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId },
+    orderBy: [{ state: "asc" }, { city: "asc" }]
+  });
+
+  return res.status(201).json({ created: citiesToCreate.length, cities: savedCities.map(toTerritoryCityResponse) });
 });
 
 router.get("/territories/config/cities", async (req, res) => {

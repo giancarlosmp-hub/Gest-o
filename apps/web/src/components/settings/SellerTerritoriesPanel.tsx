@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, MapPinned, Plus, Save, Search, Trash2, Upload } from "lucide-react";
+import { AlertCircle, CheckCircle2, FileUp, MapPinned, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
@@ -30,6 +30,32 @@ type OfficialCity = {
 };
 
 type DraftCity = TerritoryCity & { draftId: string; isNew?: boolean };
+
+type KmlImportItemStatus = "to_add" | "already_seller" | "conflict" | "not_found" | "duplicate_file";
+
+type KmlImportPreview = {
+  fileName: string;
+  sellerId: string;
+  summary: {
+    totalRead: number;
+    valid: number;
+    alreadySeller: number;
+    linkedToOtherSeller: number;
+    notFound: number;
+    duplicateInFile?: number;
+    toAdd: number;
+  };
+  items: Array<{
+    sourceName: string;
+    city: string | null;
+    state: string | null;
+    ibgeCode: string | null;
+    status: KmlImportItemStatus;
+    message: string;
+    sellerName?: string;
+  }>;
+  citiesToAdd: Array<{ city: string; state: string; ibgeCode?: string | null }>;
+};
 
 const ufOptions = ["PR", "MS", "SC"];
 
@@ -77,6 +103,11 @@ export default function SellerTerritoriesPanel() {
   const [loadingOfficialCities, setLoadingOfficialCities] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<KmlImportPreview | null>(null);
+  const [importingPreview, setImportingPreview] = useState(false);
+  const [confirmingImport, setConfirmingImport] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId);
@@ -322,7 +353,87 @@ export default function SellerTerritoriesPanel() {
     }
   };
 
+  const resetImportModal = () => {
+    setImportFile(null);
+    setImportPreview(null);
+    setImportingPreview(false);
+    setConfirmingImport(false);
+  };
+
+  const closeImportModal = () => {
+    setImportModalOpen(false);
+    resetImportModal();
+  };
+
+  const openImportModal = () => {
+    if (!canEditSelectedSeller) return;
+    resetImportModal();
+    setImportModalOpen(true);
+  };
+
+  const requestKmlPreview = async () => {
+    if (!selectedSellerId || !importFile) {
+      toast.error("Selecione um arquivo .kml ou .kmz para importar.");
+      return;
+    }
+
+    const extension = importFile.name.toLowerCase().slice(importFile.name.lastIndexOf("."));
+    if (![".kml", ".kmz"].includes(extension)) {
+      toast.error("Formato inválido. Envie um arquivo .kml ou .kmz.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("sellerId", selectedSellerId);
+    formData.append("file", importFile);
+    setImportingPreview(true);
+    try {
+      const { data } = await api.post<KmlImportPreview>("/territories/config/import-kml-preview", formData);
+      setImportPreview(data);
+      toast.success(`${data.summary.totalRead} Placemark(s) lido(s) do arquivo.`);
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Não foi possível processar o arquivo KML/KMZ."));
+    } finally {
+      setImportingPreview(false);
+    }
+  };
+
+  const confirmKmlImport = async () => {
+    if (!selectedSellerId || !importPreview || importPreview.citiesToAdd.length === 0) return;
+    setConfirmingImport(true);
+    try {
+      const { data } = await api.post<{ created: number; cities: TerritoryCity[] }>("/territories/config/import-kml-confirm", {
+        sellerId: selectedSellerId,
+        cities: importPreview.citiesToAdd
+      });
+      setCities(data.cities.map((city) => ({ ...city, draftId: city.id })));
+      toast.success(`${data.created} cidade(s) importada(s) para ${selectedSeller?.name ?? "o vendedor"}.`);
+      closeImportModal();
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, "Não foi possível confirmar a importação."));
+    } finally {
+      setConfirmingImport(false);
+    }
+  };
+
+  const importStatusLabel: Record<KmlImportItemStatus, string> = {
+    to_add: "Será adicionada",
+    already_seller: "Já vinculada",
+    conflict: "Conflito",
+    not_found: "Não encontrada",
+    duplicate_file: "Duplicada no arquivo"
+  };
+
+  const importStatusClass: Record<KmlImportItemStatus, string> = {
+    to_add: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    already_seller: "bg-slate-100 text-slate-700 ring-slate-200",
+    conflict: "bg-red-50 text-red-700 ring-red-100",
+    not_found: "bg-amber-50 text-amber-700 ring-amber-100",
+    duplicate_file: "bg-orange-50 text-orange-700 ring-orange-100"
+  };
+
   return (
+    <>
     <div id="territorios-comerciais" className="space-y-5 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
@@ -332,9 +443,14 @@ export default function SellerTerritoriesPanel() {
           <h2 className="mt-3 text-xl font-bold text-slate-900">Cidades de atuação por vendedor</h2>
           <p className="mt-1 text-sm text-slate-500">Defina cidades de atuação por vendedor usando o vínculo SellerTerritoryCity.</p>
         </div>
-        <div className="rounded-2xl bg-amber-50 p-3 text-xs text-amber-800 ring-1 ring-amber-100">
-          <strong>TODO técnico:</strong> futuramente importar .kml/.kmz, reconhecer cores/regiões e vincular cada região ao vendedor.
-        </div>
+        <button
+          type="button"
+          onClick={openImportModal}
+          disabled={!canEditSelectedSeller}
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm font-bold text-brand-700 shadow-sm hover:bg-brand-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+        >
+          <FileUp size={18} /> Importar KML/KMZ
+        </button>
       </div>
 
       {error ? (
@@ -535,5 +651,127 @@ export default function SellerTerritoriesPanel() {
         </section>
       </div>
     </div>
+
+    {importModalOpen ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+        <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-brand-700">
+                <FileUp size={14} /> Importar KML/KMZ
+              </div>
+              <h3 className="mt-2 text-lg font-bold text-slate-900">Prévia de importação para {selectedSeller?.name ?? "vendedor selecionado"}</h3>
+              <p className="mt-1 text-sm text-slate-500">O arquivo é lido como dado, validado contra cidades oficiais de PR, SC e MS, e salvo somente após confirmação.</p>
+            </div>
+            <button type="button" onClick={closeImportModal} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-800">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="space-y-4 overflow-y-auto p-5">
+            <div className="grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_auto] md:items-end">
+              <label className="block text-sm font-semibold text-slate-700">
+                Arquivo .kml ou .kmz
+                <input
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-brand-50 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-brand-700"
+                  type="file"
+                  accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz"
+                  onChange={(event) => {
+                    setImportFile(event.target.files?.[0] ?? null);
+                    setImportPreview(null);
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={requestKmlPreview}
+                disabled={!importFile || importingPreview}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                <Upload size={16} /> {importingPreview ? "Lendo arquivo..." : "Gerar prévia"}
+              </button>
+            </div>
+
+            {importPreview ? (
+              <>
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                  {[
+                    ["Total lido", importPreview.summary.totalRead],
+                    ["Cidades válidas", importPreview.summary.valid],
+                    ["Já vinculadas", importPreview.summary.alreadySeller],
+                    ["Em outro vendedor", importPreview.summary.linkedToOtherSeller],
+                    ["Não encontradas", importPreview.summary.notFound],
+                    ["Serão adicionadas", importPreview.summary.toAdd]
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3 text-center">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                      <p className="mt-1 text-2xl font-bold text-slate-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {importPreview.summary.duplicateInFile ? (
+                  <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+                    {importPreview.summary.duplicateInFile} cidade(s) duplicada(s) no arquivo foram ignoradas para não duplicar vínculos.
+                  </div>
+                ) : null}
+
+                <div className="overflow-hidden rounded-2xl border border-slate-200">
+                  <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+                    <h4 className="text-sm font-bold text-slate-900">Prévia do arquivo {importPreview.fileName}</h4>
+                    <span className="text-xs font-semibold text-slate-500">{importPreview.items.length} item(ns)</span>
+                  </div>
+                  <div className="max-h-[380px] overflow-auto">
+                    <table className="min-w-full divide-y divide-slate-100 text-sm">
+                      <thead className="sticky top-0 bg-white">
+                        <tr className="text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                          <th className="px-4 py-3">Placemark</th>
+                          <th className="px-4 py-3">Cidade oficial</th>
+                          <th className="px-4 py-3">UF</th>
+                          <th className="px-4 py-3">IBGE</th>
+                          <th className="px-4 py-3">Status</th>
+                          <th className="px-4 py-3">Mensagem</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {importPreview.items.map((item, index) => (
+                          <tr key={`${item.sourceName}-${index}`} className={item.status === "to_add" ? "bg-emerald-50/40" : "bg-white"}>
+                            <td className="px-4 py-3 font-semibold text-slate-900">{item.sourceName}</td>
+                            <td className="px-4 py-3 text-slate-700">{item.city ?? "—"}</td>
+                            <td className="px-4 py-3 text-slate-700">{item.state ?? "—"}</td>
+                            <td className="px-4 py-3 text-slate-500">{item.ibgeCode || "—"}</td>
+                            <td className="px-4 py-3">
+                              <span className={`inline-flex rounded-full px-2 py-1 text-xs font-bold ring-1 ${importStatusClass[item.status]}`}>
+                                {importStatusLabel[item.status]}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">{item.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 border-t border-slate-100 px-5 py-4 sm:flex-row sm:justify-end">
+            <button type="button" onClick={closeImportModal} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={confirmKmlImport}
+              disabled={!importPreview || importPreview.citiesToAdd.length === 0 || confirmingImport}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <CheckCircle2 size={16} /> {confirmingImport ? "Importando..." : "Confirmar importação"}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
