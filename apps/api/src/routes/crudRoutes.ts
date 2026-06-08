@@ -8681,6 +8681,8 @@ const territoryBulkCitySchema = z.object({
   text: z.string().min(1).max(20_000)
 });
 
+const OPEN_TERRITORY_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
+
 const toTerritoryCityResponse = (city: { id: string; sellerId: string; city: string; state: string; ibgeCode: string | null }) => ({
   id: city.id,
   sellerId: city.sellerId,
@@ -8688,6 +8690,9 @@ const toTerritoryCityResponse = (city: { id: string; sellerId: string; city: str
   state: normalizeState(city.state),
   ibgeCode: city.ibgeCode
 });
+
+const normalizeTerritoryCityName = (city: string) => city.replace(/\s+/g, " ").trim();
+const getTerritoryCityNormalizedKey = (state: string, city: string) => `${normalizeState(state)}::${normalizeTerritoryCityKey(city)}`;
 
 const parseBulkTerritoryCities = (text: string) => text
   .split(/\r?\n|;/)
@@ -8750,17 +8755,26 @@ const dedupeTerritoryCities = (cities: Array<{ city: string; state: string; ibge
   for (const city of cities) {
     const normalizedCity = normalizeText(city.city).replace(/\s+/g, " ").trim();
     const normalizedState = normalizeState(city.state);
-    const key = `${normalizedState}::${normalizeTerritoryCityKey(city.city)}`;
+    const key = getTerritoryCityNormalizedKey(normalizedState, city.city);
     if (!normalizedCity || !normalizedState || seen.has(key)) continue;
     seen.add(key);
     deduped.push({
-      city: city.city.replace(/\s+/g, " ").trim(),
+      city: normalizeTerritoryCityName(city.city),
       state: normalizedState,
       ibgeCode: city.ibgeCode?.trim() || null
     });
   }
 
   return deduped;
+};
+
+const findExistingTerritoryCityByNormalizedKey = async (sellerId: string, state: string, city: string) => {
+  const normalizedKey = getTerritoryCityNormalizedKey(state, city);
+  const sameStateCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId, state: normalizeState(state) },
+    select: { id: true, sellerId: true, city: true, state: true, ibgeCode: true }
+  });
+  return sameStateCities.find((item) => getTerritoryCityNormalizedKey(item.state, item.city) === normalizedKey) ?? null;
 };
 
 router.get("/territories/sellers", async (req, res) => {
@@ -8817,12 +8831,12 @@ router.post("/territories/config/cities", authorize("diretor", "gerente"), valid
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
 
-  const created = await prisma.sellerTerritoryCity.upsert({
-    where: { sellerId_state_city: { sellerId, state, city: city.replace(/\s+/g, " ").trim() } },
-    create: { sellerId, city: city.replace(/\s+/g, " ").trim(), state, ibgeCode: ibgeCode?.trim() || null },
-    update: { ibgeCode: ibgeCode?.trim() || null }
-  });
-  return res.status(201).json(toTerritoryCityResponse(created));
+  const normalizedCity = normalizeTerritoryCityName(city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(sellerId, state, normalizedCity);
+  const saved = existing
+    ? await prisma.sellerTerritoryCity.update({ where: { id: existing.id }, data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null } })
+    : await prisma.sellerTerritoryCity.create({ data: { sellerId, city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null } });
+  return res.status(201).json(toTerritoryCityResponse(saved));
 });
 
 router.post("/territories/config/cities/bulk", authorize("diretor", "gerente"), validateBody(territoryBulkCitySchema), async (req, res) => {
@@ -8836,17 +8850,23 @@ router.post("/territories/config/cities/bulk", authorize("diretor", "gerente"), 
     .map((result) => result.data);
   const cities = dedupeTerritoryCities(parsed);
 
-  await prisma.sellerTerritoryCity.createMany({
-    data: cities.map((city) => ({ sellerId, ...city })),
-    skipDuplicates: true
-  });
+  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true } });
+  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityNormalizedKey(city.state, city.city)));
+  const citiesToCreate = cities.filter((city) => !existingKeys.has(getTerritoryCityNormalizedKey(city.state, city.city)));
+
+  if (citiesToCreate.length > 0) {
+    await prisma.sellerTerritoryCity.createMany({
+      data: citiesToCreate.map((city) => ({ sellerId, ...city })),
+      skipDuplicates: true
+    });
+  }
 
   const savedCities = await prisma.sellerTerritoryCity.findMany({
     where: { sellerId },
     orderBy: [{ state: "asc" }, { city: "asc" }]
   });
 
-  return res.status(201).json({ created: cities.length, cities: savedCities.map(toTerritoryCityResponse) });
+  return res.status(201).json({ created: citiesToCreate.length, cities: savedCities.map(toTerritoryCityResponse) });
 });
 
 router.put("/territories/config/sellers/:sellerId/cities", authorize("diretor", "gerente"), validateBody(territoryCitySaveSchema), async (req, res) => {
@@ -8880,9 +8900,23 @@ router.put("/territories/config/cities/:id", authorize("diretor", "gerente"), va
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
 
   const { city, state, ibgeCode } = req.body;
+  const normalizedCity = normalizeTerritoryCityName(city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(current.sellerId, state, normalizedCity);
+
+  if (existing && existing.id !== current.id) {
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.sellerTerritoryCity.delete({ where: { id: current.id } });
+      return tx.sellerTerritoryCity.update({
+        where: { id: existing.id },
+        data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null }
+      });
+    });
+    return res.json(toTerritoryCityResponse(updated));
+  }
+
   const updated = await prisma.sellerTerritoryCity.update({
     where: { id: req.params.id },
-    data: { city: city.replace(/\s+/g, " ").trim(), state, ibgeCode: ibgeCode?.trim() || null }
+    data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null }
   });
   return res.json(toTerritoryCityResponse(updated));
 });
@@ -8918,7 +8952,10 @@ router.get("/territories/coverage", async (req, res) => {
       where: {
         sellerId,
         status: ErpOrderSyncStatus.sent,
-        createdAt: { gte: start, lt: end }
+        OR: [
+          { sentAt: { gte: start, lt: end } },
+          { sentAt: null, createdAt: { gte: start, lt: end } }
+        ]
       },
       select: {
         id: true,
@@ -8936,7 +8973,7 @@ router.get("/territories/coverage", async (req, res) => {
     prisma.opportunity.findMany({
       where: {
         ownerSellerId: sellerId,
-        stage: { in: [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] },
+        stage: { in: [...OPEN_TERRITORY_OPPORTUNITY_STAGES] },
         proposalDate: { gte: start, lt: end }
       },
       select: {
@@ -8951,7 +8988,7 @@ router.get("/territories/coverage", async (req, res) => {
   const ordersByCity = new Map<string, { orderCount: number; soldValue: number }>();
   for (const order of erpOrders) {
     const client = order.opportunity.client;
-    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const key = getTerritoryCityNormalizedKey(client.state, client.city);
     const current = ordersByCity.get(key) ?? { orderCount: 0, soldValue: 0 };
     current.orderCount += 1;
     current.soldValue += Number(order.opportunity.value || 0);
@@ -8961,14 +8998,14 @@ router.get("/territories/coverage", async (req, res) => {
   const opportunitiesByCity = new Map<string, { openOpportunityCount: number }>();
   for (const opportunity of openOpportunities) {
     const client = opportunity.client;
-    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const key = getTerritoryCityNormalizedKey(client.state, client.city);
     const current = opportunitiesByCity.get(key) ?? { openOpportunityCount: 0 };
     current.openOpportunityCount += 1;
     opportunitiesByCity.set(key, current);
   }
 
   const cities = territoryCities.map((territoryCity) => {
-    const normalizedKey = `${normalizeState(territoryCity.state)}::${normalizeTerritoryCityKey(territoryCity.city)}`;
+    const normalizedKey = getTerritoryCityNormalizedKey(territoryCity.state, territoryCity.city);
     const orderMetrics = ordersByCity.get(normalizedKey) ?? { orderCount: 0, soldValue: 0 };
     const opportunityMetrics = opportunitiesByCity.get(normalizedKey) ?? { openOpportunityCount: 0 };
     const status = orderMetrics.orderCount > 0
@@ -9000,8 +9037,8 @@ router.get("/territories/coverage", async (req, res) => {
     month: rawMonth,
     seller,
     rules: {
-      positive: "Verde quando existe pedido ERP enviado no mês para cliente da cidade.",
-      opportunity: "Amarelo quando existe oportunidade aberta no mês e nenhum pedido ERP enviado na cidade.",
+      positive: "Verde quando existe pedido ERP com status sent no mês para cliente da cidade; usa sentAt e fallback createdAt quando sentAt está vazio.",
+      opportunity: "Amarelo quando existe oportunidade aberta no mês em prospecção, negociação ou proposta e nenhum pedido ERP enviado na cidade.",
       noSale: "Vermelho quando a cidade pertence ao território, sem pedido ERP e sem oportunidade aberta.",
       outOfTerritory: "Cinza reservado para cidades fora do território no mapa real."
     },
