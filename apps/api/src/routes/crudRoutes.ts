@@ -5085,6 +5085,25 @@ router.get("/ai/today-priorities", async (req, res) => {
   return res.json(priorities);
 });
 
+router.get("/opportunities/seller-options", async (req, res) => {
+  if (!req.user) return res.status(401).json({ message: "Não autenticado" });
+
+  if (req.user.role === "vendedor") {
+    const seller = await prisma.user.findFirst({
+      where: { id: req.user.id, role: Role.vendedor, isActive: true },
+      select: { id: true, name: true, role: true, isActive: true }
+    });
+    return res.json(seller ? [seller] : []);
+  }
+
+  const sellers = await prisma.user.findMany({
+    where: { role: Role.vendedor, isActive: true },
+    select: { id: true, name: true, role: true, isActive: true },
+    orderBy: { name: "asc" }
+  });
+  return res.json(sellers);
+});
+
 router.get("/opportunities", async (req, res) => {
   const parsedFilters = parseOpportunityFilterParams(req);
   if ("error" in parsedFilters) return res.status(400).json({ message: parsedFilters.error });
