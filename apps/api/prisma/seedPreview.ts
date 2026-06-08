@@ -156,10 +156,6 @@ const BRUNO_NORTHWEST_SC_TERRITORY: PreviewTerritoryCityTemplate[] = [
   { city: "Goioerê", state: "PR" },
   { city: "Maringá", state: "PR" },
   { city: "Paranavaí", state: "PR" },
-  { city: "Loanda", state: "PR" },
-  { city: "Terra Rica", state: "PR" },
-  { city: "Iporã", state: "PR" },
-  { city: "Cruzeiro do Oeste", state: "PR" },
   { city: "Chapecó", state: "SC" },
   { city: "Xanxerê", state: "SC" },
   { city: "São Miguel do Oeste", state: "SC" },
@@ -181,6 +177,7 @@ const CARLA_MS_TERRITORY: PreviewTerritoryCityTemplate[] = [
   { city: "Sidrolândia", state: "MS" }
 ];
 
+// Seed seguro para preview/dev com territórios reais aproximados da região de atuação da Demetra.
 const PREVIEW_TERRITORIES_BY_SELLER_EMAIL: Record<string, PreviewTerritoryCityTemplate[]> = {
   "ana.preview@preview.local": ANA_WEST_SOUTHWEST_PR_TERRITORY,
   "bruno.preview@preview.local": BRUNO_NORTHWEST_SC_TERRITORY,

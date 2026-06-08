@@ -30,7 +30,7 @@ import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType, ErpOrderSyncStatus, OpportunityStage, Prisma, type User } from "@prisma/client";
+import { ActivityType, ClientType, ErpOrderSyncStatus, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
@@ -8665,21 +8665,270 @@ router.put("/goals/:id", authorize("diretor", "gerente"), validateBody(goalSchem
 router.delete("/goals/:id", authorize("diretor", "gerente"), async (req, res) => { await prisma.goal.delete({ where: { id: req.params.id } }); res.status(204).send(); });
 
 
-router.get("/territories/sellers", async (req, res) => {
-  if (req.user?.role === "vendedor") {
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { id: true, name: true, role: true, isActive: true }
-    });
-    return res.json(currentUser ? [currentUser] : []);
+
+const territoryCityInputSchema = z.object({
+  city: z.string().trim().min(1).max(120),
+  state: z.string().trim().min(2).max(2).transform((value) => normalizeState(value)),
+  ibgeCode: z.string().trim().max(32).optional().nullable()
+});
+
+const territoryCitySaveSchema = z.object({
+  cities: z.array(territoryCityInputSchema).max(500)
+});
+
+const territoryBulkCitySchema = z.object({
+  sellerId: z.string().trim().min(1),
+  text: z.string().min(1).max(20_000)
+});
+
+const OPEN_TERRITORY_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
+
+const toTerritoryCityResponse = (city: { id: string; sellerId: string; city: string; state: string; ibgeCode: string | null }) => ({
+  id: city.id,
+  sellerId: city.sellerId,
+  city: city.city,
+  state: normalizeState(city.state),
+  ibgeCode: city.ibgeCode
+});
+
+const normalizeTerritoryCityName = (city: string) => city.replace(/\s+/g, " ").trim();
+const getTerritoryCityNormalizedKey = (state: string, city: string) => `${normalizeState(state)}::${normalizeTerritoryCityKey(city)}`;
+
+const parseBulkTerritoryCities = (text: string) => text
+  .split(/\r?\n|;/)
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .map((line) => {
+    const [city = "", state = ""] = line.split("/").map((part) => part.trim());
+    return { city, state };
+  });
+
+const getTerritoryActor = async (req: Request) => {
+  if (!req.user?.id) return null;
+  return prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: { id: true, role: true, region: true }
+  });
+};
+
+const isNationalTerritoryRegion = (region?: string | null) => normalizeText(region).toLowerCase() === "nacional";
+
+const getTerritorySellerWhereForActor = (actor: { id: string; role: Role; region: string | null }) => {
+  if (actor.role === "vendedor") return { id: actor.id, role: "vendedor" as const, isActive: true };
+  if (actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region)) {
+    return { role: "vendedor" as const, isActive: true, region: actor.region };
+  }
+  return { role: "vendedor" as const, isActive: true };
+};
+
+const assertTerritorySellerAccess = async (req: Request, sellerId: string, mode: "read" | "edit") => {
+  const actor = await getTerritoryActor(req);
+  if (!actor) return { allowed: false as const, status: 401, message: "Não autenticado" };
+  if (mode === "edit" && actor.role === "vendedor") {
+    return { allowed: false as const, status: 403, message: "Vendedores podem apenas visualizar o próprio território." };
   }
 
+  const seller = await prisma.user.findUnique({
+    where: { id: sellerId },
+    select: { id: true, name: true, role: true, region: true, isActive: true }
+  });
+
+  if (!seller || seller.role !== "vendedor" || !seller.isActive) {
+    return { allowed: false as const, status: 404, message: "Vendedor não encontrado." };
+  }
+
+  if (actor.role === "vendedor" && seller.id !== actor.id) {
+    return { allowed: false as const, status: 403, message: "Vendedores podem visualizar apenas o próprio território." };
+  }
+
+  if (actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) && seller.region !== actor.region) {
+    return { allowed: false as const, status: 403, message: "Gerente pode editar apenas vendedores da própria equipe/região." };
+  }
+
+  return { allowed: true as const, actor, seller, canEdit: actor.role === "diretor" || actor.role === "gerente" };
+};
+
+const dedupeTerritoryCities = (cities: Array<{ city: string; state: string; ibgeCode?: string | null }>) => {
+  const seen = new Set<string>();
+  const deduped: Array<{ city: string; state: string; ibgeCode: string | null }> = [];
+
+  for (const city of cities) {
+    const normalizedCity = normalizeText(city.city).replace(/\s+/g, " ").trim();
+    const normalizedState = normalizeState(city.state);
+    const key = getTerritoryCityNormalizedKey(normalizedState, city.city);
+    if (!normalizedCity || !normalizedState || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push({
+      city: normalizeTerritoryCityName(city.city),
+      state: normalizedState,
+      ibgeCode: city.ibgeCode?.trim() || null
+    });
+  }
+
+  return deduped;
+};
+
+const findExistingTerritoryCityByNormalizedKey = async (sellerId: string, state: string, city: string) => {
+  const normalizedKey = getTerritoryCityNormalizedKey(state, city);
+  const sameStateCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId, state: normalizeState(state) },
+    select: { id: true, sellerId: true, city: true, state: true, ibgeCode: true }
+  });
+  return sameStateCities.find((item) => getTerritoryCityNormalizedKey(item.state, item.city) === normalizedKey) ?? null;
+};
+
+router.get("/territories/sellers", async (req, res) => {
+  const actor = await getTerritoryActor(req);
+  if (!actor) return res.status(401).json({ message: "Não autenticado" });
+
   const users = await prisma.user.findMany({
-    where: { role: "vendedor", isActive: true },
+    where: getTerritorySellerWhereForActor(actor),
     select: { id: true, name: true, role: true, isActive: true },
     orderBy: { name: "asc" }
   });
   return res.json(users);
+});
+
+router.get("/territories/config/sellers", async (req, res) => {
+  const actor = await getTerritoryActor(req);
+  if (!actor) return res.status(401).json({ message: "Não autenticado" });
+
+  const users = await prisma.user.findMany({
+    where: getTerritorySellerWhereForActor(actor),
+    select: { id: true, name: true, role: true, region: true, isActive: true },
+    orderBy: { name: "asc" }
+  });
+  return res.json(users.map((seller) => ({
+    ...seller,
+    canEdit: actor.role === "diretor" || actor.role === "gerente"
+  })));
+});
+
+router.get("/territories/config/cities", async (req, res) => {
+  const requestedSellerId = typeof req.query.sellerId === "string" ? req.query.sellerId : undefined;
+  const sellerId = req.user?.role === "vendedor" ? req.user.id : requestedSellerId;
+  const search = typeof req.query.q === "string" ? req.query.q : "";
+  const uf = typeof req.query.uf === "string" ? normalizeState(req.query.uf) : "";
+
+  if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para consultar territórios." });
+  const access = await assertTerritorySellerAccess(req, sellerId, "read");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const cities = await prisma.sellerTerritoryCity.findMany({
+    where: {
+      sellerId,
+      ...(uf ? { state: uf } : {}),
+      ...(search.trim() ? { city: { contains: search.trim(), mode: "insensitive" } } : {})
+    },
+    orderBy: [{ state: "asc" }, { city: "asc" }]
+  });
+
+  return res.json(cities.map(toTerritoryCityResponse));
+});
+
+router.post("/territories/config/cities", authorize("diretor", "gerente"), validateBody(territoryCityInputSchema.extend({ sellerId: z.string().trim().min(1) })), async (req, res) => {
+  const { sellerId, city, state, ibgeCode } = req.body;
+  const access = await assertTerritorySellerAccess(req, sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const normalizedCity = normalizeTerritoryCityName(city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(sellerId, state, normalizedCity);
+  const saved = existing
+    ? await prisma.sellerTerritoryCity.update({ where: { id: existing.id }, data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null } })
+    : await prisma.sellerTerritoryCity.create({ data: { sellerId, city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null } });
+  return res.status(201).json(toTerritoryCityResponse(saved));
+});
+
+router.post("/territories/config/cities/bulk", authorize("diretor", "gerente"), validateBody(territoryBulkCitySchema), async (req, res) => {
+  const { sellerId, text } = req.body;
+  const access = await assertTerritorySellerAccess(req, sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const parsed = parseBulkTerritoryCities(text)
+    .map((city) => territoryCityInputSchema.safeParse(city))
+    .filter((result): result is z.SafeParseSuccess<z.infer<typeof territoryCityInputSchema>> => result.success)
+    .map((result) => result.data);
+  const cities = dedupeTerritoryCities(parsed);
+
+  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true } });
+  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityNormalizedKey(city.state, city.city)));
+  const citiesToCreate = cities.filter((city) => !existingKeys.has(getTerritoryCityNormalizedKey(city.state, city.city)));
+
+  if (citiesToCreate.length > 0) {
+    await prisma.sellerTerritoryCity.createMany({
+      data: citiesToCreate.map((city) => ({ sellerId, ...city })),
+      skipDuplicates: true
+    });
+  }
+
+  const savedCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId },
+    orderBy: [{ state: "asc" }, { city: "asc" }]
+  });
+
+  return res.status(201).json({ created: citiesToCreate.length, cities: savedCities.map(toTerritoryCityResponse) });
+});
+
+router.put("/territories/config/sellers/:sellerId/cities", authorize("diretor", "gerente"), validateBody(territoryCitySaveSchema), async (req, res) => {
+  const { sellerId } = req.params;
+  const access = await assertTerritorySellerAccess(req, sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const cities = dedupeTerritoryCities(req.body.cities);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.sellerTerritoryCity.deleteMany({ where: { sellerId } });
+    if (cities.length > 0) {
+      await tx.sellerTerritoryCity.createMany({
+        data: cities.map((city) => ({ sellerId, ...city })),
+        skipDuplicates: true
+      });
+    }
+  });
+
+  const savedCities = await prisma.sellerTerritoryCity.findMany({
+    where: { sellerId },
+    orderBy: [{ state: "asc" }, { city: "asc" }]
+  });
+  return res.json(savedCities.map(toTerritoryCityResponse));
+});
+
+router.put("/territories/config/cities/:id", authorize("diretor", "gerente"), validateBody(territoryCityInputSchema), async (req, res) => {
+  const current = await prisma.sellerTerritoryCity.findUnique({ where: { id: req.params.id } });
+  if (!current) return res.status(404).json({ message: "Cidade do território não encontrada." });
+  const access = await assertTerritorySellerAccess(req, current.sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  const { city, state, ibgeCode } = req.body;
+  const normalizedCity = normalizeTerritoryCityName(city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(current.sellerId, state, normalizedCity);
+
+  if (existing && existing.id !== current.id) {
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.sellerTerritoryCity.delete({ where: { id: current.id } });
+      return tx.sellerTerritoryCity.update({
+        where: { id: existing.id },
+        data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null }
+      });
+    });
+    return res.json(toTerritoryCityResponse(updated));
+  }
+
+  const updated = await prisma.sellerTerritoryCity.update({
+    where: { id: req.params.id },
+    data: { city: normalizedCity, state, ibgeCode: ibgeCode?.trim() || null }
+  });
+  return res.json(toTerritoryCityResponse(updated));
+});
+
+router.delete("/territories/config/cities/:id", authorize("diretor", "gerente"), async (req, res) => {
+  const current = await prisma.sellerTerritoryCity.findUnique({ where: { id: req.params.id } });
+  if (!current) return res.status(404).json({ message: "Cidade do território não encontrada." });
+  const access = await assertTerritorySellerAccess(req, current.sellerId, "edit");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+
+  await prisma.sellerTerritoryCity.delete({ where: { id: req.params.id } });
+  return res.status(204).send();
 });
 
 router.get("/territories/coverage", async (req, res) => {
@@ -8689,11 +8938,9 @@ router.get("/territories/coverage", async (req, res) => {
 
   if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para consultar territórios." });
 
-  const seller = await prisma.user.findUnique({
-    where: { id: sellerId },
-    select: { id: true, name: true, role: true, isActive: true }
-  });
-  if (!seller || seller.role !== "vendedor") return res.status(404).json({ message: "Vendedor não encontrado." });
+  const access = await assertTerritorySellerAccess(req, sellerId, "read");
+  if (!access.allowed) return res.status(access.status).json({ message: access.message });
+  const seller = access.seller;
 
   const territoryCities = await prisma.sellerTerritoryCity.findMany({
     where: { sellerId },
@@ -8705,7 +8952,10 @@ router.get("/territories/coverage", async (req, res) => {
       where: {
         sellerId,
         status: ErpOrderSyncStatus.sent,
-        createdAt: { gte: start, lt: end }
+        OR: [
+          { sentAt: { gte: start, lt: end } },
+          { sentAt: null, createdAt: { gte: start, lt: end } }
+        ]
       },
       select: {
         id: true,
@@ -8723,7 +8973,7 @@ router.get("/territories/coverage", async (req, res) => {
     prisma.opportunity.findMany({
       where: {
         ownerSellerId: sellerId,
-        stage: { in: [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] },
+        stage: { in: [...OPEN_TERRITORY_OPPORTUNITY_STAGES] },
         proposalDate: { gte: start, lt: end }
       },
       select: {
@@ -8738,7 +8988,7 @@ router.get("/territories/coverage", async (req, res) => {
   const ordersByCity = new Map<string, { orderCount: number; soldValue: number }>();
   for (const order of erpOrders) {
     const client = order.opportunity.client;
-    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const key = getTerritoryCityNormalizedKey(client.state, client.city);
     const current = ordersByCity.get(key) ?? { orderCount: 0, soldValue: 0 };
     current.orderCount += 1;
     current.soldValue += Number(order.opportunity.value || 0);
@@ -8748,14 +8998,14 @@ router.get("/territories/coverage", async (req, res) => {
   const opportunitiesByCity = new Map<string, { openOpportunityCount: number }>();
   for (const opportunity of openOpportunities) {
     const client = opportunity.client;
-    const key = `${normalizeState(client.state)}::${normalizeTerritoryCityKey(client.city)}`;
+    const key = getTerritoryCityNormalizedKey(client.state, client.city);
     const current = opportunitiesByCity.get(key) ?? { openOpportunityCount: 0 };
     current.openOpportunityCount += 1;
     opportunitiesByCity.set(key, current);
   }
 
   const cities = territoryCities.map((territoryCity) => {
-    const normalizedKey = `${normalizeState(territoryCity.state)}::${normalizeTerritoryCityKey(territoryCity.city)}`;
+    const normalizedKey = getTerritoryCityNormalizedKey(territoryCity.state, territoryCity.city);
     const orderMetrics = ordersByCity.get(normalizedKey) ?? { orderCount: 0, soldValue: 0 };
     const opportunityMetrics = opportunitiesByCity.get(normalizedKey) ?? { openOpportunityCount: 0 };
     const status = orderMetrics.orderCount > 0
@@ -8787,8 +9037,8 @@ router.get("/territories/coverage", async (req, res) => {
     month: rawMonth,
     seller,
     rules: {
-      positive: "Verde quando existe pedido ERP enviado no mês para cliente da cidade.",
-      opportunity: "Amarelo quando existe oportunidade aberta no mês e nenhum pedido ERP enviado na cidade.",
+      positive: "Verde quando existe pedido ERP com status sent no mês para cliente da cidade; usa sentAt e fallback createdAt quando sentAt está vazio.",
+      opportunity: "Amarelo quando existe oportunidade aberta no mês em prospecção, negociação ou proposta e nenhum pedido ERP enviado na cidade.",
       noSale: "Vermelho quando a cidade pertence ao território, sem pedido ERP e sem oportunidade aberta.",
       outOfTerritory: "Cinza reservado para cidades fora do território no mapa real."
     },
