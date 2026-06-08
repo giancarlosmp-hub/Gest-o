@@ -40,6 +40,11 @@ type IntegrationDiagnostics = {
   lastLoginAt?: string | null;
   tokenExpiresAt?: string | null;
   tokenExpired?: boolean;
+  environment?: {
+    externalEnvFile: { path: string; exists: boolean };
+    receivedEnv: Record<"ULTRAFV3_BASE_URL" | "ERP_CREDENTIAL_ENCRYPTION_KEY" | "JWT_SECRET" | "DATABASE_URL", boolean>;
+    missingDiagnosticConfig: string[];
+  };
   guidance: string;
 };
 
@@ -345,6 +350,13 @@ export default function ErpIntegrationPanel() {
   const hasAnyCredentialPath = hasGlobalCredentials || hasSellerFallback;
   const hasBaseUrlConfigured = Boolean(integration?.baseUrl);
   const orderBlockingMissingConfig = missingConfig.filter((item) => item === "ULTRAFV3_BASE_URL" || item === "ERP_CREDENTIAL_ENCRYPTION_KEY");
+  const envDiagnosticRows = [
+    { label: "Arquivo externo de ambiente", present: integration?.environment?.externalEnvFile.exists ?? false, detail: integration?.environment?.externalEnvFile.path ?? "/root/demetra-env/.env" },
+    { label: "ULTRAFV3_BASE_URL", present: integration?.environment?.receivedEnv.ULTRAFV3_BASE_URL ?? false },
+    { label: "ERP_CREDENTIAL_ENCRYPTION_KEY", present: integration?.environment?.receivedEnv.ERP_CREDENTIAL_ENCRYPTION_KEY ?? false },
+    { label: "JWT_SECRET", present: integration?.environment?.receivedEnv.JWT_SECRET ?? false },
+    { label: "DATABASE_URL", present: integration?.environment?.receivedEnv.DATABASE_URL ?? false },
+  ];
   const hasPreventiveConfig = orderBlockingMissingConfig.length === 0;
   const canSyncReferenceCards = hasBaseUrlConfigured && hasAnyCredentialPath && hasPreventiveConfig;
   const configGuidanceMessage = missingConfig.includes("ERP_CREDENTIAL_ENCRYPTION_KEY")
@@ -404,6 +416,24 @@ export default function ErpIntegrationPanel() {
               {missingConfig.length ? missingConfig.join(", ") : integration?.guidance || "Configuração mínima presente."}
             </p>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-lg bg-white p-3 text-xs ring-1 ring-slate-200">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p className="font-semibold text-slate-800">Diagnóstico preventivo do ambiente sensível</p>
+            <p className="text-slate-500">Valores reais nunca são exibidos.</p>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+            {envDiagnosticRows.map((item) => (
+              <div key={item.label} className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200" title={item.detail}>
+                <p className="font-semibold text-slate-700">{item.label}</p>
+                <p className={item.present ? "mt-1 text-emerald-700" : "mt-1 text-red-700"}>{item.present ? "Presente" : "Ausente"}</p>
+              </div>
+            ))}
+          </div>
+          {integration?.environment?.missingDiagnosticConfig?.length ? (
+            <p className="mt-3 text-red-700">Ausentes no processo da API: <span className="font-mono font-semibold">{integration.environment.missingDiagnosticConfig.join(", ")}</span>.</p>
+          ) : null}
         </div>
       </div>
 

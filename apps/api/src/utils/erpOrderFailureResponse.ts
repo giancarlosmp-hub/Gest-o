@@ -9,6 +9,7 @@ export type ErpOrderFailureStage =
   | "handler"
   | "load-opportunity"
   | "validate-payload"
+  | "configuration"
   | "resolve-salesman"
   | "submit-order"
   | "persist-timeline"

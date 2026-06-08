@@ -9,7 +9,7 @@ import {
 } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
-import { getMissingErpRuntimeConfig } from "./erpRuntimeConfig.js";
+import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type ErpRuntimeEnvironmentDiagnostics } from "./erpRuntimeConfig.js";
 import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
@@ -78,6 +78,7 @@ type UltraFv3IntegrationDiagnostics = {
   lastLoginAt?: string | null;
   tokenExpiresAt?: string | null;
   tokenExpired?: boolean;
+  environment: ErpRuntimeEnvironmentDiagnostics;
   guidance: string;
 };
 
@@ -2128,6 +2129,7 @@ export function getUltraFv3IntegrationDiagnostics(
 ): UltraFv3IntegrationDiagnostics {
   const clientDiagnostics = ultraFv3Client.getDiagnostics();
   const preventiveMissingConfig = getMissingErpRuntimeConfig();
+  const environment = getErpRuntimeEnvironmentDiagnostics();
   const mergedMissingConfig = Array.from(new Set([...clientDiagnostics.missingConfig, ...preventiveMissingConfig]));
   const lastError = clientDiagnostics.lastError || getLatestSyncError(statuses);
   const hasAuthError = lastError
@@ -2143,7 +2145,7 @@ export function getUltraFv3IntegrationDiagnostics(
   let guidance =
     "Configuração mínima presente. Use o card Conexão UltraFV3 para validar autenticação e disponibilidade antes das sincronizações.";
   if (mergedMissingConfig.length > 0) {
-    guidance = `Configure ${mergedMissingConfig.join(", ")} no .env do backend/API e reinicie o serviço antes de sincronizar.`;
+    guidance = `Configure ${mergedMissingConfig.join(", ")} em /root/demetra-env/.env (produção) ou no .env local da API e reinicie o serviço antes de sincronizar/enviar pedidos.`;
   } else if (authenticationStatus === "auth_failed") {
     guidance =
       "Revise ULTRAFV3_USERNAME e ULTRAFV3_PASSWORD no backend/API e valide se o usuário tem permissão na API UltraFV3.";
@@ -2161,6 +2163,7 @@ export function getUltraFv3IntegrationDiagnostics(
     isConfigured: mergedMissingConfig.length === 0,
     authenticationStatus: mergedMissingConfig.length > 0 ? "missing_config" : authenticationStatus,
     lastError,
+    environment,
     guidance,
   };
 }
