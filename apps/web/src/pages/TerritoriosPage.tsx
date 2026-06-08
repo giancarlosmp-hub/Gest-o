@@ -466,7 +466,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Vendedor
             <select
-              className="mt-1 h-9 w-full rounded-xl border border-white/20 bg-white px-3 py-1.5 text-sm leading-tight text-slate-900 shadow-sm disabled:bg-slate-100 sm:h-10"
+              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2.5 py-1 text-sm leading-tight text-slate-900 shadow-sm disabled:bg-slate-100 sm:h-10 sm:px-3 sm:py-1.5"
               value={selectedSellerId}
               onChange={(event) => setSelectedSellerId(event.target.value)}
               disabled={!canChooseSeller}
@@ -479,7 +479,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Mês/Ano
             <input
-              className="mt-1 h-9 w-full rounded-xl border border-white/20 bg-white px-3 py-1.5 text-sm leading-tight text-slate-900 shadow-sm sm:h-10"
+              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2.5 py-1 text-sm leading-tight text-slate-900 shadow-sm [color-scheme:light] sm:h-10 sm:px-3 sm:py-1.5"
               type="month"
               value={month}
               onChange={(event) => setMonth(event.target.value)}
