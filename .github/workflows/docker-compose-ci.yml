@@ -33,6 +33,17 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
+      - name: Validate Docker Compose config
+        env:
+          ENABLE_SMOKE_BOOTSTRAP: "true"
+          SEED_ON_BOOTSTRAP: "true"
+          ADMIN_BOOTSTRAP_ENABLED: "true"
+          ADMIN_BOOTSTRAP_EMAIL: "diretor@empresa.com"
+          ADMIN_BOOTSTRAP_PASSWORD: "123456"
+          ADMIN_BOOTSTRAP_ROLE: "diretor"
+          ADMIN_BOOTSTRAP_REGION: "Nacional"
+        run: docker compose config
+
       - name: Build and start stack
         env:
           ENABLE_SMOKE_BOOTSTRAP: "true"

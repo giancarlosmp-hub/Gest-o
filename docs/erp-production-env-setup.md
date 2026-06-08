@@ -39,7 +39,7 @@ nano /root/demetra-env/.env
 chmod 600 /root/demetra-env/.env
 ```
 
-O `docker-compose.yml` carrega `./.env` quando existir para desenvolvimento local e também `/root/demetra-env/.env` para produção. O arquivo externo fica fora de `/apps/gest-o`, portanto não é sobrescrito por `git pull`, `merge`, `checkout`, `reset`, `stash` ou deploy do projeto.
+O arquivo externo fica fora de `/apps/gest-o`, portanto não é sobrescrito por `git pull`, `merge`, `checkout`, `reset`, `stash` ou deploy do projeto. Para manter compatibilidade com CI, preview e desenvolvimento, o `docker-compose.yml` não referencia diretamente `/root/demetra-env/.env`; em produção, os scripts de deploy carregam esse arquivo no ambiente antes de executar `docker compose`. Em desenvolvimento local, o Compose continua usando variáveis exportadas pelo shell, `.env` local para interpolação ou fallbacks seguros.
 
 ## Copiar ou restaurar o arquivo
 
@@ -76,17 +76,30 @@ Os scripts não imprimem valores sensíveis. Os backups são gravados em `/root/
 
 ## Subir containers após alteração
 
-Após editar `/root/demetra-env/.env`, recrie/reinicie a API para receber o novo ambiente:
+Após editar `/root/demetra-env/.env`, use preferencialmente o deploy seguro, que carrega o arquivo externo antes do Compose:
 
 ```bash
 cd /apps/gest-o
+bash scripts/deploy-production.sh
+```
+
+Para uma operação manual de Compose em produção, carregue o arquivo sem imprimir valores sensíveis e recrie/reinicie a API:
+
+```bash
+cd /apps/gest-o
+set -a
+. /root/demetra-env/.env
+set +a
 docker compose up -d --build api web
 ```
 
-Se também alterou banco/serviços compartilhados, suba tudo:
+Se também alterou banco/serviços compartilhados, suba tudo após carregar o arquivo externo:
 
 ```bash
 cd /apps/gest-o
+set -a
+. /root/demetra-env/.env
+set +a
 docker compose up -d --build
 ```
 

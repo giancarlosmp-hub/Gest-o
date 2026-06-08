@@ -10,6 +10,7 @@ CHECK_SCRIPT="${DEPLOY_DB_CHECK_SCRIPT:-./scripts/check-prod-health.sh}"
 API_HEALTH_URL="${DEPLOY_API_HEALTH_URL:-http://127.0.0.1:4000/health}"
 API_HEALTH_MAX_RETRIES="${DEPLOY_API_HEALTH_MAX_RETRIES:-30}"
 API_HEALTH_SLEEP_SECONDS="${DEPLOY_API_HEALTH_SLEEP_SECONDS:-5}"
+PRODUCTION_ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 
 ANTES_USER=0
 ANTES_CLIENT=0
@@ -30,6 +31,19 @@ ts() {
 
 log() {
   echo "[$(ts)] $*" | tee -a "$LOG_FILE"
+}
+
+load_production_env() {
+  if [[ -f "$PRODUCTION_ENV_FILE" ]]; then
+    log "[ENV] Carregando variáveis sensíveis de produção de $PRODUCTION_ENV_FILE (valores não serão exibidos)"
+    set -a
+    # shellcheck disable=SC1090
+    source "$PRODUCTION_ENV_FILE"
+    set +a
+    return
+  fi
+
+  log "[ENV] Aviso: $PRODUCTION_ENV_FILE não encontrado; Compose usará variáveis já exportadas ou fallbacks seguros. Envios ERP reais continuarão bloqueados se faltar configuração crítica."
 }
 
 format_commit_ref() {
@@ -305,6 +319,7 @@ main() {
   fi
 
   collect_counts "antes"
+  load_production_env
   inspect_cnpj_lookup_config
 
   log "[DEPLOY] Iniciando rebuild dos containers com código sincronizado de origin/main..."

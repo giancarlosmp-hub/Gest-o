@@ -21,19 +21,16 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      # Local development compatibility; ignored when absent.
-      - path: ./.env
-        required: false
-      # Recommended production source, outside the Git working tree.
-      - path: /root/demetra-env/.env
-        required: false
     environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro}?schema=public}
       NODE_ENV: production
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://crm.demetraagronegocios.com.br}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super-access}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-12h}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super-refresh}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}
       ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-false}
@@ -49,7 +46,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       # UltraFV3 runs outside this Docker network; use the real Windows/server IP, not localhost/127.0.0.1.
-      # Sensitive ERP/API secrets are injected by env_file above, preferably /root/demetra-env/.env in production.
+      # Production deploy scripts export /root/demetra-env/.env before running Compose; CI/preview/local use injected env, .env, or safe fallbacks.
+      ULTRAFV3_BASE_URL: ${ULTRAFV3_BASE_URL:-}
+      ULTRAFV3_USERNAME: ${ULTRAFV3_USERNAME:-}
+      ULTRAFV3_PASSWORD: ${ULTRAFV3_PASSWORD:-}
+      ERP_CREDENTIAL_ENCRYPTION_KEY: ${ERP_CREDENTIAL_ENCRYPTION_KEY:-}
       API_REQUEST_TIMEOUT_MS: ${API_REQUEST_TIMEOUT_MS:-15000}
       ERP_ORDER_REQUEST_TIMEOUT_MS: ${ERP_ORDER_REQUEST_TIMEOUT_MS:-50000}
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
