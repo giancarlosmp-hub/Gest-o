@@ -9,6 +9,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
+import { assertErpRuntimeConfigForOrderSubmission } from "./erpRuntimeConfig.js";
 import { logApiEvent } from "../utils/logger.js";
 import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
@@ -1079,6 +1080,7 @@ export async function createErpOrderFromOpportunity(
 ) {
   const correlationId = options.correlationId || randomUUID();
   const simulateOnly = rawParams.simulateOnly === true;
+  if (!simulateOnly) assertErpRuntimeConfigForOrderSubmission();
   logApiEvent("INFO", "[erp order] generation flow started", {
     opportunityId: opportunity.id,
     correlationId,

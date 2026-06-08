@@ -61,7 +61,8 @@ import {
   syncProducts,
   syncReceivingConditions,
   syncSalesmen,
-  syncOrderStatus
+  syncOrderStatus,
+  syncAllUltraFv3Catalogs
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
@@ -8113,6 +8114,31 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
     });
   }
 };
+
+
+router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) => {
+  try {
+    const result = await syncAllUltraFv3Catalogs();
+    return res.status(200).json(result);
+  } catch (error) {
+    const source = error && typeof error === "object" ? error as { status?: unknown; correlationId?: unknown; durationMs?: unknown; completedSteps?: unknown } : {};
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 sync-all route] full ERP sync failed", {
+      error: details,
+      correlationId: source.correlationId,
+      durationMs: source.durationMs,
+      completedSteps: source.completedSteps,
+    });
+    return res.status(typeof source.status === "number" ? source.status : 502).json({
+      success: false,
+      message: "Falha na Sincronização Completa ERP.",
+      details,
+      correlationId: source.correlationId,
+      durationMs: source.durationMs,
+      completedSteps: source.completedSteps,
+    });
+  }
+});
 
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
