@@ -5,9 +5,23 @@ APP_DIR="${APP_DIR:-/apps/gest-o}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 BUILD_SERVICES="${BUILD_SERVICES:-api web}"
 START_SERVICES="${START_SERVICES:-api web}"
+PRODUCTION_ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 
 log() {
   printf '[deploy-production] %s\n' "$*"
+}
+
+load_production_env() {
+  if [[ -f "${PRODUCTION_ENV_FILE}" ]]; then
+    log "Carregando variáveis sensíveis de produção de ${PRODUCTION_ENV_FILE} (valores não serão exibidos)"
+    set -a
+    # shellcheck disable=SC1090
+    source "${PRODUCTION_ENV_FILE}"
+    set +a
+    return
+  fi
+
+  log "Aviso: ${PRODUCTION_ENV_FILE} não encontrado; Compose usará variáveis já exportadas ou fallbacks seguros. Envios ERP reais continuarão bloqueados se faltar configuração crítica."
 }
 
 log "Iniciando deploy seguro em produção"
@@ -37,6 +51,9 @@ git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only origin "${DEPLOY_BRANCH}"
 
 log "Commit local após sincronização: $(git rev-parse --short HEAD)"
+load_production_env
+log "Validando docker compose config"
+docker compose config >/dev/null
 log "Reconstruindo imagens Docker: ${BUILD_SERVICES}"
 # shellcheck disable=SC2086
 docker compose build ${BUILD_SERVICES}

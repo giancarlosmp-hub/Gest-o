@@ -1,129 +1,116 @@
-# Setup de variáveis de produção — ERP UltraFV3
+# Ambiente sensível de produção do ERP UltraFV3
 
-Este guia descreve **onde** e **como** configurar, com segurança, as variáveis exigidas para integração ERP em produção, sem expor segredos no repositório.
+Este projeto deve carregar as variáveis sensíveis de produção a partir de um arquivo fora do diretório versionado:
+
+```text
+/root/demetra-env/.env
+```
+
+Esse arquivo é a fonte recomendada para produção do CRM Demetra Agro Performance em `/apps/gest-o`. Não coloque credenciais reais em GitHub, issues, pull requests, chats ou documentos compartilhados.
 
 ## Variáveis obrigatórias
 
-Configure no ambiente da API:
+O arquivo `/root/demetra-env/.env` deve conter, no mínimo:
 
-- `ERP_CREDENTIAL_ENCRYPTION_KEY`
-- `ULTRAFV3_BASE_URL`
-- `ULTRAFV3_USERNAME`
-- `ULTRAFV3_PASSWORD`
+```dotenv
+ULTRAFV3_BASE_URL=https://servidor-ou-ip-do-ultrafv3
+ERP_CREDENTIAL_ENCRYPTION_KEY=troque-por-uma-chave-forte
+JWT_SECRET=troque-por-um-segredo-forte
+DATABASE_URL=postgresql://usuario:senha@host:5432/banco?schema=public
+```
 
-## Onde configurar no projeto
+Variáveis opcionais/globais para autenticação UltraFV3:
 
-### 1) Docker Compose (produção)
+```dotenv
+ULTRAFV3_USERNAME=usuario-global-opcional
+ULTRAFV3_PASSWORD=senha-global-opcional
+```
 
-O `docker-compose.yml` injeta variáveis no serviço `api` usando `${NOME_DA_VARIAVEL}`. Isso significa que os valores devem existir no ambiente do host ou no arquivo `.env` do diretório de deploy (ex.: `/apps/gest-o/.env`).
+Se `ULTRAFV3_USERNAME`/`ULTRAFV3_PASSWORD` não forem usados, mantenha as credenciais por vendedor configuradas no painel do CRM. Nunca copie valores reais para GitHub, chat ou PR.
 
-### 2) Arquivo `.env`
+## Criar diretório e arquivo em produção
 
-No servidor, use o arquivo `.env` **local da VPS** (não versionado) para armazenar segredos de produção.
-
-- Caminho típico: `/apps/gest-o/.env`
-- **Nunca** commitar esse arquivo com valores reais.
-
-### 3) Scripts de deploy
-
-- `deploy.sh` usa `docker compose` para rebuild/restart e, portanto, consome as variáveis já presentes no `.env` do servidor.
-- `deploy-reset.sh` também usa `docker compose`, mas reseta volumes (não usar em produção normal).
-
-### 4) GitHub Actions
-
-O workflow de produção (`.github/workflows/deploy-prod.yml`) executa deploy remoto via SSH e roda `docker compose up -d --build api web` no servidor.
-
-Ele **não** escreve segredos ERP no servidor. Portanto, as variáveis precisam já estar no `.env` da VPS antes do deploy.
-
-### 5) Servidor/VPS
-
-Fonte real de produção: arquivo `.env` no diretório do projeto em produção (ex.: `/apps/gest-o/.env`).
-
-## Requisitos de segurança
-
-### `ERP_CREDENTIAL_ENCRYPTION_KEY`
-
-- Deve ser uma chave longa e secreta (recomendado: 32+ bytes aleatórios em Base64/hex).
-- Use chave forte gerada no servidor.
-- Não commitar em Git, não enviar em PR e não publicar em docs públicos.
-
-Exemplo para gerar na VPS:
+No servidor, execute como `root`:
 
 ```bash
-openssl rand -base64 48
+mkdir -p /root/demetra-env/backups
+chmod 700 /root/demetra-env /root/demetra-env/backups
+nano /root/demetra-env/.env
+chmod 600 /root/demetra-env/.env
 ```
 
-## `ULTRAFV3_BASE_URL`
+O arquivo externo fica fora de `/apps/gest-o`, portanto não é sobrescrito por `git pull`, `merge`, `checkout`, `reset`, `stash` ou deploy do projeto. Para manter compatibilidade com CI, preview e desenvolvimento, o `docker-compose.yml` não referencia diretamente `/root/demetra-env/.env`; em produção, os scripts de deploy carregam esse arquivo no ambiente antes de executar `docker compose`. Em desenvolvimento local, o Compose continua usando variáveis exportadas pelo shell, `.env` local para interpolação ou fallbacks seguros.
 
-- Deve apontar para a API UltraFV3 disponível no servidor local/Windows.
-- A porta esperada é **8585**.
+## Copiar ou restaurar o arquivo
 
-Exemplo com Tailscale:
+Para copiar um `.env` seguro de outro local para produção:
 
-```env
-ULTRAFV3_BASE_URL=http://100.74.230.16:8585
+```bash
+install -m 600 /caminho/seguro/.env /root/demetra-env/.env
+chmod 600 /root/demetra-env/.env
 ```
 
-## Exemplo seguro de `.env` na VPS (sem segredo real)
+Para criar backup manual antes de qualquer alteração:
 
-```env
-ERP_CREDENTIAL_ENCRYPTION_KEY=<gerar_valor_forte_unico>
-ULTRAFV3_BASE_URL=http://100.74.230.16:8585
-ULTRAFV3_USERNAME=<usuario_ultrafv3>
-ULTRAFV3_PASSWORD=<senha_ultrafv3>
+```bash
+/apps/gest-o/scripts/backup-production-env.sh
 ```
 
-## Comandos de deploy no servidor
+Para restaurar a partir de um backup:
 
-No servidor, dentro de `/apps/gest-o`:
+```bash
+/apps/gest-o/scripts/restore-production-env.sh /root/demetra-env/backups/env-YYYYMMDD-HHMMSS.backup
+```
 
-1) Editar `.env` com as variáveis:
+O script de restauração faz backup do `.env` atual antes de sobrescrever.
+
+## Backup automático diário
+
+Exemplo de cron para backup diário às 02:30:
+
+```cron
+30 2 * * * /apps/gest-o/scripts/backup-production-env.sh >> /var/log/demetra-env-backup.log 2>&1
+```
+
+Os scripts não imprimem valores sensíveis. Os backups são gravados em `/root/demetra-env/backups` com permissão `600`.
+
+## Subir containers após alteração
+
+Após editar `/root/demetra-env/.env`, use preferencialmente o deploy seguro, que carrega o arquivo externo antes do Compose:
 
 ```bash
 cd /apps/gest-o
-nano .env
+bash scripts/deploy-production.sh
 ```
 
-2) Validar resolução das variáveis no compose:
+Para uma operação manual de Compose em produção, carregue o arquivo sem imprimir valores sensíveis e recrie/reinicie a API:
 
 ```bash
-docker compose config | grep -E 'ERP_CREDENTIAL_ENCRYPTION_KEY|ULTRAFV3_BASE_URL|ULTRAFV3_USERNAME|ULTRAFV3_PASSWORD'
-```
-
-3) Rebuild/restart de API e WEB após alteração de variáveis:
-
-```bash
+cd /apps/gest-o
+set -a
+. /root/demetra-env/.env
+set +a
 docker compose up -d --build api web
 ```
 
-4) Conferir status:
+Se também alterou banco/serviços compartilhados, suba tudo após carregar o arquivo externo:
 
 ```bash
-docker compose ps
+cd /apps/gest-o
+set -a
+. /root/demetra-env/.env
+set +a
+docker compose up -d --build
 ```
 
-5) Conferir logs da API se necessário:
+## Diagnóstico no painel
 
-```bash
-docker compose logs --tail=200 api
-```
+Em **Configurações > Integração ERP**, o painel mostra apenas `presente`/`ausente` para:
 
-> Evite `docker compose down -v` em produção para não apagar volumes/dados.
+- arquivo externo `/root/demetra-env/.env`;
+- `ULTRAFV3_BASE_URL`;
+- `ERP_CREDENTIAL_ENCRYPTION_KEY`;
+- `JWT_SECRET`;
+- `DATABASE_URL`.
 
-## Validação funcional no CRM
-
-Após subir os containers:
-
-1. Acesse o CRM com usuário administrador.
-2. Vá em **Configurações > Integração ERP**.
-3. Valide que:
-   - `ERP_CREDENTIAL_ENCRYPTION_KEY` aparece como configurada (criptografia ativa).
-   - `ULTRAFV3_BASE_URL`, `ULTRAFV3_USERNAME` e `ULTRAFV3_PASSWORD` não estão ausentes.
-4. Execute o teste de conexão/sincronização da integração ERP e confirme ausência de erro de variáveis obrigatórias.
-
-## Checklist rápido
-
-- [ ] Variáveis ERP configuradas no `/apps/gest-o/.env` da VPS.
-- [ ] Nenhum segredo real commitado no repositório.
-- [ ] `docker compose up -d --build api web` executado após ajuste.
-- [ ] Painel **Configurações > Integração ERP** validado sem erro de variáveis ausentes.
+Valores reais nunca são exibidos. Em produção, se `ULTRAFV3_BASE_URL` ou `ERP_CREDENTIAL_ENCRYPTION_KEY` estiverem ausentes, a API continua podendo subir, mas o envio real de pedidos ERP fica bloqueado com erro estruturado contendo `correlationId` e `missingConfig`.

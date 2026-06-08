@@ -43,7 +43,7 @@ Acesse:
 - API: `http://localhost:4000`
 
 ### Variáveis de produção (VPS)
-No ambiente de produção, defina no `.env` (ou no provedor de deploy):
+No ambiente de produção, mantenha segredos sensíveis fora do repositório em `/root/demetra-env/.env` (veja `docs/erp-production-env-setup.md`). Variáveis não sensíveis ainda podem ser exportadas pelo shell, workflow ou arquivo local usado apenas para interpolação do Compose:
 ```bash
 NODE_ENV=production
 FRONTEND_URL=https://crm.seudominio.com

@@ -1,5 +1,11 @@
 import dotenv from "dotenv";
 
+export const PRODUCTION_ENV_FILE_PATH = "/root/demetra-env/.env";
+
+// Load the production file first so it is the preferred source when present.
+// dotenv does not override already-loaded keys by default, preserving shell-provided
+// variables and keeping local .env compatibility when the external file is absent.
+dotenv.config({ path: PRODUCTION_ENV_FILE_PATH });
 dotenv.config();
 
 function cleanEnvString(value: string | undefined, defaultValue = "") {
@@ -29,9 +35,10 @@ export const env = {
     ((process.env.NODE_ENV || "development") === "production" ? "" : "http://localhost:5173"),
   apiRequestTimeoutMs: toNumber(process.env.API_REQUEST_TIMEOUT_MS, 15_000),
   erpOrderRequestTimeoutMs: toNumber(process.env.ERP_ORDER_REQUEST_TIMEOUT_MS, 50_000),
-  jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "access-secret",
+  jwtSecret: cleanEnvString(process.env.JWT_SECRET),
+  jwtAccessSecret: process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || "access-secret",
   jwtAccessExpiresIn: cleanEnvString(process.env.JWT_ACCESS_EXPIRES_IN, "12h"),
-  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "refresh-secret",
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET || "refresh-secret",
   frontendUrl:
     process.env.FRONTEND_URL || ((process.env.NODE_ENV || "development") === "production" ? "" : "http://localhost:5173"),
   seedOnBootstrap: toBoolean(process.env.SEED_ON_BOOTSTRAP, false),

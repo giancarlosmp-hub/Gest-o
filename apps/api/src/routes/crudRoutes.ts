@@ -6812,7 +6812,10 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
     const message = sanitizeErpOrderErrorMessage(typeof error?.message === "string" && error.message.trim() ? error.message : "Erro no envio ao ERP");
     const sanitizedStack = error instanceof Error && error.stack ? sanitizeErpOrderErrorMessage(error.stack) : null;
     const failureEndpoint = error?.endpoint || error?.ultraFv3Failure?.endpoint || error?.diagnostics?.endpoint || null;
-    const failureStage = failureEndpoint === "/salesmen"
+    const missingConfig = Array.isArray(error?.missingConfig) ? error.missingConfig : undefined;
+    const failureStage = missingConfig?.length
+      ? "configuration"
+      : failureEndpoint === "/salesmen"
       ? "resolve-salesman"
       : failureEndpoint === "/orders"
         ? "submit-order"
@@ -6890,6 +6893,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
           existingErpOrderSyncId: error?.existingErpOrderSyncId,
           endpoint: failureEndpoint || "/orders",
           mensagem: message,
+          ...(missingConfig?.length ? { missingConfig } : {}),
           ...(Array.isArray(error?.errors) ? { errors: error.errors } : {}),
           ...(error?.payload ? { payload: sanitizeErpOrderPayload(error.payload) } : {}),
           ...(error?.ultraFv3Failure ? { ultraFv3: sanitizeErpOrderPayload(error.ultraFv3Failure) } : {}),

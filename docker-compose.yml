@@ -27,6 +27,7 @@ services:
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://crm.demetraagronegocios.com.br}
+      JWT_SECRET: ${JWT_SECRET:-}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-super-access}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN:-12h}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-super-refresh}
@@ -45,6 +46,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
       # UltraFV3 runs outside this Docker network; use the real Windows/server IP, not localhost/127.0.0.1.
+      # Production deploy scripts export /root/demetra-env/.env before running Compose; CI/preview/local use injected env, .env, or safe fallbacks.
       ULTRAFV3_BASE_URL: ${ULTRAFV3_BASE_URL:-}
       ULTRAFV3_USERNAME: ${ULTRAFV3_USERNAME:-}
       ULTRAFV3_PASSWORD: ${ULTRAFV3_PASSWORD:-}
