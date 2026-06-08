@@ -84,14 +84,14 @@ const statusFillColors: Record<TerritoryCityStatus, string> = {
   positive: "#059669",
   opportunity: "#f59e0b",
   no_sale: "#dc2626",
-  out_of_territory: "#e5e7eb"
+  out_of_territory: "#f1f5f9"
 };
 
 const statusStrokeColors: Record<TerritoryCityStatus, string> = {
   positive: "#065f46",
   opportunity: "#92400e",
   no_sale: "#991b1b",
-  out_of_territory: "#cbd5e1"
+  out_of_territory: "#e2e8f0"
 };
 
 function normalizeCityKey(value: string) {
@@ -265,6 +265,37 @@ const statusStyles: Record<TerritoryCityStatus, { badge: string; card: string; d
 
 function getCurrentMonthKey() {
   return new Date().toISOString().slice(0, 7);
+}
+
+
+function CityDetailPanel({ city, sellerName, compact = false }: { city: TerritoryCity | null; sellerName?: string; compact?: boolean }) {
+  if (!city) {
+    return (
+      <div className={`flex flex-col items-center justify-center gap-2 text-center text-sm text-slate-500 ${compact ? "py-4" : "py-6"}`}>
+        <Info className="text-brand-500" size={24} />
+        <p className="font-semibold text-slate-700">Selecione uma cidade no mapa para ver detalhes.</p>
+        <p>Cidades coloridas fazem parte do território do vendedor.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between lg:flex-col">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Cidade selecionada</p>
+          <h3 className="mt-1 text-xl font-bold text-slate-900">{city.city}/{city.state}</h3>
+        </div>
+        <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[city.status].badge}`}>{city.statusLabel}</span>
+      </div>
+      <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+        <DetailRow label="Vendedor" value={sellerName ?? "-"} />
+        <DetailRow label="Pedidos ERP" value={city.orderCount} />
+        <DetailRow label="Valor vendido" value={formatCurrencyBRL(city.soldValue)} />
+        <DetailRow label="Oportunidades abertas" value={city.openOpportunityCount} />
+      </dl>
+    </div>
+  );
 }
 
 function SummaryCard({ title, value, icon: Icon, tone = "slate" }: { title: string; value: string; icon: typeof MapPinned; tone?: "slate" | "green" | "yellow" | "red" | "blue" }) {
@@ -505,96 +536,95 @@ export default function TerritoriosPage() {
                   <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-red-600" />Vermelho: sem venda</span>
                   <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-full bg-slate-200 ring-1 ring-slate-300" />Cinza: fora</span>
                 </div>
+                <div className="mt-3 space-y-1 text-xs text-slate-500">
+                  <p>Cidades coloridas fazem parte do território do vendedor.</p>
+                  <p>Cidades em cinza estão fora do território.</p>
+                </div>
               </div>
             </div>
           </div>
 
           <div className="p-3 sm:p-5 lg:p-6">
-            <div className="flex min-h-[420px] items-center justify-center overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white sm:min-h-[560px] lg:min-h-[700px]">
-              {loading ? (
-                <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando território...</div>
-              ) : geoJsonError ? (
-                <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">
-                  <AlertCircle className="text-amber-500" size={22} />
-                  <span>{geoJsonError}</span>
-                </div>
-              ) : territoryGeoJson ? (
-                <svg
-                  className="h-full min-h-[420px] w-full max-w-[1280px] touch-manipulation sm:min-h-[560px] lg:min-h-[700px]"
-                  role="img"
-                  aria-label="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
-                  viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
-                >
-                  <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
-                  {territoryGeoJson.features.map((feature) => {
-                    const featureCityName = getFeatureCityName(feature);
-                    const featureState = getFeatureState(feature);
-                    const city = citiesByIbgeCode.get(getFeatureIbgeCode(feature))
-                      ?? citiesByStateAndName.get(getCityStateNameKey(featureState, featureCityName))
-                      ?? citiesByNormalizedName.get(normalizeCityKey(featureCityName))
-                      ?? createOutOfTerritoryCity(featureCityName, featureState);
-                    const isTerritoryCity = city.status !== "out_of_territory";
-                    const isSelected = selectedCity
-                      ? normalizeCityKey(selectedCity.city) === normalizeCityKey(featureCityName) && selectedCity.state === city.state
-                      : false;
-                    const path = featureToPath(feature, geoBounds);
-                    if (!path) return null;
+            <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
+              <div className="flex min-h-[420px] items-center justify-center sm:min-h-[560px] lg:min-h-[700px]">
+                {loading ? (
+                  <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando território...</div>
+                ) : geoJsonError ? (
+                  <div className="flex min-h-[420px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">
+                    <AlertCircle className="text-amber-500" size={22} />
+                    <span>{geoJsonError}</span>
+                  </div>
+                ) : territoryGeoJson ? (
+                  <svg
+                    className="h-full min-h-[420px] w-full max-w-[1280px] touch-manipulation sm:min-h-[560px] lg:min-h-[700px]"
+                    role="img"
+                    aria-label="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
+                    viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
+                  >
+                    <defs>
+                      <filter id="territoryGlow" x="-18%" y="-18%" width="136%" height="136%">
+                        <feDropShadow dx="0" dy="2" stdDeviation="2.2" floodColor="#0f172a" floodOpacity="0.18" />
+                      </filter>
+                      <filter id="selectedGlow" x="-24%" y="-24%" width="148%" height="148%">
+                        <feDropShadow dx="0" dy="4" stdDeviation="3.5" floodColor="#0f172a" floodOpacity="0.32" />
+                      </filter>
+                    </defs>
+                    <rect width={MAP_WIDTH} height={MAP_HEIGHT} fill="#f8fafc" />
+                    {territoryGeoJson.features.map((feature) => {
+                      const featureCityName = getFeatureCityName(feature);
+                      const featureState = getFeatureState(feature);
+                      const city = citiesByIbgeCode.get(getFeatureIbgeCode(feature))
+                        ?? citiesByStateAndName.get(getCityStateNameKey(featureState, featureCityName))
+                        ?? citiesByNormalizedName.get(normalizeCityKey(featureCityName))
+                        ?? createOutOfTerritoryCity(featureCityName, featureState);
+                      const isTerritoryCity = city.status !== "out_of_territory";
+                      const isSelected = selectedCity
+                        ? normalizeCityKey(selectedCity.city) === normalizeCityKey(featureCityName) && selectedCity.state === city.state
+                        : false;
+                      const path = featureToPath(feature, geoBounds);
+                      if (!path) return null;
 
-                    return (
-                      <path
-                        key={`${feature.properties.id ?? `${featureState}-${featureCityName}`}`}
-                        d={path}
-                        fill={statusFillColors[city.status]}
-                        stroke={isSelected ? "#020617" : statusStrokeColors[city.status]}
-                        strokeWidth={isSelected ? 3 : isTerritoryCity ? 1.45 : 0.45}
-                        vectorEffect="non-scaling-stroke"
-                        opacity={isTerritoryCity ? 0.96 : 0.25}
-                        className="cursor-pointer transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        tabIndex={0}
-                        role="button"
-                        aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
-                        onClick={() => setSelectedCity(city)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setSelectedCity(city);
-                          }
-                        }}
-                      >
-                        <title>{getTooltipText(city, coverage?.seller.name)}</title>
-                      </path>
-                    );
-                  })}
-                </svg>
-              ) : (
-                <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>
-              )}
+                      return (
+                        <path
+                          key={`${feature.properties.id ?? `${featureState}-${featureCityName}`}`}
+                          d={path}
+                          fill={statusFillColors[city.status]}
+                          stroke={isSelected ? "#020617" : statusStrokeColors[city.status]}
+                          strokeWidth={isSelected ? 4 : isTerritoryCity ? 1.8 : 0.28}
+                          vectorEffect="non-scaling-stroke"
+                          opacity={isTerritoryCity ? 0.98 : 0.12}
+                          filter={isSelected ? "url(#selectedGlow)" : isTerritoryCity ? "url(#territoryGlow)" : undefined}
+                          className="cursor-pointer transition-[opacity,stroke-width,filter] duration-150 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
+                          onClick={() => setSelectedCity(city)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelectedCity(city);
+                            }
+                          }}
+                        >
+                          <title>{getTooltipText(city, coverage?.seller.name)}</title>
+                        </path>
+                      );
+                    })}
+                  </svg>
+                ) : (
+                  <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>
+                )}
+              </div>
+
+              <div className="hidden lg:block lg:absolute lg:right-5 lg:top-5 lg:w-[360px]">
+                <div className="rounded-2xl border border-white/70 bg-white/95 p-4 shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur">
+                  <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} compact />
+                </div>
+              </div>
             </div>
 
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              {selectedCity ? (
-                <div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Cidade selecionada</p>
-                      <h3 className="mt-1 text-xl font-bold text-slate-900">{selectedCity.city}/{selectedCity.state}</h3>
-                    </div>
-                    <span className={`w-fit rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[selectedCity.status].badge}`}>{selectedCity.statusLabel}</span>
-                  </div>
-                  <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <DetailRow label="Vendedor" value={coverage?.seller.name ?? "-"} />
-                    <DetailRow label="Valor vendido" value={formatCurrencyBRL(selectedCity.soldValue)} />
-                    <DetailRow label="Pedidos ERP" value={selectedCity.orderCount} />
-                    <DetailRow label="Oportunidades abertas" value={selectedCity.openOpportunityCount} />
-                  </dl>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center gap-2 py-6 text-center text-sm text-slate-500">
-                  <Info className="text-brand-500" size={24} />
-                  <p className="font-semibold text-slate-700">Selecione uma cidade no mapa para ver detalhes.</p>
-                  <p>O enquadramento prioriza as cidades do território do vendedor selecionado.</p>
-                </div>
-              )}
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:hidden">
+              <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} />
             </div>
 
             <div className="mt-3 flex flex-col gap-1 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
