@@ -47,8 +47,7 @@ const TERRITORY_GEOJSON_STATES = [
   { uf: "SC", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-42-mun.json" },
   { uf: "MS", url: "https://cdn.jsdelivr.net/gh/tbrugz/geodata-br@master/geojson/geojs-50-mun.json" }
 ] as const;
-const TERRITORY_GEOJSON_SOURCE = "tbrugz/geodata-br (GeoJSON por UF com fonte IBGE, CC0-1.0)";
-const TERRITORY_GEOJSON_SIZE_LABEL = "aprox. 3 MB somando PR, SC e MS";
+// GeoJSON por UF com fonte IBGE, CC0-1.0 (tbrugz/geodata-br).
 const MAP_WIDTH = 1100;
 const MAP_HEIGHT = 760;
 const MAP_PADDING = 18;
@@ -84,14 +83,14 @@ const statusFillColors: Record<TerritoryCityStatus, string> = {
   positive: "#059669",
   opportunity: "#f59e0b",
   no_sale: "#dc2626",
-  out_of_territory: "#f1f5f9"
+  out_of_territory: "#e8edf3"
 };
 
 const statusStrokeColors: Record<TerritoryCityStatus, string> = {
   positive: "#065f46",
   opportunity: "#92400e",
   no_sale: "#991b1b",
-  out_of_territory: "#e2e8f0"
+  out_of_territory: "#b8c2cc"
 };
 
 function normalizeCityKey(value: string) {
@@ -467,7 +466,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Vendedor
             <select
-              className="mt-1 w-full rounded-xl border border-white/20 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm disabled:bg-slate-100"
+              className="mt-1 h-9 w-full rounded-xl border border-white/20 bg-white px-3 py-1.5 text-sm leading-tight text-slate-900 shadow-sm disabled:bg-slate-100 sm:h-10"
               value={selectedSellerId}
               onChange={(event) => setSelectedSellerId(event.target.value)}
               disabled={!canChooseSeller}
@@ -480,7 +479,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Mês/Ano
             <input
-              className="mt-1 w-full rounded-xl border border-white/20 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm"
+              className="mt-1 h-9 w-full rounded-xl border border-white/20 bg-white px-3 py-1.5 text-sm leading-tight text-slate-900 shadow-sm sm:h-10"
               type="month"
               value={month}
               onChange={(event) => setMonth(event.target.value)}
@@ -590,9 +589,9 @@ export default function TerritoriosPage() {
                           d={path}
                           fill={statusFillColors[city.status]}
                           stroke={isSelected ? "#020617" : statusStrokeColors[city.status]}
-                          strokeWidth={isSelected ? 4 : isTerritoryCity ? 1.8 : 0.28}
+                          strokeWidth={isSelected ? 4 : isTerritoryCity ? 1.8 : 0.55}
                           vectorEffect="non-scaling-stroke"
-                          opacity={isTerritoryCity ? 0.98 : 0.12}
+                          opacity={isTerritoryCity ? 0.98 : 0.64}
                           filter={isSelected ? "url(#selectedGlow)" : isTerritoryCity ? "url(#territoryGlow)" : undefined}
                           className="cursor-pointer transition-[opacity,stroke-width,filter] duration-150 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
                           tabIndex={0}
@@ -625,11 +624,6 @@ export default function TerritoriosPage() {
 
             <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:hidden">
               <CityDetailPanel city={selectedCity} sellerName={coverage?.seller.name} />
-            </div>
-
-            <div className="mt-3 flex flex-col gap-1 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-              <span>Biblioteca: React + SVG GeoJSON (sem dependência externa de mapa nesta etapa).</span>
-              <span>Origem: {TERRITORY_GEOJSON_SOURCE}; tamanho {TERRITORY_GEOJSON_SIZE_LABEL}.</span>
             </div>
           </div>
         </div>
