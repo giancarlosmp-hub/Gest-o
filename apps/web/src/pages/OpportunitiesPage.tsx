@@ -35,6 +35,7 @@ type Opportunity = {
   clientId: string;
   ownerSellerId: string;
   client?: { id: string; name: string } | string;
+  clientData?: { id: string; name?: string | null; fantasyName?: string | null; code?: string | null; cnpj?: string | null; city?: string | null; state?: string | null } | null;
   ownerSeller?: { id: string; name: string };
   owner?: string;
   clientCity?: string | null;
@@ -150,6 +151,7 @@ const stages: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho", "perdi
 const cropSelectOptions = ["soja", "milho", "trigo", "pasto", "cobertura", "outros"];
 
 
+type SellerOption = { id: string; name: string };
 type PriceTableOption = { code: string; label: string };
 
 const readOptionText = (source: Record<string, unknown>, keys: string[]) => {
@@ -326,6 +328,7 @@ export default function OpportunitiesPage() {
   const [items, setItems] = useState<Opportunity[]>([]);
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const [clients, setClients] = useState<Client[]>([]);
+  const [sellerOptions, setSellerOptions] = useState<SellerOption[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -401,6 +404,25 @@ export default function OpportunitiesPage() {
     const savedMode = localStorage.getItem(PIPELINE_VIEW_STORAGE_KEY);
     if (savedMode === "list" || savedMode === "pipeline") setViewMode(savedMode);
   }, []);
+  useEffect(() => {
+    if (!user) return;
+
+    if (user.role === "vendedor") {
+      setSellerOptions([{ id: user.id, name: user.name }]);
+      return;
+    }
+
+    api.get("/users")
+      .then((response) => {
+        const activeSellers = (Array.isArray(response.data) ? response.data : [])
+          .filter((item: any) => item?.role === "vendedor" && item?.isActive !== false && item?.id && item?.name)
+          .map((item: any) => ({ id: item.id, name: item.name } as SellerOption))
+          .sort((a: SellerOption, b: SellerOption) => a.name.localeCompare(b.name, "pt-BR"));
+        setSellerOptions(activeSellers);
+      })
+      .catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível carregar vendedores ativos")));
+  }, [user]);
+
 
   useEffect(() => {
     const urlStatus = searchParams.get("status");
@@ -569,15 +591,6 @@ export default function OpportunitiesPage() {
       dashboardMonthlySummary: dashboardMonthlySummaryQueryKey
     });
   }, [dashboardMonthlySummaryQueryKey, opportunitiesQueryKey, opportunitiesSummaryQueryKey]);
-
-  const sellers = useMemo(() => {
-    const map = new Map<string, string>();
-    items.forEach((item) => {
-      if (item.ownerSeller?.id && item.ownerSeller?.name) map.set(item.ownerSeller.id, item.ownerSeller.name);
-      if (item.ownerSellerId && item.owner) map.set(item.ownerSellerId, item.owner);
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [items]);
 
   const cropOptions = useMemo(() => {
     const dynamic = Array.from(new Set(items.map((item) => item.crop).filter(Boolean))) as string[];
@@ -1173,6 +1186,46 @@ export default function OpportunitiesPage() {
   ), [opportunityItems]);
   const hasStructuredItems = opportunityItems.length > 0;
 
+  const isNewOpportunityDirty = useMemo(() => {
+    if (opportunityModalMode !== "create") return false;
+
+    const createBaseline: FormState = {
+      ...emptyForm,
+      ownerSellerId: isSeller && user?.id ? user.id : "",
+      priceTableCode: "1"
+    };
+
+    const relevantFormKeys: Array<keyof FormState> = [
+      "title",
+      "clientId",
+      "ownerSellerId",
+      "stage",
+      "priceTableCode",
+      "value",
+      "probability",
+      "proposalEntryDate",
+      "expectedReturnDate",
+      "plantingForecastDate",
+      "lastContactAt",
+      "areaHa",
+      "expectedTicketPerHa",
+      "notes",
+      "crop",
+      "season",
+      "productOffered"
+    ];
+
+    const hasChangedFormField = relevantFormKeys.some((key) => {
+      const currentValue = String(form[key] ?? "").trim();
+      const baselineValue = String(createBaseline[key] ?? "").trim();
+      if (key === "value" && opportunityItems.length === 0 && (currentValue === "" || currentValue === "0")) return false;
+      return currentValue !== baselineValue;
+    });
+    const hasProductDraft = Object.entries(itemDraft).some(([key, value]) => String(value ?? "").trim() !== String(emptyOpportunityItem[key as keyof OpportunityItemForm] ?? "").trim());
+
+    return hasChangedFormField || opportunityItems.length > 0 || hasProductDraft || productSearch.trim().length > 0;
+  }, [form, isSeller, itemDraft, opportunityItems.length, opportunityModalMode, productSearch, user?.id]);
+
   useEffect(() => {
     setForm((current) => ({ ...current, value: String(toTwoDecimals(itemsTotals.netTotal)) }));
   }, [itemsTotals.netTotal]);
@@ -1516,7 +1569,7 @@ export default function OpportunitiesPage() {
             {canFilterByOwner ? (
               <select className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
                 <option value="">Todos vendedores</option>
-                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
               </select>
             ) : (
               <input disabled className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500 lg:col-span-2" value={user?.name || "Meu pipeline"} />
@@ -1555,7 +1608,7 @@ export default function OpportunitiesPage() {
         submitLabel={opportunityModalMode === "edit" ? "Salvar alterações" : "Salvar"}
         form={form}
         clients={clients}
-        sellers={sellers}
+        sellers={sellerOptions}
         userRole={user?.role}
         userName={user?.name}
         isSaving={isSaving}
@@ -1583,6 +1636,7 @@ export default function OpportunitiesPage() {
         hasStructuredItems={hasStructuredItems}
         priceTableOptions={priceTableOptions}
         priceTableWarning={priceTableWarning}
+        shouldConfirmClose={isNewOpportunityDirty}
         productsSection={
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
@@ -1829,7 +1883,7 @@ export default function OpportunitiesPage() {
             {canFilterByOwner ? (
               <select className="rounded-lg border border-slate-200 p-2" value={filters.ownerSellerId} onChange={(e) => setFilters((prev) => ({ ...prev, ownerSellerId: e.target.value }))}>
                 <option value="">Todos responsáveis</option>
-                {sellers.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+                {sellerOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
               </select>
             ) : (
               <input disabled className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-500" value={user?.name || "Meu pipeline"} />
