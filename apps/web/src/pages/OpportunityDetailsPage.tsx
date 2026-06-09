@@ -152,6 +152,7 @@ type ErpOrderForm = {
   branchCode: string;
   operationCode: string;
   expectedDeliveryDate: string;
+  erpOrderObservation: string;
   simulateOnly: boolean;
 };
 
@@ -222,6 +223,7 @@ const emptyErpOrderForm: ErpOrderForm = {
   branchCode: "",
   operationCode: "",
   expectedDeliveryDate: getTodayDateInputValue(),
+  erpOrderObservation: "",
   simulateOnly: false,
 };
 
@@ -362,7 +364,10 @@ function SearchableSelect({
 
   const filteredOptions = useMemo(() => {
     const normalized = normalizeSearchText(query.trim());
-    if (!normalized) return options.slice(0, 20);
+    const isShowingSelectedValue =
+      Boolean(selectedOption) &&
+      (query === selectedOption?.label || query === selectedOption?.code);
+    if (!normalized || (open && isShowingSelectedValue)) return options.slice(0, 20);
     return options
       .filter((option) =>
         normalizeSearchText(
@@ -370,7 +375,7 @@ function SearchableSelect({
         ).includes(normalized),
       )
       .slice(0, 20);
-  }, [options, query]);
+  }, [open, options, query, selectedOption]);
 
   return (
     <label className="relative block text-sm">
@@ -383,7 +388,11 @@ function SearchableSelect({
         placeholder={
           loading ? "Carregando..." : placeholder || "Pesquisar e selecionar"
         }
-        onFocus={() => setOpen(true)}
+        onFocus={(event) => {
+          setOpen(true);
+          event.currentTarget.select();
+        }}
+        onClick={() => setOpen(true)}
         onBlur={() =>
           setTimeout(() => {
             setOpen(false);
@@ -400,7 +409,8 @@ function SearchableSelect({
               option.code === nextQuery ||
               option.value === nextQuery,
           );
-          onChange(exact?.code || "");
+          if (exact) onChange(exact.code);
+          if (!nextQuery.trim()) onChange("");
         }}
         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100 disabled:bg-slate-100 disabled:text-slate-500"
       />
@@ -1531,6 +1541,27 @@ export default function OpportunityDetailsPage() {
                           />
                         </label>
                       </div>
+                      <label className="mt-3 block text-sm">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Observações do pedido ERP
+                        </span>
+                        <textarea
+                          value={erpOrderForm.erpOrderObservation}
+                          onChange={(event) =>
+                            setErpOrderField(
+                              "erpOrderObservation",
+                              event.target.value,
+                            )
+                          }
+                          rows={3}
+                          maxLength={2000}
+                          placeholder="Texto enviado ao UltraFV3 em OBS_PEDIDO. As notas da oportunidade continuam como histórico interno/linha do tempo."
+                          className="w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100"
+                        />
+                        <span className="mt-1 block text-xs text-slate-500">
+                          Este campo popula OBS_PEDIDO no pedido ERP. Não envia observações por item nesta etapa.
+                        </span>
+                      </label>
                       <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
                         <input
                           type="checkbox"

@@ -6775,10 +6775,14 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
     if (!normalizedParams.simulateOnly) {
       try {
         req.erpOrderFailureStage = "persist-timeline";
+        const erpOrderObservation = normalizedParams.erpOrderObservation.trim();
         await prisma.timelineEvent.create({
           data: {
             type: "status",
-            description: `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+            description: [
+              `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+              erpOrderObservation ? `Observações do pedido ERP enviadas: ${erpOrderObservation}` : "",
+            ].filter(Boolean).join(" "),
             clientId: opportunity.clientId,
             opportunityId: opportunity.id,
             ownerSellerId: opportunity.ownerSellerId
@@ -6804,6 +6808,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
       status: sync.status,
       orderStatus: sync.orderStatus,
       simulated: normalizedParams.simulateOnly,
+      payload: sanitizeErpOrderPayload(sync.payloadSent),
       response: sync.erpResponse
     });
   } catch (error: any) {

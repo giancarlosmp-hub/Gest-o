@@ -187,7 +187,7 @@ const sanitizeUltraOrderFailure = (
 
 type OrderParameterCodes = Pick<
   ErpOrderGenerationInput,
-  "paymentMethodCode" | "receivingConditionCode" | "priceTableCode" | "branchCode" | "operationCode" | "expectedDeliveryDate" | "simulateOnly"
+  "paymentMethodCode" | "receivingConditionCode" | "priceTableCode" | "branchCode" | "operationCode" | "expectedDeliveryDate" | "erpOrderObservation" | "simulateOnly"
 >;
 
 type NormalizedOrderParameterCodes = {
@@ -197,6 +197,7 @@ type NormalizedOrderParameterCodes = {
   branchCode: string;
   operationCode: string;
   expectedDeliveryDate: string;
+  erpOrderObservation: string;
   simulateOnly: boolean;
 };
 
@@ -213,6 +214,8 @@ export type ErpOrderParameterDiagnostics = {
   operationCodeNormalized: string;
   expectedDeliveryDateRaw: unknown;
   expectedDeliveryDateNormalized: string;
+  erpOrderObservationRaw: unknown;
+  erpOrderObservationNormalized: string;
 };
 
 const toSafeParameterRawValue = (value: ErpOrderParameterValue | undefined): unknown => {
@@ -234,6 +237,7 @@ export const normalizeErpOrderParameterCodes = (params: Partial<OrderParameterCo
   branchCode: normalizeErpParameterCode(params.branchCode),
   operationCode: normalizeErpParameterCode(params.operationCode),
   expectedDeliveryDate: typeof params.expectedDeliveryDate === "string" ? params.expectedDeliveryDate.trim() : "",
+  erpOrderObservation: typeof params.erpOrderObservation === "string" ? params.erpOrderObservation.trim() : "",
   simulateOnly: params.simulateOnly === true,
 });
 
@@ -252,6 +256,8 @@ export const getErpOrderParameterDiagnostics = (params: Partial<OrderParameterCo
     operationCodeNormalized: normalized.operationCode,
     expectedDeliveryDateRaw: typeof params.expectedDeliveryDate === "string" ? params.expectedDeliveryDate : null,
     expectedDeliveryDateNormalized: normalized.expectedDeliveryDate,
+    erpOrderObservationRaw: typeof params.erpOrderObservation === "string" ? params.erpOrderObservation : null,
+    erpOrderObservationNormalized: normalized.erpOrderObservation,
   };
 };
 
@@ -439,7 +445,7 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
   if (payload.PEDIDO_ID !== null) errors.push("PEDIDO_ID deve ser null.");
   if (payload.VALOR_ACRESCIMO !== 0) errors.push("VALOR_ACRESCIMO deve ser 0.");
   if (payload.DATA_CANCELAMENTO !== "") errors.push("DATA_CANCELAMENTO deve ser string vazia.");
-  if (payload.OBS_PEDIDO !== "") errors.push("OBS_PEDIDO deve ser string vazia.");
+  if (typeof payload.OBS_PEDIDO !== "string") errors.push("OBS_PEDIDO deve ser string.");
   if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
   if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
@@ -677,7 +683,9 @@ async function createErpOrderFromOpportunityUnsafe(
   const routeStageStartedAt = Date.now();
   const params = normalizeErpOrderParameterCodes(rawParams);
   const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
-  const missingParameter = Object.entries(params).find(([key, value]) => key !== "simulateOnly" && !value);
+  const missingParameter = Object.entries(params).find(
+    ([key, value]) => !["simulateOnly", "erpOrderObservation"].includes(key) && !value,
+  );
   if (missingParameter)
     throw Object.assign(new Error(`Payload inválido: código ERP ausente em ${missingParameter[0]}.`), {
       status: 422,
@@ -768,6 +776,7 @@ async function createErpOrderFromOpportunityUnsafe(
       branchCode: params.branchCode,
       operationCode: params.operationCode,
     },
+    hasErpOrderObservation: Boolean(params.erpOrderObservation),
   };
   logApiEvent(
     "INFO",
@@ -879,7 +888,7 @@ async function createErpOrderFromOpportunityUnsafe(
     TIPO_MOVIMENTO: "PEDIDO",
     PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
     DATA_CANCELAMENTO: "",
-    OBS_PEDIDO: "",
+    OBS_PEDIDO: params.erpOrderObservation,
     OBSERVACAO_INTERNA: null,
     ITENS: itens.map(({ DESCRICAO_CLASSIFICACAO, ...item }) => item),
   };
