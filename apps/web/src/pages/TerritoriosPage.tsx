@@ -1,5 +1,6 @@
 import { type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, CircleDollarSign, Info, LocateFixed, MapPinned, Minus, Plus, Target, TrendingUp } from "lucide-react";
+import { AlertCircle, CheckCircle2, CircleDollarSign, Info, LocateFixed, MapPinned, Minus, Plus, Settings2, Target, TrendingUp } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
@@ -110,6 +111,17 @@ const DEFAULT_MAP_TRANSFORM: MapTransform = { scale: 1, x: 0, y: 0 };
 const MAP_MIN_ZOOM = 0.85;
 const MAP_MAX_ZOOM = 3.2;
 const MAP_ZOOM_STEP = 0.22;
+const MOBILE_EMPTY_MAP_ZOOM = 1.18;
+
+function getInitialMapTransform(hasTerritory: boolean, isMobile: boolean): MapTransform {
+  if (hasTerritory || !isMobile) return DEFAULT_MAP_TRANSFORM;
+
+  return {
+    scale: MOBILE_EMPTY_MAP_ZOOM,
+    x: (MAP_WIDTH * (1 - MOBILE_EMPTY_MAP_ZOOM)) / 2,
+    y: (MAP_HEIGHT * (1 - MOBILE_EMPTY_MAP_ZOOM)) / 2
+  };
+}
 
 const statusFillColors: Record<TerritoryCityStatus, string> = {
   positive: "#059669",
@@ -447,11 +459,13 @@ export default function TerritoriosPage() {
   const [geoJsonError, setGeoJsonError] = useState<string | null>(null);
   const [selectedCity, setSelectedCity] = useState<TerritoryCity | null>(null);
   const [mapTransform, setMapTransform] = useState<MapTransform>(DEFAULT_MAP_TRANSFORM);
+  const [isMobileMap, setIsMobileMap] = useState(false);
   const dragState = useRef<DragState | null>(null);
   const suppressNextMapClick = useRef(false);
   const pendingMapSelection = useRef<TerritoryCity | null>(null);
 
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
+  const canManageTerritories = user?.role === "diretor" || user?.role === "gerente";
   const visualCities = useMemo(() => [...(coverage?.cities ?? []), ...(coverage?.outOfTerritoryPreview ?? [])], [coverage]);
   const citiesByStateAndName = useMemo(() => {
     const map = new Map<string, TerritoryCity>();
@@ -487,7 +501,21 @@ export default function TerritoriosPage() {
     return stateBoundarySegmentsToPath(buildStateBoundarySegments(territoryGeoJson.features), geoBounds);
   }, [geoBounds, territoryGeoJson]);
   const stateLabels = useMemo(() => territoryGeoJson ? calculateStateLabels(territoryGeoJson.features, geoBounds) : [], [geoBounds, territoryGeoJson]);
+  const selectedSeller = coverage?.seller ?? sellers.find((seller) => seller.id === selectedSellerId);
+  const hasTerritoryCities = (coverage?.cities.length ?? 0) > 0;
+  const hasNoTerritory = Boolean(coverage && !loading && !hasTerritoryCities);
+  const canInspectMunicipalities = !hasNoTerritory;
   const missingCities = Math.max((coverage?.summary.totalCities ?? 0) - (coverage?.summary.positiveCities ?? 0), 0);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(max-width: 640px)");
+    const updateMobileMap = () => setIsMobileMap(mediaQuery.matches);
+
+    updateMobileMap();
+    mediaQuery.addEventListener("change", updateMobileMap);
+
+    return () => mediaQuery.removeEventListener("change", updateMobileMap);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -607,27 +635,31 @@ export default function TerritoriosPage() {
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  useEffect(() => {
+    setMapTransform(getInitialMapTransform(hasTerritoryCities, isMobileMap));
+  }, [hasTerritoryCities, isMobileMap, selectedSellerId, month]);
+
   const resetMapView = () => {
-    setMapTransform(DEFAULT_MAP_TRANSFORM);
+    setMapTransform(getInitialMapTransform(hasTerritoryCities, isMobileMap));
   };
 
   return (
     <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-      <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-br from-brand-700 to-brand-500 p-5 text-white shadow-lg sm:p-6 lg:flex-row lg:items-end lg:justify-between">
+      <header className="flex flex-col gap-3 rounded-3xl bg-gradient-to-br from-brand-700 to-brand-500 px-4 py-4 text-white shadow-lg sm:gap-4 sm:p-6 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+          <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide sm:mb-3 sm:gap-2 sm:px-3 sm:text-xs">
             <MapPinned size={14} />
             Mapa de cobertura comercial
           </div>
-          <h1 className="text-3xl font-bold">Territórios</h1>
-          <p className="mt-2 max-w-2xl text-sm text-brand-50">Acompanhamento de cobertura comercial por cidade.</p>
+          <h1 className="text-2xl font-bold sm:text-3xl">Territórios</h1>
+          <p className="mt-1 max-w-2xl text-xs text-brand-50 sm:mt-2 sm:text-sm">Acompanhamento de cobertura comercial por cidade.</p>
         </div>
 
-        <div className="grid gap-3 rounded-2xl bg-white/10 p-3 backdrop-blur sm:grid-cols-2 lg:min-w-[460px]">
+        <div className="grid gap-2 rounded-2xl bg-white/10 p-2.5 backdrop-blur sm:grid-cols-2 sm:gap-3 sm:p-3 lg:min-w-[460px]">
           <label className="text-xs font-semibold text-brand-50">
             Vendedor
             <select
-              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2.5 py-1 text-sm leading-tight text-slate-900 shadow-sm disabled:bg-slate-100 sm:h-10 sm:px-3 sm:py-1.5"
+              className="mt-1 h-9 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2.5 py-0 text-sm leading-none text-slate-900 shadow-sm disabled:bg-slate-100 sm:h-10 sm:px-3"
               value={selectedSellerId}
               onChange={(event) => setSelectedSellerId(event.target.value)}
               disabled={!canChooseSeller}
@@ -640,7 +672,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Mês/Ano
             <input
-              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2 py-0.5 text-xs leading-tight text-slate-900 shadow-sm [color-scheme:light] sm:h-10 sm:px-3 sm:py-1.5 sm:text-sm"
+              className="mt-1 h-9 min-h-0 w-full appearance-none rounded-xl border border-white/20 bg-white px-2.5 py-0 text-sm leading-none text-slate-900 shadow-sm [color-scheme:light] sm:h-10 sm:px-3"
               type="month"
               value={month}
               onChange={(event) => setMonth(event.target.value)}
@@ -653,6 +685,27 @@ export default function TerritoriosPage() {
         <div className="flex items-center gap-2 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
           <AlertCircle size={18} />
           {error}
+        </div>
+      ) : null}
+
+      {hasNoTerritory ? (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Info className="mt-0.5 shrink-0 text-amber-600" size={20} />
+            <div>
+              <p className="font-bold">Este vendedor ainda não possui território cadastrado.</p>
+              <p className="mt-1 text-amber-800">{selectedSeller?.name ?? "Vendedor selecionado"} não tem cidades vinculadas para o mês exibido; por isso os indicadores permanecem zerados.</p>
+            </div>
+          </div>
+          {canManageTerritories ? (
+            <Link
+              to="/configurações?section=seller-territories"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-600 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white transition hover:bg-amber-700"
+            >
+              <Settings2 size={15} />
+              Configurar territórios
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -706,7 +759,7 @@ export default function TerritoriosPage() {
 
           <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-6">
             <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
-              <div className="absolute left-4 top-4 z-10 flex w-fit max-w-max overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
+              <div className="absolute left-4 top-4 z-10 inline-flex w-max max-w-max overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur" style={{ width: "max-content" }}>
                 <button
                   type="button"
                   className="inline-flex h-10 w-10 items-center justify-center border-r border-slate-200 text-slate-700 transition hover:bg-slate-50"
@@ -742,7 +795,7 @@ export default function TerritoriosPage() {
                   </div>
                 ) : territoryGeoJson ? (
                   <svg
-                    className="h-full min-h-[420px] w-full max-w-[1280px] cursor-grab touch-none select-none sm:min-h-[560px] lg:min-h-[700px]"
+                    className={`h-full min-h-[420px] w-full max-w-[1280px] touch-none select-none sm:min-h-[560px] lg:min-h-[700px] ${canInspectMunicipalities ? "cursor-grab" : "cursor-default"}`}
                     role="img"
                     aria-label="Mapa de cobertura comercial dos municípios do Paraná, Santa Catarina e Mato Grosso do Sul"
                     viewBox={`0 0 ${MAP_WIDTH} ${MAP_HEIGHT}`}
@@ -785,24 +838,24 @@ export default function TerritoriosPage() {
                             vectorEffect="non-scaling-stroke"
                             opacity={isTerritoryCity ? 0.98 : 0.58}
                             filter={isSelected ? "url(#selectedGlow)" : isTerritoryCity ? "url(#territoryGlow)" : undefined}
-                            className="cursor-pointer transition-[opacity,stroke-width,filter] duration-150 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            className={`${canInspectMunicipalities ? "cursor-pointer hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500" : "cursor-default"} transition-[opacity,stroke-width,filter] duration-150`}
                             data-municipality="true"
                             pointerEvents="auto"
-                            tabIndex={0}
-                            role="button"
+                            tabIndex={canInspectMunicipalities ? 0 : -1}
+                            role={canInspectMunicipalities ? "button" : "img"}
                             aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
                             onPointerDown={() => {
-                              pendingMapSelection.current = city;
+                              pendingMapSelection.current = canInspectMunicipalities ? city : null;
                             }}
                             onClick={() => {
                               if (suppressNextMapClick.current) {
                                 suppressNextMapClick.current = false;
                                 return;
                               }
-                              setSelectedCity(city);
+                              if (canInspectMunicipalities) setSelectedCity(city);
                             }}
                             onKeyDown={(event) => {
-                              if (event.key === "Enter" || event.key === " ") {
+                              if (canInspectMunicipalities && (event.key === "Enter" || event.key === " ")) {
                                 event.preventDefault();
                                 setSelectedCity(city);
                               }
@@ -844,6 +897,26 @@ export default function TerritoriosPage() {
                   <div className="flex min-h-[420px] items-center justify-center p-6 text-sm font-semibold text-slate-500 sm:min-h-[560px] lg:min-h-[700px]">Carregando mapa de PR, SC e MS...</div>
                 )}
               </div>
+              {hasNoTerritory ? (
+                <div className="pointer-events-auto absolute inset-x-4 bottom-4 z-10 rounded-2xl border border-amber-200 bg-white/95 p-4 text-sm text-slate-700 shadow-xl backdrop-blur sm:inset-x-auto sm:left-4 sm:max-w-md">
+                  <div className="flex items-start gap-3">
+                    <Info className="mt-0.5 shrink-0 text-amber-600" size={20} />
+                    <div>
+                      <p className="font-bold text-slate-900">Este vendedor ainda não possui território cadastrado.</p>
+                      <p className="mt-1">O mapa mostra PR, SC e MS apenas como referência, sem destacar cidades.</p>
+                      {canManageTerritories ? (
+                        <Link
+                          to="/configurações?section=seller-territories"
+                          className="mt-3 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold uppercase tracking-wide text-white transition hover:bg-brand-700"
+                        >
+                          <Settings2 size={15} />
+                          Configurações &gt; Territórios Comerciais
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <aside className="hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:block">
