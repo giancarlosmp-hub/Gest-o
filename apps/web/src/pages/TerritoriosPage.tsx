@@ -449,6 +449,7 @@ export default function TerritoriosPage() {
   const [mapTransform, setMapTransform] = useState<MapTransform>(DEFAULT_MAP_TRANSFORM);
   const dragState = useRef<DragState | null>(null);
   const suppressNextMapClick = useRef(false);
+  const pendingMapSelection = useRef<TerritoryCity | null>(null);
 
   const canChooseSeller = user?.role === "diretor" || user?.role === "gerente";
   const visualCities = useMemo(() => [...(coverage?.cities ?? []), ...(coverage?.outOfTerritoryPreview ?? [])], [coverage]);
@@ -562,6 +563,10 @@ export default function TerritoriosPage() {
   }, [selectedSellerId, month]);
 
   const handleMapPointerDown = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!(event.target instanceof SVGPathElement) || event.target.dataset.municipality !== "true") {
+      pendingMapSelection.current = null;
+    }
+
     dragState.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -588,7 +593,16 @@ export default function TerritoriosPage() {
   const handleMapPointerEnd = (event: ReactPointerEvent<SVGSVGElement>) => {
     const currentDrag = dragState.current;
     if (!currentDrag || currentDrag.pointerId !== event.pointerId) return;
-    if (currentDrag.moved) suppressNextMapClick.current = true;
+
+    const selectedMunicipality = pendingMapSelection.current;
+    pendingMapSelection.current = null;
+
+    if (currentDrag.moved) {
+      suppressNextMapClick.current = true;
+    } else if (selectedMunicipality) {
+      setSelectedCity(selectedMunicipality);
+    }
+
     dragState.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
   };
@@ -626,7 +640,7 @@ export default function TerritoriosPage() {
           <label className="text-xs font-semibold text-brand-50">
             Mês/Ano
             <input
-              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2.5 py-1 text-sm leading-tight text-slate-900 shadow-sm [color-scheme:light] sm:h-10 sm:px-3 sm:py-1.5"
+              className="mt-1 h-8 min-h-0 w-full rounded-xl border border-white/20 bg-white px-2 py-0.5 text-xs leading-tight text-slate-900 shadow-sm [color-scheme:light] sm:h-10 sm:px-3 sm:py-1.5 sm:text-sm"
               type="month"
               value={month}
               onChange={(event) => setMonth(event.target.value)}
@@ -692,7 +706,7 @@ export default function TerritoriosPage() {
 
           <div className="grid gap-4 p-3 sm:p-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:p-6">
             <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/30 shadow-[0_24px_70px_rgba(15,23,42,0.12)] ring-1 ring-white">
-              <div className="absolute left-4 top-4 z-10 flex overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
+              <div className="absolute left-4 top-4 z-10 flex w-fit max-w-max overflow-hidden rounded-2xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur">
                 <button
                   type="button"
                   className="inline-flex h-10 w-10 items-center justify-center border-r border-slate-200 text-slate-700 transition hover:bg-slate-50"
@@ -772,9 +786,14 @@ export default function TerritoriosPage() {
                             opacity={isTerritoryCity ? 0.98 : 0.58}
                             filter={isSelected ? "url(#selectedGlow)" : isTerritoryCity ? "url(#territoryGlow)" : undefined}
                             className="cursor-pointer transition-[opacity,stroke-width,filter] duration-150 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            data-municipality="true"
+                            pointerEvents="auto"
                             tabIndex={0}
                             role="button"
                             aria-label={`${city.city}, ${city.state}: ${city.statusLabel}`}
+                            onPointerDown={() => {
+                              pendingMapSelection.current = city;
+                            }}
                             onClick={() => {
                               if (suppressNextMapClick.current) {
                                 suppressNextMapClick.current = false;
