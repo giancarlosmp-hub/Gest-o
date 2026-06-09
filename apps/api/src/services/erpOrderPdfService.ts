@@ -1632,10 +1632,7 @@ export const buildErpOrderPdf = (
   );
   y -= 22;
 
-  const notes = cleanText(
-    payload.OBS_PEDIDO || order.opportunity.notes,
-    "Sem observações.",
-  );
+  const notes = cleanText(payload.OBS_PEDIDO, "Sem observações.");
   const noteLines = getWrappedLines(notes, PAGE_WIDTH - MARGIN * 2 - 20, 7.4);
   const notesHeight = Math.max(28, 20 + noteLines.length * 8.2);
   y = ensureSpace(pdf, y, notesHeight + 12, pageNumber, orderNumber, company);
