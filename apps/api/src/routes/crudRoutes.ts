@@ -8733,6 +8733,9 @@ const TERRITORY_GEOJSON_STATES: Record<TerritoryAllowedState, string> = {
 const FALLBACK_OFFICIAL_TERRITORY_CITIES: OfficialTerritoryCity[] = [
   { city: "Cascavel", state: "PR", ibgeCode: "4104808" },
   { city: "Toledo", state: "PR", ibgeCode: "4127700" },
+  { city: "Santa Helena", state: "PR", ibgeCode: "4123501" },
+  { city: "Mundo Novo", state: "MS", ibgeCode: "5005681" },
+  { city: "Eldorado", state: "MS", ibgeCode: "5003751" },
   { city: "Ponta Porã", state: "MS", ibgeCode: "5006606" },
   { city: "Joinville", state: "SC", ibgeCode: "4209102" },
   { city: "Florianópolis", state: "SC", ibgeCode: "4205407" },
@@ -8790,11 +8793,17 @@ const listOfficialTerritoryCities = async (state?: string) => {
   return cityGroups.flat().sort((a, b) => a.state.localeCompare(b.state) || a.city.localeCompare(b.city, "pt-BR"));
 };
 
-const findOfficialTerritoryCity = async (state: string, city: string) => {
+const findOfficialTerritoryCity = async (state: string, city: string, ibgeCode?: string | null) => {
   const normalizedState = normalizeState(state);
   if (!isTerritoryAllowedState(normalizedState)) return null;
-  const normalizedCityKey = normalizeTerritoryCityKey(city);
   const officialCities = await fetchOfficialTerritoryCitiesByState(normalizedState);
+  const normalizedIbgeCode = ibgeCode?.trim();
+  if (normalizedIbgeCode) {
+    const officialByIbge = officialCities.find((officialCity) => officialCity.ibgeCode === normalizedIbgeCode);
+    if (officialByIbge) return officialByIbge;
+  }
+
+  const normalizedCityKey = normalizeTerritoryCityKey(city);
   return officialCities.find((officialCity) => normalizeTerritoryCityKey(officialCity.city) === normalizedCityKey) ?? null;
 };
 
@@ -8981,7 +8990,7 @@ const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: 
   const existingCities = await prisma.sellerTerritoryCity.findMany({
     select: { sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true } } }
   });
-  const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityNormalizedKey(city.state, city.city), city]));
+  const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityStableKey(city), city]));
   const seenInFile = new Set<string>();
   const items: TerritoryKmlImportItem[] = [];
 
@@ -8992,7 +9001,7 @@ const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: 
       continue;
     }
 
-    const key = getTerritoryCityNormalizedKey(officialCity.state, officialCity.city);
+    const key = getTerritoryCityStableKey(officialCity);
     if (seenInFile.has(key)) {
       items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "duplicate_file", message: "Cidade duplicada no arquivo de importação." });
       continue;
@@ -9037,6 +9046,11 @@ const toTerritoryCityResponse = (city: { id: string; sellerId: string; city: str
 
 const normalizeTerritoryCityName = (city: string) => city.replace(/\s+/g, " ").trim();
 const getTerritoryCityNormalizedKey = (state: string, city: string) => `${normalizeState(state)}::${normalizeTerritoryCityKey(city)}`;
+const getTerritoryCityStableKey = (city: { state: string; city: string; ibgeCode?: string | null }) => {
+  const normalizedState = normalizeState(city.state);
+  const normalizedIbgeCode = city.ibgeCode?.trim();
+  return normalizedIbgeCode ? `${normalizedState}::IBGE::${normalizedIbgeCode}` : getTerritoryCityNormalizedKey(city.state, city.city);
+};
 
 const parseBulkTerritoryCities = (text: string) => text
   .split(/\r?\n|;/)
@@ -9104,13 +9118,13 @@ const validateOfficialTerritoryCities = async (cities: Array<{ city: string; sta
       continue;
     }
 
-    const officialCity = await findOfficialTerritoryCity(normalizedState, inputCity.city);
+    const officialCity = await findOfficialTerritoryCity(normalizedState, inputCity.city, inputCity.ibgeCode);
     if (!officialCity) {
       errors.push(`Cidade não encontrada: ${normalizeTerritoryCityName(inputCity.city)}/${normalizedState}`);
       continue;
     }
 
-    const key = getTerritoryCityNormalizedKey(officialCity.state, officialCity.city);
+    const key = getTerritoryCityStableKey(officialCity);
     if (seen.has(key)) {
       errors.push("Esta cidade já está vinculada a este vendedor.");
       continue;
@@ -9127,27 +9141,37 @@ const validateOfficialTerritoryCities = async (cities: Array<{ city: string; sta
   return { cities: officialCities, errors };
 };
 
-const findExistingTerritoryCityByNormalizedKey = async (sellerId: string, state: string, city: string) => {
+const findExistingTerritoryCityByNormalizedKey = async (sellerId: string, state: string, city: string, ibgeCode?: string | null) => {
   const normalizedKey = getTerritoryCityNormalizedKey(state, city);
+  const normalizedIbgeCode = ibgeCode?.trim();
   const sameStateCities = await prisma.sellerTerritoryCity.findMany({
     where: { sellerId, state: normalizeState(state) },
     select: { id: true, sellerId: true, city: true, state: true, ibgeCode: true }
   });
+  if (normalizedIbgeCode) {
+    const existingByIbge = sameStateCities.find((item) => item.ibgeCode === normalizedIbgeCode);
+    if (existingByIbge) return existingByIbge;
+  }
   return sameStateCities.find((item) => getTerritoryCityNormalizedKey(item.state, item.city) === normalizedKey) ?? null;
 };
 
-const findTerritoryCityLinkedToOtherSeller = async (sellerId: string, state: string, city: string) => {
+const findTerritoryCityLinkedToOtherSeller = async (sellerId: string, state: string, city: string, ibgeCode?: string | null) => {
   const normalizedKey = getTerritoryCityNormalizedKey(state, city);
+  const normalizedIbgeCode = ibgeCode?.trim();
   const sameStateCities = await prisma.sellerTerritoryCity.findMany({
     where: { state: normalizeState(state), sellerId: { not: sellerId } },
-    select: { id: true, city: true, state: true, seller: { select: { id: true, name: true } } }
+    select: { id: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true } } }
   });
+  if (normalizedIbgeCode) {
+    const conflictByIbge = sameStateCities.find((item) => item.ibgeCode === normalizedIbgeCode);
+    if (conflictByIbge) return conflictByIbge;
+  }
   return sameStateCities.find((item) => getTerritoryCityNormalizedKey(item.state, item.city) === normalizedKey) ?? null;
 };
 
 const findTerritoryCityConflict = async (sellerId: string, cities: OfficialTerritoryCity[]) => {
   for (const city of cities) {
-    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city);
+    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city, city.ibgeCode);
     if (conflict) return conflict;
   }
   return null;
@@ -9241,14 +9265,14 @@ router.post("/territories/config/import-kml-confirm", authorize("diretor", "gere
   const officialValidation = await validateOfficialTerritoryCities(req.body.cities);
   if (officialValidation.errors.length > 0) return res.status(400).json({ message: officialValidation.errors[0], errors: officialValidation.errors });
 
-  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true } });
-  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityNormalizedKey(city.state, city.city)));
+  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true, ibgeCode: true } });
+  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityStableKey(city)));
   const citiesToCreate: OfficialTerritoryCity[] = [];
 
   for (const city of officialValidation.cities) {
-    const key = getTerritoryCityNormalizedKey(city.state, city.city);
+    const key = getTerritoryCityStableKey(city);
     if (existingKeys.has(key)) continue;
-    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city);
+    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city, city.ibgeCode);
     if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
     existingKeys.add(key);
     citiesToCreate.push(city);
@@ -9296,16 +9320,16 @@ router.post("/territories/config/cities", authorize("diretor", "gerente"), valid
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
 
-  const officialValidation = await validateOfficialTerritoryCities([{ city, state }]);
+  const officialValidation = await validateOfficialTerritoryCities([{ city, state, ibgeCode: req.body.ibgeCode }]);
   if (officialValidation.errors.length > 0 || officialValidation.cities.length === 0) {
     return res.status(400).json({ message: officialValidation.errors[0] ?? "Cidade oficial inválida." });
   }
 
   const [officialCity] = officialValidation.cities;
-  const existing = await findExistingTerritoryCityByNormalizedKey(sellerId, officialCity.state, officialCity.city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(sellerId, officialCity.state, officialCity.city, officialCity.ibgeCode);
   if (existing) return res.status(409).json({ message: "Esta cidade já está vinculada a este vendedor." });
 
-  const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, officialCity.state, officialCity.city);
+  const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, officialCity.state, officialCity.city, officialCity.ibgeCode);
   if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
 
   const saved = await prisma.sellerTerritoryCity.create({ data: { sellerId, ...officialCity } });
@@ -9328,18 +9352,18 @@ router.post("/territories/config/cities/bulk", authorize("diretor", "gerente"), 
   const officialValidation = await validateOfficialTerritoryCities(validShapeCities);
   const errors = [...schemaErrors, ...officialValidation.errors];
 
-  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true } });
-  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityNormalizedKey(city.state, city.city)));
+  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true, ibgeCode: true } });
+  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityStableKey(city)));
   const citiesToCreate: OfficialTerritoryCity[] = [];
 
   for (const city of officialValidation.cities) {
-    const key = getTerritoryCityNormalizedKey(city.state, city.city);
+    const key = getTerritoryCityStableKey(city);
     if (existingKeys.has(key)) {
       errors.push("Esta cidade já está vinculada a este vendedor.");
       continue;
     }
 
-    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city);
+    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city, city.ibgeCode);
     if (conflict) {
       errors.push(getTerritoryCityConflictMessage(conflict.seller.name));
       continue;
@@ -9399,16 +9423,16 @@ router.put("/territories/config/cities/:id", authorize("diretor", "gerente"), va
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
 
   const { city, state } = req.body;
-  const officialValidation = await validateOfficialTerritoryCities([{ city, state }]);
+  const officialValidation = await validateOfficialTerritoryCities([{ city, state, ibgeCode: req.body.ibgeCode }]);
   if (officialValidation.errors.length > 0 || officialValidation.cities.length === 0) {
     return res.status(400).json({ message: officialValidation.errors[0] ?? "Cidade oficial inválida." });
   }
 
   const [officialCity] = officialValidation.cities;
-  const existing = await findExistingTerritoryCityByNormalizedKey(current.sellerId, officialCity.state, officialCity.city);
+  const existing = await findExistingTerritoryCityByNormalizedKey(current.sellerId, officialCity.state, officialCity.city, officialCity.ibgeCode);
   if (existing && existing.id !== current.id) return res.status(409).json({ message: "Esta cidade já está vinculada a este vendedor." });
 
-  const conflict = await findTerritoryCityLinkedToOtherSeller(current.sellerId, officialCity.state, officialCity.city);
+  const conflict = await findTerritoryCityLinkedToOtherSeller(current.sellerId, officialCity.state, officialCity.city, officialCity.ibgeCode);
   if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
 
   const updated = await prisma.sellerTerritoryCity.update({
