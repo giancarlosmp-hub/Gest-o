@@ -1651,12 +1651,14 @@ export async function syncPartnersByUser(
   return runSync(
     "partners",
     async (correlationId) => {
+      const partnersRequestStartedAt = Date.now();
       const response =
         await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(
           "/partners",
           credentials,
           correlationId,
         );
+      const partnersRequestDurationMs = Date.now() - partnersRequestStartedAt;
       const rows = toArray(response);
       await cachePartnerRows(rows);
       const candidateCounts = getCandidateCounts(response);
@@ -1691,10 +1693,13 @@ export async function syncPartnersByUser(
           sampleFirstItem: sanitizePayloadForLog(rows[0] ?? null),
           sellerId: seller.id,
           sellerName: seller.name,
+          sellerErpCode: seller.erpCode,
           authMode: "seller",
+          requestDurationMs: partnersRequestDurationMs,
           receivedRaw: rows.length,
           normalizedCount: rows.length,
           discardedAfterNormalization: 0,
+          paginationDetected: 0,
         },
       );
       if (!rows.length) {
@@ -1713,6 +1718,9 @@ export async function syncPartnersByUser(
             ...diagnosticsBase,
             validAfterNormalization: 0,
             discardedAfterNormalization: 0,
+            requestDurationMs: partnersRequestDurationMs,
+            retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
+            paginationDetected: 0,
           },
         };
       }
@@ -1734,12 +1742,16 @@ export async function syncPartnersByUser(
           sellerName: seller.name,
           syncedCount: result.syncedCount,
           bodyType: describeBodyType(response),
+          requestDurationMs: partnersRequestDurationMs,
           sampleFields: firstRowSamples,
           diagnostics: {
             ...diagnosticsBase,
             ...result.diagnostics,
             validAfterNormalization: result.syncedCount,
             discardedAfterNormalization,
+            requestDurationMs: partnersRequestDurationMs,
+            retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
+            paginationDetected: 0,
           },
           authMode: "seller",
         },
@@ -1752,6 +1764,9 @@ export async function syncPartnersByUser(
           validAfterNormalization: result.syncedCount,
           discardedAfterNormalization,
           warnings: result.warnings.length,
+          requestDurationMs: partnersRequestDurationMs,
+          retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
+          paginationDetected: 0,
         },
       };
     },
@@ -2224,6 +2239,9 @@ export async function getUltraFv3SyncStatus() {
           | "seller"
           | "seller_reference"
           | undefined,
+        diagnostics: run.metrics && typeof run.metrics === "object" && !Array.isArray(run.metrics)
+          ? run.metrics as Record<string, number>
+          : undefined,
       };
       return acc;
     },
