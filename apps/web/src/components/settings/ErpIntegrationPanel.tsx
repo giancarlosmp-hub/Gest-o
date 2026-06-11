@@ -42,7 +42,8 @@ type IntegrationDiagnostics = {
   tokenExpired?: boolean;
   environment?: {
     externalEnvFile: { path: string; exists: boolean };
-    receivedEnv: Record<"ULTRAFV3_BASE_URL" | "ERP_CREDENTIAL_ENCRYPTION_KEY" | "JWT_SECRET" | "DATABASE_URL", boolean>;
+    receivedEnv: Record<"ULTRAFV3_BASE_URL" | "ERP_CREDENTIAL_ENCRYPTION_KEY" | "JWT_SECRET" | "JWT_ACCESS_SECRET" | "ACCESS_TOKEN_SECRET" | "JWT_REFRESH_SECRET" | "REFRESH_TOKEN_SECRET" | "DATABASE_URL", boolean>;
+    jwtSecretConfigured?: boolean;
     missingDiagnosticConfig: string[];
   };
   guidance: string;
@@ -111,6 +112,23 @@ type SyncStatusResponse = {
   productCount: number;
   clientCount: number;
   history?: SyncHistoryItem[];
+  automaticSync?: {
+    enabled: boolean;
+    active: boolean;
+    timezone: string;
+    windowStartHour: number;
+    windowEndHour: number;
+    intervalMs: number;
+    isRunning: boolean;
+    lastRunAt: string | null;
+    lastSuccessAt: string | null;
+    lastFinishedAt: string | null;
+    nextRunAt: string | null;
+    lastError: string | null;
+    currentRunId: string | null;
+    lastCorrelationId: string | null;
+    lastSkippedReason: string | null;
+  };
 };
 
 type SyncCardConfig = {
@@ -357,7 +375,7 @@ export default function ErpIntegrationPanel() {
     { label: "Arquivo externo de ambiente", present: integration?.environment?.externalEnvFile.exists ?? false, detail: integration?.environment?.externalEnvFile.path ?? "/root/demetra-env/.env" },
     { label: "ULTRAFV3_BASE_URL", present: integration?.environment?.receivedEnv.ULTRAFV3_BASE_URL ?? false },
     { label: "ERP_CREDENTIAL_ENCRYPTION_KEY", present: integration?.environment?.receivedEnv.ERP_CREDENTIAL_ENCRYPTION_KEY ?? false },
-    { label: "JWT_SECRET", present: integration?.environment?.receivedEnv.JWT_SECRET ?? false },
+    { label: "Segredo JWT", present: integration?.environment?.jwtSecretConfigured ?? integration?.environment?.receivedEnv.JWT_SECRET ?? false, detail: "JWT_SECRET ou ACCESS/REFRESH token secrets" },
     { label: "DATABASE_URL", present: integration?.environment?.receivedEnv.DATABASE_URL ?? false },
   ];
   const hasPreventiveConfig = orderBlockingMissingConfig.length === 0;
@@ -418,6 +436,27 @@ export default function ErpIntegrationPanel() {
             <p className={missingConfig.length ? "mt-1 text-red-700" : "mt-1 text-slate-600"}>
               {missingConfig.length ? missingConfig.join(", ") : integration?.guidance || "Configuração mínima presente."}
             </p>
+          </div>
+        </div>
+
+
+        <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Sincronização automática</p>
+            <p className={data?.automaticSync?.active ? "mt-1 text-emerald-700" : "mt-1 text-slate-600"}>{data?.automaticSync?.active ? "Ativa" : "Inativa"}</p>
+            <p className="mt-1 text-slate-500">07:00–19:00 · America/Sao_Paulo</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Última sincronização automática</p>
+            <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.lastRunAt || undefined)}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Próxima execução prevista</p>
+            <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.nextRunAt || undefined)}</p>
+          </div>
+          <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
+            <p className="font-semibold text-slate-700">Último erro automático</p>
+            <p className={data?.automaticSync?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>{data?.automaticSync?.lastError || "Nenhum erro registrado."}</p>
           </div>
         </div>
 
@@ -589,7 +628,7 @@ export default function ErpIntegrationPanel() {
                   <td className="py-2 pr-3 font-semibold text-slate-800">{item.scope}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.sellerName || "Global"}</td>
                   <td className="py-2 pr-3"><span className="rounded-full bg-slate-50 px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200">{authModeLabel(item.authMode)}</span></td>
-                  <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Agendado" : "Manual"}</td>
+                  <td className="py-2 pr-3 text-slate-600">{item.trigger === "scheduler" ? "Automática" : "Manual"}</td>
                   <td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td>
                   <td className="py-2 pr-3 text-slate-600">{formatDate(item.finishedAt || item.startedAt)}</td>
                   <td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td>

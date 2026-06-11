@@ -346,6 +346,7 @@ export default function OpportunitiesPage() {
   const [selectedProduct, setSelectedProduct] = useState<OpportunityProduct | null>(null);
   const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
   const [isSyncingProducts, setIsSyncingProducts] = useState(false);
+  const [isRefreshingClients, setIsRefreshingClients] = useState(false);
   const [hasAttemptedProductSearch, setHasAttemptedProductSearch] = useState(false);
   const [loadingItems, setLoadingItems] = useState(false);
   const [search, setSearch] = useState("");
@@ -1148,6 +1149,22 @@ export default function OpportunitiesPage() {
   };
 
 
+
+  const refreshOpportunityClientsFromErp = async () => {
+    setIsRefreshingClients(true);
+    try {
+      const sellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
+      const syncResponse = await api.post("/erp/ultrafv3/sync/partners/opportunity-clients", sellerId ? { sellerId } : {});
+      const clientsResponse = await api.get("/clients");
+      setClients(clientsResponse.data || []);
+      toast.success(`Clientes atualizados com sucesso (${syncResponse.data?.syncedCount ?? 0} sincronizado(s)).`);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível atualizar clientes do UltraFV3."));
+    } finally {
+      setIsRefreshingClients(false);
+    }
+  };
+
   const itemDraftTotals = useMemo(() => calculateItemTotals(itemDraft), [itemDraft]);
   const savedOpportunityId = editing;
   const isOpportunitySaved = Boolean(savedOpportunityId);
@@ -1638,6 +1655,8 @@ export default function OpportunitiesPage() {
         priceTableOptions={priceTableOptions}
         priceTableWarning={priceTableWarning}
         shouldConfirmClose={isNewOpportunityDirty}
+        onRefreshClients={opportunityModalMode === "create" ? refreshOpportunityClientsFromErp : undefined}
+        isRefreshingClients={isRefreshingClients}
         productsSection={
           <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">

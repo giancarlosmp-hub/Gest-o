@@ -71,6 +71,7 @@ import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../uti
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
+import { getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -8154,6 +8155,31 @@ router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) 
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
+router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
+  try {
+    const requestedSellerId = typeof req.body?.sellerId === "string" ? req.body.sellerId.trim() : "";
+    const shouldUseSellerCredential = req.user!.role === "vendedor" || Boolean(requestedSellerId);
+    const sellerId = req.user!.role === "vendedor" ? req.user!.id : requestedSellerId;
+    const result = shouldUseSellerCredential
+      ? await syncPartnersByUser(sellerId)
+      : await syncPartners();
+    return res.status(200).json({
+      scope: "partners",
+      authMode: shouldUseSellerCredential ? "seller" : "global",
+      sellerId: shouldUseSellerCredential ? sellerId : null,
+      ...result,
+    });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 sync route] opportunity clients sync failed", { userId: req.user!.id, role: req.user!.role, error: details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
+      scope: "partners",
+      message: "Falha ao atualizar clientes do UltraFV3.",
+      details
+    });
+  }
+});
+
 router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", "gerente"), async (req, res) => {
   try {
     const result = await syncPartnersByUser(req.params.userId);
@@ -8207,7 +8233,7 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
     getErpOrderOperationalSummary()
   ]);
   const history = await getUltraFv3SyncHistory(10);
-  return res.status(200).json({ status, integration, productCount, clientCount, operational, history });
+  return res.status(200).json({ status, integration, productCount, clientCount, operational, history, automaticSync: getErpAutomaticSyncState() });
 });
 
 router.get("/erp/ultrafv3/sync/history", authorize("diretor", "gerente"), async (req, res) => {
@@ -9198,7 +9224,7 @@ router.get("/territories/sellers", async (req, res) => {
   return res.json(users);
 });
 
-router.get("/territories/config/sellers", async (req, res) => {
+router.get("/territories/config/sellers", authorize("diretor", "gerente"), async (req, res) => {
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
 
@@ -9213,7 +9239,7 @@ router.get("/territories/config/sellers", async (req, res) => {
   })));
 });
 
-router.get("/territories/config/official-cities", async (req, res) => {
+router.get("/territories/config/official-cities", authorize("diretor", "gerente"), async (req, res) => {
   const state = typeof req.query.uf === "string" ? req.query.uf : undefined;
   const officialCities = await listOfficialTerritoryCities(state);
   return res.json(officialCities);
@@ -9300,7 +9326,7 @@ router.post("/territories/config/import-kml-confirm", authorize("diretor", "gere
   return res.status(201).json({ created: citiesToCreate.length, cities: savedCities.map(toTerritoryCityResponse) });
 });
 
-router.get("/territories/config/cities", async (req, res) => {
+router.get("/territories/config/cities", authorize("diretor", "gerente"), async (req, res) => {
   const requestedSellerId = typeof req.query.sellerId === "string" ? req.query.sellerId : undefined;
   const sellerId = req.user?.role === "vendedor" ? req.user.id : requestedSellerId;
   const search = typeof req.query.q === "string" ? req.query.q : "";

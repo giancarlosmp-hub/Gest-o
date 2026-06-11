@@ -954,11 +954,35 @@ async function createErpOrderFromOpportunityUnsafe(
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
+  const operatorResolutionDiagnostics = {
+    sellerErpCode,
+    crmOperator: operatorCode || null,
+    salesmenOperator: sequenceResolution.operatorCode || null,
+    resolvedOperator: effectiveOperatorCode || null,
+    numPedido: numPedido || null,
+    authContext: sequenceResolution.diagnostics.authContext,
+    reason: sequenceResolution.operatorCode
+      ? "salesmen_operator"
+      : operatorCode
+        ? "crm_operator_fallback"
+        : "missing_operator",
+  };
+  logApiEvent("INFO", "[erp order] resolved seller ERP operator", operatorResolutionDiagnostics);
   if (!numPedido || !effectiveOperatorCode || !sequenceResolution.diagnostics.matchedSalesmanFound || !Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode)) {
-    const diagnostics = sequenceResolution.diagnostics;
+    const diagnostics = { ...sequenceResolution.diagnostics, operatorResolution: operatorResolutionDiagnostics };
     const message = !diagnostics.matchedSalesmanFound
       ? `Vendedor ERP ${sellerErpCode} não retornou no /salesmen para a credencial utilizada.`
-      : `Vendedor ERP ${sellerErpCode} encontrado, mas sem NUM_PEDIDO/OPERADOR configurado no UltraFV3.`;
+      : !effectiveOperatorCode
+        ? `Vendedor ${sellerErpCode} sem operador ERP configurado no CRM e no UltraFV3.`
+        : `Vendedor ERP ${sellerErpCode} encontrado, mas sem NUM_PEDIDO configurado no UltraFV3.`;
+    logApiEvent("WARN", "[erp order] seller ERP operator/sequence resolution blocked order", {
+      ...operatorResolutionDiagnostics,
+      reason: !diagnostics.matchedSalesmanFound
+        ? "salesman_not_found"
+        : !effectiveOperatorCode
+          ? "missing_operator"
+          : "missing_num_pedido",
+    });
     throw Object.assign(
       new Error(message),
       { status: 400, diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
