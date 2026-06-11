@@ -6859,6 +6859,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
       endpoint: failureEndpoint || "/orders",
       error: message,
       pedidoIdImportacao: error?.pedidoIdImportacao,
+      diagnostics: error?.diagnostics || null,
     });
 
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order route] order submission rejected", {
@@ -6902,6 +6903,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
           ...(Array.isArray(error?.errors) ? { errors: error.errors } : {}),
           ...(error?.payload ? { payload: sanitizeErpOrderPayload(error.payload) } : {}),
           ...(error?.ultraFv3Failure ? { ultraFv3: sanitizeErpOrderPayload(error.ultraFv3Failure) } : {}),
+          ...(error?.diagnostics ? { salesmenDiagnostics: sanitizeErpOrderPayload(error.diagnostics) } : {}),
           ...(error?.parameterDiagnostics || parameterDiagnostics),
         },
       });

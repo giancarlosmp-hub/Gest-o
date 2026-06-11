@@ -70,6 +70,7 @@ type SyncHistoryItem = {
   sellerName?: string | null;
   authMode?: "global" | "seller" | "seller_reference" | string;
   errorMessage?: string | null;
+  metrics?: Record<string, number> | null;
 };
 
 type AuthModeDiagnostics = {
@@ -325,7 +326,7 @@ export default function ErpIntegrationPanel() {
 
 
   const sellerPartnerRuns = useMemo(() => {
-    const grouped = new Map<string, { sellerId: string; sellerName: string; status: string; syncedCount: number; error?: string }>();
+    const grouped = new Map<string, { sellerId: string; sellerName: string; status: string; syncedCount: number; durationMs?: number | null; requestDurationMs?: number | null; error?: string }>();
     for (const item of data?.history ?? []) {
       if (item.scope !== "partners" || item.authMode !== "seller" || !item.sellerId) continue;
       if (grouped.has(item.sellerId)) continue;
@@ -334,6 +335,8 @@ export default function ErpIntegrationPanel() {
         sellerName: item.sellerName || "Sem nome",
         status: item.status,
         syncedCount: item.syncedCount,
+        durationMs: item.durationMs,
+        requestDurationMs: item.metrics?.requestDurationMs ?? null,
         error: item.errorMessage || undefined,
       });
     }
@@ -527,12 +530,12 @@ export default function ErpIntegrationPanel() {
         <p className="mt-1 text-xs text-slate-600">Última execução individual por vendedor (fluxo correto para parceiros/clientes).</p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-left text-xs">
-            <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Importados</th><th className="py-2 pr-3">Erro</th></tr></thead>
+            <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Importados</th><th className="py-2 pr-3">Duração</th><th className="py-2 pr-3">Chamada /partners</th><th className="py-2 pr-3">Erro</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {sellerPartnerRuns.map((item) => (
-                <tr key={item.sellerId}><td className="py-2 pr-3 font-medium text-slate-800">{item.sellerName}</td><td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td><td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td><td className="max-w-md truncate py-2 pr-3 text-red-700" title={item.error}>{item.error || "—"}</td></tr>
+                <tr key={item.sellerId}><td className="py-2 pr-3 font-medium text-slate-800">{item.sellerName}</td><td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td><td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td><td className="py-2 pr-3 text-slate-600">{item.durationMs ?? 0}ms</td><td className="py-2 pr-3 text-slate-600">{item.requestDurationMs ?? "—"}{item.requestDurationMs != null ? "ms" : ""}</td><td className="max-w-md truncate py-2 pr-3 text-red-700" title={item.error}>{item.error || "—"}</td></tr>
               ))}
-              {!sellerPartnerRuns.length ? <tr><td colSpan={4} className="py-4 text-center text-slate-500">Nenhuma execução por vendedor registrada.</td></tr> : null}
+              {!sellerPartnerRuns.length ? <tr><td colSpan={6} className="py-4 text-center text-slate-500">Nenhuma execução por vendedor registrada.</td></tr> : null}
             </tbody>
           </table>
         </div>

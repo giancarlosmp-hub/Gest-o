@@ -162,6 +162,23 @@ type ErpOrderFeedback = {
   erpOrderNumber?: string | null;
   correlationId?: string;
   message?: string;
+  guidance?: string[];
+};
+
+const ERP_SALESMAN_RESOLUTION_GUIDANCE = [
+  "Sincronize Vendedores no painel de Integração ERP.",
+  "Revise o código ERP/CODVENDEDOR do vendedor no cadastro do usuário CRM.",
+  "Revise o Login FV3 e a Senha FV3 do vendedor no cadastro do usuário CRM.",
+  "Revise no UltraFV3 se o vendedor possui NUM_PEDIDO e OPERADOR configurados.",
+];
+
+const getErpOrderFailureGuidance = (payload: unknown, message: string) => {
+  const details = payload && typeof payload === "object" ? payload as Record<string, unknown> : {};
+  const etapa = String(details.etapa || "");
+  const hasSalesmanDiagnostics = Boolean(details.salesmenDiagnostics);
+  return etapa === "resolve-salesman" || hasSalesmanDiagnostics || /Vendedor ERP|\/salesmen|NUM_PEDIDO|OPERADOR/i.test(message)
+    ? ERP_SALESMAN_RESOLUTION_GUIDANCE
+    : undefined;
 };
 
 type ErpOrderSync = {
@@ -794,6 +811,7 @@ export default function OpportunityDetailsPage() {
         pedidoIdImportacao: maybeResponse?.pedidoIdImportacao,
         correlationId: errorCorrelationId,
         message,
+        guidance: getErpOrderFailureGuidance(maybeResponse, message),
       });
       try {
         const ordersResponse = await api.get(
@@ -1945,6 +1963,16 @@ export default function OpportunityDetailsPage() {
                           ) : null}
                           {erpOrderFeedback.message ? (
                             <p className="mt-1">{erpOrderFeedback.message}</p>
+                          ) : null}
+                          {erpOrderFeedback.guidance?.length ? (
+                            <div className="mt-2 rounded-lg border border-red-200 bg-white/70 p-2">
+                              <p className="font-semibold">Como resolver:</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-4">
+                                {erpOrderFeedback.guidance.map((item) => (
+                                  <li key={item}>{item}</li>
+                                ))}
+                              </ul>
+                            </div>
                           ) : null}
                         </div>
                       ) : null}

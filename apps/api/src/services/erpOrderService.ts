@@ -271,7 +271,7 @@ type OpportunityForErpOrder = {
     erpClientCode?: string | null;
     rawPayload?: Prisma.JsonValue | null;
   };
-  ownerSeller: Pick<User, "id" | "erpCode" | "erpOperatorCode" | "erpLoginUsername" | "erpLoginPasswordEncrypted">;
+  ownerSeller: Pick<User, "id" | "name" | "erpCode" | "erpOperatorCode" | "erpLoginUsername" | "erpLoginPasswordEncrypted">;
   items: Array<OpportunityItem & { product?: Pick<Product, "stockQuantity" | "unit" | "className" | "rawErpPayload"> | null }>;
 };
 
@@ -546,12 +546,26 @@ const extractErpOrderNumber = (payload: unknown) => {
 };
 
 type SalesmanOrderSequenceDiagnostics = {
+  endpoint: "/salesmen";
+  sellerId: string;
+  sellerName: string;
   sellerErpCode: string;
+  sellerErpCodeNormalized: string;
+  authContext: "seller" | "global" | "seller_reference";
   receivedSalesmenCount: number;
+  firstSellerCodesReceived: string[];
+  availableSellerCodeFields: string[];
   hasNumeroPedido: boolean;
   numeroPedidoPathUsed: string | null;
   matchedSalesmanFound: boolean;
+  matchedSalesmanCode: string | null;
+  matchedSalesmanCodeField: string | null;
+  matchedSalesmanName: string | null;
+  matchedSalesmanLogin: string | null;
+  matchedSalesmanFields: string[];
   operatorFound: boolean;
+  operatorFieldUsed: string | null;
+  comparisonMode: "exact" | "normalized" | null;
 };
 
 type SalesmanOrderSequenceResolution = {
@@ -559,6 +573,105 @@ type SalesmanOrderSequenceResolution = {
   operatorCode: string;
   diagnostics: SalesmanOrderSequenceDiagnostics;
 };
+
+type SalesmanOrderSequenceContext = {
+  sellerId: string;
+  sellerName: string;
+  sellerErpCode: string;
+  authContext: SalesmanOrderSequenceDiagnostics["authContext"];
+};
+
+
+const SALESMAN_CODE_KEYS = [
+  "CODVENDEDOR",
+  "VENDEDOR",
+  "code",
+  "erpCode",
+  "sellerCode",
+  "salesmanCode",
+  "vendedorCodigo",
+  "codigo",
+  "CODIGO",
+  "codVendedor",
+  "COD_VENDEDOR",
+  "CODVEN",
+];
+const SALESMAN_OPERATOR_KEYS = [
+  "OPERADOR",
+  "CODOPERADOR",
+  "COD_OPERADOR",
+  "CODIGO_OPERADOR",
+  "operator",
+  "operador",
+  "operatorCode",
+  "erpOperatorCode",
+  "operadorCodigo",
+  "codigoOperador",
+];
+const SALESMAN_NAME_KEYS = [
+  "NOME",
+  "nome",
+  "name",
+  "description",
+  "fullName",
+  "sellerName",
+  "salesmanName",
+  "razaoSocial",
+];
+const SALESMAN_LOGIN_KEYS = [
+  "LOGIN",
+  "login",
+  "USUARIO",
+  "usuario",
+  "USERNAME",
+  "username",
+  "email",
+  "EMAIL",
+];
+
+const normalizeErpLinkCodeForComparison = (value: unknown) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  const digitsOnly = trimmed.replace(/\D/g, "");
+  if (digitsOnly && /^[0-9\s._/-]+$/.test(trimmed)) {
+    const withoutLeadingZeros = digitsOnly.replace(/^0+/, "");
+    return withoutLeadingZeros || "0";
+  }
+  return trimmed.toLowerCase();
+};
+
+const pickFirstStringWithKey = (payload: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = payload[key];
+    if (value !== undefined && value !== null && String(value).trim() !== "")
+      return { value: String(value).trim(), key };
+  }
+  return { value: "", key: null as string | null };
+};
+
+const getSalesmanCodeMatch = (row: Record<string, unknown>, sellerErpCode: string) => {
+  const expectedNormalized = normalizeErpLinkCodeForComparison(sellerErpCode);
+  for (const key of SALESMAN_CODE_KEYS) {
+    const value = row[key];
+    if (value === undefined || value === null || String(value).trim() === "") continue;
+    const raw = String(value).trim();
+    if (raw === sellerErpCode) return { matched: true, code: raw, field: key, mode: "exact" as const };
+    if (normalizeErpLinkCodeForComparison(raw) === expectedNormalized)
+      return { matched: true, code: raw, field: key, mode: "normalized" as const };
+  }
+  return { matched: false, code: null, field: null, mode: null };
+};
+
+const collectSalesmanCodeFields = (rows: unknown[]) => Array.from(new Set(rows.flatMap((row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row)) return [] as string[];
+  const payload = row as Record<string, unknown>;
+  return SALESMAN_CODE_KEYS.filter((key) => payload[key] !== undefined && payload[key] !== null && String(payload[key]).trim() !== "");
+}))).slice(0, 20);
+
+const collectFirstSalesmanCodes = (rows: unknown[]) => rows
+  .slice(0, 10)
+  .map((row) => row && typeof row === "object" && !Array.isArray(row) ? pickFirstString(row as Record<string, unknown>, SALESMAN_CODE_KEYS) : "")
+  .filter(Boolean);
 
 const getNestedRecord = (payload: unknown, path: string[]) => {
   let current: unknown = payload;
@@ -623,51 +736,71 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
   return requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID(), 1, SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS);
 }
 
-async function resolveSalesmanOrderSequenceUnsafe(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
+async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   const body = await loadSalesmenBody({ forceRefresh: true, credentials, correlationId });
   const { numeroPedido, numeroPedidoPathUsed, salesmen } = resolveSalesmenPayload(body);
-  const matchedSalesman = salesmen.find((row) => {
-    if (!row || typeof row !== "object") return false;
-    return pickFirstString(row as Record<string, unknown>, [
-      "CODVENDEDOR",
-      "code",
-      "erpCode",
-      "sellerCode",
-      "salesmanCode",
-      "vendedorCodigo",
-      "codigo",
-      "CODIGO",
-      "codVendedor",
-    ]) === sellerErpCode;
-  });
-  const operatorCode = matchedSalesman && typeof matchedSalesman === "object"
-    ? pickFirstString(matchedSalesman as Record<string, unknown>, ["OPERADOR", "operator", "operador", "operatorCode"])
-    : "";
+  const matchedEntry = salesmen
+    .map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return { row: null, match: { matched: false, code: null, field: null, mode: null } };
+      return { row: row as Record<string, unknown>, match: getSalesmanCodeMatch(row as Record<string, unknown>, context.sellerErpCode) };
+    })
+    .find((entry) => entry.match.matched);
+  const matchedSalesman = matchedEntry?.row ?? null;
+  const operatorPick = matchedSalesman
+    ? pickFirstStringWithKey(matchedSalesman, SALESMAN_OPERATOR_KEYS)
+    : { value: "", key: null };
+  const namePick = matchedSalesman
+    ? pickFirstStringWithKey(matchedSalesman, SALESMAN_NAME_KEYS)
+    : { value: "", key: null };
+  const loginPick = matchedSalesman
+    ? pickFirstStringWithKey(matchedSalesman, SALESMAN_LOGIN_KEYS)
+    : { value: "", key: null };
+  const operatorCode = operatorPick.value;
   const validNumeroPedido = NUM_PEDIDO_PATTERN.test(numeroPedido) ? numeroPedido : "";
   const diagnostics: SalesmanOrderSequenceDiagnostics = {
-    sellerErpCode,
+    endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+    sellerId: context.sellerId,
+    sellerName: context.sellerName,
+    sellerErpCode: context.sellerErpCode,
+    sellerErpCodeNormalized: normalizeErpLinkCodeForComparison(context.sellerErpCode),
+    authContext: context.authContext,
     receivedSalesmenCount: salesmen.length,
+    firstSellerCodesReceived: collectFirstSalesmanCodes(salesmen),
+    availableSellerCodeFields: collectSalesmanCodeFields(salesmen),
     hasNumeroPedido: Boolean(validNumeroPedido),
     numeroPedidoPathUsed,
     matchedSalesmanFound: Boolean(matchedSalesman),
+    matchedSalesmanCode: matchedEntry?.match.code ?? null,
+    matchedSalesmanCodeField: matchedEntry?.match.field ?? null,
+    matchedSalesmanName: namePick.value || null,
+    matchedSalesmanLogin: loginPick.value || null,
+    matchedSalesmanFields: matchedSalesman ? Object.keys(matchedSalesman).slice(0, 60) : [],
     operatorFound: Boolean(operatorCode),
+    operatorFieldUsed: operatorPick.key,
+    comparisonMode: matchedEntry?.match.mode ?? null,
   };
-  logApiEvent(validNumeroPedido && matchedSalesman ? "INFO" : "WARN", "[erp order] resolved UltraFV3 salesman order sequence", diagnostics);
+  logApiEvent(validNumeroPedido && matchedSalesman && operatorCode ? "INFO" : "WARN", "[erp order] resolved UltraFV3 salesman order sequence", diagnostics);
   return { numPedido: validNumeroPedido, operatorCode, diagnostics };
 }
 
-async function resolveSalesmanOrderSequence(sellerErpCode: string, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
+async function resolveSalesmanOrderSequence(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   return erpOrderNumPedidoMutex.runExclusive(async () => {
     logApiEvent("INFO", "[erp order] acquired NUM_PEDIDO generation lock", {
-      sellerErpCode,
+      sellerId: context.sellerId,
+      sellerName: context.sellerName,
+      sellerErpCode: context.sellerErpCode,
+      authContext: context.authContext,
       correlationId,
       endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
     });
     try {
-      return await resolveSalesmanOrderSequenceUnsafe(sellerErpCode, credentials, correlationId);
+      return await resolveSalesmanOrderSequenceUnsafe(context, credentials, correlationId);
     } finally {
       logApiEvent("INFO", "[erp order] released NUM_PEDIDO generation lock", {
-        sellerErpCode,
+        sellerId: context.sellerId,
+        sellerName: context.sellerName,
+        sellerErpCode: context.sellerErpCode,
+        authContext: context.authContext,
         correlationId,
         endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
       });
@@ -800,7 +933,12 @@ async function createErpOrderFromOpportunityUnsafe(
     routeCorrelationId: correlationId,
     endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
   });
-  const sequenceResolution = await resolveSalesmanOrderSequence(sellerErpCode, sellerCredentials, pedidoIdImportacao);
+  const sequenceResolution = await resolveSalesmanOrderSequence({
+    sellerId: opportunity.ownerSeller.id,
+    sellerName: opportunity.ownerSeller.name,
+    sellerErpCode,
+    authContext: "seller",
+  }, sellerCredentials, pedidoIdImportacao);
   logErpOrderRouteStage("[ERP ORDER AFTER SALESMEN]", {
     correlationId,
     opportunityId: opportunity.id,
@@ -818,11 +956,12 @@ async function createErpOrderFromOpportunityUnsafe(
   const numericOperatorCode = Number(effectiveOperatorCode);
   if (!numPedido || !effectiveOperatorCode || !sequenceResolution.diagnostics.matchedSalesmanFound || !Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode)) {
     const diagnostics = sequenceResolution.diagnostics;
+    const message = !diagnostics.matchedSalesmanFound
+      ? `Vendedor ERP ${sellerErpCode} não retornou no /salesmen para a credencial utilizada.`
+      : `Vendedor ERP ${sellerErpCode} encontrado, mas sem NUM_PEDIDO/OPERADOR configurado no UltraFV3.`;
     throw Object.assign(
-      new Error(
-        `Não foi possível resolver NUM_PEDIDO/OPERADOR válido em /salesmen para o vendedor ERP vinculado. diagnostics=${JSON.stringify(diagnostics)}`,
-      ),
-      { status: 400, diagnostics },
+      new Error(message),
+      { status: 400, diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
     );
   }
 
