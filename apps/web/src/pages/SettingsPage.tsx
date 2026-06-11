@@ -92,10 +92,14 @@ export default function SettingsPage() {
   if (loading) return <div className="p-8">Carregando...</div>;
   if (!user) return <Navigate to="/login" replace />;
 
-  const canAccess = user.role === "diretor" || user.role === "gerente" || user.role === "vendedor";
-  if (!canAccess) return <Navigate to="/dashboard" replace />;
-  if (user.role === "vendedor" && activeSection !== "seller-territories") {
-    return <Navigate to="/configurações?section=seller-territories" replace />;
+  const canAccess = user.role === "diretor" || user.role === "gerente";
+  if (!canAccess) {
+    return (
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900">
+        <h2 className="text-lg font-semibold">Acesso não permitido</h2>
+        <p className="mt-2 text-sm">Configurações administrativas, incluindo Territórios Comerciais, estão disponíveis apenas para Diretor e Gerente.</p>
+      </section>
+    );
   }
 
   return (
@@ -107,7 +111,7 @@ export default function SettingsPage() {
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
         <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-6" aria-label="Seções de configurações">
-          {SETTINGS_SECTIONS.filter((section) => user.role !== "vendedor" || section.id === "seller-territories").map((section) => {
+          {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
 

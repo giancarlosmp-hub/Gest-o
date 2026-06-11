@@ -62,6 +62,8 @@ type CreateOpportunityModalProps = {
   priceTableOptions?: PriceTableOption[];
   priceTableWarning?: string;
   shouldConfirmClose?: boolean;
+  onRefreshClients?: () => Promise<void> | void;
+  isRefreshingClients?: boolean;
 };
 
 export default function CreateOpportunityModal({
@@ -90,7 +92,9 @@ export default function CreateOpportunityModal({
   hasStructuredItems = false,
   priceTableOptions = [],
   priceTableWarning = "",
-  shouldConfirmClose = false
+  shouldConfirmClose = false,
+  onRefreshClients,
+  isRefreshingClients = false
 }: CreateOpportunityModalProps) {
   const fieldClassName = "w-full rounded-lg border border-slate-200 p-2";
   const labelClassName = "text-sm font-medium text-slate-700";
@@ -146,8 +150,21 @@ export default function CreateOpportunityModal({
                   <input ref={titleInputRef} required className={fieldClassName} placeholder="Ex: Oportunidade Milho Safra 25/26 – Cliente X" value={form.title} onChange={(e) => onFormChange({ ...form, title: e.target.value })} />
                 </label>
                 <div className="space-y-2">
+                  {onRefreshClients ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={labelClassName}>Cliente *</span>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => onRefreshClients()}
+                        disabled={isRefreshingClients}
+                      >
+                        {isRefreshingClients ? "Atualizando clientes..." : "Atualizar clientes"}
+                      </button>
+                    </div>
+                  ) : null}
                   <label className="space-y-1">
-                    <span className={labelClassName}>Cliente *</span>
+                    {!onRefreshClients ? <span className={labelClassName}>Cliente *</span> : null}
                     <ClientSearchSelect
                       clients={clients}
                       value={form.clientId}

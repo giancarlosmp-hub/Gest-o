@@ -13,6 +13,10 @@ export const ERP_DIAGNOSTIC_ENV_VARS = [
   "ULTRAFV3_BASE_URL",
   "ERP_CREDENTIAL_ENCRYPTION_KEY",
   "JWT_SECRET",
+  "JWT_ACCESS_SECRET",
+  "ACCESS_TOKEN_SECRET",
+  "JWT_REFRESH_SECRET",
+  "REFRESH_TOKEN_SECRET",
   "DATABASE_URL",
 ] as const;
 
@@ -25,6 +29,7 @@ export type ErpRuntimeEnvironmentDiagnostics = {
     exists: boolean;
   };
   receivedEnv: Record<ErpDiagnosticEnvVar, boolean>;
+  jwtSecretConfigured: boolean;
   missingDiagnosticConfig: ErpDiagnosticEnvVar[];
 };
 
@@ -38,10 +43,21 @@ export function getMissingErpRuntimeConfig(): ErpRequiredEnvVar[] {
 }
 
 export function getErpRuntimeEnvironmentDiagnostics(): ErpRuntimeEnvironmentDiagnostics {
+  const jwtSecretConfigured = [
+    process.env.JWT_SECRET,
+    process.env.JWT_ACCESS_SECRET,
+    process.env.ACCESS_TOKEN_SECRET,
+    process.env.JWT_REFRESH_SECRET,
+    process.env.REFRESH_TOKEN_SECRET,
+  ].some(hasReceivedEnvValue);
   const receivedEnv: Record<ErpDiagnosticEnvVar, boolean> = {
     ULTRAFV3_BASE_URL: hasReceivedEnvValue(process.env.ULTRAFV3_BASE_URL),
     ERP_CREDENTIAL_ENCRYPTION_KEY: hasReceivedEnvValue(process.env.ERP_CREDENTIAL_ENCRYPTION_KEY),
-    JWT_SECRET: hasReceivedEnvValue(process.env.JWT_SECRET),
+    JWT_SECRET: jwtSecretConfigured,
+    JWT_ACCESS_SECRET: hasReceivedEnvValue(process.env.JWT_ACCESS_SECRET),
+    ACCESS_TOKEN_SECRET: hasReceivedEnvValue(process.env.ACCESS_TOKEN_SECRET),
+    JWT_REFRESH_SECRET: hasReceivedEnvValue(process.env.JWT_REFRESH_SECRET),
+    REFRESH_TOKEN_SECRET: hasReceivedEnvValue(process.env.REFRESH_TOKEN_SECRET),
     DATABASE_URL: hasReceivedEnvValue(process.env.DATABASE_URL),
   };
 
@@ -51,7 +67,12 @@ export function getErpRuntimeEnvironmentDiagnostics(): ErpRuntimeEnvironmentDiag
       exists: existsSync(ERP_PRODUCTION_ENV_FILE_PATH),
     },
     receivedEnv,
-    missingDiagnosticConfig: ERP_DIAGNOSTIC_ENV_VARS.filter((key) => !receivedEnv[key]),
+    jwtSecretConfigured,
+    missingDiagnosticConfig: ERP_DIAGNOSTIC_ENV_VARS.filter((key) => {
+      if (key === "JWT_SECRET") return !jwtSecretConfigured;
+      if (["JWT_ACCESS_SECRET", "ACCESS_TOKEN_SECRET", "JWT_REFRESH_SECRET", "REFRESH_TOKEN_SECRET"].includes(key)) return false;
+      return !receivedEnv[key];
+    }),
   };
 }
 
