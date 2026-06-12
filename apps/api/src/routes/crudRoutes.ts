@@ -5810,6 +5810,15 @@ router.get("/products", async (_req, res) => {
   return res.json(products);
 });
 
+const isSynchronizedProduct = (product: { rawErpPayload?: Prisma.JsonValue | null }) => {
+  if (product.rawErpPayload == null) return false;
+  if (typeof product.rawErpPayload !== "object") return true;
+  if (Array.isArray(product.rawErpPayload)) return product.rawErpPayload.length > 0;
+  return Object.keys(product.rawErpPayload).length > 0;
+};
+
+type HiddenProductDiagnosticReason = "inactive" | "not_synchronized" | "invalid_price";
+
 router.get("/products/search", async (req, res) => {
   const parsed = productSearchQuerySchema.safeParse(req.query);
   if (!parsed.success) return res.status(400).json({ message: "Parâmetro q é obrigatório" });
@@ -5826,11 +5835,27 @@ router.get("/products/search", async (req, res) => {
         { brand: { contains: q, mode: "insensitive" } }
       ]
     },
-    take: 30,
+    take: 100,
     orderBy: [{ name: "asc" }],
     include: { prices: { orderBy: [{ validFrom: "desc" }] } }
   });
-  return res.json(products.map((product) => {
+
+  const hiddenDiagnostics: Record<HiddenProductDiagnosticReason, number> = {
+    inactive: 0,
+    not_synchronized: 0,
+    invalid_price: 0,
+  };
+  const hiddenSamples: Array<{
+    id: string;
+    erpProductCode: string;
+    erpProductClassCode: string;
+    reason: HiddenProductDiagnosticReason;
+    price: number;
+    priceTableMatched: boolean;
+    priceSource: string;
+  }> = [];
+
+  const visibleProducts = products.flatMap((product) => {
     const pickedPrice = calculateOpportunityPriceForTable({
       product,
       priceTableCode: requestedPriceTableCode,
@@ -5838,14 +5863,34 @@ router.get("/products/search", async (req, res) => {
       erpPrices: priceRules.erpPrices,
     });
     const stock = Number(product.stockQuantity || 0);
-    const status = product.isSuspended
-      ? "suspenso/fora de linha"
-      : pickedPrice.price <= 0
-        ? "sem preço"
-        : stock <= 0
-          ? "sem estoque"
-          : "disponível";
-    return {
+    const isActiveForErpOrder = product.isActive && !product.isSuspended;
+    const isSynchronized = isSynchronizedProduct(product);
+    const hasValidSelectedTablePrice = pickedPrice.price > 0 && pickedPrice.priceTableMatched;
+    const hiddenReason: HiddenProductDiagnosticReason | null = !isActiveForErpOrder
+      ? "inactive"
+      : !isSynchronized
+        ? "not_synchronized"
+        : !hasValidSelectedTablePrice
+          ? "invalid_price"
+          : null;
+
+    if (hiddenReason) {
+      hiddenDiagnostics[hiddenReason] += 1;
+      if (hiddenSamples.length < 5) {
+        hiddenSamples.push({
+          id: product.id,
+          erpProductCode: product.erpProductCode,
+          erpProductClassCode: product.erpProductClassCode,
+          reason: hiddenReason,
+          price: pickedPrice.price,
+          priceTableMatched: pickedPrice.priceTableMatched,
+          priceSource: pickedPrice.source,
+        });
+      }
+      return [];
+    }
+
+    return [{
       id: product.id,
       name: product.name,
       erpProductCode: product.erpProductCode,
@@ -5855,14 +5900,28 @@ router.get("/products/search", async (req, res) => {
       price: pickedPrice.price,
       priceTableCode: pickedPrice.priceTableCode,
       priceTableMatched: pickedPrice.priceTableMatched,
-      priceWarning: pickedPrice.priceWarning,
+      priceWarning: null,
       priceSource: pickedPrice.source,
       stock,
       brand: product.brand,
       groupName: product.groupName,
-      status
-    };
-  }));
+      status: stock <= 0 ? "sem estoque" : "disponível"
+    }];
+  }).slice(0, 30);
+
+  const hiddenTotal = hiddenDiagnostics.inactive + hiddenDiagnostics.not_synchronized + hiddenDiagnostics.invalid_price;
+  if (hiddenTotal > 0) {
+    logApiEvent("INFO", "[products search] hidden invalid opportunity products", {
+      query: q,
+      priceTableCode: requestedPriceTableCode,
+      visibleCount: visibleProducts.length,
+      hiddenCount: hiddenTotal,
+      hiddenDiagnostics,
+      hiddenSamples,
+    });
+  }
+
+  return res.json(visibleProducts);
 });
 
 router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
