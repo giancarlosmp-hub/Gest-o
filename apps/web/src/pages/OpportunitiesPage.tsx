@@ -112,6 +112,7 @@ type OpportunityItemForm = {
   discountType: DiscountType;
   discountValue: string;
   notes: string;
+  stock?: number | null;
 };
 
 type FormState = {
@@ -266,7 +267,8 @@ const emptyOpportunityItem: OpportunityItemForm = {
   unitPrice: "0",
   discountType: "value",
   discountValue: "0",
-  notes: ""
+  notes: "",
+  stock: null
 };
 
 const emptySummary: Summary = {
@@ -311,6 +313,36 @@ function normalizeRisk(value?: string | null): OpportunityRisk {
 function toTwoDecimals(value: number) {
   return Math.round(value * 100) / 100;
 }
+
+const getStockWarningKind = (stock?: number | null) => {
+  if (typeof stock !== "number" || !Number.isFinite(stock)) return null;
+  if (stock < 0) return "negative" as const;
+  if (stock === 0) return "zero" as const;
+  return null;
+};
+
+const getStockBadge = (stock?: number | null) => {
+  const warningKind = getStockWarningKind(stock);
+  if (warningKind === "negative") return { label: "Saldo negativo", className: "border-red-200 bg-red-50 text-red-700" };
+  if (warningKind === "zero") return { label: "Sem saldo", className: "border-amber-200 bg-amber-50 text-amber-700" };
+  return null;
+};
+
+const confirmStockWarning = (productName: string, stock?: number | null) => {
+  const warningKind = getStockWarningKind(stock);
+  if (!warningKind) return true;
+
+  const formattedStock = Number(stock || 0).toLocaleString("pt-BR");
+  if (warningKind === "negative") {
+    return window.confirm(
+      `⚠️ SALDO NEGATIVO\n\nO produto "${productName}" está com saldo negativo (${formattedStock}).\n\nDeseja continuar mesmo assim?`,
+    );
+  }
+
+  return window.confirm(
+    `O produto "${productName}" está com estoque 0 (sem saldo).\n\nDeseja continuar mesmo assim?`,
+  );
+};
 
 function calculateItemTotals(item: OpportunityItemForm) {
   const quantity = Number(item.quantity || 0);
@@ -785,7 +817,8 @@ export default function OpportunitiesPage() {
         unitPrice: String(item.unitPrice ?? 0),
         discountType: (item.discountType || "value") as DiscountType,
         discountValue: String(item.discountValue ?? 0),
-        notes: item.notes || ""
+        notes: item.notes || "",
+        stock: typeof item.product?.stockQuantity === "number" ? item.product.stockQuantity : null
       }));
       setOpportunityItems(loadedItems);
     } catch {
@@ -848,7 +881,8 @@ export default function OpportunitiesPage() {
       erpProductCode: product.erpProductCode,
       erpProductClassCode: product.erpProductClassCode,
       unit: product.unit || "",
-      unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice
+      unitPrice: product.defaultPrice != null ? String(product.defaultPrice) : current.unitPrice,
+      stock: typeof product.stock === "number" ? product.stock : null
     }));
     setIsProductDropdownOpen(false);
     setProductOptions([]);
@@ -917,9 +951,12 @@ export default function OpportunitiesPage() {
   };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
+    const draftStock = typeof selectedProduct?.stock === "number" ? selectedProduct.stock : draft.stock;
+    if (!confirmStockWarning(draft.productNameSnapshot || selectedProduct?.name || "Produto", draftStock)) return;
+
     if (!savedOpportunityId) {
       const temporaryId = draft.id || `tmp-${Date.now()}`;
-      const localDraft = { ...draft, productId: draft.productId || selectedProduct?.id || "", id: temporaryId };
+      const localDraft = { ...draft, productId: draft.productId || selectedProduct?.id || "", id: temporaryId, stock: draftStock ?? null };
       setOpportunityItems((current) => {
         const exists = current.some((item) => item.id === temporaryId);
         if (exists) return current.map((item) => item.id === temporaryId ? localDraft : item);
@@ -1781,6 +1818,11 @@ export default function OpportunitiesPage() {
                         <p className="text-xs text-slate-600">
                           {product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} ·{" "}
                           <strong className={Number(product.stock || 0) <= 0 ? "text-red-600" : "text-slate-800"}>ESTOQUE {Number(product.stock || 0)}</strong>
+                          {getStockBadge(product.stock) ? (
+                            <span className={`ml-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getStockBadge(product.stock)?.className}`}>
+                              {getStockBadge(product.stock)?.label}
+                            </span>
+                          ) : null}
                         </p>
                       </button>
                     ))}
@@ -1792,6 +1834,11 @@ export default function OpportunitiesPage() {
                 {itemDraft.productNameSnapshot ? (
                   <p className="text-xs text-slate-500">
                     Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
+                    {getStockBadge(selectedProduct?.stock ?? itemDraft.stock) ? (
+                      <span className={`ml-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getStockBadge(selectedProduct?.stock ?? itemDraft.stock)?.className}`}>
+                        {getStockBadge(selectedProduct?.stock ?? itemDraft.stock)?.label}
+                      </span>
+                    ) : null}
                   </p>
                 ) : null}
                 {priceTableWarning ? <p className="text-xs text-amber-700">{priceTableWarning}</p> : null}
@@ -1854,7 +1901,16 @@ export default function OpportunitiesPage() {
                     const totals = calculateItemTotals(opportunityItem);
                     return (
                       <tr key={opportunityItem.id} className="border-t border-slate-100">
-                        <td className="p-2">{opportunityItem.productNameSnapshot} · {opportunityItem.erpProductClassCode}</td>
+                        <td className="p-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>{opportunityItem.productNameSnapshot} · {opportunityItem.erpProductClassCode}</span>
+                            {getStockBadge(opportunityItem.stock) ? (
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getStockBadge(opportunityItem.stock)?.className}`}>
+                                {getStockBadge(opportunityItem.stock)?.label}
+                              </span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="p-2">{opportunityItem.quantity}</td>
                         <td className="p-2">{formatCurrencyBRL(Number(opportunityItem.unitPrice || 0))}</td>
                         <td className="p-2">{opportunityItem.discountType === "percent" ? `${opportunityItem.discountValue}%` : formatCurrencyBRL(Number(opportunityItem.discountValue || 0))}</td>

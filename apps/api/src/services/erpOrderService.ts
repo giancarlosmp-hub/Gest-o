@@ -883,16 +883,6 @@ async function createErpOrderFromOpportunityUnsafe(
     throw Object.assign(new Error("Payload inválido: pedido ERP bloqueado por item com preço zerado."), {
       status: 400,
     });
-  const insufficientStockItem = opportunity.items.find((item) => {
-    const stockQuantity = item.product?.stockQuantity;
-    return typeof stockQuantity === "number" && stockQuantity < Number(item.quantity || 0);
-  });
-  if (insufficientStockItem)
-    throw Object.assign(
-      new Error(`Estoque insuficiente para ${insufficientStockItem.productNameSnapshot}. Disponível: ${insufficientStockItem.product?.stockQuantity ?? 0}.`),
-      { status: 400 },
-    );
-
   try {
     await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
     await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
