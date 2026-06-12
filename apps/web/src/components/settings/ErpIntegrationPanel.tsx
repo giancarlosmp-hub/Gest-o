@@ -74,6 +74,8 @@ type SyncHistoryItem = {
   metrics?: Record<string, number> | null;
 };
 
+type SellerDiagnosticsResponse = Record<string, unknown>;
+
 type AuthModeDiagnostics = {
   hasGlobalCredentials: boolean;
   encryptionKeyConfigured: boolean;
@@ -217,6 +219,8 @@ export default function ErpIntegrationPanel() {
   const [running, setRunning] = useState<SyncScopeKey | "allSellers" | "syncAll" | "automaticSync" | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
+  const [sellerDiag, setSellerDiag] = useState<SellerDiagnosticsResponse | null>(null);
+  const [sellerDiagLoading, setSellerDiagLoading] = useState(false);
   const [fullSyncProgress, setFullSyncProgress] = useState<FullSyncProgress>({
     isRunning: false,
     startedAt: null,
@@ -333,6 +337,21 @@ export default function ErpIntegrationPanel() {
       toast.error(getApiErrorMessage(error, "Não foi possível executar a Sincronização Completa ERP."));
     } finally {
       setRunning(null);
+    }
+  };
+
+  const runSellerDiagnostics = async () => {
+    setSellerDiagLoading(true);
+    try {
+      const response = await api.get<SellerDiagnosticsResponse>("/erp/ultrafv3/seller-diagnostics", {
+        params: { sellerCode: "7057", operatorCode: "45", search: "Jeferson Luiz Carlota" },
+      });
+      setSellerDiag(response.data);
+      toast.success("Diagnóstico ERP do vendedor carregado.");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar o diagnóstico do vendedor."));
+    } finally {
+      setSellerDiagLoading(false);
     }
   };
 
@@ -678,6 +697,41 @@ export default function ErpIntegrationPanel() {
           {configGuidanceMessage}
         </div>
       ) : null}
+
+      <section className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h4 className="text-sm font-semibold text-violet-950">Diagnóstico ERP do vendedor — Jeferson Luiz Carlota</h4>
+            <p className="mt-1 text-xs leading-relaxed text-violet-800">Tela temporária para investigar definitivamente CODVENDEDOR 7057 / OPERADOR 45: CRM, cache UltraFV3, sincronização individual/global, pedido ERP e divergências, sem exibir senha ou token.</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+            onClick={runSellerDiagnostics}
+            disabled={sellerDiagLoading}
+          >
+            {sellerDiagLoading ? "Investigando..." : "Investigar 7057"}
+          </button>
+        </div>
+        {sellerDiag ? (
+          <div className="mt-4 grid gap-3 lg:grid-cols-3">
+            {[
+              ["CRM", (sellerDiag as { crm?: unknown }).crm],
+              ["UltraFV3", (sellerDiag as { ultraFv3?: unknown }).ultraFv3],
+              ["Divergências", (sellerDiag as { divergences?: unknown }).divergences],
+              ["Cache", (sellerDiag as { cache?: unknown }).cache],
+              ["Fluxos", (sellerDiag as { flow?: unknown }).flow],
+            ].map(([title, value]) => (
+              <div key={String(title)} className="rounded-lg border border-violet-100 bg-white p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-violet-800">{String(title)}</p>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-950 p-3 text-[11px] leading-relaxed text-slate-100">{JSON.stringify(value ?? null, null, 2)}</pre>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-3 text-xs text-violet-800">Clique em “Investigar 7057” para consultar CRM, caches locais e UltraFV3 ao vivo com as credenciais do vendedor.</p>
+        )}
+      </section>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {SYNC_CARDS.map((card) => {

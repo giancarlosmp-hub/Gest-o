@@ -9816,6 +9816,223 @@ router.get("/users/:id/erp-diagnostics", authorize("diretor", "gerente"), async 
   });
 });
 
+
+router.get("/erp/ultrafv3/seller-diagnostics", authorize("diretor", "gerente"), async (req, res) => {
+  const correlationId = randomUUID();
+  const sellerCode = String(req.query.sellerCode || req.query.erpCode || "7057").trim();
+  const operatorCode = String(req.query.operatorCode || req.query.operador || "45").trim();
+  const search = String(req.query.search || "Jeferson Luiz Carlota").trim();
+  const cpf = String(req.query.cpf || "").trim();
+  const cnpj = String(req.query.cnpj || "").trim();
+  const loginFV3 = String(req.query.loginFV3 || "").trim();
+  const email = String(req.query.email || "").trim();
+  const oldCnpj = String(req.query.oldCnpj || "").trim();
+  const normalizedCpf = normalizeCnpj(cpf);
+  const normalizedCnpj = normalizeCnpj(cnpj || oldCnpj);
+  const textNeedles = [sellerCode, operatorCode, search, cpf, cnpj, oldCnpj, loginFV3, email]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const normalizedNeedles = Array.from(new Set([
+    ...textNeedles.map((value) => normalizeErpDiagCode(value)).filter(Boolean),
+    normalizedCpf,
+    normalizedCnpj,
+  ].filter(Boolean)));
+  const containsNeedle = (value: unknown): boolean => {
+    if (value == null) return false;
+    if (typeof value === "object") return Object.values(value as Record<string, unknown>).some(containsNeedle);
+    const text = String(value);
+    const normalized = normalizeErpDiagCode(text);
+    return normalizedNeedles.some((needle) => normalized.includes(needle) || text.toLowerCase().includes(needle.toLowerCase()));
+  };
+  const safeRows = (rows: unknown[], limit = 10) => rows.slice(0, limit).map((row) => sanitizeErpOrderPayload(row));
+
+  logApiEvent("INFO", "[erp seller definitive diagnostics] request started", {
+    correlationId,
+    sellerCode,
+    operatorCode,
+    search,
+    hasCpf: Boolean(cpf),
+    hasCnpj: Boolean(cnpj || oldCnpj),
+    hasLoginFV3: Boolean(loginFV3),
+    hasEmail: Boolean(email),
+  });
+
+  const users = await prisma.user.findMany({
+    where: {
+      OR: [
+        sellerCode ? { erpCode: sellerCode } : undefined,
+        operatorCode ? { erpOperatorCode: operatorCode } : undefined,
+        search ? { name: { contains: search, mode: "insensitive" } } : undefined,
+        email ? { email: { contains: email, mode: "insensitive" } } : undefined,
+        loginFV3 ? { erpLoginUsername: loginFV3 } : undefined,
+        cpf ? { erpLoginUsername: cpf } : undefined,
+        cnpj ? { erpLoginUsername: cnpj } : undefined,
+        oldCnpj ? { erpLoginUsername: oldCnpj } : undefined,
+      ].filter(Boolean) as Prisma.UserWhereInput[],
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
+      isActive: true,
+      erpCode: true,
+      erpOperatorCode: true,
+      erpRawPayload: true,
+      erpLoginUsername: true,
+      erpLoginPasswordEncrypted: true,
+      erpLoginLastTestStatus: true,
+      erpLoginLastTestAt: true,
+      createdAt: true,
+      _count: { select: { clients: true, opportunities: true, erpOrderSyncs: true } },
+    },
+    orderBy: [{ isActive: "desc" }, { name: "asc" }],
+  });
+  const targetUser = users.find((user) => normalizeErpDiagCode(user.erpCode) === normalizeErpDiagCode(sellerCode)) ?? users[0] ?? null;
+
+  const [salesmenCache, partnersCache, syncRuns, orderSyncs, clientsByTarget, documentClients] = await Promise.all([
+    prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.salesmen" }, select: { value: true, updatedAt: true } }),
+    prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.partners" }, select: { value: true, updatedAt: true } }),
+    prisma.erpSyncRun.findMany({
+      where: { OR: [
+        targetUser ? { sellerId: targetUser.id } : undefined,
+        sellerCode ? { sellerName: { contains: search || sellerCode, mode: "insensitive" } } : undefined,
+        { scope: "partners", authMode: "seller" },
+      ].filter(Boolean) as Prisma.ErpSyncRunWhereInput[] },
+      orderBy: [{ startedAt: "desc" }],
+      take: 25,
+    }),
+    prisma.erpOrderSync.findMany({
+      where: targetUser ? { sellerId: targetUser.id } : {},
+      orderBy: [{ createdAt: "desc" }],
+      take: 10,
+      select: { id: true, opportunityId: true, sellerId: true, pedidoIdImportacao: true, numPedido: true, erpOrderNumber: true, status: true, orderStatus: true, payloadSent: true, erpResponse: true, syncErrors: true, createdAt: true, updatedAt: true },
+    }),
+    targetUser ? prisma.client.findMany({
+      where: { ownerSellerId: targetUser.id },
+      orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "desc" }],
+      take: 20,
+      select: { id: true, code: true, name: true, fantasyName: true, clientType: true, cnpj: true, cnpjNormalized: true, ownerSellerId: true, erpUpdatedAt: true, createdAt: true },
+    }) : Promise.resolve([]),
+    (normalizedCpf || normalizedCnpj) ? prisma.client.findMany({
+      where: { OR: [
+        normalizedCpf ? { cnpjNormalized: normalizedCpf } : undefined,
+        normalizedCnpj ? { cnpjNormalized: normalizedCnpj } : undefined,
+      ].filter(Boolean) as Prisma.ClientWhereInput[] },
+      orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "desc" }],
+      take: 20,
+      select: { id: true, code: true, name: true, fantasyName: true, clientType: true, cnpj: true, cnpjNormalized: true, ownerSellerId: true, erpUpdatedAt: true, createdAt: true },
+    }) : Promise.resolve([]),
+  ]);
+
+  const salesmenRows = parseSalesmenCacheRows(salesmenCache?.value);
+  const partnersRows = parseSalesmenCacheRows(partnersCache?.value);
+  const salesmenMatches = salesmenRows.filter(containsNeedle);
+  const partnerMatches = partnersRows.filter(containsNeedle);
+  const primarySalesman = salesmenMatches.find((row) => row && typeof row === "object" && normalizeErpDiagCode(pickDiagText(row as Record<string, unknown>, SALESMAN_DIAG_CODE_KEYS)) === normalizeErpDiagCode(sellerCode)) as Record<string, unknown> | undefined;
+  const salesmenOperator = primarySalesman ? pickDiagText(primarySalesman, SALESMAN_DIAG_OPERATOR_KEYS) : "";
+  const salesmenNumPedido = primarySalesman ? pickDiagText(primarySalesman, SALESMAN_DIAG_NUM_PEDIDO_KEYS) : "";
+  const crmOperator = targetUser?.erpOperatorCode?.trim() || "";
+
+  let liveUltraFv3: Record<string, unknown> = { available: false, reason: "Usuário alvo sem Login FV3/Senha FV3 configurados." };
+  if (targetUser?.erpLoginUsername?.trim() && targetUser.erpLoginPasswordEncrypted) {
+    const credentials = { username: targetUser.erpLoginUsername.trim(), password: decryptErpCredential(targetUser.erpLoginPasswordEncrypted) };
+    try {
+      const auth = await ultraFv3Client.authenticateWithCredentials(credentials);
+      const [partnersResult, salesmenResult] = await Promise.allSettled([
+        ultraFv3Client.requestWithCredentials<unknown>("/partners", credentials, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }),
+        ultraFv3Client.requestWithCredentials<unknown>("/salesmen", credentials, { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS }),
+      ]);
+      const livePartnersRows = partnersResult.status === "fulfilled" ? toDiagArray(partnersResult.value) : [];
+      const liveSalesmenRows = salesmenResult.status === "fulfilled" ? toDiagArray(salesmenResult.value) : [];
+      liveUltraFv3 = {
+        available: true,
+        auth: { tokenPayload: auth.tokenPayload, tokenExpiresAt: auth.tokenExpiresAt },
+        partners: {
+          ok: partnersResult.status === "fulfilled",
+          count: livePartnersRows.length,
+          error: partnersResult.status === "rejected" ? sanitizeErpOrderErrorMessage(partnersResult.reason?.message || String(partnersResult.reason)) : null,
+          matches: safeRows(livePartnersRows.filter(containsNeedle), 10),
+          receivedPayloadSummary: partnersResult.status === "fulfilled" ? { type: Array.isArray(partnersResult.value) ? "array" : typeof partnersResult.value, rootKeys: partnersResult.value && typeof partnersResult.value === "object" && !Array.isArray(partnersResult.value) ? Object.keys(partnersResult.value as Record<string, unknown>).slice(0, 20) : [] } : null,
+        },
+        salesmen: {
+          ok: salesmenResult.status === "fulfilled",
+          count: liveSalesmenRows.length,
+          error: salesmenResult.status === "rejected" ? sanitizeErpOrderErrorMessage(salesmenResult.reason?.message || String(salesmenResult.reason)) : null,
+          matches: safeRows(liveSalesmenRows.filter(containsNeedle), 10),
+          receivedPayloadSummary: salesmenResult.status === "fulfilled" ? { type: Array.isArray(salesmenResult.value) ? "array" : typeof salesmenResult.value, rootKeys: salesmenResult.value && typeof salesmenResult.value === "object" && !Array.isArray(salesmenResult.value) ? Object.keys(salesmenResult.value as Record<string, unknown>).slice(0, 20) : [] } : null,
+        },
+      };
+    } catch (error) {
+      liveUltraFv3 = {
+        available: false,
+        error: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : String(error)),
+        diagnostics: sanitizeErpOrderPayload((error as { diagnostics?: unknown })?.diagnostics ?? null),
+      };
+    }
+  }
+
+  const sanitizedUsers = users.map((user) => ({
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    isActive: user.isActive,
+    erpCode: user.erpCode,
+    erpOperatorCode: user.erpOperatorCode,
+    erpLoginConfigured: Boolean(user.erpLoginUsername?.trim()),
+    erpLoginType: getMaskedLoginType(user.erpLoginUsername),
+    erpPasswordConfigured: Boolean(user.erpLoginPasswordEncrypted),
+    erpLoginLastTestStatus: user.erpLoginLastTestStatus,
+    erpLoginLastTestAt: user.erpLoginLastTestAt,
+    createdAt: user.createdAt,
+    rawLoginType: user.erpRawPayload && typeof user.erpRawPayload === "object" ? getMaskedLoginType(pickDiagText(user.erpRawPayload as Record<string, unknown>, SALESMAN_DIAG_LOGIN_KEYS)) : "ausente",
+    counts: user._count,
+  }));
+  const duplicateUsers = sanitizedUsers.filter((user) => user.id !== targetUser?.id && (
+    normalizeErpDiagCode(user.erpCode) === normalizeErpDiagCode(sellerCode) ||
+    normalizeErpDiagCode(user.erpOperatorCode) === normalizeErpDiagCode(operatorCode) ||
+    (email && user.email.toLowerCase() === email.toLowerCase())
+  ));
+  const alerts = [
+    !targetUser ? "Nenhum usuário CRM localizado para os filtros informados." : null,
+    targetUser && normalizeErpDiagCode(targetUser.erpCode) !== normalizeErpDiagCode(sellerCode) ? "Usuário alvo não possui CODVENDEDOR esperado." : null,
+    targetUser && crmOperator && operatorCode && normalizeErpDiagCode(crmOperator) !== normalizeErpDiagCode(operatorCode) ? "OPERADOR CRM diverge do OPERADOR informado." : null,
+    primarySalesman && salesmenOperator && operatorCode && normalizeErpDiagCode(salesmenOperator) !== normalizeErpDiagCode(operatorCode) ? "OPERADOR do cache /salesmen diverge do OPERADOR informado." : null,
+    duplicateUsers.length ? "Há duplicidade de usuário CRM por CODVENDEDOR/OPERADOR/e-mail." : null,
+    salesmenMatches.length > 1 ? "Há múltiplos registros no cache /salesmen para os identificadores pesquisados." : null,
+    partnerMatches.length > 1 ? "Há múltiplos registros no cache /partners para os identificadores pesquisados." : null,
+    sanitizedUsers.some((user) => user.erpLoginType === "cpf" && user.rawLoginType === "cnpj") ? "Possível resíduo PJ/CNPJ em erpRawPayload com login FV3 atual CPF." : null,
+  ].filter(Boolean);
+
+  return res.status(200).json({
+    correlationId,
+    investigatedAt: new Date().toISOString(),
+    filters: { sellerCode, operatorCode, search, hasCpf: Boolean(cpf), hasCnpj: Boolean(cnpj || oldCnpj), hasLoginFV3: Boolean(loginFV3), hasEmail: Boolean(email) },
+    crm: {
+      targetUserId: targetUser?.id ?? null,
+      users: sanitizedUsers,
+      duplicates: { users: duplicateUsers },
+      clientsBySeller: clientsByTarget,
+      clientsByDocument: documentClients,
+      orderSyncs: orderSyncs.map((sync) => ({ ...sync, payloadSent: sanitizeErpOrderPayload(sync.payloadSent), erpResponse: sanitizeErpOrderPayload(sync.erpResponse), syncErrors: sanitizeErpOrderPayload(sync.syncErrors) })),
+      syncRuns: syncRuns.map((run) => ({ id: run.id, scope: run.scope, status: run.status, sellerId: run.sellerId, sellerName: run.sellerName, authMode: run.authMode, correlationId: run.correlationId, startedAt: run.startedAt, finishedAt: run.finishedAt, durationMs: run.durationMs, syncedCount: run.syncedCount, metrics: run.metrics, errorMessage: run.errorMessage, errors: sanitizeErpOrderPayload(run.errors) })),
+    },
+    cache: {
+      salesmen: { updatedAt: salesmenCache?.updatedAt ?? null, totalRows: salesmenRows.length, matchesCount: salesmenMatches.length, matches: safeRows(salesmenMatches, 10) },
+      partners: { updatedAt: partnersCache?.updatedAt ?? null, totalRows: partnersRows.length, matchesCount: partnerMatches.length, matches: safeRows(partnerMatches, 10) },
+      tokens: { exposed: false, note: "Tokens UltraFV3 ficam apenas no cache em memória por credencial e nunca são retornados por diagnóstico." },
+    },
+    flow: {
+      individualPartnersSync: { path: "Login FV3 do vendedor -> POST /auth/login -> GET /partners", identifierUsed: targetUser?.erpLoginUsername ? "erpLoginUsername do usuário CRM (valor mascarado na UI)" : null, authMode: "seller", endpoint: "/partners" },
+      allSellersSync: { path: "POST /erp/ultrafv3/sync/partners/all-sellers -> usuários ativos com Login FV3 -> syncPartnersByUser(user.id) -> GET /partners", lastRunsReturned: syncRuns.length },
+      orderErp: { path: "Oportunidade -> ownerSeller -> autenticação FV3 do vendedor -> GET /salesmen para OPERADOR/NUM_PEDIDO -> POST /orders", sellerId: targetUser?.id ?? null, sellerErpCode: targetUser?.erpCode ?? null, erpOperatorCode: targetUser?.erpOperatorCode ?? null, loginFV3Type: targetUser ? getMaskedLoginType(targetUser.erpLoginUsername) : null, cpf: normalizedCpf ? "informado" : null, cnpj: normalizedCnpj ? "informado" : null, resolvedOperator: salesmenOperator || crmOperator || null, resolvedNumPedido: salesmenNumPedido || null },
+    },
+    ultraFv3: liveUltraFv3,
+    divergences: alerts,
+  });
+});
+
 router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSchema), async (req, res) => {
   const { name, email, password, role, region, erpCode, erpOperatorCode, erpLoginUsername, erpLoginPassword } = req.body;
   if (req.user!.role === "gerente" && role === "diretor") {
