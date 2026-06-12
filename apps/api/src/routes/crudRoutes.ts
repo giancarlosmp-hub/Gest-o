@@ -8632,7 +8632,7 @@ router.post("/users/:id/erp-login/test", authorize("diretor", "gerente"), async 
   }
 });
 
-router.get("/settings/weekly-visit-minimum", async (_req, res) => {
+router.get("/settings/weekly-visit-minimum", authorize("diretor", "gerente"), async (_req, res) => {
   const weeklyVisitGoal = await getWeeklyVisitGoal();
   return res.json({ minimumWeeklyVisits: weeklyVisitGoal });
 });
