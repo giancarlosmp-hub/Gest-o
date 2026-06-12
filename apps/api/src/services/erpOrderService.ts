@@ -618,6 +618,7 @@ const SALESMAN_NAME_KEYS = [
   "salesmanName",
   "razaoSocial",
 ];
+const SALESMAN_DOCUMENT_KEYS = ["CPF", "CNPJ", "cpf", "cnpj", "document", "documentNumber", "cnpjCpf"];
 const SALESMAN_LOGIN_KEYS = [
   "LOGIN",
   "login",
@@ -627,7 +628,16 @@ const SALESMAN_LOGIN_KEYS = [
   "username",
   "email",
   "EMAIL",
+  ...SALESMAN_DOCUMENT_KEYS,
 ];
+
+
+const getErpLoginType = (value: unknown) => {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length === 11) return "cpf";
+  if (digits.length === 14) return "cnpj";
+  return String(value ?? "").trim() ? "usuario" : "ausente";
+};
 
 const normalizeErpLinkCodeForComparison = (value: unknown) => {
   const trimmed = String(value ?? "").trim();
@@ -950,16 +960,25 @@ async function createErpOrderFromOpportunityUnsafe(
   }, {
     salesmenDiagnostics: sequenceResolution.diagnostics,
   });
-  const numPedido = String(sequenceResolution.numPedido);
+  const salesmenNumPedido = String(sequenceResolution.numPedido || "");
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
+  const numPedido = salesmenNumPedido || pedidoIdImportacao;
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
+  const erpLoginType = getErpLoginType(sellerFv3Username);
+  const oldPessoaTypeConflictDetected = erpLoginType === "cpf" && /cnpj|pessoa\s*juri/i.test(JSON.stringify(sanitizeUltraValue(opportunity.ownerSeller)));
   const operatorResolutionDiagnostics = {
+    userId: opportunity.ownerSeller.id,
+    sellerName: opportunity.ownerSeller.name,
     sellerErpCode,
+    erpLoginType,
     crmOperator: operatorCode || null,
     salesmenOperator: sequenceResolution.operatorCode || null,
+    salesmenNumPedido: salesmenNumPedido || null,
     resolvedOperator: effectiveOperatorCode || null,
-    numPedido: numPedido || null,
+    resolvedNumPedido: numPedido || null,
+    matchedBy: sequenceResolution.diagnostics.matchedSalesmanFound ? sequenceResolution.diagnostics.matchedSalesmanCodeField : null,
+    oldPessoaTypeConflictDetected,
     authContext: sequenceResolution.diagnostics.authContext,
     reason: sequenceResolution.operatorCode
       ? "salesmen_operator"
@@ -967,26 +986,29 @@ async function createErpOrderFromOpportunityUnsafe(
         ? "crm_operator_fallback"
         : "missing_operator",
   };
-  logApiEvent("INFO", "[erp order] resolved seller ERP operator", operatorResolutionDiagnostics);
-  if (!numPedido || !effectiveOperatorCode || !sequenceResolution.diagnostics.matchedSalesmanFound || !Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode)) {
+  logApiEvent("INFO", "[erp order] resolved seller ERP operator/sequence", operatorResolutionDiagnostics);
+  if (!effectiveOperatorCode || !sequenceResolution.diagnostics.matchedSalesmanFound || !Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode)) {
     const diagnostics = { ...sequenceResolution.diagnostics, operatorResolution: operatorResolutionDiagnostics };
     const message = !diagnostics.matchedSalesmanFound
       ? `Vendedor ERP ${sellerErpCode} não retornou no /salesmen para a credencial utilizada.`
       : !effectiveOperatorCode
         ? `Vendedor ${sellerErpCode} sem operador ERP configurado no CRM e no UltraFV3.`
-        : `Vendedor ERP ${sellerErpCode} encontrado, mas sem NUM_PEDIDO configurado no UltraFV3.`;
-    logApiEvent("WARN", "[erp order] seller ERP operator/sequence resolution blocked order", {
+        : `Vínculo ERP inválido para vendedor ${sellerErpCode}.`;
+    logApiEvent("WARN", "[erp order] seller ERP operator resolution blocked order", {
       ...operatorResolutionDiagnostics,
       reason: !diagnostics.matchedSalesmanFound
         ? "salesman_not_found"
         : !effectiveOperatorCode
           ? "missing_operator"
-          : "missing_num_pedido",
+          : "invalid_numeric_codes",
     });
     throw Object.assign(
       new Error(message),
       { status: 400, diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
     );
+  }
+  if (!salesmenNumPedido) {
+    logApiEvent("WARN", "[erp order] /salesmen did not return NUM_PEDIDO; using PEDIDO_ID_IMPORTACAO as safe NUM_PEDIDO fallback", operatorResolutionDiagnostics);
   }
 
   const itens = opportunity.items.map((item, index) => {

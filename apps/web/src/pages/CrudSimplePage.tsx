@@ -51,6 +51,16 @@ type ErpSalesmenOptionsResponse = {
   warning?: string | null;
 };
 
+
+type UserErpDiagnostics = {
+  user: { id: string; name: string; role: string; erpSellerCode?: string | null; erpOperatorCode?: string | null; erpLoginConfigured: boolean; erpPasswordConfigured: boolean; erpLoginType: string; erpLoginLastTestStatus?: string | null; erpLoginLastTestAt?: string | null };
+  salesmen: { cacheUpdatedAt?: string | null; matchedCount: number; resultFound: boolean; operator?: string | null; numPedido?: string | null; raw?: unknown };
+  resolution: { crmOperator?: string | null; salesmenOperator?: string | null; salesmenNumPedido?: string | null; resolvedOperator?: string | null; resolvedNumPedido?: string | null; matchedBy?: string | null };
+  duplicates: { users: Array<{ id: string; name: string; email: string; role: string; erpCode?: string | null; erpOperatorCode?: string | null; erpLoginType?: string | null }>; salesmenCount: number };
+  oldPessoaTypeConflictDetected: boolean;
+  alerts: string[];
+};
+
 type ClientListItem = {
   id: string;
   ownerSellerId?: string;
@@ -278,6 +288,8 @@ export default function CrudSimplePage({
   const [isApplyingFilters, setIsApplyingFilters] = useState(false);
 
   const [openActionsMenuId, setOpenActionsMenuId] = useState<string | null>(null);
+  const [erpDiagnostics, setErpDiagnostics] = useState<UserErpDiagnostics | null>(null);
+  const [erpDiagnosticsLoading, setErpDiagnosticsLoading] = useState(false);
 
   // Import
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -1575,6 +1587,20 @@ export default function CrudSimplePage({
     }
   };
 
+
+  const openUserErpDiagnostics = async (item: ClientListItem) => {
+    setOpenActionsMenuId(null);
+    setErpDiagnosticsLoading(true);
+    try {
+      const response = await api.get<UserErpDiagnostics>(`/users/${item.id}/erp-diagnostics`);
+      setErpDiagnostics(response.data);
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível carregar diagnóstico ERP do vendedor."));
+    } finally {
+      setErpDiagnosticsLoading(false);
+    }
+  };
+
   const onEdit = (item: any) => {
     setFormError(null);
     setFormFieldErrors({});
@@ -1969,6 +1995,15 @@ export default function CrudSimplePage({
 
                             {openActionsMenuId === it.id ? (
                               <div className="absolute right-0 z-10 mt-1 min-w-28 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                {isUsersPage ? (
+                                  <button
+                                    type="button"
+                                    className="block w-full px-3 py-1.5 text-left text-sm text-sky-700 hover:bg-sky-50"
+                                    onClick={() => void openUserErpDiagnostics(it)}
+                                  >
+                                    Diagnóstico ERP do vendedor
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100"
@@ -2059,16 +2094,25 @@ export default function CrudSimplePage({
                                 {openActionsMenuId === it.id ? (
                                   <div className="absolute right-0 z-10 mt-1 min-w-28 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                                     {isUsersPage ? (
-                                      <button
-                                        type="button"
-                                        className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-brand-50"
-                                        onClick={() => {
-                                          setOpenActionsMenuId(null);
-                                          void testUserErpLogin(it);
-                                        }}
-                                      >
-                                        Testar login FV3
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-brand-50"
+                                          onClick={() => {
+                                            setOpenActionsMenuId(null);
+                                            void testUserErpLogin(it);
+                                          }}
+                                        >
+                                          Testar login FV3
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="block w-full px-3 py-1.5 text-left text-sm text-sky-700 hover:bg-sky-50"
+                                          onClick={() => void openUserErpDiagnostics(it)}
+                                        >
+                                          Diagnóstico ERP do vendedor
+                                        </button>
+                                      </>
                                     ) : null}
                                     <button
                                       type="button"
@@ -2422,6 +2466,51 @@ export default function CrudSimplePage({
                 </>
               ) : null}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {erpDiagnostics || erpDiagnosticsLoading ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Diagnóstico ERP do vendedor</h2>
+                <p className="text-sm text-slate-600">Não exibimos senha, token ou documento completo.</p>
+              </div>
+              <button type="button" className="rounded-lg border px-3 py-1 text-sm" onClick={() => setErpDiagnostics(null)}>Fechar</button>
+            </div>
+            {erpDiagnosticsLoading && !erpDiagnostics ? (
+              <p className="mt-4 text-sm text-slate-600">Carregando diagnóstico...</p>
+            ) : erpDiagnostics ? (
+              <div className="mt-4 space-y-4 text-sm">
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Código vendedor CRM</p><p className="font-semibold">{erpDiagnostics.user.erpSellerCode || "-"}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Operador CRM</p><p className="font-semibold">{erpDiagnostics.user.erpOperatorCode || "-"}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Login FV3 configurado</p><p className="font-semibold">{erpDiagnostics.user.erpLoginConfigured ? "Sim" : "Não"}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Tipo login FV3</p><p className="font-semibold">{erpDiagnostics.user.erpLoginType}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Resultado /salesmen</p><p className="font-semibold">{erpDiagnostics.salesmen.resultFound ? `${erpDiagnostics.salesmen.matchedCount} vínculo(s)` : "Não encontrado"}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">Operador UltraFV3</p><p className="font-semibold">{erpDiagnostics.salesmen.operator || "-"}</p></div>
+                  <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><p className="text-slate-500">NUM_PEDIDO retornado</p><p className="font-semibold">{erpDiagnostics.salesmen.numPedido || "-"}</p></div>
+                  <div className="rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200"><p className="text-emerald-700">Operador usado no pedido</p><p className="font-semibold text-emerald-900">{erpDiagnostics.resolution.resolvedOperator || "-"}</p></div>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-800">Alertas de inconsistência</h3>
+                  {erpDiagnostics.alerts.length ? (
+                    <ul className="mt-2 list-disc space-y-1 pl-5 text-amber-700">{erpDiagnostics.alerts.map((alert) => <li key={alert}>{alert}</li>)}</ul>
+                  ) : <p className="mt-2 text-emerald-700">Nenhuma inconsistência crítica detectada.</p>}
+                </div>
+                {erpDiagnostics.duplicates.users.length ? (
+                  <div>
+                    <h3 className="font-semibold text-slate-800">Duplicidades de usuário</h3>
+                    <ul className="mt-2 space-y-1 text-slate-700">{erpDiagnostics.duplicates.users.map((duplicate) => <li key={duplicate.id}>{duplicate.name} · {duplicate.email} · OPERADOR {duplicate.erpOperatorCode || "-"}</li>)}</ul>
+                  </div>
+                ) : null}
+                <div className="flex justify-end gap-2">
+                  <button type="button" className="rounded-lg border border-brand-200 px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50" onClick={() => void testUserErpLogin({ id: erpDiagnostics.user.id } as ClientListItem)}>Revalidar vínculo ERP</button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
