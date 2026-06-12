@@ -114,6 +114,7 @@ type SyncStatusResponse = {
   history?: SyncHistoryItem[];
   automaticSync?: {
     enabled: boolean;
+    enabledByEnv: boolean;
     active: boolean;
     timezone: string;
     windowStartHour: number;
@@ -128,6 +129,7 @@ type SyncStatusResponse = {
     currentRunId: string | null;
     lastCorrelationId: string | null;
     lastSkippedReason: string | null;
+    statusLabel: string;
   };
 };
 
@@ -212,7 +214,7 @@ export default function ErpIntegrationPanel() {
   const [data, setData] = useState<SyncStatusResponse | null>(null);
   const [authMode, setAuthMode] = useState<AuthModeDiagnostics | null>(null);
   const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState<SyncScopeKey | "allSellers" | "syncAll" | null>(null);
+  const [running, setRunning] = useState<SyncScopeKey | "allSellers" | "syncAll" | "automaticSync" | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
   const [fullSyncProgress, setFullSyncProgress] = useState<FullSyncProgress>({
@@ -334,6 +336,21 @@ export default function ErpIntegrationPanel() {
     }
   };
 
+  const toggleAutomaticSync = async () => {
+    const enabled = !(data?.automaticSync?.enabled ?? false);
+    setRunning("automaticSync");
+    try {
+      const response = await api.patch<{ automaticSync: SyncStatusResponse["automaticSync"] }>("/erp/ultrafv3/sync/automatic", { enabled });
+      setData((current) => current ? { ...current, automaticSync: response.data.automaticSync } : current);
+      toast.success(enabled ? "Sincronização automática ativada." : "Sincronização automática desativada.");
+      await load();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível alterar a sincronização automática."));
+    } finally {
+      setRunning(null);
+    }
+  };
+
   const summary = useMemo(() => {
     const statuses = data ? Object.values(data.status) : [];
     const errors = statuses.filter((item) => item?.status === "error").length;
@@ -443,8 +460,19 @@ export default function ErpIntegrationPanel() {
         <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Sincronização automática</p>
-            <p className={data?.automaticSync?.active ? "mt-1 text-emerald-700" : "mt-1 text-slate-600"}>{data?.automaticSync?.active ? "Ativa" : "Inativa"}</p>
-            <p className="mt-1 text-slate-500">07:00–19:00 · America/Sao_Paulo</p>
+            <p className={data?.automaticSync?.enabled ? "mt-1 text-emerald-700" : "mt-1 text-slate-600"}>{data?.automaticSync?.statusLabel || (data?.automaticSync?.enabled ? "Ativa" : "Inativa")}</p>
+            <p className="mt-1 text-slate-500">Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
+            {!data?.automaticSync?.enabledByEnv ? (
+              <p className="mt-1 text-amber-700">ERP_SYNC_SCHEDULER_ENABLED desabilitada no ambiente.</p>
+            ) : null}
+            <button
+              type="button"
+              className="mt-3 rounded-lg border border-brand-200 px-3 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-60"
+              onClick={() => void toggleAutomaticSync()}
+              disabled={running === "automaticSync"}
+            >
+              {data?.automaticSync?.enabled ? "Desativar sincronização automática" : "Ativar sincronização automática"}
+            </button>
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Última sincronização automática</p>

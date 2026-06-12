@@ -18,9 +18,11 @@ import {
   type RunSyncOptions,
 } from "../services/ultraFv3SyncService.js";
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
+import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 
 const AUTOMATIC_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+const AUTOMATIC_SYNC_CONFIG_KEY = "erp.automaticSync.config";
 const AUTOMATIC_SYNC_CHECK_INTERVAL_MS = 60 * 1000;
 const SAO_PAULO_TIME_ZONE = "America/Sao_Paulo";
 const AUTOMATIC_SYNC_START_HOUR = 7;
@@ -47,6 +49,7 @@ const AUTOMATIC_SYNC_STEPS: Array<{
 
 type AutomaticSyncState = {
   enabled: boolean;
+  enabledByEnv: boolean;
   active: boolean;
   timezone: typeof SAO_PAULO_TIME_ZONE;
   windowStartHour: number;
@@ -61,6 +64,11 @@ type AutomaticSyncState = {
   currentRunId: string | null;
   lastCorrelationId: string | null;
   lastSkippedReason: string | null;
+  statusLabel: string;
+};
+
+type AutomaticSyncPersistedConfig = {
+  enabled: boolean;
 };
 
 let automaticTimer: NodeJS.Timeout | null = null;
@@ -73,6 +81,30 @@ let lastAutomaticError: string | null = null;
 let currentAutomaticRunId: string | null = null;
 let lastAutomaticCorrelationId: string | null = null;
 let lastAutomaticSkippedReason: string | null = null;
+let persistedAutomaticSyncEnabled = false;
+
+
+async function loadAutomaticSyncPersistedConfig(): Promise<AutomaticSyncPersistedConfig> {
+  const stored = await prisma.appConfig.findUnique({
+    where: { key: AUTOMATIC_SYNC_CONFIG_KEY },
+    select: { value: true },
+  });
+  if (!stored?.value) return { enabled: false };
+  try {
+    const parsed = JSON.parse(stored.value) as Partial<AutomaticSyncPersistedConfig>;
+    return { enabled: parsed.enabled === true };
+  } catch {
+    return { enabled: false };
+  }
+}
+
+async function saveAutomaticSyncPersistedConfig(config: AutomaticSyncPersistedConfig) {
+  await prisma.appConfig.upsert({
+    where: { key: AUTOMATIC_SYNC_CONFIG_KEY },
+    update: { value: JSON.stringify(config) },
+    create: { key: AUTOMATIC_SYNC_CONFIG_KEY, value: JSON.stringify(config) },
+  });
+}
 
 const getSaoPauloHour = (date: Date) => {
   const hourText = new Intl.DateTimeFormat("en-US", {
@@ -184,9 +216,15 @@ function scheduleAutomaticSyncChecker() {
   automaticTimer.unref?.();
 }
 
-export function startErpSyncScheduler() {
+export async function startErpSyncScheduler() {
+  const config = await loadAutomaticSyncPersistedConfig();
+  persistedAutomaticSyncEnabled = config.enabled;
   if (!env.erpSyncSchedulerEnabled) {
-    logApiEvent("INFO", "[erp automatic sync] disabled by configuration");
+    logApiEvent("INFO", "[erp automatic sync] disabled by environment configuration", { envVar: "ERP_SYNC_SCHEDULER_ENABLED" });
+    return;
+  }
+  if (!persistedAutomaticSyncEnabled) {
+    logApiEvent("INFO", "[erp automatic sync] disabled by database configuration", { configKey: AUTOMATIC_SYNC_CONFIG_KEY });
     return;
   }
 
@@ -213,12 +251,33 @@ export function startErpSyncScheduler() {
 export function stopErpSyncScheduler() {
   if (automaticTimer) clearInterval(automaticTimer);
   automaticTimer = null;
-  nextAutomaticRunAt = null;
+  nextAutomaticRunAt = persistedAutomaticSyncEnabled ? calculateNextAutomaticRunAt(new Date()) : null;
+}
+
+export async function setErpAutomaticSyncEnabled(enabled: boolean) {
+  persistedAutomaticSyncEnabled = enabled;
+  await saveAutomaticSyncPersistedConfig({ enabled });
+  if (enabled) {
+    await startErpSyncScheduler();
+  } else {
+    stopErpSyncScheduler();
+  }
+  return getErpAutomaticSyncState();
+}
+
+export async function refreshErpAutomaticSyncConfig() {
+  const config = await loadAutomaticSyncPersistedConfig();
+  persistedAutomaticSyncEnabled = config.enabled;
+  if (config.enabled && env.erpSyncSchedulerEnabled && !automaticTimer) {
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
+  }
+  return getErpAutomaticSyncState();
 }
 
 export function getErpAutomaticSyncState(): AutomaticSyncState {
   return {
-    enabled: env.erpSyncSchedulerEnabled,
+    enabled: persistedAutomaticSyncEnabled,
+    enabledByEnv: env.erpSyncSchedulerEnabled,
     active: Boolean(automaticTimer),
     timezone: SAO_PAULO_TIME_ZONE,
     windowStartHour: AUTOMATIC_SYNC_START_HOUR,
@@ -233,6 +292,11 @@ export function getErpAutomaticSyncState(): AutomaticSyncState {
     currentRunId: currentAutomaticRunId,
     lastCorrelationId: lastAutomaticCorrelationId,
     lastSkippedReason: lastAutomaticSkippedReason,
+    statusLabel: Boolean(automaticTimer)
+      ? isInsideAutomaticSyncWindow(new Date())
+        ? "Ativa"
+        : "Ativa, aguardando próxima janela"
+      : "Inativa",
   };
 }
 

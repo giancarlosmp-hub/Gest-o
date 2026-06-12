@@ -43,7 +43,7 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });
-    startErpSyncScheduler();
+    void startErpSyncScheduler().catch((error) => logApiEvent("ERROR", "Falha ao iniciar scheduler ERP", { error: error instanceof Error ? error.message : String(error) }));
   });
 }
 
