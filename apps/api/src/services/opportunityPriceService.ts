@@ -162,12 +162,21 @@ export const calculateOpportunityPriceForTable = ({
 
   if (normalizedPriceTableCode === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE) {
     const basePrice = getProductBasePrice(product);
+    const calculatedPrice = basePrice > 0 ? null : findCalculatedPrice(product, normalizedPriceTableCode, erpPrices);
+    const selectedPrice = tablePrice?.price ?? rawTablePrice ?? calculatedPrice ?? basePrice;
+    const source = tablePrice
+      ? "productPrice"
+      : rawTablePrice
+        ? "rawProduct"
+        : calculatedPrice
+          ? "prices"
+          : "product.PRECO";
     return {
-      price: Number(basePrice.toFixed(2)),
+      price: Number(selectedPrice.toFixed(2)),
       priceTableCode: normalizedPriceTableCode,
-      priceTableMatched: basePrice > 0,
-      priceWarning: basePrice > 0 ? null : "Produto sem PRECO sincronizado para a tabela 1.",
-      source: "product.PRECO",
+      priceTableMatched: selectedPrice > 0,
+      priceWarning: selectedPrice > 0 ? null : "Produto sem preço válido sincronizado para a tabela 1.",
+      source,
     };
   }
 

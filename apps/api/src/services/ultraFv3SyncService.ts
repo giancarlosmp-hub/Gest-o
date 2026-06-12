@@ -1006,12 +1006,35 @@ export async function syncProducts(options?: RunSyncOptions) {
           suspendedByUltra ||
           outOfLineByUltra;
 
+        const isDiagnosticProduct = normalizeErpLookupCode(code) === DIAGNOSTIC_PRODUCT_CODE;
+        if (isDiagnosticProduct) {
+          logApiEvent("INFO", "[ultrafv3 sync products] product 273 received", {
+            correlationId,
+            code,
+            classCode: classCode || "default",
+            unit: unit || null,
+            price,
+            stockQuantity,
+            status: status || null,
+            activeFlag,
+            suspendedFlag,
+            payload: sanitizePayloadForLog(payload),
+          });
+        }
         if (!code) {
           diagnostics.invalidMissingCode += 1;
           continue;
         }
         if (!unit) {
           diagnostics.invalidMissingUnit += 1;
+          if (isDiagnosticProduct) {
+            logApiEvent("INFO", "[ultrafv3 sync products] product 273 excluded", {
+              correlationId,
+              reason: "missing_unit",
+              code,
+              classCode: classCode || "default",
+            });
+          }
           continue;
         }
         if (!isActive) diagnostics.invalidInactive += 1;
@@ -1165,6 +1188,19 @@ export async function syncProducts(options?: RunSyncOptions) {
               },
             });
           }
+        }
+        if (isDiagnosticProduct) {
+          logApiEvent("INFO", "[ultrafv3 sync products] product 273 synced", {
+            correlationId,
+            productId: product.id,
+            code,
+            classCode: classCode || "default",
+            isActive,
+            isSuspended,
+            stockNumber,
+            defaultPrice: normalizedPrice,
+            priceRowsFromProductPayload: extractProductPrices(payload, normalizedPrice, priceTableCode || "1", branchCode).length,
+          });
         }
         syncedCount += 1;
       }
@@ -2146,12 +2182,150 @@ async function syncReferenceData(
   );
 }
 
+
+const DIAGNOSTIC_PRODUCT_CODE = "273";
+
+const normalizeErpLookupCode = (value: unknown) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
+
+async function upsertProductPricesFromRows(rows: unknown[], correlationId: string) {
+  const diagnostics = {
+    received: rows.length,
+    matchedProducts: 0,
+    updatedPrices: 0,
+    createdPrices: 0,
+    missingProduct: 0,
+    invalidPrice: 0,
+    product273Received: 0,
+    product273Matched: 0,
+    product273Price: 0,
+  };
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const payload = row as Record<string, unknown>;
+    const productCode = pickFirstString(payload, ["CODPRODUTO", "COD_PRODUTO", "productCode", "erpProductCode", "produto"]);
+    const productClassCode = pickFirstString(payload, ["CODPRODUTO_CLAS", "COD_PRODUTO_CLAS", "productClassCode", "erpProductClassCode", "classificacao"]);
+    const priceTableCode = pickFirstString(payload, ["TABELA", "CODTABELA", "COD_TABELA", "TABELA_PRECO", "priceTableCode", "tabela"]);
+    const branchCode = pickFirstString(payload, ["CODFILIAL", "COD_FILIAL", "branchCode", "filial"]);
+    const price = parsePositivePrice(pickFirstValue(payload, ["PRECO", "PRECO_LISTA", "VALOR", "price", "preco", "valor"]));
+    const isDiagnosticProduct = normalizeErpLookupCode(productCode) === DIAGNOSTIC_PRODUCT_CODE;
+    if (isDiagnosticProduct) diagnostics.product273Received += 1;
+    if (!productCode || !price) {
+      if (!price) diagnostics.invalidPrice += 1;
+      if (isDiagnosticProduct) {
+        logApiEvent("INFO", "[ultrafv3 sync prices] product 273 price row ignored", {
+          correlationId,
+          productCode,
+          productClassCode,
+          priceTableCode,
+          branchCode,
+          reason: !productCode ? "missing_product_code" : "invalid_price",
+          price: price ?? 0,
+          payload: sanitizePayloadForLog(payload),
+        });
+      }
+      continue;
+    }
+
+    const normalizedProductCode = normalizeErpLookupCode(productCode);
+    const normalizedProductClassCode = normalizeErpLookupCode(productClassCode || "default") || "default";
+    const productCandidates = await prisma.product.findMany({
+      where: {
+        erpProductCode: { in: Array.from(new Set([productCode, normalizedProductCode].filter(Boolean))) },
+      },
+    });
+    const product = productCandidates.find((candidate) =>
+      normalizeErpLookupCode(candidate.erpProductCode) === normalizedProductCode &&
+      (normalizeErpLookupCode(candidate.erpProductClassCode) || "default") === normalizedProductClassCode
+    ) ?? null;
+    if (!product) {
+      diagnostics.missingProduct += 1;
+      if (isDiagnosticProduct) {
+        logApiEvent("INFO", "[ultrafv3 sync prices] product 273 price row has no matching CRM product", {
+          correlationId,
+          productCode,
+          productClassCode: productClassCode || "default",
+          priceTableCode: priceTableCode || null,
+          branchCode: branchCode || null,
+          price,
+        });
+      }
+      continue;
+    }
+
+    diagnostics.matchedProducts += 1;
+    if (isDiagnosticProduct) {
+      diagnostics.product273Matched += 1;
+      diagnostics.product273Price = price;
+    }
+    const existingPrice = await prisma.productPrice.findFirst({
+      where: {
+        productId: product.id,
+        erpPriceId: priceTableCode || null,
+        branchCode: branchCode || null,
+      },
+    });
+    if (existingPrice) {
+      await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price } });
+      diagnostics.updatedPrices += 1;
+    } else {
+      await prisma.productPrice.create({
+        data: {
+          productId: product.id,
+          erpPriceId: priceTableCode || null,
+          branchCode: branchCode || null,
+          price,
+        },
+      });
+      diagnostics.createdPrices += 1;
+    }
+    if (!product.defaultPrice || product.defaultPrice <= 0 || !priceTableCode || normalizeErpLookupCode(priceTableCode) === "1") {
+      await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: price, minPrice: product.minPrice && product.minPrice > 0 ? product.minPrice : price } });
+    }
+  }
+
+  logApiEvent("INFO", "[ultrafv3 sync prices] processed product price rows", { correlationId, diagnostics });
+  return diagnostics;
+}
+
 export const syncPriceTables = (options?: RunSyncOptions) =>
   syncReferenceData("priceTables", "/price-tables", options, ["/priceTables"]);
 export const syncPriceVariations = (options?: RunSyncOptions) =>
   syncReferenceData("priceVariations", "/priceVariations", options);
-export const syncPrices = (options?: RunSyncOptions) =>
-  syncReferenceData("prices", "/prices", options);
+export async function syncPrices(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
+  return runSync(
+    "prices",
+    async (correlationId) => {
+      const result = await fetchUltraFv3RowsWithAlias(
+        "/prices",
+        "prices",
+        correlationId,
+        resolved.credentials,
+      );
+      await prisma.appConfig.upsert({
+        where: { key: "erp.ultrafv3.prices" },
+        update: { value: JSON.stringify(result.rows) },
+        create: { key: "erp.ultrafv3.prices", value: JSON.stringify(result.rows) },
+      });
+      const productPriceDiagnostics = await upsertProductPricesFromRows(result.rows, correlationId);
+      return {
+        syncedCount: result.rows.length,
+        diagnostics: {
+          endpointUsed: 1,
+          aliasFallbackUsed: result.aliasFallbackUsed,
+          ...productPriceDiagnostics,
+        },
+      };
+    },
+    {
+      ...options,
+      authMode: resolved.authMode,
+      sellerId: resolved.sellerId ?? undefined,
+      sellerName: resolved.sellerName ?? undefined,
+    },
+  );
+}
 export const syncPaymentMethods = (options?: RunSyncOptions) =>
   syncReferenceData("paymentMethods", "/payment-methods", options, [
     "/paymentMethods",
@@ -2173,9 +2347,11 @@ export const syncSalesmen = (options?: RunSyncOptions) =>
 
 
 export type UltraFv3FullSyncStep = {
-  scope: Exclude<UltraFv3SyncScope, "orderStatus">;
+  scope: UltraFv3SyncScope;
   label: string;
   result: SyncResult;
+  nonCritical?: boolean;
+  warning?: string;
 };
 
 export type UltraFv3FullSyncResult = {
@@ -2191,12 +2367,14 @@ export type UltraFv3FullSyncResult = {
     branches: number;
   };
   steps: UltraFv3FullSyncStep[];
+  warnings?: Array<{ scope: UltraFv3SyncScope; label: string; message: string; correlationId: string }>;
 };
 
 const FULL_SYNC_STEPS: Array<{
-  scope: Exclude<UltraFv3SyncScope, "orderStatus">;
+  scope: UltraFv3SyncScope;
   label: string;
   run: (options?: RunSyncOptions) => Promise<SyncResult>;
+  nonCritical?: boolean;
 }> = [
   { scope: "connection", label: "Conexão", run: syncConnection },
   { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
@@ -2209,12 +2387,14 @@ const FULL_SYNC_STEPS: Array<{
   { scope: "paymentMethods", label: "Formas de pagamento", run: syncPaymentMethods },
   { scope: "branches", label: "Filiais", run: syncBranches },
   { scope: "operations", label: "Operações", run: syncOperations },
+  { scope: "orderStatus", label: "Status de pedidos", run: (options) => syncOrderStatus(() => import("./erpOrderService.js").then(({ syncErpOrderStatuses }) => syncErpOrderStatuses()), options), nonCritical: true },
 ];
 
 export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult> {
   const correlationId = randomUUID();
   const startedAt = Date.now();
   const steps: UltraFv3FullSyncStep[] = [];
+  const warnings: Array<{ scope: UltraFv3SyncScope; label: string; message: string; correlationId: string }> = [];
 
   logApiEvent("INFO", "[ultrafv3 sync-all] full ERP sync started", {
     correlationId,
@@ -2231,8 +2411,40 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
         step: index + 1,
         totalSteps: FULL_SYNC_STEPS.length,
       });
-      const result = await step.run({ correlationId, failIfLocked: true });
-      steps.push({ scope: step.scope, label: step.label, result });
+      let result: SyncResult;
+      try {
+        result = await step.run({ correlationId, failIfLocked: true });
+      } catch (error) {
+        if (!step.nonCritical) throw error;
+        const message = formatError(error);
+        warnings.push({ scope: step.scope, label: step.label, message, correlationId });
+        result = { syncedCount: 0, diagnostics: { nonCriticalError: 1 } };
+        logApiEvent("WARN", "[ultrafv3 sync-all] non-critical operational step ignored", {
+          correlationId,
+          scope: step.scope,
+          label: step.label,
+          step: index + 1,
+          totalSteps: FULL_SYNC_STEPS.length,
+          error: message,
+          operationalAlert: true,
+        });
+      }
+      if (step.nonCritical && (result.diagnostics?.nonCriticalOrderStatusErrors ?? 0) > 0) {
+        warnings.push({
+          scope: step.scope,
+          label: step.label,
+          message: `${result.diagnostics?.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
+          correlationId,
+        });
+      }
+      const stepWarning = step.nonCritical ? warnings.find((warning) => warning.scope === step.scope)?.message : undefined;
+      steps.push({
+        scope: step.scope,
+        label: step.label,
+        result,
+        ...(step.nonCritical ? { nonCritical: true } : {}),
+        ...(stepWarning ? { warning: stepWarning } : {}),
+      });
       logApiEvent("INFO", "[ultrafv3 sync-all] step finished", {
         correlationId,
         scope: step.scope,
@@ -2258,6 +2470,7 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
         branches: countByScope.get("branches") ?? 0,
       },
       steps,
+      warnings: warnings.length ? warnings : undefined,
     };
 
     logApiEvent("INFO", "[ultrafv3 sync-all] full ERP sync finished", response);

@@ -5906,6 +5906,22 @@ router.get("/products/search", async (req, res) => {
           ? "invalid_price"
           : null;
 
+    if (product.erpProductCode.replace(/^0+(?=\d)/, "") === "273") {
+      logApiEvent("INFO", "[products search] product 273 evaluated", {
+        query: q,
+        priceTableCode: requestedPriceTableCode,
+        productId: product.id,
+        erpProductCode: product.erpProductCode,
+        erpProductClassCode: product.erpProductClassCode,
+        isActive: product.isActive,
+        isSuspended: product.isSuspended,
+        isSynchronized,
+        stock,
+        pickedPrice,
+        hiddenReason,
+      });
+    }
+
     if (hiddenReason) {
       hiddenDiagnostics[hiddenReason] += 1;
       if (hiddenSamples.length < 5) {
@@ -7189,10 +7205,18 @@ router.get("/opportunities/:id/erp/orders", async (req, res) => {
 
   const orders = await prisma.erpOrderSync.findMany({
     where: { opportunityId: req.params.id },
-    orderBy: [{ createdAt: "desc" }]
+    orderBy: [
+      { status: "desc" },
+      { sentAt: "desc" },
+      { createdAt: "desc" }
+    ]
   });
+  const sentOrders = orders.filter((order) => order.status === ErpOrderSyncStatus.sent);
 
-  return res.status(200).json({ items: orders });
+  return res.status(200).json({
+    items: sentOrders.length ? sentOrders : orders,
+    hiddenSupersededErrorCount: sentOrders.length ? orders.filter((order) => order.status !== ErpOrderSyncStatus.sent).length : 0,
+  });
 });
 
 router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {

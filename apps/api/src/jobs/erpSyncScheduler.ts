@@ -339,6 +339,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   });
 
   const completedSteps: Array<{ scope: string; label: string }> = [];
+  const nonCriticalStepWarnings: Array<{ scope: string; label: string; step: number; message: string; correlationId: string }> = [];
   let failedStep: { scope: string; label: string; step: number } | null = null;
   let failedStepErrorPrefix: string | null = null;
 
@@ -352,12 +353,35 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
         totalSteps: AUTOMATIC_SYNC_STEPS.length,
       });
       try {
-        await step.run({
+        const result = await step.run({
           trigger: ErpSyncTrigger.scheduler,
           failIfLocked: true,
           correlationId,
         });
+        if (step.scope === "orderStatus" && (result as { diagnostics?: Record<string, number> }).diagnostics?.nonCriticalOrderStatusErrors) {
+          nonCriticalStepWarnings.push({
+            scope: step.scope,
+            label: step.label,
+            step: index + 1,
+            message: `${(result as { diagnostics?: Record<string, number> }).diagnostics?.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
+            correlationId,
+          });
+        }
       } catch (error) {
+        if (step.scope === "orderStatus") {
+          const message = formatErrorMessage(error);
+          nonCriticalStepWarnings.push({ scope: step.scope, label: step.label, step: index + 1, message, correlationId });
+          logApiEvent("WARN", "[erp automatic sync] non-critical operational step ignored", {
+            correlationId,
+            scope: step.scope,
+            label: step.label,
+            step: index + 1,
+            totalSteps: AUTOMATIC_SYNC_STEPS.length,
+            error: message,
+            operationalAlert: true,
+          });
+          continue;
+        }
         failedStep = { scope: step.scope, label: step.label, step: index + 1 };
         failedStepErrorPrefix = step.label;
         throw error;
@@ -388,6 +412,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           scheduledFor: scheduledFor?.toISOString() ?? null,
           timezone: SAO_PAULO_TIME_ZONE,
           completedSteps,
+          nonCriticalStepWarnings,
           totalSteps: AUTOMATIC_SYNC_STEPS.length,
         } as Prisma.InputJsonValue,
       },
@@ -402,6 +427,8 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
       status: "success",
       correlationId,
       runId: overallRun.id,
+      nonCriticalStepWarnings,
+      operationalWarning: nonCriticalStepWarnings.length > 0,
     });
   } catch (error) {
     const finishedAt = new Date();
