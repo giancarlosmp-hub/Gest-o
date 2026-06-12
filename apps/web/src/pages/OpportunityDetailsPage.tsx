@@ -326,6 +326,44 @@ const findDefaultSalesOperationCode = (options: ErpOption[]) =>
   options.find((option) => option.code === DEFAULT_ERP_OPERATION_CODE)?.code ||
   "";
 
+const getStockWarningKind = (stock?: number | null) => {
+  if (typeof stock !== "number" || !Number.isFinite(stock)) return null;
+  if (stock < 0) return "negative" as const;
+  if (stock === 0) return "zero" as const;
+  return null;
+};
+
+const getStockStatusPill = (stock?: number | null) => {
+  const warningKind = getStockWarningKind(stock);
+  if (warningKind === "negative") return { tone: "danger" as const, label: "Saldo negativo" };
+  if (warningKind === "zero") return { tone: "warning" as const, label: "Sem saldo" };
+  return null;
+};
+
+const confirmOrderStockWarnings = (items: OpportunityItem[]) => {
+  const negativeItems = items.filter((item) => getStockWarningKind(item.product?.stockQuantity) === "negative");
+  if (negativeItems.length) {
+    const itemList = negativeItems
+      .map((item) => `• ${item.productNameSnapshot}: ${Number(item.product?.stockQuantity || 0).toLocaleString("pt-BR")}`)
+      .join("\n");
+    return window.confirm(
+      `⚠️ SALDO NEGATIVO\n\nHá produto(s) com saldo negativo neste pedido ERP:\n${itemList}\n\nDeseja gerar o pedido mesmo assim?`,
+    );
+  }
+
+  const zeroItems = items.filter((item) => getStockWarningKind(item.product?.stockQuantity) === "zero");
+  if (zeroItems.length) {
+    const itemList = zeroItems
+      .map((item) => `• ${item.productNameSnapshot}: 0`)
+      .join("\n");
+    return window.confirm(
+      `Há produto(s) com estoque 0 (sem saldo) neste pedido ERP:\n${itemList}\n\nDeseja gerar o pedido mesmo assim?`,
+    );
+  }
+
+  return true;
+};
+
 const statusPillClassName: Record<
   "success" | "warning" | "danger" | "neutral",
   string
@@ -593,14 +631,8 @@ export default function OpportunityDetailsPage() {
   const itemsWithMissingErp = opportunityItems.filter(
     (opportunityItem) => !opportunityItem.erpProductCode?.trim(),
   );
-  const itemsWithInsufficientStock = opportunityItems.filter(
-    (opportunityItem) => {
-      const stockQuantity = opportunityItem.product?.stockQuantity;
-      return (
-        typeof stockQuantity === "number" &&
-        stockQuantity < Number(opportunityItem.quantity || 0)
-      );
-    },
+  const itemsWithStockWarnings = opportunityItems.filter((opportunityItem) =>
+    Boolean(getStockWarningKind(opportunityItem.product?.stockQuantity)),
   );
   const orderTotal = opportunityItemTotals.netTotal || item?.value || 0;
   const erpOrderReadiness = getErpOrderReadiness({
@@ -760,6 +792,7 @@ export default function OpportunityDetailsPage() {
     setSendingErpOrder(true);
     setErpOrderFeedback(null);
     try {
+      if (!confirmOrderStockWarnings(opportunityItems)) return;
       if (!erpOrderForm.expectedDeliveryDate) {
         toast.error(
           "Informe a Data prevista de entrega antes de enviar o pedido ERP.",
@@ -1621,9 +1654,9 @@ export default function OpportunityDetailsPage() {
                                 Produtos vinculados
                               </StatusPill>
                             )}
-                            {itemsWithInsufficientStock.length ? (
+                            {itemsWithStockWarnings.length ? (
                               <StatusPill tone="warning">
-                                Estoque insuficiente
+                                Alerta de estoque
                               </StatusPill>
                             ) : (
                               <StatusPill tone="success">
@@ -1639,10 +1672,8 @@ export default function OpportunityDetailsPage() {
                             {opportunityItems.map((opportunityItem) => {
                               const stockQuantity =
                                 opportunityItem.product?.stockQuantity;
-                              const insufficientStock =
-                                typeof stockQuantity === "number" &&
-                                stockQuantity <
-                                  Number(opportunityItem.quantity || 0);
+                              const stockStatusPill =
+                                getStockStatusPill(stockQuantity);
                               const missingErp =
                                 !opportunityItem.erpProductCode?.trim();
                               const productFields = [
@@ -1725,9 +1756,9 @@ export default function OpportunityDetailsPage() {
                                         ERP vinculado
                                       </StatusPill>
                                     )}
-                                    {insufficientStock ? (
-                                      <StatusPill tone="warning">
-                                        Estoque insuficiente
+                                    {stockStatusPill ? (
+                                      <StatusPill tone={stockStatusPill.tone}>
+                                        {stockStatusPill.label}
                                       </StatusPill>
                                     ) : null}
                                   </div>
@@ -1774,10 +1805,8 @@ export default function OpportunityDetailsPage() {
                               opportunityItems.map((opportunityItem) => {
                                 const stockQuantity =
                                   opportunityItem.product?.stockQuantity;
-                                const insufficientStock =
-                                  typeof stockQuantity === "number" &&
-                                  stockQuantity <
-                                    Number(opportunityItem.quantity || 0);
+                                const stockStatusPill =
+                                  getStockStatusPill(stockQuantity);
                                 const missingErp =
                                   !opportunityItem.erpProductCode?.trim();
                                 return (
@@ -1837,9 +1866,9 @@ export default function OpportunityDetailsPage() {
                                             ERP vinculado
                                           </StatusPill>
                                         )}
-                                        {insufficientStock ? (
-                                          <StatusPill tone="warning">
-                                            Estoque insuficiente
+                                        {stockStatusPill ? (
+                                          <StatusPill tone={stockStatusPill.tone}>
+                                            {stockStatusPill.label}
                                           </StatusPill>
                                         ) : null}
                                       </div>
