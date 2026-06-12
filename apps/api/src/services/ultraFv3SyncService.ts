@@ -10,7 +10,7 @@ import {
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
 import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type ErpRuntimeEnvironmentDiagnostics } from "./erpRuntimeConfig.js";
-import { normalizeCnpj, normalizeState } from "../utils/normalize.js";
+import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -368,7 +368,7 @@ const resolveClientTypeFromDocument = (normalizedDocument?: string | null) => {
   return undefined;
 };
 
-const toArray = (payload: unknown) => {
+const toArray = (payload: unknown): unknown[] => {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
@@ -379,8 +379,15 @@ const toArray = (payload: unknown) => {
       "result",
       "results",
       "content",
+      "SALESMAN",
+      "salesmen",
+      "vendedores",
     ]) {
       if (Array.isArray(record[key])) return record[key] as unknown[];
+      if (record[key] && typeof record[key] === "object" && !Array.isArray(record[key])) {
+        const nested: unknown[] = toArray(record[key]);
+        if (nested.length) return nested;
+      }
     }
   }
   return [];
@@ -1220,23 +1227,391 @@ const getConfiguredSellerCredentials = (
   };
 };
 
+
+
+type PartnerPersistenceDiagnostics = {
+  received: number;
+  withoutCode: number;
+  discardedNonObject: number;
+  created: number;
+  updated: number;
+  merged: number;
+  duplicatesFound: number;
+  ambiguousDuplicates: number;
+  sellerChangedCount: number;
+  cityCorrectedCount: number;
+  documentErpConflicts: number;
+  fallbackSellerLinks?: number;
+  validAfterNormalization?: number;
+  discardedAfterNormalization?: number;
+  receivedWithDocument: number;
+  receivedWithoutDocument: number;
+  updatedDocumentCount: number;
+};
+
+type PartnerMappedData = {
+  code: string;
+  name: string;
+  fantasyName: string | null;
+  cnpj?: string;
+  cnpjNormalized?: string;
+  city: string;
+  state: string;
+  region: string;
+  clientType?: "PF" | "PJ";
+  ownerSellerId: string;
+  segment?: string;
+  erpUpdatedAt: Date;
+  nameNormalized: string;
+  cityNormalized: string;
+};
+
+type PartnerClientCandidate = {
+  id: string;
+  code: string | null;
+  cnpj: string | null;
+  cnpjNormalized: string | null;
+  name: string;
+  nameNormalized: string | null;
+  city: string;
+  cityNormalized: string | null;
+  state: string;
+  ownerSellerId: string;
+  erpUpdatedAt: Date | null;
+  segment: string | null;
+  createdAt: Date;
+  _count: {
+    opportunities: number;
+    timelineEvents: number;
+    activities: number;
+    contacts: number;
+    agendaEvents: number;
+    agendaStops: number;
+  };
+};
+
+const partnerSellerCodeKeys = [
+  "VENDEDOR_DO_PARCEIRO",
+  "CODVENDEDOR",
+  "sellerCode",
+  "salesmanCode",
+  "codVendedor",
+  "vendedorCodigo",
+  "VENDEDOR",
+];
+
+const normalizePartnerIdentity = (value: unknown) => normalizeText(String(value ?? ""));
+const isPlaceholderCity = (value: unknown) => /^(nao informado|não informado|ni|-)$/i.test(normalizePartnerIdentity(value));
+
+const buildPartnerMappedData = (
+  payload: Record<string, unknown>,
+  ownerSellerId: string,
+  now = new Date(),
+): { data: PartnerMappedData; normalizedDocument: string; cnpj: string; mappedCity: string; mappedState: string; mappedAddress: string } => {
+  const code = pickPartnerCode(payload);
+  const cnpj = pickPartnerDocument(payload);
+  const normalizedDocument = normalizeDocument(cnpj);
+  const mappedCity = pickPartnerCity(payload);
+  const mappedState = pickPartnerState(payload);
+  const mappedRegion = pickFirstString(payload, [
+    "region",
+    "regiao",
+    "REGIAO",
+    "região",
+    "REGIÃO",
+    "cidadeAtuacao",
+    "CIDADE_ATUACAO",
+  ]);
+  const mappedAddress = pickPartnerAddress(payload);
+  const mappedName = pickFirstString(payload, [
+    "RAZAO_SOCIAL",
+    "NOME",
+    "corporateName",
+    "name",
+    "razaoSocial",
+    "nome",
+  ]);
+  const mappedFantasyName = pickFirstString(payload, [
+    "FANTASIA",
+    "fantasyName",
+    "nomeFantasia",
+    "apelido",
+  ]);
+  const name = mappedName || "Cliente sem nome";
+  const city = mappedCity || "Não informado";
+  return {
+    normalizedDocument,
+    cnpj,
+    mappedCity,
+    mappedState,
+    mappedAddress,
+    data: {
+      code,
+      name,
+      fantasyName: mappedFantasyName || null,
+      cnpj: cnpj || undefined,
+      cnpjNormalized: normalizedDocument || undefined,
+      city,
+      state: normalizeState(mappedState || "NI"),
+      region: mappedRegion || "Não informado",
+      clientType: resolveClientTypeFromDocument(normalizedDocument),
+      ownerSellerId,
+      segment: nonEmptyOrUndefined(mappedAddress),
+      erpUpdatedAt: now,
+      nameNormalized: normalizeText(name),
+      cityNormalized: normalizeText(city),
+    },
+  };
+};
+
+const selectPartnerClientCandidate = {
+  id: true,
+  code: true,
+  cnpj: true,
+  cnpjNormalized: true,
+  name: true,
+  nameNormalized: true,
+  city: true,
+  cityNormalized: true,
+  state: true,
+  ownerSellerId: true,
+  erpUpdatedAt: true,
+  segment: true,
+  createdAt: true,
+  _count: {
+    select: {
+      opportunities: true,
+      timelineEvents: true,
+      activities: true,
+      contacts: true,
+      agendaEvents: true,
+      agendaStops: true,
+    },
+  },
+} satisfies Prisma.ClientSelect;
+
+const getCandidateHistoryScore = (candidate: PartnerClientCandidate) =>
+  candidate._count.opportunities +
+  candidate._count.timelineEvents +
+  candidate._count.activities +
+  candidate._count.contacts +
+  candidate._count.agendaEvents +
+  candidate._count.agendaStops;
+
+const choosePrimaryPartnerClient = (candidates: PartnerClientCandidate[], ownerSellerId: string) =>
+  [...candidates].sort((a, b) => {
+    const historyDiff = getCandidateHistoryScore(b) - getCandidateHistoryScore(a);
+    if (historyDiff !== 0) return historyDiff;
+    if (a.ownerSellerId === ownerSellerId && b.ownerSellerId !== ownerSellerId) return -1;
+    if (b.ownerSellerId === ownerSellerId && a.ownerSellerId !== ownerSellerId) return 1;
+    const erpDiff = (b.erpUpdatedAt?.getTime() ?? 0) - (a.erpUpdatedAt?.getTime() ?? 0);
+    if (erpDiff !== 0) return erpDiff;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  })[0] ?? null;
+
+const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDocument: string) => {
+  const byCode = data.code
+    ? await prisma.client.findMany({
+        where: { code: data.code },
+        select: selectPartnerClientCandidate,
+      }) as PartnerClientCandidate[]
+    : [];
+  const byDocument = normalizedDocument
+    ? await prisma.client.findMany({
+        where: {
+          OR: [
+            { cnpjNormalized: normalizedDocument },
+            ...(data.cnpj ? [{ cnpj: data.cnpj }] : []),
+          ],
+        },
+        select: selectPartnerClientCandidate,
+      }) as PartnerClientCandidate[]
+    : [];
+  let byIdentity: PartnerClientCandidate[] = [];
+  if (!byCode.length && !byDocument.length && data.nameNormalized && data.cityNormalized && data.state) {
+    byIdentity = await prisma.client.findMany({
+      where: {
+        nameNormalized: data.nameNormalized,
+        cityNormalized: data.cityNormalized,
+        state: data.state,
+      },
+      select: selectPartnerClientCandidate,
+    }) as PartnerClientCandidate[];
+  }
+  const merged = new Map<string, PartnerClientCandidate>();
+  for (const candidate of [...byCode, ...byDocument, ...byIdentity]) merged.set(candidate.id, candidate);
+  return { candidates: [...merged.values()], byCode, byDocument, byIdentity };
+};
+
+const getPartnerAmbiguityReasons = (params: {
+  data: PartnerMappedData;
+  normalizedDocument: string;
+  byCode: PartnerClientCandidate[];
+  byDocument: PartnerClientCandidate[];
+}) => {
+  const reasons: string[] = [];
+  if (params.normalizedDocument) {
+    const conflictingDocs = params.byCode.filter((candidate) => {
+      const existingDoc = candidate.cnpjNormalized || normalizeDocument(candidate.cnpj);
+      return existingDoc && existingDoc !== params.normalizedDocument;
+    });
+    if (conflictingDocs.length) reasons.push("same_erp_code_conflicting_document");
+  }
+  if (params.data.code) {
+    const conflictingCodes = params.byDocument.filter((candidate) => candidate.code && candidate.code !== params.data.code);
+    if (conflictingCodes.length) reasons.push("same_document_conflicting_erp_code");
+  }
+  return reasons;
+};
+
+async function mergeDuplicateClientsIntoPrimary(
+  tx: Prisma.TransactionClient,
+  primary: PartnerClientCandidate,
+  duplicates: PartnerClientCandidate[],
+  data: PartnerMappedData,
+  correlationId: string,
+) {
+  const now = Date.now();
+  for (const duplicate of duplicates) {
+    await tx.opportunity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.activity.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.timelineEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.contact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.agendaEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.agendaStop.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await tx.client.update({
+      where: { id: duplicate.id },
+      data: {
+        code: duplicate.code ? `${duplicate.code}__MERGED__${now}` : null,
+        cnpjNormalized: null,
+        cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
+        name: `[ARQUIVADO ERP DUP] ${duplicate.name}`,
+        nameNormalized: normalizeText(`[ARQUIVADO ERP DUP] ${duplicate.name}`),
+      },
+    });
+    logApiEvent("INFO", "[ultrafv3 sync partners] duplicate client merged", {
+      correlationId,
+      primaryClientId: primary.id,
+      duplicateClientId: duplicate.id,
+      duplicateHistoryScore: getCandidateHistoryScore(duplicate),
+      match: {
+        code: data.code || null,
+        cnpjNormalized: data.cnpjNormalized || null,
+      },
+    });
+  }
+}
+
+async function persistPartnerPayload(
+  payload: Record<string, unknown>,
+  ownerSellerId: string,
+  diagnostics: PartnerPersistenceDiagnostics,
+  correlationId: string,
+) {
+  const code = pickPartnerCode(payload);
+  if (!code) {
+    diagnostics.withoutCode += 1;
+    return false;
+  }
+  const { data, normalizedDocument, cnpj, mappedCity, mappedState } = buildPartnerMappedData(payload, ownerSellerId);
+  if (cnpj) diagnostics.receivedWithDocument += 1;
+  else diagnostics.receivedWithoutDocument += 1;
+
+  const { candidates, byCode, byDocument } = await findPartnerClientCandidates(data, normalizedDocument);
+  const ambiguityReasons = getPartnerAmbiguityReasons({ data, normalizedDocument, byCode, byDocument });
+  if (ambiguityReasons.length) {
+    diagnostics.ambiguousDuplicates += 1;
+    diagnostics.documentErpConflicts += 1;
+    logApiEvent("WARN", "[ultrafv3 sync partners] ambiguous duplicate not merged", {
+      correlationId,
+      reasons: ambiguityReasons,
+      code: data.code,
+      cnpjNormalized: normalizedDocument || null,
+      candidateIds: candidates.map((candidate) => candidate.id),
+    });
+    return false;
+  }
+
+  const primary = choosePrimaryPartnerClient(candidates, ownerSellerId);
+  const duplicates = primary ? candidates.filter((candidate) => candidate.id !== primary.id) : [];
+  if (candidates.length > 1) diagnostics.duplicatesFound += candidates.length;
+
+  const updateData: Prisma.ClientUpdateInput = {
+    code: data.code,
+    name: data.name,
+    fantasyName: data.fantasyName,
+    cnpj: cnpj ? cnpj : undefined,
+    cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+    city: mappedCity ? data.city : primary?.city || data.city,
+    state: mappedState ? data.state : primary?.state || data.state,
+    region: data.region,
+    clientType: data.clientType,
+    ownerSeller: { connect: { id: ownerSellerId } },
+    segment: data.segment ?? primary?.segment ?? undefined,
+    erpUpdatedAt: data.erpUpdatedAt,
+    nameNormalized: data.nameNormalized,
+    cityNormalized: mappedCity ? data.cityNormalized : primary?.cityNormalized || data.cityNormalized,
+  };
+
+  if (primary) {
+    const sellerChanged = primary.ownerSellerId !== ownerSellerId;
+    const currentCityPlaceholder = isPlaceholderCity(primary.city);
+    const cityChanged = Boolean(mappedCity) && normalizeText(primary.city) !== normalizeText(data.city);
+    await prisma.$transaction(async (tx) => {
+      if (duplicates.length) await mergeDuplicateClientsIntoPrimary(tx, primary, duplicates, data, correlationId);
+      await tx.client.update({ where: { id: primary.id }, data: updateData });
+    });
+    diagnostics.updated += 1;
+    diagnostics.merged += duplicates.length;
+    if (sellerChanged) diagnostics.sellerChangedCount += 1;
+    if (cityChanged || (currentCityPlaceholder && mappedCity)) diagnostics.cityCorrectedCount += 1;
+    if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
+    return true;
+  }
+
+  await prisma.client.create({
+    data: {
+      code: data.code,
+      name: data.name,
+      fantasyName: data.fantasyName,
+      cnpj: cnpj || null,
+      cnpjNormalized: normalizedDocument || null,
+      city: data.city,
+      state: data.state,
+      region: data.region,
+      clientType: data.clientType,
+      ownerSellerId,
+      segment: data.segment,
+      erpUpdatedAt: data.erpUpdatedAt,
+      nameNormalized: data.nameNormalized,
+      cityNormalized: data.cityNormalized,
+    },
+  });
+  diagnostics.created += 1;
+  return true;
+}
+
 async function persistPartnerRowsForSeller(
   rows: unknown[],
   seller: SellerSyncUser,
   correlationId: string,
 ) {
-  const diagnostics = {
+  const diagnostics: PartnerPersistenceDiagnostics = {
     received: rows.length,
     withoutCode: 0,
     discardedNonObject: 0,
     created: 0,
     updated: 0,
-    preservedCommercialLinkWarnings: 0,
+    merged: 0,
+    duplicatesFound: 0,
+    ambiguousDuplicates: 0,
+    sellerChangedCount: 0,
+    cityCorrectedCount: 0,
+    documentErpConflicts: 0,
     receivedWithDocument: 0,
     receivedWithoutDocument: 0,
     updatedDocumentCount: 0,
   };
-  const warnings: string[] = [];
   let syncedCount = 0;
 
   for (const row of rows) {
@@ -1244,125 +1619,13 @@ async function persistPartnerRowsForSeller(
       diagnostics.discardedNonObject += 1;
       continue;
     }
-    const payload = row as Record<string, unknown>;
-    const code = pickPartnerCode(payload);
-    if (!code) {
-      diagnostics.withoutCode += 1;
-      continue;
-    }
-
-    const cnpj = pickPartnerDocument(payload);
-    const normalizedDocument = normalizeDocument(cnpj);
-    if (cnpj) diagnostics.receivedWithDocument += 1;
-    else diagnostics.receivedWithoutDocument += 1;
-    const state = pickPartnerState(payload);
-    const existing = await prisma.client.findFirst({
-      where: {
-        OR: [
-          { code },
-          ...(normalizedDocument
-            ? [{ cnpjNormalized: normalizedDocument }]
-            : []),
-          ...(normalizedDocument && code
-            ? [{ AND: [{ code }, { cnpjNormalized: normalizedDocument }] }]
-            : []),
-        ],
-      },
-      orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
-      select: { id: true, ownerSellerId: true, city: true, state: true },
-    });
-    const mappedCity = pickPartnerCity(payload);
-    const derivedClientType = resolveClientTypeFromDocument(normalizedDocument);
-    const data = {
-      code,
-      name:
-        pickFirstString(payload, [
-          "RAZAO_SOCIAL",
-          "NOME",
-          "name",
-          "corporateName",
-          "razaoSocial",
-          "nome",
-        ]) || "Cliente sem nome",
-      fantasyName:
-        pickFirstString(payload, [
-          "FANTASIA",
-          "fantasyName",
-          "nomeFantasia",
-          "apelido",
-        ]) || null,
-      cnpj: cnpj || undefined,
-      cnpjNormalized: normalizedDocument || undefined,
-      city: mappedCity || "Não informado",
-      state: normalizeState(state || "NI"),
-      region: pickFirstString(payload, ["region", "regiao"]) || "Não informado",
-      clientType: derivedClientType,
-      erpUpdatedAt: new Date(),
-    };
-
-    if (existing) {
-      const shouldPreserveCommercialLink = existing.ownerSellerId !== seller.id;
-      if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
-      await prisma.client.update({
-        where: { id: existing.id },
-        data: shouldPreserveCommercialLink
-          ? {
-              ...data,
-              cnpj: cnpj ? cnpj : undefined,
-              cnpjNormalized: normalizedDocument
-                ? normalizedDocument
-                : undefined,
-              city: mappedCity ? data.city : existing.city || data.city,
-              state: state ? data.state : existing.state || data.state,
-            }
-          : {
-              ...data,
-              ownerSellerId: seller.id,
-              cnpj: cnpj ? cnpj : undefined,
-              cnpjNormalized: normalizedDocument
-                ? normalizedDocument
-                : undefined,
-              city: mappedCity ? data.city : existing.city || data.city,
-              state: state ? data.state : existing.state || data.state,
-            },
-      });
-      diagnostics.updated += 1;
-      if (shouldPreserveCommercialLink) {
-        diagnostics.preservedCommercialLinkWarnings += 1;
-        warnings.push(
-          `Cliente ERP ${code} já possui vínculo comercial com outro vendedor CRM; vínculo preservado por limitação de vendedor único por cliente.`,
-        );
-      }
-    } else {
-      await prisma.client.create({
-        data: {
-          ...data,
-          cnpj: cnpj || null,
-          cnpjNormalized: normalizedDocument || null,
-          ownerSellerId: seller.id,
-        },
-      });
-      diagnostics.created += 1;
-    }
-    syncedCount += 1;
+    const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, diagnostics, correlationId);
+    if (persisted) syncedCount += 1;
   }
 
-  if (warnings.length) {
-    logApiEvent(
-      "WARN",
-      "[ultrafv3 sync partners] preserved existing commercial links",
-      {
-        correlationId,
-        sellerId: seller.id,
-        sellerName: seller.name,
-        warningCount: warnings.length,
-        limitation:
-          "Client.ownerSellerId suporta apenas um vendedor; vínculos existentes não são sobrescritos em sync por vendedor.",
-      },
-    );
-  }
-
-  return { syncedCount, diagnostics, warnings };
+  diagnostics.validAfterNormalization = syncedCount;
+  diagnostics.discardedAfterNormalization = Math.max(rows.length - syncedCount, 0);
+  return { syncedCount, diagnostics, warnings: [] as string[] };
 }
 
 export async function syncPartners(options?: RunSyncOptions) {
@@ -1393,16 +1656,23 @@ export async function syncPartners(options?: RunSyncOptions) {
             select: { id: true, erpCode: true },
           })
         )
-          .map((seller) => [seller.erpCode?.trim(), seller.id] as const)
+          .map((seller) => [normalizePartnerCacheCode(seller.erpCode?.trim() || ""), seller.id] as const)
           .filter(([code]) => Boolean(code)),
       );
 
-      const diagnostics = {
+      const diagnostics: PartnerPersistenceDiagnostics = {
         received: rows.length,
         withoutCode: 0,
+        discardedNonObject: 0,
         fallbackSellerLinks: 0,
         updated: 0,
         created: 0,
+        merged: 0,
+        duplicatesFound: 0,
+        ambiguousDuplicates: 0,
+        sellerChangedCount: 0,
+        cityCorrectedCount: 0,
+        documentErpConflicts: 0,
         validAfterNormalization: 0,
         discardedAfterNormalization: 0,
         receivedWithDocument: 0,
@@ -1411,136 +1681,18 @@ export async function syncPartners(options?: RunSyncOptions) {
       };
       let syncedCount = 0;
       for (const row of rows) {
-        if (!row || typeof row !== "object") continue;
-        const payload = row as Record<string, unknown>;
-        const code = pickPartnerCode(payload);
-        if (!code) {
-          diagnostics.withoutCode += 1;
+        if (!row || typeof row !== "object") {
+          diagnostics.discardedNonObject += 1;
           continue;
         }
-        const sellerCode = pickFirstString(payload, [
-          "VENDEDOR_DO_PARCEIRO",
-          "CODVENDEDOR",
-          "sellerCode",
-          "salesmanCode",
-          "codVendedor",
-          "vendedorCodigo",
-          "VENDEDOR",
-        ]);
-        const ownerSellerId =
-          sellersByErpCode.get(sellerCode) || fallbackSeller.id;
-        if (!sellersByErpCode.has(sellerCode))
-          diagnostics.fallbackSellerLinks += 1;
-        const cnpj = pickPartnerDocument(payload);
-        const normalizedDocument = normalizeDocument(cnpj);
-        const derivedClientType =
-          resolveClientTypeFromDocument(normalizedDocument);
-        const existing = await prisma.client.findFirst({
-          where: {
-            OR: [
-              { code },
-              ...(normalizedDocument
-                ? [{ cnpjNormalized: normalizedDocument }]
-                : []),
-              ...(normalizedDocument && code
-                ? [{ AND: [{ code }, { cnpjNormalized: normalizedDocument }] }]
-                : []),
-            ],
-          },
-          orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "asc" }],
-          select: { id: true },
-        });
-        const mappedCity = pickPartnerCity(payload);
-        const mappedState = pickPartnerState(payload);
-        const mappedRegion = pickFirstString(payload, [
-          "region",
-          "regiao",
-          "REGIAO",
-          "região",
-          "REGIÃO",
-          "cidadeAtuacao",
-          "CIDADE_ATUACAO",
-        ]);
-        const mappedAddress = pickPartnerAddress(payload);
-        const mappedName = pickFirstString(payload, [
-          "RAZAO_SOCIAL",
-          "NOME",
-          "corporateName",
-          "name",
-          "razaoSocial",
-          "nome",
-        ]);
-        const mappedFantasyName = pickFirstString(payload, [
-          "FANTASIA",
-          "fantasyName",
-          "nomeFantasia",
-          "apelido",
-        ]);
-        const data = {
-          code,
-          name: mappedName || "Cliente sem nome",
-          fantasyName: mappedFantasyName || null,
-          cnpj: cnpj || undefined,
-          cnpjNormalized: normalizedDocument || undefined,
-          city: mappedCity || "Não informado",
-          state: normalizeState(mappedState || "NI"),
-          region: mappedRegion || "Não informado",
-          clientType: derivedClientType,
-          ownerSellerId,
-          segment: nonEmptyOrUndefined(mappedAddress),
-          erpUpdatedAt: new Date(),
-        };
-        if (existing) {
-          const current = await prisma.client.findUnique({
-            where: { id: existing.id },
-            select: {
-              cnpj: true,
-              cnpjNormalized: true,
-              city: true,
-              state: true,
-              region: true,
-              segment: true,
-              ownerSellerId: true,
-            },
-          });
-          const safeData = {
-            ...data,
-            cnpj: cnpj ? cnpj : undefined,
-            cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
-            city: mappedCity ? data.city : current?.city || data.city,
-            state: mappedState ? data.state : current?.state || data.state,
-            region: mappedRegion ? data.region : current?.region || data.region,
-            segment: mappedAddress
-              ? mappedAddress
-              : current?.segment || undefined,
-          };
-          await prisma.client.update({
-            where: { id: existing.id },
-            data: safeData,
-          });
-          diagnostics.updated += 1;
-          if (normalizedDocument)
-            diagnostics.updatedDocumentCount =
-              (diagnostics.updatedDocumentCount || 0) + 1;
-        } else {
-          await prisma.client.create({
-            data: {
-              ...data,
-              cnpj: cnpj || null,
-              cnpjNormalized: normalizedDocument || null,
-            },
-          });
-          diagnostics.created += 1;
-        }
-        if (normalizedDocument)
-          diagnostics.receivedWithDocument =
-            (diagnostics.receivedWithDocument || 0) + 1;
-        else
-          diagnostics.receivedWithoutDocument =
-            (diagnostics.receivedWithoutDocument || 0) + 1;
-        syncedCount += 1;
-        diagnostics.validAfterNormalization += 1;
+        const payload = row as Record<string, unknown>;
+        const sellerCode = normalizePartnerCacheCode(pickFirstString(payload, partnerSellerCodeKeys));
+        const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
+        if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks = (diagnostics.fallbackSellerLinks || 0) + 1;
+        const persisted = await persistPartnerPayload(payload, ownerSellerId, diagnostics, correlationId);
+        if (persisted) syncedCount += 1;
       }
+      diagnostics.validAfterNormalization = syncedCount;
       diagnostics.discardedAfterNormalization = Math.max(
         diagnostics.received - diagnostics.validAfterNormalization,
         0,

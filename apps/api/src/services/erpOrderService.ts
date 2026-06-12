@@ -46,7 +46,8 @@ const logErpOrderRouteStage = (
 };
 
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
-const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,40}$/;
+const NUM_PEDIDO_MAX_LENGTH = 15;
+const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,15}$/;
 
 class ErpOrderSubmissionMutex {
   private tail: Promise<void> = Promise.resolve();
@@ -237,7 +238,7 @@ export const normalizeErpOrderParameterCodes = (params: Partial<OrderParameterCo
   branchCode: normalizeErpParameterCode(params.branchCode),
   operationCode: normalizeErpParameterCode(params.operationCode),
   expectedDeliveryDate: typeof params.expectedDeliveryDate === "string" ? params.expectedDeliveryDate.trim() : "",
-  erpOrderObservation: typeof params.erpOrderObservation === "string" ? params.erpOrderObservation.trim() : "",
+  erpOrderObservation: typeof params.erpOrderObservation === "string" ? params.erpOrderObservation : "",
   simulateOnly: params.simulateOnly === true,
 });
 
@@ -448,6 +449,7 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
   if (typeof payload.OBS_PEDIDO !== "string") errors.push("OBS_PEDIDO deve ser string.");
   if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
+  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ter no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres alfanuméricos seguros.`);
   if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
     errors.push("PEDIDO_ID_IMPORTACAO deve ser UUID v4.");
   }
@@ -530,19 +532,57 @@ async function assertReferenceCode(scope: "priceTables" | "operations", code: st
 }
 
 const extractErpOrderNumber = (payload: unknown) => {
-  if (!payload || typeof payload !== "object") return null;
-  const record = payload as Record<string, unknown>;
-  return (
-    pickFirstString(record, [
-      "NUM_PEDIDO",
-      "numPedido",
-      "numeroPedido",
-      "orderNumber",
-      "pedido",
-      "PEDIDO",
-      "idPedido",
-    ]) || null
-  );
+  const keys = [
+    "PEDIDO_ID",
+    "PEDIDO_NUMERO",
+    "NUMERO_PEDIDO_ERP",
+    "NUM_PEDIDO_ERP",
+    "NROPEDIDO",
+    "NR_PEDIDO",
+    "CODPEDIDO",
+    "COD_PEDIDO",
+    "ID_PEDIDO",
+    "idPedido",
+    "pedidoId",
+    "numeroPedidoErp",
+    "erpOrderNumber",
+    "orderNumber",
+    "pedido",
+    "PEDIDO",
+  ];
+  const visit = (value: unknown, depth = 0): string | null => {
+    if (!value || typeof value !== "object" || depth > 4) return null;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = visit(item, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    const record = value as Record<string, unknown>;
+    const direct = keys
+      .map((key) => record[key])
+      .find((candidate) =>
+        ["string", "number", "bigint"].includes(typeof candidate) &&
+        String(candidate).trim() !== "",
+      );
+    if (direct !== undefined) return String(direct).trim();
+    for (const nestedKey of ["data", "response", "result", "retorno", "Retorno", "order", "pedido"]) {
+      const found = visit(record[nestedKey], depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  return visit(payload);
+};
+
+const generateShortNumPedido = () => {
+  const timestamp = Date.now().toString(36).toUpperCase().slice(-8);
+  const random = Math.floor(Math.random() * 36 ** 5)
+    .toString(36)
+    .toUpperCase()
+    .padStart(5, "0");
+  return `P${timestamp}${random}`.slice(0, NUM_PEDIDO_MAX_LENGTH);
 };
 
 type SalesmanOrderSequenceDiagnostics = {
@@ -743,7 +783,13 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
     return response;
   }
 
-  return requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID(), 1, SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS);
+  const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(SALESMEN_ORDER_SEQUENCE_ENDPOINT, options.credentials, options.correlationId || randomUUID(), 1, SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS);
+  await prisma.appConfig.upsert({
+    where: { key: SALESMEN_CONFIG_KEY },
+    update: { value: JSON.stringify(response) },
+    create: { key: SALESMEN_CONFIG_KEY, value: JSON.stringify(response) },
+  });
+  return response;
 }
 
 async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
@@ -952,7 +998,7 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const salesmenNumPedido = String(sequenceResolution.numPedido || "");
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
-  const numPedido = salesmenNumPedido || pedidoIdImportacao;
+  const numPedido = generateShortNumPedido();
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
   const erpLoginType = getErpLoginType(sellerFv3Username);
@@ -998,7 +1044,7 @@ async function createErpOrderFromOpportunityUnsafe(
     );
   }
   if (!salesmenNumPedido) {
-    logApiEvent("WARN", "[erp order] /salesmen did not return NUM_PEDIDO; using PEDIDO_ID_IMPORTACAO as safe NUM_PEDIDO fallback", operatorResolutionDiagnostics);
+    logApiEvent("WARN", "[erp order] /salesmen did not return a valid short NUM_PEDIDO; CRM generated a local short NUM_PEDIDO", operatorResolutionDiagnostics);
   }
 
   const itens = opportunity.items.map((item, index) => {
@@ -1193,7 +1239,7 @@ async function createErpOrderFromOpportunityUnsafe(
       correlationId: pedidoIdImportacao,
       timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
     });
-    const erpOrderNumber = extractErpOrderNumber(erpResponse) || numPedido;
+    const erpOrderNumber = extractErpOrderNumber(erpResponse);
     const updated = await prisma.erpOrderSync.update({
       where: { id: sync.id },
       data: {
@@ -1331,7 +1377,7 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
   let errorCount = 0;
   for (const order of orders) {
     const query =
-      order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao;
+      order.erpOrderNumber || order.pedidoIdImportacao;
     try {
       const correlationId = randomUUID();
       logApiEvent("INFO", "[erp order status] querying UltraFV3 orderStatus", {

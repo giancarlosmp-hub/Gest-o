@@ -381,7 +381,7 @@ export const erpOrderGenerationSchema = z.object({
   branchCode: erpOrderParameterValueSchema,
   operationCode: erpOrderParameterValueSchema,
   expectedDeliveryDate: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Data prevista de entrega obrigatória no formato YYYY-MM-DD."),
-  erpOrderObservation: z.string().trim().max(2000, "Observações do pedido ERP devem ter no máximo 2000 caracteres.").optional().default(""),
+  erpOrderObservation: z.string().max(2000, "Observações do pedido ERP devem ter no máximo 2000 caracteres.").optional().default(""),
   simulateOnly: z.boolean().optional().default(false),
 });
 

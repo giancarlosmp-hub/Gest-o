@@ -110,6 +110,34 @@ let lastAutomaticCorrelationId: string | null = null;
 let lastAutomaticSkippedReason: AutomaticSyncSkipReason = null;
 let persistedAutomaticSyncEnabled = false;
 
+async function getAutomaticSyncConfigurationStatus() {
+  const diagnostics = ultraFv3Client.getDiagnostics();
+  if (diagnostics.isConfigured) {
+    return { ok: true, diagnostics, authMode: "global" as const, sellerId: null as string | null, sellerName: null as string | null };
+  }
+
+  const missingWithoutGlobalAuth = diagnostics.missingConfig.filter(
+    (key) => key !== "ULTRAFV3_USERNAME" && key !== "ULTRAFV3_PASSWORD",
+  );
+  if (missingWithoutGlobalAuth.length) {
+    return { ok: false, diagnostics, authMode: "none" as const, sellerId: null as string | null, sellerName: null as string | null };
+  }
+
+  const seller = await prisma.user.findFirst({
+    where: {
+      role: "vendedor",
+      isActive: true,
+      erpLoginUsername: { not: null },
+      erpLoginPasswordEncrypted: { not: null },
+    },
+    select: { id: true, name: true },
+    orderBy: [{ name: "asc" }],
+  });
+
+  return seller
+    ? { ok: true, diagnostics, authMode: "seller_reference" as const, sellerId: seller.id, sellerName: seller.name }
+    : { ok: false, diagnostics, authMode: "none" as const, sellerId: null as string | null, sellerName: null as string | null };
+}
 
 async function loadAutomaticSyncPersistedConfig(): Promise<AutomaticSyncPersistedConfig> {
   const stored = await prisma.appConfig.findUnique({
@@ -254,8 +282,9 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     return;
   }
 
-  const diagnostics = ultraFv3Client.getDiagnostics();
-  if (!diagnostics.isConfigured) {
+  const configuration = await getAutomaticSyncConfigurationStatus();
+  const diagnostics = configuration.diagnostics;
+  if (!configuration.ok) {
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent("WARN", "[erp automatic sync] scheduler tick skipped", {
@@ -447,8 +476,9 @@ export async function startErpSyncScheduler() {
     return;
   }
 
-  const diagnostics = ultraFv3Client.getDiagnostics();
-  if (!diagnostics.isConfigured) {
+  const configuration = await getAutomaticSyncConfigurationStatus();
+  const diagnostics = configuration.diagnostics;
+  if (!configuration.ok) {
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent("WARN", "[erp automatic sync] disabled because UltraFV3 is not configured", {
@@ -490,7 +520,8 @@ export async function refreshErpAutomaticSyncConfig() {
   const config = await loadAutomaticSyncPersistedConfig();
   persistedAutomaticSyncEnabled = config.enabled;
   if (config.enabled && env.erpSyncSchedulerEnabled && !automaticTimer) {
-    nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
+    const configuration = await getAutomaticSyncConfigurationStatus();
+    if (configuration.ok) nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
   }
   return getErpAutomaticSyncState();
 }
@@ -499,16 +530,16 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
   const { latestFinished, latestSuccess, latestAttempt } = await loadLatestAutomaticRunSummary();
   const now = new Date();
   const insideWindow = isInsideAutomaticSyncWindow(now);
-  const diagnostics = ultraFv3Client.getDiagnostics();
+  const configuration = await getAutomaticSyncConfigurationStatus();
 
   let derivedSkippedReason = lastAutomaticSkippedReason;
   if (!env.erpSyncSchedulerEnabled) derivedSkippedReason = "scheduler_disabled";
   else if (!persistedAutomaticSyncEnabled) derivedSkippedReason = "database_disabled";
-  else if (!diagnostics.isConfigured) derivedSkippedReason = "configuration_error";
+  else if (!configuration.ok) derivedSkippedReason = "configuration_error";
   else if (!insideWindow) derivedSkippedReason = "outside_window";
 
   const latestAttemptStatus = latestAttempt?.status ?? null;
-  const panelStatus: AutomaticSyncPanelStatus = !persistedAutomaticSyncEnabled || !env.erpSyncSchedulerEnabled || !diagnostics.isConfigured
+  const panelStatus: AutomaticSyncPanelStatus = !persistedAutomaticSyncEnabled || !env.erpSyncSchedulerEnabled || !configuration.ok
     ? "disabled"
     : automaticSyncRunning || latestAttemptStatus === ErpSyncRunStatus.running
       ? "running"

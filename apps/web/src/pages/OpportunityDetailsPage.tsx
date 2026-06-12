@@ -340,6 +340,15 @@ const getStockStatusPill = (stock?: number | null) => {
   return null;
 };
 
+
+const getFilenameFromContentDisposition = (value: unknown) => {
+  const header = String(value || "");
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1].trim().replace(/^"|"$/g, ""));
+  const match = /filename="?([^";]+)"?/i.exec(header);
+  return match?.[1]?.trim() || "";
+};
+
 const confirmOrderStockWarnings = (items: OpportunityItem[]) => {
   const negativeItems = items.filter((item) => getStockWarningKind(item.product?.stockQuantity) === "negative");
   if (negativeItems.length) {
@@ -422,14 +431,12 @@ function SearchableSelect({
     const isShowingSelectedValue =
       Boolean(selectedOption) &&
       (query === selectedOption?.label || query === selectedOption?.code);
-    if (!normalized || (open && isShowingSelectedValue)) return options.slice(0, 20);
-    return options
-      .filter((option) =>
-        normalizeSearchText(
-          `${option.label} ${option.code} ${option.name} ${option.description || ""}`,
-        ).includes(normalized),
-      )
-      .slice(0, 20);
+    if (!normalized || (open && isShowingSelectedValue)) return options;
+    return options.filter((option) =>
+      normalizeSearchText(
+        `${option.label} ${option.code} ${option.name} ${option.description || ""}`,
+      ).includes(normalized),
+    );
   }, [open, options, query, selectedOption]);
 
   return (
@@ -444,10 +451,14 @@ function SearchableSelect({
           loading ? "Carregando..." : placeholder || "Pesquisar e selecionar"
         }
         onFocus={(event) => {
+          setQuery(selectedOption?.label || value || "");
           setOpen(true);
           event.currentTarget.select();
         }}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          setQuery(selectedOption?.label || value || "");
+          setOpen(true);
+        }}
         onBlur={() =>
           setTimeout(() => {
             setOpen(false);
@@ -903,8 +914,9 @@ export default function OpportunityDetailsPage() {
             "O backend não retornou um PDF válido. Verifique sua sessão e tente novamente.",
         );
       }
-      const orderNumber =
-        order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao;
+      const filename = getFilenameFromContentDisposition(
+        response.headers?.["content-disposition"],
+      );
       const blob =
         response.data instanceof Blob
           ? response.data
@@ -912,7 +924,7 @@ export default function OpportunityDetailsPage() {
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `pedido-erp-${orderNumber}.pdf`;
+      link.download = filename || "pedido-erp-sem-numero.pdf";
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1978,10 +1990,17 @@ export default function OpportunityDetailsPage() {
                               </strong>
                             </p>
                           ) : null}
-                          {erpOrderFeedback.erpOrderNumber ? (
+                          {erpOrderFeedback.status === "enviado" ? (
                             <p className="mt-1">
                               Pedido ERP:{" "}
-                              <strong>{erpOrderFeedback.erpOrderNumber}</strong>
+                              <strong>
+                                {erpOrderFeedback.erpOrderNumber ||
+                                  "Pedido enviado, número ERP não retornado"}
+                              </strong>
+                            </p>
+                          ) : erpOrderFeedback.erpOrderNumber ? (
+                            <p className="mt-1">
+                              Pedido ERP: <strong>{erpOrderFeedback.erpOrderNumber}</strong>
                             </p>
                           ) : null}
                           {erpOrderFeedback.correlationId ? (
@@ -2067,8 +2086,7 @@ export default function OpportunityDetailsPage() {
                                     <p className="text-xs text-slate-600">
                                       Pedido:{" "}
                                       {order.erpOrderNumber ||
-                                        order.numPedido ||
-                                        "-"}
+                                        "Pedido enviado, número ERP não retornado"}
                                     </p>
                                   </div>
                                   {order.status === "sent" ? (

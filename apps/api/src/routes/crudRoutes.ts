@@ -1149,7 +1149,7 @@ const isDatabaseForeignKeyViolation = (error: unknown) => {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003";
 };
 
-type DuplicateClientMatchType = "cnpj" | "identity";
+type DuplicateClientMatchType = "code" | "cnpj" | "identity";
 
 type DuplicateClientSummary = {
   id: string;
@@ -1157,6 +1157,7 @@ type DuplicateClientSummary = {
   city: string | null;
   state: string | null;
   cnpj: string | null;
+  code?: string | null;
 };
 
 class DuplicateClientError extends Error {
@@ -1167,7 +1168,9 @@ class DuplicateClientError extends Error {
   constructor(existingClient: DuplicateClientSummary, matchType: DuplicateClientMatchType, message?: string) {
     super(message ?? (matchType === "cnpj"
       ? `Já existe um cliente com este CNPJ: ${existingClient.name}${existingClient.city && existingClient.state ? ` (${existingClient.city}/${existingClient.state})` : ""}.`
-      : DUPLICATE_CLIENT_MESSAGE));
+      : matchType === "code"
+        ? `Já existe um cliente com este código ERP: ${existingClient.name}${existingClient.code ? ` (${existingClient.code})` : ""}.`
+        : DUPLICATE_CLIENT_MESSAGE));
     this.name = "DuplicateClientError";
     this.statusCode = 409;
     this.existingClient = existingClient;
@@ -1180,7 +1183,9 @@ const normalizeClientForComparison = (client: {
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
+  code?: string | null;
 }) => ({
+  code: String(client.code ?? "").trim(),
   nameNormalized: normalizeText(client.name),
   cityNormalized: normalizeText(client.city),
   state: normalizeState(client.state),
@@ -1192,11 +1197,55 @@ const findDuplicateClient = async ({
   scope,
   ignoreClientId
 }: {
-  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null };
+  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null; code?: string | null };
   scope: Prisma.ClientWhereInput;
   ignoreClientId?: string;
 }) => {
   const normalized = normalizeClientForComparison(candidate);
+
+  if (normalized.code) {
+    const existingByCode = await prisma.client.findFirst({
+      where: { code: normalized.code, ...(ignoreClientId ? { id: { not: ignoreClientId } } : {}) },
+      select: { id: true, name: true, city: true, state: true, cnpj: true, code: true },
+    });
+    if (existingByCode) {
+      return {
+        matchType: "code" as const,
+        existingClient: {
+          id: existingByCode.id,
+          name: existingByCode.name,
+          city: existingByCode.city,
+          state: existingByCode.state,
+          cnpj: existingByCode.cnpj,
+          code: existingByCode.code,
+        },
+      };
+    }
+  }
+
+  if (normalized.cnpjNormalized) {
+    const existingByCnpj = await prisma.client.findFirst({
+      where: {
+        OR: [{ cnpjNormalized: normalized.cnpjNormalized }, ...(candidate.cnpj ? [{ cnpj: candidate.cnpj }] : [])],
+        ...(ignoreClientId ? { id: { not: ignoreClientId } } : {}),
+      },
+      select: { id: true, name: true, city: true, state: true, cnpj: true, code: true },
+    });
+    if (existingByCnpj) {
+      return {
+        matchType: "cnpj" as const,
+        existingClient: {
+          id: existingByCnpj.id,
+          name: existingByCnpj.name,
+          city: existingByCnpj.city,
+          state: existingByCnpj.state,
+          cnpj: existingByCnpj.cnpj,
+          code: existingByCnpj.code,
+        },
+      };
+    }
+  }
+
   const existingClients = await prisma.client.findMany({
     where: {
       ...scope,
@@ -1208,33 +1257,13 @@ const findDuplicateClient = async ({
       city: true,
       state: true,
       cnpj: true,
+      code: true,
       nameNormalized: true,
       cityNormalized: true,
       cnpjNormalized: true
     }
   });
 
-  if (normalized.cnpjNormalized) {
-    const existingByCnpj = existingClients.find((existing) => {
-      const existingCnpjNormalized = existing.cnpjNormalized || normalizeCnpj(existing.cnpj);
-      return existingCnpjNormalized === normalized.cnpjNormalized;
-    });
-
-    if (existingByCnpj) {
-      return {
-        matchType: "cnpj" as const,
-        existingClient: {
-          id: existingByCnpj.id,
-          name: existingByCnpj.name,
-          city: existingByCnpj.city,
-          state: existingByCnpj.state,
-          cnpj: existingByCnpj.cnpj
-        }
-      };
-    }
-
-    return null;
-  }
 
   const existingByIdentity = existingClients.find((existing) => {
     const existingNameNormalized = existing.nameNormalized || normalizeText(existing.name);
@@ -1257,13 +1286,14 @@ const findDuplicateClient = async ({
       name: existingByIdentity.name,
       city: existingByIdentity.city,
       state: existingByIdentity.state,
-      cnpj: existingByIdentity.cnpj
+      cnpj: existingByIdentity.cnpj,
+      code: existingByIdentity.code
     }
   };
 };
 
 const ensureClientIsNotDuplicate = async (params: {
-  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null };
+  candidate: { name?: string | null; city?: string | null; state?: string | null; cnpj?: string | null; code?: string | null };
   scope: Prisma.ClientWhereInput;
   ignoreClientId?: string;
 }) => {
@@ -4524,7 +4554,8 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
       name: req.body.name ?? old.name,
       city: req.body.city ?? old.city,
       state: req.body.state ?? old.state,
-      cnpj: req.body.cnpj ?? old.cnpj
+      cnpj: req.body.cnpj ?? old.cnpj,
+      code: req.body.code ?? old.code
     };
 
     const normalized = normalizeClientForComparison(mergedClientForValidation);
@@ -4759,7 +4790,8 @@ router.put("/companies/:id", validateBody(companySchema.partial()), async (req, 
       name: req.body.name ?? old.name,
       city: old.city,
       state: old.state,
-      cnpj: req.body.cnpj ?? old.cnpj
+      cnpj: req.body.cnpj ?? old.cnpj,
+      code: req.body.code ?? old.code
     };
 
     await ensureClientIsNotDuplicate({
@@ -6888,7 +6920,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
           data: {
             type: "status",
             description: [
-              `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+              `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. ${sync.erpOrderNumber ? `Pedido ERP: ${sync.erpOrderNumber}.` : "Pedido enviado, número ERP não retornado."}`,
               erpOrderObservation ? `Observações do pedido ERP enviadas: ${erpOrderObservation}` : "",
             ].filter(Boolean).join(" "),
             clientId: opportunity.clientId,
@@ -7197,7 +7229,7 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
       logRawFields: true,
       regenerate,
     });
-    const filename = getErpOrderPdfFilename(order);
+    const filename = getErpOrderPdfFilename(pdfOrder, metadata);
     if (regenerate) res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

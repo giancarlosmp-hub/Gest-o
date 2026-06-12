@@ -65,6 +65,7 @@ app.use(
       callback(new Error("Origin not allowed by CORS"));
     },
     credentials: true,
+    exposedHeaders: ["Content-Disposition"],
   })
 );
 app.use(requestContextMiddleware);
