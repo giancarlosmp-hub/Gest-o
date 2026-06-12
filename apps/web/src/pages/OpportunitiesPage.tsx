@@ -1,4 +1,4 @@
-import { DragEvent, FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, FormEvent, PointerEvent, ReactNode, TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { MoreHorizontal, Search } from "lucide-react";
@@ -381,6 +381,9 @@ export default function OpportunitiesPage() {
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
   const opportunitiesRequestRef = useRef(0);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const productDropdownTouchStartYRef = useRef<number | null>(null);
+  const productDropdownPointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const isProductDropdownPointerDraggingRef = useRef(false);
   const actionTodayFilter = searchParams.get("actionToday") === "true";
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
@@ -859,6 +862,58 @@ export default function OpportunitiesPage() {
       unitPrice: nextUnitPrice,
       canAddItem
     });
+  };
+
+  const handleProductDropdownTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    productDropdownTouchStartYRef.current = event.touches[0]?.clientY ?? null;
+    event.stopPropagation();
+  };
+
+  const handleProductDropdownTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+
+    const currentY = event.touches[0]?.clientY;
+    const previousY = productDropdownTouchStartYRef.current;
+    if (currentY == null || previousY == null) return;
+
+    const dropdown = event.currentTarget;
+    const deltaY = currentY - previousY;
+    const isAtTop = dropdown.scrollTop <= 0;
+    const isAtBottom = Math.ceil(dropdown.scrollTop + dropdown.clientHeight) >= dropdown.scrollHeight;
+
+    if ((isAtTop && deltaY > 0) || (isAtBottom && deltaY < 0)) {
+      event.preventDefault();
+    }
+
+    productDropdownTouchStartYRef.current = currentY;
+  };
+
+  const handleProductDropdownPointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    productDropdownPointerStartRef.current = { x: event.clientX, y: event.clientY };
+    isProductDropdownPointerDraggingRef.current = false;
+
+    if (event.pointerType === "mouse") {
+      event.preventDefault();
+    }
+  };
+
+  const handleProductDropdownPointerMove = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!productDropdownPointerStartRef.current) return;
+
+    const deltaX = Math.abs(event.clientX - productDropdownPointerStartRef.current.x);
+    const deltaY = Math.abs(event.clientY - productDropdownPointerStartRef.current.y);
+    if (deltaX > 6 || deltaY > 6) isProductDropdownPointerDraggingRef.current = true;
+  };
+
+  const resetProductDropdownPointer = () => {
+    productDropdownPointerStartRef.current = null;
+  };
+
+  const shouldIgnoreProductDropdownSelection = () => {
+    if (!isProductDropdownPointerDraggingRef.current) return false;
+
+    isProductDropdownPointerDraggingRef.current = false;
+    return true;
   };
 
   const persistOpportunityItem = async (draft: OpportunityItemForm) => {
@@ -1670,7 +1725,7 @@ export default function OpportunitiesPage() {
                   {isSyncingProducts ? "Atualizando estoque..." : "Atualizar estoque"}
                 </button>
               </div>
-              <label className="space-y-1 sm:col-span-4">
+              <div className="space-y-1 sm:col-span-4">
                 <span className="text-sm font-medium text-slate-700">Produto</span>
                 <input
                   ref={productSearchInputRef}
@@ -1692,17 +1747,33 @@ export default function OpportunitiesPage() {
                       setIsProductDropdownOpen(true);
                     }
                   }}
-                  onBlur={() => setIsProductDropdownOpen(false)}
+                  onBlur={() => window.setTimeout(() => setIsProductDropdownOpen(false), 120)}
                 />
                 {isProductDropdownOpen && productSearch.trim().length >= 2 && productOptions.length > 0 ? (
-                  <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white overscroll-contain">
+                  <div
+                    className="max-h-[min(14rem,40dvh)] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white [touch-action:pan-y] [-webkit-overflow-scrolling:touch] sm:max-h-56"
+                    onTouchStart={handleProductDropdownTouchStart}
+                    onTouchMove={handleProductDropdownTouchMove}
+                    onWheel={(event) => event.stopPropagation()}
+                  >
                     {productOptions.map((product) => (
                       <button
                         key={product.id}
                         type="button"
                         className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
-                        onPointerDown={(event) => {
-                          event.preventDefault();
+                        onPointerDown={handleProductDropdownPointerDown}
+                        onPointerMove={handleProductDropdownPointerMove}
+                        onPointerCancel={() => {
+                          resetProductDropdownPointer();
+                          isProductDropdownPointerDraggingRef.current = false;
+                        }}
+                        onPointerUp={(event) => {
+                          resetProductDropdownPointer();
+                          if (event.pointerType === "mouse" || shouldIgnoreProductDropdownSelection()) return;
+                          handleSelectProduct(product);
+                        }}
+                        onClick={() => {
+                          if (shouldIgnoreProductDropdownSelection()) return;
                           handleSelectProduct(product);
                         }}
                       >
@@ -1725,7 +1796,7 @@ export default function OpportunitiesPage() {
                 ) : null}
                 {priceTableWarning ? <p className="text-xs text-amber-700">{priceTableWarning}</p> : null}
                 {!isOpportunitySaved ? <p className="text-xs text-amber-700">Na nova oportunidade, o item é adicionado em uma lista temporária e salvo junto com a oportunidade.</p> : null}
-              </label>
+              </div>
               <label className="space-y-1">
                 <span className="text-sm font-medium text-slate-700">Quantidade</span>
                 <input className="w-full rounded-lg border border-slate-200 p-2" value={itemDraft.quantity} onChange={(e) => setItemDraft((current) => ({ ...current, quantity: sanitizeNumericInput(e.target.value) }))} />
