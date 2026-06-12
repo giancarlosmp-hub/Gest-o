@@ -19,7 +19,7 @@ type SyncScopeKey =
 
 type SyncScopeStatus = {
   scope?: SyncScopeKey;
-  status: "idle" | "running" | "success" | "error" | string;
+  status: "idle" | "running" | "success" | "error" | "skipped" | string;
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
@@ -131,6 +131,13 @@ type SyncStatusResponse = {
     currentRunId: string | null;
     lastCorrelationId: string | null;
     lastSkippedReason: string | null;
+    lastSkippedReasonLabel: string | null;
+    panelStatus: "scheduled" | "running" | "success" | "error" | "skipped_lock" | "outside_window" | "disabled" | string;
+    lastAttemptStatus: string | null;
+    lastAttemptAt: string | null;
+    lastAttemptFinishedAt: string | null;
+    lastAttemptCorrelationId: string | null;
+    lastStepError: string | null;
     statusLabel: string;
   };
 };
@@ -177,6 +184,7 @@ const statusLabel: Record<string, string> = {
   running: "Sincronizando",
   success: "Sincronizado",
   error: "Com erro",
+  skipped: "Ignorado",
 };
 
 const statusClasses: Record<string, string> = {
@@ -184,6 +192,17 @@ const statusClasses: Record<string, string> = {
   running: "bg-amber-50 text-amber-700 ring-amber-200",
   success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   error: "bg-red-50 text-red-700 ring-red-200",
+  skipped: "bg-orange-50 text-orange-700 ring-orange-200",
+};
+
+const automaticPanelClasses: Record<string, string> = {
+  scheduled: "bg-sky-50 text-sky-700 ring-sky-200",
+  running: "bg-amber-50 text-amber-700 ring-amber-200",
+  success: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  error: "bg-red-50 text-red-700 ring-red-200",
+  skipped_lock: "bg-orange-50 text-orange-700 ring-orange-200",
+  outside_window: "bg-slate-100 text-slate-700 ring-slate-200",
+  disabled: "bg-slate-100 text-slate-700 ring-slate-200",
 };
 
 const formatDate = (value?: string) => {
@@ -479,10 +498,15 @@ export default function ErpIntegrationPanel() {
         <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 text-xs md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Sincronização automática</p>
-            <p className={data?.automaticSync?.enabled ? "mt-1 text-emerald-700" : "mt-1 text-slate-600"}>{data?.automaticSync?.statusLabel || (data?.automaticSync?.enabled ? "Ativa" : "Inativa")}</p>
-            <p className="mt-1 text-slate-500">Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
+            <span className={`mt-2 inline-flex rounded-full px-2 py-1 font-semibold ring-1 ${automaticPanelClasses[data?.automaticSync?.panelStatus || "disabled"] || automaticPanelClasses.disabled}`}>
+              {data?.automaticSync?.statusLabel || (data?.automaticSync?.enabled ? "Agendada" : "Inativa")}
+            </span>
+            <p className="mt-2 text-slate-500">Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
             {!data?.automaticSync?.enabledByEnv ? (
               <p className="mt-1 text-amber-700">ERP_SYNC_SCHEDULER_ENABLED desabilitada no ambiente.</p>
+            ) : null}
+            {data?.automaticSync?.lastSkippedReasonLabel ? (
+              <p className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-amber-800">Motivo atual: {data.automaticSync.lastSkippedReasonLabel}</p>
             ) : null}
             <button
               type="button"
@@ -496,13 +520,20 @@ export default function ErpIntegrationPanel() {
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Última sincronização automática</p>
             <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.lastRunAt || undefined)}</p>
+            <p className="mt-1 text-slate-500">Última execução real concluída: {formatDate(data?.automaticSync?.lastFinishedAt || undefined)}</p>
+            <p className="mt-1 text-slate-500">Último sucesso: {formatDate(data?.automaticSync?.lastSuccessAt || undefined)}</p>
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Próxima execução prevista</p>
             <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.nextRunAt || undefined)}</p>
+            <p className="mt-1 text-slate-500">A previsão só é recalculada após execução real (sucesso/erro); lock mantém o horário pendente.</p>
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
-            <p className="font-semibold text-slate-700">Último erro automático</p>
+            <p className="font-semibold text-slate-700">Último evento automático</p>
+            <p className="mt-1 text-slate-600">Status: {statusLabel[data?.automaticSync?.lastAttemptStatus || "idle"] || data?.automaticSync?.lastAttemptStatus || "Nunca"}</p>
+            <p className="mt-1 text-slate-600">Início: {formatDate(data?.automaticSync?.lastAttemptAt || undefined)}</p>
+            <p className="mt-1 text-slate-600">Fim: {formatDate(data?.automaticSync?.lastAttemptFinishedAt || undefined)}</p>
+            <p className="mt-1 truncate text-slate-500" title={data?.automaticSync?.lastAttemptCorrelationId || undefined}>correlationId: {data?.automaticSync?.lastAttemptCorrelationId || "—"}</p>
             <p className={data?.automaticSync?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>{data?.automaticSync?.lastError || "Nenhum erro registrado."}</p>
           </div>
         </div>
