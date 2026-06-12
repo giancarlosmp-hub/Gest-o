@@ -127,10 +127,16 @@ export default function App() {
           element={canAccessRoute("usuarios", user?.role) ? <Navigate to={usersRedirectPath} replace /> : <Navigate to="/" replace />}
         />
 
-        <Route path="configurações" element={canAccessRoute("configuracoes", user?.role) ? <SettingsPage /> : <Navigate to="/" replace />} />
-        <Route path="configuracoes" element={<Navigate to={`/configurações${location.search}${location.hash}`} replace />} />
+        <Route path="configurações" element={<RoleRoute route="configuracoes"><SettingsPage /></RoleRoute>} />
+        <Route
+          path="configuracoes"
+          element={canAccessRoute("configuracoes", user?.role) ? <Navigate to={`/configurações${location.search}${location.hash}`} replace /> : <Navigate to="/" replace />}
+        />
 
-        <Route path="configurações/kpis-atividades" element={<Navigate to="/configurações?section=kpis" replace />} />
+        <Route
+          path="configurações/kpis-atividades"
+          element={canAccessRoute("configuracoes", user?.role) ? <Navigate to="/configurações?section=kpis" replace /> : <Navigate to="/" replace />}
+        />
       </Route>
     </Routes>
   );

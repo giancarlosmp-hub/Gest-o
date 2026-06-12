@@ -6,7 +6,7 @@ const routeAccess: Record<AppRoute, UserRole[]> = {
   equipe: ["diretor", "gerente"],
   objetivos: ["diretor", "gerente"],
   usuarios: ["diretor", "gerente"],
-  configuracoes: ["diretor", "gerente", "vendedor"],
+  configuracoes: ["diretor", "gerente"],
   assistenteTecnico: ["diretor", "gerente", "vendedor"]
 };
 
