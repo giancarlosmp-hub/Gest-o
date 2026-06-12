@@ -857,19 +857,31 @@ export default function OpportunityDetailsPage() {
         message,
         guidance: getErpOrderFailureGuidance(maybeResponse, message),
       });
+      let successfulOrderRecovered = null as ErpOrderSync | null;
       try {
         const ordersResponse = await api.get(
           `/opportunities/${item.id}/erp/orders`,
         );
-        setErpOrders(
-          Array.isArray(ordersResponse.data?.items)
-            ? ordersResponse.data.items
-            : [],
-        );
+        const nextOrders = Array.isArray(ordersResponse.data?.items)
+          ? ordersResponse.data.items
+          : [];
+        setErpOrders(nextOrders);
+        successfulOrderRecovered = nextOrders.find(isSuccessfulErpOrderSync) || null;
       } catch {
         // mantém o feedback do erro principal mesmo se a atualização do histórico falhar
       }
-      toast.error(message);
+      if (successfulOrderRecovered) {
+        setErpOrderFeedback({
+          status: "enviado",
+          pedidoIdImportacao: successfulOrderRecovered.pedidoIdImportacao,
+          erpOrderNumber: successfulOrderRecovered.erpOrderNumber,
+          correlationId: errorCorrelationId,
+          message: "Pedido enviado ao ERP; erro anterior/duplicado foi ignorado porque já existe pedido enviado para esta oportunidade.",
+        });
+        toast.success("Pedido enviado ao ERP");
+      } else {
+        toast.error(message);
+      }
     } finally {
       setSendingErpOrder(false);
     }

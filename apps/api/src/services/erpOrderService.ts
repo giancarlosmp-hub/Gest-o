@@ -1378,8 +1378,8 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
   for (const order of orders) {
     const query =
       order.erpOrderNumber || order.pedidoIdImportacao;
+    const correlationId = randomUUID();
     try {
-      const correlationId = randomUUID();
       logApiEvent("INFO", "[erp order status] querying UltraFV3 orderStatus", {
         erpOrderSyncId: order.id,
         opportunityId: order.opportunityId,
@@ -1427,27 +1427,29 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
         where: { id: order.id },
         data: {
           syncErrors: toJson([
-            { message, at: new Date().toISOString(), operation: "orderStatus" },
+            { message, at: new Date().toISOString(), operation: "orderStatus", correlationId, nonCritical: true },
           ]),
           statusSyncedAt: new Date(),
         },
       });
       logApiEvent(
-        "ERROR",
-        "[erp order status] UltraFV3 order status sync failed",
+        "WARN",
+        "[erp order status] UltraFV3 order status sync failed (non-critical)",
         {
           erpOrderSyncId: order.id,
           opportunityId: order.opportunityId,
           pedidoIdImportacao: order.pedidoIdImportacao,
           query,
+          correlationId,
           error: message,
+          nonCritical: true,
         },
       );
       await sleep(250);
     }
   }
 
-  return { syncedCount, errorCount };
+  return { syncedCount, errorCount, diagnostics: { nonCriticalOrderStatusErrors: errorCount } };
 }
 
 

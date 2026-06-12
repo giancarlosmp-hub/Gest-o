@@ -88,6 +88,7 @@ type FullSyncResponse = {
   success: true;
   durationMs: number;
   correlationId: string;
+  warnings?: Array<{ scope: SyncScopeKey | string; label: string; message: string; correlationId: string }>;
   stats: {
     clients: number;
     products: number;
@@ -150,7 +151,7 @@ type SyncCardConfig = {
   description: string;
 };
 
-const FULL_SYNC_STEPS: Array<{ key: Exclude<SyncScopeKey, "orderStatus">; label: string }> = [
+const FULL_SYNC_STEPS: Array<{ key: SyncScopeKey; label: string; nonCritical?: boolean }> = [
   { key: "connection", label: "Conexão" },
   { key: "salesmen", label: "Vendedores" },
   { key: "partners", label: "Clientes" },
@@ -162,11 +163,12 @@ const FULL_SYNC_STEPS: Array<{ key: Exclude<SyncScopeKey, "orderStatus">; label:
   { key: "paymentMethods", label: "Formas de pagamento" },
   { key: "branches", label: "Filiais" },
   { key: "operations", label: "Operações" },
+  { key: "orderStatus", label: "Status de pedidos", nonCritical: true },
 ];
 
 const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
-  { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos válidos", description: "Importa somente produtos ativos, não suspensos, com código ERP, unidade e preço maior que zero." },
+  { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos sincronizados", description: "Importa produtos com código ERP e unidade; a seleção da oportunidade exibe apenas itens com preço válido, mesmo com estoque zerado." },
   { key: "partners", title: "Clientes/parceiros", endpoint: "partners", countLabel: "Clientes", description: "Atualiza código ERP, nome, cidade, UF e CNPJ/CPF quando disponíveis." },
   { key: "orderStatus", title: "Status de pedidos", endpoint: "order-status", countLabel: "Pedidos consultados", description: "Consulta o /orderStatus em modo somente leitura para atualizar o acompanhamento operacional dos pedidos já enviados." },
   { key: "salesmen", title: "Vendedores", endpoint: "salesmen", description: "Persiste o catálogo de vendedores com código ERP para vínculo com usuários CRM." },
@@ -348,7 +350,11 @@ export default function ErpIntegrationPanel() {
         percent: 100,
         correlationId: response.data.correlationId,
       });
-      toast.success(`Sincronização Completa ERP finalizada em ${response.data.durationMs}ms.`);
+      if (response.data.warnings?.length) {
+        toast.warning(`Sincronização Completa ERP concluída com aviso operacional: ${response.data.warnings[0].label}.`);
+      } else {
+        toast.success(`Sincronização Completa ERP finalizada em ${response.data.durationMs}ms.`);
+      }
     } catch (error) {
       window.clearInterval(timer);
       await load().catch(() => undefined);
@@ -567,7 +573,7 @@ export default function ErpIntegrationPanel() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h4 className="text-base font-semibold">Sincronização Completa ERP</h4>
-            <p className="mt-1 text-sm text-white/85">Sincroniza todos os catálogos UltraFV3 em sequência, sem execução paralela, parando no primeiro erro crítico.</p>
+            <p className="mt-1 text-sm text-white/85">Sincroniza todos os catálogos UltraFV3 em sequência, sem execução paralela, parando no primeiro erro crítico. Status de pedidos é leitura operacional e vira aviso não crítico.</p>
           </div>
           <button
             type="button"
@@ -837,7 +843,7 @@ export default function ErpIntegrationPanel() {
             <p className="mt-3 text-sm text-slate-700">Toda a estrutura ERP será sincronizada novamente.<br />Deseja continuar?</p>
             <ul className="mt-4 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
               {FULL_SYNC_STEPS.map((step) => (
-                <li key={step.key} className="flex items-center gap-2"><span className="text-emerald-600">✓</span>{step.label}</li>
+                <li key={step.key} className="flex items-center gap-2"><span className={step.nonCritical ? "text-amber-500" : "text-emerald-600"}>{step.nonCritical ? "!" : "✓"}</span>{step.label}{step.nonCritical ? <span className="text-xs text-amber-700">(aviso)</span> : null}</li>
               ))}
             </ul>
             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
