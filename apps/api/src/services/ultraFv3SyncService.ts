@@ -368,7 +368,7 @@ const resolveClientTypeFromDocument = (normalizedDocument?: string | null) => {
   return undefined;
 };
 
-const toArray = (payload: unknown) => {
+const toArray = (payload: unknown): unknown[] => {
   if (Array.isArray(payload)) return payload;
   if (payload && typeof payload === "object") {
     const record = payload as Record<string, unknown>;
@@ -379,8 +379,15 @@ const toArray = (payload: unknown) => {
       "result",
       "results",
       "content",
+      "SALESMAN",
+      "salesmen",
+      "vendedores",
     ]) {
       if (Array.isArray(record[key])) return record[key] as unknown[];
+      if (record[key] && typeof record[key] === "object" && !Array.isArray(record[key])) {
+        const nested: unknown[] = toArray(record[key]);
+        if (nested.length) return nested;
+      }
     }
   }
   return [];

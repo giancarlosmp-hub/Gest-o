@@ -6888,7 +6888,7 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
           data: {
             type: "status",
             description: [
-              `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. Pedido: ${sync.erpOrderNumber || sync.numPedido || sync.pedidoIdImportacao}.`,
+              `${previousOrderCount > 0 ? "Reenvio" : "Geração"} de pedido ERP concluída. ${sync.erpOrderNumber ? `Pedido ERP: ${sync.erpOrderNumber}.` : "Pedido enviado, número ERP não retornado."}`,
               erpOrderObservation ? `Observações do pedido ERP enviadas: ${erpOrderObservation}` : "",
             ].filter(Boolean).join(" "),
             clientId: opportunity.clientId,
@@ -7197,7 +7197,7 @@ router.get("/opportunities/:id/erp/orders/:orderId/pdf", async (req, res) => {
       logRawFields: true,
       regenerate,
     });
-    const filename = getErpOrderPdfFilename(order);
+    const filename = getErpOrderPdfFilename(pdfOrder, metadata);
     if (regenerate) res.setHeader("Cache-Control", "no-store");
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

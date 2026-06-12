@@ -1347,17 +1347,26 @@ const drawTableRow = (
   );
 };
 
+const sanitizePdfFilenamePart = (value: unknown, fallback: string) => {
+  const sanitized = cleanText(value, fallback)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return sanitized || fallback;
+};
+
 export const getErpOrderPdfFilename = (
-  order: Pick<
-    ErpOrderSync,
-    "erpOrderNumber" | "numPedido" | "pedidoIdImportacao"
-  >,
+  order: ErpOrderPdfRecord,
+  metadata: ErpOrderPdfMetadata = {},
 ) => {
-  const orderNumber = cleanText(
-    order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao,
-    "sem-numero",
-  ).replace(/[^a-zA-Z0-9._-]/g, "-");
-  return `pedido-erp-${orderNumber}.pdf`;
+  const clientName = getClientLegalName(order.opportunity.client, metadata.partner)
+    || getClientFantasyName(order.opportunity.client, metadata.partner);
+  const orderNumber = order.erpOrderNumber
+    || (order.pedidoIdImportacao ? order.pedidoIdImportacao.slice(0, 15) : "")
+    || "sem-numero";
+  return `${sanitizePdfFilenamePart(clientName, "cliente")}-pedido-${sanitizePdfFilenamePart(orderNumber, "sem-numero")}.pdf`;
 };
 
 export const buildErpOrderPdf = (
@@ -1399,7 +1408,7 @@ export const buildErpOrderPdf = (
   const clientLegalName = getClientLegalName(client, metadata.partner);
   const fantasyName = getClientFantasyName(client, metadata.partner);
   const orderNumber = cleanText(
-    order.erpOrderNumber || order.numPedido || order.pedidoIdImportacao,
+    order.erpOrderNumber || "sem-numero",
   );
   const pdf = new SimplePdf();
   const pageNumber = { value: 1 };
