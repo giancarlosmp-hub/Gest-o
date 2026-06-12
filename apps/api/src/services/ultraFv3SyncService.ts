@@ -720,10 +720,11 @@ async function runSync(
     if (shouldWriteStatus)
       await writeSyncStatus({
         scope,
-        status: "running",
+        status: "skipped",
         lastSyncAt: startedAtDate.toISOString(),
         syncedCount: 0,
-        correlationId: lock.runId,
+        errors: [message],
+        correlationId,
         trigger,
         ...syncContext,
       });
