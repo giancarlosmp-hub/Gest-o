@@ -1245,11 +1245,18 @@ export default function OpportunitiesPage() {
   const refreshOpportunityClientsFromErp = async () => {
     setIsRefreshingClients(true);
     try {
-      const sellerId = isSeller && user?.id ? user.id : form.ownerSellerId || undefined;
-      const syncResponse = await api.post("/erp/ultrafv3/sync/partners/opportunity-clients", sellerId ? { sellerId } : {});
+      const syncResponse = await api.post("/erp/ultrafv3/sync/partners/opportunity-clients");
       const clientsResponse = await api.get("/clients");
       setClients(clientsResponse.data || []);
-      toast.success(`Clientes atualizados com sucesso (${syncResponse.data?.syncedCount ?? 0} sincronizado(s)).`);
+      const created = Number(syncResponse.data?.created ?? 0);
+      const updated = Number(syncResponse.data?.updated ?? 0);
+      const sellerChangedCount = Number(syncResponse.data?.sellerChangedCount ?? 0);
+      const details = [
+        `criados: ${created}`,
+        `atualizados: ${updated}`,
+        `trocas de carteira: ${sellerChangedCount}`,
+      ].join(" · ");
+      toast.success(`Clientes de todos os vendedores sincronizados com sucesso. ${details}.`);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível atualizar clientes do UltraFV3."));
     } finally {

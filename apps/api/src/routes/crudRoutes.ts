@@ -31,7 +31,7 @@ import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
-import { ActivityType, ClientType, ErpOrderSyncStatus, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
+import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
 import { z } from "zod";
 import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
@@ -8320,16 +8320,12 @@ router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vend
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
 router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
   try {
-    const requestedSellerId = typeof req.body?.sellerId === "string" ? req.body.sellerId.trim() : "";
-    const shouldUseSellerCredential = req.user!.role === "vendedor" || Boolean(requestedSellerId);
-    const sellerId = req.user!.role === "vendedor" ? req.user!.id : requestedSellerId;
-    const result = shouldUseSellerCredential
-      ? await syncPartnersByUser(sellerId)
-      : await syncPartners();
-    return res.status(200).json({
+    const result = await syncPartnersForAllConfiguredSellers({ trigger: ErpSyncTrigger.manual });
+    return res.status(result.errorCount > 0 ? 207 : 200).json({
       scope: "partners",
-      authMode: shouldUseSellerCredential ? "seller" : "global",
-      sellerId: shouldUseSellerCredential ? sellerId : null,
+      authMode: "all_sellers",
+      allSellers: true,
+      syncedCount: result.results.reduce((total, item) => total + (item.syncedCount ?? 0), 0),
       ...result,
     });
   } catch (error) {
