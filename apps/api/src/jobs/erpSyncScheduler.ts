@@ -270,6 +270,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
 
   if (automaticSyncRunning) {
     lastAutomaticSkippedReason = "already_running";
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
     logApiEvent("WARN", "[erp automatic sync] scheduler tick skipped", {
       ...tickMetadataBase,
       shouldRun: false,
@@ -285,6 +286,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   const configuration = await getAutomaticSyncConfigurationStatus();
   const diagnostics = configuration.diagnostics;
   if (!configuration.ok) {
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent("WARN", "[erp automatic sync] scheduler tick skipped", {
@@ -437,6 +439,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     lastAutomaticSkippedReason = isLock ? "lock_active" : "step_error";
     lastAutomaticError = failedStepErrorPrefix ? `${failedStepErrorPrefix}: ${message}` : message;
     lastAutomaticFinishedAt = finishedAt;
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(finishedAt);
     await prisma.erpSyncRun.update({
       where: { id: overallRun.id },
       data: {
@@ -451,13 +454,13 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           completedSteps,
           failedStep,
           skippedReason: lastAutomaticSkippedReason,
+          nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
           totalSteps: AUTOMATIC_SYNC_STEPS.length,
         } as Prisma.InputJsonValue,
         errors: [{ message, failedStep, at: finishedAt.toISOString(), correlationId }] as Prisma.InputJsonValue,
         errorMessage: lastAutomaticError,
       },
     });
-    if (!isLock) nextAutomaticRunAt = calculateNextAutomaticRunAt(finishedAt);
     logApiEvent(isLock ? "WARN" : "ERROR", "[erp automatic sync] hourly ERP sync did not complete", {
       schedulerTickAt: schedulerTickAt.toISOString(),
       shouldRun: true,
@@ -506,6 +509,7 @@ export async function startErpSyncScheduler() {
   const configuration = await getAutomaticSyncConfigurationStatus();
   const diagnostics = configuration.diagnostics;
   if (!configuration.ok) {
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent("WARN", "[erp automatic sync] disabled because UltraFV3 is not configured", {

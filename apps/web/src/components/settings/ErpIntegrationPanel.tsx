@@ -169,7 +169,7 @@ const FULL_SYNC_STEPS: Array<{ key: SyncScopeKey; label: string; nonCritical?: b
 const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
   { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos sincronizados", description: "Importa produtos com código ERP e unidade; a seleção da oportunidade exibe apenas itens com preço válido, mesmo com estoque zerado." },
-  { key: "partners", title: "Clientes/parceiros", endpoint: "partners", countLabel: "Clientes", description: "Atualiza código ERP, nome, cidade, UF e CNPJ/CPF quando disponíveis." },
+  { key: "partners", title: "Clientes/parceiros (vendedor referência/global)", endpoint: "partners", countLabel: "Clientes", description: "Sincroniza /partners com credencial global ou vendedor de referência. Para atualizar carteira completa e trocas de vendedor, use Clientes por vendedor." },
   { key: "orderStatus", title: "Status de pedidos", endpoint: "order-status", countLabel: "Pedidos consultados", description: "Consulta o /orderStatus em modo somente leitura para atualizar o acompanhamento operacional dos pedidos já enviados." },
   { key: "salesmen", title: "Vendedores", endpoint: "salesmen", description: "Persiste o catálogo de vendedores com código ERP para vínculo com usuários CRM." },
   { key: "paymentMethods", title: "Formas de pagamento", endpoint: "payment-methods", description: "Sincroniza formas de pagamento disponíveis para emissão de pedidos." },
@@ -634,7 +634,7 @@ export default function ErpIntegrationPanel() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <h4 className="text-sm font-semibold text-emerald-950">Clientes por vendedor</h4>
-            <p className="mt-1 text-xs text-emerald-800">Executa /partners sequencialmente com Login FV3 de cada vendedor ativo configurado, sem concorrência por vendedor.</p>
+            <p className="mt-1 text-xs text-emerald-800">Use esta opção para atualizar a carteira completa: executa /partners sequencialmente com Login FV3 de cada vendedor ativo configurado, sem concorrência por vendedor, e aplica trocas de carteira no CRM.</p>
           </div>
           <button
             type="button"

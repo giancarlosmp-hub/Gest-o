@@ -1994,12 +1994,19 @@ export async function syncPartnersForAllConfiguredSellers(
     successCount: 0,
     errorCount: 0,
     skippedCount: 0,
+    created: 0,
+    updated: 0,
+    sellerChangedCount: 0,
   };
   const results: Array<{
     userId: string;
     sellerName: string;
     status: "success" | "error" | "skipped";
     syncedCount?: number;
+    created?: number;
+    updated?: number;
+    sellerChangedCount?: number;
+    diagnostics?: Record<string, number>;
     error?: string;
   }> = [];
 
@@ -2012,11 +2019,21 @@ export async function syncPartnersForAllConfiguredSellers(
       const skipped = Boolean(result.diagnostics?.skippedByLock);
       if (skipped) summary.skippedCount += 1;
       else summary.successCount += 1;
+      const created = result.diagnostics?.created ?? 0;
+      const updated = result.diagnostics?.updated ?? 0;
+      const sellerChangedCount = result.diagnostics?.sellerChangedCount ?? 0;
+      summary.created += created;
+      summary.updated += updated;
+      summary.sellerChangedCount += sellerChangedCount;
       results.push({
         userId: seller.id,
         sellerName: seller.name,
         status: skipped ? "skipped" : "success",
         syncedCount: result.syncedCount,
+        created,
+        updated,
+        sellerChangedCount,
+        diagnostics: result.diagnostics,
       });
     } catch (error) {
       summary.errorCount += 1;
@@ -2237,7 +2254,7 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     const product = productCandidates.find((candidate) =>
       normalizeErpLookupCode(candidate.erpProductCode) === normalizedProductCode &&
       (normalizeErpLookupCode(candidate.erpProductClassCode) || "default") === normalizedProductClassCode
-    ) ?? null;
+    ) ?? (productCandidates.length === 1 ? productCandidates[0] : null);
     if (!product) {
       diagnostics.missingProduct += 1;
       if (isDiagnosticProduct) {
@@ -2245,6 +2262,7 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           correlationId,
           productCode,
           productClassCode: productClassCode || "default",
+          candidateClassCodes: productCandidates.map((candidate) => candidate.erpProductClassCode),
           priceTableCode: priceTableCode || null,
           branchCode: branchCode || null,
           price,
@@ -2281,6 +2299,17 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     }
     if (!product.defaultPrice || product.defaultPrice <= 0 || !priceTableCode || normalizeErpLookupCode(priceTableCode) === "1") {
       await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: price, minPrice: product.minPrice && product.minPrice > 0 ? product.minPrice : price } });
+      if (isDiagnosticProduct) {
+        logApiEvent("INFO", "[ultrafv3 sync prices] product 273 default price updated", {
+          correlationId,
+          productId: product.id,
+          productCode,
+          productClassCode: product.erpProductClassCode,
+          priceTableCode: priceTableCode || null,
+          branchCode: branchCode || null,
+          price,
+        });
+      }
     }
   }
 
@@ -2404,12 +2433,14 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
 
   try {
     for (const [index, step] of FULL_SYNC_STEPS.entries()) {
+      const stepStartedAt = Date.now();
       logApiEvent("INFO", "[ultrafv3 sync-all] step started", {
         correlationId,
         scope: step.scope,
         label: step.label,
         step: index + 1,
         totalSteps: FULL_SYNC_STEPS.length,
+        startedAt: new Date(stepStartedAt).toISOString(),
       });
       let result: SyncResult;
       try {
@@ -2452,6 +2483,7 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
         step: index + 1,
         totalSteps: FULL_SYNC_STEPS.length,
         syncedCount: result.syncedCount,
+        durationMs: Date.now() - stepStartedAt,
       });
     }
 
