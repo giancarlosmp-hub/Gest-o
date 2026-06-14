@@ -19,7 +19,8 @@
     "typecheck": "npm run prisma:generate && tsc -p tsconfig.json --noEmit",
     "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts",
     "admin:diagnose-hash": "node dist/scripts/diagnosePasswordHash.js",
-    "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts"
+    "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts",
+    "smoke:ultrafv3-crm-sync": "tsx src/scripts/ultraFv3CrmSyncRegressionSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

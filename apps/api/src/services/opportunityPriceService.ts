@@ -67,8 +67,10 @@ const readFirst = (source: Record<string, unknown>, keys: string[]) => {
 };
 
 const getProductBasePrice = (product: OpportunityPriceProduct) => {
+  const synchronizedDefaultPrice = parseNumber(product.defaultPrice);
+  if (synchronizedDefaultPrice !== null) return synchronizedDefaultPrice > 0 ? synchronizedDefaultPrice : 0;
   const raw = asRecord(product.rawErpPayload);
-  return parsePositiveNumber(readFirst(raw, ["PRECO", "price", "defaultPrice", "preco", "salePrice", "valor"])) ?? parsePositiveNumber(product.defaultPrice) ?? 0;
+  return parsePositiveNumber(readFirst(raw, ["PRECO", "price", "defaultPrice", "preco", "salePrice", "valor"])) ?? 0;
 };
 
 const pickRawPriceForTable = (rawPayload: unknown, priceTableCode: string) => {

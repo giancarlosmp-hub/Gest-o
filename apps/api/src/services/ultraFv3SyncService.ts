@@ -102,9 +102,18 @@ const pickFirstNumber = (payload: Record<string, unknown>, keys: string[]) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const parseNumber = (value: unknown) => {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const parsePositivePrice = (value: unknown) => {
-  const parsed = Number(String(value ?? "").replace(",", "."));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  const parsed = parseNumber(value);
+  return parsed !== null && parsed > 0 ? parsed : null;
 };
 
 type ExtractedProductPrice = {
@@ -2201,6 +2210,7 @@ async function syncReferenceData(
 
 
 const DIAGNOSTIC_PRODUCT_CODE = "273";
+const ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE = "228";
 
 const normalizeErpLookupCode = (value: unknown) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
 
@@ -2212,10 +2222,16 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     createdPrices: 0,
     missingProduct: 0,
     invalidPrice: 0,
+    zeroPriceInvalidated: 0,
+    absentPriceInvalidated: 0,
     product273Received: 0,
     product273Matched: 0,
     product273Price: 0,
+    product228Received: 0,
+    product228Zeroed: 0,
   };
+  const seenProductPriceIds = new Set<string>();
+  const touchedProductIds = new Set<string>();
 
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
@@ -2224,11 +2240,15 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     const productClassCode = pickFirstString(payload, ["CODPRODUTO_CLAS", "COD_PRODUTO_CLAS", "productClassCode", "erpProductClassCode", "classificacao"]);
     const priceTableCode = pickFirstString(payload, ["TABELA", "CODTABELA", "COD_TABELA", "TABELA_PRECO", "priceTableCode", "tabela"]);
     const branchCode = pickFirstString(payload, ["CODFILIAL", "COD_FILIAL", "branchCode", "filial"]);
-    const price = parsePositivePrice(pickFirstValue(payload, ["PRECO", "PRECO_LISTA", "VALOR", "price", "preco", "valor"]));
+    const rawPriceValue = pickFirstValue(payload, ["PRECO", "PRECO_LISTA", "VALOR", "price", "preco", "valor"]);
+    const parsedPrice = parseNumber(rawPriceValue);
+    const price = parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null;
     const isDiagnosticProduct = normalizeErpLookupCode(productCode) === DIAGNOSTIC_PRODUCT_CODE;
+    const isZeroPriceDiagnosticProduct = normalizeErpLookupCode(productCode) === ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE;
     if (isDiagnosticProduct) diagnostics.product273Received += 1;
-    if (!productCode || !price) {
-      if (!price) diagnostics.invalidPrice += 1;
+    if (isZeroPriceDiagnosticProduct) diagnostics.product228Received += 1;
+    if (!productCode || parsedPrice === null) {
+      if (parsedPrice === null) diagnostics.invalidPrice += 1;
       if (isDiagnosticProduct) {
         logApiEvent("INFO", "[ultrafv3 sync prices] product 273 price row ignored", {
           correlationId,
@@ -2237,7 +2257,7 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           priceTableCode,
           branchCode,
           reason: !productCode ? "missing_product_code" : "invalid_price",
-          price: price ?? 0,
+          price: parsedPrice ?? 0,
           payload: sanitizePayloadForLog(payload),
         });
       }
@@ -2265,7 +2285,31 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           candidateClassCodes: productCandidates.map((candidate) => candidate.erpProductClassCode),
           priceTableCode: priceTableCode || null,
           branchCode: branchCode || null,
-          price,
+          price: parsedPrice ?? 0,
+        });
+      }
+      continue;
+    }
+
+    touchedProductIds.add(product.id);
+    if (!price) {
+      diagnostics.invalidPrice += 1;
+      const updateResult = await prisma.productPrice.updateMany({
+        where: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null, price: { gt: 0 } },
+        data: { price: 0 },
+      });
+      diagnostics.zeroPriceInvalidated += updateResult.count;
+      await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: 0, minPrice: 0 } });
+      if (isZeroPriceDiagnosticProduct) {
+        diagnostics.product228Zeroed += 1;
+        logApiEvent("INFO", "[ultrafv3 sync prices] product 228 zero price invalidated", {
+          correlationId,
+          productId: product.id,
+          productCode,
+          productClassCode: product.erpProductClassCode,
+          priceTableCode: priceTableCode || null,
+          branchCode: branchCode || null,
+          previousRowsInvalidated: updateResult.count,
         });
       }
       continue;
@@ -2285,9 +2329,10 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     });
     if (existingPrice) {
       await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price } });
+      seenProductPriceIds.add(existingPrice.id);
       diagnostics.updatedPrices += 1;
     } else {
-      await prisma.productPrice.create({
+      const createdPrice = await prisma.productPrice.create({
         data: {
           productId: product.id,
           erpPriceId: priceTableCode || null,
@@ -2295,6 +2340,7 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           price,
         },
       });
+      seenProductPriceIds.add(createdPrice.id);
       diagnostics.createdPrices += 1;
     }
     if (!product.defaultPrice || product.defaultPrice <= 0 || !priceTableCode || normalizeErpLookupCode(priceTableCode) === "1") {
@@ -2313,7 +2359,28 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     }
   }
 
-  logApiEvent("INFO", "[ultrafv3 sync prices] processed product price rows", { correlationId, diagnostics });
+  const staleWhere: Prisma.ProductPriceWhereInput = seenProductPriceIds.size
+    ? { id: { notIn: [...seenProductPriceIds] }, price: { gt: 0 } }
+    : { price: { gt: 0 } };
+  const staleResult = await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0 } });
+  diagnostics.absentPriceInvalidated = staleResult.count;
+  if (staleResult.count > 0) {
+    const productsWithoutValidPrice = await prisma.product.findMany({
+      where: { prices: { none: { price: { gt: 0 } } } },
+      select: { id: true, erpProductCode: true },
+    });
+    if (productsWithoutValidPrice.length) {
+      await prisma.product.updateMany({
+        where: { id: { in: productsWithoutValidPrice.map((product) => product.id) } },
+        data: { defaultPrice: 0, minPrice: 0 },
+      });
+    }
+  }
+  logApiEvent("INFO", "[ultrafv3 sync prices] processed product price rows", {
+    correlationId,
+    diagnostics,
+    touchedProductCount: touchedProductIds.size,
+  });
   return diagnostics;
 }
 
