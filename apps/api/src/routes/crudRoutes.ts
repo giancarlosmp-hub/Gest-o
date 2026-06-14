@@ -5906,8 +5906,9 @@ router.get("/products/search", async (req, res) => {
           ? "invalid_price"
           : null;
 
-    if (product.erpProductCode.replace(/^0+(?=\d)/, "") === "273") {
-      logApiEvent("INFO", "[products search] product 273 evaluated", {
+    const normalizedErpProductCode = product.erpProductCode.replace(/^0+(?=\d)/, "");
+    if (normalizedErpProductCode === "273" || normalizedErpProductCode === "228") {
+      logApiEvent("INFO", `[products search] product ${normalizedErpProductCode} evaluated`, {
         query: q,
         priceTableCode: requestedPriceTableCode,
         productId: product.id,
@@ -8321,6 +8322,17 @@ router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runU
 router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
   try {
     const result = await syncPartnersForAllConfiguredSellers({ trigger: ErpSyncTrigger.manual });
+    logApiEvent("INFO", "[ultrafv3 sync route] opportunity clients all-sellers sync finished", {
+      userId: req.user!.id,
+      role: req.user!.role,
+      totalUsers: result.totalUsers,
+      successCount: result.successCount,
+      errorCount: result.errorCount,
+      skippedCount: result.skippedCount,
+      created: result.created,
+      updated: result.updated,
+      sellerChangedCount: result.sellerChangedCount,
+    });
     return res.status(result.errorCount > 0 ? 207 : 200).json({
       scope: "partners",
       authMode: "all_sellers",
