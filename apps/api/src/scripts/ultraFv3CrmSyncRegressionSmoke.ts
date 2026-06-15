@@ -52,10 +52,16 @@ assert.match(crudRoutes, /return res\.status\(result\.errorCount > 0 \? 207 : 20
 assert.match(crudRoutes, /if \(res\.headersSent\)/, "Endpoint opportunity-clients não deve tentar responder erro depois de já ter enviado resposta");
 assert.match(crudRoutes, /status: stock <= 0 \? "sem estoque" : "disponível"/, "Produto com estoque 0 deve aparecer com status de alerta para confirmação antes de adicionar");
 assert.match(crudRoutes, /\/erp\/ultrafv3\/price-diagnostics/, "Endpoint temporário de diagnóstico de preços deve existir");
+assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*if \(res\.headersSent\)[\s\S]*response already sent before success payload/, "POST /erp/sync-all deve proteger resposta de sucesso contra headers já enviados");
+assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*headers already sent; skipping error response/, "POST /erp/sync-all não deve enviar resposta de erro se headers já foram enviados");
+assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*response sent/, "POST /erp/sync-all deve registrar envio único de resposta");
 
 const syncService = readFileSync(new URL("../services/ultraFv3SyncService.ts", import.meta.url), "utf8");
 assert.match(syncService, /ownerSeller: \{ connect: \{ id: ownerSellerId \} \}/, "Troca de carteira deve atualizar ownerSellerId do cliente existente");
 assert.match(syncService, /nonCritical: true[\s\S]*orderStatus|orderStatus[\s\S]*nonCritical: true/, "Sincronização completa deve tratar orderStatus como não crítico");
+assert.match(syncService, /hasConfiguredSellerFv3Credentials/, "Sync deve detectar vendedores ativos com Login FV3/Senha FV3");
+assert.match(syncService, /skippedOrderStatusMissingGlobalCredentials/, "orderStatus deve ser ignorado como aviso operacional quando só faltam credenciais globais em modo por vendedor");
+assert.match(syncService, /\[ultrafv3 sync orderStatus\] skipped in seller-auth mode/, "orderStatus deve logar skip estruturado não crítico em modo por vendedor");
 assert.match(syncService, /zeroPriceInvalidated/, "Sync de preços deve invalidar preço zero retornado pelo ERP");
 assert.match(syncService, /createdZeroPrice/, "Sync de preços deve registrar ProductPrice zero explícito para bloquear fallback de /products.PRECO");
 assert.match(syncService, /product PRECO fallback preserved/, "Sync de preços não deve zerar fallback de /products.PRECO quando /prices não retorna o produto");

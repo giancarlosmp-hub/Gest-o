@@ -8319,6 +8319,18 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
 router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) => {
   try {
     const result = await syncAllUltraFv3Catalogs();
+    if (res.headersSent) {
+      logApiEvent("WARN", "[ultrafv3 sync-all route] response already sent before success payload", {
+        correlationId: result.correlationId,
+        durationMs: result.durationMs,
+      });
+      return;
+    }
+    logApiEvent("INFO", "[ultrafv3 sync-all route] response sent", {
+      correlationId: result.correlationId,
+      success: result.success,
+      warnings: result.warnings?.length ?? 0,
+    });
     return res.status(200).json(result);
   } catch (error) {
     const source = error && typeof error === "object" ? error as { status?: unknown; correlationId?: unknown; durationMs?: unknown; completedSteps?: unknown } : {};
@@ -8328,7 +8340,15 @@ router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) 
       correlationId: source.correlationId,
       durationMs: source.durationMs,
       completedSteps: source.completedSteps,
+      headersSent: res.headersSent,
     });
+    if (res.headersSent) {
+      logApiEvent("WARN", "[ultrafv3 sync-all route] headers already sent; skipping error response", {
+        correlationId: source.correlationId,
+        error: details,
+      });
+      return;
+    }
     return res.status(typeof source.status === "number" ? source.status : 502).json({
       success: false,
       message: "Falha na Sincronização Completa ERP.",

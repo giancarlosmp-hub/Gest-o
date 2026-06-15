@@ -603,6 +603,19 @@ async function fetchUltraFv3RowsWithAlias(
     : new Error(formatError(lastError));
 }
 
+export async function hasConfiguredSellerFv3Credentials() {
+  const seller = await prisma.user.findFirst({
+    where: {
+      role: "vendedor",
+      isActive: true,
+      erpLoginUsername: { not: null },
+      erpLoginPasswordEncrypted: { not: null },
+    },
+    select: { id: true },
+  });
+  return Boolean(seller);
+}
+
 async function resolveReferenceCredentials() {
   if (ultraFv3Client.hasGlobalCredentials())
     return {
@@ -2720,7 +2733,14 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
           operationalAlert: true,
         });
       }
-      if (step.nonCritical && (result.diagnostics?.nonCriticalOrderStatusErrors ?? 0) > 0) {
+      if (step.nonCritical && (result.diagnostics?.skippedOrderStatusMissingGlobalCredentials ?? 0) > 0) {
+        warnings.push({
+          scope: step.scope,
+          label: step.label,
+          message: "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
+          correlationId,
+        });
+      } else if (step.nonCritical && (result.diagnostics?.nonCriticalOrderStatusErrors ?? 0) > 0) {
         warnings.push({
           scope: step.scope,
           label: step.label,
@@ -2911,7 +2931,24 @@ export async function syncOrderStatus(
   runner: () => Promise<SyncResult>,
   options?: RunSyncOptions,
 ) {
-  return runSync("orderStatus", async () => runner(), options);
+  return runSync("orderStatus", async (correlationId) => {
+    if (!ultraFv3Client.hasGlobalCredentials() && await hasConfiguredSellerFv3Credentials()) {
+      logApiEvent("WARN", "[ultrafv3 sync orderStatus] skipped in seller-auth mode", {
+        correlationId,
+        missingGlobalCredentials: ["ULTRAFV3_USERNAME", "ULTRAFV3_PASSWORD"],
+        nonCritical: true,
+        skipped: true,
+      });
+      return {
+        syncedCount: 0,
+        diagnostics: {
+          skippedOrderStatusMissingGlobalCredentials: 1,
+          nonCriticalOrderStatusErrors: 1,
+        },
+      };
+    }
+    return runner();
+  }, options);
 }
 
 export async function getUltraFv3SyncHistory(limit = 20) {

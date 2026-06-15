@@ -240,6 +240,7 @@ export default function ErpIntegrationPanel() {
   const [running, setRunning] = useState<SyncScopeKey | "allSellers" | "syncAll" | "automaticSync" | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
+  const [fullSyncWarnings, setFullSyncWarnings] = useState<FullSyncResponse["warnings"]>(undefined);
   const [sellerDiag, setSellerDiag] = useState<SellerDiagnosticsResponse | null>(null);
   const [sellerDiagLoading, setSellerDiagLoading] = useState(false);
   const [fullSyncProgress, setFullSyncProgress] = useState<FullSyncProgress>({
@@ -334,6 +335,7 @@ export default function ErpIntegrationPanel() {
     setShowFullSyncModal(false);
     setRunning("syncAll");
     setFullSyncProgress({ isRunning: true, startedAt, currentStep: FULL_SYNC_STEPS[0]?.label ?? "Iniciando", completedSteps: 0, percent: 0 });
+    setFullSyncWarnings(undefined);
     const timer = window.setInterval(() => {
       refreshFullSyncProgress(startedAt).catch(() => undefined);
     }, 2_000);
@@ -351,7 +353,8 @@ export default function ErpIntegrationPanel() {
         correlationId: response.data.correlationId,
       });
       if (response.data.warnings?.length) {
-        toast.warning(`Sincronização Completa ERP concluída com aviso operacional: ${response.data.warnings[0].label}.`);
+        setFullSyncWarnings(response.data.warnings);
+        toast.warning(`Sincronização concluída com avisos: ${response.data.warnings.map((warning) => warning.label).join(", ")}.`);
       } else {
         toast.success(`Sincronização Completa ERP finalizada em ${response.data.durationMs}ms.`);
       }
@@ -359,6 +362,7 @@ export default function ErpIntegrationPanel() {
       window.clearInterval(timer);
       await load().catch(() => undefined);
       setFullSyncProgress((current) => ({ ...current, isRunning: false }));
+      setFullSyncWarnings(undefined);
       toast.error(getApiErrorMessage(error, "Não foi possível executar a Sincronização Completa ERP."));
     } finally {
       setRunning(null);
@@ -835,6 +839,19 @@ export default function ErpIntegrationPanel() {
           );
         })}
       </div>
+
+      {fullSyncWarnings?.length ? (
+        <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p className="font-semibold">Sincronização concluída com avisos</p>
+          <ul className="mt-2 list-disc space-y-1 pl-5">
+            {fullSyncWarnings.map((warning) => (
+              <li key={`${warning.scope}-${warning.correlationId}`}>
+                <span className="font-semibold">{warning.label}:</span> {warning.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {showFullSyncModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
