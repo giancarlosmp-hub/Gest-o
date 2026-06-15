@@ -1015,9 +1015,16 @@ export async function syncProducts(options?: RunSyncOptions) {
           suspendedByUltra ||
           outOfLineByUltra;
 
-        const isDiagnosticProduct = normalizeErpLookupCode(code) === DIAGNOSTIC_PRODUCT_CODE;
+        const diagnosticProductCode = normalizeErpLookupCode(code);
+        const isDiagnosticProduct = [DIAGNOSTIC_PRODUCT_CODE, ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE].includes(diagnosticProductCode);
         if (isDiagnosticProduct) {
-          logApiEvent("INFO", "[ultrafv3 sync products] product 273 received", {
+          const previousProduct = code
+            ? await prisma.product.findFirst({
+                where: { erpProductCode: { in: Array.from(new Set([code, diagnosticProductCode].filter(Boolean))) } },
+                select: { id: true, erpProductCode: true, erpProductClassCode: true, defaultPrice: true, minPrice: true, prices: true },
+              })
+            : null;
+          logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} received`, {
             correlationId,
             code,
             classCode: classCode || "default",
@@ -1028,6 +1035,9 @@ export async function syncProducts(options?: RunSyncOptions) {
             activeFlag,
             suspendedFlag,
             payload: sanitizePayloadForLog(payload),
+            previousCrmProduct: previousProduct
+              ? { id: previousProduct.id, erpProductCode: previousProduct.erpProductCode, erpProductClassCode: previousProduct.erpProductClassCode, defaultPrice: previousProduct.defaultPrice, minPrice: previousProduct.minPrice, priceRows: previousProduct.prices.length }
+              : null,
           });
         }
         if (!code) {
@@ -1037,7 +1047,7 @@ export async function syncProducts(options?: RunSyncOptions) {
         if (!unit) {
           diagnostics.invalidMissingUnit += 1;
           if (isDiagnosticProduct) {
-            logApiEvent("INFO", "[ultrafv3 sync products] product 273 excluded", {
+            logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} excluded`, {
               correlationId,
               reason: "missing_unit",
               code,
@@ -1199,7 +1209,7 @@ export async function syncProducts(options?: RunSyncOptions) {
           }
         }
         if (isDiagnosticProduct) {
-          logApiEvent("INFO", "[ultrafv3 sync products] product 273 synced", {
+          logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} synced`, {
             correlationId,
             productId: product.id,
             code,
@@ -1209,6 +1219,8 @@ export async function syncProducts(options?: RunSyncOptions) {
             stockNumber,
             defaultPrice: normalizedPrice,
             priceRowsFromProductPayload: extractProductPrices(payload, normalizedPrice, priceTableCode || "1", branchCode).length,
+            defaultPriceAfter: product.defaultPrice,
+            minPriceAfter: product.minPrice,
           });
         }
         syncedCount += 1;
@@ -2249,8 +2261,8 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     if (isZeroPriceDiagnosticProduct) diagnostics.product228Received += 1;
     if (!productCode || parsedPrice === null) {
       if (parsedPrice === null) diagnostics.invalidPrice += 1;
-      if (isDiagnosticProduct) {
-        logApiEvent("INFO", "[ultrafv3 sync prices] product 273 price row ignored", {
+      if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
+        logApiEvent("INFO", `[ultrafv3 sync prices] product ${normalizeErpLookupCode(productCode)} price row ignored`, {
           correlationId,
           productCode,
           productClassCode,
@@ -2277,8 +2289,8 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     ) ?? (productCandidates.length === 1 ? productCandidates[0] : null);
     if (!product) {
       diagnostics.missingProduct += 1;
-      if (isDiagnosticProduct) {
-        logApiEvent("INFO", "[ultrafv3 sync prices] product 273 price row has no matching CRM product", {
+      if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
+        logApiEvent("INFO", `[ultrafv3 sync prices] product ${normalizedProductCode} price row has no matching CRM product`, {
           correlationId,
           productCode,
           productClassCode: productClassCode || "default",
@@ -2292,10 +2304,28 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     }
 
     touchedProductIds.add(product.id);
+    const previousDefaultPrice = product.defaultPrice;
+    const previousMinPrice = product.minPrice;
+    if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
+      logApiEvent("INFO", `[ultrafv3 sync prices] product ${normalizedProductCode} price row matched`, {
+        correlationId,
+        endpoint: "/prices",
+        productId: product.id,
+        productCode,
+        receivedClassCode: productClassCode || null,
+        matchedClassCode: product.erpProductClassCode,
+        priceTableCode: priceTableCode || null,
+        branchCode: branchCode || null,
+        receivedPrice: parsedPrice ?? 0,
+        previousDefaultPrice,
+        previousMinPrice,
+        productFound: true,
+      });
+    }
     if (!price) {
       diagnostics.invalidPrice += 1;
       const updateResult = await prisma.productPrice.updateMany({
-        where: { productId: product.id, erpPriceId: priceTableCode || null, branchCode: branchCode || null, price: { gt: 0 } },
+        where: { productId: product.id, ...(priceTableCode ? { erpPriceId: priceTableCode } : {}), ...(branchCode ? { branchCode } : {}), price: { gt: 0 } },
         data: { price: 0 },
       });
       diagnostics.zeroPriceInvalidated += updateResult.count;
@@ -2310,6 +2340,10 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           priceTableCode: priceTableCode || null,
           branchCode: branchCode || null,
           previousRowsInvalidated: updateResult.count,
+          defaultPriceBefore: previousDefaultPrice,
+          minPriceBefore: previousMinPrice,
+          defaultPriceAfter: 0,
+          minPriceAfter: 0,
         });
       }
       continue;
@@ -2354,6 +2388,8 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           priceTableCode: priceTableCode || null,
           branchCode: branchCode || null,
           price,
+          defaultPriceBefore: previousDefaultPrice,
+          minPriceBefore: previousMinPrice,
         });
       }
     }
