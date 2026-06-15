@@ -52,12 +52,14 @@ assert.match(crudRoutes, /return res\.status\(result\.errorCount > 0 \? 207 : 20
 assert.match(crudRoutes, /if \(res\.headersSent\)/, "Endpoint opportunity-clients não deve tentar responder erro depois de já ter enviado resposta");
 assert.match(crudRoutes, /status: stock <= 0 \? "sem estoque" : "disponível"/, "Produto com estoque 0 deve aparecer com status de alerta para confirmação antes de adicionar");
 assert.match(crudRoutes, /\/erp\/ultrafv3\/price-diagnostics/, "Endpoint temporário de diagnóstico de preços deve existir");
-assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*if \(res\.headersSent\)[\s\S]*response already sent before success payload/, "POST /erp/sync-all deve proteger resposta de sucesso contra headers já enviados");
-assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*headers already sent; skipping error response/, "POST /erp/sync-all não deve enviar resposta de erro se headers já foram enviados");
-assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*response sent/, "POST /erp/sync-all deve registrar envio único de resposta");
+assert.match(crudRoutes, /\/erp\/sync-all[\s\S]*startUltraFv3FullSyncJob/, "POST /erp/sync-all deve apenas iniciar job assíncrono");
+assert.match(crudRoutes, /res\.status\(job\.alreadyRunning \? 200 : 202\)\.json\(job\)/, "POST /erp/sync-all deve responder rapidamente com 202 ou status claro de já em execução");
+assert.doesNotMatch(crudRoutes, /\/erp\/sync-all[\s\S]*response already sent before success payload/, "POST /erp/sync-all não deve manter lógica de resposta tardia após headersSent");
 
 const syncService = readFileSync(new URL("../services/ultraFv3SyncService.ts", import.meta.url), "utf8");
 assert.match(syncService, /ownerSeller: \{ connect: \{ id: ownerSellerId \} \}/, "Troca de carteira deve atualizar ownerSellerId do cliente existente");
+assert.match(syncService, /startUltraFv3FullSyncJob[\s\S]*void syncAllUltraFv3Catalogs/, "Sync completa deve continuar em background depois da resposta HTTP");
+assert.match(syncService, /scope: "syncAll"[\s\S]*finalStatus/, "Sync completa deve persistir status final no histórico do job");
 assert.match(syncService, /nonCritical: true[\s\S]*orderStatus|orderStatus[\s\S]*nonCritical: true/, "Sincronização completa deve tratar orderStatus como não crítico");
 assert.match(syncService, /hasConfiguredSellerFv3Credentials/, "Sync deve detectar vendedores ativos com Login FV3/Senha FV3");
 assert.match(syncService, /skippedOrderStatusMissingGlobalCredentials/, "orderStatus deve ser ignorado como aviso operacional quando só faltam credenciais globais em modo por vendedor");

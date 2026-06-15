@@ -62,7 +62,7 @@ import {
   syncReceivingConditions,
   syncSalesmen,
   syncOrderStatus,
-  syncAllUltraFv3Catalogs
+  startUltraFv3FullSyncJob
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
@@ -8318,44 +8318,21 @@ const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_re
 
 router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) => {
   try {
-    const result = await syncAllUltraFv3Catalogs();
-    if (res.headersSent) {
-      logApiEvent("WARN", "[ultrafv3 sync-all route] response already sent before success payload", {
-        correlationId: result.correlationId,
-        durationMs: result.durationMs,
-      });
-      return;
-    }
-    logApiEvent("INFO", "[ultrafv3 sync-all route] response sent", {
-      correlationId: result.correlationId,
-      success: result.success,
-      warnings: result.warnings?.length ?? 0,
+    const job = await startUltraFv3FullSyncJob();
+    logApiEvent("INFO", "[ultrafv3 sync-all route] async job response sent", {
+      correlationId: job.correlationId,
+      runId: job.runId,
+      status: job.status,
+      alreadyRunning: job.alreadyRunning,
     });
-    return res.status(200).json(result);
+    return res.status(job.alreadyRunning ? 200 : 202).json(job);
   } catch (error) {
-    const source = error && typeof error === "object" ? error as { status?: unknown; correlationId?: unknown; durationMs?: unknown; completedSteps?: unknown } : {};
     const details = error instanceof Error ? error.message : String(error);
-    logApiEvent("ERROR", "[ultrafv3 sync-all route] full ERP sync failed", {
-      error: details,
-      correlationId: source.correlationId,
-      durationMs: source.durationMs,
-      completedSteps: source.completedSteps,
-      headersSent: res.headersSent,
-    });
-    if (res.headersSent) {
-      logApiEvent("WARN", "[ultrafv3 sync-all route] headers already sent; skipping error response", {
-        correlationId: source.correlationId,
-        error: details,
-      });
-      return;
-    }
-    return res.status(typeof source.status === "number" ? source.status : 502).json({
+    logApiEvent("ERROR", "[ultrafv3 sync-all route] failed to start async job", { error: details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
       success: false,
-      message: "Falha na Sincronização Completa ERP.",
+      message: "Falha ao iniciar a Sincronização Completa ERP.",
       details,
-      correlationId: source.correlationId,
-      durationMs: source.durationMs,
-      completedSteps: source.completedSteps,
     });
   }
 });
@@ -8609,7 +8586,7 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
     prisma.client.count(),
     getErpOrderOperationalSummary()
   ]);
-  const history = await getUltraFv3SyncHistory(10);
+  const history = await getUltraFv3SyncHistory(25);
   const automaticSync = await refreshErpAutomaticSyncConfig();
   return res.status(200).json({ status, integration, productCount, clientCount, operational, history, automaticSync });
 });

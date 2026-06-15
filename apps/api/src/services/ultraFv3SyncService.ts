@@ -33,7 +33,7 @@ export type UltraFv3SyncScope =
 
 type SyncStatusPayload = {
   scope: UltraFv3SyncScope;
-  status: "idle" | "running" | "success" | "error" | "skipped";
+  status: "idle" | "running" | "success" | "success_with_warnings" | "error" | "skipped";
   sellerId?: string | null;
   sellerName?: string | null;
   authMode?: "global" | "seller" | "seller_reference";
@@ -2656,8 +2656,11 @@ export type UltraFv3FullSyncStep = {
   warning?: string;
 };
 
-export type UltraFv3FullSyncResult = {
-  success: true;
+export type UltraFv3FullSyncFinalStatus = "success" | "success_with_warnings" | "failed";
+
+type UltraFv3FullSyncResult = {
+  success: boolean;
+  finalStatus: UltraFv3FullSyncFinalStatus;
   durationMs: number;
   correlationId: string;
   stats: {
@@ -2692,8 +2695,7 @@ const FULL_SYNC_STEPS: Array<{
   { scope: "orderStatus", label: "Status de pedidos", run: (options) => syncOrderStatus(() => import("./erpOrderService.js").then(({ syncErpOrderStatuses }) => syncErpOrderStatuses()), options), nonCritical: true },
 ];
 
-export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult> {
-  const correlationId = randomUUID();
+export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Promise<UltraFv3FullSyncResult> {
   const startedAt = Date.now();
   const steps: UltraFv3FullSyncStep[] = [];
   const warnings: Array<{ scope: UltraFv3SyncScope; label: string; message: string; correlationId: string }> = [];
@@ -2771,6 +2773,7 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
     const countByScope = new Map(steps.map((step) => [step.scope, step.result.syncedCount]));
     const response: UltraFv3FullSyncResult = {
       success: true,
+      finalStatus: warnings.length ? "success_with_warnings" : "success",
       durationMs,
       correlationId,
       stats: {
@@ -2801,6 +2804,97 @@ export async function syncAllUltraFv3Catalogs(): Promise<UltraFv3FullSyncResult>
       completedSteps: steps.map((step) => step.scope),
     });
   }
+}
+
+export type StartUltraFv3FullSyncJobResult = {
+  accepted: boolean;
+  alreadyRunning: boolean;
+  runId: string;
+  correlationId: string;
+  status: "running" | "already_running";
+  message: string;
+};
+
+export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJobResult> {
+  const correlationId = randomUUID();
+  const lock = await acquireSyncLock("syncAll", correlationId);
+  if (!lock.acquired) {
+    const currentRun = await prisma.erpSyncRun.findFirst({
+      where: { scope: "syncAll", status: ErpSyncRunStatus.running },
+      orderBy: { startedAt: "desc" },
+      select: { id: true, correlationId: true },
+    });
+    return {
+      accepted: false,
+      alreadyRunning: true,
+      runId: currentRun?.id ?? lock.runId,
+      correlationId: currentRun?.correlationId ?? lock.runId,
+      status: "already_running",
+      message: "Sincronização Completa ERP já está em execução.",
+    };
+  }
+
+  const run = await prisma.erpSyncRun.create({
+    data: {
+      scope: "syncAll",
+      trigger: ErpSyncTrigger.manual,
+      status: ErpSyncRunStatus.running,
+      correlationId,
+      metrics: { totalSteps: FULL_SYNC_STEPS.length } as Prisma.InputJsonValue,
+    },
+  });
+
+  logApiEvent("INFO", "[ultrafv3 sync-all job] accepted", { correlationId, runId: run.id });
+
+  void syncAllUltraFv3Catalogs(correlationId)
+    .then(async (result) => {
+      await prisma.erpSyncRun.update({
+        where: { id: run.id },
+        data: {
+          status: ErpSyncRunStatus.success,
+          finishedAt: new Date(),
+          durationMs: result.durationMs,
+          syncedCount: result.steps.reduce((total, step) => total + (step.result.syncedCount ?? 0), 0),
+          metrics: {
+            finalStatus: result.finalStatus,
+            completedSteps: result.steps.length,
+            totalSteps: FULL_SYNC_STEPS.length,
+            warnings: result.warnings ?? [],
+            stats: result.stats,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      logApiEvent("INFO", "[ultrafv3 sync-all job] finished", { correlationId, runId: run.id, finalStatus: result.finalStatus, warnings: result.warnings?.length ?? 0 });
+    })
+    .catch(async (error) => {
+      const message = formatError(error);
+      await prisma.erpSyncRun.update({
+        where: { id: run.id },
+        data: {
+          status: ErpSyncRunStatus.error,
+          finishedAt: new Date(),
+          durationMs: typeof (error as { durationMs?: unknown }).durationMs === "number" ? (error as { durationMs: number }).durationMs : undefined,
+          errorMessage: message,
+          errors: [{ message, at: new Date().toISOString(), correlationId }] as Prisma.InputJsonValue,
+          metrics: { finalStatus: "failed", completedSteps: (error as { completedSteps?: unknown }).completedSteps ?? [] } as Prisma.InputJsonValue,
+        },
+      });
+      logApiEvent("ERROR", "[ultrafv3 sync-all job] failed", { correlationId, runId: run.id, error: message });
+    })
+    .finally(() => {
+      void releaseSyncLock("syncAll", correlationId).catch((error) =>
+        logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to release lock", { correlationId, runId: run.id, error: formatError(error) }),
+      );
+    });
+
+  return {
+    accepted: true,
+    alreadyRunning: false,
+    runId: run.id,
+    correlationId,
+    status: "running",
+    message: "Sincronização iniciada",
+  };
 }
 
 const getLatestSyncError = (
@@ -2877,7 +2971,7 @@ export async function getUltraFv3SyncStatus() {
     "operations",
   ];
   const latestRuns = await prisma.erpSyncRun.findMany({
-    where: { scope: { in: scopes }, status: { not: ErpSyncRunStatus.running } },
+    where: { scope: { in: scopes } },
     orderBy: [{ startedAt: "desc" }],
     distinct: ["scope"],
   });
@@ -2897,7 +2991,7 @@ export async function getUltraFv3SyncStatus() {
         scope,
         status:
           run.status === ErpSyncRunStatus.success
-            ? "success"
+            ? ((run.metrics && typeof run.metrics === "object" && !Array.isArray(run.metrics) && (run.metrics as Record<string, unknown>).finalStatus === "success_with_warnings") ? "success_with_warnings" : "success")
             : run.status === ErpSyncRunStatus.error
               ? "error"
               : run.status === ErpSyncRunStatus.skipped

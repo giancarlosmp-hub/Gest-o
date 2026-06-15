@@ -71,7 +71,7 @@ type SyncHistoryItem = {
   sellerName?: string | null;
   authMode?: "global" | "seller" | "seller_reference" | string;
   errorMessage?: string | null;
-  metrics?: Record<string, number> | null;
+  metrics?: Record<string, unknown> | null;
 };
 
 type SellerDiagnosticsResponse = Record<string, unknown>;
@@ -85,18 +85,13 @@ type AuthModeDiagnostics = {
 };
 
 type FullSyncResponse = {
-  success: true;
-  durationMs: number;
+  accepted: boolean;
+  alreadyRunning: boolean;
+  runId: string;
   correlationId: string;
+  status: "running" | "already_running";
+  message: string;
   warnings?: Array<{ scope: SyncScopeKey | string; label: string; message: string; correlationId: string }>;
-  stats: {
-    clients: number;
-    products: number;
-    priceTables: number;
-    prices: number;
-    operations: number;
-    branches: number;
-  };
 };
 
 type FullSyncProgress = {
@@ -330,6 +325,29 @@ export default function ErpIntegrationPanel() {
     setFullSyncProgress((current) => ({ ...current, ...progress }));
   };
 
+  const waitForFullSyncCompletion = async (runId: string, startedAt: number) => {
+    for (;;) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+      const statusResponse = await api.get<SyncStatusResponse>("/erp/ultrafv3/sync/status");
+      setData(statusResponse.data);
+      const progress = calculateFullSyncProgress(statusResponse.data, startedAt);
+      const fullSyncRun = statusResponse.data.history?.find((item) => item.id === runId);
+      const metrics = fullSyncRun?.metrics ?? {};
+      const warnings = Array.isArray((metrics as { warnings?: unknown }).warnings)
+        ? (metrics as { warnings: FullSyncResponse["warnings"] }).warnings
+        : undefined;
+      setFullSyncProgress((current) => ({
+        ...current,
+        ...progress,
+        completedSteps: typeof metrics.completedSteps === "number" ? metrics.completedSteps : progress.completedSteps,
+        percent: fullSyncRun?.status && fullSyncRun.status !== "running" ? 100 : progress.percent,
+        currentStep: fullSyncRun?.status && fullSyncRun.status !== "running" ? "Sincronização completa finalizada" : progress.currentStep,
+      }));
+      if (!fullSyncRun || fullSyncRun.status === "running") continue;
+      return { fullSyncRun, warnings };
+    }
+  };
+
   const runFullSync = async () => {
     const startedAt = Date.now();
     setShowFullSyncModal(false);
@@ -342,6 +360,9 @@ export default function ErpIntegrationPanel() {
 
     try {
       const response = await api.post<FullSyncResponse>("/erp/sync-all");
+      toast.success(response.data.alreadyRunning ? "Sincronização já em execução" : "Sincronização iniciada");
+      setFullSyncProgress((current) => ({ ...current, correlationId: response.data.correlationId }));
+      const { fullSyncRun, warnings } = await waitForFullSyncCompletion(response.data.runId, startedAt);
       window.clearInterval(timer);
       await load();
       setFullSyncProgress({
@@ -352,11 +373,13 @@ export default function ErpIntegrationPanel() {
         percent: 100,
         correlationId: response.data.correlationId,
       });
-      if (response.data.warnings?.length) {
-        setFullSyncWarnings(response.data.warnings);
-        toast.warning(`Sincronização concluída com avisos: ${response.data.warnings.map((warning) => warning.label).join(", ")}.`);
+      if (fullSyncRun.status === "error") {
+        toast.error(fullSyncRun.errorMessage || "Falha crítica na Sincronização Completa ERP.");
+      } else if (warnings?.length) {
+        setFullSyncWarnings(warnings);
+        toast.warning("Sincronização concluída com avisos");
       } else {
-        toast.success(`Sincronização Completa ERP finalizada em ${response.data.durationMs}ms.`);
+        toast.success("Sincronização concluída com sucesso");
       }
     } catch (error) {
       window.clearInterval(timer);
@@ -419,7 +442,7 @@ export default function ErpIntegrationPanel() {
         status: item.status,
         syncedCount: item.syncedCount,
         durationMs: item.durationMs,
-        requestDurationMs: item.metrics?.requestDurationMs ?? null,
+        requestDurationMs: typeof item.metrics?.requestDurationMs === "number" ? item.metrics.requestDurationMs : null,
         error: item.errorMessage || undefined,
       });
     }
