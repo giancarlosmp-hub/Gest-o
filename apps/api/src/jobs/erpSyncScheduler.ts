@@ -40,12 +40,28 @@ const AUTOMATIC_SYNC_STEPS: Array<{
   { scope: "products", label: "Produtos", run: syncProducts },
   { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
   { scope: "prices", label: "Preços calculados", run: syncPrices },
-  { scope: "priceVariations", label: "Variações por tabela", run: syncPriceVariations },
-  { scope: "receivingConditions", label: "Condições de pagamento", run: syncReceivingConditions },
-  { scope: "paymentMethods", label: "Formas de pagamento", run: syncPaymentMethods },
+  {
+    scope: "priceVariations",
+    label: "Variações por tabela",
+    run: syncPriceVariations,
+  },
+  {
+    scope: "receivingConditions",
+    label: "Condições de pagamento",
+    run: syncReceivingConditions,
+  },
+  {
+    scope: "paymentMethods",
+    label: "Formas de pagamento",
+    run: syncPaymentMethods,
+  },
   { scope: "branches", label: "Filiais", run: syncBranches },
   { scope: "operations", label: "Operações", run: syncOperations },
-  { scope: "orderStatus", label: "Status de pedidos", run: (options) => syncOrderStatus(() => syncErpOrderStatuses(), options) },
+  {
+    scope: "orderStatus",
+    label: "Status de pedidos",
+    run: (options) => syncOrderStatus(() => syncErpOrderStatuses(), options),
+  },
 ];
 
 type AutomaticSyncPanelStatus =
@@ -67,10 +83,13 @@ type AutomaticSyncSkipReason =
   | "already_running"
   | null;
 
+type SchedulerAuthMode = "global" | "seller_reference" | "none";
+
 type AutomaticSyncState = {
   enabled: boolean;
   enabledByEnv: boolean;
   active: boolean;
+  initialized: boolean;
   timezone: typeof SAO_PAULO_TIME_ZONE;
   windowStartHour: number;
   windowEndHour: number;
@@ -78,6 +97,9 @@ type AutomaticSyncState = {
   isRunning: boolean;
   lastRunAt: string | null;
   lastSuccessAt: string | null;
+  lastRealSchedulerRunAt: string | null;
+  lastRealSchedulerSuccessAt: string | null;
+  lastRealSchedulerSuccessRecent: boolean;
   lastFinishedAt: string | null;
   nextRunAt: string | null;
   lastError: string | null;
@@ -92,6 +114,8 @@ type AutomaticSyncState = {
   lastAttemptCorrelationId: string | null;
   lastStepError: string | null;
   statusLabel: string;
+  authMode: SchedulerAuthMode;
+  configurationOk: boolean;
 };
 
 type AutomaticSyncPersistedConfig = {
@@ -109,18 +133,32 @@ let currentAutomaticRunId: string | null = null;
 let lastAutomaticCorrelationId: string | null = null;
 let lastAutomaticSkippedReason: AutomaticSyncSkipReason = null;
 let persistedAutomaticSyncEnabled = false;
+let automaticSchedulerInitialized = false;
+let lastSchedulerAuthMode: SchedulerAuthMode = "none";
 
 async function getAutomaticSyncConfigurationStatus() {
   const diagnostics = ultraFv3Client.getDiagnostics();
   if (diagnostics.isConfigured) {
-    return { ok: true, diagnostics, authMode: "global" as const, sellerId: null as string | null, sellerName: null as string | null };
+    return {
+      ok: true,
+      diagnostics,
+      authMode: "global" as const,
+      sellerId: null as string | null,
+      sellerName: null as string | null,
+    };
   }
 
   const missingWithoutGlobalAuth = diagnostics.missingConfig.filter(
     (key) => key !== "ULTRAFV3_USERNAME" && key !== "ULTRAFV3_PASSWORD",
   );
   if (missingWithoutGlobalAuth.length) {
-    return { ok: false, diagnostics, authMode: "none" as const, sellerId: null as string | null, sellerName: null as string | null };
+    return {
+      ok: false,
+      diagnostics,
+      authMode: "none" as const,
+      sellerId: null as string | null,
+      sellerName: null as string | null,
+    };
   }
 
   const seller = await prisma.user.findFirst({
@@ -135,8 +173,20 @@ async function getAutomaticSyncConfigurationStatus() {
   });
 
   return seller
-    ? { ok: true, diagnostics, authMode: "seller_reference" as const, sellerId: seller.id, sellerName: seller.name }
-    : { ok: false, diagnostics, authMode: "none" as const, sellerId: null as string | null, sellerName: null as string | null };
+    ? {
+        ok: true,
+        diagnostics,
+        authMode: "seller_reference" as const,
+        sellerId: seller.id,
+        sellerName: seller.name,
+      }
+    : {
+        ok: false,
+        diagnostics,
+        authMode: "none" as const,
+        sellerId: null as string | null,
+        sellerName: null as string | null,
+      };
 }
 
 async function loadAutomaticSyncPersistedConfig(): Promise<AutomaticSyncPersistedConfig> {
@@ -144,16 +194,23 @@ async function loadAutomaticSyncPersistedConfig(): Promise<AutomaticSyncPersiste
     where: { key: AUTOMATIC_SYNC_CONFIG_KEY },
     select: { value: true },
   });
-  if (!stored?.value) return { enabled: false };
+  if (!stored?.value) {
+    await saveAutomaticSyncPersistedConfig({ enabled: false });
+    return { enabled: false };
+  }
   try {
-    const parsed = JSON.parse(stored.value) as Partial<AutomaticSyncPersistedConfig>;
+    const parsed = JSON.parse(
+      stored.value,
+    ) as Partial<AutomaticSyncPersistedConfig>;
     return { enabled: parsed.enabled === true };
   } catch {
     return { enabled: false };
   }
 }
 
-async function saveAutomaticSyncPersistedConfig(config: AutomaticSyncPersistedConfig) {
+async function saveAutomaticSyncPersistedConfig(
+  config: AutomaticSyncPersistedConfig,
+) {
   await prisma.appConfig.upsert({
     where: { key: AUTOMATIC_SYNC_CONFIG_KEY },
     update: { value: JSON.stringify(config) },
@@ -170,12 +227,12 @@ const getSaoPauloHour = (date: Date) => {
   return Number(hourText === "24" ? "0" : hourText);
 };
 
-const isInsideAutomaticSyncWindow = (date: Date) => {
+export const isInsideAutomaticSyncWindow = (date: Date) => {
   const hour = getSaoPauloHour(date);
   return hour >= AUTOMATIC_SYNC_START_HOUR && hour < AUTOMATIC_SYNC_END_HOUR;
 };
 
-const calculateNextAutomaticRunAt = (from = new Date()) => {
+export const calculateNextAutomaticRunAt = (from = new Date()) => {
   const probe = new Date(from.getTime());
   probe.setUTCSeconds(0, 0);
   probe.setUTCMinutes(0);
@@ -253,10 +310,16 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     timezone: SAO_PAULO_TIME_ZONE,
   };
 
+  logApiEvent("INFO", "[ultrafv3 scheduler] tick", {
+    ...tickMetadataBase,
+    enabled: persistedAutomaticSyncEnabled,
+    active: Boolean(automaticTimer),
+  });
+
   if (!isInsideAutomaticSyncWindow(schedulerTickAt)) {
     lastAutomaticSkippedReason = "outside_window";
     nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
-    logApiEvent("INFO", "[erp automatic sync] scheduler tick skipped", {
+    logApiEvent("INFO", "[ultrafv3 scheduler] skipped", {
       ...tickMetadataBase,
       shouldRun: false,
       skippedReason: lastAutomaticSkippedReason,
@@ -271,7 +334,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   if (automaticSyncRunning) {
     lastAutomaticSkippedReason = "already_running";
     nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
-    logApiEvent("WARN", "[erp automatic sync] scheduler tick skipped", {
+    logApiEvent("WARN", "[ultrafv3 scheduler] skipped", {
       ...tickMetadataBase,
       shouldRun: false,
       skippedReason: lastAutomaticSkippedReason,
@@ -284,12 +347,13 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   }
 
   const configuration = await getAutomaticSyncConfigurationStatus();
+  lastSchedulerAuthMode = configuration.authMode;
   const diagnostics = configuration.diagnostics;
   if (!configuration.ok) {
     nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
-    logApiEvent("WARN", "[erp automatic sync] scheduler tick skipped", {
+    logApiEvent("WARN", "[ultrafv3 scheduler] skipped", {
       ...tickMetadataBase,
       shouldRun: false,
       skippedReason: lastAutomaticSkippedReason,
@@ -304,13 +368,19 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   }
 
   if (configuration.authMode === "seller_reference") {
-    logApiEvent("INFO", "[erp automatic sync] using seller-auth reference mode", {
-      ...tickMetadataBase,
-      authMode: configuration.authMode,
-      sellerReferenceId: configuration.sellerId,
-      sellerReferenceName: configuration.sellerName,
-      missingGlobalCredentials: diagnostics.missingConfig.filter((key) => key === "ULTRAFV3_USERNAME" || key === "ULTRAFV3_PASSWORD"),
-    });
+    logApiEvent(
+      "INFO",
+      "[erp automatic sync] using seller-auth reference mode",
+      {
+        ...tickMetadataBase,
+        authMode: configuration.authMode,
+        sellerReferenceId: configuration.sellerId,
+        sellerReferenceName: configuration.sellerName,
+        missingGlobalCredentials: diagnostics.missingConfig.filter(
+          (key) => key === "ULTRAFV3_USERNAME" || key === "ULTRAFV3_PASSWORD",
+        ),
+      },
+    );
   }
 
   const correlationId = randomUUID();
@@ -338,7 +408,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     },
   });
 
-  logApiEvent("INFO", "[erp automatic sync] scheduler tick accepted", {
+  logApiEvent("INFO", "[ultrafv3 scheduler] run started", {
     ...tickMetadataBase,
     shouldRun: true,
     skippedReason: null,
@@ -354,7 +424,13 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   });
 
   const completedSteps: Array<{ scope: string; label: string }> = [];
-  const nonCriticalStepWarnings: Array<{ scope: string; label: string; step: number; message: string; correlationId: string }> = [];
+  const nonCriticalStepWarnings: Array<{
+    scope: string;
+    label: string;
+    step: number;
+    message: string;
+    correlationId: string;
+  }> = [];
   let failedStep: { scope: string; label: string; step: number } | null = null;
   let failedStepErrorPrefix: string | null = null;
 
@@ -374,13 +450,16 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           correlationId,
         });
         if (step.scope === "orderStatus") {
-          const diagnostics = (result as { diagnostics?: Record<string, number> }).diagnostics;
+          const diagnostics = (
+            result as { diagnostics?: Record<string, number> }
+          ).diagnostics;
           if (diagnostics?.skippedOrderStatusMissingGlobalCredentials) {
             nonCriticalStepWarnings.push({
               scope: step.scope,
               label: step.label,
               step: index + 1,
-              message: "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
+              message:
+                "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
               correlationId,
             });
           } else if (diagnostics?.nonCriticalOrderStatusErrors) {
@@ -396,16 +475,26 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
       } catch (error) {
         if (step.scope === "orderStatus") {
           const message = formatErrorMessage(error);
-          nonCriticalStepWarnings.push({ scope: step.scope, label: step.label, step: index + 1, message, correlationId });
-          logApiEvent("WARN", "[erp automatic sync] non-critical operational step ignored", {
-            correlationId,
+          nonCriticalStepWarnings.push({
             scope: step.scope,
             label: step.label,
             step: index + 1,
-            totalSteps: AUTOMATIC_SYNC_STEPS.length,
-            error: message,
-            operationalAlert: true,
+            message,
+            correlationId,
           });
+          logApiEvent(
+            "WARN",
+            "[erp automatic sync] non-critical operational step ignored",
+            {
+              correlationId,
+              scope: step.scope,
+              label: step.label,
+              step: index + 1,
+              totalSteps: AUTOMATIC_SYNC_STEPS.length,
+              error: message,
+              operationalAlert: true,
+            },
+          );
           continue;
         }
         failedStep = { scope: step.scope, label: step.label, step: index + 1 };
@@ -444,7 +533,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
       },
     });
     nextAutomaticRunAt = calculateNextAutomaticRunAt(finishedAt);
-    logApiEvent("INFO", "[erp automatic sync] hourly ERP sync finished", {
+    logApiEvent("INFO", "[ultrafv3 scheduler] run finished", {
       schedulerTickAt: schedulerTickAt.toISOString(),
       shouldRun: true,
       skippedReason: null,
@@ -461,7 +550,9 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     const message = formatErrorMessage(error);
     const isLock = getErrorStatusCode(error) === 409;
     lastAutomaticSkippedReason = isLock ? "lock_active" : "step_error";
-    lastAutomaticError = failedStepErrorPrefix ? `${failedStepErrorPrefix}: ${message}` : message;
+    lastAutomaticError = failedStepErrorPrefix
+      ? `${failedStepErrorPrefix}: ${message}`
+      : message;
     lastAutomaticFinishedAt = finishedAt;
     nextAutomaticRunAt = calculateNextAutomaticRunAt(finishedAt);
     await prisma.erpSyncRun.update({
@@ -481,23 +572,29 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
           totalSteps: AUTOMATIC_SYNC_STEPS.length,
         } as Prisma.InputJsonValue,
-        errors: [{ message, failedStep, at: finishedAt.toISOString(), correlationId }] as Prisma.InputJsonValue,
+        errors: [
+          { message, failedStep, at: finishedAt.toISOString(), correlationId },
+        ] as Prisma.InputJsonValue,
         errorMessage: lastAutomaticError,
       },
     });
-    logApiEvent(isLock ? "WARN" : "ERROR", "[erp automatic sync] hourly ERP sync did not complete", {
-      schedulerTickAt: schedulerTickAt.toISOString(),
-      shouldRun: true,
-      skippedReason: lastAutomaticSkippedReason,
-      startedAt: startedAt.toISOString(),
-      finishedAt: finishedAt.toISOString(),
-      status: isLock ? "skipped" : "error",
-      correlationId,
-      runId: overallRun.id,
-      failedStep,
-      error: lastAutomaticError,
-      operationalAlert: !isLock,
-    });
+    logApiEvent(
+      isLock ? "WARN" : "ERROR",
+      "[ultrafv3 scheduler] run finished",
+      {
+        schedulerTickAt: schedulerTickAt.toISOString(),
+        shouldRun: true,
+        skippedReason: lastAutomaticSkippedReason,
+        startedAt: startedAt.toISOString(),
+        finishedAt: finishedAt.toISOString(),
+        status: isLock ? "skipped" : "error",
+        correlationId,
+        runId: overallRun.id,
+        failedStep,
+        error: lastAutomaticError,
+        operationalAlert: !isLock,
+      },
+    );
   } finally {
     automaticSyncRunning = false;
     currentAutomaticRunId = null;
@@ -519,27 +616,53 @@ function scheduleAutomaticSyncChecker() {
 export async function startErpSyncScheduler() {
   const config = await loadAutomaticSyncPersistedConfig();
   persistedAutomaticSyncEnabled = config.enabled;
+  automaticSchedulerInitialized = true;
+  const bootConfiguration = await getAutomaticSyncConfigurationStatus();
+  lastSchedulerAuthMode = bootConfiguration.authMode;
+  nextAutomaticRunAt = persistedAutomaticSyncEnabled
+    ? calculateNextAutomaticRunAt(new Date())
+    : null;
+  logApiEvent("INFO", "[ultrafv3 scheduler] initialized", {
+    enabled: persistedAutomaticSyncEnabled,
+    enabledByEnv: env.erpSyncSchedulerEnabled,
+    window: "07:00-19:00",
+    timezone: SAO_PAULO_TIME_ZONE,
+    nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
+    authMode: bootConfiguration.authMode,
+  });
   if (!env.erpSyncSchedulerEnabled) {
     lastAutomaticSkippedReason = "scheduler_disabled";
-    logApiEvent("INFO", "[erp automatic sync] disabled by environment configuration", { envVar: "ERP_SYNC_SCHEDULER_ENABLED" });
+    logApiEvent(
+      "INFO",
+      "[erp automatic sync] disabled by environment configuration",
+      { envVar: "ERP_SYNC_SCHEDULER_ENABLED" },
+    );
     return;
   }
   if (!persistedAutomaticSyncEnabled) {
     lastAutomaticSkippedReason = "database_disabled";
-    logApiEvent("INFO", "[erp automatic sync] disabled by database configuration", { configKey: AUTOMATIC_SYNC_CONFIG_KEY });
+    logApiEvent(
+      "INFO",
+      "[erp automatic sync] disabled by database configuration",
+      { configKey: AUTOMATIC_SYNC_CONFIG_KEY },
+    );
     return;
   }
 
-  const configuration = await getAutomaticSyncConfigurationStatus();
+  const configuration = bootConfiguration;
   const diagnostics = configuration.diagnostics;
   if (!configuration.ok) {
     nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
     lastAutomaticSkippedReason = "configuration_error";
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
-    logApiEvent("WARN", "[erp automatic sync] disabled because UltraFV3 is not configured", {
-      missingConfig: diagnostics.missingConfig,
-      operationalAlert: true,
-    });
+    logApiEvent(
+      "WARN",
+      "[erp automatic sync] disabled because UltraFV3 is not configured",
+      {
+        missingConfig: diagnostics.missingConfig,
+        operationalAlert: true,
+      },
+    );
     return;
   }
 
@@ -557,7 +680,9 @@ export async function startErpSyncScheduler() {
 export function stopErpSyncScheduler() {
   if (automaticTimer) clearInterval(automaticTimer);
   automaticTimer = null;
-  nextAutomaticRunAt = persistedAutomaticSyncEnabled ? calculateNextAutomaticRunAt(new Date()) : null;
+  nextAutomaticRunAt = persistedAutomaticSyncEnabled
+    ? calculateNextAutomaticRunAt(new Date())
+    : null;
 }
 
 export async function setErpAutomaticSyncEnabled(enabled: boolean) {
@@ -576,37 +701,54 @@ export async function refreshErpAutomaticSyncConfig() {
   persistedAutomaticSyncEnabled = config.enabled;
   if (config.enabled && env.erpSyncSchedulerEnabled && !automaticTimer) {
     const configuration = await getAutomaticSyncConfigurationStatus();
-    if (configuration.ok) nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
+    lastSchedulerAuthMode = configuration.authMode;
+    if (configuration.ok)
+      nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
   }
   return getErpAutomaticSyncState();
 }
 
 export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
-  const { latestFinished, latestSuccess, latestAttempt } = await loadLatestAutomaticRunSummary();
+  const { latestFinished, latestSuccess, latestAttempt } =
+    await loadLatestAutomaticRunSummary();
   const now = new Date();
   const insideWindow = isInsideAutomaticSyncWindow(now);
   const configuration = await getAutomaticSyncConfigurationStatus();
 
   let derivedSkippedReason = lastAutomaticSkippedReason;
   if (!env.erpSyncSchedulerEnabled) derivedSkippedReason = "scheduler_disabled";
-  else if (!persistedAutomaticSyncEnabled) derivedSkippedReason = "database_disabled";
+  else if (!persistedAutomaticSyncEnabled)
+    derivedSkippedReason = "database_disabled";
   else if (!configuration.ok) derivedSkippedReason = "configuration_error";
   else if (!insideWindow) derivedSkippedReason = "outside_window";
 
   const latestAttemptStatus = latestAttempt?.status ?? null;
-  const panelStatus: AutomaticSyncPanelStatus = !persistedAutomaticSyncEnabled || !env.erpSyncSchedulerEnabled || !configuration.ok
-    ? "disabled"
-    : automaticSyncRunning || latestAttemptStatus === ErpSyncRunStatus.running
-      ? "running"
-      : derivedSkippedReason === "lock_active" || latestAttemptStatus === ErpSyncRunStatus.skipped
-        ? "skipped_lock"
-        : !insideWindow
-          ? "outside_window"
-          : latestAttemptStatus === ErpSyncRunStatus.error
-            ? "error"
-            : latestAttemptStatus === ErpSyncRunStatus.success
-              ? "success"
-              : "scheduled";
+  const lastSuccessTime =
+    latestSuccess?.finishedAt ??
+    latestSuccess?.startedAt ??
+    lastAutomaticSuccessAt;
+  const lastSuccessRecent = Boolean(
+    lastSuccessTime &&
+    now.getTime() - lastSuccessTime.getTime() <= AUTOMATIC_SYNC_INTERVAL_MS * 2,
+  );
+  const panelStatus: AutomaticSyncPanelStatus =
+    !persistedAutomaticSyncEnabled ||
+    !env.erpSyncSchedulerEnabled ||
+    !configuration.ok
+      ? "disabled"
+      : automaticSyncRunning || latestAttemptStatus === ErpSyncRunStatus.running
+        ? "running"
+        : derivedSkippedReason === "lock_active" ||
+            latestAttemptStatus === ErpSyncRunStatus.skipped
+          ? "skipped_lock"
+          : !insideWindow
+            ? "outside_window"
+            : latestAttemptStatus === ErpSyncRunStatus.error
+              ? "error"
+              : latestAttemptStatus === ErpSyncRunStatus.success &&
+                  lastSuccessRecent
+                ? "success"
+                : "scheduled";
 
   const statusLabel = (() => {
     switch (panelStatus) {
@@ -621,7 +763,9 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
       case "outside_window":
         return "Fora da janela";
       case "disabled":
-        return persistedAutomaticSyncEnabled ? "Scheduler desativado" : "Inativa";
+        return persistedAutomaticSyncEnabled
+          ? "Scheduler desativado"
+          : "Inativa";
       default:
         return "Agendada";
     }
@@ -631,18 +775,26 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
     enabled: persistedAutomaticSyncEnabled,
     enabledByEnv: env.erpSyncSchedulerEnabled,
     active: Boolean(automaticTimer),
+    initialized: automaticSchedulerInitialized,
     timezone: SAO_PAULO_TIME_ZONE,
     windowStartHour: AUTOMATIC_SYNC_START_HOUR,
     windowEndHour: AUTOMATIC_SYNC_END_HOUR,
     intervalMs: AUTOMATIC_SYNC_INTERVAL_MS,
     isRunning: automaticSyncRunning,
-    lastRunAt: (latestFinished?.startedAt ?? lastAutomaticRunAt)?.toISOString() ?? null,
-    lastSuccessAt: (latestSuccess?.finishedAt ?? latestSuccess?.startedAt ?? lastAutomaticSuccessAt)?.toISOString() ?? null,
-    lastFinishedAt: (latestFinished?.finishedAt ?? lastAutomaticFinishedAt)?.toISOString() ?? null,
+    lastRunAt:
+      (latestFinished?.startedAt ?? lastAutomaticRunAt)?.toISOString() ?? null,
+    lastSuccessAt: lastSuccessTime?.toISOString() ?? null,
+    lastRealSchedulerRunAt: latestAttempt?.startedAt.toISOString() ?? null,
+    lastRealSchedulerSuccessAt: lastSuccessTime?.toISOString() ?? null,
+    lastRealSchedulerSuccessRecent: lastSuccessRecent,
+    lastFinishedAt:
+      (latestFinished?.finishedAt ?? lastAutomaticFinishedAt)?.toISOString() ??
+      null,
     nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
     lastError: latestAttempt?.errorMessage ?? lastAutomaticError,
     currentRunId: currentAutomaticRunId,
-    lastCorrelationId: lastAutomaticCorrelationId ?? latestAttempt?.correlationId ?? null,
+    lastCorrelationId:
+      lastAutomaticCorrelationId ?? latestAttempt?.correlationId ?? null,
     lastSkippedReason: derivedSkippedReason,
     lastSkippedReasonLabel: formatAutomaticSkipReason(derivedSkippedReason),
     panelStatus,
@@ -652,6 +804,8 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
     lastAttemptCorrelationId: latestAttempt?.correlationId ?? null,
     lastStepError: latestAttempt?.errorMessage ?? null,
     statusLabel,
+    authMode: configuration.authMode,
+    configurationOk: configuration.ok,
   };
 }
 
