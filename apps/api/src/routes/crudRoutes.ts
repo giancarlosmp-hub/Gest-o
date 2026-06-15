@@ -5907,7 +5907,31 @@ router.get("/products/search", async (req, res) => {
           : null;
 
     const normalizedErpProductCode = product.erpProductCode.replace(/^0+(?=\d)/, "");
-    if (normalizedErpProductCode === "273" || normalizedErpProductCode === "228") {
+    if (normalizedErpProductCode === "273") {
+      logApiEvent("INFO", hiddenReason ? "product 273 search result rejected" : "product 273 search result accepted", {
+        step: hiddenReason ? "search result rejected" : "search result accepted",
+        source: "opportunityPriceService.searchProducts",
+        query: q,
+        priceTableCode: requestedPriceTableCode,
+        productId: product.id,
+        erpProductCode: product.erpProductCode,
+        erpProductClassCode: product.erpProductClassCode,
+        isActive: product.isActive,
+        isSuspended: product.isSuspended,
+        isSynchronized,
+        stock,
+        pickedPrice,
+        hiddenReason,
+        rejectionReason: hiddenReason,
+        rejectionDetails: hiddenReason === "inactive"
+          ? { isActive: product.isActive, isSuspended: product.isSuspended }
+          : hiddenReason === "not_synchronized"
+            ? { rawErpPayloadPresent: product.rawErpPayload != null }
+            : hiddenReason === "invalid_price"
+              ? { price: pickedPrice.price, priceTableMatched: pickedPrice.priceTableMatched, priceSource: pickedPrice.source, priceWarning: pickedPrice.priceWarning }
+              : null,
+      });
+    } else if (normalizedErpProductCode === "228") {
       logApiEvent("INFO", `[products search] product ${normalizedErpProductCode} evaluated`, {
         query: q,
         priceTableCode: requestedPriceTableCode,

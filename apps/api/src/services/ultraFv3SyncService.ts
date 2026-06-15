@@ -1021,15 +1021,19 @@ export async function syncProducts(options?: RunSyncOptions) {
           outOfLineByUltra;
 
         const diagnosticProductCode = normalizeErpLookupCode(code);
+        const isProduct273 = diagnosticProductCode === DIAGNOSTIC_PRODUCT_CODE;
         const isDiagnosticProduct = [DIAGNOSTIC_PRODUCT_CODE, ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE].includes(diagnosticProductCode);
-        if (isDiagnosticProduct) {
+        if (isProduct273) {
           const previousProduct = code
             ? await prisma.product.findFirst({
                 where: { erpProductCode: { in: Array.from(new Set([code, diagnosticProductCode].filter(Boolean))) } },
                 select: { id: true, erpProductCode: true, erpProductClassCode: true, defaultPrice: true, minPrice: true, prices: true },
               })
             : null;
-          logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} received`, {
+          logApiEvent("INFO", "product 273 received raw", {
+            step: "received raw",
+            diagnosticProductCode,
+            endpoint: "/products",
             correlationId,
             code,
             classCode: classCode || "default",
@@ -1051,8 +1055,10 @@ export async function syncProducts(options?: RunSyncOptions) {
         }
         if (!unit) {
           diagnostics.invalidMissingUnit += 1;
-          if (isDiagnosticProduct) {
-            logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} excluded`, {
+          if (isProduct273) {
+            logApiEvent("INFO", "product 273 normalizeProducts rejected", {
+              step: "normalized",
+              result: "rejected",
               correlationId,
               reason: "missing_unit",
               code,
@@ -1076,6 +1082,22 @@ export async function syncProducts(options?: RunSyncOptions) {
           stockNumber <= 0
         )
           diagnostics.withoutStock += 1;
+
+        if (isProduct273) {
+          logApiEvent("INFO", "product 273 normalized", {
+            step: "normalized",
+            result: "accepted",
+            correlationId,
+            code,
+            classCode: classCode || "default",
+            unit,
+            isActive,
+            isSuspended,
+            stockNumber,
+            defaultPrice: normalizedPrice,
+            minPrice: pickFirstNumber(payload, ["PRECO_MINIMO", "minPrice", "precoMinimo"]) || normalizedPrice,
+          });
+        }
 
         const product = await prisma.product.upsert({
           where: {
@@ -1184,12 +1206,13 @@ export async function syncProducts(options?: RunSyncOptions) {
           "filial",
           "CODFILIAL",
         ]);
-        for (const productPrice of extractProductPrices(
+        const extractedProductPrices = extractProductPrices(
           payload,
           normalizedPrice,
           priceTableCode || "1",
           branchCode,
-        )) {
+        );
+        for (const productPrice of extractedProductPrices) {
           const existingPrice = await prisma.productPrice.findFirst({
             where: {
               productId: product.id,
@@ -1202,8 +1225,20 @@ export async function syncProducts(options?: RunSyncOptions) {
               where: { id: existingPrice.id },
               data: { price: productPrice.price },
             });
+            if (isProduct273) {
+              logApiEvent("INFO", "product 273 ProductPrice created", {
+                step: "ProductPrice created",
+                result: "updated",
+                correlationId,
+                productId: product.id,
+                productPriceId: existingPrice.id,
+                erpPriceId: productPrice.priceTableCode,
+                branchCode: productPrice.branchCode,
+                price: productPrice.price,
+              });
+            }
           } else {
-            await prisma.productPrice.create({
+            const createdProductPrice = await prisma.productPrice.create({
               data: {
                 productId: product.id,
                 erpPriceId: productPrice.priceTableCode,
@@ -1211,10 +1246,27 @@ export async function syncProducts(options?: RunSyncOptions) {
                 price: productPrice.price,
               },
             });
+            if (isProduct273) {
+              logApiEvent("INFO", "product 273 ProductPrice created", {
+                step: "ProductPrice created",
+                result: "created",
+                correlationId,
+                productId: product.id,
+                productPriceId: createdProductPrice.id,
+                erpPriceId: productPrice.priceTableCode,
+                branchCode: productPrice.branchCode,
+                price: productPrice.price,
+              });
+            }
           }
         }
-        if (isDiagnosticProduct) {
-          logApiEvent("INFO", `[ultrafv3 sync products] product ${diagnosticProductCode} synced`, {
+        if (isProduct273) {
+          const persistedProduct = await prisma.product.findUnique({
+            where: { id: product.id },
+            include: { prices: { orderBy: [{ validFrom: "desc" }] } },
+          });
+          logApiEvent("INFO", "product 273 persisted", {
+            step: "persisted",
             correlationId,
             productId: product.id,
             code,
@@ -1223,7 +1275,19 @@ export async function syncProducts(options?: RunSyncOptions) {
             isSuspended,
             stockNumber,
             defaultPrice: normalizedPrice,
-            priceRowsFromProductPayload: extractProductPrices(payload, normalizedPrice, priceTableCode || "1", branchCode).length,
+            priceRowsFromProductPayload: extractedProductPrices.length,
+            persistedProduct: persistedProduct
+              ? {
+                  id: persistedProduct.id,
+                  erpProductCode: persistedProduct.erpProductCode,
+                  erpProductClassCode: persistedProduct.erpProductClassCode,
+                  defaultPrice: persistedProduct.defaultPrice,
+                  minPrice: persistedProduct.minPrice,
+                  isActive: persistedProduct.isActive,
+                  isSuspended: persistedProduct.isSuspended,
+                  priceRows: persistedProduct.prices.map((priceRow) => ({ id: priceRow.id, erpPriceId: priceRow.erpPriceId, branchCode: priceRow.branchCode, price: priceRow.price })),
+                }
+              : null,
             defaultPriceAfter: product.defaultPrice,
             minPriceAfter: product.minPrice,
           });
@@ -2338,6 +2402,18 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
       if (existingZeroPrice) {
         await prisma.productPrice.update({ where: { id: existingZeroPrice.id }, data: { price: 0 } });
         seenProductPriceIds.add(existingZeroPrice.id);
+        if (isDiagnosticProduct) {
+          logApiEvent("INFO", "product 273 ProductPrice invalidated", {
+            step: "ProductPrice invalidated",
+            result: "explicit_zero_updated",
+            correlationId,
+            productId: product.id,
+            productPriceId: existingZeroPrice.id,
+            erpPriceId: priceTableCode || null,
+            branchCode: branchCode || null,
+            receivedPrice: parsedPrice ?? 0,
+          });
+        }
       } else {
         const createdZeroPrice = await prisma.productPrice.create({
           data: {
@@ -2348,11 +2424,35 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
           },
         });
         seenProductPriceIds.add(createdZeroPrice.id);
+        if (isDiagnosticProduct) {
+          logApiEvent("INFO", "product 273 ProductPrice created", {
+            step: "ProductPrice created",
+            result: "explicit_zero_created",
+            correlationId,
+            productId: product.id,
+            productPriceId: createdZeroPrice.id,
+            erpPriceId: priceTableCode || null,
+            branchCode: branchCode || null,
+            price: 0,
+          });
+        }
       }
       const updateResult = await prisma.productPrice.updateMany({
         where: { productId: product.id, ...(priceTableCode ? { erpPriceId: priceTableCode } : {}), ...(branchCode ? { branchCode } : {}), price: { gt: 0 } },
         data: { price: 0 },
       });
+      if (isDiagnosticProduct && updateResult.count > 0) {
+        logApiEvent("INFO", "product 273 ProductPrice invalidated", {
+          step: "ProductPrice invalidated",
+          result: "zero_price_invalidated",
+          correlationId,
+          productId: product.id,
+          erpPriceId: priceTableCode || null,
+          branchCode: branchCode || null,
+          invalidatedRows: updateResult.count,
+          receivedPrice: parsedPrice ?? 0,
+        });
+      }
       diagnostics.zeroPriceInvalidated += updateResult.count;
       await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: 0, minPrice: 0 } });
       if (isZeroPriceDiagnosticProduct) {
@@ -2389,6 +2489,18 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     if (existingPrice) {
       await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price } });
       seenProductPriceIds.add(existingPrice.id);
+      if (isDiagnosticProduct) {
+        logApiEvent("INFO", "product 273 ProductPrice created", {
+          step: "ProductPrice created",
+          result: "updated_from_prices_endpoint",
+          correlationId,
+          productId: product.id,
+          productPriceId: existingPrice.id,
+          erpPriceId: priceTableCode || null,
+          branchCode: branchCode || null,
+          price,
+        });
+      }
       diagnostics.updatedPrices += 1;
     } else {
       const createdPrice = await prisma.productPrice.create({
@@ -2400,6 +2512,18 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
         },
       });
       seenProductPriceIds.add(createdPrice.id);
+      if (isDiagnosticProduct) {
+        logApiEvent("INFO", "product 273 ProductPrice created", {
+          step: "ProductPrice created",
+          result: "created_from_prices_endpoint",
+          correlationId,
+          productId: product.id,
+          productPriceId: createdPrice.id,
+          erpPriceId: priceTableCode || null,
+          branchCode: branchCode || null,
+          price,
+        });
+      }
       diagnostics.createdPrices += 1;
     }
     if (!product.defaultPrice || product.defaultPrice <= 0 || !priceTableCode || normalizeErpLookupCode(priceTableCode) === "1") {
@@ -2426,6 +2550,20 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
   const staleResult = await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0 } });
   diagnostics.absentPriceInvalidated = staleResult.count;
   if (staleResult.count > 0) {
+    const product273AfterInvalidation = await prisma.product.findFirst({
+      where: { erpProductCode: { in: [DIAGNOSTIC_PRODUCT_CODE, `0${DIAGNOSTIC_PRODUCT_CODE}`] } },
+      include: { prices: { orderBy: [{ validFrom: "desc" }] } },
+    });
+    if (product273AfterInvalidation) {
+      logApiEvent("INFO", "product 273 ProductPrice invalidated", {
+        step: "ProductPrice invalidated",
+        result: "absent_price_sweep",
+        correlationId,
+        productId: product273AfterInvalidation.id,
+        staleProductPriceRows: staleResult.count,
+        remainingPriceRows: product273AfterInvalidation.prices.map((priceRow) => ({ id: priceRow.id, erpPriceId: priceRow.erpPriceId, branchCode: priceRow.branchCode, price: priceRow.price })),
+      });
+    }
     logApiEvent("INFO", "[ultrafv3 sync prices] stale ProductPrice rows invalidated; product PRECO fallback preserved", {
       correlationId,
       staleProductPriceRows: staleResult.count,
