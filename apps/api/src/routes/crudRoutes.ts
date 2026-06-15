@@ -8316,6 +8316,94 @@ router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) 
   }
 });
 
+
+const priceDiagnosticsQuerySchema = z.object({
+  codes: z.string().trim().min(1).max(200).default("273,228"),
+  priceTableCode: z.string().trim().min(1).max(60).optional(),
+});
+
+const summarizeRawErpPayloadForPriceDiagnostics = (raw: Prisma.JsonValue | null | undefined) => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw ? { type: typeof raw } : null;
+  const record = raw as Record<string, unknown>;
+  const allowedKeys = [
+    "CODPRODUTO",
+    "CODPRODUTO_CLAS",
+    "DSCPRODUTO",
+    "DSCPRODUTO_CLAS",
+    "UND_MEDIDA",
+    "PRECO",
+    "PRECO_MINIMO",
+    "QTD_ESTOQUE",
+    "CODGRUPO",
+    "TABELA_PRECO",
+    "SUSPENDER_PEDIDOS",
+    "IDN_FORA_LINHA",
+  ];
+  return Object.fromEntries(allowedKeys.filter((key) => record[key] !== undefined).map((key) => [key, record[key]]));
+};
+
+router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), async (req, res) => {
+  const parsed = priceDiagnosticsQuerySchema.safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ message: "Parâmetro codes inválido." });
+  const correlationId = randomUUID();
+  const requestedCodes = parsed.data.codes.split(",").map((code) => code.trim()).filter(Boolean);
+  const normalizedCodes = requestedCodes.map((code) => code.replace(/^0+(?=\d)/, ""));
+  const priceTableCode = normalizeOpportunityPriceTableCode(parsed.data.priceTableCode || "1");
+  const priceRules = await loadOpportunityPriceRules();
+  const [products, syncRuns] = await Promise.all([
+    prisma.product.findMany({
+      where: { OR: requestedCodes.flatMap((code, index) => [{ erpProductCode: code }, { erpProductCode: normalizedCodes[index] }]) },
+      include: { prices: { orderBy: [{ erpPriceId: "asc" }, { branchCode: "asc" }, { validFrom: "desc" }] } },
+      orderBy: [{ erpProductCode: "asc" }, { erpProductClassCode: "asc" }],
+    }),
+    prisma.erpSyncRun.findMany({
+      where: { scope: { in: ["products", "prices", "priceVariations"] } },
+      orderBy: [{ startedAt: "desc" }],
+      take: 10,
+      select: { id: true, scope: true, status: true, startedAt: true, finishedAt: true, syncedCount: true, metrics: true, errors: true, errorMessage: true, correlationId: true },
+    }),
+  ]);
+
+  const diagnostics = requestedCodes.map((requestedCode) => {
+    const normalizedCode = requestedCode.replace(/^0+(?=\d)/, "");
+    const matches = products.filter((product) => product.erpProductCode.replace(/^0+(?=\d)/, "") === normalizedCode);
+    const productDiagnostics = matches.map((product) => {
+      const searchPrice = calculateOpportunityPriceForTable({ product, priceTableCode, priceVariations: priceRules.priceVariations, erpPrices: priceRules.erpPrices });
+      const selectable = product.isActive && !product.isSuspended && searchPrice.price > 0 && searchPrice.priceTableMatched;
+      const divergences = [
+        !product.isActive ? "Produto inativo no CRM." : null,
+        product.isSuspended ? "Produto suspenso no CRM." : null,
+        !searchPrice.priceTableMatched ? `Sem preço válido sincronizado para a tabela ${priceTableCode}.` : null,
+        searchPrice.source === "rawProduct" ? "Busca ainda dependeria de rawErpPayload; revisar fonte de verdade." : null,
+        product.prices.some((price) => Number(price.price) <= 0) && Number(product.defaultPrice || 0) > 0 ? "ProductPrice inválido/zero com defaultPrice positivo." : null,
+      ].filter(Boolean);
+      return {
+        product: {
+          id: product.id,
+          erpProductCode: product.erpProductCode,
+          erpProductClassCode: product.erpProductClassCode,
+          name: product.name,
+          unit: product.unit,
+          isActive: product.isActive,
+          isSuspended: product.isSuspended,
+          stockQuantity: product.stockQuantity,
+          defaultPrice: product.defaultPrice,
+          minPrice: product.minPrice,
+          updatedAt: product.updatedAt,
+        },
+        productPrices: product.prices.map((price) => ({ id: price.id, erpPriceId: price.erpPriceId, branchCode: price.branchCode, price: price.price, validFrom: price.validFrom, updatedAt: price.updatedAt })),
+        rawErpPayloadSummary: summarizeRawErpPayloadForPriceDiagnostics(product.rawErpPayload),
+        opportunitySearchForTable: { selectable, reason: selectable ? "visible" : "hidden_invalid_or_inactive", ...searchPrice },
+        divergences,
+      };
+    });
+    return { requestedCode, normalizedCode, crmProductFound: matches.length > 0, candidateCount: matches.length, products: productDiagnostics };
+  });
+
+  logApiEvent("INFO", "[ultrafv3 price diagnostics] generated", { correlationId, codes: requestedCodes, priceTableCode });
+  return res.json({ correlationId, endpoint: "GET /erp/ultrafv3/price-diagnostics", priceTableCode, diagnostics, lastSyncRuns: syncRuns });
+});
+
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));

@@ -159,20 +159,24 @@ export const calculateOpportunityPriceForTable = ({
 }: OpportunityPriceCalculationInput): OpportunityPriceCalculationResult => {
   const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
   const productPrices = product.prices || [];
-  const tablePrice = productPrices.find((item) => priceTableMatches(item.erpPriceId, normalizedPriceTableCode) && Number(item.price) > 0);
-  const rawTablePrice = tablePrice ? null : pickRawPriceForTable(product.rawErpPayload, normalizedPriceTableCode);
+  const selectedTableRows = productPrices.filter((item) => priceTableMatches(item.erpPriceId, normalizedPriceTableCode));
+  const tablePrice = selectedTableRows.find((item) => Number(item.price) > 0);
+  const hasExplicitInvalidSelectedTablePrice = selectedTableRows.some((item) => Number(item.price) <= 0);
+  const rawTablePrice = tablePrice || hasExplicitInvalidSelectedTablePrice ? null : pickRawPriceForTable(product.rawErpPayload, normalizedPriceTableCode);
 
   if (normalizedPriceTableCode === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE) {
     const basePrice = getProductBasePrice(product);
-    const calculatedPrice = basePrice > 0 ? null : findCalculatedPrice(product, normalizedPriceTableCode, erpPrices);
-    const selectedPrice = tablePrice?.price ?? rawTablePrice ?? calculatedPrice ?? basePrice;
+    const calculatedPrice = tablePrice || hasExplicitInvalidSelectedTablePrice ? null : findCalculatedPrice(product, normalizedPriceTableCode, erpPrices);
+    const selectedPrice = tablePrice?.price ?? rawTablePrice ?? calculatedPrice ?? (hasExplicitInvalidSelectedTablePrice ? 0 : basePrice);
     const source = tablePrice
       ? "productPrice"
       : rawTablePrice
         ? "rawProduct"
         : calculatedPrice
           ? "prices"
-          : "product.PRECO";
+          : hasExplicitInvalidSelectedTablePrice
+            ? "missing"
+            : "product.PRECO";
     return {
       price: Number(selectedPrice.toFixed(2)),
       priceTableCode: normalizedPriceTableCode,
