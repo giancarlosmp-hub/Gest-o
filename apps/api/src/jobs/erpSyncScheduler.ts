@@ -303,6 +303,16 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     return;
   }
 
+  if (configuration.authMode === "seller_reference") {
+    logApiEvent("INFO", "[erp automatic sync] using seller-auth reference mode", {
+      ...tickMetadataBase,
+      authMode: configuration.authMode,
+      sellerReferenceId: configuration.sellerId,
+      sellerReferenceName: configuration.sellerName,
+      missingGlobalCredentials: diagnostics.missingConfig.filter((key) => key === "ULTRAFV3_USERNAME" || key === "ULTRAFV3_PASSWORD"),
+    });
+  }
+
   const correlationId = randomUUID();
   const startedAt = new Date();
   const startedAtMs = Date.now();
@@ -337,6 +347,9 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
     status: "running",
     correlationId,
     runId: overallRun.id,
+    authMode: configuration.authMode,
+    sellerReferenceId: configuration.sellerId,
+    sellerReferenceName: configuration.sellerName,
     scopes: AUTOMATIC_SYNC_STEPS.map((step) => step.scope),
   });
 
@@ -360,14 +373,25 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           failIfLocked: true,
           correlationId,
         });
-        if (step.scope === "orderStatus" && (result as { diagnostics?: Record<string, number> }).diagnostics?.nonCriticalOrderStatusErrors) {
-          nonCriticalStepWarnings.push({
-            scope: step.scope,
-            label: step.label,
-            step: index + 1,
-            message: `${(result as { diagnostics?: Record<string, number> }).diagnostics?.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
-            correlationId,
-          });
+        if (step.scope === "orderStatus") {
+          const diagnostics = (result as { diagnostics?: Record<string, number> }).diagnostics;
+          if (diagnostics?.skippedOrderStatusMissingGlobalCredentials) {
+            nonCriticalStepWarnings.push({
+              scope: step.scope,
+              label: step.label,
+              step: index + 1,
+              message: "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
+              correlationId,
+            });
+          } else if (diagnostics?.nonCriticalOrderStatusErrors) {
+            nonCriticalStepWarnings.push({
+              scope: step.scope,
+              label: step.label,
+              step: index + 1,
+              message: `${diagnostics.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
+              correlationId,
+            });
+          }
         }
       } catch (error) {
         if (step.scope === "orderStatus") {
