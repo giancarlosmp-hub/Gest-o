@@ -114,6 +114,7 @@ type SyncStatusResponse = {
     enabled: boolean;
     enabledByEnv: boolean;
     active: boolean;
+    initialized: boolean;
     timezone: string;
     windowStartHour: number;
     windowEndHour: number;
@@ -121,6 +122,9 @@ type SyncStatusResponse = {
     isRunning: boolean;
     lastRunAt: string | null;
     lastSuccessAt: string | null;
+    lastRealSchedulerRunAt: string | null;
+    lastRealSchedulerSuccessAt: string | null;
+    lastRealSchedulerSuccessRecent: boolean;
     lastFinishedAt: string | null;
     nextRunAt: string | null;
     lastError: string | null;
@@ -135,6 +139,8 @@ type SyncStatusResponse = {
     lastAttemptCorrelationId: string | null;
     lastStepError: string | null;
     statusLabel: string;
+    authMode: string;
+    configurationOk: boolean;
   };
 };
 
@@ -534,7 +540,8 @@ export default function ErpIntegrationPanel() {
             <span className={`mt-2 inline-flex rounded-full px-2 py-1 font-semibold ring-1 ${automaticPanelClasses[data?.automaticSync?.panelStatus || "disabled"] || automaticPanelClasses.disabled}`}>
               {data?.automaticSync?.statusLabel || (data?.automaticSync?.enabled ? "Agendada" : "Inativa")}
             </span>
-            <p className="mt-2 text-slate-500">Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
+            <p className="mt-2 text-slate-500">{data?.automaticSync?.active ? "Ativo" : "Inativo"} · Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
+            <p className="mt-1 text-slate-500">Backend: {data?.automaticSync?.initialized ? "inicializado" : "não inicializado"} · Auth: {authModeLabel(data?.automaticSync?.authMode)}</p>
             {!data?.automaticSync?.enabledByEnv ? (
               <p className="mt-1 text-amber-700">ERP_SYNC_SCHEDULER_ENABLED desabilitada no ambiente.</p>
             ) : null}
@@ -552,14 +559,17 @@ export default function ErpIntegrationPanel() {
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Última sincronização automática</p>
-            <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.lastRunAt || undefined)}</p>
+            <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.lastRealSchedulerRunAt || undefined)}</p>
             <p className="mt-1 text-slate-500">Última execução real concluída: {formatDate(data?.automaticSync?.lastFinishedAt || undefined)}</p>
-            <p className="mt-1 text-slate-500">Último sucesso: {formatDate(data?.automaticSync?.lastSuccessAt || undefined)}</p>
+            <p className="mt-1 text-slate-500">Último sucesso real scheduler: {formatDate(data?.automaticSync?.lastRealSchedulerSuccessAt || undefined)}</p>
+            {data?.automaticSync?.lastRealSchedulerSuccessAt && !data?.automaticSync?.lastRealSchedulerSuccessRecent ? (
+              <p className="mt-1 text-amber-700">Último sucesso automático não é recente; o painel não marca como sucesso atual.</p>
+            ) : null}
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Próxima execução prevista</p>
-            <p className="mt-1 text-slate-900">{formatDate(data?.automaticSync?.nextRunAt || undefined)}</p>
-            <p className="mt-1 text-slate-500">A previsão só é recalculada após execução real (sucesso/erro); lock mantém o horário pendente.</p>
+            <p className="mt-1 text-slate-900">{data?.automaticSync?.active ? formatDate(data?.automaticSync?.nextRunAt || undefined) : "—"}</p>
+            <p className="mt-1 text-slate-500">Próxima execução real calculada pelo backend; fica vazia quando o scheduler está inativo.</p>
           </div>
           <div className="rounded-lg bg-white p-3 ring-1 ring-slate-200">
             <p className="font-semibold text-slate-700">Último evento automático</p>
@@ -567,7 +577,8 @@ export default function ErpIntegrationPanel() {
             <p className="mt-1 text-slate-600">Início: {formatDate(data?.automaticSync?.lastAttemptAt || undefined)}</p>
             <p className="mt-1 text-slate-600">Fim: {formatDate(data?.automaticSync?.lastAttemptFinishedAt || undefined)}</p>
             <p className="mt-1 truncate text-slate-500" title={data?.automaticSync?.lastAttemptCorrelationId || undefined}>correlationId: {data?.automaticSync?.lastAttemptCorrelationId || "—"}</p>
-            <p className={data?.automaticSync?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>{data?.automaticSync?.lastError || "Nenhum erro registrado."}</p>
+            <p className="mt-1 text-slate-600">Último skip: {data?.automaticSync?.lastSkippedReasonLabel || "—"}</p>
+            <p className={data?.automaticSync?.lastError ? "mt-1 text-red-700" : "mt-1 text-slate-500"}>Último erro automático: {data?.automaticSync?.lastError || "Nenhum erro registrado."}</p>
           </div>
         </div>
 

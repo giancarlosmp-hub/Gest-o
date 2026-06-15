@@ -8592,6 +8592,11 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
 });
 
 
+router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), async (_req, res) => {
+  const automaticSync = await refreshErpAutomaticSyncConfig();
+  return res.status(200).json({ automaticSync });
+});
+
 router.patch("/erp/ultrafv3/sync/automatic", authorize("diretor", "gerente"), validateBody(z.object({ enabled: z.boolean() })), async (req, res) => {
   const automaticSync = await setErpAutomaticSyncEnabled(req.body.enabled);
   return res.status(200).json({ automaticSync });
