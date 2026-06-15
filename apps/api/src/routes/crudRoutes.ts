@@ -8350,6 +8350,48 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
   const normalizedCodes = requestedCodes.map((code) => code.replace(/^0+(?=\d)/, ""));
   const priceTableCode = normalizeOpportunityPriceTableCode(parsed.data.priceTableCode || "1");
   const priceRules = await loadOpportunityPriceRules();
+  const parseDiagnosticRows = (value: string | undefined) => {
+    if (!value?.trim()) return [] as unknown[];
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === "object") {
+        const record = parsed as Record<string, unknown>;
+        for (const key of ["items", "data", "rows", "results", "content"]) {
+          if (Array.isArray(record[key])) return record[key] as unknown[];
+        }
+      }
+    } catch {
+      return [] as unknown[];
+    }
+    return [] as unknown[];
+  };
+  const getCodeFromDiagnosticRow = (row: unknown) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return "";
+    const record = row as Record<string, unknown>;
+    const value = record.CODPRODUTO ?? record.COD_PRODUTO ?? record.productCode ?? record.erpProductCode ?? record.produto;
+    return String(value ?? "").trim().replace(/^0+(?=\d)/, "");
+  };
+  const readDiagnosticNumber = (row: unknown, keys: string[]) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+    const record = row as Record<string, unknown>;
+    for (const key of keys) {
+      const value = record[key];
+      if (value === undefined || value === null || String(value).trim() === "") continue;
+      const raw = String(value).trim();
+      const parsed = Number(raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+  };
+  const appConfigs = await prisma.appConfig.findMany({
+    where: { key: { in: ["erp.ultrafv3.products", "erp.ultrafv3.prices", "erp.ultrafv3.priceVariations"] } },
+    select: { key: true, value: true, updatedAt: true },
+  });
+  const configByKey = new Map(appConfigs.map((config) => [config.key, config]));
+  const productRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.products")?.value);
+  const priceRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.prices")?.value);
+  const priceVariationRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.priceVariations")?.value);
   const [products, syncRuns] = await Promise.all([
     prisma.product.findMany({
       where: { OR: requestedCodes.flatMap((code, index) => [{ erpProductCode: code }, { erpProductCode: normalizedCodes[index] }]) },
@@ -8367,6 +8409,21 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
   const diagnostics = requestedCodes.map((requestedCode) => {
     const normalizedCode = requestedCode.replace(/^0+(?=\d)/, "");
     const matches = products.filter((product) => product.erpProductCode.replace(/^0+(?=\d)/, "") === normalizedCode);
+    const productRowsForCode = productRows.filter((row) => getCodeFromDiagnosticRow(row) === normalizedCode);
+    const priceRowsForCode = priceRows.filter((row) => getCodeFromDiagnosticRow(row) === normalizedCode);
+    const variationRowsForCode = priceVariationRows.filter((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+      const record = row as Record<string, unknown>;
+      const rowCode = getCodeFromDiagnosticRow(row);
+      if (rowCode) return rowCode === normalizedCode;
+      const groups = productRowsForCode.map((productRow) => {
+        if (!productRow || typeof productRow !== "object" || Array.isArray(productRow)) return "";
+        const productRecord = productRow as Record<string, unknown>;
+        return String(productRecord.CODGRUPO ?? productRecord.COD_GRUPO ?? productRecord.groupCode ?? productRecord.codigoGrupo ?? "").trim().replace(/^0+(?=\d)/, "");
+      }).filter(Boolean);
+      const variationGroup = String(record.CODGRUPO ?? record.COD_GRUPO ?? record.groupCode ?? record.codigoGrupo ?? record.grupo ?? "").trim().replace(/^0+(?=\d)/, "");
+      return Boolean(variationGroup && groups.includes(variationGroup));
+    });
     const productDiagnostics = matches.map((product) => {
       const searchPrice = calculateOpportunityPriceForTable({ product, priceTableCode, priceVariations: priceRules.priceVariations, erpPrices: priceRules.erpPrices });
       const selectable = product.isActive && !product.isSuspended && searchPrice.price > 0 && searchPrice.priceTableMatched;
@@ -8393,11 +8450,24 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
         },
         productPrices: product.prices.map((price) => ({ id: price.id, erpPriceId: price.erpPriceId, branchCode: price.branchCode, price: price.price, validFrom: price.validFrom, updatedAt: price.updatedAt })),
         rawErpPayloadSummary: summarizeRawErpPayloadForPriceDiagnostics(product.rawErpPayload),
-        opportunitySearchForTable: { selectable, reason: selectable ? "visible" : "hidden_invalid_or_inactive", ...searchPrice },
+        opportunitySearchForTable: { selectable, reason: selectable ? "visible" : divergences[0] || "hidden_invalid_or_inactive", ...searchPrice },
+        priceSource: searchPrice.source === "product.PRECO" ? "/products.PRECO" : searchPrice.source === "productPrice" ? "ProductPrice (/prices or /products table field)" : searchPrice.source,
         divergences,
       };
     });
-    return { requestedCode, normalizedCode, crmProductFound: matches.length > 0, candidateCount: matches.length, products: productDiagnostics };
+    return {
+      requestedCode,
+      normalizedCode,
+      appearedInProductsEndpoint: productRowsForCode.length > 0,
+      productsEndpointPreco: productRowsForCode.map((row) => readDiagnosticNumber(row, ["PRECO", "price", "defaultPrice", "preco"])),
+      appearedInPricesEndpoint: priceRowsForCode.length > 0,
+      pricesEndpointRows: priceRowsForCode,
+      appearedInPriceVariationsEndpoint: variationRowsForCode.length > 0,
+      priceVariationRows: variationRowsForCode,
+      crmProductFound: matches.length > 0,
+      candidateCount: matches.length,
+      products: productDiagnostics,
+    };
   });
 
   logApiEvent("INFO", "[ultrafv3 price diagnostics] generated", { correlationId, codes: requestedCodes, priceTableCode });
@@ -8429,6 +8499,10 @@ router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("direto
       ...result,
     });
   } catch (error) {
+    if (res.headersSent) {
+      logApiEvent("WARN", "[ultrafv3 sync route] opportunity clients sync failed after response was sent", { userId: req.user!.id, role: req.user!.role });
+      return;
+    }
     const details = error instanceof Error ? error.message : String(error);
     logApiEvent("ERROR", "[ultrafv3 sync route] opportunity clients sync failed", { userId: req.user!.id, role: req.user!.role, error: details });
     return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({

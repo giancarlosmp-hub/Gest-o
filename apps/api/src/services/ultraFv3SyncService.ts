@@ -913,6 +913,11 @@ export async function syncProducts(options?: RunSyncOptions) {
         correlationId,
         resolved.credentials,
       );
+      await prisma.appConfig.upsert({
+        where: { key: "erp.ultrafv3.products" },
+        update: { value: JSON.stringify(rows) },
+        create: { key: "erp.ultrafv3.products", value: JSON.stringify(rows) },
+      });
       const diagnostics = {
         received: rows.length,
         validAfterNormalization: 0,
@@ -2324,6 +2329,26 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     }
     if (!price) {
       diagnostics.invalidPrice += 1;
+      const explicitZeroWhere = {
+        productId: product.id,
+        erpPriceId: priceTableCode || null,
+        branchCode: branchCode || null,
+      };
+      const existingZeroPrice = await prisma.productPrice.findFirst({ where: explicitZeroWhere });
+      if (existingZeroPrice) {
+        await prisma.productPrice.update({ where: { id: existingZeroPrice.id }, data: { price: 0 } });
+        seenProductPriceIds.add(existingZeroPrice.id);
+      } else {
+        const createdZeroPrice = await prisma.productPrice.create({
+          data: {
+            productId: product.id,
+            erpPriceId: priceTableCode || null,
+            branchCode: branchCode || null,
+            price: 0,
+          },
+        });
+        seenProductPriceIds.add(createdZeroPrice.id);
+      }
       const updateResult = await prisma.productPrice.updateMany({
         where: { productId: product.id, ...(priceTableCode ? { erpPriceId: priceTableCode } : {}), ...(branchCode ? { branchCode } : {}), price: { gt: 0 } },
         data: { price: 0 },
@@ -2401,16 +2426,10 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
   const staleResult = await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0 } });
   diagnostics.absentPriceInvalidated = staleResult.count;
   if (staleResult.count > 0) {
-    const productsWithoutValidPrice = await prisma.product.findMany({
-      where: { prices: { none: { price: { gt: 0 } } } },
-      select: { id: true, erpProductCode: true },
+    logApiEvent("INFO", "[ultrafv3 sync prices] stale ProductPrice rows invalidated; product PRECO fallback preserved", {
+      correlationId,
+      staleProductPriceRows: staleResult.count,
     });
-    if (productsWithoutValidPrice.length) {
-      await prisma.product.updateMany({
-        where: { id: { in: productsWithoutValidPrice.map((product) => product.id) } },
-        data: { defaultPrice: 0, minPrice: 0 },
-      });
-    }
   }
   logApiEvent("INFO", "[ultrafv3 sync prices] processed product price rows", {
     correlationId,
