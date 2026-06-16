@@ -1552,6 +1552,7 @@ const getCandidateHistoryScore = (candidate: PartnerClientCandidate) =>
 
 const choosePrimaryPartnerClient = (candidates: PartnerClientCandidate[], ownerSellerId: string) =>
   [...candidates].sort((a, b) => {
+    if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
     const historyDiff = getCandidateHistoryScore(b) - getCandidateHistoryScore(a);
     if (historyDiff !== 0) return historyDiff;
     if (a.ownerSellerId === ownerSellerId && b.ownerSellerId !== ownerSellerId) return -1;

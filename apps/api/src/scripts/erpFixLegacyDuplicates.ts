@@ -33,6 +33,7 @@ type Candidate = {
 type CleanupSummary = {
   groupsFound: number;
   groupsChanged: number;
+  conflictsFound: number;
   relationshipsMoved: number;
   duplicatesArchived: number;
   visibleAfterCleanup: Record<string, number>;
@@ -42,6 +43,8 @@ const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");
 
 const normalizeCode = (value?: string | null) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
+const isNeutralizedCode = (value?: string | null) => /__(LEGACY_DUP|MERGED)__/.test(String(value ?? ""));
+const normalizeStrongCode = (value?: string | null) => (value && !isNeutralizedCode(value) ? normalizeCode(value) : "");
 const normalizeValidDocument = (value?: string | null) => {
   const digits = normalizeCnpj(value);
   return (digits.length === 11 || digits.length === 14) && !/^(\d)\1+$/.test(digits) ? digits : "";
@@ -162,7 +165,7 @@ function buildDuplicateGroups(clients: Candidate[]) {
 
   for (const client of clients) {
     dsu.add(client.id);
-    const code = normalizeCode(client.code);
+    const code = normalizeStrongCode(client.code);
     const doc = normalizeValidDocument(client.cnpjNormalized || client.cnpj);
     if (code) byCode.set(code, [...(byCode.get(code) ?? []), client]);
     if (doc) byDocument.set(doc, [...(byDocument.get(doc) ?? []), client]);
@@ -198,7 +201,7 @@ async function visibleCountBySearchTerm(term: string) {
 async function cleanupLegacyDuplicates(): Promise<CleanupSummary> {
   const candidates = await loadCandidates();
   const groups = buildDuplicateGroups(candidates);
-  const summary: CleanupSummary = { groupsFound: groups.length, groupsChanged: 0, relationshipsMoved: 0, duplicatesArchived: 0, visibleAfterCleanup: {} };
+  const summary: CleanupSummary = { groupsFound: groups.length, groupsChanged: 0, conflictsFound: 0, relationshipsMoved: 0, duplicatesArchived: 0, visibleAfterCleanup: {} };
   const now = Date.now();
 
   for (const group of groups) {
@@ -206,6 +209,13 @@ async function cleanupLegacyDuplicates(): Promise<CleanupSummary> {
     const duplicates = group.filter((client) => client.id !== primary.id);
     const singleLegacyArchived = group.length === 1 && isLegacyArchivedName(primary.name);
     if (!primary || (!duplicates.length && !singleLegacyArchived)) continue;
+    const strongCodes = new Set(group.map((client) => normalizeStrongCode(client.code)).filter(Boolean));
+    const validDocuments = new Set(group.map((client) => normalizeValidDocument(client.cnpjNormalized || client.cnpj)).filter(Boolean));
+    if (strongCodes.size > 1 || validDocuments.size > 1) {
+      summary.conflictsFound += 1;
+      console.warn(`[erp:fix-duplicates] Conflito ignorado por múltiplas identidades fortes. codes=${[...strongCodes].join(",") || "-"} docs=${[...validDocuments].join(",") || "-"} ids=${group.map((client) => client.id).join(",")}`);
+      continue;
+    }
     summary.groupsChanged += 1;
     console.log(`[erp:fix-duplicates] Grupo com ${group.length} cliente(s). Principal=${primary.id} ${primary.name}`);
 
