@@ -8594,7 +8594,7 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
   const integration = getUltraFv3IntegrationDiagnostics(status);
   const [productCount, clientCount, operational] = await Promise.all([
     prisma.product.count({ where: { isActive: true } }),
-    prisma.client.count(),
+    prisma.client.count({ where: { isArchived: false } }),
     getErpOrderOperationalSummary()
   ]);
   const history = await getUltraFv3SyncHistory(25);

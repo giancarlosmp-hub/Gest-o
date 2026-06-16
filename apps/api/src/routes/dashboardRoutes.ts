@@ -101,7 +101,7 @@ router.get("/summary", async (req, res) => {
         expectedCloseDate: { gte: start, lte: end }
       }
     }),
-    prisma.client.count({ where: { ...whereOwner, createdAt: { gte: start, lte: end } } }),
+    prisma.client.count({ where: { ...whereOwner, isArchived: false, createdAt: { gte: start, lte: end } } }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } }),
     prisma.user.findMany({ where: req.user!.role === "vendedor" ? { id: req.user!.id } : { role: "vendedor", ...(whereSale.sellerId ? { id: whereSale.sellerId } : {}) } }),
     prisma.activity.findMany({ where: whereOwner, take: 8, orderBy: { createdAt: "desc" } })
@@ -274,7 +274,7 @@ router.get("/portfolio", async (req, res) => {
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
   const [clients, wonOpportunities, recentWonOpportunities, soldTodayData] = await Promise.all([
-    prisma.client.findMany({ where: whereOwner, select: { id: true, name: true } }),
+    prisma.client.findMany({ where: { ...whereOwner, isArchived: false }, select: { id: true, name: true } }),
     prisma.opportunity.findMany({
       where: {
         ...whereOwner,
