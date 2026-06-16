@@ -8,6 +8,10 @@ type Client = {
   cityNormalized: string;
   state: string;
   ownerSellerId: string;
+  isArchived?: boolean;
+  financialProfile?: Record<string, unknown> | null;
+  partnerTitles?: Record<string, unknown>[] | null;
+  overdueTitlesTotal?: number;
   opportunities: string[];
   timelineEvents: string[];
 };
@@ -48,6 +52,7 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
       cityNormalized: normalize(row.city),
       state: row.state,
       ownerSellerId: row.ownerSellerId,
+      isArchived: false,
       opportunities: [],
       timelineEvents: [],
     });
@@ -59,6 +64,7 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
     primary.timelineEvents.push(...duplicate.timelineEvents);
     duplicate.code = `${duplicate.code || duplicate.id}__MERGED__TEST`;
     duplicate.cnpjNormalized = null;
+    duplicate.isArchived = true;
   }
   const sellerChanged = primary.ownerSellerId !== row.ownerSellerId ? 1 : 0;
   const cityCorrected = normalize(primary.city) !== normalize(row.city) ? 1 : 0;
@@ -71,6 +77,7 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
     cityNormalized: normalize(row.city),
     state: row.state,
     ownerSellerId: row.ownerSellerId,
+    isArchived: false,
   });
   return { created: 0, updated: 1, merged: duplicates.length, sellerChanged, cityCorrected };
 };
@@ -88,6 +95,9 @@ assert(result.merged === 1, "duplicado por mesmo código ERP deveria ser consoli
 assert(result.sellerChanged === 1 && fernando.ownerSellerId === "jeferson", "troca de vendedor deveria atualizar carteira");
 assert(result.cityCorrected === 1 && fernando.city === "CHOPINZINHO", "cidade Não informado deveria ser corrigida");
 assert(fernando.opportunities.includes("opp-1") && fernando.timelineEvents.includes("timeline-1"), "histórico deveria ser preservado na mesclagem por código ERP");
+assert(clients.filter((client) => !client.isArchived && client.code === "2000").length === 1, "cliente com mesmo código ERP não deve duplicar quando muda vendedor");
+assert(!clients.filter((client) => !client.isArchived).some((client) => client.name.startsWith("[ARQUIVADO ERP DUP]")), "duplicado arquivado não deve aparecer em pesquisa/lista normal");
+assert(clients.filter((client) => client.ownerSellerId === "edirlei" && !client.isArchived).length === 0, "duplicado arquivado não deve bloquear manutenção do vendedor antigo");
 
 const docResult = upsertPartner(clients, { code: "9999", cnpjNormalized: "99887766000155", name: "CLIENTE DOC", city: "A", state: "PR", ownerSellerId: "seller-b" });
 const docClient = clients.find((client) => client.id === "dup-doc")!;
@@ -107,5 +117,13 @@ for (const run of allSellerResults) {
 }
 assert(success === 2 && errors === 1, "sync de todos vendedores deve continuar após falha isolada");
 assert(clients.some((client) => client.code === "4000"), "vendedor após falha isolada deveria continuar sincronizando");
+
+const financialClient = clients.find((client) => client.code === "4000")!;
+financialClient.financialProfile = { VALOR_MEDIO: 5499.9, DATA_ULTFATURA: "2019-03-09T03:00:00.000Z", DIAS_MEDIAATRASO: 4 };
+financialClient.partnerTitles = [{ DOCTO: 9766, DATA_VENCIMENTO: "2026-05-13T03:00:00.000Z", SALDO_CAPITAL: 2400 }];
+financialClient.overdueTitlesTotal = 2400;
+assert(financialClient.financialProfile.VALOR_MEDIO === 5499.9, "financialProfiles deve sincronizar e ficar disponível para Cliente 360");
+assert(financialClient.partnerTitles.length === 1, "partnerTitles deve sincronizar e ficar disponível para Cliente 360");
+assert((financialClient.overdueTitlesTotal ?? 0) > 0, "cliente com título vencido deve disparar alerta financeiro na Nova Oportunidade");
 
 console.log("UltraFV3 partner dedup rules smoke passed");

@@ -29,7 +29,9 @@ export type UltraFv3SyncScope =
   | "prices"
   | "branches"
   | "operations"
-  | "orderStatus";
+  | "orderStatus"
+  | "financialProfiles"
+  | "partnerTitles";
 
 type SyncStatusPayload = {
   scope: UltraFv3SyncScope;
@@ -553,7 +555,7 @@ async function fetchUltraFv3RowsWithAlias(
   endpoint: string,
   scope: Exclude<
     UltraFv3SyncScope,
-    "connection" | "products" | "partners" | "orderStatus"
+    "connection" | "products" | "partners" | "orderStatus" | "financialProfiles" | "partnerTitles"
   >,
   correlationId: string,
   credentials: UltraFv3Credentials | undefined,
@@ -1626,6 +1628,8 @@ async function mergeDuplicateClientsIntoPrimary(
         cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
         name: `[ARQUIVADO ERP DUP] ${duplicate.name}`,
         nameNormalized: normalizeText(`[ARQUIVADO ERP DUP] ${duplicate.name}`),
+        isArchived: true,
+        archiveReason: `MERGED_INTO:${primary.id}`,
       },
     });
     logApiEvent("INFO", "[ultrafv3 sync partners] duplicate client merged", {
@@ -1681,6 +1685,8 @@ async function persistPartnerPayload(
     fantasyName: data.fantasyName,
     cnpj: cnpj ? cnpj : undefined,
     cnpjNormalized: normalizedDocument ? normalizedDocument : undefined,
+    isArchived: false,
+    archiveReason: null,
     city: mappedCity ? data.city : primary?.city || data.city,
     state: mappedState ? data.state : primary?.state || data.state,
     region: data.region,
@@ -2160,7 +2166,7 @@ export async function syncPartnersForAllConfiguredSellers(
 async function syncReferenceData(
   scope: Exclude<
     UltraFv3SyncScope,
-    "connection" | "products" | "partners" | "orderStatus"
+    "connection" | "products" | "partners" | "orderStatus" | "financialProfiles" | "partnerTitles"
   >,
   endpoint: string,
   options?: RunSyncOptions,
@@ -2285,6 +2291,31 @@ async function syncReferenceData(
           value: JSON.stringify(result.rows),
         },
       });
+      if (scope === "salesmen") {
+        let inactivatedUsers = 0;
+        for (const row of result.rows) {
+          if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+          const payload = row as Record<string, unknown>;
+          const baixa = pickFirstValue(payload, ["DATA_BAIXA", "DT_BAIXA", "DATABAIXA", "dataBaixa", "inactiveAt"]);
+          if (!baixa) continue;
+          const erpCode = normalizePartnerCacheCode(pickFirstString(payload, ["CODVENDEDOR", "VENDEDOR", "CODIGO", "erpCode"]));
+          const operatorCode = normalizePartnerCacheCode(pickFirstString(payload, ["OPERADOR", "CODOPERADOR", "COD_OPERADOR", "erpOperatorCode"]));
+          if (!erpCode && !operatorCode) continue;
+          const updated = await prisma.user.updateMany({
+            where: {
+              role: "vendedor",
+              isActive: true,
+              OR: [
+                ...(erpCode ? [{ erpCode }] : []),
+                ...(operatorCode ? [{ erpOperatorCode: operatorCode }] : []),
+              ],
+            },
+            data: { isActive: false, erpRawPayload: payload as Prisma.InputJsonObject },
+          });
+          inactivatedUsers += updated.count;
+        }
+        if (inactivatedUsers) logApiEvent("INFO", "[ultrafv3 sync salesmen] ERP inactive sellers disabled in CRM", { correlationId, inactivatedUsers });
+      }
       return {
         syncedCount: result.rows.length,
         diagnostics: {
@@ -2647,6 +2678,89 @@ export const syncSalesmen = (options?: RunSyncOptions) =>
     "/vendedores",
   ]);
 
+const getFinancialProfilePartnerCode = (row: Record<string, unknown>) =>
+  normalizePartnerCacheCode(pickFirstString(row, ["PARCEIRO_OUT", "PARCEIRO", "CODPARCEIRO", "partnerCode"]));
+
+const getPartnerTitlePartnerCode = (row: Record<string, unknown>) =>
+  normalizePartnerCacheCode(pickFirstString(row, ["PARCEIRO", "PARCEIRO_OUT", "CODPARCEIRO", "partnerCode"]));
+
+const getTitleSaldoCapital = (row: Record<string, unknown>) =>
+  parseNumber(row.SALDO_CAPITAL ?? row.saldoCapital ?? row.SALDO ?? row.valorSaldo) ?? 0;
+
+const isTitleOverdue = (row: Record<string, unknown>, now = new Date()) => {
+  const dueRaw = row.DATA_VENCIMENTO ?? row.dataVencimento ?? row.dueDate;
+  const due = dueRaw ? new Date(String(dueRaw)) : null;
+  return Boolean(due && !Number.isNaN(due.getTime()) && due.getTime() < now.getTime() && getTitleSaldoCapital(row) > 0);
+};
+
+export async function syncFinancialProfiles(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
+  return runSync(
+    "financialProfiles",
+    async (correlationId) => {
+      const rows = await fetchUltraFv3Rows("/financialProfiles?date=01.01.1900+00:00:00", "financialProfiles", correlationId, resolved.credentials);
+      await prisma.appConfig.upsert({
+        where: { key: "erp.ultrafv3.financialProfiles" },
+        update: { value: JSON.stringify(rows) },
+        create: { key: "erp.ultrafv3.financialProfiles", value: JSON.stringify(rows) },
+      });
+      let matchedClients = 0;
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        const payload = row as Record<string, unknown>;
+        const code = getFinancialProfilePartnerCode(payload);
+        if (!code) continue;
+        const result = await prisma.client.updateMany({
+          where: { code, isArchived: false },
+          data: {
+            financialProfile: payload as Prisma.InputJsonObject,
+            lastPurchaseDate: payload.DATA_ULTFATURA ? new Date(String(payload.DATA_ULTFATURA)) : undefined,
+            lastPurchaseValue: parseNumber(payload.VALOR_ULTFATURA) ?? undefined,
+          },
+        });
+        matchedClients += result.count;
+      }
+      return { syncedCount: rows.length, diagnostics: { matchedClients } };
+    },
+    { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined },
+  );
+}
+
+export async function syncPartnerTitles(options?: RunSyncOptions) {
+  const resolved = await resolveReferenceCredentials();
+  return runSync(
+    "partnerTitles",
+    async (correlationId) => {
+      const rows = await fetchUltraFv3Rows("/partnerTitles?date=01.01.1900+00:00:00", "partnerTitles", correlationId, resolved.credentials);
+      await prisma.appConfig.upsert({
+        where: { key: "erp.ultrafv3.partnerTitles" },
+        update: { value: JSON.stringify(rows) },
+        create: { key: "erp.ultrafv3.partnerTitles", value: JSON.stringify(rows) },
+      });
+      const byPartner = new Map<string, Record<string, unknown>[]>();
+      for (const row of rows) {
+        if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+        const payload = row as Record<string, unknown>;
+        const code = getPartnerTitlePartnerCode(payload);
+        if (!code) continue;
+        byPartner.set(code, [...(byPartner.get(code) ?? []), payload]);
+      }
+      let matchedClients = 0;
+      for (const [code, titles] of byPartner) {
+        const openTitlesTotal = titles.reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+        const overdueTitlesTotal = titles.filter((title) => isTitleOverdue(title)).reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+        const result = await prisma.client.updateMany({
+          where: { code, isArchived: false },
+          data: { partnerTitles: titles as Prisma.InputJsonArray, openTitlesTotal, overdueTitlesTotal },
+        });
+        matchedClients += result.count;
+      }
+      return { syncedCount: rows.length, diagnostics: { matchedClients, clientsWithTitles: byPartner.size } };
+    },
+    { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined },
+  );
+}
+
 
 export type UltraFv3FullSyncStep = {
   scope: UltraFv3SyncScope;
@@ -2665,6 +2779,8 @@ type UltraFv3FullSyncResult = {
   correlationId: string;
   stats: {
     clients: number;
+    financialProfiles: number;
+    partnerTitles: number;
     products: number;
     priceTables: number;
     prices: number;
@@ -2684,6 +2800,8 @@ const FULL_SYNC_STEPS: Array<{
   { scope: "connection", label: "Conexão", run: syncConnection },
   { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
   { scope: "partners", label: "Clientes", run: syncPartners },
+  { scope: "financialProfiles", label: "Perfil financeiro", run: syncFinancialProfiles },
+  { scope: "partnerTitles", label: "Títulos em aberto", run: syncPartnerTitles },
   { scope: "products", label: "Produtos", run: syncProducts },
   { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
   { scope: "prices", label: "Preços calculados", run: syncPrices },
@@ -2778,6 +2896,8 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Pro
       correlationId,
       stats: {
         clients: countByScope.get("partners") ?? 0,
+        financialProfiles: countByScope.get("financialProfiles") ?? 0,
+        partnerTitles: countByScope.get("partnerTitles") ?? 0,
         products: countByScope.get("products") ?? 0,
         priceTables: countByScope.get("priceTables") ?? 0,
         prices: countByScope.get("prices") ?? 0,
@@ -2960,6 +3080,8 @@ export async function getUltraFv3SyncStatus() {
     "connection",
     "products",
     "partners",
+    "financialProfiles",
+    "partnerTitles",
     "orderStatus",
     "salesmen",
     "paymentMethods",

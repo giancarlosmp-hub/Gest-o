@@ -31,6 +31,7 @@ type ClientOption = {
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
+  overdueTitlesTotal?: number | null;
 };
 type SellerOption = { id: string; name: string };
 type PriceTableOption = { code: string; label: string };
@@ -124,6 +125,8 @@ export default function CreateOpportunityModal({
     titleInputRef.current?.focus();
   }, [open]);
 
+  const selectedClient = clients.find((client) => client.id === form.clientId) || null;
+  const overdueTitlesTotal = selectedClient?.overdueTitlesTotal || 0;
 
   if (!open) return null;
 
@@ -174,6 +177,11 @@ export default function CreateOpportunityModal({
                       className={fieldClassName}
                     />
                   </label>
+                  {overdueTitlesTotal > 0 ? (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+                      ⚠️ Cliente com {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(overdueTitlesTotal)} em títulos vencidos.
+                    </p>
+                  ) : null}
                   <QuickCreateClientSection
                     open={open}
                     fieldClassName={fieldClassName}

@@ -25,6 +25,10 @@ type Client = {
   potentialHa?: number | null;
   farmSizeHa?: number | null;
   commercialSummary?: CommercialSummary | null;
+  financialProfile?: Record<string, unknown> | null;
+  partnerTitles?: Array<Record<string, unknown>> | null;
+  openTitlesTotal?: number | null;
+  overdueTitlesTotal?: number | null;
 };
 
 type Contact = {
@@ -141,6 +145,11 @@ const formatCurrency = (value?: number | null) => {
   if (value == null) return "-";
 
   return brlCurrencyFormatter.format(value);
+};
+
+const numberFromErp = (value: unknown) => {
+  const parsed = typeof value === "number" ? value : Number(String(value ?? "").replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 export default function ClientDetailsPage() {
@@ -335,6 +344,17 @@ export default function ClientDetailsPage() {
   };
 
   const hasErpData = Object.values(erpData).some((value) => value !== null && value !== undefined && value !== "");
+  const financial = client.financialProfile || {};
+  const averageDelay = numberFromErp(financial.DIAS_MEDIAATRASO);
+  const openDelay = numberFromErp(financial.DIAS_MAIORATRASO_AB);
+  const bouncedChecks = numberFromErp(financial.QTD_CHEQUES_DEV);
+  const riskBadge =
+    averageDelay === 0 && openDelay === 0 && bouncedChecks === 0
+      ? { label: "Verde", className: "bg-emerald-50 text-emerald-700 ring-emerald-200" }
+      : (averageDelay ?? 0) > 15 || (openDelay ?? 0) > 0 || (bouncedChecks ?? 0) > 0
+        ? { label: "Vermelho", className: "bg-red-50 text-red-700 ring-red-200" }
+        : { label: "Amarelo", className: "bg-amber-50 text-amber-700 ring-amber-200" };
+  const titles = Array.isArray(client.partnerTitles) ? client.partnerTitles : [];
 
   const openAddContactModal = () => {
     setEditingContactId(null);
@@ -487,6 +507,58 @@ export default function ClientDetailsPage() {
             <p><strong>Última compra:</strong> {formatPtBrDate(erpData.lastPurchaseDate)}</p>
             <p><strong>Valor:</strong> {formatPtBrCurrency(erpData.lastPurchaseValue)}</p>
             <p><strong>Atualizado em:</strong> {formatPtBrDate(erpData.erpUpdatedAt)}</p>
+          </div>
+        </section>
+      ) : null}
+
+      {client.financialProfile ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2">
+            <h3 className="text-lg font-semibold">Perfil Financeiro ERP</h3>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${riskBadge.className}`}>Risco {riskBadge.label}</span>
+          </div>
+          <div className="grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
+            <p><strong>Ticket médio:</strong> {formatCurrency(numberFromErp(financial.VALOR_MEDIO))}</p>
+            <p><strong>Primeira compra:</strong> {formatPtBrDate(String(financial.DATA_PRIMFATURA || ""))}</p>
+            <p><strong>Última compra:</strong> {formatPtBrDate(String(financial.DATA_ULTFATURA || ""))}</p>
+            <p><strong>Valor da última compra:</strong> {formatCurrency(numberFromErp(financial.VALOR_ULTFATURA))}</p>
+            <p><strong>Média de atraso:</strong> {averageDelay ?? 0} dia(s)</p>
+            <p><strong>Maior atraso em aberto:</strong> {openDelay ?? 0} dia(s)</p>
+            <p><strong>Cheques devolvidos:</strong> {bouncedChecks ?? 0}</p>
+          </div>
+        </section>
+      ) : null}
+
+      {titles.length ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-lg font-semibold">Títulos em Aberto</h3>
+            <p className="text-sm font-semibold text-slate-700">Total em aberto: {formatCurrency(client.openTitlesTotal || 0)}</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="text-xs uppercase text-slate-500">
+                <tr><th className="px-2 py-2">Documento</th><th className="px-2 py-2">Parcela</th><th className="px-2 py-2">Vencimento</th><th className="px-2 py-2">Forma</th><th className="px-2 py-2">Valor</th><th className="px-2 py-2">Saldo</th><th className="px-2 py-2">Status</th></tr>
+              </thead>
+              <tbody>
+                {titles.map((title, index) => {
+                  const saldo = numberFromErp(title.SALDO_CAPITAL) || 0;
+                  const dueDate = title.DATA_VENCIMENTO ? new Date(String(title.DATA_VENCIMENTO)) : null;
+                  const overdue = Boolean(dueDate && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now() && saldo > 0);
+                  return (
+                    <tr key={`${title.FATURAS_RECEBER_ID || title.DOCTO || index}`} className="border-t border-slate-100">
+                      <td className="px-2 py-2">{String(title.DOCTO || "-")}</td>
+                      <td className="px-2 py-2">{String(title.PARCELA || "-")}</td>
+                      <td className="px-2 py-2">{formatPtBrDate(String(title.DATA_VENCIMENTO || ""))}</td>
+                      <td className="px-2 py-2">{String(title.DSCFORMA || "-")}</td>
+                      <td className="px-2 py-2">{formatCurrency(numberFromErp(title.VALOR))}</td>
+                      <td className="px-2 py-2">{formatCurrency(saldo)}</td>
+                      <td className={`px-2 py-2 font-semibold ${overdue ? "text-red-700" : "text-emerald-700"}`}>{overdue ? "vencido" : "em aberto"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </section>
       ) : null}
