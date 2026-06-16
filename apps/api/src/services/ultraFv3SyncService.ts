@@ -371,6 +371,11 @@ const pickPartnerAddress = (payload: Record<string, unknown>) => {
 const nonEmptyOrUndefined = (value: string) =>
   value.trim() ? value.trim() : undefined;
 
+const LEGACY_ARCHIVED_DUPLICATE_PREFIX = "[ARQUIVADO ERP DUP]";
+const legacyArchivedDuplicateNameWhere = {
+  name: { startsWith: LEGACY_ARCHIVED_DUPLICATE_PREFIX, mode: "insensitive" as const },
+};
+
 const isValidDocumentForDedup = (value?: string | null) => {
   const digits = normalizeCnpj(value);
   return (digits.length === 11 || digits.length === 14) && !/^(\d)\1+$/.test(digits);
@@ -1565,7 +1570,7 @@ const choosePrimaryPartnerClient = (candidates: PartnerClientCandidate[], ownerS
 const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDocument: string) => {
   const byCode = data.code
     ? await prisma.client.findMany({
-        where: { code: data.code },
+        where: { code: data.code, NOT: legacyArchivedDuplicateNameWhere },
         select: selectPartnerClientCandidate,
       }) as PartnerClientCandidate[]
     : [];
@@ -1576,6 +1581,7 @@ const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDo
             { cnpjNormalized: normalizedDocument },
             ...(data.cnpj ? [{ cnpj: data.cnpj }] : []),
           ],
+          NOT: legacyArchivedDuplicateNameWhere,
         },
         select: selectPartnerClientCandidate,
       }) as PartnerClientCandidate[]
@@ -1587,6 +1593,7 @@ const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDo
         nameNormalized: data.nameNormalized,
         cityNormalized: data.cityNormalized,
         state: data.state,
+        NOT: legacyArchivedDuplicateNameWhere,
       },
       select: selectPartnerClientCandidate,
     }) as PartnerClientCandidate[];
@@ -1656,8 +1663,8 @@ async function mergeDuplicateClientsIntoPrimary(
         code: duplicate.code ? `${duplicate.code}__MERGED__${now}` : null,
         cnpjNormalized: null,
         cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
-        name: `[ARQUIVADO ERP DUP] ${duplicate.name}`,
-        nameNormalized: normalizeText(`[ARQUIVADO ERP DUP] ${duplicate.name}`),
+        name: `${LEGACY_ARCHIVED_DUPLICATE_PREFIX} ${duplicate.name}`,
+        nameNormalized: normalizeText(`${LEGACY_ARCHIVED_DUPLICATE_PREFIX} ${duplicate.name}`),
         isArchived: true,
         archiveReason: `MERGED_INTO:${primary.id}`,
       },

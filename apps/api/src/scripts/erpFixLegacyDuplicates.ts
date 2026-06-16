@@ -36,6 +36,7 @@ type CleanupSummary = {
   conflictsFound: number;
   relationshipsMoved: number;
   duplicatesArchived: number;
+  archivedFlagFixed: number;
   visibleAfterCleanup: Record<string, number>;
 };
 
@@ -201,23 +202,37 @@ async function visibleCountBySearchTerm(term: string) {
 async function cleanupLegacyDuplicates(): Promise<CleanupSummary> {
   const candidates = await loadCandidates();
   const groups = buildDuplicateGroups(candidates);
-  const summary: CleanupSummary = { groupsFound: groups.length, groupsChanged: 0, conflictsFound: 0, relationshipsMoved: 0, duplicatesArchived: 0, visibleAfterCleanup: {} };
+  const summary: CleanupSummary = { groupsFound: groups.length, groupsChanged: 0, conflictsFound: 0, relationshipsMoved: 0, duplicatesArchived: 0, archivedFlagFixed: 0, visibleAfterCleanup: {} };
   const now = Date.now();
 
   for (const group of groups) {
     const primary = choosePrimary(group);
     const duplicates = group.filter((client) => client.id !== primary.id);
-    const singleLegacyArchived = group.length === 1 && isLegacyArchivedName(primary.name);
-    if (!primary || (!duplicates.length && !singleLegacyArchived)) continue;
+    const legacyFlagFixTargets = group.filter((client) => isLegacyArchivedName(client.name) && (!client.isArchived || client.archiveReason !== CLEANUP_REASON));
+    const singleLegacyArchived = group.length === 1 && legacyFlagFixTargets.some((target) => target.id === primary.id);
+    if (!primary || (!duplicates.length && !singleLegacyArchived && !legacyFlagFixTargets.length)) continue;
     const strongCodes = new Set(group.map((client) => normalizeStrongCode(client.code)).filter(Boolean));
     const validDocuments = new Set(group.map((client) => normalizeValidDocument(client.cnpjNormalized || client.cnpj)).filter(Boolean));
-    if (strongCodes.size > 1 || validDocuments.size > 1) {
-      summary.conflictsFound += 1;
-      console.warn(`[erp:fix-duplicates] Conflito ignorado por múltiplas identidades fortes. codes=${[...strongCodes].join(",") || "-"} docs=${[...validDocuments].join(",") || "-"} ids=${group.map((client) => client.id).join(",")}`);
-      continue;
-    }
     summary.groupsChanged += 1;
     console.log(`[erp:fix-duplicates] Grupo com ${group.length} cliente(s). Principal=${primary.id} ${primary.name}`);
+
+    if (legacyFlagFixTargets.length) {
+      if (dryRun) {
+        for (const target of legacyFlagFixTargets) console.log(`  [dry-run] Corrigiria flag arquivada ${target.id} ${target.name}`);
+      } else {
+        const result = await prisma.client.updateMany({
+          where: { id: { in: legacyFlagFixTargets.map((target) => target.id) } },
+          data: { isArchived: true, archiveReason: CLEANUP_REASON },
+        });
+        summary.archivedFlagFixed += result.count;
+      }
+    }
+
+    if (strongCodes.size > 1 || validDocuments.size > 1) {
+      summary.conflictsFound += 1;
+      console.warn(`[erp:fix-duplicates] Conflito ignorado por múltiplas identidades fortes. Apenas flags legadas com prefixo foram corrigidas. codes=${[...strongCodes].join(",") || "-"} docs=${[...validDocuments].join(",") || "-"} ids=${group.map((client) => client.id).join(",")}`);
+      continue;
+    }
 
     if (dryRun) {
       for (const duplicate of duplicates) console.log(`  [dry-run] Arquivaria ${duplicate.id} ${duplicate.name}`);
