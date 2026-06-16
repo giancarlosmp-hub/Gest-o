@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { EventType, Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { normalizeCnpj, normalizeText } from "../utils/normalize.js";
 
@@ -42,6 +42,10 @@ const args = new Set(process.argv.slice(2));
 const dryRun = args.has("--dry-run");
 
 const normalizeCode = (value?: string | null) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
+const normalizeValidDocument = (value?: string | null) => {
+  const digits = normalizeCnpj(value);
+  return (digits.length === 11 || digits.length === 14) && !/^(\d)\1+$/.test(digits) ? digits : "";
+};
 const isLegacyArchivedName = (name: string) => normalizeText(name).startsWith(normalizeText(ARCHIVED_PREFIX));
 const stripLegacyPrefix = (name: string) => name.replace(/^\s*\[ARQUIVADO ERP DUP\]\s*/i, "").trim();
 const identityNameKey = (client: Candidate) => [normalizeText(stripLegacyPrefix(client.name)), client.cityNormalized || normalizeText(client.city), client.state].join("|");
@@ -106,6 +110,19 @@ async function moveRelationships(tx: Prisma.TransactionClient, duplicateId: stri
   return results.reduce((total, result) => total + result.count, 0);
 }
 
+const createCleanupAuditEvent = (
+  tx: Prisma.TransactionClient,
+  params: { clientId: string; ownerSellerId: string; description: string },
+) =>
+  tx.timelineEvent.create({
+    data: {
+      type: EventType.status,
+      clientId: params.clientId,
+      ownerSellerId: params.ownerSellerId,
+      description: params.description,
+    },
+  });
+
 async function loadCandidates() {
   const clients = await prisma.client.findMany({
     where: {
@@ -146,7 +163,7 @@ function buildDuplicateGroups(clients: Candidate[]) {
   for (const client of clients) {
     dsu.add(client.id);
     const code = normalizeCode(client.code);
-    const doc = client.cnpjNormalized || normalizeCnpj(client.cnpj);
+    const doc = normalizeValidDocument(client.cnpjNormalized || client.cnpj);
     if (code) byCode.set(code, [...(byCode.get(code) ?? []), client]);
     if (doc) byDocument.set(doc, [...(byDocument.get(doc) ?? []), client]);
     byNameCityState.set(identityNameKey(client), [...(byNameCityState.get(identityNameKey(client)) ?? []), client]);
@@ -206,11 +223,21 @@ async function cleanupLegacyDuplicates(): Promise<CleanupSummary> {
           where: { id: primary.id },
           data: { isArchived: true, archiveReason: CLEANUP_REASON },
         });
+        await createCleanupAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId: primary.ownerSellerId,
+          description: "Duplicado legado arquivado automaticamente pelo saneamento UltraFV3.",
+        });
         summary.duplicatesArchived += 1;
         return;
       }
       for (const duplicate of duplicates) {
         summary.relationshipsMoved += await moveRelationships(tx, duplicate.id, primary.id);
+        await createCleanupAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId: primary.ownerSellerId,
+          description: `Cadastro legado duplicado ${duplicate.name} (${duplicate.code || duplicate.id}) fundido ao cliente principal pelo saneamento UltraFV3. Histórico, oportunidades, atividades e timeline foram preservados no cliente principal.`,
+        });
         await tx.client.update({
           where: { id: duplicate.id },
           data: {
@@ -222,6 +249,11 @@ async function cleanupLegacyDuplicates(): Promise<CleanupSummary> {
             name: isLegacyArchivedName(duplicate.name) ? duplicate.name : `${ARCHIVED_PREFIX} ${duplicate.name}`,
             nameNormalized: normalizeText(`${ARCHIVED_PREFIX} ${stripLegacyPrefix(duplicate.name)}`),
           },
+        });
+        await createCleanupAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId: primary.ownerSellerId,
+          description: `Duplicado legado arquivado automaticamente pelo saneamento UltraFV3: ${duplicate.name}.`,
         });
         summary.duplicatesArchived += 1;
       }

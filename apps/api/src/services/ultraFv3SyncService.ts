@@ -1,4 +1,4 @@
-import { Prisma, ErpSyncRunStatus, ErpSyncTrigger } from "@prisma/client";
+import { Prisma, ErpSyncRunStatus, ErpSyncTrigger, EventType } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../config/prisma.js";
 import {
@@ -371,7 +371,14 @@ const pickPartnerAddress = (payload: Record<string, unknown>) => {
 const nonEmptyOrUndefined = (value: string) =>
   value.trim() ? value.trim() : undefined;
 
-const normalizeDocument = (value?: string | null) => normalizeCnpj(value);
+const isValidDocumentForDedup = (value?: string | null) => {
+  const digits = normalizeCnpj(value);
+  return (digits.length === 11 || digits.length === 14) && !/^(\d)\1+$/.test(digits);
+};
+const normalizeDocument = (value?: string | null) => {
+  const digits = normalizeCnpj(value);
+  return isValidDocumentForDedup(digits) ? digits : "";
+};
 const resolveClientTypeFromDocument = (normalizedDocument?: string | null) => {
   if (!normalizedDocument) return undefined;
   if (normalizedDocument.length === 11) return "PF" as const;
@@ -1418,6 +1425,8 @@ type PartnerClientCandidate = {
   cityNormalized: string | null;
   state: string;
   ownerSellerId: string;
+  ownerSeller?: { name: string } | null;
+  isArchived: boolean;
   erpUpdatedAt: Date | null;
   segment: string | null;
   createdAt: Date;
@@ -1516,6 +1525,8 @@ const selectPartnerClientCandidate = {
   cityNormalized: true,
   state: true,
   ownerSellerId: true,
+  ownerSeller: { select: { name: true } },
+  isArchived: true,
   erpUpdatedAt: true,
   segment: true,
   createdAt: true,
@@ -1605,6 +1616,19 @@ const getPartnerAmbiguityReasons = (params: {
   return reasons;
 };
 
+const createUltraFv3ClientAuditEvent = (
+  tx: Prisma.TransactionClient,
+  params: { clientId: string; ownerSellerId: string; description: string },
+) =>
+  tx.timelineEvent.create({
+    data: {
+      type: EventType.status,
+      clientId: params.clientId,
+      ownerSellerId: params.ownerSellerId,
+      description: params.description,
+    },
+  });
+
 async function mergeDuplicateClientsIntoPrimary(
   tx: Prisma.TransactionClient,
   primary: PartnerClientCandidate,
@@ -1620,6 +1644,11 @@ async function mergeDuplicateClientsIntoPrimary(
     await tx.contact.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
     await tx.agendaEvent.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
     await tx.agendaStop.updateMany({ where: { clientId: duplicate.id }, data: { clientId: primary.id } });
+    await createUltraFv3ClientAuditEvent(tx, {
+      clientId: primary.id,
+      ownerSellerId: primary.ownerSellerId,
+      description: `Cadastro duplicado ${duplicate.name} (${duplicate.code || duplicate.id}) fundido ao cliente principal via sincronização UltraFV3. Histórico e relacionamentos preservados no cadastro principal.`,
+    });
     await tx.client.update({
       where: { id: duplicate.id },
       data: {
@@ -1631,6 +1660,11 @@ async function mergeDuplicateClientsIntoPrimary(
         isArchived: true,
         archiveReason: `MERGED_INTO:${primary.id}`,
       },
+    });
+    await createUltraFv3ClientAuditEvent(tx, {
+      clientId: primary.id,
+      ownerSellerId: primary.ownerSellerId,
+      description: `Duplicado arquivado automaticamente via UltraFV3: ${duplicate.name}. Motivo: cadastro fundido ao cliente principal.`,
     });
     logApiEvent("INFO", "[ultrafv3 sync partners] duplicate client merged", {
       correlationId,
@@ -1700,11 +1734,27 @@ async function persistPartnerPayload(
 
   if (primary) {
     const sellerChanged = primary.ownerSellerId !== ownerSellerId;
+    const wasArchived = primary.isArchived;
     const currentCityPlaceholder = isPlaceholderCity(primary.city);
     const cityChanged = Boolean(mappedCity) && normalizeText(primary.city) !== normalizeText(data.city);
     await prisma.$transaction(async (tx) => {
       if (duplicates.length) await mergeDuplicateClientsIntoPrimary(tx, primary, duplicates, data, correlationId);
       await tx.client.update({ where: { id: primary.id }, data: updateData });
+      if (sellerChanged) {
+        const newSeller = await tx.user.findUnique({ where: { id: ownerSellerId }, select: { name: true } });
+        await createUltraFv3ClientAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId,
+          description: `Cliente atualizado via UltraFV3. Vendedor alterado de ${primary.ownerSeller?.name || primary.ownerSellerId} para ${newSeller?.name || ownerSellerId}. Oportunidades, atividades, autores e datas históricas foram preservados.`,
+        });
+      }
+      if (wasArchived) {
+        await createUltraFv3ClientAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId,
+          description: "Cliente reativado automaticamente pela sincronização UltraFV3 por corresponder ao cadastro principal do ERP.",
+        });
+      }
     });
     diagnostics.updated += 1;
     diagnostics.merged += duplicates.length;
