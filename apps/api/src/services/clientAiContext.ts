@@ -69,7 +69,8 @@ export const buildClientAiContext = async ({
   const client = await prisma.client.findFirst({
     where: {
       id: clientId,
-      ...scope
+      ...scope,
+      isArchived: false
     },
     select: {
       id: true,

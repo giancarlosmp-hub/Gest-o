@@ -139,4 +139,60 @@ assert(financialClient.financialProfile.VALOR_MEDIO === 5499.9, "financialProfil
 assert(financialClient.partnerTitles.length === 1, "partnerTitles deve sincronizar e ficar disponível para Cliente 360");
 assert((financialClient.overdueTitlesTotal ?? 0) > 0, "cliente com título vencido deve disparar alerta financeiro na Nova Oportunidade");
 
+const legacyArchivedClient = {
+  id: "legacy-archived-flag",
+  code: "7000",
+  cnpjNormalized: "7000",
+  name: "[ARQUIVADO ERP DUP] CLIENTE LEGADO",
+  nameNormalized: normalize("[ARQUIVADO ERP DUP] CLIENTE LEGADO"),
+  city: "C",
+  cityNormalized: normalize("C"),
+  state: "PR",
+  ownerSellerId: "old-seller",
+  isArchived: false,
+  opportunities: [],
+  timelineEvents: [],
+};
+clients.push(legacyArchivedClient);
+const fixLegacyArchivedFlags = (items: Client[]) => {
+  let fixed = 0;
+  for (const client of items) {
+    if (client.name.startsWith("[ARQUIVADO ERP DUP]") && client.isArchived === false) {
+      client.isArchived = true;
+      fixed += 1;
+    }
+  }
+  return fixed;
+};
+const visibleClientSearch = (items: Client[], term: string) => items.filter((client) => !client.isArchived && client.name.includes(term));
+const sellerWallet = (items: Client[], sellerId: string) => items.filter((client) => client.ownerSellerId === sellerId && !client.isArchived);
+const userDeletionBlockedByClients = (items: Client[], sellerId: string) => items.some((client) => client.ownerSellerId === sellerId && !client.isArchived);
+assert(fixLegacyArchivedFlags(clients) === 1, "rotina complementar deve corrigir cliente legado com prefixo e isArchived=false");
+assert(legacyArchivedClient.isArchived === true, "cliente legado com prefixo deve ficar isArchived=true");
+assert(visibleClientSearch(clients, "CLIENTE LEGADO").length === 0, "cliente legado arquivado deve desaparecer das buscas");
+assert(sellerWallet(clients, "old-seller").length === 0, "cliente legado arquivado deve desaparecer da carteira");
+assert(!userDeletionBlockedByClients(clients, "old-seller"), "cliente legado arquivado não deve bloquear exclusão de usuário");
+
+const findSyncCandidatesIgnoringLegacyArchivedNames = (items: Client[], row: PartnerRow) =>
+  findCandidates(items, row).filter((client) => !client.name.startsWith("[ARQUIVADO ERP DUP]"));
+const legacyOnlyCandidate = {
+  id: "legacy-only-sync",
+  code: "8000",
+  cnpjNormalized: "8000",
+  name: "[ARQUIVADO ERP DUP] CLIENTE SOMENTE ARQUIVADO",
+  nameNormalized: normalize("[ARQUIVADO ERP DUP] CLIENTE SOMENTE ARQUIVADO"),
+  city: "C",
+  cityNormalized: normalize("C"),
+  state: "PR",
+  ownerSellerId: "old-seller",
+  isArchived: true,
+  opportunities: [],
+  timelineEvents: [],
+};
+clients.push(legacyOnlyCandidate);
+assert(
+  findSyncCandidatesIgnoringLegacyArchivedNames(clients, { code: "8000", cnpjNormalized: "8000", name: "CLIENTE SOMENTE ARQUIVADO", city: "C", state: "PR", ownerSellerId: "new-seller" }).length === 0,
+  "sync UltraFV3 não deve reativar cadastro com prefixo [ARQUIVADO ERP DUP] por engano"
+);
+
 console.log("UltraFV3 partner dedup rules smoke passed");

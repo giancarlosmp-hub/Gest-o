@@ -22,6 +22,7 @@
     "build:shared": "npm run build -w @salesforce-pro/shared",
     "build:web": "npm run build -w @salesforce-pro/web",
     "build:api": "npm run build -w @salesforce-pro/api",
-    "erp:fix-duplicates": "npm run erp:fix-duplicates -w @salesforce-pro/api"
+    "erp:fix-duplicates": "npm run erp:fix-duplicates -w @salesforce-pro/api",
+    "erp:fix-archived-flag": "npm run erp:fix-archived-flag -w @salesforce-pro/api"
   }
 }

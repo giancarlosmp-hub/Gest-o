@@ -22,7 +22,8 @@
     "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts",
     "smoke:ultrafv3-crm-sync": "tsx src/scripts/ultraFv3CrmSyncRegressionSmoke.ts",
     "smoke:ultrafv3-scheduler": "tsx src/scripts/ultraFv3SchedulerSmoke.ts",
-    "erp:fix-duplicates": "tsx src/scripts/erpFixLegacyDuplicates.ts"
+    "erp:fix-duplicates": "tsx src/scripts/erpFixLegacyDuplicates.ts",
+    "erp:fix-archived-flag": "tsx src/scripts/erpFixArchivedFlag.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

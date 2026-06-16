@@ -1207,7 +1207,7 @@ const findDuplicateClient = async ({
 
   if (normalized.code) {
     const existingByCode = await prisma.client.findFirst({
-      where: { code: normalized.code, ...(ignoreClientId ? { id: { not: ignoreClientId } } : {}) },
+      where: { code: normalized.code, isArchived: false, ...(ignoreClientId ? { id: { not: ignoreClientId } } : {}) },
       select: { id: true, name: true, city: true, state: true, cnpj: true, code: true },
     });
     if (existingByCode) {
@@ -1229,6 +1229,7 @@ const findDuplicateClient = async ({
     const existingByCnpj = await prisma.client.findFirst({
       where: {
         OR: [{ cnpjNormalized: normalized.cnpjNormalized }, ...(candidate.cnpj ? [{ cnpj: candidate.cnpj }] : [])],
+        isArchived: false,
         ...(ignoreClientId ? { id: { not: ignoreClientId } } : {}),
       },
       select: { id: true, name: true, city: true, state: true, cnpj: true, code: true },
@@ -1251,6 +1252,7 @@ const findDuplicateClient = async ({
   const existingClients = await prisma.client.findMany({
     where: {
       ...scope,
+      isArchived: false,
       ...(ignoreClientId ? { id: { not: ignoreClientId } } : {})
     },
     select: {
@@ -1855,7 +1857,7 @@ const buildImportPreview = async (req: any, rows: unknown[]): Promise<ImportPrev
 
   // Carrega o mínimo necessário para deduplicação
   const existingClients = await prisma.client.findMany({
-    where: scopedWhere,
+    where: { ...scopedWhere, isArchived: false },
     select: { id: true, cnpj: true, code: true, name: true, nameNormalized: true, city: true, state: true }
   });
 
@@ -2190,6 +2192,7 @@ const processOpportunityImport = async ({
     const clients = await prisma.client.findMany({
       where: {
         ...sellerWhere(req),
+        isArchived: false,
         ...(clientIds.size && !clientNames.size ? { id: { in: Array.from(clientIds) } } : {})
       },
       select: { id: true, name: true, city: true, state: true, cnpj: true }
@@ -4263,6 +4266,7 @@ router.post("/clients/exists-bulk", async (req, res) => {
     ? await prisma.client.findMany({
         where: {
           ...sellerWhere(req),
+          isArchived: false,
           OR: whereOr
         },
         select: {
@@ -4387,7 +4391,7 @@ router.post("/clients/import", async (req, res) => {
   const scopedWhere = sellerWhere(req);
 
   const existingClients = await prisma.client.findMany({
-    where: scopedWhere,
+    where: { ...scopedWhere, isArchived: false },
     select: {
       id: true,
       name: true,
@@ -4643,7 +4647,8 @@ router.get("/clients/:id/contacts", async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
-      ...sellerWhere(req)
+      ...sellerWhere(req),
+      isArchived: false
     },
     select: { id: true }
   });
@@ -4668,7 +4673,8 @@ router.post(
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
-        ...sellerWhere(req)
+        ...sellerWhere(req),
+        isArchived: false
       },
       select: { id: true }
     });
@@ -4694,7 +4700,8 @@ router.put(
     const client = await prisma.client.findFirst({
       where: {
         id: req.params.id,
-        ...sellerWhere(req)
+        ...sellerWhere(req),
+        isArchived: false
       },
       select: { id: true }
     });
@@ -4742,6 +4749,7 @@ router.get("/companies", async (req, res) => {
   const data = await prisma.client.findMany({
     where: {
       ...sellerWhere(req),
+      isArchived: false,
       clientType: "PJ"
     },
     orderBy: { createdAt: "desc" }
@@ -4968,7 +4976,8 @@ router.get("/ai/client-summary/:clientId", async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: clientId,
-      ...sellerWhere(req)
+      ...sellerWhere(req),
+      isArchived: false
     },
     select: {
       id: true,
@@ -6007,7 +6016,7 @@ router.get("/products/search", async (req, res) => {
 router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
   const duplicatedDocuments = await prisma.client.groupBy({
     by: ["cnpjNormalized"],
-    where: { cnpjNormalized: { not: null } },
+    where: { cnpjNormalized: { not: null }, isArchived: false },
     _count: { cnpjNormalized: true },
     having: {
       cnpjNormalized: {
@@ -6019,7 +6028,7 @@ router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
   const details = await Promise.all(duplicatedDocuments.map(async (duplicate) => {
     const normalized = duplicate.cnpjNormalized;
     const clients = await prisma.client.findMany({
-      where: { cnpjNormalized: normalized || undefined },
+      where: { cnpjNormalized: normalized || undefined, isArchived: false },
       orderBy: [{ createdAt: "asc" }],
       select: {
         id: true,
@@ -6089,7 +6098,9 @@ router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "geren
           code: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
           cnpjNormalized: null,
           cnpj: duplicate.cnpj ? `${duplicate.cnpj} [MERGED INTO ${primary.id}]` : null,
-          name: `[ARQUIVADO] ${duplicate.name}`
+          name: `[ARQUIVADO] ${duplicate.name}`,
+          isArchived: true,
+          archiveReason: reason || "manual_duplicate_merge"
         }
       });
     }
@@ -10172,16 +10183,19 @@ router.get("/erp/ultrafv3/seller-diagnostics", authorize("diretor", "gerente"), 
       select: { id: true, opportunityId: true, sellerId: true, pedidoIdImportacao: true, numPedido: true, erpOrderNumber: true, status: true, orderStatus: true, payloadSent: true, erpResponse: true, syncErrors: true, createdAt: true, updatedAt: true },
     }),
     targetUser ? prisma.client.findMany({
-      where: { ownerSellerId: targetUser.id },
+      where: { ownerSellerId: targetUser.id, isArchived: false },
       orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "desc" }],
       take: 20,
       select: { id: true, code: true, name: true, fantasyName: true, clientType: true, cnpj: true, cnpjNormalized: true, ownerSellerId: true, erpUpdatedAt: true, createdAt: true },
     }) : Promise.resolve([]),
     (normalizedCpf || normalizedCnpj) ? prisma.client.findMany({
-      where: { OR: [
-        normalizedCpf ? { cnpjNormalized: normalizedCpf } : undefined,
-        normalizedCnpj ? { cnpjNormalized: normalizedCnpj } : undefined,
-      ].filter(Boolean) as Prisma.ClientWhereInput[] },
+      where: {
+        isArchived: false,
+        OR: [
+          normalizedCpf ? { cnpjNormalized: normalizedCpf } : undefined,
+          normalizedCnpj ? { cnpjNormalized: normalizedCnpj } : undefined,
+        ].filter(Boolean) as Prisma.ClientWhereInput[]
+      },
       orderBy: [{ erpUpdatedAt: "desc" }, { createdAt: "desc" }],
       take: 20,
       select: { id: true, code: true, name: true, fantasyName: true, clientType: true, cnpj: true, cnpjNormalized: true, ownerSellerId: true, erpUpdatedAt: true, createdAt: true },

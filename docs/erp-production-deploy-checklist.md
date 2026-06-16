@@ -47,3 +47,16 @@ Objetivo: liberar primeiros pedidos reais com foco em estabilidade operacional, 
 - [ ] Pausar novos envios se `/salesmen` retornar `NUM_PEDIDO` vazio/inválido para vendedores ativos.
 - [ ] Pausar novos envios se houver repetição de `NUM_PEDIDO` para oportunidades diferentes.
 - [ ] Reverter deploy se logs não permitirem rastrear `pedidoIdImportacao` ou se o histórico `ErpOrderSync` não persistir.
+
+## Validação pós-saneamento de duplicados arquivados
+
+Após executar `npm run erp:fix-duplicates` e `npm run erp:fix-archived-flag`, confirmar que não restou nenhum cadastro legado com prefixo de arquivado ainda visível:
+
+```sql
+SELECT COUNT(*)
+FROM "Client"
+WHERE name LIKE '[ARQUIVADO ERP DUP]%'
+AND "isArchived" = false;
+```
+
+Resultado esperado: `0`.
