@@ -7,6 +7,8 @@ type SyncScopeKey =
   | "connection"
   | "products"
   | "partners"
+  | "financialProfiles"
+  | "partnerTitles"
   | "orderStatus"
   | "salesmen"
   | "paymentMethods"
@@ -156,6 +158,8 @@ const FULL_SYNC_STEPS: Array<{ key: SyncScopeKey; label: string; nonCritical?: b
   { key: "connection", label: "Conexão" },
   { key: "salesmen", label: "Vendedores" },
   { key: "partners", label: "Clientes" },
+  { key: "financialProfiles", label: "Perfil financeiro" },
+  { key: "partnerTitles", label: "Títulos em aberto" },
   { key: "products", label: "Produtos" },
   { key: "priceTables", label: "Tabelas de preço" },
   { key: "prices", label: "Preços calculados" },
@@ -171,6 +175,8 @@ const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
   { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos sincronizados", description: "Importa produtos com código ERP e unidade; a seleção da oportunidade exibe apenas itens com preço válido, mesmo com estoque zerado." },
   { key: "partners", title: "Clientes/parceiros (vendedor referência/global)", endpoint: "partners", countLabel: "Clientes", description: "Sincroniza /partners com credencial global ou vendedor de referência. Para atualizar carteira completa e trocas de vendedor, use Clientes por vendedor." },
+  { key: "financialProfiles", title: "Perfil financeiro", endpoint: "financial-profiles", countLabel: "Perfis", description: "Sincroniza /financialProfiles e enriquece o Cliente 360 com ticket, compras, atrasos e cheques devolvidos." },
+  { key: "partnerTitles", title: "Títulos em aberto", endpoint: "partner-titles", countLabel: "Títulos", description: "Sincroniza /partnerTitles, calcula saldo em aberto/vencido e exibe alertas financeiros na oportunidade." },
   { key: "orderStatus", title: "Status de pedidos", endpoint: "order-status", countLabel: "Pedidos consultados", description: "Consulta o /orderStatus em modo somente leitura para atualizar o acompanhamento operacional dos pedidos já enviados." },
   { key: "salesmen", title: "Vendedores", endpoint: "salesmen", description: "Persiste o catálogo de vendedores com código ERP para vínculo com usuários CRM." },
   { key: "paymentMethods", title: "Formas de pagamento", endpoint: "payment-methods", description: "Sincroniza formas de pagamento disponíveis para emissão de pedidos." },

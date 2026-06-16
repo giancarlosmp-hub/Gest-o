@@ -8,8 +8,14 @@ type Client = {
   cityNormalized: string;
   state: string;
   ownerSellerId: string;
+  isArchived?: boolean;
+  financialProfile?: Record<string, unknown> | null;
+  partnerTitles?: Record<string, unknown>[] | null;
+  overdueTitlesTotal?: number;
   opportunities: string[];
+  opportunityOwners?: Record<string, string>;
   timelineEvents: string[];
+  timelineOwners?: Record<string, string>;
 };
 
 type PartnerRow = {
@@ -48,8 +54,11 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
       cityNormalized: normalize(row.city),
       state: row.state,
       ownerSellerId: row.ownerSellerId,
+      isArchived: false,
       opportunities: [],
+      opportunityOwners: {},
       timelineEvents: [],
+      timelineOwners: {},
     });
     return { created: 1, updated: 0, merged: 0, sellerChanged: 0, cityCorrected: 0 };
   }
@@ -57,8 +66,11 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
   for (const duplicate of duplicates) {
     primary.opportunities.push(...duplicate.opportunities);
     primary.timelineEvents.push(...duplicate.timelineEvents);
+    primary.opportunityOwners = { ...(primary.opportunityOwners || {}), ...(duplicate.opportunityOwners || {}) };
+    primary.timelineOwners = { ...(primary.timelineOwners || {}), ...(duplicate.timelineOwners || {}) };
     duplicate.code = `${duplicate.code || duplicate.id}__MERGED__TEST`;
     duplicate.cnpjNormalized = null;
+    duplicate.isArchived = true;
   }
   const sellerChanged = primary.ownerSellerId !== row.ownerSellerId ? 1 : 0;
   const cityCorrected = normalize(primary.city) !== normalize(row.city) ? 1 : 0;
@@ -71,6 +83,7 @@ const upsertPartner = (clients: Client[], row: PartnerRow) => {
     cityNormalized: normalize(row.city),
     state: row.state,
     ownerSellerId: row.ownerSellerId,
+    isArchived: false,
   });
   return { created: 0, updated: 1, merged: duplicates.length, sellerChanged, cityCorrected };
 };
@@ -79,7 +92,11 @@ const clients: Client[] = [
   { id: "old-city", code: "2000", cnpjNormalized: "12345678901", name: "FERNANDO FREIRE CIOLA", nameNormalized: normalize("FERNANDO FREIRE CIOLA"), city: "Não informado", cityNormalized: normalize("Não informado"), state: "PR", ownerSellerId: "edirlei", opportunities: ["opp-1"], timelineEvents: [] },
   { id: "dup-code", code: "2000", cnpjNormalized: "12345678901", name: "FERNANDO FREIRE CIOLA", nameNormalized: normalize("FERNANDO FREIRE CIOLA"), city: "CHOPINZINHO", cityNormalized: normalize("CHOPINZINHO"), state: "PR", ownerSellerId: "edirlei", opportunities: [], timelineEvents: ["timeline-1"] },
   { id: "dup-doc", code: "9999", cnpjNormalized: "99887766000155", name: "CLIENTE DOC", nameNormalized: normalize("CLIENTE DOC"), city: "A", cityNormalized: normalize("A"), state: "PR", ownerSellerId: "seller-a", opportunities: [], timelineEvents: ["timeline-doc"] },
+  { id: "joao", code: "5001", cnpjNormalized: null, name: "JOÃO DA SILVA", nameNormalized: normalize("JOÃO DA SILVA"), city: "C", cityNormalized: normalize("C"), state: "PR", ownerSellerId: "seller-a", opportunities: [], timelineEvents: [] },
+  { id: "joao-filho", code: "5002", cnpjNormalized: null, name: "JOÃO DA SILVA FILHO", nameNormalized: normalize("JOÃO DA SILVA FILHO"), city: "C", cityNormalized: normalize("C"), state: "PR", ownerSellerId: "seller-b", opportunities: [], timelineEvents: [] },
 ];
+clients[0].opportunityOwners = { "opp-1": "criador-original" };
+clients[1].timelineOwners = { "timeline-1": "autor-timeline-original" };
 
 const result = upsertPartner(clients, { code: "2000", cnpjNormalized: "12345678901", name: "FERNANDO FREIRE CIOLA", city: "CHOPINZINHO", state: "PR", ownerSellerId: "jeferson" });
 const fernando = clients.find((client) => client.id === "old-city")!;
@@ -88,11 +105,17 @@ assert(result.merged === 1, "duplicado por mesmo código ERP deveria ser consoli
 assert(result.sellerChanged === 1 && fernando.ownerSellerId === "jeferson", "troca de vendedor deveria atualizar carteira");
 assert(result.cityCorrected === 1 && fernando.city === "CHOPINZINHO", "cidade Não informado deveria ser corrigida");
 assert(fernando.opportunities.includes("opp-1") && fernando.timelineEvents.includes("timeline-1"), "histórico deveria ser preservado na mesclagem por código ERP");
+assert(fernando.opportunityOwners?.["opp-1"] === "criador-original" && fernando.timelineOwners?.["timeline-1"] === "autor-timeline-original", "troca de carteira não deve alterar autores históricos de oportunidade/timeline");
+assert(clients.filter((client) => !client.isArchived && client.code === "2000").length === 1, "cliente com mesmo código ERP não deve duplicar quando muda vendedor");
+assert(!clients.filter((client) => !client.isArchived).some((client) => client.name.startsWith("[ARQUIVADO ERP DUP]")), "duplicado arquivado não deve aparecer em pesquisa/lista normal");
+assert(clients.filter((client) => client.ownerSellerId === "edirlei" && !client.isArchived).length === 0, "duplicado arquivado não deve bloquear manutenção do vendedor antigo");
 
 const docResult = upsertPartner(clients, { code: "9999", cnpjNormalized: "99887766000155", name: "CLIENTE DOC", city: "A", state: "PR", ownerSellerId: "seller-b" });
 const docClient = clients.find((client) => client.id === "dup-doc")!;
 assert(docResult.updated === 1 && docClient.timelineEvents.includes("timeline-doc"), "duplicado por CNPJ deveria preservar linha do tempo");
 assert(docClient.ownerSellerId === "seller-b", "cliente por CNPJ deveria trocar vendedor");
+assert(findCandidates(clients, { name: "JOÃO DA SILVA", city: "C", state: "PR", ownerSellerId: "seller-x" }).length === 1, "nome+cidade+UF só deve unir correspondência exata e segura");
+assert(findCandidates(clients, { name: "JOÃO DA SILVA FILHO", city: "C", state: "PR", ownerSellerId: "seller-x" }).length === 1, "nomes semelhantes sem documento válido não podem ser fundidos automaticamente");
 
 const allSellerResults = [() => upsertPartner(clients, { code: "3000", cnpjNormalized: "3000", name: "OK", city: "X", state: "PR", ownerSellerId: "seller-ok" }), () => { throw new Error("falha Jeferson simulada"); }, () => upsertPartner(clients, { code: "4000", cnpjNormalized: "4000", name: "OK2", city: "Y", state: "PR", ownerSellerId: "seller-ok2" })];
 let success = 0;
@@ -107,5 +130,13 @@ for (const run of allSellerResults) {
 }
 assert(success === 2 && errors === 1, "sync de todos vendedores deve continuar após falha isolada");
 assert(clients.some((client) => client.code === "4000"), "vendedor após falha isolada deveria continuar sincronizando");
+
+const financialClient = clients.find((client) => client.code === "4000")!;
+financialClient.financialProfile = { VALOR_MEDIO: 5499.9, DATA_ULTFATURA: "2019-03-09T03:00:00.000Z", DIAS_MEDIAATRASO: 4 };
+financialClient.partnerTitles = [{ DOCTO: 9766, DATA_VENCIMENTO: "2026-05-13T03:00:00.000Z", SALDO_CAPITAL: 2400 }];
+financialClient.overdueTitlesTotal = 2400;
+assert(financialClient.financialProfile.VALOR_MEDIO === 5499.9, "financialProfiles deve sincronizar e ficar disponível para Cliente 360");
+assert(financialClient.partnerTitles.length === 1, "partnerTitles deve sincronizar e ficar disponível para Cliente 360");
+assert((financialClient.overdueTitlesTotal ?? 0) > 0, "cliente com título vencido deve disparar alerta financeiro na Nova Oportunidade");
 
 console.log("UltraFV3 partner dedup rules smoke passed");

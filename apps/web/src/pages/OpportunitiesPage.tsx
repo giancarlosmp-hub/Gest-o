@@ -57,6 +57,7 @@ type Client = {
   city?: string | null;
   state?: string | null;
   cnpj?: string | null;
+  overdueTitlesTotal?: number | null;
 };
 type Summary = {
   pipelineTotal: number;

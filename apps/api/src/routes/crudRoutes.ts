@@ -50,7 +50,9 @@ import {
   getUltraFv3SyncStatus,
   syncBranches,
   syncConnection,
+  syncFinancialProfiles,
   syncOperations,
+  syncPartnerTitles,
   syncPartners,
   syncPartnersByUser,
   syncPartnersForAllConfiguredSellers,
@@ -4004,6 +4006,7 @@ router.get("/clients", async (req, res) => {
 
   const where: Prisma.ClientWhereInput = {
     ...sellerWhere(req),
+    isArchived: false,
     ...(state ? { state: { equals: state, mode: "insensitive" } } : {}),
     ...(region ? { region: { equals: region, mode: "insensitive" } } : {}),
     ...(isValidClientType ? { clientType: parsedClientType } : {}),
@@ -4074,6 +4077,7 @@ router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
     where: {
       id: req.params.id,
+      isArchived: false,
       ...sellerWhere(req)
     }
   });
@@ -4111,7 +4115,10 @@ router.get("/clients/:id", async (req, res) => {
     lastActivityAt: lastActivityAggregate._max.date ?? lastActivityAggregate._max.createdAt ?? null,
     lastPurchaseDate: data.lastPurchaseDate ?? null,
     lastPurchaseValue: data.lastPurchaseValue ?? null,
-    totalCompletedActivities
+    totalCompletedActivities,
+    clientCode: data.code ?? null,
+    fantasyName: data.fantasyName ?? null,
+    erpUpdatedAt: data.erpUpdatedAt ?? null
   };
 
   res.json({
@@ -8290,6 +8297,8 @@ const ultraFv3SyncHandlers = {
   connection: syncConnection,
   products: syncProducts,
   partners: syncPartners,
+  financialProfiles: syncFinancialProfiles,
+  partnerTitles: syncPartnerTitles,
   salesmen: syncSalesmen,
   paymentMethods: syncPaymentMethods,
   receivingConditions: syncReceivingConditions,
@@ -8498,6 +8507,8 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
+router.post("/erp/ultrafv3/sync/financial-profiles", authorize("diretor", "gerente"), runUltraFv3Sync("financialProfiles"));
+router.post("/erp/ultrafv3/sync/partner-titles", authorize("diretor", "gerente"), runUltraFv3Sync("partnerTitles"));
 router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
   try {
     const result = await syncPartnersForAllConfiguredSellers({ trigger: ErpSyncTrigger.manual });
@@ -8583,7 +8594,7 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
   const integration = getUltraFv3IntegrationDiagnostics(status);
   const [productCount, clientCount, operational] = await Promise.all([
     prisma.product.count({ where: { isActive: true } }),
-    prisma.client.count(),
+    prisma.client.count({ where: { isArchived: false } }),
     getErpOrderOperationalSummary()
   ]);
   const history = await getUltraFv3SyncHistory(25);
@@ -10473,7 +10484,7 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
 
     const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
       await Promise.all([
-        prisma.client.count({ where: { ownerSellerId: id } }),
+        prisma.client.count({ where: { ownerSellerId: id, isArchived: false } }),
         prisma.opportunity.count({ where: { ownerSellerId: id } }),
         prisma.activity.count({ where: { ownerSellerId: id } }),
         prisma.agendaEvent.count({ where: { sellerId: id } }),

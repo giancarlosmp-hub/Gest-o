@@ -114,6 +114,12 @@ model Client {
   lastPurchaseDate  DateTime?
   lastPurchaseValue Float?
   erpUpdatedAt      DateTime?
+  isArchived        Boolean         @default(false)
+  archiveReason     String?
+  financialProfile  Json?
+  partnerTitles     Json?
+  openTitlesTotal   Float?          @default(0)
+  overdueTitlesTotal Float?         @default(0)
   ownerSellerId     String
   ownerSeller       User            @relation(fields: [ownerSellerId], references: [id])
   contacts          Contact[]
@@ -126,6 +132,7 @@ model Client {
 
   @@index([code])
   @@index([fantasyName])
+  @@index([isArchived])
 }
 
 model AgendaEvent {
