@@ -10009,9 +10009,58 @@ const sanitizeUserForList = (user: Prisma.UserGetPayload<{ select: typeof userLi
   };
 };
 
-router.get("/users", authorize("diretor", "gerente"), async (_req, res) => {
-  const users = await prisma.user.findMany({ select: userListSelect });
-  return res.json(users.map(sanitizeUserForList));
+const getUserBlockingLinks = async (id: string) => {
+  const [clients, opportunities, activities, agenda, contacts, timeline, goals, kpis, sales, orders, changeLogs, territories, syncRuns] = await Promise.all([
+    prisma.client.count({ where: { ownerSellerId: id, isArchived: false } }),
+    prisma.opportunity.count({ where: { ownerSellerId: id } }),
+    prisma.activity.count({ where: { ownerSellerId: id } }),
+    prisma.agendaEvent.count({ where: { sellerId: id } }),
+    prisma.contact.count({ where: { ownerSellerId: id } }),
+    prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
+    prisma.goal.count({ where: { sellerId: id, targetValue: { gt: 0 } } }),
+    prisma.activityKPI.count({ where: { sellerId: id } }),
+    prisma.sale.count({ where: { sellerId: id } }),
+    prisma.erpOrderSync.count({ where: { sellerId: id } }),
+    prisma.opportunityChangeLog.count({ where: { actorId: id } }),
+    prisma.sellerTerritoryCity.count({ where: { sellerId: id } }),
+    prisma.erpSyncRun.count({ where: { sellerId: id } }),
+  ]);
+
+  return { clients, opportunities, activities, agenda, contacts, timeline, goals, kpis, sales, orders, changeLogs, territories, syncRuns };
+};
+
+const getUserBlockingReasons = (links: Awaited<ReturnType<typeof getUserBlockingLinks>>) => [
+  links.clients ? `clientes ativos (${links.clients})` : null,
+  links.opportunities ? `oportunidades (${links.opportunities})` : null,
+  links.activities ? `atividades (${links.activities})` : null,
+  links.timeline ? `timeline (${links.timeline})` : null,
+  links.agenda ? `agenda (${links.agenda})` : null,
+  links.goals ? `metas/objetivos (${links.goals})` : null,
+  links.kpis ? `KPI (${links.kpis})` : null,
+  links.orders ? `pedidos (${links.orders})` : null,
+  links.sales ? `vendas (${links.sales})` : null,
+  links.contacts ? `contatos (${links.contacts})` : null,
+  links.changeLogs ? `histórico de alterações de oportunidades (${links.changeLogs})` : null,
+  links.territories ? `territórios comerciais (${links.territories})` : null,
+  links.syncRuns ? `histórico de sincronização ERP (${links.syncRuns})` : null,
+].filter(Boolean) as string[];
+
+router.get("/users", authorize("diretor", "gerente"), async (req, res) => {
+  const status = String(req.query.status || req.query.active || "active").toLowerCase();
+  const where = status === "all" || status === "todos"
+    ? {}
+    : status === "inactive" || status === "inativos" || status === "false"
+      ? { isActive: false }
+      : { isActive: true };
+  const users = await prisma.user.findMany({ where, select: userListSelect, orderBy: [{ isActive: "desc" }, { name: "asc" }] });
+  const safeUsers = users.map(sanitizeUserForList);
+  const includeLinks = String(req.query.includeLinks || "").toLowerCase() === "true";
+  if (includeLinks || status === "all" || status === "todos" || status === "inactive" || status === "inativos") {
+    const links = await Promise.all(safeUsers.map(async (user) => ({ id: user.id, reasons: getUserBlockingReasons(await getUserBlockingLinks(user.id)) })));
+    const byId = new Map(links.map((item) => [item.id, item.reasons]));
+    return res.json(safeUsers.map((user) => ({ ...user, hasBlockingLinks: (byId.get(user.id)?.length ?? 0) > 0, blockingReasons: byId.get(user.id) ?? [] })));
+  }
+  return res.json(safeUsers);
 });
 
 router.get("/users/:id/erp-diagnostics", authorize("diretor", "gerente"), async (req, res) => {
@@ -10415,9 +10464,15 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
   }
 });
 router.patch("/users/:id/region", authorize("diretor", "gerente"), async (req, res) => res.json(await prisma.user.update({ where: { id: req.params.id }, data: { region: req.body.region } })));
-router.patch("/users/:id/active", authorize("diretor"), validateBody(userActivationSchema), async (req, res) => {
+router.patch("/users/:id/active", authorize("diretor", "gerente"), validateBody(userActivationSchema), async (req, res) => {
   if (req.user!.id === req.params.id && !req.body.isActive) {
     return res.status(400).json({ message: "Você não pode desativar seu próprio usuário" });
+  }
+
+  const targetUser = await prisma.user.findUnique({ where: { id: req.params.id }, select: { role: true } });
+  if (!targetUser) return res.status(404).json({ message: "Usuário não encontrado." });
+  if (req.user!.role === "gerente" && targetUser.role === "diretor") {
+    return res.status(403).json({ message: "Gerentes não podem alterar o status de diretores." });
   }
 
   const updatedUser = await prisma.user.update({
@@ -10441,6 +10496,29 @@ router.patch("/users/:id/role", authorize("diretor"), validateBody(userRoleUpdat
 
   return res.json(updatedUser);
 });
+router.get("/users/:id/delete-diagnostics", authorize("diretor", "gerente"), async (req, res) => {
+  const user = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, name: true, email: true, role: true, isActive: true, erpCode: true, erpOperatorCode: true }
+  });
+  if (!user) return res.status(404).json({ success: false, message: "Usuário não encontrado." });
+
+  const links = await getUserBlockingLinks(user.id);
+  const blockingReasons = getUserBlockingReasons(links);
+
+  return res.json({
+    success: true,
+    user,
+    canDelete: blockingReasons.length === 0,
+    recommendation: blockingReasons.length === 0 ? "delete" : "deactivate",
+    message: blockingReasons.length === 0
+      ? "Usuário sem vínculos relevantes. A exclusão física pode ser realizada."
+      : `Usuário possui vínculo(s) em: ${blockingReasons.join(", ")}. Recomenda-se desativar para preservar o histórico comercial.`,
+    links,
+    blockingReasons
+  });
+});
+
 router.post("/users/:id/reset-password", authorize("diretor"), validateBody(userResetPasswordSchema), async (req, res) => {
   const temporaryPasswordLength = req.body.temporaryPasswordLength ?? 12;
   const temporaryPassword = randomBytes(temporaryPasswordLength).toString("base64url").slice(0, temporaryPasswordLength);
@@ -10476,83 +10554,39 @@ router.delete("/users/:id", authorize("diretor"), async (req, res) => {
     }
 
     if (user.role === "diretor") {
-      const directorsCount = await prisma.user.count({ where: { role: "diretor" } });
+      const directorsCount = await prisma.user.count({ where: { role: "diretor", isActive: true } });
       if (directorsCount <= 1) {
-        return res.status(400).json({ success: false, message: "Não é possível excluir o último diretor." });
+        return res.status(400).json({ success: false, message: "Não é possível excluir o último diretor ativo." });
       }
     }
 
     if (user.role === "gerente") {
-      const managersCount = await prisma.user.count({ where: { role: "gerente" } });
+      const managersCount = await prisma.user.count({ where: { role: "gerente", isActive: true } });
       if (managersCount <= 1) {
-        return res.status(400).json({ success: false, message: "Não é possível excluir o último gerente." });
+        return res.status(400).json({ success: false, message: "Não é possível excluir o último gerente ativo." });
       }
     }
 
-    await prisma.goal.deleteMany({
-      where: {
-        sellerId: id,
-        targetValue: { lte: 0 }
-      }
-    });
+    await prisma.goal.deleteMany({ where: { sellerId: id, targetValue: { lte: 0 } } });
 
-    const [clientsCount, opportunitiesCount, activitiesCount, agendaEventsCount, contactsCount, timelineEventsCount, goalsCount, activityKpisCount, salesCount] =
-      await Promise.all([
-        prisma.client.count({ where: { ownerSellerId: id, isArchived: false } }),
-        prisma.opportunity.count({ where: { ownerSellerId: id } }),
-        prisma.activity.count({ where: { ownerSellerId: id } }),
-        prisma.agendaEvent.count({ where: { sellerId: id } }),
-        prisma.contact.count({ where: { ownerSellerId: id } }),
-        prisma.timelineEvent.count({ where: { ownerSellerId: id } }),
-        prisma.goal.count({ where: { sellerId: id, targetValue: { gt: 0 } } }),
-        prisma.activityKPI.count({ where: { sellerId: id } }),
-        prisma.sale.count({ where: { sellerId: id } })
-      ]);
-
-    if (clientsCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem clientes vinculados." });
-    }
-
-    if (opportunitiesCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem oportunidades vinculadas." });
-    }
-
-    if (activitiesCount > 0 || agendaEventsCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem atividades/agendas vinculadas." });
-    }
-
-    if (contactsCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem contatos vinculados." });
-    }
-
-    if (timelineEventsCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem eventos vinculados." });
-    }
-
-    if (goalsCount > 0) {
-      return res.status(400).json({
+    const blockingReasons = getUserBlockingReasons(await getUserBlockingLinks(id));
+    if (blockingReasons.length > 0) {
+      return res.status(409).json({
         success: false,
-        message: "Não é possível excluir este usuário porque existem objetivos mensais vinculados. Remova os objetivos na aba Equipe e tente novamente."
+        message: `Não é possível excluir este usuário porque há vínculo(s) em: ${blockingReasons.join(", ")}. Desative o usuário para preservar o histórico comercial.`,
+        blockingReasons
       });
-    }
-
-    if (activityKpisCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem KPIs vinculados." });
-    }
-
-    if (salesCount > 0) {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem vendas vinculadas." });
     }
 
     await prisma.user.delete({ where: { id } });
     return res.json({ success: true, message: "Usuário excluído com sucesso." });
   } catch (error: any) {
     if (error?.code === "P2003") {
-      return res.status(400).json({ success: false, message: "Não é possível excluir este usuário porque existem vínculos ativos em outros registros." });
+      return res.status(409).json({ success: false, message: "Não é possível excluir este usuário porque existem vínculos em outros registros. Desative o usuário para preservar o histórico comercial." });
     }
 
     console.error("[users:delete]", error);
-    return res.status(500).json({ success: false, message: "Não foi possível excluir o usuário.", details: error?.message });
+    return res.status(500).json({ success: false, message: error?.message ? `Não foi possível excluir o usuário: ${error.message}` : "Não foi possível excluir o usuário." });
   }
 });
 

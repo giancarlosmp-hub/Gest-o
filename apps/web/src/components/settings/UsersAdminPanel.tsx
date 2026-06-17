@@ -26,6 +26,7 @@ export default function UsersAdminPanel() {
           ]
         },
         { key: "region", label: "Região de atuação", placeholder: "Informe a região de atuação" },
+        { key: "isActive", label: "Status", tableOnly: true },
         {
           key: "erpCode",
           label: "Vendedor/operador ERP",

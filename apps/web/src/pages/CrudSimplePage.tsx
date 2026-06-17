@@ -280,6 +280,7 @@ export default function CrudSimplePage({
     clientType: "",
     ownerSellerId: ""
   });
+  const [userStatusFilter, setUserStatusFilter] = useState<"active" | "inactive" | "all">("active");
 
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -326,7 +327,7 @@ export default function CrudSimplePage({
     setLoading(true);
     setError(null);
     try {
-      const response = await api.get(endpoint);
+      const response = await api.get(endpoint, isUsersPage ? { params: { status: userStatusFilter, includeLinks: true } } : undefined);
       setItems(Array.isArray(response.data) ? response.data : []);
     } catch (e: any) {
       setItems([]);
@@ -417,7 +418,9 @@ export default function CrudSimplePage({
     quickFilters.region,
     quickFilters.clientType,
     quickFilters.ownerSellerId,
-    canFilterBySeller
+    canFilterBySeller,
+    isUsersPage,
+    userStatusFilter
   ]);
 
   useEffect(() => {
@@ -430,7 +433,7 @@ export default function CrudSimplePage({
       .get("/users")
       .then((response) => {
         const allUsers = Array.isArray(response.data) ? response.data : [];
-        const sellers = allUsers.filter((item: any) => item?.role === "vendedor" && item?.id && item?.name);
+        const sellers = allUsers.filter((item: any) => item?.role === "vendedor" && item?.isActive !== false && item?.id && item?.name);
         setUsers(sellers);
       })
       .catch(() => {
@@ -485,6 +488,9 @@ export default function CrudSimplePage({
   const getCellValue = (item: ClientListItem, fieldKey: string) => {
     if (isClientsPage && fieldKey === "ownerSellerId") {
       return item.ownerSeller?.name || item.ownerSellerName || "—";
+    }
+    if (isUsersPage && fieldKey === "isActive") {
+      return item.isActive === false ? "Inativo" : "Ativo";
     }
     if (isUsersPage && fieldKey === "erpCode") {
       const code = typeof item.erpCode === "string" ? item.erpCode : "";
@@ -1651,6 +1657,24 @@ export default function CrudSimplePage({
     }
   };
 
+  const onToggleUserActive = async (item: any, isActive: boolean) => {
+    const message = isActive
+      ? "Deseja reativar este usuário e permitir acesso ao CRM?"
+      : "Este usuário será desativado e não poderá mais acessar o CRM. O histórico comercial será preservado. Deseja continuar?";
+    if (!window.confirm(message)) return;
+
+    setDeletingId(item.id);
+    try {
+      await api.patch(`/users/${item.id}/active`, { isActive });
+      toast.success(isActive ? "Usuário reativado com sucesso." : "Usuário desativado com sucesso.");
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || "Não foi possível atualizar o status do usuário.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const onOpenDetails = (id: string) => {
     if (!detailsPath) return;
     navigate(`${detailsPath}/${id}`);
@@ -1946,6 +1970,77 @@ export default function CrudSimplePage({
 
         {!loading && !error ? (
           <>
+            {isUsersPage ? (
+              <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 p-3">
+                <label className="text-sm font-medium text-slate-700" htmlFor="user-status-filter">Status</label>
+                <select
+                  id="user-status-filter"
+                  className="rounded-lg border border-slate-300 p-2 text-sm text-slate-800"
+                  value={userStatusFilter}
+                  onChange={(event) => setUserStatusFilter(event.target.value as "active" | "inactive" | "all")}
+                >
+                  <option value="active">Ativos</option>
+                  <option value="inactive">Inativos</option>
+                  <option value="all">Todos</option>
+                </select>
+              </div>
+            ) : null}
+            {isUsersPage ? (
+              <div className="space-y-3 p-3 md:hidden">
+                {visibleItems.map((it) => (
+                  <article key={it.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
+                        <p className="mt-1 text-sm text-slate-600">{String(getCellValue(it, "email") || "-")}</p>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${it.isActive === false ? "bg-slate-100 text-slate-600" : "bg-emerald-50 text-emerald-700"}`}>
+                        {String(getCellValue(it, "isActive"))}
+                      </span>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <dt className="text-slate-500">Perfil</dt>
+                        <dd className="font-medium text-slate-800">{String(getCellValue(it, "role") || "-")}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-slate-500">Região</dt>
+                        <dd className="font-medium text-slate-800">{String(getCellValue(it, "region") || "-")}</dd>
+                      </div>
+                    </dl>
+                    {!readOnly ? (
+                      <div className="mt-4 flex items-center justify-end gap-2" data-row-action-menu="true">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            className="rounded-md border border-slate-300 p-1.5 text-slate-600 hover:bg-slate-100"
+                            aria-label="Abrir ações"
+                            onClick={() => setOpenActionsMenuId((current) => (current === it.id ? null : it.id))}
+                            disabled={saving || deletingId === it.id}
+                          >
+                            <MoreHorizontal size={16} />
+                          </button>
+                          {openActionsMenuId === it.id ? (
+                            <div className="absolute right-0 z-20 mt-1 min-w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-brand-50" onClick={() => { setOpenActionsMenuId(null); void testUserErpLogin(it); }}>Testar login FV3</button>
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-sky-700 hover:bg-sky-50" onClick={() => void openUserErpDiagnostics(it)}>Diagnóstico ERP do vendedor</button>
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100" onClick={() => { setOpenActionsMenuId(null); onEdit(it); }}>Editar</button>
+                              {it.isActive === false ? (
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => { setOpenActionsMenuId(null); void onToggleUserActive(it, true); }} disabled={saving || deletingId === it.id}>Reativar</button>
+                              ) : it.hasBlockingLinks ? (
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50" onClick={() => { setOpenActionsMenuId(null); void onToggleUserActive(it, false); }} disabled={saving || deletingId === it.id}>Desativar usuário</button>
+                              ) : (
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => { setOpenActionsMenuId(null); void onDelete(it.id); }} disabled={saving || deletingId === it.id}>Excluir</button>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : null}
             {isClientsPage ? (
               <div className="space-y-3 p-3 md:hidden">
                 {visibleItems.map((it) => (
@@ -2042,7 +2137,7 @@ export default function CrudSimplePage({
               </div>
             ) : null}
 
-            <div className={isClientsPage ? "hidden overflow-auto md:block" : "overflow-auto"}>
+            <div className={isClientsPage || isUsersPage ? "hidden overflow-auto md:block" : "overflow-auto"}>
               <table className="min-w-[600px] w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-brand-50 text-brand-800">
@@ -2124,17 +2219,43 @@ export default function CrudSimplePage({
                                     >
                                       Editar
                                     </button>
-                                    <button
-                                      type="button"
-                                      className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50"
-                                      onClick={() => {
-                                        setOpenActionsMenuId(null);
-                                        void onDelete(it.id);
-                                      }}
-                                      disabled={saving || deletingId === it.id}
-                                    >
-                                      Excluir
-                                    </button>
+                                    {isUsersPage && it.isActive === false ? (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void onToggleUserActive(it, true);
+                                        }}
+                                        disabled={saving || deletingId === it.id}
+                                      >
+                                        Reativar
+                                      </button>
+                                    ) : isUsersPage && it.hasBlockingLinks ? (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-amber-700 hover:bg-amber-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void onToggleUserActive(it, false);
+                                        }}
+                                        disabled={saving || deletingId === it.id}
+                                      >
+                                        Desativar usuário
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50"
+                                        onClick={() => {
+                                          setOpenActionsMenuId(null);
+                                          void onDelete(it.id);
+                                        }}
+                                        disabled={saving || deletingId === it.id}
+                                      >
+                                        Excluir
+                                      </button>
+                                    )}
                                   </div>
                                 ) : null}
                               </div>
