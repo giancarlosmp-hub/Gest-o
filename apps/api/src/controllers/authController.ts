@@ -47,7 +47,7 @@ export async function login(req: Request, res: Response) {
         console.log("USER NOT FOUND IN DATABASE");
         return sendLoginResponse(401, { message: "Credenciais inválidas" });
       }
-      if (!user.isActive) return sendLoginResponse(403, { message: "Usuário inativo" });
+      if (!user.isActive) return sendLoginResponse(403, { message: "Usuário desativado. Procure o administrador." });
 
       logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
       const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
