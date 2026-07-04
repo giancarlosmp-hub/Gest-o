@@ -1,4 +1,4 @@
-import { Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
+import { Bot, Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -8,8 +8,9 @@ import WeeklyVisitMinimumPanel from "../components/settings/WeeklyVisitMinimumPa
 import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPanel";
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
+import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
 
-type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "erp-integration" | "seller-territories";
+type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "erp-integration" | "seller-territories" | "commercial-automations";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -43,6 +44,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     icon: MapPinned
   },
   {
+    id: "commercial-automations",
+    label: "Automações Comerciais",
+    description: "Salve parâmetros para fluxos comerciais futuros, sem executar criação automática.",
+    icon: Bot
+  },
+  {
     id: "users",
     label: "Usuários",
     description: "Gerencie cadastro, permissões e manutenção de contas da operação comercial.",
@@ -60,6 +67,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedSection === "technical-cultures" || normalizedSection === "catalogo-tecnico") return "technical-cultures";
   if (normalizedSection === "erp-integration" || normalizedSection === "integracao-erp") return "erp-integration";
   if (normalizedSection === "seller-territories" || normalizedSection === "territorios-comerciais") return "seller-territories";
+  if (normalizedSection === "commercial-automations" || normalizedSection === "automacoes-comerciais") return "commercial-automations";
 
   if (normalizedHash === "#usuarios" || normalizedHash === "#users") return "users";
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
@@ -67,6 +75,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedHash === "#catalogo-tecnico" || normalizedHash === "#technical-cultures") return "technical-cultures";
   if (normalizedHash === "#integracao-erp" || normalizedHash === "#erp-integration") return "erp-integration";
   if (normalizedHash === "#territorios-comerciais" || normalizedHash === "#seller-territories") return "seller-territories";
+  if (normalizedHash === "#automacoes-comerciais" || normalizedHash === "#commercial-automations") return "commercial-automations";
 
   return "kpis";
 }
@@ -110,7 +119,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-6" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-7" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -153,6 +162,8 @@ export default function SettingsPage() {
         <ErpIntegrationPanel />
       ) : activeSection === "seller-territories" ? (
         <SellerTerritoriesPanel />
+      ) : activeSection === "commercial-automations" ? (
+        <CommercialAutomationsPanel canEdit={user.role === "diretor"} />
       ) : (
         <div id="usuarios" className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
           <CrudSimplePage

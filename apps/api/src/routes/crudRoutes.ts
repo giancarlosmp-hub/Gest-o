@@ -23,6 +23,7 @@ import {
   userRoleUpdateSchema,
   userUpdateSchema,
   weeklyVisitMinimumSchema,
+  commercialAutomationsConfigSchema,
   erpOrderGenerationSchema
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
@@ -799,6 +800,40 @@ const getCurrentWeekRangeFromBrazilNow = () => {
 const DEFAULT_WEEKLY_VISIT_GOAL = 25;
 const WEEKLY_VISIT_GOAL_KEY = "weeklyVisitGoal";
 const APP_CONFIG_CACHE_TTL_MS = 60_000;
+const COMMERCIAL_AUTOMATIONS_CONFIG_KEY = "commercialAutomations.config";
+const DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG = {
+  inactiveClientWorkflow: {
+    enabled: false,
+    daysWithoutPurchase: 90,
+    allowedOptions: [30, 60, 90],
+    customDaysEnabled: true,
+    returnDeadlineBusinessDays: 3,
+    initialOpportunityStage: "follow_up",
+    createOpportunity: true,
+    createActivity: true,
+    createTimelineEvent: true
+  }
+};
+
+const parseCommercialAutomationsConfig = (value: string | null | undefined) => {
+  if (!value) return DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG;
+
+  try {
+    const parsed = JSON.parse(value);
+    return commercialAutomationsConfigSchema.parse({
+      ...DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      inactiveClientWorkflow: {
+        ...DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG.inactiveClientWorkflow,
+        ...(parsed?.inactiveClientWorkflow && typeof parsed.inactiveClientWorkflow === "object" ? parsed.inactiveClientWorkflow : {})
+      }
+    });
+  } catch (error) {
+    console.error("[appConfig] Falha ao obter commercialAutomations.config. Usando fallback padrão.", error);
+    return DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG;
+  }
+};
+
 
 const weeklyVisitGoalCache: {
   value: number;
@@ -8935,6 +8970,35 @@ router.put(
   }
 );
 
+
+
+router.get("/settings/commercial-automations", authorize("diretor", "gerente"), async (_req, res) => {
+  const config = await prisma.appConfig.upsert({
+    where: { key: COMMERCIAL_AUTOMATIONS_CONFIG_KEY },
+    update: {},
+    create: { key: COMMERCIAL_AUTOMATIONS_CONFIG_KEY, value: JSON.stringify(DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG) },
+    select: { value: true }
+  });
+
+  return res.json(parseCommercialAutomationsConfig(config.value));
+});
+
+router.put(
+  "/settings/commercial-automations",
+  authorize("diretor"),
+  validateBody(commercialAutomationsConfigSchema),
+  async (req, res) => {
+    const normalizedConfig = commercialAutomationsConfigSchema.parse(req.body);
+    const config = await prisma.appConfig.upsert({
+      where: { key: COMMERCIAL_AUTOMATIONS_CONFIG_KEY },
+      update: { value: JSON.stringify(normalizedConfig) },
+      create: { key: COMMERCIAL_AUTOMATIONS_CONFIG_KEY, value: JSON.stringify(normalizedConfig) },
+      select: { value: true }
+    });
+
+    return res.json(parseCommercialAutomationsConfig(config.value));
+  }
+);
 
 router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
   const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);

@@ -218,6 +218,31 @@ export const weeklyVisitMinimumSchema = z.object({
 });
 
 
+export const inactiveClientWorkflowConfigSchema = z.object({
+  enabled: z.boolean(),
+  daysWithoutPurchase: z.number().int().positive(),
+  allowedOptions: z.array(z.number().int().positive()).min(1),
+  customDaysEnabled: z.boolean(),
+  returnDeadlineBusinessDays: z.number().int().min(1).max(365),
+  initialOpportunityStage: z.string().trim().min(1).max(80),
+  createOpportunity: z.boolean(),
+  createActivity: z.boolean(),
+  createTimelineEvent: z.boolean()
+}).superRefine((value, ctx) => {
+  if (!value.customDaysEnabled && !value.allowedOptions.includes(value.daysWithoutPurchase)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["daysWithoutPurchase"],
+      message: "Selecione uma das opções permitidas ou habilite dias customizados."
+    });
+  }
+});
+
+export const commercialAutomationsConfigSchema = z.object({
+  inactiveClientWorkflow: inactiveClientWorkflowConfigSchema
+});
+
+
 const cultureGoalRangeSchema = z.object({
   min: z.number().nonnegative(),
   max: z.number().nonnegative()
@@ -326,6 +351,7 @@ export type UserCreateInput = z.infer<typeof userCreateSchema>;
 export type UserUpdateInput = z.infer<typeof userUpdateSchema>;
 export type UserResetPasswordInput = z.infer<typeof userResetPasswordSchema>;
 export type WeeklyVisitMinimumInput = z.infer<typeof weeklyVisitMinimumSchema>;
+export type CommercialAutomationsConfig = z.infer<typeof commercialAutomationsConfigSchema>;
 export type TimelineEventInput = z.infer<typeof timelineEventSchema>;
 export type EventInput = z.infer<typeof eventSchema>;
 export type CultureCatalogInput = z.infer<typeof cultureCatalogSchema>;
