@@ -5,6 +5,7 @@ import { ensureAdminBootstrap } from "./bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "./utils/databaseHealth.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { startErpSyncScheduler } from "./jobs/erpSyncScheduler.js";
+import { startCommercialAutomationsScheduler } from "./jobs/commercialAutomationsScheduler.js";
 import { validateErpRuntimeConfigOnStartup } from "./services/erpRuntimeConfig.js";
 
 console.log("SERVER STARTING...");
@@ -44,6 +45,7 @@ async function start() {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });
     void startErpSyncScheduler().catch((error) => logApiEvent("ERROR", "Falha ao iniciar scheduler ERP", { error: error instanceof Error ? error.message : String(error) }));
+    void startCommercialAutomationsScheduler().catch((error) => logApiEvent("ERROR", "Falha ao iniciar scheduler comercial", { error: error instanceof Error ? error.message : String(error) }));
   });
 }
 

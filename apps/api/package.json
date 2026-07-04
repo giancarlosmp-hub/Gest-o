@@ -23,7 +23,8 @@
     "smoke:ultrafv3-crm-sync": "tsx src/scripts/ultraFv3CrmSyncRegressionSmoke.ts",
     "smoke:ultrafv3-scheduler": "tsx src/scripts/ultraFv3SchedulerSmoke.ts",
     "erp:fix-duplicates": "node dist/scripts/erpFixLegacyDuplicates.js",
-    "erp:fix-archived-flag": "node dist/scripts/erpFixArchivedFlag.js"
+    "erp:fix-archived-flag": "node dist/scripts/erpFixArchivedFlag.js",
+    "smoke:commercial-automations": "tsx src/scripts/commercialAutomationsSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

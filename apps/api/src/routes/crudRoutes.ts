@@ -75,6 +75,7 @@ import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionCo
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { refreshErpAutomaticSyncConfig, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
+import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -800,41 +801,6 @@ const getCurrentWeekRangeFromBrazilNow = () => {
 const DEFAULT_WEEKLY_VISIT_GOAL = 25;
 const WEEKLY_VISIT_GOAL_KEY = "weeklyVisitGoal";
 const APP_CONFIG_CACHE_TTL_MS = 60_000;
-const COMMERCIAL_AUTOMATIONS_CONFIG_KEY = "commercialAutomations.config";
-const DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG = {
-  inactiveClientWorkflow: {
-    enabled: false,
-    daysWithoutPurchase: 90,
-    allowedOptions: [30, 60, 90],
-    customDaysEnabled: true,
-    returnDeadlineBusinessDays: 3,
-    initialOpportunityStage: "follow_up",
-    createOpportunity: true,
-    createActivity: true,
-    createTimelineEvent: true
-  }
-};
-
-const parseCommercialAutomationsConfig = (value: string | null | undefined) => {
-  if (!value) return DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG;
-
-  try {
-    const parsed = JSON.parse(value);
-    return commercialAutomationsConfigSchema.parse({
-      ...DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG,
-      ...(parsed && typeof parsed === "object" ? parsed : {}),
-      inactiveClientWorkflow: {
-        ...DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG.inactiveClientWorkflow,
-        ...(parsed?.inactiveClientWorkflow && typeof parsed.inactiveClientWorkflow === "object" ? parsed.inactiveClientWorkflow : {})
-      }
-    });
-  } catch (error) {
-    console.error("[appConfig] Falha ao obter commercialAutomations.config. Usando fallback padrão.", error);
-    return DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG;
-  }
-};
-
-
 const weeklyVisitGoalCache: {
   value: number;
   expiresAt: number;
@@ -8971,6 +8937,16 @@ router.put(
 );
 
 
+
+
+router.post("/commercial-automations/run", authorize("diretor", "gerente"), async (_req, res) => {
+  const result = await runCommercialAutomations("manual");
+  return res.status(result.skipped ? 200 : 202).json(result);
+});
+
+router.get("/commercial-automations/history", authorize("diretor", "gerente"), async (_req, res) => {
+  return res.json(getCommercialAutomationsStatus());
+});
 
 router.get("/settings/commercial-automations", authorize("diretor", "gerente"), async (_req, res) => {
   const config = await prisma.appConfig.upsert({
