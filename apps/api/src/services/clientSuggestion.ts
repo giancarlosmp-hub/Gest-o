@@ -1,5 +1,5 @@
 import type { ClientAiContextPayload } from "./clientAiContext.js";
-import { OpenAiRequestError, getOpenAiClient } from "./ai/openaiClient.js";
+import { aiService } from "./ai/aiService.js";
 import { logApiEvent } from "../utils/logger.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
@@ -135,31 +135,6 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
   ].join("\n");
 };
 
-const extractResponseText = (response: unknown): string => {
-  if (!response || typeof response !== "object") return "";
-
-  const responseRecord = response as Record<string, unknown>;
-  const outputText = responseRecord.output_text;
-  if (typeof outputText === "string") return outputText;
-
-  const output = responseRecord.output;
-  if (!Array.isArray(output) || output.length === 0) return "";
-
-  const firstOutput = output[0];
-  if (!firstOutput || typeof firstOutput !== "object") return "";
-
-  const firstOutputRecord = firstOutput as Record<string, unknown>;
-  const content = firstOutputRecord.content;
-  if (!Array.isArray(content) || content.length === 0) return "";
-
-  const firstContent = content[0];
-  if (!firstContent || typeof firstContent !== "object") return "";
-
-  const firstContentRecord = firstContent as Record<string, unknown>;
-  const text = firstContentRecord.text;
-  return typeof text === "string" ? text : "";
-};
-
 type ParseMode = "direct_json" | "fenced_json" | "embedded_object";
 
 const sanitizeJsonText = (value: string): { text: string; parseModeHint: ParseMode | null } => {
@@ -184,7 +159,7 @@ const parseSuggestionPayload = (rawText: string): { parsed: unknown; parseMode: 
   } catch {
     const objectMatch = sanitizedText.match(/\{[\s\S]*\}/);
     if (!objectMatch) {
-      throw new Error("openai_invalid_json");
+      throw new Error("ai_invalid_json");
     }
     return {
       parsed: JSON.parse(objectMatch[0]) as unknown,
@@ -199,32 +174,23 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     ...buildClientSuggestion(clientContext),
     source: "deterministic" as const
   };
-  const runtimeOpenAiEnabled = process.env.OPENAI_ENABLED === "true";
-  const runtimeHasApiKey = Boolean(process.env.OPENAI_API_KEY?.trim());
-  let attemptedOpenAi = false;
-  let openAiClientAvailable = false;
-  let openAiCallElapsedMs: number | null = null;
-  let openAiHttpStatus: number | null = null;
-  let openAiTimedOut = false;
+  let attemptedAi = false;
+  let aiCallElapsedMs: number | null = null;
   let responseTextLength = 0;
   let parseMode: ParseMode | null = null;
   let validatorAccepted: boolean | null = null;
+  let fallbackReason: string | null = null;
 
-  const finalizeSuggestion = ({
-    suggestion,
-    fallbackReason
-  }: {
-    suggestion: ClientSuggestionPayload;
-    fallbackReason: string | null;
-  }): ClientSuggestionPayload => {
+  const finalizeSuggestion = (suggestion: ClientSuggestionPayload): ClientSuggestionPayload => {
+    const status = aiService.getStatus();
     logApiEvent("INFO", "[ai/client-suggestion] final-result", {
-      runtimeOpenAiEnabled,
-      runtimeHasApiKey,
-      openAiClientAvailable,
-      attemptedOpenAi,
-      openAiHttpStatus,
-      openAiCallElapsedMs,
-      openAiTimedOut,
+      provider: status.provider,
+      model: status.model,
+      enabled: status.enabled,
+      configured: status.configured,
+      fallback: status.fallback,
+      attemptedAi,
+      aiCallElapsedMs,
       responseTextLength,
       parseMode,
       validatorAccepted,
@@ -238,54 +204,36 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     return suggestion;
   };
 
-  const openai = getOpenAiClient();
-  openAiClientAvailable = Boolean(openai);
+  const prompt = buildSuggestionPrompt(clientContext);
+  const result = await aiService.chat({
+    system: "Você gera sugestões comerciais em JSON estrito para o CRM Demetra Agro Performance.",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.2
+  });
+  attemptedAi = result != null;
 
-  if (!openai) {
-    return finalizeSuggestion({
-      suggestion: fallbackSuggestion,
-      fallbackReason: "openai_client_unavailable"
-    });
+  if (!result) {
+    fallbackReason = aiService.getStatus().lastError ?? "ai_unavailable";
+    return finalizeSuggestion(fallbackSuggestion);
   }
 
-  const prompt = buildSuggestionPrompt(clientContext);
+  aiCallElapsedMs = result.elapsedMs;
+  const text = result.content;
+  responseTextLength = text.trim().length;
+
+  if (!text?.trim()) {
+    fallbackReason = "ai_empty_response";
+    return finalizeSuggestion(fallbackSuggestion);
+  }
 
   try {
-    attemptedOpenAi = true;
-    logApiEvent("INFO", "[ai/client-suggestion] openai-attempt-start", {
-      runtimeOpenAiEnabled,
-      runtimeHasApiKey
-    });
-    const response = await openai.responses.create(
-      { input: prompt },
-      8000
-    );
-    openAiHttpStatus = response.status;
-    openAiCallElapsedMs = response.elapsedMs;
-    logApiEvent("INFO", "[ai/client-suggestion] openai-attempt-end", {
-      openAiHttpStatus,
-      openAiCallElapsedMs
-    });
-
-    const text = extractResponseText(response.body);
-    responseTextLength = text.trim().length;
-
-    if (!text?.trim()) {
-      return finalizeSuggestion({
-        suggestion: fallbackSuggestion,
-        fallbackReason: "openai_empty_response"
-      });
-    }
-
     const parsedResult = parseSuggestionPayload(text);
     parseMode = parsedResult.parseMode;
     const parsed = parsedResult.parsed;
 
     if (!parsed || typeof parsed !== "object") {
-      return finalizeSuggestion({
-        suggestion: fallbackSuggestion,
-        fallbackReason: "openai_invalid_json_shape"
-      });
+      fallbackReason = "ai_invalid_json_shape";
+      return finalizeSuggestion(fallbackSuggestion);
     }
 
     const suggestionFromAi = {
@@ -295,43 +243,15 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
 
     validatorAccepted = isClientSuggestionPayload(suggestionFromAi);
     if (!validatorAccepted) {
-      return finalizeSuggestion({
-        suggestion: fallbackSuggestion,
-        fallbackReason: "openai_payload_validation_failed"
-      });
+      fallbackReason = "ai_payload_validation_failed";
+      return finalizeSuggestion(fallbackSuggestion);
     }
 
-    return finalizeSuggestion({
-      suggestion: suggestionFromAi,
-      fallbackReason: null
-    });
+    return finalizeSuggestion(suggestionFromAi);
   } catch (error) {
-    if (error instanceof OpenAiRequestError) {
-      openAiCallElapsedMs = error.elapsedMs;
-      openAiHttpStatus = error.status;
-      openAiTimedOut = error.isTimeout;
-      logApiEvent("WARN", "[ai/client-suggestion] openai-attempt-end", {
-        openAiHttpStatus,
-        openAiCallElapsedMs,
-        openAiTimedOut,
-        reason: error.message
-      });
-      return finalizeSuggestion({
-        suggestion: fallbackSuggestion,
-        fallbackReason: error.isTimeout ? "openai_request_timeout" : "openai_request_failed"
-      });
-    }
-
-    if (error instanceof SyntaxError || (error instanceof Error && error.message === "openai_invalid_json")) {
-      return finalizeSuggestion({
-        suggestion: fallbackSuggestion,
-        fallbackReason: "openai_invalid_json"
-      });
-    }
-
-    return finalizeSuggestion({
-      suggestion: fallbackSuggestion,
-      fallbackReason: "openai_request_failed"
-    });
+    fallbackReason = error instanceof SyntaxError || (error instanceof Error && error.message === "ai_invalid_json")
+      ? "ai_invalid_json"
+      : "ai_parse_failed";
+    return finalizeSuggestion(fallbackSuggestion);
   }
 };
