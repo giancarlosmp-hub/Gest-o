@@ -14,4 +14,8 @@ export {
   calculateTodayPriorities
 } from "./commercialIntelligenceService.js";
 
-export { getOpenAiClient, getOpenAiDefaultModel } from "./openaiClient.js";
+
+export { aiService, AiService, type AiServiceStatus } from "./aiService.js";
+export { type AiProvider, type AiChatRequest, type AiChatResponse, AiProviderError } from "./aiProvider.js";
+export { OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
+export { OllamaProvider } from "./ollamaProvider.js";

@@ -39,6 +39,7 @@ import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { aiService } from "../services/ai/aiService.js";
 import {
   calculateTodayPriorities,
   generateClientSummary,
@@ -4155,6 +4156,10 @@ router.get("/clients/:id/ai-context", async (req, res) => {
 
 const clientSuggestionBodySchema = z.object({
   clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+router.get("/ai/status", (_req, res) => {
+  return res.json(aiService.getStatus());
 });
 
 router.post("/ai/client-suggestion", async (req, res) => {
