@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, SunMoon, UsersRound } from "lucide-react";
+import { Bot, CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, RefreshCw, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getSessionMotivationalQuote } from "../lib/dailyQuote";
@@ -104,6 +104,21 @@ type TodayPriority = {
   suggestedAction: string;
 };
 
+type CommercialInsightItem = { title?: string; detail?: string; count?: number };
+
+type CommercialInsights = {
+  summary: string;
+  highPriority: CommercialInsightItem[];
+  mediumPriority: CommercialInsightItem[];
+  lowPriority: CommercialInsightItem[];
+  recommendations: string[];
+  nextActions: string[];
+  risks: string[];
+  highlights: string[];
+  generatedAt: string;
+  source: "ai" | "deterministic";
+};
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour <= 11) return "Bom dia";
@@ -192,6 +207,9 @@ export default function HomePage() {
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [todayPriorities, setTodayPriorities] = useState<TodayPriority[]>([]);
+  const [commercialInsights, setCommercialInsights] = useState<CommercialInsights | null>(null);
+  const [commercialInsightsLoading, setCommercialInsightsLoading] = useState(false);
+  const [commercialInsightsError, setCommercialInsightsError] = useState<string | null>(null);
   const [agendaEventsToday, setAgendaEventsToday] = useState<AgendaEventLite[]>([]);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
@@ -210,6 +228,22 @@ export default function HomePage() {
   const [draggedPanelId, setDraggedPanelId] = useState<PanelId | null>(null);
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
+  const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente";
+
+  const loadCommercialInsights = useCallback(async (refresh = false, signal?: AbortSignal) => {
+    if (!canViewCommercialInsights) return;
+    setCommercialInsightsLoading(true);
+    setCommercialInsightsError(null);
+    try {
+      const response = await api.get<CommercialInsights>(`/ai/commercial-insights${refresh ? "?refresh=true" : ""}`, { signal });
+      setCommercialInsights(response.data);
+    } catch (error) {
+      if ((error as { code?: string })?.code === "ERR_CANCELED") return;
+      setCommercialInsightsError(getApiErrorMessage(error, "Não foi possível carregar a IA Comercial."));
+    } finally {
+      if (!signal?.aborted) setCommercialInsightsLoading(false);
+    }
+  }, [canViewCommercialInsights]);
 
   const loadCentralData = useCallback(
     async (signal?: AbortSignal) => {
@@ -225,6 +259,7 @@ export default function HomePage() {
           api.get(`/agenda/events?from=${today}&to=${today}`, { signal }),
           api.get("/ai/today-priorities", { signal })
         ]);
+        void loadCommercialInsights(false, signal);
         setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
         const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
           ? opportunitiesResponse.data.items
@@ -266,7 +301,7 @@ export default function HomePage() {
         }
       }
     },
-    [dashboardQueryKey, refreshReminders]
+    [dashboardQueryKey, refreshReminders, loadCommercialInsights]
   );
 
   useEffect(() => {
@@ -688,6 +723,60 @@ export default function HomePage() {
     </button>
   );
 
+  const renderInsightList = (items: CommercialInsightItem[]) => (
+    items.length === 0 ? <p className="text-sm text-slate-500">Sem apontamentos.</p> : (
+      <ul className="mt-2 space-y-1 text-sm text-slate-700">
+        {items.map((item, index) => (
+          <li key={`${item.title || item.detail || index}`} className="flex gap-2">
+            <span className="text-brand-600">•</span>
+            <span><strong>{item.title || "Indicador"}</strong>{item.detail ? ` — ${item.detail}` : ""}</span>
+          </li>
+        ))}
+      </ul>
+    )
+  );
+
+  const renderCommercialInsightsCard = () => {
+    if (!canViewCommercialInsights) return null;
+    return (
+      <section className="rounded-2xl border border-brand-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Bot className="text-brand-700" size={22} />
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">IA Comercial</h2>
+              <p className="text-sm text-slate-500">Resumo executivo da carteira comercial.</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => void loadCommercialInsights(true)} disabled={commercialInsightsLoading} className="inline-flex items-center gap-2 rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-60">
+            <RefreshCw size={14} className={commercialInsightsLoading ? "animate-spin" : ""} />
+            Atualizar análise
+          </button>
+        </div>
+        {commercialInsightsError ? <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{commercialInsightsError}</p> : null}
+        {commercialInsightsLoading && !commercialInsights ? <p className="mt-4 text-sm text-slate-500">Gerando análise comercial...</p> : null}
+        {commercialInsights ? (
+          <div className="mt-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Resumo do Dia</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-700">{commercialInsights.summary}</p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div><h3 className="text-sm font-semibold text-rose-700">Prioridade Alta</h3>{renderInsightList(commercialInsights.highPriority)}</div>
+              <div><h3 className="text-sm font-semibold text-amber-700">Prioridade Média</h3>{renderInsightList(commercialInsights.mediumPriority)}</div>
+              <div><h3 className="text-sm font-semibold text-slate-700">Prioridade Baixa</h3>{renderInsightList(commercialInsights.lowPriority)}</div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div><h3 className="text-sm font-semibold text-slate-900">Recomendações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.recommendations.join(" ") || "Sem recomendações."}</p></div>
+              <div><h3 className="text-sm font-semibold text-slate-900">Próximas ações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.nextActions.join(" ") || "Sem próximas ações."}</p></div>
+            </div>
+            <p className="text-xs text-slate-500">Última atualização: {new Date(commercialInsights.generatedAt).toLocaleString("pt-BR")} · Fonte: {commercialInsights.source === "ai" ? "IA" : "fallback determinístico"}</p>
+          </div>
+        ) : null}
+      </section>
+    );
+  };
+
   const renderCentralDayHero = (showStartRoute: boolean) => (
     <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -737,6 +826,7 @@ export default function HomePage() {
     return (
       <div className="flex flex-col gap-5 pb-4">
         {renderCentralDayHero(false)}
+        {renderCommercialInsightsCard()}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Resumo do dia</h2>
@@ -893,6 +983,7 @@ export default function HomePage() {
       </section>
 
       {renderCentralDayHero(true)}
+      {renderCommercialInsightsCard()}
 
       <section className="flex flex-col gap-4">
         <article className={blockClass} style={{ order: panelOrder.indexOf("routine") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("routine")}>
