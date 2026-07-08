@@ -119,6 +119,7 @@ type OpportunityItem = {
   grossTotal: number;
   discountTotal: number;
   netTotal: number;
+  notes?: string | null;
   product?: {
     id: string;
     erpProductCode?: string | null;
@@ -372,6 +373,132 @@ const confirmOrderStockWarnings = (items: OpportunityItem[]) => {
 
   return true;
 };
+
+
+const OpportunityItemsSummaryCard = ({
+  items,
+  totals,
+}: {
+  items: OpportunityItem[];
+  totals: OpportunityItemTotals;
+}) => (
+  <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
+    <div className="mb-3 flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Itens da proposta
+        </p>
+        <h3 className="text-lg font-semibold text-slate-900">
+          Produtos negociados
+        </h3>
+      </div>
+      <p className="text-sm text-slate-600">
+        Total geral: {" "}
+        <strong className="text-slate-900">
+          {formatCurrencyBRL(totals.netTotal || 0)}
+        </strong>
+      </p>
+    </div>
+
+    {items.length ? (
+      <>
+        <div className="space-y-3 md:hidden">
+          {items.map((opportunityItem) => {
+            const noStock = getStockWarningKind(opportunityItem.product?.stockQuantity) === "zero";
+            const classification = opportunityItem.product?.className || opportunityItem.erpProductClassCode || "";
+            return (
+              <article key={opportunityItem.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-bold text-slate-900">
+                      {opportunityItem.productNameSnapshot}
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-600">
+                      {opportunityItem.erpProductCode ? <span>Cód. ERP {opportunityItem.erpProductCode}</span> : null}
+                      {classification ? <span>Classificação {classification}</span> : null}
+                    </div>
+                  </div>
+                  {noStock ? <StatusPill tone="warning">Sem saldo</StatusPill> : null}
+                </div>
+                <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded-xl bg-white p-2">
+                    <dt className="text-slate-500">Quantidade</dt>
+                    <dd className="font-semibold text-slate-900">{Number(opportunityItem.quantity || 0).toLocaleString("pt-BR")}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white p-2">
+                    <dt className="text-slate-500">Preço unitário</dt>
+                    <dd className="font-semibold text-slate-900">{formatCurrencyBRL(opportunityItem.unitPrice || 0)}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white p-2">
+                    <dt className="text-slate-500">Desconto</dt>
+                    <dd className="font-semibold text-slate-900">{formatCurrencyBRL(opportunityItem.discountTotal || 0)}</dd>
+                  </div>
+                  <div className="rounded-xl bg-white p-2">
+                    <dt className="text-slate-500">Total do item</dt>
+                    <dd className="font-semibold text-slate-900">{formatCurrencyBRL(opportunityItem.netTotal || 0)}</dd>
+                  </div>
+                </dl>
+                {opportunityItem.notes ? (
+                  <p className="mt-3 rounded-xl bg-white p-2 text-xs text-slate-600">
+                    <strong>Observação:</strong> {opportunityItem.notes}
+                  </p>
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
+
+        <div className="hidden overflow-hidden rounded-xl border border-slate-200 md:block">
+          <table className="w-full divide-y divide-slate-100 text-left text-xs">
+            <thead className="bg-slate-50 uppercase tracking-wide text-slate-500">
+              <tr>
+                <th className="px-3 py-2 font-semibold">Produto</th>
+                <th className="px-3 py-2 font-semibold">Cód. ERP</th>
+                <th className="px-3 py-2 font-semibold">Classificação</th>
+                <th className="px-3 py-2 text-right font-semibold">Qtd.</th>
+                <th className="px-3 py-2 text-right font-semibold">Preço unit.</th>
+                <th className="px-3 py-2 text-right font-semibold">Desconto</th>
+                <th className="px-3 py-2 text-right font-semibold">Total</th>
+                <th className="px-3 py-2 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {items.map((opportunityItem) => {
+                const noStock = getStockWarningKind(opportunityItem.product?.stockQuantity) === "zero";
+                return (
+                  <tr key={opportunityItem.id} className="align-top">
+                    <td className="px-3 py-2">
+                      <p className="font-semibold text-slate-900">{opportunityItem.productNameSnapshot}</p>
+                      {opportunityItem.notes ? <p className="mt-1 text-[11px] text-slate-500">Obs.: {opportunityItem.notes}</p> : null}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">{opportunityItem.erpProductCode || "-"}</td>
+                    <td className="px-3 py-2 text-slate-700">{opportunityItem.product?.className || opportunityItem.erpProductClassCode || "-"}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{Number(opportunityItem.quantity || 0).toLocaleString("pt-BR")}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrencyBRL(opportunityItem.unitPrice || 0)}</td>
+                    <td className="px-3 py-2 text-right text-slate-700">{formatCurrencyBRL(opportunityItem.discountTotal || 0)}</td>
+                    <td className="px-3 py-2 text-right font-semibold text-slate-900">{formatCurrencyBRL(opportunityItem.netTotal || 0)}</td>
+                    <td className="px-3 py-2">{noStock ? <StatusPill tone="warning">Sem saldo</StatusPill> : <span className="text-slate-400">-</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="bg-slate-50 text-sm">
+              <tr>
+                <td colSpan={6} className="px-3 py-2 text-right font-semibold text-slate-600">Total geral dos itens</td>
+                <td className="px-3 py-2 text-right font-bold text-slate-900">{formatCurrencyBRL(totals.netTotal || 0)}</td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </>
+    ) : (
+      <p className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+        Nenhum item cadastrado nesta oportunidade.
+      </p>
+    )}
+  </section>
+);
 
 const statusPillClassName: Record<
   "success" | "warning" | "danger" | "neutral",
@@ -1201,6 +1328,11 @@ export default function OpportunityDetailsPage() {
           </p>
         </div>
       </section>
+
+      <OpportunityItemsSummaryCard
+        items={opportunityItems}
+        totals={opportunityItemTotals}
+      />
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
         <h3 className="mb-3 text-lg font-semibold">Bloco Agro</h3>
