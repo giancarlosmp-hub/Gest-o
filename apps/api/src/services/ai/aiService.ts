@@ -3,6 +3,7 @@ import { logApiEvent } from "../../utils/logger.js";
 import { AiProviderError, estimateAiUsage, type AiChatRequest, type AiChatResponse, type AiProvider } from "./aiProvider.js";
 import { OllamaProvider } from "./ollamaProvider.js";
 import { OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
+import { getDemetraCommercialSystemPrompt } from "./prompts/demetraCommercialSystemPrompt.js";
 
 export type AiServiceStatus = {
   enabled: boolean;
@@ -82,7 +83,11 @@ export class AiService {
   async chat(request: AiChatRequest): Promise<AiServiceChatResult | null> {
     const provider = this.getProvider();
     const status = provider.getStatus();
-    const requestUsageEstimate = estimateAiUsage(request.system ?? "") + request.messages.reduce((sum, message) => sum + estimateAiUsage(message.content), 0);
+    const chatRequest = {
+      ...request,
+      system: request.system ?? getDemetraCommercialSystemPrompt()
+    };
+    const requestUsageEstimate = estimateAiUsage(chatRequest.system ?? "") + chatRequest.messages.reduce((sum, message) => sum + estimateAiUsage(message.content), 0);
 
     if (!env.aiChatEnabled || !status.configured) {
       this.lastError = !env.aiChatEnabled ? "ai_chat_disabled" : "provider_not_configured";
@@ -99,7 +104,7 @@ export class AiService {
 
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        const result = await provider.chat(request);
+        const result = await provider.chat(chatRequest);
         this.lastError = null;
         this.fallback = false;
         logApiEvent("INFO", "[AI] chat-success", {
