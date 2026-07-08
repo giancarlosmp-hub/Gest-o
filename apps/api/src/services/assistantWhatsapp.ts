@@ -4,6 +4,7 @@ import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { logApiEvent } from "../utils/logger.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
+import { parseAiTextResponse } from "./ai/aiResponseParser.js";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -104,16 +105,7 @@ utilizar apenas os dados recebidos.
 
 Retorne somente JSON válido no formato {"message":"..."}.`;
 
-const parseMessage = (content: string) => {
-  const trimmed = content.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as { message?: unknown };
-    return typeof parsed.message === "string" && parsed.message.trim() ? parsed.message.trim() : null;
-  } catch {
-    return trimmed.startsWith("{") || trimmed.startsWith("[") ? null : trimmed;
-  }
-};
+const parseMessage = (content: string) => parseAiTextResponse(content, "message")?.text || null;
 
 export const generateAssistantWhatsappMessage = async (context: AssistantWhatsappContext, service: AiService = aiService) => {
   const startedAt = Date.now();

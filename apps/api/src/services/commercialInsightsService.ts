@@ -4,6 +4,7 @@ import { logApiEvent } from "../utils/logger.js";
 import { aiService, type AiService } from "./ai/aiService.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
+import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const NO_LIMIT = 5;
@@ -45,17 +46,19 @@ const compactName = (value: string | null | undefined) => (value || "Não inform
 
 const parseAiPayload = (content: string): Omit<CommercialInsightsPayload, "generatedAt" | "expiresAt" | "source" | "cacheHit" | "metrics"> | null => {
   try {
-    const parsed = JSON.parse(content.trim());
+    const parsedResult = parseAiJsonObject(content);
+    const parsed = parsedResult?.parsed;
     if (!parsed || typeof parsed !== "object") return null;
+    const payload = parsed as Record<string, unknown>;
     return {
-      summary: String(parsed.summary || "Não há informações suficientes para gerar resumo."),
-      highPriority: Array.isArray(parsed.highPriority) ? parsed.highPriority.slice(0, 8) : [],
-      mediumPriority: Array.isArray(parsed.mediumPriority) ? parsed.mediumPriority.slice(0, 8) : [],
-      lowPriority: Array.isArray(parsed.lowPriority) ? parsed.lowPriority.slice(0, 8) : [],
-      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String).slice(0, 8) : [],
-      nextActions: Array.isArray(parsed.nextActions) ? parsed.nextActions.map(String).slice(0, 8) : [],
-      risks: Array.isArray(parsed.risks) ? parsed.risks.map(String).slice(0, 8) : [],
-      highlights: Array.isArray(parsed.highlights) ? parsed.highlights.map(String).slice(0, 8) : []
+      summary: String(payload.summary || "Não há informações suficientes para gerar resumo."),
+      highPriority: Array.isArray(payload.highPriority) ? payload.highPriority.slice(0, 8) : [],
+      mediumPriority: Array.isArray(payload.mediumPriority) ? payload.mediumPriority.slice(0, 8) : [],
+      lowPriority: Array.isArray(payload.lowPriority) ? payload.lowPriority.slice(0, 8) : [],
+      recommendations: Array.isArray(payload.recommendations) ? payload.recommendations.map(String).slice(0, 8) : [],
+      nextActions: Array.isArray(payload.nextActions) ? payload.nextActions.map(String).slice(0, 8) : [],
+      risks: Array.isArray(payload.risks) ? payload.risks.map(String).slice(0, 8) : [],
+      highlights: Array.isArray(payload.highlights) ? payload.highlights.map(String).slice(0, 8) : []
     };
   } catch {
     return null;
