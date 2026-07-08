@@ -3,6 +3,7 @@ import { aiService, type AiService } from "./ai/aiService.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { logApiEvent } from "../utils/logger.js";
+import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -76,6 +77,17 @@ export const buildAssistantWhatsappContext = (
   };
 };
 
+const buildAssistantWhatsappKnowledgeQuery = (context: AssistantWhatsappContext) => [
+  context.nome,
+  context.cidade,
+  context.estado,
+  context.ultimaOportunidade,
+  context.etapa,
+  context.observacaoResumida,
+  context.ultimaCompra ? `última compra ${context.ultimaCompra}` : null,
+  ...context.produtos
+].filter(Boolean).join(" | ");
+
 export const generateDeterministicAssistantWhatsappMessage = (context: AssistantWhatsappContext) => {
   const firstName = context.nome.split(/\s+/)[0] || context.nome;
   const topic = context.ultimaOportunidade || context.produtos[0] || "seu planejamento";
@@ -112,9 +124,10 @@ const parseMessage = (content: string) => {
 export const generateAssistantWhatsappMessage = async (context: AssistantWhatsappContext, service: AiService = aiService) => {
   const startedAt = Date.now();
   const fallbackMessage = generateDeterministicAssistantWhatsappMessage(context);
+  const knowledgeContext = await resolveKnowledgeContextForAi("assistant-whatsapp", buildAssistantWhatsappKnowledgeQuery(context));
   const result = await service.chat({
     system: DEMETRA_MASTER_PROMPT,
-    messages: [{ role: "user", content: `${WHATSAPP_MESSAGE_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(context)}` }],
+    messages: [{ role: "user", content: `${WHATSAPP_MESSAGE_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(context)}${knowledgeContext ? `\n\n${knowledgeContext}` : ""}` }],
     temperature: 0.35,
     maxTokens: 180
   });

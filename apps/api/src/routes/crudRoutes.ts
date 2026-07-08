@@ -42,6 +42,7 @@ import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
+import { getKnowledgeContextForAi } from "../services/knowledgeBaseService.js";
 import { aiService } from "../services/ai/aiService.js";
 import {
   calculateTodayPriorities,
@@ -4164,6 +4165,26 @@ const clientSuggestionBodySchema = z.object({
 
 router.get("/ai/status", (_req, res) => {
   return res.json(aiService.getStatus());
+});
+
+router.get("/ai/knowledge-preview", authorize("diretor", "gerente"), async (req, res) => {
+  const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+  if (!query) {
+    return res.status(400).json({ message: "query é obrigatório" });
+  }
+
+  const result = await getKnowledgeContextForAi(query);
+  return res.json({
+    documentsFound: result.documents.length,
+    elapsedMs: result.elapsedMs,
+    documents: result.documents.map((document) => ({
+      id: document.id,
+      category: document.category,
+      title: document.title,
+      summary: document.summary || document.excerpt,
+      score: document.score
+    }))
+  });
 });
 
 router.post("/ai/client-suggestion", async (req, res) => {
