@@ -93,6 +93,28 @@ model User {
   sales                     Sale[]
   agendaEvents              AgendaEvent[]
   territoryCities           SellerTerritoryCity[]
+  knowledgeDocuments        KnowledgeDocument[]
+}
+
+model KnowledgeDocument {
+  id          String   @id @default(cuid())
+  title       String
+  category    String
+  sourceType  String
+  sourceName  String?
+  content     String
+  summary     String?
+  tags        String[] @default([])
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([sourceType])
+  @@index([isActive])
+  @@index([createdById])
 }
 
 model Client {
