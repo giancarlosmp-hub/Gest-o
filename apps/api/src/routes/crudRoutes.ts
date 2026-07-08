@@ -39,6 +39,7 @@ import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
 import {
   calculateTodayPriorities,
@@ -4180,6 +4181,105 @@ router.post("/ai/client-suggestion", async (req, res) => {
   const suggestion = await generateClientSuggestion(context);
   return res.json(suggestion);
 });
+
+const assistantWhatsappMessageSchema = z.object({
+  clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+router.post("/ai/assistant-whatsapp-message", async (req, res) => {
+  const parsed = assistantWhatsappMessageSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
+  }
+
+  const context = await buildClientAiContext({
+    clientId: parsed.data.clientId,
+    scope: sellerWhere(req)
+  });
+
+  if (!context) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const sanitizedContext = buildAssistantWhatsappContext(context);
+  const result = await generateAssistantWhatsappMessage(sanitizedContext);
+
+  return res.json(result);
+});
+
+const assistantWhatsappContactSchema = z.object({
+  clientId: z.string().trim().min(1, "clientId é obrigatório"),
+  opportunityId: z.string().trim().min(1).optional()
+});
+
+router.post("/assistant-whatsapp/contact", async (req, res) => {
+  const parsed = assistantWhatsappContactSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
+  }
+
+  const client = await prisma.client.findFirst({
+    where: { id: parsed.data.clientId, ...sellerWhere(req), isArchived: false },
+    select: { id: true, ownerSellerId: true }
+  });
+
+  if (!client) {
+    return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const opportunity = parsed.data.opportunityId
+    ? await prisma.opportunity.findFirst({
+        where: { id: parsed.data.opportunityId, clientId: client.id, ...sellerWhere(req) },
+        select: { id: true, ownerSellerId: true }
+      })
+    : await prisma.opportunity.findFirst({
+        where: {
+          clientId: client.id,
+          stage: { in: ["prospeccao", "negociacao", "proposta"] },
+          ...sellerWhere(req)
+        },
+        orderBy: [{ followUpDate: "asc" }, { createdAt: "desc" }],
+        select: { id: true, ownerSellerId: true }
+      });
+
+  if (parsed.data.opportunityId && !opportunity) {
+    return res.status(404).json({ message: "Oportunidade não encontrada" });
+  }
+
+  const ownerSellerId = opportunity?.ownerSellerId || client.ownerSellerId || req.user!.id;
+  const now = new Date();
+
+  const result = await prisma.$transaction(async (tx) => {
+    const activity = await tx.activity.create({
+      data: {
+        type: "whatsapp",
+        done: true,
+        notes: "Contato realizado via WhatsApp.",
+        description: "Contato realizado via WhatsApp.",
+        dueDate: now,
+        date: now,
+        clientId: client.id,
+        opportunityId: opportunity?.id,
+        ownerSellerId
+      }
+    });
+
+    const timelineEvent = await tx.timelineEvent.create({
+      data: {
+        type: "status",
+        description: "Contato via WhatsApp",
+        clientId: client.id,
+        opportunityId: opportunity?.id,
+        ownerSellerId
+      }
+    });
+
+    return { activity, timelineEvent };
+  });
+
+  return res.status(201).json(result);
+});
+
 
 const clientDuplicateCheckSchema = z.object({
   name: z.string().optional(),

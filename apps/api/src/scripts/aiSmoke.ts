@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { env } from "../config/env.js";
 import { AiService } from "../services/ai/aiService.js";
-import { getDemetraCommercialSystemPrompt } from "../services/ai/prompts/demetraCommercialSystemPrompt.js";
+import { getDemetraMasterPrompt } from "../services/ai/demetraMasterPrompt.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { generateDeterministicSalesMessage, generateSalesMessage, type SalesMessageOpportunityInput } from "../services/opportunitySalesMessage.js";
 import type { ClientAiContextPayload } from "../services/clientAiContext.js";
@@ -92,7 +92,7 @@ const runChatScenario = async (name: string, setup: () => void, expectFallback: 
 const assertUsesMasterPrompt = (init?: RequestInit) => {
   const payload = JSON.parse(String(init?.body));
   const systemMessage = payload.messages?.find((message: { role?: string }) => message.role === "system");
-  assert.equal(systemMessage?.content, getDemetraCommercialSystemPrompt());
+  assert.equal(systemMessage?.content, getDemetraMasterPrompt());
   assert.equal(payload.messages.filter((message: { role?: string }) => message.role === "system").length, 1);
   return payload;
 };

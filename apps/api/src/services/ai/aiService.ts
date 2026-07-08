@@ -3,7 +3,7 @@ import { logApiEvent } from "../../utils/logger.js";
 import { AiProviderError, estimateAiUsage, type AiChatRequest, type AiChatResponse, type AiProvider } from "./aiProvider.js";
 import { OllamaProvider } from "./ollamaProvider.js";
 import { OpenAICompatibleProvider } from "./openAiCompatibleProvider.js";
-import { getDemetraCommercialSystemPrompt } from "./prompts/demetraCommercialSystemPrompt.js";
+import { getDemetraMasterPrompt } from "./demetraMasterPrompt.js";
 
 export type AiServiceStatus = {
   enabled: boolean;
@@ -85,7 +85,7 @@ export class AiService {
     const status = provider.getStatus();
     const chatRequest = {
       ...request,
-      system: request.system ?? getDemetraCommercialSystemPrompt()
+      system: request.system ?? getDemetraMasterPrompt()
     };
     const requestUsageEstimate = estimateAiUsage(chatRequest.system ?? "") + chatRequest.messages.reduce((sum, message) => sum + estimateAiUsage(message.content), 0);
 

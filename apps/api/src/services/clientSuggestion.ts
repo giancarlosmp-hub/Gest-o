@@ -1,6 +1,6 @@
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { aiService } from "./ai/aiService.js";
-import { getDemetraCommercialSystemPrompt } from "./ai/prompts/demetraCommercialSystemPrompt.js";
+import { getDemetraMasterPrompt } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
@@ -200,7 +200,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
 
   const prompt = buildSuggestionPrompt(clientContext);
   const result = await aiService.chat({
-    system: getDemetraCommercialSystemPrompt(),
+    system: getDemetraMasterPrompt(),
     messages: [{ role: "user", content: prompt }],
     temperature: 0.2
   });
