@@ -34,6 +34,29 @@ async function upsertUser(name, email, role, region) {
   return updatedUser;
 }
 
+async function ensureInitialKnowledgeDocuments() {
+  const seed = {
+    title: "Conhecimento institucional Demetra Agro e Acervo Sementes",
+    category: "institucional",
+    sourceType: "interno",
+    sourceName: "seed-inicial",
+    summary: "Base institucional mínima para a IA Comercial.",
+    tags: ["demetra", "acervo-sementes", "institucional", "portfólio"],
+    content: [
+      "Demetra Agro é distribuidora de sementes.",
+      "Acervo Sementes é marca própria.",
+      "O portfólio inclui sementes forrageiras, cobertura, pastagem, inverno e verão.",
+      "A abordagem comercial deve ser consultiva e técnica, sem inventar recomendações agronômicas detalhadas."
+    ].join("\n")
+  };
+
+  const exists = await prisma.knowledgeDocument.findFirst({
+    where: { title: seed.title, sourceType: seed.sourceType, sourceName: seed.sourceName },
+    select: { id: true }
+  });
+  if (!exists) await prisma.knowledgeDocument.create({ data: seed });
+}
+
 const cropOptions = ["soja", "milho", "algodão", "café", "trigo"];
 const stageOptions = ["prospeccao", "negociacao", "proposta", "ganho", "perdido"];
 
@@ -81,6 +104,7 @@ const westernParanaTerritoryCities = [
 ];
 
 async function main() {
+  await ensureInitialKnowledgeDocuments();
   const realUsersCount = await prisma.user.count({
     where: {
       email: {

@@ -1,4 +1,4 @@
-import { Bot, Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
+import { Bot, BrainCircuit, Database, Leaf, MapPinned, Settings2, Target, Users } from "lucide-react";
 import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
@@ -9,8 +9,9 @@ import TechnicalCulturesPanel from "../components/settings/TechnicalCulturesPane
 import ErpIntegrationPanel from "../components/settings/ErpIntegrationPanel";
 import SellerTerritoriesPanel from "../components/settings/SellerTerritoriesPanel";
 import CommercialAutomationsPanel from "../components/settings/CommercialAutomationsPanel";
+import KnowledgeBasePanel from "../components/settings/KnowledgeBasePanel";
 
-type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "erp-integration" | "seller-territories" | "commercial-automations";
+type SettingsSection = "kpis" | "discipline" | "users" | "technical-cultures" | "knowledge-base" | "erp-integration" | "seller-territories" | "commercial-automations";
 
 const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description: string; icon: typeof Target }> = [
   {
@@ -30,6 +31,12 @@ const SETTINGS_SECTIONS: Array<{ id: SettingsSection; label: string; description
     label: "Catálogo Técnico",
     description: "Edite culturas, faixas de kg/ha e padrões da calculadora do Assistente Técnico.",
     icon: Leaf
+  },
+  {
+    id: "knowledge-base",
+    label: "Base de Conhecimento IA",
+    description: "Administre documentos técnicos e comerciais para consulta segura da IA Comercial.",
+    icon: BrainCircuit
   },
   {
     id: "erp-integration",
@@ -65,6 +72,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedSection === "kpis" || normalizedSection === "kpis-atividades") return "kpis";
   if (normalizedSection === "discipline" || normalizedSection === "disciplina") return "discipline";
   if (normalizedSection === "technical-cultures" || normalizedSection === "catalogo-tecnico") return "technical-cultures";
+  if (normalizedSection === "knowledge-base" || normalizedSection === "base-conhecimento-ia") return "knowledge-base";
   if (normalizedSection === "erp-integration" || normalizedSection === "integracao-erp") return "erp-integration";
   if (normalizedSection === "seller-territories" || normalizedSection === "territorios-comerciais") return "seller-territories";
   if (normalizedSection === "commercial-automations" || normalizedSection === "automacoes-comerciais") return "commercial-automations";
@@ -73,6 +81,7 @@ function getSectionFromUrl(sectionParam: string | null, hash: string): SettingsS
   if (normalizedHash === "#kpis" || normalizedHash === "#kpis-atividades") return "kpis";
   if (normalizedHash === "#disciplina" || normalizedHash === "#discipline") return "discipline";
   if (normalizedHash === "#catalogo-tecnico" || normalizedHash === "#technical-cultures") return "technical-cultures";
+  if (normalizedHash === "#base-conhecimento-ia" || normalizedHash === "#knowledge-base") return "knowledge-base";
   if (normalizedHash === "#integracao-erp" || normalizedHash === "#erp-integration") return "erp-integration";
   if (normalizedHash === "#territorios-comerciais" || normalizedHash === "#seller-territories") return "seller-territories";
   if (normalizedHash === "#automacoes-comerciais" || normalizedHash === "#commercial-automations") return "commercial-automations";
@@ -119,7 +128,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-7" aria-label="Seções de configurações">
+        <nav className="grid gap-2 md:grid-cols-2 xl:grid-cols-8" aria-label="Seções de configurações">
           {SETTINGS_SECTIONS.map((section) => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
@@ -158,6 +167,8 @@ export default function SettingsPage() {
         <WeeklyVisitMinimumPanel canEdit={user.role === "diretor"} />
       ) : activeSection === "technical-cultures" ? (
         <TechnicalCulturesPanel />
+      ) : activeSection === "knowledge-base" ? (
+        <KnowledgeBasePanel />
       ) : activeSection === "erp-integration" ? (
         <ErpIntegrationPanel />
       ) : activeSection === "seller-territories" ? (
