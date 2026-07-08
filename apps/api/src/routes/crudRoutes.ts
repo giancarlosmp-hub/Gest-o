@@ -24,7 +24,9 @@ import {
   userUpdateSchema,
   weeklyVisitMinimumSchema,
   commercialAutomationsConfigSchema,
-  erpOrderGenerationSchema
+  erpOrderGenerationSchema,
+  knowledgeDocumentCreateSchema,
+  knowledgeDocumentUpdateSchema
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -78,6 +80,7 @@ import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErp
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { refreshErpAutomaticSyncConfig, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
+import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 
 const router = Router();
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
@@ -9109,6 +9112,68 @@ router.put(
     return res.json(parseCommercialAutomationsConfig(config.value));
   }
 );
+
+
+router.get("/knowledge-documents", authorize("diretor", "gerente"), async (req, res) => {
+  await ensureInitialKnowledgeDocuments();
+  const documents = await searchKnowledgeDocuments({
+    query: req.query.q as string | undefined,
+    tag: req.query.tag as string | undefined,
+    category: req.query.category as string | undefined,
+    includeInactive: req.query.includeInactive === "true",
+    limit: Number(req.query.limit || 50)
+  });
+  return res.json(documents);
+});
+
+router.post(
+  "/knowledge-documents",
+  authorize("diretor", "gerente"),
+  validateBody(knowledgeDocumentCreateSchema),
+  async (req, res) => {
+    const input = knowledgeDocumentCreateSchema.parse(req.body);
+    const document = await prisma.knowledgeDocument.create({
+      data: {
+        ...input,
+        sourceName: input.sourceName || null,
+        summary: input.summary || null,
+        tags: input.tags.map((tag) => tag.toLowerCase()),
+        createdById: req.user?.id
+      }
+    });
+    return res.status(201).json(document);
+  }
+);
+
+router.put(
+  "/knowledge-documents/:id",
+  authorize("diretor", "gerente"),
+  validateBody(knowledgeDocumentUpdateSchema),
+  async (req, res) => {
+    const input = knowledgeDocumentUpdateSchema.parse(req.body);
+    const document = await prisma.knowledgeDocument.update({
+      where: { id: req.params.id },
+      data: {
+        ...input,
+        ...(input.sourceName !== undefined ? { sourceName: input.sourceName || null } : {}),
+        ...(input.summary !== undefined ? { summary: input.summary || null } : {}),
+        ...(input.tags !== undefined ? { tags: input.tags.map((tag) => tag.toLowerCase()) } : {})
+      }
+    });
+    return res.json(document);
+  }
+);
+
+router.patch("/knowledge-documents/:id/archive", authorize("diretor", "gerente"), async (req, res) => {
+  const isActive = req.body?.isActive === true;
+  const document = await prisma.knowledgeDocument.update({ where: { id: req.params.id }, data: { isActive } });
+  return res.json(document);
+});
+
+router.get("/knowledge-documents/ai-context", authorize("diretor", "gerente"), async (req, res) => {
+  const context = await getKnowledgeContextForAi(String(req.query.q || ""));
+  return res.json({ context, maxChars: 2400 });
+});
 
 router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {
   const parsedPeriod = parseObjectivePeriod(req.query.month as string | undefined, req.query.year as string | undefined);

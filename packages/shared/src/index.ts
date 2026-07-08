@@ -473,3 +473,40 @@ export const isSuccessfulErpOrderSync = (order: ErpOrderSyncReadinessInput) =>
 
 export const isErpOrderSyncResendable = (order: ErpOrderSyncReadinessInput) =>
   order.status === "error" || order.status === "pending" || order.orderStatus === "cancelado";
+
+export const KnowledgeDocumentCategoryEnum = z.enum([
+  "produto",
+  "mix",
+  "cultura",
+  "argumento_comercial",
+  "objeção",
+  "manual_tecnico",
+  "treinamento",
+  "institucional",
+  "outro"
+]);
+
+export const KnowledgeDocumentSourceTypeEnum = z.enum(["manual", "pdf", "texto", "upload", "interno", "outro"]);
+
+const knowledgeDocumentTagsSchema = z.array(z.string().trim().min(1).max(60)).max(30).default([]);
+
+export const knowledgeDocumentCreateSchema = z.object({
+  title: z.string().trim().min(3).max(180),
+  category: KnowledgeDocumentCategoryEnum.default("outro"),
+  sourceType: KnowledgeDocumentSourceTypeEnum.default("manual"),
+  sourceName: z.string().trim().max(180).optional().nullable(),
+  content: z.string().trim().min(10).max(50000),
+  summary: z.string().trim().max(2000).optional().nullable(),
+  tags: knowledgeDocumentTagsSchema,
+  isActive: z.boolean().optional().default(true)
+});
+
+export const knowledgeDocumentUpdateSchema = knowledgeDocumentCreateSchema.partial().extend({
+  title: z.string().trim().min(3).max(180).optional(),
+  content: z.string().trim().min(10).max(50000).optional()
+});
+
+export type KnowledgeDocumentCategory = z.infer<typeof KnowledgeDocumentCategoryEnum>;
+export type KnowledgeDocumentSourceType = z.infer<typeof KnowledgeDocumentSourceTypeEnum>;
+export type KnowledgeDocumentCreateInput = z.infer<typeof knowledgeDocumentCreateSchema>;
+export type KnowledgeDocumentUpdateInput = z.infer<typeof knowledgeDocumentUpdateSchema>;
