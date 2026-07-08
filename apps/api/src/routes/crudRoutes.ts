@@ -5109,10 +5109,20 @@ router.get("/ai/opportunity-message", async (req, res) => {
       stage: true,
       crop: true,
       productOffered: true,
+      value: true,
+      probability: true,
+      notes: true,
       followUpDate: true,
       lastContactAt: true,
       createdAt: true,
       client: {
+        select: {
+          name: true,
+          city: true,
+          state: true
+        }
+      },
+      ownerSeller: {
         select: {
           name: true
         }
@@ -5120,6 +5130,18 @@ router.get("/ai/opportunity-message", async (req, res) => {
       timelineEvents: {
         select: {
           description: true,
+          createdAt: true
+        },
+        orderBy: { createdAt: "desc" },
+        take: 2
+      },
+      activities: {
+        select: {
+          notes: true,
+          description: true,
+          result: true,
+          product: true,
+          date: true,
           createdAt: true
         },
         orderBy: { createdAt: "desc" },
@@ -5132,16 +5154,23 @@ router.get("/ai/opportunity-message", async (req, res) => {
     return res.status(404).json({ message: "Oportunidade não encontrada" });
   }
 
-  const message = generateSalesMessage({
+  const message = await generateSalesMessage({
     clientName: opportunity.client?.name || null,
     title: opportunity.title,
     crop: opportunity.crop,
     productOffered: opportunity.productOffered,
     stage: opportunity.stage,
+    city: opportunity.client?.city || null,
+    state: opportunity.client?.state || null,
+    sellerName: opportunity.ownerSeller?.name || null,
+    value: opportunity.value,
+    probability: opportunity.probability,
+    notes: opportunity.notes,
     followUpDate: opportunity.followUpDate,
     lastContactAt: opportunity.lastContactAt,
     createdAt: opportunity.createdAt,
-    timelineEvents: opportunity.timelineEvents
+    timelineEvents: opportunity.timelineEvents,
+    activities: opportunity.activities
   });
 
   return res.json({ message });
