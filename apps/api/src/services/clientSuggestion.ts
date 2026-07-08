@@ -1,5 +1,6 @@
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { aiService } from "./ai/aiService.js";
+import { getDemetraCommercialSystemPrompt } from "./ai/prompts/demetraCommercialSystemPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
@@ -111,20 +112,13 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
   const deterministicSuggestion = buildClientSuggestion(clientContext);
 
   return [
-    "Você é um assistente comercial B2B e deve gerar uma sugestão de próxima abordagem para o cliente.",
-    "Escreva em português do Brasil (PT-BR), com tom comercial, direto, profissional e natural (não robótico).",
-    "A resposta deve ser específica ao contexto: mencione comportamento do cliente e oportunidades reais, sem frases genéricas.",
-    "Foque em ação prática de venda.",
-    "Regras obrigatórias por campo:",
-    "- summary: deve soar como diagnóstico comercial, mencionar comportamento do cliente e evitar frases genéricas como \"cliente em acompanhamento\".",
-    "- recommendation: deve indicar estratégia comercial clara, sem repetir o summary.",
-    "- nextAction: deve ser objetiva, executável e começar com verbo de ação (ex.: \"Entrar em contato...\", \"Agendar visita...\", \"Enviar proposta...\").",
-    "- riskLevel: deve ser coerente com o cenário, sem exagerar risco sem motivo.",
-    "Restrições obrigatórias:",
-    "- NÃO inventar dados.",
-    "- NÃO usar termos vagos.",
-    "- NÃO repetir frases entre os campos.",
-    "- NÃO escrever nada fora do JSON.",
+    "Gere uma sugestão inteligente de próxima abordagem para o cliente, em português do Brasil (PT-BR).",
+    "A resposta deve ser específica ao contexto enviado e focada em ação prática de venda.",
+    "Regras por campo:",
+    "- summary: diagnóstico comercial do cliente, mencionando comportamento observado no contexto.",
+    "- recommendation: estratégia comercial clara, sem repetir o summary.",
+    "- nextAction: ação objetiva, executável e iniciada com verbo de ação.",
+    "- riskLevel: coerente com os dados disponíveis.",
     "Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto extra.",
     "Use exatamente a estrutura abaixo (sem adicionar ou remover campos):",
     '{"status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
@@ -206,7 +200,7 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
 
   const prompt = buildSuggestionPrompt(clientContext);
   const result = await aiService.chat({
-    system: "Você gera sugestões comerciais em JSON estrito para o CRM Demetra Agro Performance.",
+    system: getDemetraCommercialSystemPrompt(),
     messages: [{ role: "user", content: prompt }],
     temperature: 0.2
   });
