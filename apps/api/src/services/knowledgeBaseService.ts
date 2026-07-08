@@ -16,6 +16,8 @@ export type KnowledgeContextResult = {
   elapsedMs: number;
 };
 
+export type KnowledgeContextSource = "client-suggestion" | "opportunity-message" | "assistant-whatsapp";
+
 const MAX_QUERY_LENGTH = 800;
 const MAX_DOCUMENTS = 4;
 const MAX_EXCERPT_LENGTH = 650;
@@ -107,7 +109,7 @@ const summarizeKnowledgeError = (error: unknown) => {
   return error.message.replace(/\s+/g, " ").slice(0, 120);
 };
 
-export const resolveKnowledgeContextForAi = async (source: string, query: string) => {
+export const resolveKnowledgeContextForAi = async (source: KnowledgeContextSource, query: string) => {
   const startedAt = Date.now();
   try {
     const result = await getKnowledgeContextForAi(query);
