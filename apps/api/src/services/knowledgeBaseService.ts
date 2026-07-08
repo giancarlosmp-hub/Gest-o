@@ -1,8 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
+import { logApiEvent } from "../utils/logger.js";
 
 export const KNOWLEDGE_CONTEXT_MAX_CHARS = 2400;
 export const KNOWLEDGE_CONTEXT_MAX_DOCUMENTS = 4;
+const KNOWLEDGE_CONTEXT_MAX_QUERY_CHARS = 320;
+const KNOWLEDGE_CONTEXT_MAX_SNIPPET_CHARS = 700;
 
 export const INITIAL_KNOWLEDGE_DOCUMENTS = [
   {
@@ -29,7 +32,29 @@ type SearchKnowledgeInput = {
   limit?: number;
 };
 
+export type KnowledgeContextSource = {
+  id: string;
+  title: string;
+  category: string;
+  sourceType: string;
+  sourceName: string | null;
+  score: number;
+};
+
+export type KnowledgeContextDocument = KnowledgeContextSource & {
+  summary: string | null;
+  snippet: string;
+};
+
+export type KnowledgeContextResult = {
+  documents: KnowledgeContextDocument[];
+  context: string;
+  elapsedMs: number;
+};
+
 const normalize = (value?: string | null) => (value || "").trim();
+const normalizeSpaces = (value?: string | null) => normalize(value).replace(/\s+/g, " ");
+const clampText = (value: string, maxChars: number) => (value.length > maxChars ? `${value.slice(0, Math.max(maxChars - 1, 0))}…` : value);
 
 const buildTextFilters = (query: string): Prisma.KnowledgeDocumentWhereInput[] => {
   if (!query) return [];
@@ -40,6 +65,18 @@ const buildTextFilters = (query: string): Prisma.KnowledgeDocumentWhereInput[] =
     { sourceName: { contains: query, mode: "insensitive" } },
     { tags: { has: query.toLowerCase() } }
   ];
+};
+
+const scoreKnowledgeDocument = (doc: { title: string; content: string; summary: string | null; tags: string[] }, query: string) => {
+  const terms = query.toLowerCase().split(/\s+/).filter((term) => term.length >= 3);
+  if (!terms.length) return 1;
+  const fields = [doc.title, doc.summary || "", doc.content, doc.tags.join(" ")].map((field) => field.toLowerCase());
+  return terms.reduce((score, term) => score + fields.reduce((sum, field, index) => sum + (field.includes(term) ? [4, 3, 1, 5][index] : 0), 0), 0);
+};
+
+const buildSnippet = (doc: { content: string; summary: string | null }, maxChars = KNOWLEDGE_CONTEXT_MAX_SNIPPET_CHARS) => {
+  const text = normalizeSpaces([doc.summary, doc.content].filter(Boolean).join(" "));
+  return clampText(text, maxChars);
 };
 
 export async function ensureInitialKnowledgeDocuments() {
@@ -70,20 +107,47 @@ export async function searchKnowledgeDocuments(input: SearchKnowledgeInput) {
   });
 }
 
-export async function getKnowledgeContextForAi(query: string, maxChars = KNOWLEDGE_CONTEXT_MAX_CHARS) {
-  const documents = await searchKnowledgeDocuments({ query, limit: KNOWLEDGE_CONTEXT_MAX_DOCUMENTS });
-  const snippets: string[] = [];
-  let remaining = Math.max(Math.min(maxChars, KNOWLEDGE_CONTEXT_MAX_CHARS), 0);
+export const formatKnowledgeContextBlock = (documents: KnowledgeContextDocument[]) => {
+  if (!documents.length) return "";
+  const items = documents.map((doc, index) => [`${index + 1}. ${doc.title} (${doc.category})`, doc.summary ? `Resumo: ${doc.summary}` : null, `Trecho: ${doc.snippet}`].filter(Boolean).join("\n"));
+  return [
+    "Conhecimento interno Demetra/Acervo disponível:",
+    items.join("\n\n"),
+    "Use este conhecimento apenas se for relevante.",
+    "Não invente informações além do contexto."
+  ].join("\n");
+};
 
-  for (const doc of documents) {
-    if (remaining <= 0) break;
-    const base = [`Título: ${doc.title}`, doc.summary ? `Resumo: ${doc.summary}` : null, `Conteúdo: ${doc.content}`]
-      .filter(Boolean)
-      .join("\n");
-    const snippet = base.slice(0, remaining);
-    snippets.push(snippet);
-    remaining -= snippet.length + 2;
+export async function getKnowledgeContextForAi(query: string, maxChars = KNOWLEDGE_CONTEXT_MAX_CHARS): Promise<KnowledgeContextResult> {
+  const startedAt = Date.now();
+  const safeQuery = clampText(normalizeSpaces(query), KNOWLEDGE_CONTEXT_MAX_QUERY_CHARS);
+  const safeMaxChars = Math.max(0, Math.min(maxChars, KNOWLEDGE_CONTEXT_MAX_CHARS));
+
+  try {
+    const found = await searchKnowledgeDocuments({ query: safeQuery, limit: KNOWLEDGE_CONTEXT_MAX_DOCUMENTS });
+    const documents = found
+      .map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        category: doc.category,
+        sourceType: doc.sourceType,
+        sourceName: doc.sourceName,
+        summary: doc.summary ? clampText(normalizeSpaces(doc.summary), 220) : null,
+        snippet: buildSnippet(doc),
+        score: scoreKnowledgeDocument(doc, safeQuery)
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, KNOWLEDGE_CONTEXT_MAX_DOCUMENTS);
+
+    const context = clampText(formatKnowledgeContextBlock(documents), safeMaxChars);
+    const elapsedMs = Date.now() - startedAt;
+    logApiEvent("INFO", "[knowledge-base/ai-context] resolved", { queryLength: safeQuery.length, documents: documents.length, contextLength: context.length, elapsedMs });
+    return { documents, context, elapsedMs };
+  } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+    logApiEvent("WARN", "[knowledge-base/ai-context] fallback-empty", { queryLength: safeQuery.length, elapsedMs, error: error instanceof Error ? error.message : String(error) });
+    return { documents: [], context: "", elapsedMs };
   }
-
-  return snippets.join("\n\n---\n\n");
 }
+
+export const resolveKnowledgeContextForAi = async (query: string, maxChars = KNOWLEDGE_CONTEXT_MAX_CHARS) => getKnowledgeContextForAi(query, maxChars);

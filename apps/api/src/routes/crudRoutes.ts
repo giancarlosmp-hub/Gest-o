@@ -4166,6 +4166,24 @@ router.get("/ai/status", (_req, res) => {
   return res.json(aiService.getStatus());
 });
 
+router.get("/ai/knowledge-preview", authorize("diretor", "gerente"), async (req, res) => {
+  const result = await getKnowledgeContextForAi(String(req.query.query || req.query.q || ""));
+  return res.json({
+    query: String(req.query.query || req.query.q || ""),
+    elapsedMs: result.elapsedMs,
+    documents: result.documents.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      category: doc.category,
+      sourceType: doc.sourceType,
+      sourceName: doc.sourceName,
+      summary: doc.summary,
+      snippet: doc.snippet,
+      score: doc.score
+    }))
+  });
+});
+
 router.post("/ai/client-suggestion", async (req, res) => {
   const parsed = clientSuggestionBodySchema.safeParse(req.body);
   if (!parsed.success) {
@@ -9171,8 +9189,8 @@ router.patch("/knowledge-documents/:id/archive", authorize("diretor", "gerente")
 });
 
 router.get("/knowledge-documents/ai-context", authorize("diretor", "gerente"), async (req, res) => {
-  const context = await getKnowledgeContextForAi(String(req.query.q || ""));
-  return res.json({ context, maxChars: 2400 });
+  const result = await getKnowledgeContextForAi(String(req.query.q || ""));
+  return res.json({ context: result.context, documents: result.documents, elapsedMs: result.elapsedMs, maxChars: 2400 });
 });
 
 router.get("/objectives", authorize("diretor", "gerente"), async (req, res) => {

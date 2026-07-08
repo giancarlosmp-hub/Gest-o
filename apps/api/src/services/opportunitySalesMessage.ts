@@ -2,6 +2,7 @@ import { OpportunityStage } from "@prisma/client";
 import { aiService, type AiService } from "./ai/index.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
+import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 
 type OpportunityHistoryItem = {
   description: string;
@@ -202,6 +203,13 @@ const daysBetween = (from: Date | null | undefined, to: Date) => {
 
 const uniqueCompact = (items: (string | null | undefined)[]) => Array.from(new Set(items.map((item) => compactText(item, 80)).filter(Boolean)));
 
+const buildKnowledgeQuery = (opportunity: SalesMessageOpportunityInput) =>
+  [opportunity.clientName, opportunity.title, opportunity.crop, opportunity.productOffered, opportunity.city, opportunity.state, opportunity.notes]
+    .concat((opportunity.timelineEvents || []).map((event) => event.description))
+    .concat((opportunity.activities || []).flatMap((activity) => [activity.product, activity.description, activity.notes, activity.result]))
+    .filter(Boolean)
+    .join(" ");
+
 const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, now: Date) => {
   const latestActivity = (opportunity.activities || [])
     .slice()
@@ -270,12 +278,14 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
   const fallbackMessage = generateDeterministicSalesMessage(opportunity);
   const now = new Date();
 
+  const knowledgeContext = await resolveKnowledgeContextForAi(buildKnowledgeQuery(opportunity));
+
   const result = await service.chat({
     system: DEMETRA_MASTER_PROMPT,
     messages: [
       {
         role: "user",
-        content: `${SALES_MESSAGE_USER_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(buildAiSalesMessageContext(opportunity, now))}`
+        content: [SALES_MESSAGE_USER_INSTRUCTION, knowledgeContext.context, `Contexto comercial sanitizado:\n${JSON.stringify(buildAiSalesMessageContext(opportunity, now))}`].filter(Boolean).join("\n\n")
       }
     ],
     temperature: 0.35,

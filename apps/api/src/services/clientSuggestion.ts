@@ -2,6 +2,7 @@ import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { aiService } from "./ai/aiService.js";
 import { getDemetraMasterPrompt } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
+import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
 type ClientSuggestionRiskLevel = "baixo" | "medio" | "alto";
@@ -108,7 +109,19 @@ const isClientSuggestionPayload = (value: unknown): value is ClientSuggestionPay
   );
 };
 
-const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
+const buildKnowledgeQuery = (clientContext: ClientAiContextPayload) =>
+  [
+    clientContext.client.name,
+    clientContext.client.city,
+    clientContext.client.state,
+    clientContext.latestObservation,
+    ...clientContext.recentOpportunities.map((opportunity) => opportunity.title),
+    ...clientContext.recentActivities.map((activity) => activity.opportunityTitle || activity.description || activity.notes)
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+const buildSuggestionPrompt = (clientContext: ClientAiContextPayload, knowledgeContext = "") => {
   const deterministicSuggestion = buildClientSuggestion(clientContext);
 
   return [
@@ -122,6 +135,7 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload) => {
     "Retorne APENAS JSON válido, sem markdown, sem explicações, sem texto extra.",
     "Use exatamente a estrutura abaixo (sem adicionar ou remover campos):",
     '{"status":"negociacao|ativo|parado|acompanhamento","summary":"...","recommendation":"...","nextAction":"...","riskLevel":"baixo|medio|alto"}',
+    knowledgeContext ? knowledgeContext : null,
     "Contexto do cliente:",
     JSON.stringify(clientContext),
     "Base determinística esperada (pode refinar texto, mas mantenha estrutura e valores válidos):",
@@ -198,7 +212,8 @@ export const generateClientSuggestion = async (clientContext: ClientAiContextPay
     return suggestion;
   };
 
-  const prompt = buildSuggestionPrompt(clientContext);
+  const knowledgeContext = await resolveKnowledgeContextForAi(buildKnowledgeQuery(clientContext));
+  const prompt = buildSuggestionPrompt(clientContext, knowledgeContext.context);
   const result = await aiService.chat({
     system: getDemetraMasterPrompt(),
     messages: [{ role: "user", content: prompt }],

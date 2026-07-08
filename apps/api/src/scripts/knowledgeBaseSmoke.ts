@@ -45,8 +45,9 @@ async function main() {
   const longDoc = await prisma.knowledgeDocument.create({
     data: { title: `Documento contexto ${unique}`, category: "institucional", sourceType: "manual", content: `${unique} ${"x".repeat(5000)}`, tags: [unique], isActive: true }
   });
-  const context = await getKnowledgeContextForAi(unique, 300);
-  assert(context.length <= 300, "getKnowledgeContextForAi retorna contexto limitado");
+  const contextResult = await getKnowledgeContextForAi(unique, 300);
+  assert(contextResult.context.length <= 300, "getKnowledgeContextForAi retorna contexto limitado");
+  assert(contextResult.documents.length > 0, "getKnowledgeContextForAi retorna documentos estruturados");
 
   await prisma.knowledgeDocument.deleteMany({ where: { id: { in: [created.id, longDoc.id] } } });
   await prisma.user.deleteMany({ where: { email: { in: [`${unique}@kb.local`, `${unique}-seller@kb.local`] } } });
