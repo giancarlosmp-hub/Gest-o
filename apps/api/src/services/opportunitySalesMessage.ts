@@ -1,4 +1,7 @@
 import { OpportunityStage } from "@prisma/client";
+import { aiService, type AiService } from "./ai/index.js";
+import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
+import { logApiEvent } from "../utils/logger.js";
 
 type OpportunityHistoryItem = {
   description: string;
@@ -11,10 +14,17 @@ export type SalesMessageOpportunityInput = {
   crop: string | null;
   productOffered: string | null;
   stage: OpportunityStage;
+  city?: string | null;
+  state?: string | null;
+  sellerName?: string | null;
+  value?: number | null;
+  probability?: number | null;
+  notes?: string | null;
   followUpDate?: Date | null;
   lastContactAt?: Date | null;
   createdAt?: Date;
   timelineEvents?: OpportunityHistoryItem[];
+  activities?: { createdAt: Date; date?: Date | null; notes?: string | null; description?: string | null; result?: string | null; product?: string | null }[];
 };
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
@@ -139,7 +149,7 @@ const buildNegotiationMessage = (params: {
 const buildFallbackMessage = (params: { clientName: string; subject: string }) =>
   `Oi ${params.clientName}, tudo bem?\nQueria retomar ${params.subject} contigo.\nSe fizer sentido, me chama que ajustamos os próximos passos por aqui 👍`;
 
-export const generateSalesMessage = (opportunity: SalesMessageOpportunityInput) => {
+export const generateDeterministicSalesMessage = (opportunity: SalesMessageOpportunityInput) => {
   const now = new Date();
   const clientName = opportunity.clientName?.trim() || "tudo bem";
   const subject = buildSubject(opportunity);
@@ -176,4 +186,132 @@ export const generateSalesMessage = (opportunity: SalesMessageOpportunityInput) 
   }
 
   return buildFallbackMessage({ clientName, subject });
+};
+
+
+const compactText = (value?: string | null, maxLength = 220) => {
+  const normalized = normalizeHistoryText(value || "");
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+};
+
+const daysBetween = (from: Date | null | undefined, to: Date) => {
+  if (!from) return null;
+  const diff = Math.ceil((from.getTime() - to.getTime()) / DAY_IN_MS);
+  return Number.isFinite(diff) ? diff : null;
+};
+
+const uniqueCompact = (items: (string | null | undefined)[]) => Array.from(new Set(items.map((item) => compactText(item, 80)).filter(Boolean)));
+
+const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, now: Date) => {
+  const latestActivity = (opportunity.activities || [])
+    .slice()
+    .sort((a, b) => (b.date || b.createdAt).getTime() - (a.date || a.createdAt).getTime())[0];
+  const history = (opportunity.timelineEvents || [])
+    .map((event) => compactText(event.description, 180))
+    .filter(Boolean)
+    .slice(0, 2);
+  const activityTexts = latestActivity
+    ? [latestActivity.notes, latestActivity.description, latestActivity.result].map((text) => compactText(text, 180)).filter(Boolean)
+    : [];
+
+  return {
+    cliente: compactText(opportunity.clientName, 80) || null,
+    cidade: compactText(opportunity.city, 80) || null,
+    estado: compactText(opportunity.state, 20) || null,
+    vendedor: compactText(opportunity.sellerName, 80) || null,
+    etapaDaOportunidade: opportunity.stage,
+    valor: typeof opportunity.value === "number" && Number.isFinite(opportunity.value) ? opportunity.value : null,
+    probabilidade: typeof opportunity.probability === "number" && Number.isFinite(opportunity.probability) ? opportunity.probability : null,
+    diasSemContato: getDaysWithoutInteraction(opportunity, now),
+    diasParaRetorno: daysBetween(opportunity.followUpDate, now),
+    ultimaAtividade: activityTexts[0] || null,
+    ultimaObservacao: compactText(opportunity.notes, 220) || history[0] || activityTexts[1] || null,
+    produtosEnvolvidos: uniqueCompact([opportunity.productOffered, opportunity.crop, latestActivity?.product]),
+    resumoComercial: compactText(buildSubject(opportunity), 160),
+    historicoResumido: history
+  };
+};
+
+const SALES_MESSAGE_USER_INSTRUCTION = `Gere apenas uma mensagem comercial pronta para envio ao cliente.
+
+Objetivos:
+ser natural;
+não parecer IA;
+máximo 120 palavras;
+sem markdown;
+sem listas;
+sem assinatura;
+sem inventar informações;
+utilizar apenas o contexto recebido;
+estimular continuidade da negociação;
+preservar relacionamento.
+
+Evite as expressões: "Espero que esteja bem", "Passando para saber", "Gostaria de".
+
+Retorne somente JSON válido no formato {"message":"..."}.`;
+
+const parseAiSalesMessage = (content: string) => {
+  const trimmed = content.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === "object" && typeof (parsed as { message?: unknown }).message === "string") {
+      const message = (parsed as { message: string }).message.trim();
+      return message || null;
+    }
+  } catch {
+    return trimmed.startsWith("{") || trimmed.startsWith("[") ? null : trimmed;
+  }
+  return null;
+};
+
+export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService) => {
+  const startedAt = Date.now();
+  const fallbackMessage = generateDeterministicSalesMessage(opportunity);
+  const now = new Date();
+
+  const result = await service.chat({
+    system: DEMETRA_MASTER_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: `${SALES_MESSAGE_USER_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(buildAiSalesMessageContext(opportunity, now))}`
+      }
+    ],
+    temperature: 0.35,
+    maxTokens: 220
+  });
+
+  if (!result) {
+    const status = service.getStatus();
+    logApiEvent("INFO", "[ai/opportunity-message] fallback", {
+      provider: status.provider,
+      model: status.model,
+      elapsedMs: Date.now() - startedAt,
+      fallback: true,
+      error: status.lastError || "ai_unavailable"
+    });
+    return fallbackMessage;
+  }
+
+  const message = parseAiSalesMessage(result.content);
+  if (!message) {
+    logApiEvent("WARN", "[ai/opportunity-message] fallback", {
+      provider: result.provider,
+      model: result.model,
+      elapsedMs: result.elapsedMs,
+      fallback: true,
+      error: "ai_invalid_or_empty_response"
+    });
+    return fallbackMessage;
+  }
+
+  logApiEvent("INFO", "[ai/opportunity-message] success", {
+    provider: result.provider,
+    model: result.model,
+    elapsedMs: result.elapsedMs,
+    fallback: false,
+    error: null
+  });
+  return message;
 };

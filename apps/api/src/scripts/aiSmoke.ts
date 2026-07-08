@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { env } from "../config/env.js";
 import { AiService } from "../services/ai/aiService.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
+import { generateDeterministicSalesMessage, generateSalesMessage, type SalesMessageOpportunityInput } from "../services/opportunitySalesMessage.js";
 import type { ClientAiContextPayload } from "../services/clientAiContext.js";
 
 const originalFetch = globalThis.fetch;
@@ -37,6 +38,32 @@ const baseEnv = () => {
   env.aiTimeoutMs = 50;
   env.aiMaxOutputTokens = 64;
   env.aiTemperature = 0.4;
+};
+
+
+const opportunityContext: SalesMessageOpportunityInput = {
+  clientName: "João",
+  title: "Proposta sorgo",
+  crop: "sorgo",
+  productOffered: "Semente premium",
+  stage: "proposta",
+  city: "Rio Verde",
+  state: "GO",
+  sellerName: "Vendedor Teste",
+  value: 12000,
+  probability: 70,
+  notes: "Cliente avaliando volumes",
+  followUpDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  lastContactAt: new Date(),
+  createdAt: new Date(),
+  timelineEvents: [{ description: "Cliente pediu proposta de sorgo", createdAt: new Date() }],
+  activities: [{ createdAt: new Date(), notes: "Alinhar condições finais", product: "Semente premium" }]
+};
+
+const assertOpportunityMessagePayload = (payload: unknown) => {
+  assert.equal(typeof payload, "object", "payload deve ser objeto");
+  assert.equal(Object.keys(payload as Record<string, unknown>).length, 1, "payload deve manter apenas message");
+  assert.equal(typeof (payload as { message?: unknown }).message, "string", "message deve ser string");
 };
 
 const clientContext: ClientAiContextPayload = {
@@ -105,6 +132,20 @@ try {
   setFetch(async () => Response.json(invalidJson));
   assert.equal((await generateClientSuggestion(clientContext)).source, "deterministic");
   console.info("[ai-smoke] JSON inválido: ok");
+
+
+
+  baseEnv();
+  setFetch(async () => Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Olá João. Separei sua proposta de sorgo para alinharmos os próximos passos com objetividade." }) } }] }));
+  const aiMessage = await generateSalesMessage(opportunityContext);
+  assert.match(aiMessage, /Separei sua proposta/);
+  assertOpportunityMessagePayload({ message: aiMessage });
+  console.info("[ai-smoke] GET /ai/opportunity-message com IA habilitada: ok");
+
+  baseEnv();
+  setFetch(async () => Response.json({ choices: [{ message: { content: "{" } }] }));
+  assert.equal(await generateSalesMessage(opportunityContext), generateDeterministicSalesMessage(opportunityContext));
+  console.info("[ai-smoke] JSON inválido na mensagem comercial usa fallback: ok");
 
   await runChatScenario("Fallback determinístico", () => {
     baseEnv();
