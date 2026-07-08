@@ -78,6 +78,7 @@ import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../uti
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
+import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { refreshErpAutomaticSyncConfig, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -9093,6 +9094,13 @@ router.put(
 
 
 
+
+router.get("/ai/commercial-insights", authorize("diretor", "gerente"), async (req, res) => {
+  const refresh = req.query.refresh === "true" || req.query.refresh === "1";
+  if (refresh) invalidateCommercialInsightsCache();
+  const insights = await getCommercialInsights({ refresh });
+  return res.json(insights);
+});
 
 router.post("/commercial-automations/run", authorize("diretor", "gerente"), async (_req, res) => {
   const result = await runCommercialAutomations("manual");
