@@ -3,6 +3,7 @@ import { aiService, type AiService } from "./ai/index.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
+import { parseAiTextResponse } from "./ai/aiResponseParser.js";
 
 type OpportunityHistoryItem = {
   description: string;
@@ -32,7 +33,6 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const normalizeHistoryText = (value: string) => value.replace(/\s+/g, " ").trim();
 
-const capitalize = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 const getDaysWithoutInteraction = (opportunity: SalesMessageOpportunityInput, now: Date) => {
   const lastTimelineAt = (opportunity.timelineEvents || [])
@@ -91,18 +91,13 @@ const buildTimingContext = (followUpDate?: Date | null, now: Date = new Date()) 
   return null;
 };
 
-const withClientName = (name: string) => {
-  const normalized = name.trim();
-  return normalized ? `${capitalize(normalized)},` : "";
-};
-
 const buildProspectingMessage = (params: {
   clientName: string;
   subject: string;
   historySnippet: string | null;
   timingContext: string | null;
 }) => {
-  const open = `Oi ${withClientName(params.clientName)} tudo certo?`;
+  const open = "Bom dia!";
   const context = params.historySnippet
     ? `Fiquei lembrando do que conversamos sobre ${params.subject} (${params.historySnippet}).`
     : `Queria retomar contigo ${params.subject}.`;
@@ -127,7 +122,7 @@ const buildProposalMessage = (params: {
     ? `Como ${params.timingContext}, conseguimos garantir melhor condição se alinharmos agora.`
     : "Esse é um bom momento para fechar e já deixar tudo organizado sem correria.";
 
-  return `Fala ${params.clientName}, tudo bem?\n${context}\n${value}\nSe estiver ok para você, te envio agora o resumo final e já avançamos 👍`;
+  return `Bom dia!\n${context}\n${value}\nSe estiver ok para você, te envio agora o resumo final e já avançamos.`;
 };
 
 const buildNegotiationMessage = (params: {
@@ -144,11 +139,11 @@ const buildNegotiationMessage = (params: {
     ? `Como ${params.timingContext}, vale ajustarmos isso hoje para não perder a janela comercial.`
     : "Se tiver algum ponto travando (prazo, volume ou condição), me fala que ajusto contigo.";
 
-  return `Oi ${params.clientName}!\n${context}\n${value}\nPrefere que eu te ligue rapidinho 5 min para fechar esse alinhamento? 📞`;
+  return `Bom dia!\n${context}\n${value}\nPrefere que eu te ligue rapidinho 5 min para fechar esse alinhamento?`;
 };
 
 const buildFallbackMessage = (params: { clientName: string; subject: string }) =>
-  `Oi ${params.clientName}, tudo bem?\nQueria retomar ${params.subject} contigo.\nSe fizer sentido, me chama que ajustamos os próximos passos por aqui 👍`;
+  `Bom dia!\nQueria retomar ${params.subject} contigo.\nSe fizer sentido, me chama que ajustamos os próximos passos por aqui.`;
 
 export const generateDeterministicSalesMessage = (opportunity: SalesMessageOpportunityInput) => {
   const now = new Date();
@@ -226,7 +221,6 @@ const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, n
     cliente: compactText(opportunity.clientName, 80) || null,
     cidade: compactText(opportunity.city, 80) || null,
     estado: compactText(opportunity.state, 20) || null,
-    vendedor: compactText(opportunity.sellerName, 80) || null,
     etapaDaOportunidade: opportunity.stage,
     valor: typeof opportunity.value === "number" && Number.isFinite(opportunity.value) ? opportunity.value : null,
     probabilidade: typeof opportunity.probability === "number" && Number.isFinite(opportunity.probability) ? opportunity.probability : null,
@@ -240,38 +234,31 @@ const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, n
   };
 };
 
-const SALES_MESSAGE_USER_INSTRUCTION = `Gere apenas uma mensagem comercial pronta para envio ao cliente.
+const SALES_MESSAGE_USER_INSTRUCTION = `Gere apenas uma mensagem comercial pronta para envio PARA O CLIENTE.
 
 Objetivos:
-ser natural;
+ser natural e profissional, como um vendedor experiente;
 não parecer IA;
-máximo 120 palavras;
+até aproximadamente 600 caracteres;
 sem markdown;
 sem listas;
 sem assinatura;
 sem inventar informações;
 utilizar apenas o contexto recebido;
-estimular continuidade da negociação;
-preservar relacionamento.
+estimular uma resposta do cliente;
+preservar relacionamento;
+nunca escrever para o vendedor;
+nunca citar o nome do vendedor;
+nunca iniciar com nome próprio seguido de vírgula;
+iniciar com saudação profissional como "Bom dia!", "Boa tarde!" ou "Olá!".
 
 Evite as expressões: "Espero que esteja bem", "Passando para saber", "Gostaria de".
 
-Retorne somente JSON válido no formato {"message":"..."}.`;
+Preferencialmente retorne somente JSON válido no formato {"message":"..."}.`;
 
-const parseAiSalesMessage = (content: string) => {
-  const trimmed = content.trim();
-  if (!trimmed) return null;
-  try {
-    const parsed = JSON.parse(trimmed) as unknown;
-    if (parsed && typeof parsed === "object" && typeof (parsed as { message?: unknown }).message === "string") {
-      const message = (parsed as { message: string }).message.trim();
-      return message || null;
-    }
-  } catch {
-    return trimmed.startsWith("{") || trimmed.startsWith("[") ? null : trimmed;
-  }
-  return null;
-};
+const INVALID_SALES_MESSAGE = "Não foi possível gerar a mensagem comercial.";
+
+const parseAiSalesMessage = (content: string) => parseAiTextResponse(content, "message")?.text || null;
 
 export const generateSalesMessage = async (opportunity: SalesMessageOpportunityInput, service: AiService = aiService) => {
   const startedAt = Date.now();
@@ -313,7 +300,7 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
       fallback: true,
       error: "ai_invalid_or_empty_response"
     });
-    return fallbackMessage;
+    return INVALID_SALES_MESSAGE;
   }
 
   logApiEvent("INFO", "[ai/opportunity-message] success", {

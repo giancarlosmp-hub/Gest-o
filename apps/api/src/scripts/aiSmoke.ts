@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { env } from "../config/env.js";
 import { AiService } from "../services/ai/aiService.js";
+import { parseAiTextResponse } from "../services/ai/aiResponseParser.js";
 import { getDemetraMasterPrompt } from "../services/ai/demetraMasterPrompt.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { generateDeterministicSalesMessage, generateSalesMessage, type SalesMessageOpportunityInput } from "../services/opportunitySalesMessage.js";
@@ -41,6 +42,22 @@ const baseEnv = () => {
   env.aiTemperature = 0.4;
 };
 
+
+const assertNoRawAiArtifacts = (value: string) => {
+  assert.ok(!value.includes("```json"), "mensagem não deve exibir fence markdown json");
+  assert.ok(!value.includes("```") , "mensagem não deve exibir fence markdown");
+  assert.ok(!value.includes('{"message"'), "mensagem não deve exibir JSON bruto");
+  assert.ok(!/stack trace/i.test(value), "mensagem não deve exibir stack trace");
+};
+
+const runAiResponseParserSmoke = () => {
+  assert.equal(parseAiTextResponse("Bom dia.\nEstou entrando em contato...")?.text, "Bom dia.\nEstou entrando em contato...");
+  assert.equal(parseAiTextResponse('{"message":"Bom dia..."}')?.text, "Bom dia...");
+  assert.equal(parseAiTextResponse('```json\n{\n  "message":"Bom dia..."\n}\n```')?.text, "Bom dia...");
+  assert.equal(parseAiTextResponse('```json\n{bad}\n```'), null);
+  assert.equal(parseAiTextResponse('{"summary":"sem message"}'), null);
+  console.info("[ai-smoke] parser de resposta da IA: ok");
+};
 
 const opportunityContext: SalesMessageOpportunityInput = {
   clientName: "João",
@@ -98,6 +115,8 @@ const assertUsesMasterPrompt = (init?: RequestInit) => {
 };
 
 try {
+  runAiResponseParserSmoke();
+
   await runChatScenario("IA desabilitada", () => {
     baseEnv();
     env.aiChatEnabled = false;
@@ -164,13 +183,23 @@ try {
   setFetch(async () => Response.json({ choices: [{ message: { content: JSON.stringify({ message: "Olá João. Separei sua proposta de sorgo para alinharmos os próximos passos com objetividade." }) } }] }));
   const aiMessage = await generateSalesMessage(opportunityContext);
   assert.match(aiMessage, /Separei sua proposta/);
+  assertNoRawAiArtifacts(aiMessage);
   assertOpportunityMessagePayload({ message: aiMessage });
   console.info("[ai-smoke] GET /ai/opportunity-message com IA habilitada: ok");
 
   baseEnv();
   setFetch(async () => Response.json({ choices: [{ message: { content: "{" } }] }));
-  assert.equal(await generateSalesMessage(opportunityContext), generateDeterministicSalesMessage(opportunityContext));
-  console.info("[ai-smoke] JSON inválido na mensagem comercial usa fallback: ok");
+  const invalidSalesMessage = await generateSalesMessage(opportunityContext);
+  assert.equal(invalidSalesMessage, "Não foi possível gerar a mensagem comercial.");
+  assertNoRawAiArtifacts(invalidSalesMessage);
+  console.info("[ai-smoke] JSON inválido na mensagem comercial usa mensagem controlada: ok");
+
+  const deterministicSalesMessage = generateDeterministicSalesMessage(opportunityContext);
+  assert.ok(!deterministicSalesMessage.startsWith(`${opportunityContext.sellerName},`), "mensagem comercial não deve iniciar com nome do vendedor");
+  assert.ok(!deterministicSalesMessage.startsWith(`${opportunityContext.sellerName}!`), "mensagem comercial não deve iniciar com nome do vendedor");
+  assert.match(deterministicSalesMessage, /^(Bom dia!|Boa tarde!|Olá!)/);
+  assertNoRawAiArtifacts(deterministicSalesMessage);
+  console.info("[ai-smoke] mensagem comercial não inicia com vendedor: ok");
 
   await runChatScenario("Fallback determinístico", () => {
     baseEnv();

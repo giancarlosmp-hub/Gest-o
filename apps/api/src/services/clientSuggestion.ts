@@ -3,6 +3,7 @@ import { aiService } from "./ai/aiService.js";
 import { getDemetraMasterPrompt } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
 import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
+import { parseAiJsonObject } from "./ai/aiResponseParser.js";
 
 type ClientSuggestionStatus = "negociacao" | "ativo" | "parado" | "acompanhamento";
 type ClientSuggestionRiskLevel = "baixo" | "medio" | "alto";
@@ -143,37 +144,12 @@ const buildSuggestionPrompt = (clientContext: ClientAiContextPayload, knowledgeC
   ].join("\n");
 };
 
-type ParseMode = "direct_json" | "fenced_json" | "embedded_object";
-
-const sanitizeJsonText = (value: string): { text: string; parseModeHint: ParseMode | null } => {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("```")) {
-    return {
-      text: trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim(),
-      parseModeHint: "fenced_json"
-    };
-  }
-  return { text: trimmed, parseModeHint: null };
-};
+type ParseMode = "direct_json" | "fenced_json" | "embedded_json";
 
 const parseSuggestionPayload = (rawText: string): { parsed: unknown; parseMode: ParseMode } => {
-  const { text: sanitizedText, parseModeHint } = sanitizeJsonText(rawText);
-
-  try {
-    return {
-      parsed: JSON.parse(sanitizedText) as unknown,
-      parseMode: parseModeHint ?? "direct_json"
-    };
-  } catch {
-    const objectMatch = sanitizedText.match(/\{[\s\S]*\}/);
-    if (!objectMatch) {
-      throw new Error("ai_invalid_json");
-    }
-    return {
-      parsed: JSON.parse(objectMatch[0]) as unknown,
-      parseMode: "embedded_object"
-    };
-  }
+  const result = parseAiJsonObject(rawText);
+  if (!result) throw new Error("ai_invalid_json");
+  return { parsed: result.parsed, parseMode: result.mode };
 };
 
 export const generateClientSuggestion = async (clientContext: ClientAiContextPayload): Promise<ClientSuggestionPayload> => {
