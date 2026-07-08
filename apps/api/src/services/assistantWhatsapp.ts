@@ -3,6 +3,7 @@ import { aiService, type AiService } from "./ai/aiService.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import type { ClientAiContextPayload } from "./clientAiContext.js";
 import { logApiEvent } from "../utils/logger.js";
+import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -83,6 +84,11 @@ export const generateDeterministicAssistantWhatsappMessage = (context: Assistant
   return `Oi ${firstName}, tudo bem? ${inactivity} e lembrei de você por aqui na Demetra. Podemos conversar rapidinho sobre ${topic} e ver se faz sentido para o momento da sua operação?`;
 };
 
+const buildKnowledgeQuery = (context: AssistantWhatsappContext) =>
+  [context.nome, context.cidade, context.estado, context.ultimaOportunidade, context.observacaoResumida, ...context.produtos, ...context.historicoResumido]
+    .filter(Boolean)
+    .join(" ");
+
 const WHATSAPP_MESSAGE_INSTRUCTION = `Gere uma mensagem curta para WhatsApp.
 
 Objetivo:
@@ -112,9 +118,11 @@ const parseMessage = (content: string) => {
 export const generateAssistantWhatsappMessage = async (context: AssistantWhatsappContext, service: AiService = aiService) => {
   const startedAt = Date.now();
   const fallbackMessage = generateDeterministicAssistantWhatsappMessage(context);
+  const knowledgeContext = await resolveKnowledgeContextForAi(buildKnowledgeQuery(context));
+
   const result = await service.chat({
     system: DEMETRA_MASTER_PROMPT,
-    messages: [{ role: "user", content: `${WHATSAPP_MESSAGE_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(context)}` }],
+    messages: [{ role: "user", content: [WHATSAPP_MESSAGE_INSTRUCTION, knowledgeContext.context, `Contexto comercial sanitizado:\n${JSON.stringify(context)}`].filter(Boolean).join("\n\n") }],
     temperature: 0.35,
     maxTokens: 180
   });
