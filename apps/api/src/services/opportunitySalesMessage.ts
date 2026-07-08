@@ -2,6 +2,7 @@ import { OpportunityStage } from "@prisma/client";
 import { aiService, type AiService } from "./ai/index.js";
 import { DEMETRA_MASTER_PROMPT } from "./ai/demetraMasterPrompt.js";
 import { logApiEvent } from "../utils/logger.js";
+import { resolveKnowledgeContextForAi } from "./knowledgeBaseService.js";
 
 type OpportunityHistoryItem = {
   description: string;
@@ -232,6 +233,18 @@ const buildAiSalesMessageContext = (opportunity: SalesMessageOpportunityInput, n
   };
 };
 
+const buildSalesMessageKnowledgeQuery = (context: ReturnType<typeof buildAiSalesMessageContext>) => [
+  context.resumoComercial,
+  context.etapaDaOportunidade,
+  context.cliente,
+  context.cidade,
+  context.estado,
+  context.ultimaObservacao,
+  context.ultimaAtividade,
+  ...context.produtosEnvolvidos,
+  ...context.historicoResumido
+].filter(Boolean).join(" | ");
+
 const SALES_MESSAGE_USER_INSTRUCTION = `Gere apenas uma mensagem comercial pronta para envio ao cliente.
 
 Objetivos:
@@ -270,12 +283,15 @@ export const generateSalesMessage = async (opportunity: SalesMessageOpportunityI
   const fallbackMessage = generateDeterministicSalesMessage(opportunity);
   const now = new Date();
 
+  const aiContext = buildAiSalesMessageContext(opportunity, now);
+  const knowledgeContext = await resolveKnowledgeContextForAi("opportunity-message", buildSalesMessageKnowledgeQuery(aiContext));
+
   const result = await service.chat({
     system: DEMETRA_MASTER_PROMPT,
     messages: [
       {
         role: "user",
-        content: `${SALES_MESSAGE_USER_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(buildAiSalesMessageContext(opportunity, now))}`
+        content: `${SALES_MESSAGE_USER_INSTRUCTION}\n\nContexto comercial sanitizado:\n${JSON.stringify(aiContext)}${knowledgeContext ? `\n\n${knowledgeContext}` : ""}`
       }
     ],
     temperature: 0.35,
