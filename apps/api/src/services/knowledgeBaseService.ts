@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 
@@ -18,10 +19,39 @@ export type KnowledgeContextResult = {
 
 export type KnowledgeContextSource = "client-suggestion" | "opportunity-message" | "assistant-whatsapp";
 
+type KnowledgeDocumentRecord = {
+  id: string;
+  category: string | null;
+  title: string;
+  summary: string | null;
+  content: string;
+};
+
+type KnowledgeDocumentDelegate = {
+  createMany?: (args: { data: Array<{ title: string; category: string; summary: string; content: string; isActive: boolean }>; skipDuplicates?: boolean }) => Promise<unknown>;
+  findMany?: (args: {
+    where: unknown;
+    select: { id: true; category: true; title: true; summary: true; content: true };
+    take: number;
+    orderBy: { updatedAt: "desc" };
+  }) => Promise<KnowledgeDocumentRecord[]>;
+};
+
+export const INITIAL_KNOWLEDGE_DOCUMENTS = [
+  {
+    title: "Uso responsável da Base de Conhecimento Demetra",
+    category: "governanca",
+    summary: "Orienta a IA Comercial a usar conhecimento interno apenas quando for relevante ao contexto comercial.",
+    content: "Use informações internas da Demetra somente quando forem relevantes ao cliente, oportunidade ou conversa. Não mencione ao cliente que uma base interna foi consultada e não invente dados que não estejam no contexto recebido.",
+    isActive: true
+  }
+] as const;
+
 const MAX_QUERY_LENGTH = 800;
 const MAX_DOCUMENTS = 4;
 const MAX_EXCERPT_LENGTH = 650;
 const MAX_CONTEXT_LENGTH = 2400;
+const MAX_SEARCH_CANDIDATES = 12;
 
 const compactText = (value: unknown, maxLength: number) => {
   const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
@@ -36,27 +66,55 @@ const calculateScore = (queryTokens: string[], documentText: string) => {
   return queryTokens.reduce((score, token) => score + (normalized.includes(token) ? 1 : 0), 0);
 };
 
-export const formatKnowledgeContextBlock = (context: string | null | undefined) => {
-  const normalized = compactText(context, MAX_CONTEXT_LENGTH);
-  if (!normalized) return "";
-  return [
-    "Conhecimento interno Demetra/Acervo disponível:",
-    normalized,
-    "Use este conhecimento apenas se for relevante.",
-    "Não invente informações além do contexto."
-  ].join("\n");
-};
+const getKnowledgeDocumentDelegate = () => (prisma as unknown as { knowledgeDocument?: KnowledgeDocumentDelegate }).knowledgeDocument;
 
-export const getKnowledgeContextForAi = async (query: string): Promise<KnowledgeContextResult> => {
-  const startedAt = Date.now();
-  const normalizedQuery = compactText(query, MAX_QUERY_LENGTH);
-  const queryTokens = tokenize(normalizedQuery);
-
-  if (!normalizedQuery || queryTokens.length === 0) {
-    return { documents: [], context: "", elapsedMs: Date.now() - startedAt };
+export const ensureInitialKnowledgeDocuments = async () => {
+  const delegate = getKnowledgeDocumentDelegate();
+  if (delegate?.createMany) {
+    await delegate.createMany({ data: [...INITIAL_KNOWLEDGE_DOCUMENTS], skipDuplicates: true });
+    return;
   }
 
-  const documents = await prisma.$queryRaw<Array<{ id: string; category: string | null; title: string; summary: string | null; content: string }>>`
+  for (const document of INITIAL_KNOWLEDGE_DOCUMENTS) {
+    await prisma.$executeRaw(Prisma.sql`
+      INSERT INTO "KnowledgeDocument" (id, title, category, summary, content, "isActive", "createdAt", "updatedAt")
+      SELECT gen_random_uuid()::text, ${document.title}, ${document.category}, ${document.summary}, ${document.content}, ${document.isActive}, NOW(), NOW()
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "KnowledgeDocument" existing WHERE existing.title = ${document.title}
+      )
+    `);
+  }
+};
+
+export const searchKnowledgeDocuments = async ({ query, limit = MAX_SEARCH_CANDIDATES }: { query: string; limit?: number }) => {
+  const normalizedQuery = compactText(query, MAX_QUERY_LENGTH);
+  const queryTokens = tokenize(normalizedQuery);
+  const boundedLimit = Math.max(1, Math.min(limit, MAX_SEARCH_CANDIDATES));
+
+  if (!normalizedQuery || queryTokens.length === 0) {
+    return { documents: [] as KnowledgeDocumentRecord[], queryTokens };
+  }
+
+  const delegate = getKnowledgeDocumentDelegate();
+  if (delegate?.findMany) {
+    const tokenFilters = queryTokens.slice(0, 8).flatMap((token) => [
+      { title: { contains: token, mode: "insensitive" } },
+      { summary: { contains: token, mode: "insensitive" } },
+      { content: { contains: token, mode: "insensitive" } },
+      { category: { contains: token, mode: "insensitive" } }
+    ]);
+
+    const documents = await delegate.findMany({
+      where: { isActive: true, OR: tokenFilters },
+      select: { id: true, category: true, title: true, summary: true, content: true },
+      take: boundedLimit,
+      orderBy: { updatedAt: "desc" }
+    });
+
+    return { documents, queryTokens };
+  }
+
+  const documents = await prisma.$queryRaw<KnowledgeDocumentRecord[]>`
     SELECT id, category, title, summary, content
     FROM "KnowledgeDocument"
     WHERE "isActive" = true
@@ -75,8 +133,30 @@ export const getKnowledgeContextForAi = async (query: string): Promise<Knowledge
         )
       )
     ORDER BY "updatedAt" DESC
-    LIMIT 12
+    LIMIT ${boundedLimit}
   `;
+
+  return { documents, queryTokens };
+};
+
+export const formatKnowledgeContextBlock = (context: string | null | undefined) => {
+  const normalized = compactText(context, MAX_CONTEXT_LENGTH);
+  if (!normalized) return "";
+  return [
+    "Conhecimento interno Demetra/Acervo disponível:",
+    normalized,
+    "Use este conhecimento apenas se for relevante.",
+    "Não invente informações além do contexto."
+  ].join("\n");
+};
+
+export const getKnowledgeContextForAi = async (query: string): Promise<KnowledgeContextResult> => {
+  const startedAt = Date.now();
+  const { documents, queryTokens } = await searchKnowledgeDocuments({ query, limit: MAX_SEARCH_CANDIDATES });
+
+  if (documents.length === 0 || queryTokens.length === 0) {
+    return { documents: [], context: "", elapsedMs: Date.now() - startedAt };
+  }
 
   const ranked = documents
     .map((document) => {
