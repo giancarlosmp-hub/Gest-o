@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bot, ChevronDown, MessageCircle, Plus, RefreshCw, Route, Target, Trophy } from "lucide-react";
+import { Bot, CalendarClock, CheckSquare, Clock3, GripVertical, MessageCircleWarning, RefreshCw, SunMoon, UsersRound } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getSessionMotivationalQuote } from "../lib/dailyQuote";
@@ -9,36 +9,200 @@ import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 
-type Activity = { id: string; type: string; notes: string; date?: string; dueDate: string; createdAt: string; done: boolean; opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null };
-type AgendaEventLite = { id: string; title: string; type: string; status?: "planned" | "completed" | "cancelled"; startsAt?: string; startDateTime?: string };
-type ActivityKpi = { type: string; targetValue: number };
-type Opportunity = { id: string; title: string; followUpDate?: string | null; expectedCloseDate?: string | null; stage: string; value?: number; lastContactAt?: string | null; updatedAt?: string | null; lastActivityAt?: string | null; client?: { id: string; name: string } | string };
-type CoolingClientsState = { count: number; unavailable: boolean; message?: string };
-type WeeklyMission = { key: string; title: string; progress: number; target: number; done: boolean; medal?: "gold" | "silver" | "bronze" | "none" };
-type WeeklyMissionSeller = { userId: string; name: string; missions: WeeklyMission[] };
-type TodayPriority = { opportunityId: string; clientName: string; value: number; priorityScore: number; risk: "alto" | "medio" | "baixo"; reason: string; suggestedAction: string };
-type CommercialInsightItem = { title?: string; detail?: string; count?: number };
-type CommercialInsights = { summary: string; highPriority: CommercialInsightItem[]; mediumPriority: CommercialInsightItem[]; lowPriority: CommercialInsightItem[]; recommendations: string[]; nextActions: string[]; risks: string[]; highlights: string[]; generatedAt: string; source: "ai" | "deterministic" };
+type Activity = {
+  id: string;
+  type: string;
+  notes: string;
+  date?: string;
+  dueDate: string;
+  createdAt: string;
+  done: boolean;
+  opportunity?: { id: string; title: string; client?: { id: string; name: string } } | null;
+};
 
-type UnifiedPriority = { id: string; title: string; meta: string; detail: string; to: string; tone: "danger" | "warning" | "info" };
+type AgendaEventLite = {
+  id: string;
+  title: string;
+  type: string;
+  status?: "planned" | "completed" | "cancelled";
+  startsAt?: string;
+  startDateTime?: string;
+};
+
+type ActivityKpi = {
+  type: string;
+  targetValue: number;
+};
+
+type Opportunity = {
+  id: string;
+  title: string;
+  followUpDate?: string | null;
+  expectedCloseDate?: string | null;
+  stage: string;
+  value?: number;
+  lastContactAt?: string | null;
+  updatedAt?: string | null;
+  lastActivityAt?: string | null;
+  client?: { id: string; name: string } | string;
+};
+
+type SmartAlertItem = {
+  id: "followups_overdue" | "opportunities_without_followup" | "proposals_no_response" | "cooling_clients";
+  label: string;
+  helper: string;
+  count: number;
+  to?: string;
+  unavailable?: boolean;
+};
+
+type CoolingClientsState = {
+  count: number;
+  unavailable: boolean;
+  message?: string;
+};
+
+type WeeklyVisitItem = {
+  userId: string;
+  name: string;
+  visitsDone: number;
+  goal: number;
+  medal: "gold" | "silver" | "bronze" | "none";
+  missing: number;
+};
+
+type WeeklyMission = {
+  key: "visits_25" | "followups_5" | "proposals_2" | "overdue_0" | string;
+  title: string;
+  progress: number;
+  target: number;
+  done: boolean;
+  medal?: WeeklyVisitItem["medal"];
+};
+
+type WeeklyMissionSeller = {
+  userId: string;
+  name: string;
+  missions: WeeklyMission[];
+};
 
 const WEEKLY_MISSIONS_CACHE_TTL_MS = 45_000;
 let weeklyMissionsCache: { key: string; expiresAt: number; payload: WeeklyMissionSeller[] } | null = null;
-const cardClass = "rounded-2xl border border-slate-200 bg-white p-4 shadow-sm";
 
-function getGreeting() { const hour = new Date().getHours(); if (hour >= 5 && hour <= 11) return "Bom dia"; if (hour <= 17) return "Boa tarde"; return "Boa noite"; }
-function getTodayBoundaries() { const start = new Date(); start.setHours(0, 0, 0, 0); const end = new Date(start); end.setDate(end.getDate() + 1); return { start, end }; }
-function isSameDay(dateValue: string, start: Date, end: Date) { const date = new Date(dateValue); return date >= start && date < end; }
-function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDate"> & { date?: string }) { return activity.date || activity.createdAt || activity.dueDate; }
-function getCurrentWeekStartDate() { const today = new Date(); const day = today.getDay(); const diffToMonday = day === 0 ? -6 : 1 - day; const monday = new Date(today); monday.setDate(today.getDate() + diffToMonday); return new Date(monday.getTime() - monday.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
-function getMonthBusinessDays(date: Date) { const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate(); return Array.from({ length: lastDay }, (_, index) => new Date(date.getFullYear(), date.getMonth(), index + 1).getDay()).filter((day) => day !== 0 && day !== 6).length; }
-function formatMoney(value?: number) { return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }); }
-function getRiskClassName(risk: TodayPriority["risk"]) { if (risk === "alto") return "bg-red-100 text-red-700"; if (risk === "medio") return "bg-amber-100 text-amber-700"; return "bg-emerald-100 text-emerald-700"; }
+type PipelineOpportunity = Opportunity & {
+  priorityType: "followup_overdue" | "opportunity_overdue" | "proposal_no_response";
+  daysLate: number;
+};
+
+type TodayPriority = {
+  opportunityId: string;
+  clientName: string;
+  value: number;
+  priorityScore: number;
+  risk: "alto" | "medio" | "baixo";
+  reason: string;
+  suggestedAction: string;
+};
+
+type CommercialInsightItem = { title?: string; detail?: string; count?: number };
+
+type CommercialInsights = {
+  summary: string;
+  highPriority: CommercialInsightItem[];
+  mediumPriority: CommercialInsightItem[];
+  lowPriority: CommercialInsightItem[];
+  recommendations: string[];
+  nextActions: string[];
+  risks: string[];
+  highlights: string[];
+  generatedAt: string;
+  source: "ai" | "deterministic";
+};
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour <= 11) return "Bom dia";
+  if (hour >= 12 && hour <= 17) return "Boa tarde";
+  return "Boa noite";
+}
+
+function getTodayBoundaries() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function getCurrentWeekStartDate() {
+  const today = new Date();
+  const day = today.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + diffToMonday);
+  const local = new Date(monday.getTime() - monday.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function getMonthBusinessDays(date: Date) {
+  const year = date.getFullYear();
+  const month = date.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  let businessDays = 0;
+
+  for (let day = 1; day <= lastDay; day += 1) {
+    const weekDay = new Date(year, month, day).getDay();
+    if (weekDay !== 0 && weekDay !== 6) {
+      businessDays += 1;
+    }
+  }
+
+  return businessDays;
+}
+
+function isSameDay(dateValue: string, start: Date, end: Date) {
+  const date = new Date(dateValue);
+  return date >= start && date < end;
+}
+
+function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDate"> & { date?: string }) {
+  return activity.date || activity.createdAt || activity.dueDate;
+}
+
+const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
+const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
+type PanelId = (typeof defaultPanelOrder)[number];
+
+function normalizePanelOrder(value: unknown): PanelId[] {
+  if (!Array.isArray(value)) return [...defaultPanelOrder];
+  const validItems = value.filter((item): item is PanelId => defaultPanelOrder.includes(item as PanelId));
+  const missingItems = defaultPanelOrder.filter((item) => !validItems.includes(item));
+  return [...validItems, ...missingItems];
+}
 
 export default function HomePage() {
   const { user } = useAuth();
-  const isSeller = user?.role === "vendedor";
-  const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente" || isSeller;
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768;
+  });
+  const startRouteSearch = useMemo(() => {
+    const params = new URLSearchParams({
+      date: new Date().toISOString().slice(0, 10),
+      view: "hoje",
+      highlight: "next",
+      execute: "1"
+    });
+
+    if (user?.id && user.role === "vendedor") {
+      params.set("sellerId", user.id);
+    }
+
+    return params.toString();
+  }, [user?.id, user?.role]);
+
+  const { alerts, reminders, refreshReminders } = useReminders({ autoLoad: false });
   const [activities, setActivities] = useState<Activity[]>([]);
   const [activityKpis, setActivityKpis] = useState<ActivityKpi[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
@@ -51,61 +215,1131 @@ export default function HomePage() {
   const [coolingClients, setCoolingClients] = useState<CoolingClientsState>({ count: 0, unavailable: false });
   const [weeklyMissions, setWeeklyMissions] = useState<WeeklyMissionSeller[]>([]);
   const [loading, setLoading] = useState(true);
+  const [panelOrder, setPanelOrder] = useState<PanelId[]>(() => {
+    if (typeof window === "undefined") return [...defaultPanelOrder];
+    const storedOrder = window.localStorage.getItem(PANEL_ORDER_STORAGE_KEY);
+    if (!storedOrder) return [...defaultPanelOrder];
+    try {
+      return normalizePanelOrder(JSON.parse(storedOrder));
+    } catch {
+      return [...defaultPanelOrder];
+    }
+  });
+  const [draggedPanelId, setDraggedPanelId] = useState<PanelId | null>(null);
+
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
-  const quote = useMemo(() => getSessionMotivationalQuote(), [user?.id]);
-  const startRouteSearch = useMemo(() => new URLSearchParams({ date: new Date().toISOString().slice(0, 10), view: "hoje", highlight: "next", execute: "1", ...(isSeller && user?.id ? { sellerId: user.id } : {}) }).toString(), [isSeller, user?.id]);
-  const { alerts, reminders, refreshReminders } = useReminders({ autoLoad: false });
+  const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente";
 
   const loadCommercialInsights = useCallback(async (refresh = false, signal?: AbortSignal) => {
     if (!canViewCommercialInsights) return;
-    setCommercialInsightsLoading(true); setCommercialInsightsError(null);
-    try { const response = await api.get<CommercialInsights>(`/ai/commercial-insights${refresh ? "?refresh=true" : ""}`, { signal }); setCommercialInsights(response.data); }
-    catch (error) { if ((error as { code?: string })?.code !== "ERR_CANCELED") setCommercialInsightsError(getApiErrorMessage(error, "A IA Comercial não conseguiu atualizar agora.")); }
-    finally { if (!signal?.aborted) setCommercialInsightsLoading(false); }
+    setCommercialInsightsLoading(true);
+    setCommercialInsightsError(null);
+    try {
+      const response = await api.get<CommercialInsights>(`/ai/commercial-insights${refresh ? "?refresh=true" : ""}`, { signal });
+      setCommercialInsights(response.data);
+    } catch (error) {
+      if ((error as { code?: string })?.code === "ERR_CANCELED") return;
+      setCommercialInsightsError(getApiErrorMessage(error, "Não foi possível carregar a IA Comercial."));
+    } finally {
+      if (!signal?.aborted) setCommercialInsightsLoading(false);
+    }
   }, [canViewCommercialInsights]);
 
-  const loadCentralData = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true); void refreshReminders(signal);
-    try {
-      setPipelineError(null); const today = new Date().toISOString().slice(0, 10);
-      const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse, prioritiesResponse] = await Promise.all([api.get("/activities", { signal }), api.get("/opportunities?status=open", { signal }), api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal }), api.get(`/agenda/events?from=${today}&to=${today}`, { signal }), api.get("/ai/today-priorities", { signal })]);
-      void loadCommercialInsights(false, signal);
-      setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
-      const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items) ? opportunitiesResponse.data.items : opportunitiesResponse.data;
-      setOpportunities(Array.isArray(opportunitiesPayload) ? opportunitiesPayload : []);
-      setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
-      const agendaPayload = Array.isArray(agendaResponse.data?.items) ? agendaResponse.data.items : agendaResponse.data;
-      setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
-      setTodayPriorities(Array.isArray(prioritiesResponse.data) ? prioritiesResponse.data : []);
-      try { const coolingResponse = await api.get("/clients/alerts/cooling", { signal }); setCoolingClients({ count: Number(coolingResponse.data?.count ?? 0), unavailable: false }); }
-      catch { setCoolingClients({ count: 0, unavailable: true, message: "Clientes esfriando indisponível no momento." }); }
-    } catch (error) { if ((error as { code?: string })?.code !== "ERR_CANCELED") { setPipelineError("Não foi possível carregar as prioridades agora. Tente novamente em instantes."); setTodayPriorities([]); } }
-    finally { if (!signal?.aborted) setLoading(false); }
-  }, [dashboardQueryKey, loadCommercialInsights, refreshReminders]);
+  const loadCentralData = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      void refreshReminders(signal);
+      try {
+        setPipelineError(null);
+        const today = new Date().toISOString().slice(0, 10);
+        const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse, prioritiesResponse] = await Promise.all([
+          api.get("/activities", { signal }),
+          api.get("/opportunities?status=open", { signal }),
+          api.get(`/activity-kpis?month=${dashboardQueryKey}`, { signal }),
+          api.get(`/agenda/events?from=${today}&to=${today}`, { signal }),
+          api.get("/ai/today-priorities", { signal })
+        ]);
+        void loadCommercialInsights(false, signal);
+        setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
+        const opportunitiesPayload = Array.isArray(opportunitiesResponse.data?.items)
+          ? opportunitiesResponse.data.items
+          : opportunitiesResponse.data;
+        setOpportunities(Array.isArray(opportunitiesPayload) ? opportunitiesPayload : []);
+        setActivityKpis(Array.isArray(activityKpisResponse.data) ? activityKpisResponse.data : []);
+        const agendaPayload = Array.isArray(agendaResponse.data?.items) ? agendaResponse.data.items : agendaResponse.data;
+        setAgendaEventsToday(Array.isArray(agendaPayload) ? agendaPayload : []);
+        setTodayPriorities(Array.isArray(prioritiesResponse.data) ? prioritiesResponse.data : []);
 
-  useEffect(() => { const controller = new AbortController(); void loadCentralData(controller.signal); return () => controller.abort(); }, [loadCentralData]);
-  useEffect(() => { const onRefresh = () => void loadCentralData(); window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh); window.addEventListener("focus", onRefresh); return () => { window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh); window.removeEventListener("focus", onRefresh); }; }, [loadCentralData]);
-  useEffect(() => { let active = true; const weekStart = getCurrentWeekStartDate(); const cacheKey = `${user?.role || "anon"}:${user?.id || "anon"}:${weekStart}`; const load = async () => { if (weeklyMissionsCache?.key === cacheKey && weeklyMissionsCache.expiresAt > Date.now()) { setWeeklyMissions(weeklyMissionsCache.payload); return; } try { const response = await api.get<WeeklyMissionSeller[]>(`/reports/weekly-missions?weekStart=${weekStart}`); if (!active) return; const payload = Array.isArray(response.data) ? response.data : []; setWeeklyMissions(payload); weeklyMissionsCache = { key: cacheKey, payload, expiresAt: Date.now() + WEEKLY_MISSIONS_CACHE_TTL_MS }; } catch { if (active) setWeeklyMissions([]); } }; void load(); return () => { active = false; }; }, [user?.id, user?.role]);
+        try {
+          const coolingResponse = await api.get("/clients/alerts/cooling", { signal });
+          const count = Number(coolingResponse.data?.count ?? 0);
+          setCoolingClients({ count: Number.isFinite(count) ? count : 0, unavailable: false });
+        } catch (coolingError: unknown) {
+          if ((coolingError as { code?: string })?.code === "ERR_CANCELED") return;
+          const status = (coolingError as { response?: { status?: number } })?.response?.status;
+          if (status === 404) {
+            setCoolingClients({
+              count: 0,
+              unavailable: true,
+              message: "Alerta de clientes esfriando indisponível no momento."
+            });
+          } else {
+            setCoolingClients({
+              count: 0,
+              unavailable: true,
+              message: getApiErrorMessage(coolingError, "Não foi possível carregar clientes esfriando.")
+            });
+          }
+        }
+      } catch (error) {
+        if ((error as { code?: string })?.code === "ERR_CANCELED") return;
+        setPipelineError("Não foi possível carregar o Pipeline do Dia agora. Tente novamente em instantes.");
+        setTodayPriorities([]);
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [dashboardQueryKey, refreshReminders, loadCommercialInsights]
+  );
 
-  const { plannedAppointmentsToday, activitiesToday, pendingFollowUps, completedActivitiesTodayCount } = useMemo(() => { const { start, end } = getTodayBoundaries(); const eligible = new Set(["visita", "visita_tecnica"]); const planned = agendaEventsToday.filter((item) => (item.status ?? "planned") === "planned" && isSameDay(String(item.startsAt || item.startDateTime || ""), start, end)); const dayActivities = activities.filter((item) => item.done && eligible.has(normalizeActivityType(item.type)) && item.date && isSameDay(item.date, start, end)); const pending = opportunities.filter((item) => item.followUpDate && new Date(item.followUpDate) >= start).sort((a, b) => new Date(a.followUpDate || 0).getTime() - new Date(b.followUpDate || 0).getTime()); const completed = activities.filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end)).length; return { plannedAppointmentsToday: planned, activitiesToday: dayActivities, pendingFollowUps: pending, completedActivitiesTodayCount: completed }; }, [activities, agendaEventsToday, opportunities]);
+  useEffect(() => {
+    const controller = new AbortController();
 
-  const routineMetrics = useMemo(() => { const now = new Date(); const monthBusinessDays = getMonthBusinessDays(now); const { start, end } = getTodayBoundaries(); const monthly = activityKpis.reduce<Record<string, number>>((acc, item) => ({ ...acc, [normalizeActivityType(item.type)]: (acc[normalizeActivityType(item.type)] ?? 0) + Number(item.targetValue || 0) }), {}); const today = activities.reduce<Record<string, number>>((acc, item) => { if (isSameDay(getActivityExecutionDate(item), start, end)) acc[normalizeActivityType(item.type)] = (acc[normalizeActivityType(item.type)] ?? 0) + 1; return acc; }, {}); return [["Ligações", ["ligacao"]], ["Visitas", ["visita", "visita_tecnica", "visita_presencial"]], ["Propostas", ["envio_proposta"]]].map(([label, keys]) => { const target = (keys as string[]).reduce((sum, key) => sum + (monthly[key] ?? 0), 0) / Math.max(monthBusinessDays, 1); const realized = (keys as string[]).reduce((sum, key) => sum + (today[key] ?? 0), 0); return { label: String(label), target, realized, percent: target > 0 ? Math.min((realized / target) * 100, 100) : 0 }; }); }, [activities, activityKpis]);
+    void loadCentralData(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [loadCentralData]);
 
-  const smartAlertCounts = useMemo(() => { const today = new Date(); today.setHours(0, 0, 0, 0); const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1); const sevenDaysMs = 7 * 24 * 60 * 60 * 1000; return { followups: opportunities.filter((item) => item.followUpDate && new Date(item.followUpDate) < tomorrow).length, overdue: opportunities.filter((item) => item.expectedCloseDate && new Date(item.expectedCloseDate) < today && (!item.followUpDate || new Date(item.followUpDate) >= tomorrow)).length, proposals: opportunities.filter((item) => String(item.stage || "").toLowerCase() === "proposta" && Date.now() - new Date(item.lastActivityAt || item.updatedAt || item.lastContactAt || item.followUpDate || 0).getTime() > sevenDaysMs).length, cooling: coolingClients.count }; }, [coolingClients.count, opportunities]);
+  useEffect(() => {
+    const onRefresh = () => {
+      void loadCentralData();
+    };
 
-  const unifiedPriorities = useMemo<UnifiedPriority[]>(() => {
-    const priorityItems = todayPriorities.map((item) => ({ id: `p-${item.opportunityId}`, title: item.suggestedAction || `Agir em ${item.clientName}`, meta: `${item.clientName} · ${formatMoney(item.value)}`, detail: item.reason, to: `/oportunidades/${item.opportunityId}`, tone: item.risk === "alto" ? "danger" : "warning" as UnifiedPriority["tone"] }));
-    const alertItems: UnifiedPriority[] = [smartAlertCounts.followups > 0 ? { id: "followups", title: `${smartAlertCounts.followups} follow-up(s) vencidos`, meta: "Pendência comercial", detail: "Trate os retornos mais antigos primeiro.", to: "/oportunidades?status=open&actionToday=true", tone: "danger" } : null, smartAlertCounts.cooling > 0 ? { id: "cooling", title: `${smartAlertCounts.cooling} cliente(s) esfriando`, meta: "Carteira", detail: "Retome contato antes de perder temperatura comercial.", to: "/clientes?classe=A", tone: "warning" } : null].filter(Boolean) as UnifiedPriority[];
-    return [...priorityItems, ...alertItems].slice(0, 6);
-  }, [smartAlertCounts.cooling, smartAlertCounts.followups, todayPriorities]);
+    window.addEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+    window.addEventListener("focus", onRefresh);
 
-  const nextBestAction = unifiedPriorities[0];
-  const ownWeeklyMissions = (weeklyMissions.find((seller) => seller.userId === user?.id) ?? weeklyMissions[0])?.missions ?? [];
-  const aiLead = todayPriorities[0];
+    return () => {
+      window.removeEventListener(DASHBOARD_REFRESH_EVENT, onRefresh);
+      window.removeEventListener("focus", onRefresh);
+    };
+  }, [loadCentralData]);
 
-  const QuickActions = () => <section className={cardClass}><h2 className="text-base font-bold text-slate-900">Ações rápidas</h2><div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3"><Link to={`/agenda?${startRouteSearch}`} className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl bg-brand-700 px-4 py-3 text-base font-bold text-white hover:bg-brand-800"><Route size={18}/>Nova visita</Link><Link to="/oportunidades" className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-base font-bold text-brand-800"><Plus size={18}/>Nova oportunidade</Link><Link to="/whatsapp" className="inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-base font-bold text-slate-800"><MessageCircle size={18}/>WhatsApp</Link></div></section>;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const onViewportChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
+    setIsMobile(mediaQuery.matches);
+    mediaQuery.addEventListener("change", onViewportChange);
+    return () => {
+      mediaQuery.removeEventListener("change", onViewportChange);
+    };
+  }, []);
 
-  const AiCard = () => <section className="rounded-2xl border border-brand-200 bg-white p-4 shadow-sm"><div className="flex items-start justify-between gap-3"><div className="flex gap-2"><Bot className="mt-0.5 text-brand-700" size={22}/><div><h2 className="text-lg font-bold text-slate-900">IA Comercial</h2><p className="text-xs text-slate-500">{isSeller ? "Operacional: o que fazer agora." : "Estratégica: atenção da operação."}</p></div></div><button type="button" onClick={() => void loadCommercialInsights(true)} disabled={commercialInsightsLoading} className="inline-flex items-center gap-1 rounded-lg border border-brand-200 px-2 py-1.5 text-xs font-semibold text-brand-700 disabled:opacity-60"><RefreshCw size={14} className={commercialInsightsLoading ? "animate-spin" : ""}/>Atualizar análise</button></div>{commercialInsightsError && <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"><p>{commercialInsightsError}</p><button type="button" onClick={() => void loadCommercialInsights(true)} className="mt-2 font-bold text-rose-800">Atualizar análise</button></div>}{commercialInsightsLoading && !commercialInsights && <p className="mt-3 text-sm text-slate-500">Gerando análise comercial...</p>}{!commercialInsightsLoading && isSeller && <div className="mt-3 text-sm leading-relaxed text-slate-700"><p className="line-clamp-5">{aiLead ? `Hoje existem ${todayPriorities.length} oportunidades críticas. Comece por ${aiLead.clientName}: ${formatMoney(aiLead.value)}. ${aiLead.reason}. Depois trate ${pendingFollowUps.length} follow-up(s) pendentes.` : "Sem prioridade crítica agora. Registre a próxima visita, mantenha os follow-ups em dia e avance a melhor oportunidade aberta."}</p>{aiLead ? <Link to={`/oportunidades/${aiLead.opportunityId}`} className="mt-3 inline-flex rounded-lg bg-brand-700 px-3 py-2 text-sm font-bold text-white">Ver oportunidade</Link> : <Link to="/oportunidades?status=open&actionToday=true" className="mt-3 inline-flex rounded-lg bg-brand-700 px-3 py-2 text-sm font-bold text-white">Abrir prioridade</Link>}</div>}{!isSeller && commercialInsights && <div className="mt-3 grid gap-3 lg:grid-cols-3"><div className="lg:col-span-3"><p className="text-sm leading-relaxed text-slate-700">{commercialInsights.summary}</p></div>{[commercialInsights.highPriority, commercialInsights.mediumPriority, commercialInsights.recommendations.map((item): CommercialInsightItem => ({ title: item }))].map((items, index) => <div key={index} className="rounded-xl bg-slate-50 p-3"><p className="text-xs font-bold uppercase text-slate-500">{index === 0 ? "Alta" : index === 1 ? "Média" : "Recomendações"}</p><ul className="mt-2 space-y-1 text-sm text-slate-700">{items.slice(0, 3).map((item, itemIndex) => <li key={itemIndex}>• {item.title || item.detail}</li>)}</ul></div>)}</div>}</section>;
 
-  return <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-6"><section className="space-y-2">{alerts.showOverdueFollowUpAlert && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">Atenção: existem follow-ups vencidos.</div>}{alerts.showUpcomingMeetingBanner && <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-700">Você possui {reminders.upcomingMeetingsCount} reunião(ões) nas próximas 2 horas.</div>}{alerts.showNoActivitiesWarning && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">Você ainda não registrou atividades hoje.</div>}</section><section className="rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white p-5 shadow-sm"><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold text-brand-700">{getGreeting()}, {user?.name ?? "Usuário"}</p><h1 className="mt-1 text-2xl font-black text-brand-950 sm:text-3xl">Central do Dia</h1><p className="mt-2 text-sm text-slate-600">“{quote.text}” — <span className="font-semibold text-amber-600">{quote.author}</span></p></div><Link to={`/agenda?${startRouteSearch}`} className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand-700 px-5 py-3 text-base font-bold text-white hover:bg-brand-800">Iniciar roteiro</Link></div></section><QuickActions/><AiCard/><section className="grid gap-3 sm:grid-cols-4"><div className={cardClass}><p className="text-xs text-slate-500">Atividades hoje</p><p className="mt-1 text-2xl font-black text-slate-900">{completedActivitiesTodayCount}</p></div><div className={cardClass}><p className="text-xs text-slate-500">Agenda</p><p className="mt-1 text-2xl font-black text-slate-900">{plannedAppointmentsToday.length}</p></div><div className={cardClass}><p className="text-xs text-slate-500">Follow-ups pendentes</p><p className="mt-1 text-2xl font-black text-slate-900">{pendingFollowUps.length}</p></div><div className={cardClass}><p className="text-xs text-slate-500">Oportunidades críticas</p><p className="mt-1 text-2xl font-black text-slate-900">{todayPriorities.length}</p></div></section><section className={cardClass}><div className="flex items-center gap-2"><Target className="text-brand-700" size={20}/><h2 className="text-lg font-bold text-slate-900">Próxima melhor ação</h2></div>{loading ? <p className="mt-3 text-sm text-slate-500">Carregando ação prioritária...</p> : nextBestAction ? <div className="mt-3 rounded-xl border border-brand-100 bg-brand-50 p-4"><p className="text-lg font-black text-slate-950">{nextBestAction.title}</p><p className="mt-1 text-sm font-semibold text-slate-700">{nextBestAction.meta}</p><p className="mt-1 text-sm text-slate-600">{nextBestAction.detail}</p><Link to={nextBestAction.to} className="mt-3 inline-flex rounded-lg bg-brand-700 px-4 py-2 text-sm font-bold text-white">Abrir oportunidade</Link></div> : <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">Sem prioridades críticas. Use as ações rápidas para gerar a próxima atividade.</p>}</section><section className={cardClass}><div className="flex items-center justify-between"><h2 className="text-lg font-bold text-slate-900">Prioridades do dia</h2><Link to="/oportunidades?status=open&actionToday=true" className="text-sm font-bold text-brand-700">Ver mais</Link></div>{pipelineError && <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>}<div className="mt-3 space-y-2">{loading ? <p className="text-sm text-slate-500">Carregando prioridades...</p> : unifiedPriorities.length === 0 ? <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">Nenhuma prioridade para hoje.</p> : unifiedPriorities.slice(0, 3).map((item) => <Link key={item.id} to={item.to} className="block rounded-xl border border-slate-200 p-3 hover:bg-slate-50"><div className="flex items-start justify-between gap-2"><div><p className="font-bold text-slate-900">{item.title}</p><p className="text-sm text-slate-600">{item.meta}</p><p className="text-xs text-slate-500">{item.detail}</p></div><span className={`rounded-full px-2 py-1 text-xs font-bold ${item.tone === "danger" ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>{item.tone === "danger" ? "Crítico" : "Atenção"}</span></div></Link>)}</div></section><section className={cardClass}><div className="flex items-center gap-2"><Trophy className="text-amber-500" size={20}/><h2 className="text-lg font-bold text-slate-900">Missões da semana</h2></div><div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{ownWeeklyMissions.length ? ownWeeklyMissions.slice(0, 4).map((mission) => { const percent = mission.target > 0 ? Math.min((Number(mission.progress || 0) / Number(mission.target)) * 100, 100) : mission.done ? 100 : 0; return <div key={mission.key} className="rounded-xl bg-slate-50 p-3"><p className="text-sm font-bold text-slate-800">{mission.title}</p><p className="text-xs text-slate-500">{mission.progress}/{mission.target}</p><div className="mt-2 h-2 rounded-full bg-slate-200"><div className="h-2 rounded-full bg-brand-600" style={{ width: `${percent}%` }}/></div></div>; }) : <p className="text-sm text-slate-500">Sem missões carregadas para esta semana.</p>}</div></section><details className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><summary className="flex cursor-pointer list-none items-center justify-between text-lg font-bold text-slate-900">Ver indicadores completos<ChevronDown size={20}/></summary><div className="mt-4 grid gap-4 lg:grid-cols-2"><div className="rounded-xl bg-slate-50 p-4"><h3 className="font-bold text-slate-900">Pipeline</h3><p className="mt-2 text-sm text-slate-600">Abertas: {opportunities.length} · Críticas: {todayPriorities.length}</p>{todayPriorities.slice(0, 5).map((item) => <p key={item.opportunityId} className="mt-2 text-sm"><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${getRiskClassName(item.risk)}`}>{item.risk}</span> {item.clientName} · {formatMoney(item.value)}</p>)}</div><div className="rounded-xl bg-slate-50 p-4"><h3 className="font-bold text-slate-900">Execução</h3>{routineMetrics.map((metric) => <div key={metric.label} className="mt-3"><div className="flex justify-between text-sm"><span>{metric.label}</span><span>{metric.realized}/{metric.target.toFixed(1)}</span></div><div className="mt-1 h-2 rounded-full bg-slate-200"><div className="h-2 rounded-full bg-emerald-500" style={{ width: `${metric.percent}%` }}/></div></div>)}</div><div className="rounded-xl bg-slate-50 p-4"><h3 className="font-bold text-slate-900">Pendências e criticidade</h3><p className="mt-2 text-sm text-slate-600">Follow-ups: {smartAlertCounts.followups}</p><p className="text-sm text-slate-600">Oportunidades atrasadas: {smartAlertCounts.overdue}</p><p className="text-sm text-slate-600">Propostas sem retorno: {smartAlertCounts.proposals}</p><p className="text-sm text-slate-600">Clientes esfriando: {coolingClients.unavailable ? "Indisponível" : smartAlertCounts.cooling}</p>{coolingClients.message && <p className="mt-2 text-xs text-amber-700">{coolingClients.message}</p>}</div><div className="rounded-xl bg-slate-50 p-4"><h3 className="font-bold text-slate-900">Agenda e atividades</h3><p className="mt-2 text-sm text-slate-600">Compromissos hoje: {plannedAppointmentsToday.length}</p><p className="text-sm text-slate-600">Visitas realizadas: {activitiesToday.length}</p><p className="text-sm text-slate-600">Atividades concluídas: {completedActivitiesTodayCount}</p></div></div></details></div>;
+  useEffect(() => {
+    let active = true;
+    const weekStart = getCurrentWeekStartDate();
+    const cacheKey = `${user?.role || "anon"}:${user?.id || "anon"}:${weekStart}`;
+
+    const loadWeeklyMissions = async () => {
+      if (weeklyMissionsCache && weeklyMissionsCache.key === cacheKey && weeklyMissionsCache.expiresAt > Date.now()) {
+        setWeeklyMissions(weeklyMissionsCache.payload);
+        return;
+      }
+
+      try {
+        const response = await api.get<WeeklyMissionSeller[]>(`/reports/weekly-missions?weekStart=${weekStart}`);
+        if (!active) return;
+        const payload = Array.isArray(response.data) ? response.data : [];
+        setWeeklyMissions(payload);
+        weeklyMissionsCache = {
+          key: cacheKey,
+          payload,
+          expiresAt: Date.now() + WEEKLY_MISSIONS_CACHE_TTL_MS
+        };
+      } catch {
+        if (!active) return;
+        setWeeklyMissions([]);
+      }
+    };
+
+    void loadWeeklyMissions();
+    return () => {
+      active = false;
+    };
+  }, [user?.id, user?.role]);
+  const todayDateLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat("pt-BR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      }).format(new Date()),
+    []
+  );
+  const inspirationalQuote = useMemo(() => getSessionMotivationalQuote(), [user?.id]);
+
+  const { plannedAppointmentsToday, activitiesToday, pendingFollowUps } = useMemo(() => {
+    const { start, end } = getTodayBoundaries();
+    const eligibleActivityTypes = new Set(["visita", "visita_tecnica"]);
+
+    const plannedAppointments = agendaEventsToday
+      .filter((item) => (item.status ?? "planned") === "planned")
+      .filter((item) => isSameDay(String(item.startsAt || item.startDateTime || ""), start, end));
+
+
+    const dayActivities = activities
+      .filter((item) => item.done)
+      .filter((item) => eligibleActivityTypes.has(normalizeActivityType(item.type)))
+      .filter((item) => item.date && isSameDay(item.date, start, end))
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+
+    const toFollowUpDate = (value?: string | null) => {
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    };
+
+    const pending = opportunities
+      .filter((item) => {
+        const followUpDate = toFollowUpDate(item.followUpDate);
+        return followUpDate !== null && followUpDate >= start;
+      })
+      .sort((a, b) => {
+        const aDate = toFollowUpDate(a.followUpDate);
+        const bDate = toFollowUpDate(b.followUpDate);
+        if (!aDate || !bDate) return 0;
+        return aDate.getTime() - bDate.getTime();
+      });
+
+
+    return {
+      plannedAppointmentsToday: plannedAppointments,
+      activitiesToday: dayActivities,
+      pendingFollowUps: pending
+    };
+  }, [activities, agendaEventsToday, opportunities]);
+
+  const completedActivitiesTodayCount = useMemo(() => {
+    const { start, end } = getTodayBoundaries();
+    return activities.filter((item) => item.done && isSameDay(getActivityExecutionDate(item), start, end)).length;
+  }, [activities]);
+
+  const activitiesForMobileList = useMemo(() => {
+    const { start, end } = getTodayBoundaries();
+    return activities
+      .filter((item) => isSameDay(getActivityExecutionDate(item), start, end))
+      .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
+  }, [activities]);
+
+  const routineMetrics = useMemo(() => {
+    const now = new Date();
+    const monthBusinessDays = getMonthBusinessDays(now);
+    const { start, end } = getTodayBoundaries();
+
+    const targetKeys = {
+      ligacao: ["ligacao"],
+      visita: ["visita", "visita_tecnica", "visita_presencial"],
+      proposta: ["envio_proposta"]
+    };
+
+    const monthlyTargetByType = activityKpis.reduce<Record<string, number>>((accumulator, item) => {
+      const normalized = normalizeActivityType(item.type);
+      accumulator[normalized] = (accumulator[normalized] ?? 0) + Number(item.targetValue || 0);
+      return accumulator;
+    }, {});
+
+    const todayCountByType = activities.reduce<Record<string, number>>((accumulator, item) => {
+      if (!isSameDay(getActivityExecutionDate(item), start, end)) {
+        return accumulator;
+      }
+      const normalized = normalizeActivityType(item.type);
+      accumulator[normalized] = (accumulator[normalized] ?? 0) + 1;
+      return accumulator;
+    }, {});
+
+    const buildMetric = (label: string, keys: string[]) => {
+      const monthlyTarget = keys.reduce((sum, key) => sum + (monthlyTargetByType[key] ?? 0), 0);
+      const dailyTarget = monthBusinessDays > 0 ? monthlyTarget / monthBusinessDays : 0;
+      const realized = keys.reduce((sum, key) => sum + (todayCountByType[key] ?? 0), 0);
+      const progressPercent = dailyTarget > 0 ? (realized / dailyTarget) * 100 : 0;
+
+      return {
+        label,
+        dailyTarget,
+        realized,
+        progressPercent,
+        achieved: realized >= dailyTarget && dailyTarget > 0
+      };
+    };
+
+    const metrics = [
+      buildMetric("Meta de ligações hoje", targetKeys.ligacao),
+      buildMetric("Meta de visitas hoje", targetKeys.visita),
+      buildMetric("Meta de propostas hoje", targetKeys.proposta)
+    ];
+
+    const totalTarget = metrics.reduce((sum, item) => sum + item.dailyTarget, 0);
+    const totalRealized = metrics.reduce((sum, item) => sum + item.realized, 0);
+
+    const shouldShowWarning =
+      user?.role === "vendedor" &&
+      now.getHours() >= 15 &&
+      totalTarget > 0 &&
+      totalRealized / totalTarget < 0.5;
+
+    return { metrics, shouldShowWarning };
+  }, [activities, activityKpis, user?.role]);
+
+  const pipelineOfDay = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const noResponseDays = 7;
+    const msPerDay = 1000 * 60 * 60 * 24;
+
+    const getDayDiff = (dateValue?: string | null) => {
+      if (!dateValue) return 0;
+      const parsedDate = new Date(dateValue);
+      if (Number.isNaN(parsedDate.getTime())) return 0;
+      const dateOnly = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate());
+      return Math.floor((today.getTime() - dateOnly.getTime()) / msPerDay);
+    };
+
+    const prioritized: PipelineOpportunity[] = opportunities
+      .map((item) => {
+        const followUpLateDays = getDayDiff(item.followUpDate);
+        if (followUpLateDays >= 0) {
+          return { ...item, priorityType: "followup_overdue" as const, daysLate: followUpLateDays };
+        }
+
+        const expectedCloseLateDays = getDayDiff(item.expectedCloseDate);
+        if (expectedCloseLateDays > 0) {
+          return { ...item, priorityType: "opportunity_overdue" as const, daysLate: expectedCloseLateDays };
+        }
+
+        const stage = String(item.stage || "").toLowerCase();
+        const noActionDays = getDayDiff(item.lastContactAt || item.followUpDate);
+        if (stage === "proposta" && noActionDays >= noResponseDays) {
+          return { ...item, priorityType: "proposal_no_response" as const, daysLate: noActionDays };
+        }
+
+        return null;
+      })
+      .filter((item): item is PipelineOpportunity => item !== null)
+      .sort((a, b) => {
+        const priorityOrder = {
+          followup_overdue: 0,
+          opportunity_overdue: 1,
+          proposal_no_response: 2
+        } as const;
+        const byPriority = priorityOrder[a.priorityType] - priorityOrder[b.priorityType];
+        if (byPriority !== 0) return byPriority;
+
+        const byDelay = b.daysLate - a.daysLate;
+        if (byDelay !== 0) return byDelay;
+
+        return Number(b.value || 0) - Number(a.value || 0);
+      });
+
+    return {
+      total: prioritized.length,
+      topFive: prioritized.slice(0, 5)
+    };
+  }, [opportunities]);
+
+  const smartAlerts = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today);
+    tomorrow.setDate(today.getDate() + 1);
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+
+    const toValidDate = (value?: string | null) => {
+      if (!value) return null;
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
+    const followUpsOverdue = opportunities.filter((item) => {
+      const followUpDate = toValidDate(item.followUpDate);
+      return followUpDate !== null && followUpDate < tomorrow;
+    }).length;
+
+    const opportunitiesWithoutFollowUp = opportunities.filter((item) => {
+      const expectedCloseDate = toValidDate(item.expectedCloseDate);
+      const followUpDate = toValidDate(item.followUpDate);
+      const closeIsLate = expectedCloseDate !== null && expectedCloseDate < today;
+      const noFollowUp = followUpDate === null;
+      const followUpAfterToday = followUpDate !== null && followUpDate >= tomorrow;
+      return closeIsLate && (noFollowUp || followUpAfterToday);
+    }).length;
+
+    const proposalsNoResponse = opportunities.filter((item) => {
+      const stage = String(item.stage || "").toLowerCase();
+      if (stage !== "proposta") return false;
+      const lastActivityDate = toValidDate(item.lastActivityAt || item.updatedAt || item.lastContactAt || item.followUpDate);
+      if (!lastActivityDate) return false;
+      return now.getTime() - lastActivityDate.getTime() > sevenDaysMs;
+    }).length;
+
+    const items: SmartAlertItem[] = [
+      {
+        id: "followups_overdue",
+        label: "Follow-ups vencidos hoje/atrasados",
+        helper: "Existem follow-ups que já deveriam ter sido tratados.",
+        count: followUpsOverdue,
+        to: "/oportunidades?status=open&actionToday=true"
+      },
+      {
+        id: "opportunities_without_followup",
+        label: "Oportunidades atrasadas sem follow-up",
+        helper: "Negócios com previsão vencida sem acompanhamento adequado.",
+        count: opportunitiesWithoutFollowUp,
+        to: "/oportunidades?status=open&overdue=true"
+      },
+      {
+        id: "proposals_no_response",
+        label: "Propostas sem retorno",
+        helper: "Propostas sem interação há mais de 7 dias.",
+        count: proposalsNoResponse,
+        to: "/oportunidades?status=open&stage=proposta"
+      },
+      {
+        id: "cooling_clients",
+        label: "Clientes esfriando",
+        helper: coolingClients.unavailable
+          ? "Alerta indisponível no momento."
+          : "Clientes A/B sem atividade relevante há 21+ dias.",
+        count: coolingClients.count,
+        to: "/clientes?classe=A",
+        unavailable: coolingClients.unavailable
+      }
+    ];
+
+    return {
+      items,
+      hasActionableAlerts: items.some((item) => !item.unavailable && item.count > 0)
+    };
+  }, [coolingClients.count, coolingClients.unavailable, opportunities]);
+
+  const weeklyMissionSummary = useMemo(() => {
+    const getMissionByKey = (seller: WeeklyMissionSeller, key: WeeklyMission["key"]) =>
+      seller.missions.find((mission) => mission.key === key) ?? null;
+
+    const ranking = [...weeklyMissions]
+      .map((seller) => {
+        const mainMission = getMissionByKey(seller, "visits_25");
+        return {
+          ...seller,
+          mainMission,
+          mainMissionProgress: Number(mainMission?.progress ?? 0)
+        };
+      })
+      .sort((a, b) => b.mainMissionProgress - a.mainMissionProgress || a.name.localeCompare(b.name, "pt-BR"));
+
+    const own = ranking.find((seller) => seller.userId === user?.id) ?? ranking[0] ?? null;
+    return {
+      own,
+      top3: ranking.slice(0, 3)
+    };
+  }, [weeklyMissions, user?.id]);
+
+  const ownWeeklyMissions = useMemo(() => {
+    const fallback = weeklyMissionSummary.own;
+    return fallback?.missions ?? [];
+  }, [weeklyMissionSummary.own]);
+
+  const getMedalLabel = (medal: WeeklyVisitItem["medal"]) => {
+    if (medal === "gold") return "🥇 Ouro";
+    if (medal === "silver") return "🥈 Prata";
+    if (medal === "bronze") return "🥉 Bronze";
+    return "Sem medalha";
+  };
+
+  const getMedalTone = (medal: WeeklyVisitItem["medal"]) => {
+    if (medal === "gold") return "text-amber-600";
+    if (medal === "silver") return "text-slate-600";
+    if (medal === "bronze") return "text-orange-700";
+    return "text-slate-500";
+  };
+
+  const getPipelinePriorityLabel = (type: PipelineOpportunity["priorityType"]) => {
+    if (type === "followup_overdue") return "Follow-up vencido";
+    if (type === "opportunity_overdue") return "Oportunidade atrasada";
+    return "Proposta sem retorno";
+  };
+
+  const getRiskLabel = (risk: TodayPriority["risk"]) => {
+    if (risk === "alto") return "Alto";
+    if (risk === "medio") return "Médio";
+    return "Baixo";
+  };
+
+  const getRiskClassName = (risk: TodayPriority["risk"]) => {
+    if (risk === "alto") return "bg-red-100 text-red-700";
+    if (risk === "medio") return "bg-amber-100 text-amber-700";
+    return "bg-emerald-100 text-emerald-700";
+  };
+
+  useEffect(() => {
+    window.localStorage.setItem(PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
+  }, [panelOrder]);
+
+  const handlePanelDrop = useCallback(
+    (targetPanelId: PanelId) => {
+      if (!draggedPanelId || draggedPanelId === targetPanelId) return;
+      setPanelOrder((currentOrder) => {
+        const startIndex = currentOrder.indexOf(draggedPanelId);
+        const endIndex = currentOrder.indexOf(targetPanelId);
+        if (startIndex < 0 || endIndex < 0) return currentOrder;
+        const updatedOrder = [...currentOrder];
+        updatedOrder.splice(startIndex, 1);
+        updatedOrder.splice(endIndex, 0, draggedPanelId);
+        return updatedOrder;
+      });
+      setDraggedPanelId(null);
+    },
+    [draggedPanelId]
+  );
+
+  const scrollablePanelClass = "max-h-[220px] overflow-y-auto pr-1";
+
+  const renderDragHandle = (panelId: PanelId) => (
+    <button
+      type="button"
+      draggable
+      onDragStart={() => setDraggedPanelId(panelId)}
+      onDragEnd={() => setDraggedPanelId(null)}
+      className="mb-3 inline-flex cursor-grab items-center gap-2 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 active:cursor-grabbing"
+      title="Arraste para reordenar"
+      aria-label="Arrastar painel"
+    >
+      <GripVertical size={14} />
+      Prioridade do painel
+    </button>
+  );
+
+  const renderInsightList = (items: CommercialInsightItem[]) => (
+    items.length === 0 ? <p className="text-sm text-slate-500">Sem apontamentos.</p> : (
+      <ul className="mt-2 space-y-1 text-sm text-slate-700">
+        {items.map((item, index) => (
+          <li key={`${item.title || item.detail || index}`} className="flex gap-2">
+            <span className="text-brand-600">•</span>
+            <span><strong>{item.title || "Indicador"}</strong>{item.detail ? ` — ${item.detail}` : ""}</span>
+          </li>
+        ))}
+      </ul>
+    )
+  );
+
+  const renderCommercialInsightsCard = () => {
+    if (!canViewCommercialInsights) return null;
+    return (
+      <section className="rounded-2xl border border-brand-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Bot className="text-brand-700" size={22} />
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">IA Comercial</h2>
+              <p className="text-sm text-slate-500">Resumo executivo da carteira comercial.</p>
+            </div>
+          </div>
+          <button type="button" onClick={() => void loadCommercialInsights(true)} disabled={commercialInsightsLoading} className="inline-flex items-center gap-2 rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50 disabled:opacity-60">
+            <RefreshCw size={14} className={commercialInsightsLoading ? "animate-spin" : ""} />
+            Atualizar análise
+          </button>
+        </div>
+        {commercialInsightsError ? <p className="mt-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{commercialInsightsError}</p> : null}
+        {commercialInsightsLoading && !commercialInsights ? <p className="mt-4 text-sm text-slate-500">Gerando análise comercial...</p> : null}
+        {commercialInsights ? (
+          <div className="mt-4 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900">Resumo do Dia</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-700">{commercialInsights.summary}</p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div><h3 className="text-sm font-semibold text-rose-700">Prioridade Alta</h3>{renderInsightList(commercialInsights.highPriority)}</div>
+              <div><h3 className="text-sm font-semibold text-amber-700">Prioridade Média</h3>{renderInsightList(commercialInsights.mediumPriority)}</div>
+              <div><h3 className="text-sm font-semibold text-slate-700">Prioridade Baixa</h3>{renderInsightList(commercialInsights.lowPriority)}</div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div><h3 className="text-sm font-semibold text-slate-900">Recomendações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.recommendations.join(" ") || "Sem recomendações."}</p></div>
+              <div><h3 className="text-sm font-semibold text-slate-900">Próximas ações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.nextActions.join(" ") || "Sem próximas ações."}</p></div>
+            </div>
+            <p className="text-xs text-slate-500">Última atualização: {new Date(commercialInsights.generatedAt).toLocaleString("pt-BR")} · Fonte: {commercialInsights.source === "ai" ? "IA" : "fallback determinístico"}</p>
+          </div>
+        ) : null}
+      </section>
+    );
+  };
+
+  const renderCentralDayHero = (showStartRoute: boolean) => (
+    <section className="rounded-xl border border-brand-100 bg-brand-50 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900">Central do Dia</h1>
+          <p className="mt-1 text-sm text-slate-600">Resumo operacional, tarefas e compromissos do dia.</p>
+        </div>
+
+        {showStartRoute && (
+          <Link
+            to={`/agenda?${startRouteSearch}`}
+            className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800"
+          >
+            Iniciar roteiro
+          </Link>
+        )}
+      </div>
+
+      <div className="mt-4 flex items-center gap-3 text-brand-900">
+        <SunMoon size={22} />
+        <div>
+          <h2 className="text-xl font-bold">
+            {getGreeting()}, {user?.name ?? "Usuário"}
+          </h2>
+          <p className="mt-1 text-sm text-slate-600 capitalize">{todayDateLabel}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-start gap-3 text-slate-800">
+        <span className="select-none font-serif text-4xl font-bold leading-none text-[#F59E0B]" aria-hidden="true">
+          “
+        </span>
+        <div>
+          <blockquote className="text-base font-semibold leading-relaxed text-slate-800">
+            {inspirationalQuote.text}
+            <span className="ml-1 align-sub font-serif text-2xl font-bold leading-none text-[#F59E0B]" aria-hidden="true">
+              ”
+            </span>
+          </blockquote>
+          <p className="mt-2 text-sm font-semibold text-[#F59E0B]">— {inspirationalQuote.author}</p>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderQuickActions = () => (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-semibold text-slate-900">Ações rápidas</h2>
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <Link
+          to={`/agenda?${startRouteSearch}`}
+          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand-700 px-4 py-3 text-base font-semibold text-white hover:bg-brand-800"
+        >
+          Nova visita
+        </Link>
+        <Link
+          to="/oportunidades/nova"
+          className="inline-flex min-h-12 items-center justify-center rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-base font-semibold text-brand-800 hover:bg-brand-100"
+        >
+          Nova oportunidade
+        </Link>
+        <Link
+          to="/whatsapp"
+          className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-800 hover:bg-slate-50"
+        >
+          WhatsApp
+        </Link>
+      </div>
+    </section>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="flex flex-col gap-5 pb-4">
+        {renderCentralDayHero(false)}
+        {renderQuickActions()}
+        {renderCommercialInsightsCard()}
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Resumo do dia</h2>
+          <div className="mt-4 grid gap-3">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Atividades concluídas hoje</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{completedActivitiesTodayCount}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Compromissos do dia</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-600">Visitas realizadas</p>
+              <p className="mt-1 text-3xl font-bold text-slate-900">{activitiesToday.length}</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
+              <h2 className="text-lg font-semibold text-slate-900">🔥 Prioridades do dia</h2>
+            </div>
+            <Link
+              to="/oportunidades?status=open&actionToday=true"
+              className="rounded-md border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700"
+            >
+              Ver todas
+            </Link>
+          </div>
+          <div className="mt-3 space-y-2">
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando prioridades...</p>
+            ) : todayPriorities.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma prioridade crítica para hoje.</p>
+            ) : (
+              todayPriorities.slice(0, 5).map((item) => (
+                <Link key={item.opportunityId} to={`/oportunidades/${item.opportunityId}`} className="block rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">{item.clientName}</p>
+                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${getRiskClassName(item.risk)}`}>{getRiskLabel(item.risk)}</span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-700">R$ {Number(item.value || 0).toLocaleString("pt-BR")}</p>
+                  <p className="mt-1 text-xs text-slate-500">{item.reason}</p>
+                </Link>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Lista operacional</h2>
+
+          <div className="mt-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Atividades do dia</h3>
+            <div className="mt-2 space-y-2">
+              {loading ? (
+                <p className="text-sm text-slate-500">Carregando atividades...</p>
+              ) : activitiesForMobileList.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhuma atividade para hoje.</p>
+              ) : (
+                activitiesForMobileList.slice(0, 8).map((activity) => (
+                  <div key={activity.id} className="rounded-xl border border-slate-200 p-3">
+                    <p className="text-base font-medium text-slate-900">{activity.notes || "Atividade"}</p>
+                    <p className="mt-1 text-sm text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {activity.done ? "Concluída" : "Pendente"} ·{" "}
+                      {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(activity.createdAt || activity.dueDate))}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Agenda do dia</h3>
+            <div className="mt-2 space-y-2">
+              {loading ? (
+                <p className="text-sm text-slate-500">Carregando agenda...</p>
+              ) : plannedAppointmentsToday.length === 0 ? (
+                <p className="text-sm text-slate-500">Nenhum compromisso para hoje.</p>
+              ) : (
+                plannedAppointmentsToday.map((item) => {
+                  const startsAt = item.startsAt || item.startDateTime;
+                  return (
+                    <div key={item.id} className="rounded-xl border border-slate-200 p-3">
+                      <p className="text-base font-medium text-slate-900">
+                        {startsAt
+                          ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(startsAt))
+                          : "Sem horário"}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-600">{item.title || "Compromisso"}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </section>
+
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <section className="space-y-2">
+        {alerts.showOverdueFollowUpAlert && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700">
+            Atenção: existem follow-ups vencidos.
+          </div>
+        )}
+        {alerts.showUpcomingMeetingBanner && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-medium text-blue-700">
+            Lembrete: você possui {reminders.upcomingMeetingsCount} reunião(ões) nas próximas 2 horas.
+          </div>
+        )}
+        {alerts.showNoActivitiesWarning && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
+            Você ainda não registrou atividades hoje.
+          </div>
+        )}
+        {routineMetrics.shouldShowWarning && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-medium text-amber-700">
+            Atenção leve: você está abaixo de 50% da rotina comercial esperada até este horário.
+          </div>
+        )}
+      </section>
+
+      {renderCentralDayHero(true)}
+      {renderQuickActions()}
+      {renderCommercialInsightsCard()}
+
+      <section className="flex flex-col gap-4">
+        <article className={blockClass} style={{ order: panelOrder.indexOf("routine") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("routine")}>
+          {renderDragHandle("routine")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Painel de Disciplina Comercial</p>
+              <h2 className="text-lg font-semibold text-slate-900">Rotina Comercial do Dia</h2>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {routineMetrics.metrics.map((metric) => {
+              const barColorClass = metric.achieved ? "bg-green-500" : "bg-red-500";
+              const clampedProgress = Math.max(0, Math.min(metric.progressPercent, 100));
+
+              return (
+                <div key={metric.label} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                    <p className="font-medium text-slate-900">{metric.label}</p>
+                    <p className="text-slate-600">
+                      {metric.realized} /{" "}
+                      {metric.dailyTarget.toLocaleString("pt-BR", {
+                        maximumFractionDigits: 1,
+                        minimumFractionDigits: 1
+                      })}
+                    </p>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-100">
+                    <div
+                      className={`h-2 rounded-full transition-all ${barColorClass}`}
+                      style={{ width: `${clampedProgress}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("missions") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("missions")}>
+          {renderDragHandle("missions")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Gamificação</p>
+              <h2 className="text-lg font-semibold text-slate-900">Missões da Semana</h2>
+            </div>
+          </div>
+
+          {weeklyMissionSummary.own ? (
+            <>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {ownWeeklyMissions.map((mission) => {
+                  const progress = Number(mission.progress || 0);
+                  const target = Number(mission.target || 0);
+                  const safePercent = target > 0 ? Math.max(0, Math.min((progress / target) * 100, 100)) : mission.done ? 100 : 0;
+                  const motivational = mission.done
+                    ? "Concluída! Excelente consistência. 🚀"
+                    : `Falta ${Math.max(target - progress, 0)} para completar.`;
+
+                  return (
+                    <div key={mission.key} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium text-slate-700">{mission.title}</p>
+                      <p className="mt-1 text-lg font-bold text-slate-900">
+                        {progress}/{target}
+                      </p>
+                      <div className="mt-1 h-1.5 rounded-full bg-slate-200">
+                        <div className="h-1.5 rounded-full bg-brand-600" style={{ width: `${safePercent}%` }} />
+                      </div>
+                      {mission.key === "visits_25" && mission.medal && (
+                        <p className={`mt-1 text-xs font-medium ${getMedalTone(mission.medal)}`}>{getMedalLabel(mission.medal)}</p>
+                      )}
+                      <p className={`mt-1 text-xs ${mission.done ? "text-emerald-700" : "text-slate-600"}`}>{motivational}</p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-3 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Top 3 da semana</p>
+                {weeklyMissionSummary.top3.map((item, index) => (
+                  <div key={item.userId} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+                    <p className="text-sm text-slate-700">
+                      {index + 1}º · <span className="font-medium text-slate-900">{item.name}</span>
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">{item.mainMissionProgress} visitas</p>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-slate-500">Ainda não há visitas concluídas nesta semana. Bora começar com tudo!</p>
+          )}
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("pipeline") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("pipeline")}>
+          {renderDragHandle("pipeline")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pipeline</p>
+              <h2 className="text-lg font-semibold text-slate-900">🔥 Prioridades do dia</h2>
+            </div>
+            <Link
+              to="/oportunidades?status=open&actionToday=true"
+              className="rounded-md border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50"
+            >
+              Ver todas
+            </Link>
+          </div>
+
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs text-slate-500">Oportunidades priorizadas</p>
+            <p className="text-2xl font-bold text-slate-900">{todayPriorities.length}</p>
+          </div>
+
+          <div className={`mt-3 space-y-2 ${todayPriorities.slice(0, 5).length > 3 ? scrollablePanelClass : ""}`}>
+            {pipelineError ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">{pipelineError}</p>
+            ) : loading ? (
+              <p className="text-sm text-slate-500">Carregando prioridades do dia...</p>
+            ) : todayPriorities.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma prioridade crítica para hoje.</p>
+            ) : (
+              todayPriorities.slice(0, 5).map((item) => (
+                <Link key={item.opportunityId} to={`/oportunidades/${item.opportunityId}`} className="block rounded-lg border border-slate-200 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-900">{item.clientName}</p>
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        Score {item.priorityScore}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getRiskClassName(item.risk)}`}>{getRiskLabel(item.risk)}</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-600">R$ {Number(item.value || 0).toLocaleString("pt-BR")}</p>
+                  <p className="text-xs text-slate-500"><strong>Motivo:</strong> {item.reason}</p>
+                  <p className="text-xs text-brand-700"><strong>Ação sugerida:</strong> {item.suggestedAction}</p>
+                </Link>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("alerts") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("alerts")}>
+          {renderDragHandle("alerts")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Prioridades</p>
+              <h2 className="text-lg font-semibold text-slate-900">Alertas Inteligentes</h2>
+            </div>
+          </div>
+
+          {coolingClients.message && (
+            <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700">{coolingClients.message}</p>
+          )}
+
+          <div className={`space-y-2 ${smartAlerts.items.length > 3 ? scrollablePanelClass : ""}`}>
+            {smartAlerts.items.map((alert) => (
+              <div key={alert.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <div>
+                  <p className="text-base font-semibold text-slate-900">{alert.count.toLocaleString("pt-BR")}</p>
+                  <p className="text-sm text-slate-700">{alert.label}</p>
+                  <p className="text-xs text-slate-500">{alert.helper}</p>
+                </div>
+
+                {alert.unavailable ? (
+                  <span className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500">Indisponível</span>
+                ) : (
+                  <Link
+                    to={alert.to || "/"}
+                    className="rounded-md bg-brand-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-800"
+                  >
+                    Abrir
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {!loading && !smartAlerts.hasActionableAlerts && (
+            <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+              Tudo em dia ✅
+            </p>
+          )}
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("summary") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("summary")}>
+          {renderDragHandle("summary")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Mini KPI</p>
+              <h2 className="text-lg font-semibold text-slate-900">Resumo do Dia</h2>
+            </div>
+            <CalendarClock className="text-brand-700" size={20} />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">Compromissos planejados hoje</p>
+              <p className="text-2xl font-bold text-slate-900">{plannedAppointmentsToday.length}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">Follow-ups pendentes</p>
+              <p className="text-2xl font-bold text-slate-900">{pendingFollowUps.length}</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 p-3">
+              <p className="text-xs text-slate-500">Atividades do dia</p>
+              <p className="text-2xl font-bold text-slate-900">{activitiesToday.length}</p>
+            </div>
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("agenda") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("agenda")}>
+          {renderDragHandle("agenda")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Planejamento</p>
+              <h2 className="text-lg font-semibold text-slate-900">Agenda de hoje</h2>
+            </div>
+            <UsersRound className="text-brand-700" size={20} />
+          </div>
+
+          <div className={`space-y-2 ${plannedAppointmentsToday.length > 3 ? scrollablePanelClass : ""}`}>
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando agenda...</p>
+            ) : plannedAppointmentsToday.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhum item planejado na Agenda para hoje.</p>
+            ) : (
+              plannedAppointmentsToday.map((item) => {
+                const startsAt = item.startsAt || item.startDateTime;
+
+                return (
+                <div
+                  key={item.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">
+                      {startsAt
+                        ? new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(new Date(startsAt))
+                        : "Sem horário"}
+                    </p>
+                    <p className="text-xs text-slate-600">{item.title || "Compromisso"}</p>
+                    <p className="text-xs text-slate-500">Origem: Agenda</p>
+                  </div>
+                </div>
+              );
+            })
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("activities") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("activities")}>
+          {renderDragHandle("activities")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Execução</p>
+              <h2 className="text-lg font-semibold text-slate-900">Atividades executadas hoje</h2>
+            </div>
+            <MessageCircleWarning className="text-brand-700" size={20} />
+          </div>
+
+          <div className={`space-y-2 ${activitiesToday.length > 3 ? scrollablePanelClass : ""}`}>
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando atividades...</p>
+            ) : activitiesToday.length === 0 ? (
+              <p className="text-sm text-slate-500">Nenhuma atividade executada hoje.</p>
+            ) : (
+              activitiesToday.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{activity.notes || "Atividade"}</p>
+                    <p className="text-xs text-slate-600">{activity.opportunity?.title || "Sem oportunidade"}</p>
+                    <p className="text-xs text-slate-500">Origem: Activities</p>
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+                    <Clock3 size={14} />
+                    {new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(
+                      new Date(activity.createdAt || activity.dueDate)
+                    )}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("followups") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("followups")}>
+          {renderDragHandle("followups")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Pendências</p>
+              <h2 className="text-lg font-semibold text-slate-900">Followups pendentes</h2>
+            </div>
+            <CheckSquare className="text-brand-700" size={20} />
+          </div>
+
+          <div className={`space-y-2 ${pendingFollowUps.length > 3 ? scrollablePanelClass : ""}`}>
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando follow-ups...</p>
+            ) : pendingFollowUps.length === 0 ? (
+              <p className="text-sm text-slate-500">Sem follow-ups pendentes.</p>
+            ) : (
+              pendingFollowUps.slice(0, 6).map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                    <p className="text-xs text-slate-600">{typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}</p>
+                    <p className="text-xs text-slate-500">Follow-up: {item.followUpDate ? new Intl.DateTimeFormat("pt-BR").format(new Date(item.followUpDate)) : "Sem data"}</p>
+                  </div>
+                  <span className="text-xs font-medium text-amber-700">Ação pendente</span>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+
+        <article className={blockClass} style={{ order: panelOrder.indexOf("critical") }} onDragOver={(event) => event.preventDefault()} onDrop={() => handlePanelDrop("critical")}>
+          {renderDragHandle("critical")}
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-500">Criticidade</p>
+              <h2 className="text-lg font-semibold text-slate-900">Oportunidades críticas</h2>
+            </div>
+            <MessageCircleWarning className="text-brand-700" size={20} />
+          </div>
+
+          <div className={`space-y-2 ${pipelineOfDay.topFive.length > 3 ? scrollablePanelClass : ""}`}>
+            {loading ? (
+              <p className="text-sm text-slate-500">Carregando oportunidades críticas...</p>
+            ) : pipelineOfDay.topFive.length === 0 ? (
+              <p className="text-sm text-slate-500">Sem negociações críticas no momento.</p>
+            ) : (
+              pipelineOfDay.topFive.map((item) => (
+                <div key={item.id} className="rounded-lg border border-slate-200 px-3 py-2">
+                  <p className="text-sm font-medium text-slate-900">{item.title}</p>
+                  <p className="text-xs text-slate-600">
+                    {typeof item.client === "string" ? item.client : item.client?.name ?? "Cliente não informado"}
+                  </p>
+                  <p className="text-xs text-red-700">{getPipelinePriorityLabel(item.priorityType)} · {item.daysLate} dia(s)</p>
+                </div>
+              ))
+            )}
+          </div>
+        </article>
+      </section>
+    </div>
+  );
 }
