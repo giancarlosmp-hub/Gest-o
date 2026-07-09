@@ -171,7 +171,7 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
-const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
+const defaultPanelOrder = ["routine", "pipeline", "summary", "agenda", "followups", "critical", "alerts", "missions", "activities"] as const;
 type PanelId = (typeof defaultPanelOrder)[number];
 
 function normalizePanelOrder(value: unknown): PanelId[] {
@@ -822,37 +822,10 @@ export default function HomePage() {
     </section>
   );
 
-  const renderQuickActions = () => (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-semibold text-slate-900">Ações rápidas</h2>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <Link
-          to={`/agenda?${startRouteSearch}`}
-          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand-700 px-4 py-3 text-base font-semibold text-white hover:bg-brand-800"
-        >
-          Nova visita
-        </Link>
-        <Link
-          to="/oportunidades/nova"
-          className="inline-flex min-h-12 items-center justify-center rounded-xl border border-brand-200 bg-brand-50 px-4 py-3 text-base font-semibold text-brand-800 hover:bg-brand-100"
-        >
-          Nova oportunidade
-        </Link>
-        <Link
-          to="/whatsapp"
-          className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-800 hover:bg-slate-50"
-        >
-          WhatsApp
-        </Link>
-      </div>
-    </section>
-  );
-
   if (isMobile) {
     return (
       <div className="flex flex-col gap-5 pb-4">
         {renderCentralDayHero(false)}
-        {renderQuickActions()}
         {renderCommercialInsightsCard()}
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -987,7 +960,6 @@ export default function HomePage() {
       </section>
 
       {renderCentralDayHero(true)}
-      {renderQuickActions()}
       {renderCommercialInsightsCard()}
 
       <section className="flex flex-col gap-4">

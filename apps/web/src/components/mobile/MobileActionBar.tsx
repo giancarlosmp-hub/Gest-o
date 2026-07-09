@@ -1,4 +1,4 @@
-import { CalendarPlus, ClipboardCheck, MessageCircle } from "lucide-react";
+import { CalendarPlus, MessageCircle, TrendingUp } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 const actionButtonBaseClass =
@@ -12,10 +12,10 @@ const primaryActions = [
     icon: CalendarPlus
   },
   {
-    id: "followup",
-    label: "Follow-up",
-    to: `/atividades?${new URLSearchParams({ open: "create", type: "followup", date: new Date().toISOString().slice(0, 10) }).toString()}`,
-    icon: ClipboardCheck
+    id: "oportunidade",
+    label: "Oportunidade",
+    to: "/oportunidades/nova",
+    icon: TrendingUp
   },
   {
     id: "whatsapp",
