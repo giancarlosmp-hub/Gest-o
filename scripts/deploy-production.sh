@@ -51,6 +51,9 @@ git checkout "${DEPLOY_BRANCH}"
 git pull --ff-only origin "${DEPLOY_BRANCH}"
 
 log "Commit local após sincronização: $(git rev-parse --short HEAD)"
+log "Branch local ativa: $(git branch --show-current)"
+log "Status Git após sincronização"
+git status --short --branch
 load_production_env
 log "Validando docker compose config"
 docker compose config >/dev/null
@@ -64,5 +67,8 @@ docker compose up -d ${START_SERVICES}
 
 log "Status dos containers após deploy"
 docker compose ps
+log "IDs das imagens em uso pelos containers atualizados"
+# shellcheck disable=SC2086
+docker compose images ${START_SERVICES} || true
 
 log "Deploy concluído com segurança"
