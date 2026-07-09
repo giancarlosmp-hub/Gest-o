@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Copy, ExternalLink, MessageCircle, Search, Sparkles, Check } from "lucide-react";
 import api from "../lib/apiClient";
@@ -20,10 +21,12 @@ type GeneratedMessage = { message: string; source: "ai" | "deterministic"; fallb
 const normalizePhone = (value?: string | null) => String(value || "").replace(/\D/g, "");
 
 export default function WhatsAppPage() {
+  const [searchParams] = useSearchParams();
+  const initialClientId = searchParams.get("clientId") || "";
   const [clients, setClients] = useState<Client[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [search, setSearch] = useState("");
-  const [selectedClientId, setSelectedClientId] = useState("");
+  const [selectedClientId, setSelectedClientId] = useState(initialClientId);
   const [draft, setDraft] = useState("");
   const [loadingClients, setLoadingClients] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -39,14 +42,14 @@ export default function WhatsAppPage() {
         if (!active) return;
         const data = Array.isArray(response.data) ? response.data : response.data.items || [];
         setClients(data);
-        setSelectedClientId((current) => current || data[0]?.id || "");
+        setSelectedClientId((current) => current || initialClientId || data[0]?.id || "");
       })
       .catch(() => toast.error("Não foi possível carregar clientes."))
       .finally(() => active && setLoadingClients(false));
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialClientId]);
 
   const selectedClient = clients.find((client) => client.id === selectedClientId) || null;
 

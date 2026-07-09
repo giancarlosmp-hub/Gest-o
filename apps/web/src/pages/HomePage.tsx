@@ -106,6 +106,16 @@ type TodayPriority = {
 
 type CommercialInsightItem = { title?: string; detail?: string; count?: number };
 
+type SellerOperationalInsight = {
+  opportunityId?: string;
+  clientId?: string;
+  clientName: string;
+  opportunityTitle?: string;
+  reason: string;
+  suggestedAction: string;
+  risk: "alto" | "medio" | "baixo";
+};
+
 type CommercialInsights = {
   summary: string;
   highPriority: CommercialInsightItem[];
@@ -228,6 +238,7 @@ export default function HomePage() {
   const [draggedPanelId, setDraggedPanelId] = useState<PanelId | null>(null);
 
   const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
+  const isSeller = user?.role === "vendedor";
   const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente";
 
   const loadCommercialInsights = useCallback(async (refresh = false, signal?: AbortSignal) => {
@@ -685,6 +696,62 @@ export default function HomePage() {
     return "bg-emerald-100 text-emerald-700";
   };
 
+  const sellerOperationalInsight = useMemo<SellerOperationalInsight | null>(() => {
+    if (!isSeller) return null;
+
+    const getOpportunityClient = (opportunity?: Opportunity) => {
+      if (!opportunity) return { clientId: undefined, clientName: "Cliente não informado" };
+      if (typeof opportunity.client === "string") return { clientId: undefined, clientName: opportunity.client };
+      return {
+        clientId: opportunity.client?.id,
+        clientName: opportunity.client?.name || "Cliente não informado"
+      };
+    };
+
+    const topTodayPriority = todayPriorities[0];
+    if (topTodayPriority) {
+      const relatedOpportunity = opportunities.find((item) => item.id === topTodayPriority.opportunityId);
+      const client = getOpportunityClient(relatedOpportunity);
+      return {
+        opportunityId: topTodayPriority.opportunityId,
+        clientId: client.clientId,
+        clientName: topTodayPriority.clientName || client.clientName,
+        opportunityTitle: relatedOpportunity?.title,
+        reason: topTodayPriority.reason,
+        suggestedAction: topTodayPriority.suggestedAction,
+        risk: topTodayPriority.risk
+      };
+    }
+
+    const topPipelinePriority = pipelineOfDay.topFive[0];
+    if (topPipelinePriority) {
+      const client = getOpportunityClient(topPipelinePriority);
+      return {
+        opportunityId: topPipelinePriority.id,
+        clientId: client.clientId,
+        clientName: client.clientName,
+        opportunityTitle: topPipelinePriority.title,
+        reason: `${getPipelinePriorityLabel(topPipelinePriority.priorityType)} há ${topPipelinePriority.daysLate} dia(s).`,
+        suggestedAction: topPipelinePriority.priorityType === "followup_overdue"
+          ? "Retomar o follow-up e atualizar a próxima etapa."
+          : "Abrir a oportunidade e registrar a ação comercial de hoje.",
+        risk: topPipelinePriority.priorityType === "followup_overdue" ? "alto" : "medio"
+      };
+    }
+
+    const actionableAlert = smartAlerts.items.find((item) => !item.unavailable && item.count > 0);
+    if (actionableAlert) {
+      return {
+        clientName: "Minha carteira",
+        reason: actionableAlert.label,
+        suggestedAction: actionableAlert.helper,
+        risk: actionableAlert.count > 3 ? "alto" : "medio"
+      };
+    }
+
+    return null;
+  }, [isSeller, opportunities, pipelineOfDay.topFive, smartAlerts.items, todayPriorities]);
+
   useEffect(() => {
     window.localStorage.setItem(PANEL_ORDER_STORAGE_KEY, JSON.stringify(panelOrder));
   }, [panelOrder]);
@@ -735,6 +802,58 @@ export default function HomePage() {
       </ul>
     )
   );
+
+  const renderSellerOperationalAiCard = () => {
+    if (!isSeller) return null;
+
+    return (
+      <section className="rounded-2xl border border-brand-200 bg-white p-4 shadow-sm md:p-5">
+        <div className="flex items-start gap-2">
+          <Bot className="mt-0.5 text-brand-700" size={20} />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold text-slate-900 md:text-lg">Minha IA Comercial</h2>
+            <p className="text-sm text-slate-500">Próxima melhor ação para hoje</p>
+          </div>
+          {sellerOperationalInsight ? (
+            <span className={`hidden rounded-full px-2 py-1 text-xs font-medium md:inline-flex ${getRiskClassName(sellerOperationalInsight.risk)}`}>
+              {getRiskLabel(sellerOperationalInsight.risk)}
+            </span>
+          ) : null}
+        </div>
+
+        {pipelineError ? (
+          <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-700">Não foi possível analisar suas prioridades agora.</p>
+        ) : loading ? (
+          <p className="mt-3 text-sm text-slate-500">Analisando suas prioridades…</p>
+        ) : !sellerOperationalInsight ? (
+          <p className="mt-3 text-sm text-slate-500">Nenhuma ação crítica no momento.</p>
+        ) : (
+          <div className="mt-3 space-y-3">
+            <div className="rounded-xl bg-brand-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Próxima melhor ação</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900 md:text-base">{sellerOperationalInsight.suggestedAction}</p>
+              <p className="mt-1 text-sm text-slate-700">
+                {sellerOperationalInsight.clientName}
+                {sellerOperationalInsight.opportunityTitle ? ` · ${sellerOperationalInsight.opportunityTitle}` : ""}
+              </p>
+              <p className="mt-1 text-xs text-slate-600"><strong>Motivo:</strong> {sellerOperationalInsight.reason}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {sellerOperationalInsight.opportunityId ? (
+                <>
+                  <Link to={`/oportunidades/${sellerOperationalInsight.opportunityId}`} className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-800">Abrir</Link>
+                  <Link to={`/oportunidades/${sellerOperationalInsight.opportunityId}#registrar-interacao`} className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Registrar interação</Link>
+                </>
+              ) : (
+                <Link to="/oportunidades?status=open&actionToday=true" className="rounded-lg bg-brand-700 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-800">Abrir</Link>
+              )}
+              <Link to={sellerOperationalInsight.clientId ? `/whatsapp?clientId=${sellerOperationalInsight.clientId}` : "/whatsapp"} className="rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-700 hover:bg-brand-50">WhatsApp</Link>
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  };
 
   const renderCommercialInsightsCard = () => {
     if (!canViewCommercialInsights) return null;
@@ -852,6 +971,7 @@ export default function HomePage() {
     return (
       <div className="flex flex-col gap-5 pb-4">
         {renderCentralDayHero(false)}
+        {renderSellerOperationalAiCard()}
         {renderQuickActions()}
         {renderCommercialInsightsCard()}
 
@@ -987,6 +1107,7 @@ export default function HomePage() {
       </section>
 
       {renderCentralDayHero(true)}
+      {renderSellerOperationalAiCard()}
       {renderQuickActions()}
       {renderCommercialInsightsCard()}
 
