@@ -941,8 +941,6 @@ export default function HomePage() {
     </section>
   );
 
-
-
   if (isMobile) {
     return (
       <div className="flex flex-col gap-5 pb-4">
