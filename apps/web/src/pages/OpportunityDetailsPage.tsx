@@ -1440,7 +1440,7 @@ export default function OpportunityDetailsPage() {
         )}
       </section>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
+      <section id="registrar-interacao" className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:p-4">
         <h3 className="mb-3 text-lg font-semibold">Registrar Interação</h3>
         <p className="text-sm">
           <strong>Última interação:</strong>{" "}
