@@ -181,7 +181,7 @@ function getActivityExecutionDate(activity: Pick<Activity, "createdAt" | "dueDat
 
 const blockClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const PANEL_ORDER_STORAGE_KEY = "central-do-dia-panel-order";
-const defaultPanelOrder = ["routine", "missions", "pipeline", "alerts", "summary", "agenda", "activities", "followups", "critical"] as const;
+const defaultPanelOrder = ["routine", "pipeline", "summary", "agenda", "followups", "critical", "alerts", "missions", "activities"] as const;
 type PanelId = (typeof defaultPanelOrder)[number];
 
 function normalizePanelOrder(value: unknown): PanelId[] {
