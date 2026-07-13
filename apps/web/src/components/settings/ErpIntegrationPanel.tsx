@@ -122,6 +122,9 @@ type SyncStatusResponse = {
     windowEndHour: number;
     intervalMs: number;
     isRunning: boolean;
+    authConfigured?: boolean;
+    referenceSellerConfigured?: boolean;
+    missingConfig?: string[];
     lastRunAt: string | null;
     lastSuccessAt: string | null;
     lastRealSchedulerRunAt: string | null;
@@ -547,7 +550,7 @@ export default function ErpIntegrationPanel() {
               {data?.automaticSync?.statusLabel || (data?.automaticSync?.enabled ? "Agendada" : "Inativa")}
             </span>
             <p className="mt-2 text-slate-500">{data?.automaticSync?.active ? "Ativo" : "Inativo"} · Janela 07:00–19:00 · America/Sao_Paulo · Frequência 1 hora</p>
-            <p className="mt-1 text-slate-500">Backend: {data?.automaticSync?.initialized ? "inicializado" : "não inicializado"} · Auth: {authModeLabel(data?.automaticSync?.authMode)}</p>
+            <p className="mt-1 text-slate-500">Backend: {data?.automaticSync?.initialized ? "inicializado" : "não inicializado"} · Auth: {authModeLabel(data?.automaticSync?.authMode)} · Global: {data?.automaticSync?.authConfigured ? "sim" : "não"} · Vendedor referência: {data?.automaticSync?.referenceSellerConfigured ? "sim" : "não"}</p>
             {!data?.automaticSync?.enabledByEnv ? (
               <p className="mt-1 text-amber-700">ERP_SYNC_SCHEDULER_ENABLED desabilitada no ambiente.</p>
             ) : null}
@@ -655,7 +658,7 @@ export default function ErpIntegrationPanel() {
         </div>
         <p className="mt-3 text-sm text-slate-700">{authMode?.rationale || "Carregando diagnóstico de autenticação."}</p>
         <div className="mt-4 grid gap-3 text-xs md:grid-cols-4">
-          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Global .env</strong><span className="mt-1 block text-slate-600">{authMode?.hasGlobalCredentials ? "ULTRAFV3_USERNAME/PASSWORD configurados" : hasSellerFallback ? "Modo por vendedor disponível" : "Credencial global ausente"}</span></div>
+          <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Global .env</strong><span className="mt-1 block text-slate-600">{authMode?.hasGlobalCredentials ? "ULTRAFV3_USERNAME/PASSWORD configurados" : "Credencial global ausente"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Vínculo ERP</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withErpLink}/${authMode.sellers.total} vendedores` : "—"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Login FV3 vendedor</strong><span className="mt-1 block text-slate-600">{authMode ? `${authMode.sellers.withFv3Login}/${authMode.sellers.total} configurados` : "—"}</span></div>
           <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200"><strong>Criptografia</strong><span className="mt-1 block text-slate-600">{authMode?.encryptionKeyConfigured ? "ERP_CREDENTIAL_ENCRYPTION_KEY ativa" : "Chave não configurada"}</span></div>

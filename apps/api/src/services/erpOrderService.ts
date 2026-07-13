@@ -47,7 +47,8 @@ const logErpOrderRouteStage = (
 
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_MAX_LENGTH = 15;
-const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,15}$/;
+const NUM_PEDIDO_PATTERN = /^\d{1,15}$/;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ErpOrderSubmissionMutex {
   private tail: Promise<void> = Promise.resolve();
@@ -69,6 +70,10 @@ class ErpOrderSubmissionMutex {
 
 const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
 const erpOrderNumPedidoMutex = new ErpOrderSubmissionMutex();
+// Produção versionada em docker-compose possui um único serviço/processo `api`
+// sem replicas/cluster/PM2. Este mutex protege essa topologia. Se a API passar
+// a rodar em múltiplos processos/containers, substituir por advisory lock
+// PostgreSQL global envolvendo GET /salesmen e POST /orders.
 
 const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode">) => item.erpProductClassCode?.trim() || "";
 
@@ -449,8 +454,11 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
   if (typeof payload.OBS_PEDIDO !== "string") errors.push("OBS_PEDIDO deve ser string.");
   if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
-  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ter no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres alfanuméricos seguros.`);
-  if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
+  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ser string numérica com no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres.`);
+  else if (payload.NUM_PEDIDO === payload.PEDIDO_ID_IMPORTACAO) errors.push("NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO.");
+  else if (payload.NUM_PEDIDO.includes("-") || UUID_V4_PATTERN.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode conter UUID.");
+  else if (/^PMR/i.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode usar código interno PMR do CRM.");
+  if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !UUID_V4_PATTERN.test(payload.PEDIDO_ID_IMPORTACAO)) {
     errors.push("PEDIDO_ID_IMPORTACAO deve ser UUID v4.");
   }
   if (payload.TIPO_MOVIMENTO !== "PEDIDO") errors.push('TIPO_MOVIMENTO deve ser "PEDIDO".');
@@ -576,13 +584,35 @@ const extractErpOrderNumber = (payload: unknown) => {
   return visit(payload);
 };
 
-const generateShortNumPedido = () => {
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-8);
-  const random = Math.floor(Math.random() * 36 ** 5)
-    .toString(36)
-    .toUpperCase()
-    .padStart(5, "0");
-  return `P${timestamp}${random}`.slice(0, NUM_PEDIDO_MAX_LENGTH);
+const getFunctionalOrderErrorMessage = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const explicitSuccess = pickFirstString(record, ["success", "sucesso", "OK", "ok", "SUCCESS", "SUCESSO"]).toLowerCase();
+  const statusText = pickFirstString(record, ["status", "STATUS", "situacao", "SITUACAO", "resultado", "RESULTADO"]).toLowerCase();
+  const errorText = toUsefulText(record.error)
+    || toUsefulText(record.erro)
+    || toUsefulText(record.ERROR)
+    || toUsefulText(record.ERRO)
+    || toUsefulText(record.errors)
+    || toUsefulText(record.ERROS);
+  if (explicitSuccess && /^(false|0|n|nao|não)$/.test(explicitSuccess)) {
+    return errorText || "UltraFV3 retornou sucesso=false no corpo da resposta.";
+  }
+  if (statusText && /(erro|error|falha|failed|rejeit)/i.test(statusText)) {
+    return errorText || `UltraFV3 retornou status funcional de erro: ${statusText}.`;
+  }
+  if (errorText) return errorText;
+  for (const nestedKey of ["data", "response", "result", "retorno", "Retorno"]) {
+    const nestedError = getFunctionalOrderErrorMessage(record[nestedKey]);
+    if (nestedError) return nestedError;
+  }
+  return null;
+};
+
+const isUncertainErpOrderFailure = (sync: Pick<Prisma.ErpOrderSyncGetPayload<{}>, "syncErrors" | "erpResponse" | "status">) => {
+  if (sync.status === ErpOrderSyncStatus.pending) return true;
+  const text = JSON.stringify(sanitizeUltraValue(sync.syncErrors ?? sync.erpResponse ?? {}));
+  return /(\"status\":504|timeout|Timeout|fora do ar|inacessível|unavailable|ECONNRESET|network|AbortError|TimeoutError)/i.test(text);
 };
 
 type SalesmanOrderSequenceDiagnostics = {
@@ -998,7 +1028,7 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const salesmenNumPedido = String(sequenceResolution.numPedido || "");
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
-  const numPedido = generateShortNumPedido();
+  const numPedido = salesmenNumPedido;
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
   const erpLoginType = getErpLoginType(sellerFv3Username);
@@ -1044,7 +1074,11 @@ async function createErpOrderFromOpportunityUnsafe(
     );
   }
   if (!salesmenNumPedido) {
-    logApiEvent("WARN", "[erp order] /salesmen did not return a valid short NUM_PEDIDO; CRM generated a local short NUM_PEDIDO", operatorResolutionDiagnostics);
+    logApiEvent("WARN", "[erp order] /salesmen did not return a valid numeric NUMERO_PEDIDO; order submission blocked", operatorResolutionDiagnostics);
+    throw Object.assign(
+      new Error("UltraFV3 /salesmen não retornou NUMERO_PEDIDO numérico válido; envio bloqueado para evitar NUM_PEDIDO incorreto."),
+      { status: 422, diagnostics: sequenceResolution.diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
+    );
   }
 
   const itens = opportunity.items.map((item, index) => {
@@ -1186,6 +1220,28 @@ async function createErpOrderFromOpportunityUnsafe(
       );
     }
 
+    const uncertainSync = await tx.erpOrderSync.findFirst({
+      where: {
+        opportunityId: opportunity.id,
+        status: { in: [ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
+      },
+      orderBy: [{ createdAt: "desc" }],
+    });
+
+    if (uncertainSync && isUncertainErpOrderFailure(uncertainSync)) {
+      throw Object.assign(
+        new Error(
+          "Há uma tentativa de pedido ERP com resultado desconhecido/timeout. Reenvio bloqueado para evitar duplicidade; confira o UltraFV3 antes de nova tentativa.",
+        ),
+        {
+          status: 409,
+          existingErpOrderSyncId: uncertainSync.id,
+          pedidoIdImportacao: uncertainSync.pedidoIdImportacao,
+          numPedido: uncertainSync.numPedido,
+        },
+      );
+    }
+
     return tx.erpOrderSync.create({
       data: {
         opportunityId: opportunity.id,
@@ -1239,7 +1295,23 @@ async function createErpOrderFromOpportunityUnsafe(
       correlationId: pedidoIdImportacao,
       timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
     });
-    const erpOrderNumber = extractErpOrderNumber(erpResponse);
+    const functionalErrorMessage = getFunctionalOrderErrorMessage(erpResponse);
+    if (functionalErrorMessage) {
+      throw Object.assign(new Error(`UltraFV3 retornou erro funcional no POST /orders: ${functionalErrorMessage}`), {
+        status: 502,
+        endpoint: "/orders",
+        diagnostics: {
+          status: 200,
+          endpoint: "/orders",
+          method: "POST",
+          message: functionalErrorMessage,
+          ultraResponse: erpResponse,
+          correlationId: pedidoIdImportacao,
+          timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
+        },
+      });
+    }
+    const erpOrderNumber = extractErpOrderNumber(erpResponse) || numPedido;
     const updated = await prisma.erpOrderSync.update({
       where: { id: sync.id },
       data: {

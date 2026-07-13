@@ -79,7 +79,7 @@ import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionCo
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
-import { refreshErpAutomaticSyncConfig, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
+import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 
@@ -8778,6 +8778,11 @@ router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), as
 
 router.patch("/erp/ultrafv3/sync/automatic", authorize("diretor", "gerente"), validateBody(z.object({ enabled: z.boolean() })), async (req, res) => {
   const automaticSync = await setErpAutomaticSyncEnabled(req.body.enabled);
+  return res.status(200).json({ automaticSync });
+});
+
+router.post("/erp-sync/automatic/run-now", authorize("diretor", "gerente"), async (_req, res) => {
+  const automaticSync = await runAutomaticErpSyncNow();
   return res.status(200).json({ automaticSync });
 });
 

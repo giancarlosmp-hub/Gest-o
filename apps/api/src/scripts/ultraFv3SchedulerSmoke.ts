@@ -18,8 +18,14 @@ assert.match(scheduler, /\[ultrafv3 scheduler\] run started/, "Scheduler deve re
 assert.match(scheduler, /\[ultrafv3 scheduler\] run finished/, "Scheduler deve registrar fim de execução");
 assert.match(scheduler, /trigger:\s*ErpSyncTrigger\.scheduler/, "Execução real deve persistir ErpSyncRun com trigger scheduler");
 assert.match(scheduler, /authMode:\s*"seller_reference"/, "Scheduler deve aceitar modo por vendedor sem credencial global");
+assert.match(scheduler, /alive but UltraFV3 is not configured/, "Scheduler deve permanecer vivo e reportar configuração ausente");
+assert.match(scheduler, /lastTickAt/, "Status deve expor lastTickAt");
+assert.match(scheduler, /authConfigured/, "Status deve expor authConfigured sem credenciais");
+assert.match(scheduler, /referenceSellerConfigured/, "Status deve expor se há vendedor de referência");
+assert.match(scheduler, /runAutomaticErpSyncNow/, "Run-now deve reutilizar a execução do scheduler");
 assert.match(scheduler, /saveAutomaticSyncPersistedConfig\(\{ enabled: false \}\)/, "Ausência de AppConfig deve criar default seguro enabled=false");
 assert.match(routes, /\/erp\/ultrafv3\/scheduler\/status/, "Backend deve expor status real do scheduler");
+assert.match(routes, /\/erp-sync\/automatic\/run-now/, "Backend deve expor run-now restrito para testar scheduler");
 assert.match(panel, /lastRealSchedulerSuccessRecent/, "UI deve diferenciar sucesso scheduler real recente de histórico antigo");
 assert.doesNotMatch(panel, /Executada com sucesso[\s\S]*Próxima execução prevista[\s\S]*statusLabel \|\|/, "UI não deve inferir sucesso visual sem estado real do backend");
 
