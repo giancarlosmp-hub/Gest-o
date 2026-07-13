@@ -88,3 +88,14 @@ Campos comerciais date-only eram tratados no frontend com `new Date(value)` e fo
 - Risco de datas: baixo; mudança concentrada em renderização/parse frontend date-only, sem migration.
 
 Rollback: reverter o commit desta PR. Em produção, caso pedidos sejam bloqueados por `NUMERO_PEDIDO` ausente, validar `/salesmen` e credenciais do vendedor antes de liberar novo envio.
+
+## 7. Revisão técnica final conservadora
+
+- Formato confirmado no código para `GET /salesmen`: o resolvedor procura `NUMERO_PEDIDO` em `body.data.NUMERO_PEDIDO`, `body.NUMERO_PEDIDO`, `body.response.data.NUMERO_PEDIDO` e `body.data.data.NUMERO_PEDIDO`; a lista de vendedores fica em `SALESMAN` no mesmo envelope e é usada apenas para casar `CODVENDEDOR`/`OPERADOR` do responsável. O contador `NUMERO_PEDIDO` é tratado como global da resposta autenticada, não como campo do primeiro vendedor.
+- A chamada real protegida permanece: lock em processo -> autenticação/renovação de credencial do vendedor -> `GET /salesmen` com `forceRefresh` e sem cache -> extração/validação de `NUMERO_PEDIDO` -> montagem/validação do payload -> persistência `pending` -> `POST /orders` -> validação funcional do corpo -> persistência `sent` somente após confirmação -> `finally` liberando lock.
+- Idempotência: `PEDIDO_ID_IMPORTACAO` é persistido com o registro `pending` antes do `POST /orders`. Em timeout/resultado desconhecido, uma nova tentativa cega da mesma oportunidade é bloqueada com mensagem para conferência no UltraFV3. Erros funcionais confirmados continuam registrados como `error` para análise. Um pedido legítimo novo só é permitido quando não há sucesso nem tentativa incerta pendente.
+- Concorrência: o `docker-compose.yml` versionado possui um único serviço `api`, sem `replicas`, cluster ou PM2. O mutex em memória é suficiente para essa topologia; se houver múltiplos processos/containers no futuro, o lock deve ser promovido para advisory lock PostgreSQL global.
+- Resposta de `/orders`: HTTP não-2xx continua falhando no client; HTTP 200 agora também é validado contra erro funcional no corpo (`error/erro`, `success=false`, `status=erro/falha`). O CRM persiste como `erpOrderNumber` o número explícito retornado pelo ERP ou, se ausente, o próprio `NUM_PEDIDO` sequencial utilizado.
+- Scheduler: `run-now` chama `executeAutomaticErpSync`, o mesmo serviço do tick. A flag `automaticSyncRunning` impede execução paralela e volta a `false` em `finally`. Configuração ausente gera skip/status visível, não chamadas inválidas em loop.
+- Autenticação do scheduler: o status diferencia credencial global (`authConfigured`), credencial por vendedor/vendedor referência (`referenceSellerConfigured`) e `missingConfig`, sem expor senha, token ou valor criptografado.
+- Date-only: a revisão removeu `new Date(value).toISOString().slice(0, 10)` de `toDateInput`; strings `YYYY-MM-DD` são reaproveitadas diretamente, e a formatação pt-BR usa componentes da string, sem deslocamento de timezone.

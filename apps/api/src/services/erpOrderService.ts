@@ -70,6 +70,10 @@ class ErpOrderSubmissionMutex {
 
 const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
 const erpOrderNumPedidoMutex = new ErpOrderSubmissionMutex();
+// Produção versionada em docker-compose possui um único serviço/processo `api`
+// sem replicas/cluster/PM2. Este mutex protege essa topologia. Se a API passar
+// a rodar em múltiplos processos/containers, substituir por advisory lock
+// PostgreSQL global envolvendo GET /salesmen e POST /orders.
 
 const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode">) => item.erpProductClassCode?.trim() || "";
 
@@ -578,6 +582,37 @@ const extractErpOrderNumber = (payload: unknown) => {
     return null;
   };
   return visit(payload);
+};
+
+const getFunctionalOrderErrorMessage = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const explicitSuccess = pickFirstString(record, ["success", "sucesso", "OK", "ok", "SUCCESS", "SUCESSO"]).toLowerCase();
+  const statusText = pickFirstString(record, ["status", "STATUS", "situacao", "SITUACAO", "resultado", "RESULTADO"]).toLowerCase();
+  const errorText = toUsefulText(record.error)
+    || toUsefulText(record.erro)
+    || toUsefulText(record.ERROR)
+    || toUsefulText(record.ERRO)
+    || toUsefulText(record.errors)
+    || toUsefulText(record.ERROS);
+  if (explicitSuccess && /^(false|0|n|nao|não)$/.test(explicitSuccess)) {
+    return errorText || "UltraFV3 retornou sucesso=false no corpo da resposta.";
+  }
+  if (statusText && /(erro|error|falha|failed|rejeit)/i.test(statusText)) {
+    return errorText || `UltraFV3 retornou status funcional de erro: ${statusText}.`;
+  }
+  if (errorText) return errorText;
+  for (const nestedKey of ["data", "response", "result", "retorno", "Retorno"]) {
+    const nestedError = getFunctionalOrderErrorMessage(record[nestedKey]);
+    if (nestedError) return nestedError;
+  }
+  return null;
+};
+
+const isUncertainErpOrderFailure = (sync: Pick<Prisma.ErpOrderSyncGetPayload<{}>, "syncErrors" | "erpResponse" | "status">) => {
+  if (sync.status === ErpOrderSyncStatus.pending) return true;
+  const text = JSON.stringify(sanitizeUltraValue(sync.syncErrors ?? sync.erpResponse ?? {}));
+  return /(\"status\":504|timeout|Timeout|fora do ar|inacessível|unavailable|ECONNRESET|network|AbortError|TimeoutError)/i.test(text);
 };
 
 type SalesmanOrderSequenceDiagnostics = {
@@ -1185,6 +1220,28 @@ async function createErpOrderFromOpportunityUnsafe(
       );
     }
 
+    const uncertainSync = await tx.erpOrderSync.findFirst({
+      where: {
+        opportunityId: opportunity.id,
+        status: { in: [ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
+      },
+      orderBy: [{ createdAt: "desc" }],
+    });
+
+    if (uncertainSync && isUncertainErpOrderFailure(uncertainSync)) {
+      throw Object.assign(
+        new Error(
+          "Há uma tentativa de pedido ERP com resultado desconhecido/timeout. Reenvio bloqueado para evitar duplicidade; confira o UltraFV3 antes de nova tentativa.",
+        ),
+        {
+          status: 409,
+          existingErpOrderSyncId: uncertainSync.id,
+          pedidoIdImportacao: uncertainSync.pedidoIdImportacao,
+          numPedido: uncertainSync.numPedido,
+        },
+      );
+    }
+
     return tx.erpOrderSync.create({
       data: {
         opportunityId: opportunity.id,
@@ -1238,7 +1295,23 @@ async function createErpOrderFromOpportunityUnsafe(
       correlationId: pedidoIdImportacao,
       timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
     });
-    const erpOrderNumber = extractErpOrderNumber(erpResponse);
+    const functionalErrorMessage = getFunctionalOrderErrorMessage(erpResponse);
+    if (functionalErrorMessage) {
+      throw Object.assign(new Error(`UltraFV3 retornou erro funcional no POST /orders: ${functionalErrorMessage}`), {
+        status: 502,
+        endpoint: "/orders",
+        diagnostics: {
+          status: 200,
+          endpoint: "/orders",
+          method: "POST",
+          message: functionalErrorMessage,
+          ultraResponse: erpResponse,
+          correlationId: pedidoIdImportacao,
+          timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
+        },
+      });
+    }
+    const erpOrderNumber = extractErpOrderNumber(erpResponse) || numPedido;
     const updated = await prisma.erpOrderSync.update({
       where: { id: sync.id },
       data: {

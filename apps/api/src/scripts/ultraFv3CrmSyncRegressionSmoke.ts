@@ -80,5 +80,8 @@ assert.match(orderService, /NUM_PEDIDO não pode usar código interno PMR/, "Val
 assert.match(orderService, /não retornou NUMERO_PEDIDO numérico válido/, "Ausência de NUMERO_PEDIDO deve bloquear envio");
 assert.match(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Envio real deve ser serializado para evitar concorrência no NUMERO_PEDIDO global");
 assert.match(orderService, /finally[\s\S]*released global UltraFV3 submission lock/, "Falha do UltraFV3 deve liberar lock em finally");
+assert.match(orderService, /resultado desconhecido\/timeout/, "Timeout/resultado desconhecido deve bloquear reenvio cego");
+assert.match(orderService, /getFunctionalOrderErrorMessage/, "HTTP 200 com erro funcional deve ser validado antes de marcar pedido como enviado");
+assert.match(orderService, /extractErpOrderNumber\(erpResponse\) \|\| numPedido/, "Número oficial salvo deve cair para o NUM_PEDIDO sequencial usado quando o ERP não retorna outro número explícito");
 
 console.log("UltraFV3 CRM sync regression smoke passed");
