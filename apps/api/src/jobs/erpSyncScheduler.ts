@@ -95,6 +95,9 @@ type AutomaticSyncState = {
   windowEndHour: number;
   intervalMs: number;
   isRunning: boolean;
+  running: boolean;
+  lastTickAt: string | null;
+  lastStartedAt: string | null;
   lastRunAt: string | null;
   lastSuccessAt: string | null;
   lastRealSchedulerRunAt: string | null;
@@ -103,6 +106,12 @@ type AutomaticSyncState = {
   lastFinishedAt: string | null;
   nextRunAt: string | null;
   lastError: string | null;
+  lastErrorAt: string | null;
+  window: string;
+  frequencyMinutes: number;
+  authConfigured: boolean;
+  referenceSellerConfigured: boolean;
+  missingConfig: string[];
   currentRunId: string | null;
   lastCorrelationId: string | null;
   lastSkippedReason: AutomaticSyncSkipReason;
@@ -132,6 +141,7 @@ let lastAutomaticError: string | null = null;
 let currentAutomaticRunId: string | null = null;
 let lastAutomaticCorrelationId: string | null = null;
 let lastAutomaticSkippedReason: AutomaticSyncSkipReason = null;
+let lastAutomaticTickAt: Date | null = null;
 let persistedAutomaticSyncEnabled = false;
 let automaticSchedulerInitialized = false;
 let lastSchedulerAuthMode: SchedulerAuthMode = "none";
@@ -304,6 +314,7 @@ async function loadLatestAutomaticRunSummary() {
 
 async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   const schedulerTickAt = new Date();
+  lastAutomaticTickAt = schedulerTickAt;
   const tickMetadataBase = {
     schedulerTickAt: schedulerTickAt.toISOString(),
     scheduledFor: scheduledFor?.toISOString() ?? null,
@@ -657,13 +668,13 @@ export async function startErpSyncScheduler() {
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent(
       "WARN",
-      "[erp automatic sync] disabled because UltraFV3 is not configured",
+      "[erp automatic sync] alive but UltraFV3 is not configured",
       {
         missingConfig: diagnostics.missingConfig,
+        nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
         operationalAlert: true,
       },
     );
-    return;
   }
 
   if (automaticTimer) return;
@@ -702,8 +713,7 @@ export async function refreshErpAutomaticSyncConfig() {
   if (config.enabled && env.erpSyncSchedulerEnabled && !automaticTimer) {
     const configuration = await getAutomaticSyncConfigurationStatus();
     lastSchedulerAuthMode = configuration.authMode;
-    if (configuration.ok)
-      nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(new Date());
   }
   return getErpAutomaticSyncState();
 }
@@ -781,6 +791,9 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
     windowEndHour: AUTOMATIC_SYNC_END_HOUR,
     intervalMs: AUTOMATIC_SYNC_INTERVAL_MS,
     isRunning: automaticSyncRunning,
+    running: automaticSyncRunning,
+    lastTickAt: lastAutomaticTickAt?.toISOString() ?? null,
+    lastStartedAt: (lastAutomaticRunAt ?? latestAttempt?.startedAt)?.toISOString() ?? null,
     lastRunAt:
       (latestFinished?.startedAt ?? lastAutomaticRunAt)?.toISOString() ?? null,
     lastSuccessAt: lastSuccessTime?.toISOString() ?? null,
@@ -792,6 +805,12 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
       null,
     nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,
     lastError: latestAttempt?.errorMessage ?? lastAutomaticError,
+    lastErrorAt: (latestAttempt?.status === ErpSyncRunStatus.error ? latestAttempt.finishedAt ?? latestAttempt.startedAt : null)?.toISOString() ?? (lastAutomaticError ? lastAutomaticFinishedAt?.toISOString() ?? null : null),
+    window: "07:00-19:00",
+    frequencyMinutes: Math.round(AUTOMATIC_SYNC_INTERVAL_MS / 60000),
+    authConfigured: configuration.authMode === "global",
+    referenceSellerConfigured: configuration.authMode === "seller_reference",
+    missingConfig: configuration.diagnostics.missingConfig,
     currentRunId: currentAutomaticRunId,
     lastCorrelationId:
       lastAutomaticCorrelationId ?? latestAttempt?.correlationId ?? null,
@@ -807,6 +826,14 @@ export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
     authMode: configuration.authMode,
     configurationOk: configuration.ok,
   };
+}
+
+export async function runAutomaticErpSyncNow() {
+  if (!automaticSchedulerInitialized) {
+    await startErpSyncScheduler();
+  }
+  await executeAutomaticErpSync(new Date());
+  return getErpAutomaticSyncState();
 }
 
 export const erpSyncSchedulerDefaults = {

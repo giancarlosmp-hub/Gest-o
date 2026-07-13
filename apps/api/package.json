@@ -26,7 +26,8 @@
     "erp:fix-archived-flag": "node dist/scripts/erpFixArchivedFlag.js",
     "smoke:commercial-automations": "tsx src/scripts/commercialAutomationsSmoke.ts",
     "smoke:ai": "tsx src/scripts/aiSmoke.ts",
-    "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts"
+    "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts",
+    "smoke:date-only": "tsx src/scripts/dateOnlySmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

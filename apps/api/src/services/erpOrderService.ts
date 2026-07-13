@@ -47,7 +47,8 @@ const logErpOrderRouteStage = (
 
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_MAX_LENGTH = 15;
-const NUM_PEDIDO_PATTERN = /^[A-Za-z0-9._/-]{1,15}$/;
+const NUM_PEDIDO_PATTERN = /^\d{1,15}$/;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ErpOrderSubmissionMutex {
   private tail: Promise<void> = Promise.resolve();
@@ -449,8 +450,11 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
   if (typeof payload.OBS_PEDIDO !== "string") errors.push("OBS_PEDIDO deve ser string.");
   if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
-  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ter no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres alfanuméricos seguros.`);
-  if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.PEDIDO_ID_IMPORTACAO)) {
+  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ser string numérica com no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres.`);
+  else if (payload.NUM_PEDIDO === payload.PEDIDO_ID_IMPORTACAO) errors.push("NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO.");
+  else if (payload.NUM_PEDIDO.includes("-") || UUID_V4_PATTERN.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode conter UUID.");
+  else if (/^PMR/i.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode usar código interno PMR do CRM.");
+  if (typeof payload.PEDIDO_ID_IMPORTACAO !== "string" || !UUID_V4_PATTERN.test(payload.PEDIDO_ID_IMPORTACAO)) {
     errors.push("PEDIDO_ID_IMPORTACAO deve ser UUID v4.");
   }
   if (payload.TIPO_MOVIMENTO !== "PEDIDO") errors.push('TIPO_MOVIMENTO deve ser "PEDIDO".');
@@ -574,15 +578,6 @@ const extractErpOrderNumber = (payload: unknown) => {
     return null;
   };
   return visit(payload);
-};
-
-const generateShortNumPedido = () => {
-  const timestamp = Date.now().toString(36).toUpperCase().slice(-8);
-  const random = Math.floor(Math.random() * 36 ** 5)
-    .toString(36)
-    .toUpperCase()
-    .padStart(5, "0");
-  return `P${timestamp}${random}`.slice(0, NUM_PEDIDO_MAX_LENGTH);
 };
 
 type SalesmanOrderSequenceDiagnostics = {
@@ -998,7 +993,7 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const salesmenNumPedido = String(sequenceResolution.numPedido || "");
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
-  const numPedido = generateShortNumPedido();
+  const numPedido = salesmenNumPedido;
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
   const erpLoginType = getErpLoginType(sellerFv3Username);
@@ -1044,7 +1039,11 @@ async function createErpOrderFromOpportunityUnsafe(
     );
   }
   if (!salesmenNumPedido) {
-    logApiEvent("WARN", "[erp order] /salesmen did not return a valid short NUM_PEDIDO; CRM generated a local short NUM_PEDIDO", operatorResolutionDiagnostics);
+    logApiEvent("WARN", "[erp order] /salesmen did not return a valid numeric NUMERO_PEDIDO; order submission blocked", operatorResolutionDiagnostics);
+    throw Object.assign(
+      new Error("UltraFV3 /salesmen não retornou NUMERO_PEDIDO numérico válido; envio bloqueado para evitar NUM_PEDIDO incorreto."),
+      { status: 422, diagnostics: sequenceResolution.diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
+    );
   }
 
   const itens = opportunity.items.map((item, index) => {

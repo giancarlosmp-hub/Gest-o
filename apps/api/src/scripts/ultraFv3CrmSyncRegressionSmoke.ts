@@ -70,4 +70,15 @@ assert.match(syncService, /product PRECO fallback preserved/, "Sync de preços n
 assert.match(syncService, /productCandidates\.length === 1 \? productCandidates\[0\]/, "Sync de preços deve atualizar candidato único seguro mesmo com classificação divergente ou ausente");
 assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s\S]*\{ scope: "prices"/, "Sincronização completa deve rodar Produtos antes de Preços");
 
+const orderService = readFileSync(new URL("../services/erpOrderService.ts", import.meta.url), "utf8");
+assert.match(orderService, /const NUM_PEDIDO_PATTERN = \/\^\\d\{1,15\}\$\//, "NUM_PEDIDO deve aceitar apenas string numérica de até 15 caracteres");
+assert.match(orderService, /const numPedido = salesmenNumPedido;/, "NUM_PEDIDO deve vir exclusivamente do NUMERO_PEDIDO retornado por /salesmen");
+assert.doesNotMatch(orderService, /generateShortNumPedido/, "CRM não pode gerar fallback PMR/P* para NUM_PEDIDO");
+assert.match(orderService, /PEDIDO_ID_IMPORTACAO: pedidoIdImportacao/, "PEDIDO_ID_IMPORTACAO deve continuar usando UUID separado");
+assert.match(orderService, /NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO/, "Validação deve bloquear NUM_PEDIDO igual ao UUID de importação");
+assert.match(orderService, /NUM_PEDIDO não pode usar código interno PMR/, "Validação deve bloquear código interno PMR em NUM_PEDIDO");
+assert.match(orderService, /não retornou NUMERO_PEDIDO numérico válido/, "Ausência de NUMERO_PEDIDO deve bloquear envio");
+assert.match(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Envio real deve ser serializado para evitar concorrência no NUMERO_PEDIDO global");
+assert.match(orderService, /finally[\s\S]*released global UltraFV3 submission lock/, "Falha do UltraFV3 deve liberar lock em finally");
+
 console.log("UltraFV3 CRM sync regression smoke passed");

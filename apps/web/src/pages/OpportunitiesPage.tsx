@@ -287,6 +287,8 @@ const shouldLogOpportunityDiagnostics = import.meta.env.MODE !== "production";
 
 function toDateInput(value?: string | null) {
   if (!value) return "";
+  const dateOnly = value.match(/^(\d{4}-\d{2}-\d{2})(?:T.*)?$/);
+  if (dateOnly) return dateOnly[1];
   return new Date(value).toISOString().slice(0, 10);
 }
 
@@ -300,7 +302,10 @@ function sanitizeNumericInput(value: string, allowDecimal = true) {
 
 function toDayStart(dateLike?: string | null) {
   if (!dateLike) return null;
-  const date = new Date(dateLike);
+  const dateOnly = dateLike.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(dateLike);
   if (Number.isNaN(date.getTime())) return null;
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
@@ -1706,8 +1711,14 @@ export default function OpportunitiesPage() {
               <option value="">Todas culturas</option>
               {cropOptions.map((crop) => <option key={crop} value={crop}>{crop}</option>)}
             </select>
-            <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
-            <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm lg:col-span-2" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Data de entrada — de
+              <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-900" value={filters.dateFrom} onChange={(e) => setFilters((prev) => ({ ...prev, dateFrom: e.target.value }))} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 lg:col-span-2">
+              Data de entrada — até
+              <input type="date" className="h-10 rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-900" value={filters.dateTo} onChange={(e) => setFilters((prev) => ({ ...prev, dateTo: e.target.value }))} />
+            </label>
             <label className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 lg:col-span-2">
               <input type="checkbox" checked={filters.overdue} onChange={(e) => setFilters((prev) => ({ ...prev, overdue: e.target.checked }))} />Somente atrasadas
             </label>
