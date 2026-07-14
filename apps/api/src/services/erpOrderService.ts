@@ -47,7 +47,7 @@ const logErpOrderRouteStage = (
 
 const ERP_ORDER_ADVISORY_LOCK_NAMESPACE = 73_001;
 const NUM_PEDIDO_MAX_LENGTH = 15;
-const NUM_PEDIDO_PATTERN = /^\d{1,15}$/;
+export const NUM_PEDIDO_PATTERN = /^\d{1,15}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class ErpOrderSubmissionMutex {
@@ -454,7 +454,7 @@ export const validateUltraFv3OrderPayload = (payload: UltraFv3OrderPayload) => {
   if (typeof payload.OBS_PEDIDO !== "string") errors.push("OBS_PEDIDO deve ser string.");
   if (payload.OBSERVACAO_INTERNA !== null) errors.push("OBSERVACAO_INTERNA deve ser null.");
   if (typeof payload.NUM_PEDIDO !== "string") errors.push("NUM_PEDIDO deve ser string.");
-  else if (!NUM_PEDIDO_PATTERN.test(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ser string numérica com no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres.`);
+  else if (!normalizeUltraFv3OrderNumber(payload.NUM_PEDIDO)) errors.push(`NUM_PEDIDO deve ser string numérica maior que zero, sem zeros à esquerda e com no máximo ${NUM_PEDIDO_MAX_LENGTH} caracteres.`);
   else if (payload.NUM_PEDIDO === payload.PEDIDO_ID_IMPORTACAO) errors.push("NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO.");
   else if (payload.NUM_PEDIDO.includes("-") || UUID_V4_PATTERN.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode conter UUID.");
   else if (/^PMR/i.test(payload.NUM_PEDIDO)) errors.push("NUM_PEDIDO não pode usar código interno PMR do CRM.");
@@ -666,6 +666,7 @@ const SALESMAN_CODE_KEYS = [
   "COD_VENDEDOR",
   "CODVEN",
 ];
+const SALESMAN_NUM_PEDIDO_KEYS = ["NUMERO_PEDIDO", "NUM_PEDIDO", "numPedido", "numeroPedido"];
 const SALESMAN_OPERATOR_KEYS = [
   "OPERADOR",
   "CODOPERADOR",
@@ -764,28 +765,108 @@ const getNestedRecord = (payload: unknown, path: string[]) => {
     : null;
 };
 
-const resolveSalesmenPayload = (body: unknown) => {
-  const candidates = [
-    { record: getNestedRecord(body, ["data"]), path: "body.data" },
-    { record: getNestedRecord(body, []), path: "body" },
-    { record: getNestedRecord(body, ["response", "data"]), path: "body.response.data" },
-    { record: getNestedRecord(body, ["data", "data"]), path: "body.data.data" },
-  ];
-  let numeroPedido = "";
-  let numeroPedidoPathUsed: string | null = null;
-  let salesmen: unknown[] = [];
-  for (const candidate of candidates) {
-    if (!candidate.record) continue;
-    if (!numeroPedido) {
-      const value = pickFirstString(candidate.record, ["NUMERO_PEDIDO"]);
-      if (value) {
-        numeroPedido = value;
-        numeroPedidoPathUsed = `${candidate.path}.NUMERO_PEDIDO`;
-      }
-    }
-    if (!salesmen.length && Array.isArray(candidate.record.SALESMAN)) salesmen = candidate.record.SALESMAN;
+export type RequestedSalesmanContext = { sellerErpCode: string };
+export type ResolvedSalesmenOrderContext = { numeroPedido: string; operador: number; codVendedor: number; selectedPath: string };
+
+export function normalizeUltraFv3OrderNumber(value: unknown): string {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const text = String(value).trim();
+  const parsed = Number(text);
+  if (!NUM_PEDIDO_PATTERN.test(text) || !Number.isSafeInteger(parsed) || parsed <= 0) return "";
+  if (text.length > 1 && text.startsWith("0")) return "";
+  return text;
+}
+
+const visitSalesmenRecords = (node: unknown, path: string, output: Array<{ path: string; record: Record<string, unknown> }>, depth = 0) => {
+  if (depth > 5 || node === null || node === undefined) return;
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => visitSalesmenRecords(item, `${path}[${index}]`, output, depth + 1));
+    return;
   }
-  return { numeroPedido, numeroPedidoPathUsed, salesmen };
+  if (typeof node !== "object") return;
+  const record = node as Record<string, unknown>;
+  const hasSalesmanFields = SALESMAN_NUM_PEDIDO_KEYS.some((key) => record[key] !== undefined)
+    || SALESMAN_CODE_KEYS.some((key) => record[key] !== undefined)
+    || SALESMAN_OPERATOR_KEYS.some((key) => record[key] !== undefined);
+  if (hasSalesmanFields) output.push({ path, record });
+  const envelopeNumeroPedido = pickFirstString(record, SALESMAN_NUM_PEDIDO_KEYS);
+  if (envelopeNumeroPedido && Array.isArray(record.SALESMAN)) {
+    record.SALESMAN.forEach((item, index) => {
+      if (item && typeof item === "object" && !Array.isArray(item)) {
+        output.push({ path: `${path}.SALESMAN[${index}]`, record: { NUMERO_PEDIDO: envelopeNumeroPedido, ...(item as Record<string, unknown>) } });
+      }
+    });
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (["data", "response", "SALESMAN", "salesmen", "items", "rows", "results", "content"].includes(key) || Array.isArray(value)) {
+      visitSalesmenRecords(value, `${path}.${key}`, output, depth + 1);
+    }
+  }
+};
+
+export function resolveSalesmenOrderContext(response: unknown, requestedSeller: RequestedSalesmanContext): ResolvedSalesmenOrderContext {
+  const records: Array<{ path: string; record: Record<string, unknown> }> = [];
+  visitSalesmenRecords(response, "body", records);
+  const candidates = records.map(({ path, record }) => {
+    const numeroPedidoPick = pickFirstStringWithKey(record, SALESMAN_NUM_PEDIDO_KEYS);
+    const operatorPick = pickFirstStringWithKey(record, SALESMAN_OPERATOR_KEYS);
+    const codePick = pickFirstStringWithKey(record, SALESMAN_CODE_KEYS);
+    return { path, numeroPedido: normalizeUltraFv3OrderNumber(numeroPedidoPick.value), operador: operatorPick.value, codVendedor: codePick.value, match: getSalesmanCodeMatch(record, requestedSeller.sellerErpCode) };
+  });
+  const valid = candidates.filter((candidate) => candidate.numeroPedido && candidate.operador && candidate.codVendedor && candidate.match.matched);
+  const exact = valid.filter((candidate) => candidate.match.mode === "exact");
+  const selectedPool = exact.length ? exact : valid;
+  if (selectedPool.length !== 1) {
+    throw Object.assign(new Error(selectedPool.length ? "erp_ambiguous_salesman_order_number" : "erp_invalid_order_number"), {
+      code: selectedPool.length ? "erp_ambiguous_salesman_order_number" : "erp_invalid_order_number",
+      candidates: candidates.map((candidate) => ({ path: candidate.path, numeroPedido: candidate.numeroPedido || null, codVendedor: candidate.codVendedor || null, operador: candidate.operador || null, matched: candidate.match.matched, matchMode: candidate.match.mode })),
+    });
+  }
+  const selected = selectedPool[0];
+  return { numeroPedido: selected.numeroPedido, operador: Number(selected.operador), codVendedor: Number(selected.codVendedor), selectedPath: selected.path };
+}
+
+export function buildSalesmenDiagnostic(response: unknown, requestedSeller: RequestedSalesmanContext, httpStatus = 200) {
+  const records: Array<{ path: string; record: Record<string, unknown> }> = [];
+  visitSalesmenRecords(response, "body", records);
+  let selected: ResolvedSalesmenOrderContext | null = null;
+  let selectionReason = "not_selected";
+  try {
+    selected = resolveSalesmenOrderContext(response, requestedSeller);
+    selectionReason = "matched_requested_seller";
+  } catch (error) {
+    selectionReason = error instanceof Error ? error.message : "selection_failed";
+  }
+  const root = response && typeof response === "object" ? response as Record<string, unknown> : null;
+  const data = root && root.data && typeof root.data === "object" && !Array.isArray(root.data) ? root.data as Record<string, unknown> : null;
+  return {
+    httpStatus,
+    rootType: Array.isArray(response) ? "array" : typeof response,
+    rootKeys: root && !Array.isArray(root) ? Object.keys(root).slice(0, 40) : [],
+    dataKeys: data ? Object.keys(data).slice(0, 40) : [],
+    recordsCount: records.length,
+    requestedSeller: requestedSeller.sellerErpCode,
+    candidatePaths: records.slice(0, 50).map(({ path, record }) => ({
+      path,
+      keys: Object.keys(record).slice(0, 60),
+      codVendedor: pickFirstString(record, SALESMAN_CODE_KEYS) || null,
+      codVendedorType: typeof record[SALESMAN_CODE_KEYS.find((key) => record[key] !== undefined) || ""],
+      operador: pickFirstString(record, SALESMAN_OPERATOR_KEYS) || null,
+      operadorType: typeof record[SALESMAN_OPERATOR_KEYS.find((key) => record[key] !== undefined) || ""],
+      numeroPedido: pickFirstString(record, SALESMAN_NUM_PEDIDO_KEYS) || null,
+      numeroPedidoType: typeof record[SALESMAN_NUM_PEDIDO_KEYS.find((key) => record[key] !== undefined) || ""],
+    })),
+    selectedPath: selected?.selectedPath ?? null,
+    selectedNumeroPedido: selected?.numeroPedido ?? null,
+    selectionReason,
+  };
+}
+
+const resolveSalesmenPayload = (body: unknown, sellerErpCode: string) => {
+  const records: Array<{ path: string; record: Record<string, unknown> }> = [];
+  visitSalesmenRecords(body, "body", records);
+  const context = resolveSalesmenOrderContext(body, { sellerErpCode });
+  return { numeroPedido: context.numeroPedido, numeroPedidoPathUsed: `${context.selectedPath}.NUMERO_PEDIDO`, salesmen: records.map((entry) => entry.record), selectedPath: context.selectedPath };
 };
 
 async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?: UltraFv3Credentials; correlationId?: string } = {}) {
@@ -824,7 +905,7 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
 
 async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   const body = await loadSalesmenBody({ forceRefresh: true, credentials, correlationId });
-  const { numeroPedido, numeroPedidoPathUsed, salesmen } = resolveSalesmenPayload(body);
+  const { numeroPedido, numeroPedidoPathUsed, salesmen, selectedPath } = resolveSalesmenPayload(body, context.sellerErpCode);
   const matchedEntry = salesmen
     .map((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) return { row: null, match: { matched: false, code: null, field: null, mode: null } };
@@ -842,7 +923,7 @@ async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequence
     ? pickFirstStringWithKey(matchedSalesman, SALESMAN_LOGIN_KEYS)
     : { value: "", key: null };
   const operatorCode = operatorPick.value;
-  const validNumeroPedido = NUM_PEDIDO_PATTERN.test(numeroPedido) ? numeroPedido : "";
+  const validNumeroPedido = normalizeUltraFv3OrderNumber(numeroPedido);
   const diagnostics: SalesmanOrderSequenceDiagnostics = {
     endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
     sellerId: context.sellerId,
@@ -854,7 +935,7 @@ async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequence
     firstSellerCodesReceived: collectFirstSalesmanCodes(salesmen),
     availableSellerCodeFields: collectSalesmanCodeFields(salesmen),
     hasNumeroPedido: Boolean(validNumeroPedido),
-    numeroPedidoPathUsed,
+    numeroPedidoPathUsed: selectedPath ? `${selectedPath}.NUMERO_PEDIDO` : numeroPedidoPathUsed,
     matchedSalesmanFound: Boolean(matchedSalesman),
     matchedSalesmanCode: matchedEntry?.match.code ?? null,
     matchedSalesmanCodeField: matchedEntry?.match.field ?? null,
@@ -865,13 +946,13 @@ async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequence
     operatorFieldUsed: operatorPick.key,
     comparisonMode: matchedEntry?.match.mode ?? null,
   };
-  logApiEvent(validNumeroPedido && matchedSalesman && operatorCode ? "INFO" : "WARN", "[erp order] resolved UltraFV3 salesman order sequence", diagnostics);
+  logApiEvent(validNumeroPedido && matchedSalesman && operatorCode ? "INFO" : "WARN", "[ultrafv3/order] order-number-selected", diagnostics);
   return { numPedido: validNumeroPedido, operatorCode, diagnostics };
 }
 
 async function resolveSalesmanOrderSequence(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   return erpOrderNumPedidoMutex.runExclusive(async () => {
-    logApiEvent("INFO", "[erp order] acquired NUM_PEDIDO generation lock", {
+    logApiEvent("INFO", "[ultrafv3/order] lock-acquired", {
       sellerId: context.sellerId,
       sellerName: context.sellerName,
       sellerErpCode: context.sellerErpCode,
@@ -882,7 +963,7 @@ async function resolveSalesmanOrderSequence(context: SalesmanOrderSequenceContex
     try {
       return await resolveSalesmanOrderSequenceUnsafe(context, credentials, correlationId);
     } finally {
-      logApiEvent("INFO", "[erp order] released NUM_PEDIDO generation lock", {
+      logApiEvent("INFO", "[ultrafv3/order] lock-released", {
         sellerId: context.sellerId,
         sellerName: context.sellerName,
         sellerErpCode: context.sellerErpCode,
@@ -1003,7 +1084,7 @@ async function createErpOrderFromOpportunityUnsafe(
     pedidoIdImportacao,
     endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
   });
-  logApiEvent("INFO", "[erp order] requesting UltraFV3 /salesmen order sequence", {
+  logApiEvent("INFO", "[ultrafv3/order] salesmen-request-start", {
     ...operationContext,
     correlationId: pedidoIdImportacao,
     routeCorrelationId: correlationId,
@@ -1076,7 +1157,7 @@ async function createErpOrderFromOpportunityUnsafe(
   if (!salesmenNumPedido) {
     logApiEvent("WARN", "[erp order] /salesmen did not return a valid numeric NUMERO_PEDIDO; order submission blocked", operatorResolutionDiagnostics);
     throw Object.assign(
-      new Error("UltraFV3 /salesmen não retornou NUMERO_PEDIDO numérico válido; envio bloqueado para evitar NUM_PEDIDO incorreto."),
+      new Error("Não foi possível obter do UltraFV3 um número sequencial válido para o pedido. Nenhum pedido foi enviado."),
       { status: 422, diagnostics: sequenceResolution.diagnostics, endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT },
     );
   }
@@ -1254,14 +1335,14 @@ async function createErpOrderFromOpportunityUnsafe(
     });
   });
 
-  logApiEvent("INFO", "[erp order] pending UltraFV3 order sync persisted", {
+  logApiEvent("INFO", "[ultrafv3/order] order-pending-persisted", {
     ...operationContext,
     pedidoIdImportacao,
     numPedido,
     erpOrderSyncId: sync.id,
   });
 
-  logApiEvent("INFO", "[erp order] sanitized final payload sent to UltraFV3", {
+  logApiEvent("INFO", "[ultrafv3/order] orders-request-start", {
     endpoint: "/orders",
     correlationId: pedidoIdImportacao,
     NUM_PEDIDO: payload.NUM_PEDIDO,
@@ -1282,7 +1363,7 @@ async function createErpOrderFromOpportunityUnsafe(
       erpOrderSyncId: sync.id,
       endpoint: "/orders",
     }, { timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS });
-    logApiEvent("INFO", "[erp order] submitting UltraFV3 /orders", {
+    logApiEvent("INFO", "[ultrafv3/order] orders-request-start", {
       ...operationContext,
       correlationId: pedidoIdImportacao,
       routeCorrelationId: correlationId,
@@ -1294,6 +1375,13 @@ async function createErpOrderFromOpportunityUnsafe(
       body: payload,
       correlationId: pedidoIdImportacao,
       timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
+    });
+    logApiEvent("INFO", "[ultrafv3/order] orders-response", {
+      ...operationContext,
+      pedidoIdImportacao,
+      numPedido,
+      erpOrderSyncId: sync.id,
+      result: "received",
     });
     const functionalErrorMessage = getFunctionalOrderErrorMessage(erpResponse);
     if (functionalErrorMessage) {
@@ -1322,7 +1410,7 @@ async function createErpOrderFromOpportunityUnsafe(
         sentAt: new Date(),
       },
     });
-    logApiEvent("INFO", "[erp order] order sent to UltraFV3", {
+    logApiEvent("INFO", "[ultrafv3/order] order-sent", {
       ...operationContext,
       pedidoIdImportacao,
       numPedido,
@@ -1524,6 +1612,37 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
   return { syncedCount, errorCount, diagnostics: { nonCriticalOrderStatusErrors: errorCount } };
 }
 
+
+export async function getZeroNumPedidoDryRunReport() {
+  const rows = await prisma.erpOrderSync.findMany({
+    where: { OR: [{ numPedido: "0" }, { erpOrderNumber: "0" }] },
+    orderBy: [{ createdAt: "desc" }],
+    take: 100,
+    select: {
+      opportunityId: true,
+      pedidoIdImportacao: true,
+      status: true,
+      createdAt: true,
+      numPedido: true,
+      erpOrderNumber: true,
+      opportunity: { select: { clientId: true } },
+    },
+  });
+  return {
+    count: rows.length,
+    requiresManualUltraFv3Review: rows.length > 0,
+    records: rows.map((row) => ({
+      opportunityId: row.opportunityId,
+      clientId: row.opportunity.clientId,
+      data: row.createdAt.toISOString(),
+      pedidoIdImportacao: row.pedidoIdImportacao,
+      status: row.status,
+      numPedido: row.numPedido,
+      erpOrderNumber: row.erpOrderNumber,
+      action: "necessita conferência manual no UltraFV3",
+    })),
+  };
+}
 
 export async function getErpOrderOperationalSummary() {
   const [sentOrders, pendingOrders, errorOrders, fulfilledOrders, lastOrderSync] = await Promise.all([
