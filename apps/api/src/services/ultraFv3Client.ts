@@ -110,6 +110,39 @@ const sanitizeUltraTokenPayload = (token: string): UltraFv3TokenPayload => {
   };
 };
 
+
+type UltraFv3ProtocolInvestigationContext = {
+  method: string;
+  path: string;
+  correlationId: string;
+  status: number;
+  durationMs?: number;
+  requestBody?: unknown;
+  requestHeaders?: Record<string, unknown>;
+  responseHeaders?: Record<string, string>;
+  authorizationToken?: string | null;
+};
+
+const truncateProtocolBody = (value: string) => {
+  const maxChars = Math.max(0, env.ultraFv3ProtocolInvestigationBodyMaxChars);
+  if (!maxChars || value.length <= maxChars) return { value, truncated: false, originalLength: value.length };
+  return { value: value.slice(0, maxChars), truncated: true, originalLength: value.length };
+};
+
+const collectResponseHeaders = (response: Response) => Object.fromEntries(response.headers.entries());
+
+const tokenInvestigationMetadata = (token?: string | null) => {
+  if (!token) return null;
+  return {
+    present: true,
+    length: token.length,
+    sha256: createHash("sha256").update(token).digest("hex"),
+    jwtPayload: sanitizeUltraTokenPayload(token),
+  };
+};
+
+const shouldLogUltraFv3Protocol = (path: string) => env.ultraFv3ProtocolInvestigationEnabled && path === "/salesmen";
+
 const maskBaseUrl = (value: string) => {
   if (!value) return "";
   try {
@@ -251,11 +284,41 @@ class UltraFv3Client {
     };
   }
 
-  private async safeJson(response: Response, allowPlainText = false) {
+  private async safeJson(response: Response, allowPlainText = false, protocolContext?: UltraFv3ProtocolInvestigationContext) {
     const text = await response.text();
+    if (protocolContext && shouldLogUltraFv3Protocol(protocolContext.path)) {
+      const rawBody = truncateProtocolBody(text);
+      logApiEvent("WARN", "[UltraFV3 PROTOCOL RAW RESPONSE BEFORE JSON PARSE]", {
+        method: protocolContext.method,
+        path: protocolContext.path,
+        correlationId: protocolContext.correlationId,
+        status: protocolContext.status,
+        durationMs: protocolContext.durationMs ?? null,
+        responseHeaders: protocolContext.responseHeaders ?? collectResponseHeaders(response),
+        request: {
+          headers: protocolContext.requestHeaders ?? null,
+          body: protocolContext.requestBody ?? null,
+          bearerJwt: tokenInvestigationMetadata(protocolContext.authorizationToken),
+        },
+        rawResponseBody: rawBody.value,
+        rawResponseBodyTruncated: rawBody.truncated,
+        rawResponseBodyOriginalLength: rawBody.originalLength,
+      });
+    }
     if (!text) return null;
     try {
-      return JSON.parse(text) as unknown;
+      const parsed = JSON.parse(text) as unknown;
+      if (protocolContext && shouldLogUltraFv3Protocol(protocolContext.path)) {
+        logApiEvent("WARN", "[UltraFV3 PROTOCOL JSON PARSE RESULT]", {
+          method: protocolContext.method,
+          path: protocolContext.path,
+          correlationId: protocolContext.correlationId,
+          status: protocolContext.status,
+          parsedType: Array.isArray(parsed) ? "array" : typeof parsed,
+          parsedBody: parsed,
+        });
+      }
+      return parsed;
     } catch {
       if (allowPlainText) return text;
       throw new UltraFv3IntegrationError(
@@ -593,7 +656,16 @@ class UltraFv3Client {
       });
     }
 
-    const ultraResponse = await this.safeJson(response, !response.ok);
+    const ultraResponse = await this.safeJson(response, !response.ok, {
+      method,
+      path,
+      correlationId,
+      status: response.status,
+      requestBody: method !== "GET" ? options?.body ?? null : null,
+      requestHeaders: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: "Bearer <captured-as-bearerJwt-metadata>" },
+      responseHeaders: collectResponseHeaders(response),
+      authorizationToken: cached.token,
+    });
     const ultraMessage = extractUltraMessage(ultraResponse, response.status);
     const diagnostics: UltraFv3RequestDiagnostic = { status: response.status, endpoint: path, method, message: ultraMessage, ultraResponse, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS };
 
@@ -722,7 +794,16 @@ class UltraFv3Client {
       throw error;
     }
 
-    const payload = (await this.safeJson(response)) as T;
+    const payload = (await this.safeJson(response, false, {
+      method,
+      path,
+      correlationId,
+      status: response.status,
+      requestBody: method !== "GET" ? options?.body ?? null : null,
+      requestHeaders: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: "Bearer <captured-as-bearerJwt-metadata>" },
+      responseHeaders: collectResponseHeaders(response),
+      authorizationToken: this.token,
+    })) as T;
     this.lastError = null;
     return payload;
   }

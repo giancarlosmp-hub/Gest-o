@@ -9,6 +9,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { normalizeErpParameterCode, type ErpOrderGenerationInput, type ErpOrderParameterValue } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
+import { env } from "../config/env.js";
 import { assertErpRuntimeConfigForOrderSubmission } from "./erpRuntimeConfig.js";
 import { logApiEvent } from "../utils/logger.js";
 import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
@@ -921,10 +922,31 @@ export function resolveSalesmenOrderContext(response: unknown, requestedSeller: 
   const valid = candidates.filter((candidate) => candidate.numeroPedido && candidate.operador && candidate.codVendedor && candidate.match.matched);
   const exact = valid.filter((candidate) => candidate.match.mode === "exact");
   const selectedPool = exact.length ? exact : valid;
+  const protocolCandidates = candidates.map((candidate) => ({
+    path: candidate.path,
+    rawNumeroPedido: pickFirstStringWithKey(candidate.path ? (records.find((entry) => entry.path === candidate.path)?.record ?? {}) : {}, SALESMAN_NUM_PEDIDO_KEYS).value || null,
+    normalizedNumeroPedido: candidate.numeroPedido || null,
+    codVendedor: candidate.codVendedor || null,
+    operador: candidate.operador || null,
+    matched: candidate.match.matched,
+    matchMode: candidate.match.mode,
+  }));
+  if (env.ultraFv3ProtocolInvestigationEnabled) {
+    logApiEvent("WARN", "[UltraFV3 PROTOCOL PARSER CANDIDATES]", {
+      requestedSeller: requestedSeller.sellerErpCode,
+      recordsCount: records.length,
+      candidates: protocolCandidates,
+      validCandidates: valid.map((candidate) => ({ path: candidate.path, numeroPedido: candidate.numeroPedido, codVendedor: candidate.codVendedor, operador: candidate.operador, matchMode: candidate.match.mode })),
+      exactCandidates: exact.map((candidate) => ({ path: candidate.path, numeroPedido: candidate.numeroPedido, codVendedor: candidate.codVendedor, operador: candidate.operador })),
+      selectedPoolSize: selectedPool.length,
+      selectedPath: selectedPool.length === 1 ? selectedPool[0]?.path ?? null : null,
+      finalNumPedido: selectedPool.length === 1 ? selectedPool[0]?.numeroPedido ?? null : null,
+    });
+  }
   if (selectedPool.length !== 1) {
     throw Object.assign(new Error(selectedPool.length ? "erp_ambiguous_salesman_order_number" : "erp_invalid_order_number"), {
       code: selectedPool.length ? "erp_ambiguous_salesman_order_number" : "erp_invalid_order_number",
-      candidates: candidates.map((candidate) => ({ path: candidate.path, numeroPedido: candidate.numeroPedido || null, codVendedor: candidate.codVendedor || null, operador: candidate.operador || null, matched: candidate.match.matched, matchMode: candidate.match.mode })),
+      candidates: protocolCandidates,
     });
   }
   const selected = selectedPool[0];
