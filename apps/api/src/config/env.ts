@@ -74,5 +74,7 @@ export const env = {
   erpSyncProductsIntervalMs: toNumber(process.env.ERP_SYNC_PRODUCTS_INTERVAL_MS, 6 * 60 * 60 * 1000),
   erpSyncPartnersIntervalMs: toNumber(process.env.ERP_SYNC_PARTNERS_INTERVAL_MS, 6 * 60 * 60 * 1000),
   erpSyncOrderStatusIntervalMs: toNumber(process.env.ERP_SYNC_ORDER_STATUS_INTERVAL_MS, 15 * 60 * 1000),
-  erpSyncHealthcheckIntervalMs: toNumber(process.env.ERP_SYNC_HEALTHCHECK_INTERVAL_MS, 5 * 60 * 1000)
+  erpSyncHealthcheckIntervalMs: toNumber(process.env.ERP_SYNC_HEALTHCHECK_INTERVAL_MS, 5 * 60 * 1000),
+  ultraFv3ProtocolInvestigationEnabled: toBoolean(process.env.ULTRAFV3_PROTOCOL_INVESTIGATION_ENABLED, false),
+  ultraFv3ProtocolInvestigationBodyMaxChars: toNumber(process.env.ULTRAFV3_PROTOCOL_INVESTIGATION_BODY_MAX_CHARS, 200_000)
 };
