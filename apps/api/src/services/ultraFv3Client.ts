@@ -141,7 +141,16 @@ const tokenInvestigationMetadata = (token?: string | null) => {
   };
 };
 
-const shouldLogUltraFv3Protocol = (path: string) => env.ultraFv3ProtocolInvestigationEnabled && path === "/salesmen";
+const ULTRAFV3_PROTOCOL_INVESTIGATION_PATHS = new Set(["/salesmen", "/orders", "/orderStatus"]);
+
+const normalizeUltraFv3ProtocolPath = (path: string) => {
+  const [pathname] = path.split("?", 1);
+  return pathname.replace(/\/+$/, "") || "/";
+};
+
+const shouldLogUltraFv3Protocol = (path: string) =>
+  env.ultraFv3ProtocolInvestigationEnabled &&
+  ULTRAFV3_PROTOCOL_INVESTIGATION_PATHS.has(normalizeUltraFv3ProtocolPath(path));
 
 const maskBaseUrl = (value: string) => {
   if (!value) return "";
