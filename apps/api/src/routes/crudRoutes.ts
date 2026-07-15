@@ -72,7 +72,7 @@ import {
   startUltraFv3FullSyncJob
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
-import { createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
+import { buildSalesmenDiagnostic, createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, getZeroNumPedidoDryRunReport, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
@@ -6766,6 +6766,49 @@ const resolveErpDebugOrderParams = async (query: Request["query"]) => {
   const missingParams = ERP_DEBUG_ORDER_PARAM_FIELDS.filter((field) => !paramsResolved[field]);
   return { paramsReceived, rawResolvedParams, paramsResolved, missingParams };
 };
+
+
+router.get("/erp-integration/salesmen-diagnostic", authorize("diretor"), async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  try {
+    const sellerCode = normalizeOptionalString(req.query.sellerCode);
+    if (!sellerCode) return res.status(400).json({ error: "sellerCode obrigatório para diagnóstico sanitizado de /salesmen" });
+    const body = await ultraFv3Client.request<unknown>("/salesmen", { correlationId, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS });
+    const diagnostic = buildSalesmenDiagnostic(body, { sellerErpCode: sellerCode }, 200);
+    logApiEvent("INFO", "[ultrafv3/order] salesmen-response-shape", { correlationId, ...diagnostic });
+    return res.json(diagnostic);
+  } catch (error: any) {
+    const message = sanitizeErpOrderErrorMessage(error?.message || String(error));
+    logApiEvent("WARN", "[ultrafv3/order] salesmen-response-shape", { correlationId, result: "failed", errorCode: message });
+    return res.status(502).json({ error: message, correlationId });
+  }
+});
+
+
+router.get("/erp-orders/zero-num-pedido-dry-run", authorize("diretor"), async (_req, res) => {
+  const report = await getZeroNumPedidoDryRunReport();
+  return res.json(report);
+});
+
+router.post("/erp-orders/preflight", authorize("diretor"), async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  try {
+    const opportunityId = normalizeOptionalString(req.body?.opportunityId);
+    if (!opportunityId) return res.status(400).json({ ready: false, error: "opportunityId_required", correlationId });
+    const params = normalizeErpOrderParameterCodes({ ...(req.body || {}), simulateOnly: true });
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id: opportunityId },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
+    });
+    if (!opportunity) return res.status(404).json({ ready: false, error: "opportunity_not_found", correlationId });
+    const preview = await createErpOrderFromOpportunity(opportunity, params, { correlationId });
+    const payload = preview.payloadSent as UltraFv3OrderPayload;
+    return res.json({ ready: true, postOrdersSent: false, numPedido: payload.NUM_PEDIDO, sellerMatched: true, operatorResolved: Boolean(payload.OPERADOR), itemsValid: payload.ITENS.length > 0, warnings: [], salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null });
+  } catch (error: any) {
+    const status = Number(error?.status || 422);
+    return res.status(status >= 400 && status < 600 ? status : 422).json({ ready: false, postOrdersSent: false, error: error?.code || (error?.message === "erp_invalid_order_number" ? "erp_invalid_order_number" : "erp_invalid_order_number"), message: sanitizeErpOrderErrorMessage(error?.message || String(error)), correlationId, salesmenDiagnostics: error?.diagnostics || null });
+  }
+});
 
 router.get("/opportunities/:id/erp/payload-audit", async (req, res) => {
   const correlationId = req.correlationId || randomUUID();

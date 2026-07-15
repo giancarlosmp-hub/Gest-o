@@ -28,7 +28,8 @@
     "smoke:ai": "tsx src/scripts/aiSmoke.ts",
     "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts",
     "smoke:date-only": "tsx src/scripts/dateOnlySmoke.ts",
-    "smoke:ultrafv3-order-flow": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/scripts/ultraFv3OrderFlowMockSmoke.ts"
+    "smoke:ultrafv3-order-flow": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/scripts/ultraFv3OrderFlowMockSmoke.ts",
+    "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

@@ -633,7 +633,7 @@ export async function startErpSyncScheduler() {
   nextAutomaticRunAt = persistedAutomaticSyncEnabled
     ? calculateNextAutomaticRunAt(new Date())
     : null;
-  logApiEvent("INFO", "[ultrafv3 scheduler] initialized", {
+  logApiEvent("INFO", "[erp-sync/scheduler] initialized", {
     enabled: persistedAutomaticSyncEnabled,
     enabledByEnv: env.erpSyncSchedulerEnabled,
     window: "07:00-19:00",
@@ -645,7 +645,7 @@ export async function startErpSyncScheduler() {
     lastAutomaticSkippedReason = "scheduler_disabled";
     logApiEvent(
       "INFO",
-      "[erp automatic sync] disabled by environment configuration",
+      "[erp-sync/scheduler] disabled",
       { envVar: "ERP_SYNC_SCHEDULER_ENABLED" },
     );
     return;
@@ -654,7 +654,7 @@ export async function startErpSyncScheduler() {
     lastAutomaticSkippedReason = "database_disabled";
     logApiEvent(
       "INFO",
-      "[erp automatic sync] disabled by database configuration",
+      "[erp-sync/scheduler] disabled",
       { configKey: AUTOMATIC_SYNC_CONFIG_KEY },
     );
     return;
@@ -668,7 +668,7 @@ export async function startErpSyncScheduler() {
     lastAutomaticError = `UltraFV3 não configurado: ${diagnostics.missingConfig.join(", ") || "configuração ausente"}.`;
     logApiEvent(
       "WARN",
-      "[erp automatic sync] alive but UltraFV3 is not configured",
+      "[erp-sync/scheduler] waiting-for-configuration",
       {
         missingConfig: diagnostics.missingConfig,
         nextRunAt: nextAutomaticRunAt?.toISOString() ?? null,

@@ -71,13 +71,14 @@ assert.match(syncService, /productCandidates\.length === 1 \? productCandidates\
 assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s\S]*\{ scope: "prices"/, "Sincronização completa deve rodar Produtos antes de Preços");
 
 const orderService = readFileSync(new URL("../services/erpOrderService.ts", import.meta.url), "utf8");
-assert.match(orderService, /const NUM_PEDIDO_PATTERN = \/\^\\d\{1,15\}\$\//, "NUM_PEDIDO deve aceitar apenas string numérica de até 15 caracteres");
+assert.match(orderService, /export const NUM_PEDIDO_PATTERN = \/\^\\d\{1,15\}\$\//, "NUM_PEDIDO deve aceitar apenas string numérica de até 15 caracteres");
+assert.match(orderService, /normalizeUltraFv3OrderNumber/, "NUM_PEDIDO deve validar inteiro maior que zero sem zeros à esquerda");
 assert.match(orderService, /const numPedido = salesmenNumPedido;/, "NUM_PEDIDO deve vir exclusivamente do NUMERO_PEDIDO retornado por /salesmen");
 assert.doesNotMatch(orderService, /generateShortNumPedido/, "CRM não pode gerar fallback PMR/P* para NUM_PEDIDO");
 assert.match(orderService, /PEDIDO_ID_IMPORTACAO: pedidoIdImportacao/, "PEDIDO_ID_IMPORTACAO deve continuar usando UUID separado");
 assert.match(orderService, /NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO/, "Validação deve bloquear NUM_PEDIDO igual ao UUID de importação");
 assert.match(orderService, /NUM_PEDIDO não pode usar código interno PMR/, "Validação deve bloquear código interno PMR em NUM_PEDIDO");
-assert.match(orderService, /não retornou NUMERO_PEDIDO numérico válido/, "Ausência de NUMERO_PEDIDO deve bloquear envio");
+assert.match(orderService, /Não foi possível obter do UltraFV3 um número sequencial válido/, "Ausência de NUMERO_PEDIDO deve bloquear envio");
 assert.match(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Envio real deve ser serializado para evitar concorrência no NUMERO_PEDIDO global");
 assert.match(orderService, /finally[\s\S]*released global UltraFV3 submission lock/, "Falha do UltraFV3 deve liberar lock em finally");
 assert.match(orderService, /resultado desconhecido\/timeout/, "Timeout/resultado desconhecido deve bloquear reenvio cego");

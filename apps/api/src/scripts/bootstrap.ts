@@ -5,6 +5,8 @@ import { prisma } from "../config/prisma.js";
 import { ensureSmokeBootstrap } from "./ensureSmokeBootstrap.js";
 import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "../utils/databaseHealth.js";
+import { logApiEvent } from "../utils/logger.js";
+import { startErpSyncScheduler } from "../jobs/erpSyncScheduler.js";
 
 console.log("BOOTSTRAP START");
 
@@ -129,10 +131,15 @@ async function start() {
   logRuntimeContext();
   await runDatabaseBootstrap();
 
-  app.listen(env.port, () => {
+  const server = app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     console.log(`API on http://localhost:${env.port}`);
+    logApiEvent("INFO", "[erp-sync/scheduler] initialization-requested", { entrypoint: "dist/scripts/bootstrap.js" });
+    void startErpSyncScheduler()
+      .then(() => logApiEvent("INFO", "[erp-sync/scheduler] initialized", { entrypoint: "dist/scripts/bootstrap.js" }))
+      .catch((error) => logApiEvent("ERROR", "[erp-sync/scheduler] initialization-failed", { entrypoint: "dist/scripts/bootstrap.js", error: error instanceof Error ? error.message : String(error) }));
     console.log("BOOTSTRAP END");
+    if (process.env.BOOTSTRAP_SMOKE_EXIT === "true") server.close(() => void prisma.$disconnect().finally(() => process.exit(0)));
   });
 }
 
