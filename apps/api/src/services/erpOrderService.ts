@@ -667,6 +667,7 @@ const SALESMAN_CODE_KEYS = [
   "CODVEN",
 ];
 const SALESMAN_NUM_PEDIDO_KEYS = ["NUMERO_PEDIDO", "NUM_PEDIDO", "numPedido", "numeroPedido"];
+const SALESMEN_ORDER_NUMBER_DEBUG_KEYS = ["NUMERO_PEDIDO", "NUMPEDIDO", "NUM_PEDIDO", "NUMPED"];
 const SALESMAN_OPERATOR_KEYS = [
   "OPERADOR",
   "CODOPERADOR",
@@ -804,6 +805,110 @@ const visitSalesmenRecords = (node: unknown, path: string, output: Array<{ path:
   }
 };
 
+
+const readPathForDiagnostics = (payload: unknown, path: string[]) => {
+  let current: unknown = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+};
+
+const getValueAtPath = (payload: unknown, path: string) => {
+  if (path === "body") return payload;
+  const segments = path
+    .replace(/^body\.?/, "")
+    .replace(/\[(\d+)\]/g, ".$1")
+    .split(".")
+    .filter(Boolean);
+  let current: unknown = payload;
+  for (const segment of segments) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index)) return undefined;
+      current = current[index];
+      continue;
+    }
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+};
+
+const collectSalesmenDebugFieldOccurrences = (node: unknown, path = "body", output: Array<{ path: string; field: string; type: string; value: unknown }> = [], depth = 0) => {
+  if (depth > 8 || node === null || node === undefined) return output;
+  if (Array.isArray(node)) {
+    node.forEach((item, index) => collectSalesmenDebugFieldOccurrences(item, `${path}[${index}]`, output, depth + 1));
+    return output;
+  }
+  if (typeof node !== "object") return output;
+  for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+    if (SALESMEN_ORDER_NUMBER_DEBUG_KEYS.includes(key)) {
+      output.push({ path: `${path}.${key}`, field: key, type: Array.isArray(value) ? "array" : typeof value, value: sanitizeErpOrderPayload(value) });
+    }
+    if (value && (Array.isArray(value) || typeof value === "object")) collectSalesmenDebugFieldOccurrences(value, `${path}.${key}`, output, depth + 1);
+  }
+  return output;
+};
+
+const buildSalesmenPayloadInvestigationLog = (body: unknown, sellerErpCode: string, selectionError?: unknown) => {
+  const records: Array<{ path: string; record: Record<string, unknown> }> = [];
+  visitSalesmenRecords(body, "body", records);
+  const candidates = records.map(({ path, record }) => {
+    const numeroPedidoPick = pickFirstStringWithKey(record, SALESMAN_NUM_PEDIDO_KEYS);
+    const operatorPick = pickFirstStringWithKey(record, SALESMAN_OPERATOR_KEYS);
+    const codePick = pickFirstStringWithKey(record, SALESMAN_CODE_KEYS);
+    const loginPick = pickFirstStringWithKey(record, SALESMAN_LOGIN_KEYS);
+    const match = getSalesmanCodeMatch(record, sellerErpCode);
+    const normalizedNumeroPedido = normalizeUltraFv3OrderNumber(numeroPedidoPick.value);
+    return {
+      path,
+      matchedRequestedSeller: match.matched,
+      matchField: match.field,
+      matchMode: match.mode,
+      CODVENDEDOR: codePick.value || null,
+      CODVENDEDOR_field: codePick.key,
+      OPERADOR: operatorPick.value || null,
+      OPERADOR_field: operatorPick.key,
+      LOGIN: loginPick.value || null,
+      LOGIN_field: loginPick.key,
+      selectedNumeroPedidoRawField: numeroPedidoPick.key,
+      selectedNumeroPedidoRawType: numeroPedidoPick.key ? typeof record[numeroPedidoPick.key] : "undefined",
+      selectedNumeroPedidoRawValue: numeroPedidoPick.value || null,
+      selectedNumeroPedidoNormalized: normalizedNumeroPedido || null,
+      numeroPedidoDecision: normalizedNumeroPedido
+        ? "valid_positive_integer"
+        : numeroPedidoPick.value === ""
+          ? "undefined_or_empty"
+          : "invalid_zero_or_non_positive_or_non_integer_or_leading_zero",
+      keys: Object.keys(record).slice(0, 120),
+    };
+  });
+  const selectedSeller = candidates.find((candidate) => candidate.matchedRequestedSeller) ?? null;
+  const selectedPath = selectedSeller?.path ?? null;
+  return {
+    requestedSeller: sellerErpCode,
+    selectionError: selectionError instanceof Error ? { message: selectionError.message, code: (selectionError as { code?: unknown }).code ?? null, candidates: (selectionError as { candidates?: unknown }).candidates ?? null } : null,
+    body: sanitizeErpOrderPayload(body),
+    "body.data": sanitizeErpOrderPayload(readPathForDiagnostics(body, ["data"])),
+    "body.data.data": sanitizeErpOrderPayload(readPathForDiagnostics(body, ["data", "data"])),
+    "body.response": sanitizeErpOrderPayload(readPathForDiagnostics(body, ["response"])),
+    "body.response.data": sanitizeErpOrderPayload(readPathForDiagnostics(body, ["response", "data"])),
+    SALESMAN: sanitizeErpOrderPayload(readPathForDiagnostics(body, ["SALESMAN"])),
+    orderNumberFieldOccurrences: collectSalesmenDebugFieldOccurrences(body),
+    hasAnyRequestedNumeroPedidoField: collectSalesmenDebugFieldOccurrences(body).length > 0,
+    selectedSeller,
+    selectedPath,
+    selectedSellerPayload: selectedPath ? sanitizeErpOrderPayload(getValueAtPath(body, selectedPath)) : null,
+    selectedNumeroPedido: selectedSeller?.selectedNumeroPedidoNormalized ?? null,
+    selectedNumeroPedidoRawValue: selectedSeller?.selectedNumeroPedidoRawValue ?? null,
+    candidates,
+    payloadInteiroRecebido: sanitizeErpOrderPayload(body),
+    explicitNumeroPedidoAbsence: collectSalesmenDebugFieldOccurrences(body).length === 0 ? "payload does not contain NUMERO_PEDIDO, NUMPEDIDO, NUM_PEDIDO or NUMPED" : null,
+  };
+};
+
 export function resolveSalesmenOrderContext(response: unknown, requestedSeller: RequestedSalesmanContext): ResolvedSalesmenOrderContext {
   const records: Array<{ path: string; record: Record<string, unknown> }> = [];
   visitSalesmenRecords(response, "body", records);
@@ -905,7 +1010,29 @@ async function loadSalesmenBody(options: { forceRefresh?: boolean; credentials?:
 
 async function resolveSalesmanOrderSequenceUnsafe(context: SalesmanOrderSequenceContext, credentials: UltraFv3Credentials, correlationId: string): Promise<SalesmanOrderSequenceResolution> {
   const body = await loadSalesmenBody({ forceRefresh: true, credentials, correlationId });
-  const { numeroPedido, numeroPedidoPathUsed, salesmen, selectedPath } = resolveSalesmenPayload(body, context.sellerErpCode);
+  logApiEvent("INFO", "[ultrafv3/order] salesmen-payload-investigation", {
+    correlationId,
+    endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+    sellerId: context.sellerId,
+    sellerName: context.sellerName,
+    sellerErpCode: context.sellerErpCode,
+    ...buildSalesmenPayloadInvestigationLog(body, context.sellerErpCode),
+  });
+  let resolvedPayload: ReturnType<typeof resolveSalesmenPayload>;
+  try {
+    resolvedPayload = resolveSalesmenPayload(body, context.sellerErpCode);
+  } catch (error) {
+    logApiEvent("WARN", "[ultrafv3/order] salesmen-payload-investigation-before-invalid-order-number", {
+      correlationId,
+      endpoint: SALESMEN_ORDER_SEQUENCE_ENDPOINT,
+      sellerId: context.sellerId,
+      sellerName: context.sellerName,
+      sellerErpCode: context.sellerErpCode,
+      ...buildSalesmenPayloadInvestigationLog(body, context.sellerErpCode, error),
+    });
+    throw error;
+  }
+  const { numeroPedido, numeroPedidoPathUsed, salesmen, selectedPath } = resolvedPayload;
   const matchedEntry = salesmen
     .map((row) => {
       if (!row || typeof row !== "object" || Array.isArray(row)) return { row: null, match: { matched: false, code: null, field: null, mode: null } };
