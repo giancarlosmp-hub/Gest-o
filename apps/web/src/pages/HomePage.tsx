@@ -113,7 +113,17 @@ type TodayPriority = {
   commercialTemperature?: "quente" | "morna" | "fria";
 };
 
-type CommercialInsightItem = { title?: string; detail?: string; count?: number };
+type CommercialInsightItem = { title?: string; detail?: string; count?: number; score?: number; level?: "baixa" | "normal" | "alta" | "urgente" };
+
+type ExecutivePriority = {
+  entityType: "client" | "opportunity" | "seller" | "territory";
+  entityId: string;
+  title: string;
+  score: number;
+  level: "baixa" | "normal" | "alta" | "urgente";
+  reason: string;
+  recommendedAction: string;
+};
 
 type SellerOperationalInsight = {
   opportunityId?: string;
@@ -123,16 +133,24 @@ type SellerOperationalInsight = {
   reason: string;
   suggestedAction: string;
   risk: "alto" | "medio" | "baixo";
+  score?: number;
+  level?: "baixa" | "normal" | "alta" | "urgente";
+  nextAction?: string;
+  followUpDate?: string;
+  value?: number;
 };
 
 type CommercialInsights = {
   summary: string;
+  priorities?: ExecutivePriority[];
   highPriority: CommercialInsightItem[];
   mediumPriority: CommercialInsightItem[];
   lowPriority: CommercialInsightItem[];
   recommendations: string[];
+  managementRecommendations?: string[];
   nextActions: string[];
   risks: string[];
+  opportunities?: string[];
   highlights: string[];
   generatedAt: string;
   source: "ai" | "deterministic";
@@ -727,8 +745,13 @@ export default function HomePage() {
         clientName: topTodayPriority.clientName || client.clientName,
         opportunityTitle: topTodayPriority.title || relatedOpportunity?.title,
         reason: topTodayPriority.reason,
-        suggestedAction: topTodayPriority.suggestedAction,
-        risk: topTodayPriority.risk
+        suggestedAction: `Comece por esta ação: ${topTodayPriority.suggestedAction}`,
+        risk: topTodayPriority.risk,
+        score: topTodayPriority.priorityScore,
+        level: topTodayPriority.priorityLevel,
+        nextAction: topTodayPriority.suggestedAction,
+        followUpDate: relatedOpportunity?.followUpDate || undefined,
+        value: topTodayPriority.value
       };
     }
 
@@ -839,13 +862,19 @@ export default function HomePage() {
         ) : (
           <div className="mt-3 space-y-3">
             <div className="rounded-xl bg-brand-50 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Próxima melhor ação</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Comece por esta ação</p>
               <p className="mt-1 text-sm font-semibold text-slate-900 md:text-base">{sellerOperationalInsight.suggestedAction}</p>
               <p className="mt-1 text-sm text-slate-700">
                 {sellerOperationalInsight.clientName}
                 {sellerOperationalInsight.opportunityTitle ? ` · ${sellerOperationalInsight.opportunityTitle}` : ""}
               </p>
-              <p className="mt-1 text-xs text-slate-600"><strong>Motivo:</strong> {sellerOperationalInsight.reason}</p>
+              <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+                {sellerOperationalInsight.score !== undefined ? <span><strong>Score:</strong> {sellerOperationalInsight.score}{sellerOperationalInsight.level ? ` · ${sellerOperationalInsight.level}` : ""}</span> : null}
+                {sellerOperationalInsight.value ? <span><strong>Valor:</strong> {sellerOperationalInsight.value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span> : null}
+                {sellerOperationalInsight.followUpDate ? <span><strong>Follow-up:</strong> {new Date(sellerOperationalInsight.followUpDate).toLocaleDateString("pt-BR")}</span> : null}
+                <span className="sm:col-span-2"><strong>Motivo:</strong> {sellerOperationalInsight.reason}</span>
+                {sellerOperationalInsight.nextAction ? <span className="sm:col-span-2"><strong>Próxima ação:</strong> {sellerOperationalInsight.nextAction}</span> : null}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               {sellerOperationalInsight.opportunityId ? (
@@ -889,13 +918,16 @@ export default function HomePage() {
               <h3 className="text-sm font-semibold text-slate-900">Resumo do Dia</h3>
               <p className="mt-1 text-sm leading-relaxed text-slate-700">{commercialInsights.summary}</p>
             </div>
+            {commercialInsights.priorities?.length ? (
+              <div><h3 className="text-sm font-semibold text-rose-700">Top 3 prioridades executivas</h3>{renderInsightList(commercialInsights.priorities.slice(0, 3).map((item) => ({ title: `${item.title} · score ${item.score} (${item.level})`, detail: `${item.reason}. Ação: ${item.recommendedAction}` })))}</div>
+            ) : null}
             <div className="grid gap-4 lg:grid-cols-3">
               <div><h3 className="text-sm font-semibold text-rose-700">Prioridade Alta</h3>{renderInsightList(commercialInsights.highPriority)}</div>
               <div><h3 className="text-sm font-semibold text-amber-700">Prioridade Média</h3>{renderInsightList(commercialInsights.mediumPriority)}</div>
               <div><h3 className="text-sm font-semibold text-slate-700">Prioridade Baixa</h3>{renderInsightList(commercialInsights.lowPriority)}</div>
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
-              <div><h3 className="text-sm font-semibold text-slate-900">Recomendações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.recommendations.join(" ") || "Sem recomendações."}</p></div>
+              <div><h3 className="text-sm font-semibold text-slate-900">Recomendações</h3><p className="mt-1 text-sm text-slate-700">{(commercialInsights.managementRecommendations || commercialInsights.recommendations).join(" ") || "Sem recomendações."}</p></div>
               <div><h3 className="text-sm font-semibold text-slate-900">Próximas ações</h3><p className="mt-1 text-sm text-slate-700">{commercialInsights.nextActions.join(" ") || "Sem próximas ações."}</p></div>
             </div>
             <p className="text-xs text-slate-500">Última atualização: {new Date(commercialInsights.generatedAt).toLocaleString("pt-BR")} · Fonte: {commercialInsights.source === "ai" ? "IA" : "fallback determinístico"}</p>
