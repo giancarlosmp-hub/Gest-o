@@ -7,6 +7,7 @@ import { ensureAdminBootstrap } from "../bootstrap/ensureAdminBootstrap.js";
 import { validateDatabaseHealth } from "../utils/databaseHealth.js";
 import { logApiEvent } from "../utils/logger.js";
 import { startErpSyncScheduler } from "../jobs/erpSyncScheduler.js";
+import { ensureErpOrderNumberSequence } from "../services/erpOrderNumberSequenceSetup.js";
 
 console.log("BOOTSTRAP START");
 
@@ -92,7 +93,7 @@ async function runDatabaseBootstrap() {
   try {
     console.log("Running prisma db push and ERP order sequence setup...");
     runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-    runStep("npm run erp:ensure-order-sequence -w @salesforce-pro/api", "ERP order sequence setup");
+    await ensureErpOrderNumberSequence();
   } catch (error) {
     console.error("DATABASE SCHEMA BOOTSTRAP FAILED:", error);
     process.exitCode = 1;

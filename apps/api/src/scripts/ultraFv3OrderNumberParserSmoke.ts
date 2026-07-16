@@ -9,6 +9,16 @@ assert.equal(normalizeUltraFv3OrderNumber("0000"), "", 'NUM_PEDIDO "0000" é rej
 assert.equal(normalizeUltraFv3OrderNumber(undefined), "", "NUM_PEDIDO ausente é rejeitado");
 assert.equal(normalizeUltraFv3OrderNumber(3812), "3812", "NUM_PEDIDO 3812 é aceito");
 
+
+const bootstrapSource = readFileSync(new URL("./bootstrap.ts", import.meta.url), "utf8");
+assert.match(bootstrapSource, /import \{ ensureErpOrderNumberSequence \} from "\.\.\/services\/erpOrderNumberSequenceSetup\.js"/, "bootstrap deve importar o setup da sequence diretamente do service compilado");
+assert.doesNotMatch(bootstrapSource, /npm run erp:ensure-order-sequence|tsx src\/scripts\/ensureErpOrderNumberSequence|node src\//, "bootstrap não pode chamar npm/tsx/src para setup da sequence");
+assert.match(bootstrapSource, /runStep\("npm run prisma:migrate[\s\S]*await ensureErpOrderNumberSequence\(\)[\s\S]*validateDatabaseHealth/, "bootstrap deve executar db push, depois setup da sequence, antes de validar/abrir servidor");
+const sequenceSetupSource = readFileSync(new URL("../services/erpOrderNumberSequenceSetup.ts", import.meta.url), "utf8");
+assert.match(sequenceSetupSource, /export async function ensureErpOrderNumberSequence/, "setup da sequence deve ser função reutilizável sem efeito colateral no import");
+const sequenceCliSource = readFileSync(new URL("./ensureErpOrderNumberSequence.ts", import.meta.url), "utf8");
+assert.match(sequenceCliSource, /pathToFileURL\(process\.argv\[1\]\)/, "CLI manual deve ter guard ESM para não executar ao ser importada");
+
 const sequenceServiceSource = readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8");
 assert.match(sequenceServiceSource, /ERP_ORDER_NUMBER_SEQUENCE_START = 900_001/, "primeiro número da sequência CRM deve ser 900001");
 assert.match(sequenceServiceSource, /nextval\('erp_order_number_seq'\)/, "reservas devem usar PostgreSQL sequence");

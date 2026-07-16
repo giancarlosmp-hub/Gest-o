@@ -24,7 +24,7 @@
     "smoke:ultrafv3-scheduler": "tsx src/scripts/ultraFv3SchedulerSmoke.ts",
     "erp:fix-duplicates": "node dist/scripts/erpFixLegacyDuplicates.js",
     "erp:fix-archived-flag": "node dist/scripts/erpFixArchivedFlag.js",
-    "erp:ensure-order-sequence": "tsx src/scripts/ensureErpOrderNumberSequence.ts",
+    "erp:ensure-order-sequence": "node dist/scripts/ensureErpOrderNumberSequence.js",
     "smoke:commercial-automations": "tsx src/scripts/commercialAutomationsSmoke.ts",
     "smoke:ai": "tsx src/scripts/aiSmoke.ts",
     "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts",
