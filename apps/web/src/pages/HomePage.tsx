@@ -96,12 +96,21 @@ type PipelineOpportunity = Opportunity & {
 
 type TodayPriority = {
   opportunityId: string;
+  clientId?: string | null;
   clientName: string;
+  title?: string;
   value: number;
   priorityScore: number;
   risk: "alto" | "medio" | "baixo";
   reason: string;
   suggestedAction: string;
+  // priorityLevel is the official calculated priority; risk is a legacy badge mapping.
+  // commercialTemperature is behavioral context and must not replace priorityLevel.
+  priorityLevel?: "baixa" | "normal" | "alta" | "urgente";
+  priorityColor?: "green" | "blue" | "orange" | "red";
+  priorityReasons?: string[];
+  intention?: string;
+  commercialTemperature?: "quente" | "morna" | "fria";
 };
 
 type CommercialInsightItem = { title?: string; detail?: string; count?: number };
@@ -714,9 +723,9 @@ export default function HomePage() {
       const client = getOpportunityClient(relatedOpportunity);
       return {
         opportunityId: topTodayPriority.opportunityId,
-        clientId: client.clientId,
+        clientId: topTodayPriority.clientId || client.clientId,
         clientName: topTodayPriority.clientName || client.clientName,
-        opportunityTitle: relatedOpportunity?.title,
+        opportunityTitle: topTodayPriority.title || relatedOpportunity?.title,
         reason: topTodayPriority.reason,
         suggestedAction: topTodayPriority.suggestedAction,
         risk: topTodayPriority.risk
