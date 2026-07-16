@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { collectUltraFv3OrderIdentifierHits, normalizeUltraFv3OrderNumber, resolveSalesmenOrderContext, sanitizeErpOrderPayload, validateUltraFv3OrderPayload } from "../services/erpOrderService.js";
 
 assert.equal(normalizeUltraFv3OrderNumber("0"), "", 'NUM_PEDIDO "0" é rejeitado');
@@ -8,14 +9,20 @@ assert.equal(normalizeUltraFv3OrderNumber("0000"), "", 'NUM_PEDIDO "0000" é rej
 assert.equal(normalizeUltraFv3OrderNumber(undefined), "", "NUM_PEDIDO ausente é rejeitado");
 assert.equal(normalizeUltraFv3OrderNumber(3812), "3812", "NUM_PEDIDO 3812 é aceito");
 
+const sequenceServiceSource = readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8");
+assert.match(sequenceServiceSource, /ERP_ORDER_NUMBER_SEQUENCE_START = 900_001/, "primeiro número da sequência CRM deve ser 900001");
+assert.match(sequenceServiceSource, /nextval\('erp_order_number_seq'\)/, "reservas devem usar PostgreSQL sequence");
+assert.match(sequenceServiceSource, /pg_advisory_xact_lock/, "reservas concorrentes devem ser protegidas por advisory lock transacional");
+
 const seller = { sellerErpCode: "7057" };
 assert.deepEqual(resolveSalesmenOrderContext({ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3812 }, seller), { numeroPedido: "3812", operador: 45, codVendedor: 7057, selectedPath: "body" });
 assert.equal(resolveSalesmenOrderContext({ data: { CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: "3812" } }, seller).numeroPedido, "3812");
 assert.equal(resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 0, OPERADOR: 1, NUMERO_PEDIDO: 0 }, { CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3812 }] }, seller).numeroPedido, "3812");
 assert.equal(resolveSalesmenOrderContext({ SALESMAN: [{ CODVENDEDOR: 0, OPERADOR: 1 }, { CODVENDEDOR: 7057, OPERADOR: 45 }], NUMERO_PEDIDO: 3812 }, seller).numeroPedido, "3812");
 assert.equal(resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 9999, OPERADOR: 1, NUMERO_PEDIDO: 3812 }, { CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3813 }] }, seller).numeroPedido, "3813");
-assert.throws(() => resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 0 }] }, seller), /erp_invalid_order_number/);
-assert.throws(() => resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3812 }, { CODVENDEDOR: 7057, OPERADOR: 46, NUMERO_PEDIDO: 3813 }] }, seller), /erp_ambiguous_salesman_order_number/);
+assert.deepEqual(resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 0 }] }, seller), { numeroPedido: "", operador: 45, codVendedor: 7057, selectedPath: "body.data[0]" }, "NUMERO_PEDIDO zero em /salesmen não bloqueia resolução de operador");
+assert.deepEqual(resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 7057, OPERADOR: 45 }] }, seller), { numeroPedido: "", operador: 45, codVendedor: 7057, selectedPath: "body.data[0]" }, "ausência de NUMERO_PEDIDO em /salesmen não bloqueia resolução de operador");
+assert.throws(() => resolveSalesmenOrderContext({ data: [{ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3812 }, { CODVENDEDOR: 7057, OPERADOR: 46, NUMERO_PEDIDO: 3813 }] }, seller), /erp_ambiguous_salesman/);
 
 const basePayload = {
   PEDIDO_ID: null,

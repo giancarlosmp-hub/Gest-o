@@ -73,16 +73,16 @@ assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s
 const orderService = readFileSync(new URL("../services/erpOrderService.ts", import.meta.url), "utf8");
 assert.match(orderService, /export const NUM_PEDIDO_PATTERN = \/\^\\d\{1,15\}\$\//, "NUM_PEDIDO deve aceitar apenas string numérica de até 15 caracteres");
 assert.match(orderService, /normalizeUltraFv3OrderNumber/, "NUM_PEDIDO deve validar inteiro maior que zero sem zeros à esquerda");
-assert.match(orderService, /const numPedido = salesmenNumPedido;/, "NUM_PEDIDO deve vir exclusivamente do NUMERO_PEDIDO retornado por /salesmen");
+assert.match(orderService, /reserveNextErpOrderNumber/, "NUM_PEDIDO deve vir da sequência global do CRM, não de /salesmen");
 assert.doesNotMatch(orderService, /generateShortNumPedido/, "CRM não pode gerar fallback PMR/P* para NUM_PEDIDO");
 assert.match(orderService, /PEDIDO_ID_IMPORTACAO: pedidoIdImportacao/, "PEDIDO_ID_IMPORTACAO deve continuar usando UUID separado");
 assert.match(orderService, /NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO/, "Validação deve bloquear NUM_PEDIDO igual ao UUID de importação");
 assert.match(orderService, /NUM_PEDIDO não pode usar código interno PMR/, "Validação deve bloquear código interno PMR em NUM_PEDIDO");
-assert.match(orderService, /Não foi possível obter do UltraFV3 um número sequencial válido/, "Ausência de NUMERO_PEDIDO deve bloquear envio");
-assert.match(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Envio real deve ser serializado para evitar concorrência no NUMERO_PEDIDO global");
+assert.doesNotMatch(orderService, /Não foi possível obter do UltraFV3 um número sequencial válido/, "Ausência de NUMERO_PEDIDO em /salesmen não deve bloquear envio");
+assert.match(readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8"), /pg_advisory_xact_lock[\s\S]*nextval/, "Reserva do NUM_PEDIDO deve ser protegida por lock transacional PostgreSQL e sequence");
 assert.match(orderService, /finally[\s\S]*released global UltraFV3 submission lock/, "Falha do UltraFV3 deve liberar lock em finally");
 assert.match(orderService, /resultado desconhecido\/timeout/, "Timeout/resultado desconhecido deve bloquear reenvio cego");
 assert.match(orderService, /getFunctionalOrderErrorMessage/, "HTTP 200 com erro funcional deve ser validado antes de marcar pedido como enviado");
-assert.match(orderService, /extractErpOrderNumber\(erpResponse\) \|\| numPedido/, "Número oficial salvo deve cair para o NUM_PEDIDO sequencial usado quando o ERP não retorna outro número explícito");
+assert.match(orderService, /const erpOrderNumber = numPedido/, "Número oficial exibido deve ser sempre o NUM_PEDIDO sequencial do CRM, sem substituir por PEDIDO_ID");
 
 console.log("UltraFV3 CRM sync regression smoke passed");

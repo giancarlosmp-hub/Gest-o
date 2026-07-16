@@ -6619,7 +6619,7 @@ const buildUltraFv3PayloadAudit = (payload: UltraFv3OrderPayload) => {
       items: ULTRAFV3_AUDIT_EXPECTED_ITEM_FIELDS,
     },
     fieldSources: {
-      NUM_PEDIDO: "Resolvido imediatamente antes da montagem do payload por GET /salesmen com credenciais do vendedor; o CRM lê NUMERO_PEDIDO em body.data, body, body.response.data ou body.data.data e valida como string.",
+      NUM_PEDIDO: "Reservado pelo CRM em sequência PostgreSQL global iniciada em 900001; qualquer NUMERO_PEDIDO retornado por /salesmen é apenas diagnóstico e não alimenta o payload.",
       OPERADOR: "Resolvido do vendedor UltraFV3 retornado em /salesmen que casa com o CODVENDEDOR do usuário CRM; usa o campo OPERADOR do SALESMAN e só mantém erpOperatorCode do usuário como fallback interno.",
       CODPRODUTO_CLAS: "Resolvido do item da oportunidade (OpportunityItem.erpProductClassCode), preenchido pela sincronização de produtos UltraFV3; se estiver vazio, o CRM bloqueia antes do POST /orders.",
       DESCRICAO_UNMED: "Resolvida do payload sincronizado do produto; para UND_MEDIDA SC, o CRM envia descrição compatível com SACO.",
@@ -6806,7 +6806,7 @@ router.post("/erp-orders/preflight", authorize("diretor"), async (req, res) => {
     return res.json({ ready: true, postOrdersSent: false, numPedido: payload.NUM_PEDIDO, sellerMatched: true, operatorResolved: Boolean(payload.OPERADOR), itemsValid: payload.ITENS.length > 0, warnings: [], salesmenDiagnostics: "salesmenDiagnostics" in preview ? preview.salesmenDiagnostics : null });
   } catch (error: any) {
     const status = Number(error?.status || 422);
-    return res.status(status >= 400 && status < 600 ? status : 422).json({ ready: false, postOrdersSent: false, error: error?.code || (error?.message === "erp_invalid_order_number" ? "erp_invalid_order_number" : "erp_invalid_order_number"), message: sanitizeErpOrderErrorMessage(error?.message || String(error)), correlationId, salesmenDiagnostics: error?.diagnostics || null });
+    return res.status(status >= 400 && status < 600 ? status : 422).json({ ready: false, postOrdersSent: false, error: error?.code || "erp_order_preview_failed", message: sanitizeErpOrderErrorMessage(error?.message || String(error)), correlationId, salesmenDiagnostics: error?.diagnostics || null });
   }
 });
 
@@ -10715,7 +10715,7 @@ router.get("/erp/ultrafv3/seller-diagnostics", authorize("diretor", "gerente"), 
     flow: {
       individualPartnersSync: { path: "Login FV3 do vendedor -> POST /auth/login -> GET /partners", identifierUsed: targetUser?.erpLoginUsername ? "erpLoginUsername do usuário CRM (valor mascarado na UI)" : null, authMode: "seller", endpoint: "/partners" },
       allSellersSync: { path: "POST /erp/ultrafv3/sync/partners/all-sellers -> usuários ativos com Login FV3 -> syncPartnersByUser(user.id) -> GET /partners", lastRunsReturned: syncRuns.length },
-      orderErp: { path: "Oportunidade -> ownerSeller -> autenticação FV3 do vendedor -> GET /salesmen para OPERADOR/NUM_PEDIDO -> POST /orders", sellerId: targetUser?.id ?? null, sellerErpCode: targetUser?.erpCode ?? null, erpOperatorCode: targetUser?.erpOperatorCode ?? null, loginFV3Type: targetUser ? getMaskedLoginType(targetUser.erpLoginUsername) : null, cpf: normalizedCpf ? "informado" : null, cnpj: normalizedCnpj ? "informado" : null, resolvedOperator: salesmenOperator || crmOperator || null, resolvedNumPedido: salesmenNumPedido || null },
+      orderErp: { path: "Oportunidade -> ownerSeller -> autenticação FV3 do vendedor -> GET /salesmen para OPERADOR -> sequência CRM global NUM_PEDIDO -> POST /orders", sellerId: targetUser?.id ?? null, sellerErpCode: targetUser?.erpCode ?? null, erpOperatorCode: targetUser?.erpOperatorCode ?? null, loginFV3Type: targetUser ? getMaskedLoginType(targetUser.erpLoginUsername) : null, cpf: normalizedCpf ? "informado" : null, cnpj: normalizedCnpj ? "informado" : null, resolvedOperator: salesmenOperator || crmOperator || null, resolvedNumPedido: salesmenNumPedido || null },
     },
     ultraFv3: liveUltraFv3,
     divergences: alerts,

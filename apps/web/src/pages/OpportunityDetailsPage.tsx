@@ -2136,7 +2136,7 @@ export default function OpportunityDetailsPage() {
                           ) : null}
                           {erpOrderFeedback.status === "enviado" ? (
                             <p className="mt-1">
-                              Pedido ERP:{" "}
+                              Pedido ERP nº {" "}
                               <strong>
                                 {erpOrderFeedback.erpOrderNumber ||
                                   "Pedido enviado, número ERP não retornado"}
@@ -2144,7 +2144,7 @@ export default function OpportunityDetailsPage() {
                             </p>
                           ) : erpOrderFeedback.erpOrderNumber ? (
                             <p className="mt-1">
-                              Pedido ERP: <strong>{erpOrderFeedback.erpOrderNumber}</strong>
+                              Pedido ERP nº <strong>{erpOrderFeedback.erpOrderNumber}</strong>
                             </p>
                           ) : null}
                           {erpOrderFeedback.correlationId ? (
@@ -2228,7 +2228,7 @@ export default function OpportunityDetailsPage() {
                                       Importação: {order.pedidoIdImportacao}
                                     </p>
                                     <p className="text-xs text-slate-600">
-                                      Pedido:{" "}
+                                      Pedido ERP nº: {" "}
                                       {order.erpOrderNumber ||
                                         "Pedido enviado, número ERP não retornado"}
                                     </p>
