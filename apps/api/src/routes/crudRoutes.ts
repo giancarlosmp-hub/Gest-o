@@ -80,6 +80,7 @@ import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErp
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
+import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -5339,6 +5340,25 @@ router.get("/ai/opportunity-message", async (req, res) => {
   });
 
   return res.json({ message });
+});
+
+
+router.get("/ai/commercial-planning/week", async (req, res) => {
+  if (!req.user?.id) return res.status(401).json({ message: "Não autenticado" });
+
+  try {
+    const plan = await planningIntelligenceService.generateWeeklyCommercialPlan({
+      viewerUserId: req.user.id,
+      viewerRole: req.user.role,
+      sellerId: typeof req.query.sellerId === "string" ? req.query.sellerId : undefined,
+      weekStart: typeof req.query.weekStart === "string" ? req.query.weekStart : undefined,
+      refresh: req.query.refresh === "true"
+    });
+    return res.json(plan);
+  } catch (error: any) {
+    if (error?.statusCode === 403) return res.status(403).json({ message: error.message });
+    return res.status(500).json({ message: "Não foi possível gerar o planejamento comercial." });
+  }
 });
 
 router.get("/ai/today-priorities", async (req, res) => {
