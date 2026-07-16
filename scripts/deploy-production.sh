@@ -61,6 +61,7 @@ log "Reconstruindo imagens Docker: ${BUILD_SERVICES}"
 # shellcheck disable=SC2086
 docker compose build ${BUILD_SERVICES}
 
+
 log "Subindo containers atualizados: ${START_SERVICES}"
 # shellcheck disable=SC2086
 docker compose up -d ${START_SERVICES}
