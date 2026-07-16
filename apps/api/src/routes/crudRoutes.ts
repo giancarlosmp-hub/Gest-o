@@ -79,6 +79,7 @@ import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionCo
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
 import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
+import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -4161,6 +4162,48 @@ router.get("/clients/:id/ai-context", async (req, res) => {
 
 const clientSuggestionBodySchema = z.object({
   clientId: z.string().trim().min(1, "clientId é obrigatório")
+});
+
+
+const timelineIntelligenceParamsSchema = z.object({
+  clientId: z.string().trim().min(1).optional(),
+  opportunityId: z.string().trim().min(1).optional()
+});
+
+router.get("/ai/timeline-intelligence/client/:clientId", async (req, res) => {
+  const parsed = timelineIntelligenceParamsSchema.safeParse(req.params);
+  if (!parsed.success || !parsed.data.clientId) {
+    return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.success ? [] : parsed.error.issues });
+  }
+
+  const result = await timelineIntelligenceService.generateTimelineIntelligence({
+    clientId: parsed.data.clientId,
+    viewerUserId: req.user!.id,
+    viewerRole: req.user!.role,
+    scope: sellerWhere(req),
+    refresh: req.query.refresh === "true"
+  });
+
+  if (!result) return res.status(404).json({ message: "Cliente não encontrado" });
+  return res.json(result);
+});
+
+router.get("/ai/timeline-intelligence/opportunity/:opportunityId", async (req, res) => {
+  const parsed = timelineIntelligenceParamsSchema.safeParse(req.params);
+  if (!parsed.success || !parsed.data.opportunityId) {
+    return res.status(400).json({ message: "Parâmetros inválidos", errors: parsed.success ? [] : parsed.error.issues });
+  }
+
+  const result = await timelineIntelligenceService.generateTimelineIntelligence({
+    opportunityId: parsed.data.opportunityId,
+    viewerUserId: req.user!.id,
+    viewerRole: req.user!.role,
+    scope: sellerWhere(req),
+    refresh: req.query.refresh === "true"
+  });
+
+  if (!result) return res.status(404).json({ message: "Oportunidade não encontrada" });
+  return res.json(result);
 });
 
 router.get("/ai/status", (_req, res) => {

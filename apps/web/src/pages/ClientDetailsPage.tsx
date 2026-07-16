@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import api from "../lib/apiClient";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
+import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 
 type CommercialSummary = {
@@ -714,6 +715,7 @@ export default function ClientDetailsPage() {
         ) : (
           <>
             <h3 className="mb-3 text-lg font-semibold">Linha do Tempo</h3>
+            <TimelineIntelligenceCard clientId={id} />
             {eventsError ? (
               <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
                 {eventsError}
