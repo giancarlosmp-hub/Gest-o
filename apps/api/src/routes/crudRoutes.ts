@@ -72,7 +72,7 @@ import {
   startUltraFv3FullSyncJob
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
-import { buildSalesmenDiagnostic, createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, getZeroNumPedidoDryRunReport, normalizeErpOrderParameterCodes, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
+import { buildSalesmenDiagnostic, createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, getZeroNumPedidoDryRunReport, normalizeErpOrderParameterCodes, runUltraFv3OrderProtocolTest, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
 import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
@@ -7004,6 +7004,56 @@ router.get("/opportunities/:id/erp/debug-payload", async (req, res) => {
       message,
       salesmenDiagnostics: error?.diagnostics || null,
       ...(error?.payload ? { invalidPayload: error.payload } : {}),
+    });
+  }
+});
+
+const erpOrderProtocolTestSchema = erpOrderGenerationSchema.extend({
+  opportunityId: z.string().trim().min(1),
+  confirmation: z.literal("CONFIRMAR_TESTE_ULTRAFV3"),
+  numPedidoMode: z.literal("zero"),
+});
+
+router.post("/erp-orders/protocol-test", authorize("diretor"), async (req, res) => {
+  const correlationId = req.correlationId || randomUUID();
+  req.correlationId = correlationId;
+  res.setHeader("x-correlation-id", correlationId);
+  if (!env.ultraFv3OrderProtocolTestEnabled) {
+    return res.status(403).json({
+      error: "feature_disabled",
+      message: "Teste de protocolo UltraFV3 desabilitado. Defina ULTRAFV3_ORDER_PROTOCOL_TEST_ENABLED=true somente durante a janela controlada.",
+      correlationId,
+    });
+  }
+
+  const parsed = erpOrderProtocolTestSchema.safeParse(req.body || {});
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "invalid_confirmation_or_payload",
+      message: parsed.error.issues[0]?.message || "Payload inválido para teste de protocolo UltraFV3.",
+      correlationId,
+    });
+  }
+
+  try {
+    const opportunity = await prisma.opportunity.findFirst({
+      where: { id: parsed.data.opportunityId },
+      include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } },
+    });
+    if (!opportunity) return res.status(404).json({ error: "opportunity_not_found", correlationId });
+    const report = await runUltraFv3OrderProtocolTest(opportunity, parsed.data, { correlationId });
+    return res.status(200).json(report);
+  } catch (error: any) {
+    const statusCandidate = Number(error?.status || 502);
+    const status = statusCandidate >= 400 && statusCandidate < 600 ? statusCandidate : 502;
+    const report = error?.protocolTestReport && typeof error.protocolTestReport === "object"
+      ? sanitizeErpOrderPayload(error.protocolTestReport)
+      : null;
+    return res.status(status).json({
+      error: status === 409 ? "duplicate_or_uncertain_attempt" : "protocol_test_failed",
+      message: sanitizeErpOrderErrorMessage(error?.message || String(error)),
+      correlationId,
+      ...(report ? { report } : {}),
     });
   }
 });

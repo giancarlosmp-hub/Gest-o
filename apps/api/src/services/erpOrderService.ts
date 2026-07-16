@@ -12,7 +12,7 @@ import { prisma } from "../config/prisma.js";
 import { env } from "../config/env.js";
 import { assertErpRuntimeConfigForOrderSubmission } from "./erpRuntimeConfig.js";
 import { logApiEvent } from "../utils/logger.js";
-import { ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
+import { isUltraFv3TimeoutError, ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQUEST_TIMEOUT_MS, UltraFv3IntegrationError, ultraFv3Client, type UltraFv3Credentials } from "./ultraFv3Client.js";
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 
@@ -80,8 +80,9 @@ const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProduc
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const SENSITIVE_KEY_PATTERN = /authorization|token|password|senha|secret|credential/i;
-const DOCUMENT_KEY_PATTERN = /document|documento|cpf|cnpj/i;
+const SENSITIVE_KEY_PATTERN = /authorization|token|password|senha|secret|credential|cookie/i;
+const DOCUMENT_KEY_PATTERN = /document|documento|cpf|cnpj|email|telefone|phone|celular|endereco|address|cliente|razao|fantasia/i;
+const PERSON_NAME_KEY_PATTERN = /(^|_)(nome|name|vendedor|salesman|seller)(_|$)/i;
 
 const redactSensitiveText = (value: string) => value
   .replace(/Bearer\s+[A-Za-z0-9._~+\/-]+/gi, "Bearer ***")
@@ -99,9 +100,18 @@ const maskDocument = (value: unknown) => {
   return `${digits.slice(0, 3)}***${digits.slice(-2)}`;
 };
 
+const maskPersonName = (value: unknown) => {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  const firstToken = text.split(/\s+/)[0] ?? text;
+  if (firstToken.length <= 3) return `${firstToken[0] ?? "*"}***`;
+  return `${firstToken.slice(0, 3).toUpperCase()}***`;
+};
+
 const sanitizeUltraValue = (value: unknown, key = ""): unknown => {
-  if (SENSITIVE_KEY_PATTERN.test(key)) return "***";
-  if (DOCUMENT_KEY_PATTERN.test(key)) return maskDocument(value);
+  if (SENSITIVE_KEY_PATTERN.test(key)) return "[REDACTED]";
+  if (DOCUMENT_KEY_PATTERN.test(key)) return "[REDACTED]";
+  if (PERSON_NAME_KEY_PATTERN.test(key) && (typeof value === "string" || typeof value === "number")) return maskPersonName(value);
   if (typeof value === "string") return redactSensitiveText(value);
   if (Array.isArray(value)) return value.map((item) => sanitizeUltraValue(item));
   if (value && typeof value === "object")
@@ -1670,6 +1680,323 @@ export async function createErpOrderFromOpportunity(
       throw error;
     }
     throw Object.assign(new Error(message || "Falha ao gerar pedido ERP."), { status, correlationId });
+  }
+}
+
+const PROTOCOL_TEST_MARKER = "protocol_test";
+const ORDER_IDENTIFIER_FIELD_PATTERN = /PEDIDO|ORDER|NUMERO|NUM|SEQUENCIA|SEQUENCE|DOCUMENTO|CODIGO|COD|ID/i;
+const SAFE_RESPONSE_HEADER_PATTERN = /^(content-type|content-length|date|server|x-request-id|x-correlation-id)$/i;
+
+export type ErpOrderProtocolIdentifierHit = {
+  path: string;
+  field: string;
+  type: string;
+  value: string;
+};
+
+const collectOrderIdentifierHits = (value: unknown, path = "$", output: ErpOrderProtocolIdentifierHit[] = [], depth = 0) => {
+  if (depth > 8 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectOrderIdentifierHits(item, `${path}[${index}]`, output, depth + 1));
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  for (const [field, nested] of Object.entries(value as Record<string, unknown>)) {
+    const nextPath = `${path}.${field}`;
+    if (ORDER_IDENTIFIER_FIELD_PATTERN.test(field) && ["string", "number", "bigint", "boolean"].includes(typeof nested)) {
+      output.push({
+        path: nextPath,
+        field,
+        type: typeof nested,
+        value: String(nested),
+      });
+    }
+    if (nested && typeof nested === "object") collectOrderIdentifierHits(nested, nextPath, output, depth + 1);
+  }
+  return output;
+};
+
+export const collectUltraFv3OrderIdentifierHits = (payload: unknown) => collectOrderIdentifierHits(payload);
+
+const sanitizeProtocolHeaders = (headers: Record<string, string>) =>
+  Object.fromEntries(Object.entries(headers)
+    .filter(([key]) => SAFE_RESPONSE_HEADER_PATTERN.test(key))
+    .map(([key, value]) => [key, sanitizeErpOrderPayload(value)]));
+
+const getDirectProtocolValue = (payload: unknown, keys: string[]): string | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();
+  }
+  for (const nestedKey of ["data", "response", "result", "retorno", "Retorno", "order", "pedido"]) {
+    const found: string | null = getDirectProtocolValue(record[nestedKey], keys);
+    if (found) return found;
+  }
+  return null;
+};
+
+const buildProtocolTestOrderPayload = async (
+  opportunity: OpportunityForErpOrder,
+  rawParams: OrderParameterCodes,
+  pedidoIdImportacao: string,
+) => {
+  const params = normalizeErpOrderParameterCodes(rawParams);
+  const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
+  const missingParameter = Object.entries(params).find(
+    ([key, value]) => !["simulateOnly", "erpOrderObservation"].includes(key) && !value,
+  );
+  if (missingParameter)
+    throw Object.assign(new Error(`Payload inválido: código ERP ausente em ${missingParameter[0]}.`), {
+      status: 422,
+      parameterDiagnostics,
+    });
+  if (opportunity.stage !== "ganho")
+    throw Object.assign(new Error("Operação inválida: apenas oportunidades na etapa Ganha podem gerar pedido ERP."), { status: 400 });
+
+  const clientPayload = opportunity.client as Record<string, unknown>;
+  const rawClientPayload = clientPayload.rawPayload && typeof clientPayload.rawPayload === "object"
+    ? (clientPayload.rawPayload as Record<string, unknown>)
+    : {};
+  const clientErpCode = pickFirstString(clientPayload, ["code", "erpCode", "externalCode", "erpClientCode"])
+    || pickFirstString(rawClientPayload, ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code", "erpCode", "codigo", "CODIGO", "partnerCode"]);
+  const numericClientErpCode = toUltraNumber(clientErpCode);
+  if (!clientErpCode) throw Object.assign(new Error("Cliente sem código ERP para gerar pedido."), { status: 400 });
+
+  const sellerErpCode = opportunity.ownerSeller.erpCode?.trim();
+  const operatorCode = opportunity.ownerSeller.erpOperatorCode?.trim();
+  if (!sellerErpCode) throw Object.assign(new Error("Vendedor sem vínculo ERP: informe o CODVENDEDOR no cadastro do usuário."), { status: 400 });
+  if (!operatorCode) throw Object.assign(new Error("Vendedor sem operador ERP configurado no CRM."), { status: 400 });
+  if (!opportunity.ownerSeller.erpLoginUsername?.trim() || !opportunity.ownerSeller.erpLoginPasswordEncrypted)
+    throw Object.assign(new Error("Vendedor sem Login FV3/Senha FV3."), { status: 400 });
+  if (!opportunity.items.length) throw Object.assign(new Error("Operação inválida: oportunidade sem itens para envio ao ERP."), { status: 400 });
+  if (opportunity.items.some((item) => !item.erpProductCode?.trim())) throw Object.assign(new Error("Payload inválido: há item sem código ERP."), { status: 400 });
+  const itemWithoutProductClass = opportunity.items.find((item) => !resolveOrderItemProductClassCode(item));
+  if (itemWithoutProductClass) throw Object.assign(new Error("Payload inválido: há item sem classificação ERP."), { status: 400 });
+  if (opportunity.items.some((item) => !item.unit?.trim())) throw Object.assign(new Error("Payload inválido: há item sem unidade de medida."), { status: 400 });
+  if (opportunity.items.some((item) => Number(item.unitPrice) <= 0 || Number(item.netTotal) <= 0))
+    throw Object.assign(new Error("Payload inválido: pedido ERP bloqueado por item com preço zerado."), { status: 400 });
+  await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
+  await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
+
+  const now = new Date();
+  const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);
+  if (!expectedDeliveryDate) throw Object.assign(new Error("Payload inválido: Data prevista de entrega obrigatória no formato YYYY-MM-DD."), { status: 400, parameterDiagnostics });
+  const numericSellerErpCode = Number(sellerErpCode);
+  const numericOperatorCode = Number(operatorCode);
+  if (!Number.isFinite(numericSellerErpCode) || !Number.isFinite(numericOperatorCode))
+    throw Object.assign(new Error("Vínculo ERP inválido para vendedor."), { status: 400 });
+
+  const itens = opportunity.items.map((item, index) => {
+    const unitFields = resolveOrderItemUnitFields(item);
+    return {
+      PEDIDO_ID: null,
+      ITEM: index + 1,
+      CODPRODUTO: toUltraNumber(item.erpProductCode),
+      CODPRODUTO_CLAS: toUltraNumber(resolveOrderItemProductClassCode(item)),
+      QTD_PEDIDO: Number(item.quantity),
+      PRECO: Number(item.unitPrice),
+      PRECO_LISTA: Number(item.unitPrice),
+      VALOR_BRUTO: roundMoney(Number(item.grossTotal || 0)),
+      VALOR_ACRESCIMO: 0,
+      VALOR_DESCONTO: roundMoney(Number(item.discountTotal || 0)),
+      VALOR_LIQUIDO: roundMoney(Number(item.netTotal || 0)),
+      DESCRICAO_UNMED: unitFields.DESCRICAO_UNMED,
+      UND_MEDIDA: unitFields.UND_MEDIDA,
+      QTD_UNMED: 1,
+      PESO_EMBALAGEM: 0,
+      PESO_PRODUTO: null,
+      MOTIVO_CANCELAMENTO: "",
+      OBS: "",
+      VALOR_ICMS_DESON: 0,
+      ICMS_DESON_DESCTO_FINANCEIRO: "N",
+    };
+  });
+  const valorBruto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.grossTotal || 0), 0));
+  const valorDesconto = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.discountTotal || 0), 0));
+  const valorLiquido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0));
+  const qtdPedido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
+  const validationPayload: UltraFv3OrderPayload = {
+    PEDIDO_ID: null,
+    PARCEIRO: numericClientErpCode,
+    NUM_PEDIDO: "1",
+    DATA_PEDIDO: formatDateDot(now),
+    DATA_PREV_ENTREGA: formatDateDot(expectedDeliveryDate),
+    VENDEDOR: numericSellerErpCode,
+    OPERADOR: numericOperatorCode,
+    CODOPER: toUltraNumber(params.operationCode),
+    CODFILIAL: toUltraNumber(params.branchCode),
+    TABELA_PRECO: toUltraNumber(params.priceTableCode),
+    CODCONDREC: toUltraNumber(params.receivingConditionCode),
+    FORMA: toUltraNumber(params.paymentMethodCode),
+    VALOR_BRUTO: valorBruto,
+    VALOR_ACRESCIMO: 0,
+    VALOR_DESCONTO: valorDesconto,
+    VALOR_LIQUIDO: valorLiquido,
+    QTD_PEDIDO: qtdPedido,
+    PRIORIDADE: 9,
+    TIPO_MOVIMENTO: "PEDIDO",
+    PEDIDO_ID_IMPORTACAO: pedidoIdImportacao,
+    DATA_CANCELAMENTO: "",
+    OBS_PEDIDO: params.erpOrderObservation,
+    OBSERVACAO_INTERNA: null,
+    ITENS: itens,
+  };
+  const payloadValidationErrors = validateUltraFv3OrderPayload(validationPayload);
+  if (payloadValidationErrors.length) throw Object.assign(new Error("Payload UltraFV3 /orders inválido; teste bloqueado antes de chamar o ERP."), { status: 422, errors: payloadValidationErrors });
+  return { ...validationPayload, NUM_PEDIDO: "0" } satisfies UltraFv3OrderPayload;
+};
+
+export async function runUltraFv3OrderProtocolTest(
+  opportunity: OpportunityForErpOrder,
+  rawParams: OrderParameterCodes,
+  options: { correlationId?: string } = {},
+) {
+  assertErpRuntimeConfigForOrderSubmission();
+  const correlationId = options.correlationId || randomUUID();
+  const pedidoIdImportacao = randomUUID();
+  const existingAttempts = await prisma.erpOrderSync.findMany({
+    where: {
+      opportunityId: opportunity.id,
+      OR: [
+        { status: ErpOrderSyncStatus.sent },
+        { status: ErpOrderSyncStatus.pending },
+        { status: ErpOrderSyncStatus.error },
+        { erpResponse: { path: ["protocolTest"], equals: true } },
+        { syncErrors: { path: ["0", "operation"], equals: PROTOCOL_TEST_MARKER } },
+      ],
+    },
+    orderBy: [{ createdAt: "desc" }],
+  });
+  const existing = existingAttempts.find((attempt) =>
+    attempt.status === ErpOrderSyncStatus.sent ||
+    attempt.status === ErpOrderSyncStatus.pending ||
+    isUncertainErpOrderFailure(attempt) ||
+    (attempt.erpResponse && typeof attempt.erpResponse === "object" && !Array.isArray(attempt.erpResponse) && (attempt.erpResponse as Record<string, unknown>).protocolTest === true) ||
+    (Array.isArray(attempt.syncErrors) && attempt.syncErrors.some((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).operation === PROTOCOL_TEST_MARKER))
+  );
+  if (existing) throw Object.assign(new Error("Teste de protocolo bloqueado: oportunidade já possui pedido/tentativa/protocol_test."), { status: 409, existingErpOrderSyncId: existing.id });
+
+  const payload = await buildProtocolTestOrderPayload(opportunity, rawParams, pedidoIdImportacao);
+  const sellerCredentials = {
+    username: opportunity.ownerSeller.erpLoginUsername!.trim(),
+    password: decryptErpCredential(opportunity.ownerSeller.erpLoginPasswordEncrypted!),
+  };
+  await ultraFv3Client.authenticateWithCredentials(sellerCredentials);
+  const sync = await prisma.erpOrderSync.create({
+    data: {
+      opportunityId: opportunity.id,
+      sellerId: opportunity.ownerSeller.id,
+      pedidoIdImportacao,
+      numPedido: "0",
+      status: ErpOrderSyncStatus.pending,
+      payloadSent: toJson(payload),
+      syncErrors: toJson([{ operation: PROTOCOL_TEST_MARKER, at: new Date().toISOString(), correlationId }]),
+    },
+  });
+
+  logApiEvent("WARN", "[ultrafv3/order protocol test] executing controlled POST /orders", {
+    opportunityId: opportunity.id,
+    erpOrderSyncId: sync.id,
+    pedidoIdImportacao,
+    submittedNumPedido: "0",
+    payload: sanitizeErpOrderPayload(payload),
+  });
+
+  try {
+    const orderResult = await ultraFv3Client.requestWithCredentialsRaw<unknown>("/orders", sellerCredentials, {
+      method: "POST",
+      body: payload,
+      correlationId: pedidoIdImportacao,
+      timeoutMs: ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS,
+    });
+    const orderResponseIdentifierHits = collectUltraFv3OrderIdentifierHits(orderResult.body);
+    const erpInternalOrderId = getDirectProtocolValue(orderResult.body, ["PEDIDO_ID", "ID_PEDIDO", "pedidoId", "idPedido"]);
+    const returnedNumPedido = getDirectProtocolValue(orderResult.body, ["NUM_PEDIDO", "NUMPEDIDO", "NUMERO_PEDIDO"]);
+    const statusQueries = [
+      { mode: "pedidoIdImportacao", value: pedidoIdImportacao },
+      ...(erpInternalOrderId ? [{ mode: "erpInternalOrderId", value: erpInternalOrderId }] : []),
+      ...(returnedNumPedido && returnedNumPedido !== "0" ? [{ mode: "returnedNumPedido", value: returnedNumPedido }] : []),
+    ];
+    const statusResults: Record<string, unknown> = {};
+    const statusHits: ErpOrderProtocolIdentifierHit[] = [];
+    for (const query of statusQueries) {
+      try {
+        const statusResponse = await ultraFv3Client.requestWithCredentialsRaw<unknown>(
+          `/orderStatus?pedido=${encodeURIComponent(query.value)}`,
+          sellerCredentials,
+          { correlationId: `${pedidoIdImportacao}-${query.mode}`, timeoutMs: ULTRAFV3_REQUEST_TIMEOUT_MS },
+        );
+        const safeBody = sanitizeErpOrderPayload(statusResponse.body);
+        statusResults[query.mode] = {
+          query: query.value,
+          httpStatus: statusResponse.status,
+          headers: sanitizeProtocolHeaders(statusResponse.headers),
+          response: safeBody,
+          identifierHits: collectUltraFv3OrderIdentifierHits(statusResponse.body),
+        };
+        statusHits.push(...collectUltraFv3OrderIdentifierHits(statusResponse.body).map((hit) => ({ ...hit, path: `${query.mode}:${hit.path}` })));
+      } catch (error) {
+        statusResults[query.mode] = {
+          query: query.value,
+          error: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : String(error)),
+        };
+      }
+    }
+
+    const report = {
+      protocolTest: true,
+      testExecuted: true,
+      pedidoIdImportacao,
+      submittedNumPedido: "0",
+      ordersHttpStatus: orderResult.status,
+      ordersAccepted: true,
+      ordersHeaders: sanitizeProtocolHeaders(orderResult.headers),
+      orderResponse: sanitizeErpOrderPayload(orderResult.body),
+      erpInternalOrderId,
+      returnedNumPedido,
+      displayOrderNumberCandidate: null,
+      orderResponseIdentifierHits,
+      orderStatusByImportId: statusResults.pedidoIdImportacao ?? null,
+      orderStatusByErpInternalOrderId: statusResults.erpInternalOrderId ?? null,
+      orderStatusByReturnedNumPedido: statusResults.returnedNumPedido ?? null,
+      orderStatusIdentifierHits: statusHits,
+      manualVerificationRequired: true,
+      warnings: ["Confira no UltraFV3 qual número sequencial foi exibido para este pedido."],
+    };
+    await prisma.erpOrderSync.update({
+      where: { id: sync.id },
+      data: {
+        status: ErpOrderSyncStatus.sent,
+        erpOrderNumber: null,
+        erpResponse: toJson(report),
+        syncErrors: Prisma.JsonNull,
+        sentAt: new Date(),
+      },
+    });
+    return report;
+  } catch (error) {
+    const failure = {
+      protocolTest: true,
+      testExecuted: true,
+      pedidoIdImportacao,
+      submittedNumPedido: "0",
+      ordersAccepted: false,
+      uncertain: isUltraFv3TimeoutError(error),
+      message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : String(error)),
+      manualVerificationRequired: true,
+      warnings: ["Resultado incerto: não repita automaticamente. Confira manualmente no UltraFV3 usando o PEDIDO_ID_IMPORTACAO."],
+    };
+    await prisma.erpOrderSync.update({
+      where: { id: sync.id },
+      data: {
+        status: ErpOrderSyncStatus.error,
+        erpResponse: toJson(failure),
+        syncErrors: toJson([{ operation: PROTOCOL_TEST_MARKER, at: new Date().toISOString(), correlationId, ...failure }]),
+      },
+    });
+    throw Object.assign(new Error(failure.message), { status: failure.uncertain ? 504 : 502, protocolTestReport: failure, pedidoIdImportacao });
   }
 }
 
