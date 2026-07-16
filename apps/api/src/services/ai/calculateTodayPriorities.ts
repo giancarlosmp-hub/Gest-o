@@ -1,12 +1,25 @@
 import { parseActivityObservation } from "../activityObservationParser.js";
 import type { OpportunityInsightInput } from "../opportunityInsight.js";
-import type { TodayPriorityItem, TodayPriorityRisk } from "./types.js";
+import type { CommercialTemperature, TodayPriorityItem, TodayPriorityRisk } from "./types.js";
 import { generateOpportunityInsight } from "../opportunityInsight.js";
+import { calculateCommercialPriority, type CommercialPriorityInput, type CommercialPriorityLevel } from "../commercialPriorityService.js";
+import { WORKFLOW_INACTIVE_CLIENT_ORIGIN } from "../commercialAutomationsService.js";
 
-type TodayPriorityInput = OpportunityInsightInput & {
+export type TodayPriorityInput = OpportunityInsightInput & {
   id: string;
+  clientId?: string | null;
+  ownerSellerId?: string | null;
+  title?: string | null;
+  notes?: string | null;
   client?: {
+    id?: string | null;
     name?: string | null;
+    lastPurchaseDate?: Date | null;
+    lastPurchaseValue?: number | null;
+    ownerSellerId?: string | null;
+    financialProfile?: Record<string, unknown> | string | null;
+    openTitlesTotal?: number | null;
+    overdueTitlesTotal?: number | null;
   } | null;
   timelineEvents: Array<{
     createdAt: Date;
@@ -15,155 +28,146 @@ type TodayPriorityInput = OpportunityInsightInput & {
   activities: Array<{
     createdAt: Date;
     date?: Date | null;
+    dueDate?: Date | null;
     notes?: string | null;
     description?: string | null;
     result?: string | null;
+    done?: boolean | null;
+    status?: string | null;
+    completedAt?: Date | null;
   }>;
 };
 
-const TODAY_PRIORITY_RISK_WEIGHT: Record<TodayPriorityRisk, number> = {
-  alto: 3,
-  medio: 2,
-  baixo: 1
-};
-
-const OPPORTUNITY_VALUE_HIGH = 100000;
-const OPPORTUNITY_VALUE_MEDIUM = 50000;
-const DAY_IN_MS = 24 * 60 * 60 * 1000;
-
-const getOpportunityValueScore = (value: number) => {
-  if (value >= OPPORTUNITY_VALUE_HIGH) return 25;
-  if (value >= OPPORTUNITY_VALUE_MEDIUM) return 15;
-  if (value > 0) return 8;
-  return 0;
-};
-
-const getDaysWithoutInteraction = (baseDate: Date, now: Date) =>
-  Math.floor((now.getTime() - baseDate.getTime()) / DAY_IN_MS);
-
-const getTodayPriorityRiskByScore = (score: number): TodayPriorityRisk => {
-  if (score >= 85) return "alto";
-  if (score >= 45) return "medio";
+const mapPriorityLevelToLegacyRisk = (level: CommercialPriorityLevel): TodayPriorityRisk => {
+  // priorityLevel is the official calculated priority (baixa/normal/alta/urgente).
+  // risk is a legacy visual compatibility field still consumed by HomePage badges.
+  // commercialTemperature remains a separate behavioral indicator from observations.
+  if (level === "urgente" || level === "alta") return "alto";
+  if (level === "normal") return "medio";
   return "baixo";
 };
+
+const getTime = (date?: Date | null) => date?.getTime() ?? Number.POSITIVE_INFINITY;
+
+const getLatestObservation = (opportunity: TodayPriorityInput) => {
+  const recentTimelineObservation = opportunity.timelineEvents
+    .find((event) => event.description?.trim())
+    ?.description
+    ?.trim();
+
+  const recentActivityWithObservation = opportunity.activities.find((activity) => {
+    const texts = [activity.notes, activity.description, activity.result].map((text) => text?.trim() || "");
+    return texts.some(Boolean);
+  });
+
+  const recentActivityObservation = recentActivityWithObservation
+    ? [recentActivityWithObservation.notes, recentActivityWithObservation.description, recentActivityWithObservation.result]
+      .map((text) => text?.trim() || "")
+      .find(Boolean) || null
+    : null;
+
+  const recentActivityDate = recentActivityWithObservation
+    ? (recentActivityWithObservation.date || recentActivityWithObservation.createdAt).getTime()
+    : 0;
+  const recentTimelineDate = opportunity.timelineEvents.find((event) => event.description?.trim())?.createdAt.getTime() || 0;
+
+  return recentActivityDate >= recentTimelineDate
+    ? recentActivityObservation
+    : (recentTimelineObservation || recentActivityObservation);
+};
+
+export const buildCommercialPriorityInput = (opportunity: TodayPriorityInput, now: Date): CommercialPriorityInput => ({
+  now,
+  client: opportunity.client ? {
+    lastPurchaseDate: opportunity.client.lastPurchaseDate,
+    lastPurchaseValue: opportunity.client.lastPurchaseValue,
+    ownerSellerId: opportunity.client.ownerSellerId,
+    financialProfile: opportunity.client.financialProfile,
+    openTitlesTotal: opportunity.client.openTitlesTotal,
+    overdueTitlesTotal: opportunity.client.overdueTitlesTotal
+  } : undefined,
+  opportunity: {
+    stage: opportunity.stage,
+    value: opportunity.value,
+    followUpDate: opportunity.followUpDate,
+    lastContactAt: opportunity.lastContactAt,
+    createdAt: opportunity.createdAt,
+    notes: opportunity.notes,
+    source: opportunity.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN) ? "automatic" : undefined
+  },
+  activities: opportunity.activities.map((activity) => ({
+    date: activity.date,
+    dueDate: activity.dueDate || activity.date,
+    createdAt: activity.createdAt,
+    completedAt: activity.completedAt,
+    status: activity.status,
+    done: activity.done
+  })),
+  timelineEvents: opportunity.timelineEvents.map((event) => ({
+    createdAt: event.createdAt,
+    description: event.description
+  })),
+  workflow: {
+    clientWithoutPurchase: !opportunity.client?.lastPurchaseDate,
+    automaticallyCreatedOpportunity: Boolean(opportunity.notes?.includes(WORKFLOW_INACTIVE_CLIENT_ORIGIN))
+  },
+  ai: {
+    hasContext: Boolean(getLatestObservation(opportunity))
+  }
+});
 
 export const calculateTodayPriorities = (
   openOpportunities: TodayPriorityInput[],
   todayStart: Date
 ): TodayPriorityItem[] => {
-  const now = new Date();
+  const now = todayStart;
 
   return openOpportunities
     .map((opportunity) => {
-      const value = Number(opportunity.value || 0);
-      const stageWeight = opportunity.stage === "proposta" || opportunity.stage === "negociacao" ? 25 : 0;
-      const followUpOverdueWeight = opportunity.followUpDate && opportunity.followUpDate < todayStart ? 40 : 0;
-      const valueWeight = getOpportunityValueScore(value);
-
-      const recentTimelineObservation = opportunity.timelineEvents
-        .find((event) => event.description?.trim())
-        ?.description
-        ?.trim();
-
-      const recentActivityWithObservation = opportunity.activities.find((activity) => {
-        const texts = [activity.notes, activity.description, activity.result].map((text) => text?.trim() || "");
-        return texts.some(Boolean);
-      });
-
-      const recentActivityObservation = recentActivityWithObservation
-        ? [recentActivityWithObservation.notes, recentActivityWithObservation.description, recentActivityWithObservation.result]
-          .map((text) => text?.trim() || "")
-          .find(Boolean) || null
-        : null;
-
-      const recentActivityDate = recentActivityWithObservation
-        ? (recentActivityWithObservation.date || recentActivityWithObservation.createdAt).getTime()
-        : 0;
-      const recentTimelineDate = opportunity.timelineEvents.find((event) => event.description?.trim())?.createdAt.getTime() || 0;
-      const latestObservation = recentActivityDate >= recentTimelineDate
-        ? recentActivityObservation
-        : (recentTimelineObservation || recentActivityObservation);
+      const latestObservation = getLatestObservation(opportunity);
       const observationInsight = parseActivityObservation(latestObservation);
 
       if (observationInsight.detectedIntent === "sem_interesse") {
         return null;
       }
 
-      const requestedProposalWeight = observationInsight.detectedIntent === "pediu_proposta" ? 35 : 0;
-      const awaitingDecisionWeight = observationInsight.detectedIntent === "aguardando_decisao" ? 15 : 0;
-
-      const timelineLastInteraction = opportunity.timelineEvents.length
-        ? opportunity.timelineEvents[0].createdAt
-        : null;
-      const activityLastInteraction = recentActivityWithObservation
-        ? (recentActivityWithObservation.date || recentActivityWithObservation.createdAt)
-        : null;
-      const candidateDates = [
-        opportunity.lastContactAt,
-        timelineLastInteraction,
-        activityLastInteraction,
-        opportunity.createdAt
-      ].filter((date): date is Date => Boolean(date));
-      const lastInteraction = candidateDates.reduce((latest, date) => (
-        !latest || date.getTime() > latest.getTime() ? date : latest
-      ), null as Date | null) || opportunity.createdAt;
-
-      const daysWithoutInteraction = getDaysWithoutInteraction(lastInteraction, now);
-      const noInteractionWeight = daysWithoutInteraction > 7 ? 30 : 0;
-
-      const priorityScore = Math.min(
-        100,
-        followUpOverdueWeight +
-        valueWeight +
-        stageWeight +
-        requestedProposalWeight +
-        awaitingDecisionWeight +
-        noInteractionWeight
-      );
-      const risk = getTodayPriorityRiskByScore(priorityScore);
+      const priority = calculateCommercialPriority(buildCommercialPriorityInput(opportunity, now));
+      const risk = mapPriorityLevelToLegacyRisk(priority.level);
       const intentLabel = observationInsight.detectedIntent.replace(/_/g, " ");
-      const interestTemperature = observationInsight.interestLevel === "alto"
+      const commercialTemperature: CommercialTemperature = observationInsight.interestLevel === "alto"
         ? "quente"
         : observationInsight.interestLevel === "baixo"
           ? "fria"
           : "morna";
-
-      const reasons: string[] = [];
-      if (followUpOverdueWeight) reasons.push("follow-up vencido");
-      if (valueWeight >= 15) reasons.push(`oportunidade de alto valor (R$ ${value.toLocaleString("pt-BR")})`);
-      if (stageWeight) reasons.push(`etapa avançada (${opportunity.stage})`);
-      if (requestedProposalWeight) reasons.push("cliente pediu proposta");
-      if (awaitingDecisionWeight) reasons.push("cliente aguardando decisão");
-      if (noInteractionWeight) reasons.push(`sem interação há ${daysWithoutInteraction} dia(s)`);
-
-      const suggestedAction = requestedProposalWeight
-        ? "Enviar proposta hoje e confirmar recebimento."
-        : followUpOverdueWeight
-          ? "Fazer contato imediato para destravar a negociação."
-          : awaitingDecisionWeight
-            ? "Definir com o cliente uma data de decisão e próximo passo."
-            : daysWithoutInteraction > 7
-              ? "Reativar conversa com abordagem objetiva de valor."
-              : "Executar follow-up planejado e avançar a próxima etapa.";
-
       const insight = generateOpportunityInsight({
         ...opportunity,
         observationInsight
       });
+      const priorityReason = priority.reasons.join("; ");
+      const contextualReason = `Intenção detectada: ${intentLabel}. Temperatura comercial ${commercialTemperature}.`;
 
       return {
         opportunityId: opportunity.id,
+        clientId: opportunity.client?.id || opportunity.clientId || null,
         clientName: opportunity.client?.name || "Cliente não informado",
-        value,
-        priorityScore,
+        title: opportunity.title || undefined,
+        value: Number(opportunity.value || 0),
+        priorityScore: priority.score,
         risk,
-        reason: reasons.length
-          ? `${reasons.join("; ")}. Intenção detectada: ${intentLabel}. Temperatura comercial ${interestTemperature}.`
-          : insight.message,
-        suggestedAction,
+        priorityLevel: priority.level,
+        priorityColor: priority.color,
+        priorityReasons: priority.reasons,
+        reason: priorityReason ? `${priorityReason}. ${contextualReason}` : (insight.message || contextualReason),
+        suggestedAction: priority.nextAction,
+        intention: observationInsight.detectedIntent,
+        commercialTemperature,
+        followUpDate: opportunity.followUpDate ?? null,
+        createdAt: opportunity.createdAt,
         _sort: {
-          priorityScore,
-          riskWeight: TODAY_PRIORITY_RISK_WEIGHT[risk] || 0
+          priorityScore: priority.score,
+          followUpTime: getTime(opportunity.followUpDate),
+          value: Number(opportunity.value || 0),
+          createdAtTime: getTime(opportunity.createdAt)
         }
       };
     })
@@ -172,11 +176,15 @@ export const calculateTodayPriorities = (
       const byScore = b._sort.priorityScore - a._sort.priorityScore;
       if (byScore !== 0) return byScore;
 
-      const byRisk = b._sort.riskWeight - a._sort.riskWeight;
-      if (byRisk !== 0) return byRisk;
+      const byFollowUp = a._sort.followUpTime - b._sort.followUpTime;
+      if (byFollowUp !== 0) return byFollowUp;
 
-      const byValue = b.value - a.value;
-      return byValue;
+      const byValue = b._sort.value - a._sort.value;
+      if (byValue !== 0) return byValue;
+
+      return a._sort.createdAtTime - b._sort.createdAtTime;
     })
-    .map(({ _sort, ...item }) => item);
+    .map(({ _sort, followUpDate, createdAt, ...item }) => item);
 };
+
+export const __todayPrioritiesTestUtils = { mapPriorityLevelToLegacyRisk };

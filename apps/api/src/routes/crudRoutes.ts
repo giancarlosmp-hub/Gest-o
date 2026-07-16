@@ -5316,7 +5316,22 @@ router.get("/ai/today-priorities", async (req, res) => {
       createdAt: true,
       lastContactAt: true,
       stage: true,
-      client: { select: { name: true } },
+      clientId: true,
+      ownerSellerId: true,
+      title: true,
+      notes: true,
+      client: {
+        select: {
+          id: true,
+          name: true,
+          lastPurchaseDate: true,
+          lastPurchaseValue: true,
+          ownerSellerId: true,
+          financialProfile: true,
+          openTitlesTotal: true,
+          overdueTitlesTotal: true
+        }
+      },
       timelineEvents: {
         select: { createdAt: true, description: true },
         orderBy: { createdAt: "desc" },
@@ -5326,6 +5341,8 @@ router.get("/ai/today-priorities", async (req, res) => {
         select: {
           createdAt: true,
           date: true,
+          dueDate: true,
+          done: true,
           notes: true,
           description: true,
           result: true
