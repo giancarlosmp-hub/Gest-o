@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma db push",
+    "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.js",
     "seed:preview": "tsx prisma/seedPreview.ts",
     "clients:backfill-normalized": "tsx src/scripts/backfillClientNormalized.ts",

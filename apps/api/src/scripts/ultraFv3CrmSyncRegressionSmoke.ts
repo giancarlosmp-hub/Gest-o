@@ -79,8 +79,10 @@ assert.match(orderService, /PEDIDO_ID_IMPORTACAO: pedidoIdImportacao/, "PEDIDO_I
 assert.match(orderService, /NUM_PEDIDO não pode ser igual ao PEDIDO_ID_IMPORTACAO/, "Validação deve bloquear NUM_PEDIDO igual ao UUID de importação");
 assert.match(orderService, /NUM_PEDIDO não pode usar código interno PMR/, "Validação deve bloquear código interno PMR em NUM_PEDIDO");
 assert.doesNotMatch(orderService, /Não foi possível obter do UltraFV3 um número sequencial válido/, "Ausência de NUMERO_PEDIDO em /salesmen não deve bloquear envio");
-assert.match(readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8"), /pg_advisory_xact_lock[\s\S]*nextval/, "Reserva do NUM_PEDIDO deve ser protegida por lock transacional PostgreSQL e sequence");
-assert.match(orderService, /finally[\s\S]*released global UltraFV3 submission lock/, "Falha do UltraFV3 deve liberar lock em finally");
+assert.match(readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8"), /nextval\('erp_order_number_seq'\)/, "Reserva do NUM_PEDIDO deve usar PostgreSQL sequence atômica");
+assert.doesNotMatch(readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8"), /CREATE SEQUENCE|ALTER SEQUENCE|setval/i, "Fluxo runtime não pode executar DDL nem inicializar sequence");
+assert.doesNotMatch(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Fluxo não deve manter lock global durante chamada HTTP externa");
+assert.match(orderService, /pg_advisory_xact_lock[\s\S]*erpOrderSync.create/, "Lock por oportunidade deve proteger idempotência e persistência pending antes do POST");
 assert.match(orderService, /resultado desconhecido\/timeout/, "Timeout/resultado desconhecido deve bloquear reenvio cego");
 assert.match(orderService, /getFunctionalOrderErrorMessage/, "HTTP 200 com erro funcional deve ser validado antes de marcar pedido como enviado");
 assert.match(orderService, /const erpOrderNumber = numPedido/, "Número oficial exibido deve ser sempre o NUM_PEDIDO sequencial do CRM, sem substituir por PEDIDO_ID");

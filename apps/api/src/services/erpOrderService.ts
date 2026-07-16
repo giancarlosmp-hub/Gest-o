@@ -52,7 +52,7 @@ const NUM_PEDIDO_MAX_LENGTH = 15;
 export const NUM_PEDIDO_PATTERN = /^\d{1,15}$/;
 const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-class ErpOrderSubmissionMutex {
+class AsyncMutex {
   private tail: Promise<void> = Promise.resolve();
 
   async runExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -70,12 +70,7 @@ class ErpOrderSubmissionMutex {
   }
 }
 
-const erpOrderSubmissionMutex = new ErpOrderSubmissionMutex();
-const erpOrderNumPedidoMutex = new ErpOrderSubmissionMutex();
-// Produção versionada em docker-compose possui um único serviço/processo `api`
-// sem replicas/cluster/PM2. Este mutex protege essa topologia. Se a API passar
-// a rodar em múltiplos processos/containers, substituir por advisory lock
-// PostgreSQL global envolvendo GET /salesmen e POST /orders.
+const erpOrderNumPedidoMutex = new AsyncMutex();
 
 const resolveOrderItemProductClassCode = (item: Pick<OpportunityItem, "erpProductClassCode">) => item.erpProductClassCode?.trim() || "";
 
@@ -1278,44 +1273,6 @@ async function createErpOrderFromOpportunityUnsafe(
   });
   const salesmenNumPedido = String(sequenceResolution.numPedido || "");
   const effectiveOperatorCode = sequenceResolution.operatorCode || operatorCode;
-  await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}::integer, hashtext(${opportunity.id})::integer)`;
-
-    const existingSuccessfulSync = await tx.erpOrderSync.findFirst({
-      where: {
-        opportunityId: opportunity.id,
-        status: ErpOrderSyncStatus.sent,
-        NOT: { orderStatus: ErpOrderFulfillmentStatus.cancelado },
-      },
-      orderBy: [{ createdAt: "desc" }],
-    });
-
-    if (existingSuccessfulSync) {
-      throw Object.assign(new Error("Oportunidade já possui pedido ERP enviado com sucesso. Reenvio bloqueado para evitar duplicidade."), {
-        status: 409,
-        existingErpOrderSyncId: existingSuccessfulSync.id,
-        pedidoIdImportacao: existingSuccessfulSync.pedidoIdImportacao,
-      });
-    }
-
-    const uncertainSync = await tx.erpOrderSync.findFirst({
-      where: {
-        opportunityId: opportunity.id,
-        status: { in: [ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
-      },
-      orderBy: [{ createdAt: "desc" }],
-    });
-
-    if (uncertainSync && isUncertainErpOrderFailure(uncertainSync)) {
-      throw Object.assign(new Error("Há uma tentativa de pedido ERP com resultado desconhecido/timeout. Reenvio bloqueado para evitar duplicidade; confira o UltraFV3 antes de nova tentativa."), {
-        status: 409,
-        existingErpOrderSyncId: uncertainSync.id,
-        pedidoIdImportacao: uncertainSync.pedidoIdImportacao,
-        numPedido: uncertainSync.numPedido,
-      });
-    }
-  });
-  const numPedido = String(await reserveNextErpOrderNumber());
   const numericSellerErpCode = Number(sellerErpCode);
   const numericOperatorCode = Number(effectiveOperatorCode);
   const erpLoginType = getErpLoginType(sellerFv3Username);
@@ -1329,7 +1286,7 @@ async function createErpOrderFromOpportunityUnsafe(
     salesmenOperator: sequenceResolution.operatorCode || null,
     salesmenNumPedido: salesmenNumPedido || null,
     resolvedOperator: effectiveOperatorCode || null,
-    resolvedNumPedido: numPedido || null,
+    resolvedNumPedido: null,
     matchedBy: sequenceResolution.diagnostics.matchedSalesmanFound ? sequenceResolution.diagnostics.matchedSalesmanCodeField : null,
     oldPessoaTypeConflictDetected,
     authContext: sequenceResolution.diagnostics.authContext,
@@ -1400,10 +1357,10 @@ async function createErpOrderFromOpportunityUnsafe(
   const valorLiquido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.netTotal || 0), 0));
   const qtdPedido = roundMoney(opportunity.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0));
 
-  const payload: UltraFv3OrderPayload = {
+  const buildOrderPayload = (reservedNumPedido: string): UltraFv3OrderPayload => ({
     PEDIDO_ID: null,
     PARCEIRO: numericClientErpCode,
-    NUM_PEDIDO: String(numPedido),
+    NUM_PEDIDO: String(reservedNumPedido),
     DATA_PEDIDO: formatDateDot(now),
     DATA_PREV_ENTREGA: formatDateDot(expectedDeliveryDate),
     VENDEDOR: numericSellerErpCode,
@@ -1425,28 +1382,23 @@ async function createErpOrderFromOpportunityUnsafe(
     OBS_PEDIDO: params.erpOrderObservation,
     OBSERVACAO_INTERNA: null,
     ITENS: itens.map(({ DESCRICAO_CLASSIFICACAO, ...item }) => item),
-  };
+  });
 
-  const payloadValidationErrors = validateUltraFv3OrderPayload(payload);
+  const validationPayload = buildOrderPayload(String(900_001));
+  const payloadValidationErrors = validateUltraFv3OrderPayload(validationPayload);
   if (payloadValidationErrors.length) {
     throw Object.assign(new Error("Payload UltraFV3 /orders inválido; envio bloqueado antes de chamar o ERP."), {
       status: 422,
       errors: payloadValidationErrors,
       endpoint: "/orders",
-      payload: sanitizeErpOrderPayload(payload),
+      payload: sanitizeErpOrderPayload(validationPayload),
       parameterDiagnostics,
     });
   }
 
-  logApiEvent("INFO", "[erp order] final validated UltraFV3 /orders payload", {
-    ...operationContext,
-    correlationId: pedidoIdImportacao,
-    payloadValidado: true,
-    endpoint: "/orders",
-    payload: buildFinalValidatedOrderPayloadLog(payload),
-  });
-
   if (params.simulateOnly) {
+    const numPedido = validationPayload.NUM_PEDIDO;
+    const payload = validationPayload;
     logApiEvent("INFO", "[erp order simulation] UltraFV3 order payload validated without submission", {
       ...operationContext,
       pedidoIdImportacao,
@@ -1474,7 +1426,7 @@ async function createErpOrderFromOpportunityUnsafe(
     };
   }
 
-  const sync = await prisma.$transaction(async (tx) => {
+  const { sync, numPedido, payload } = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}::integer, hashtext(${opportunity.id})::integer)`;
 
     const existingSuccessfulSync = await tx.erpOrderSync.findFirst({
@@ -1521,7 +1473,9 @@ async function createErpOrderFromOpportunityUnsafe(
       );
     }
 
-    return tx.erpOrderSync.create({
+    const numPedido = String(await reserveNextErpOrderNumber(tx));
+    const payload = buildOrderPayload(numPedido);
+    const sync = await tx.erpOrderSync.create({
       data: {
         opportunityId: opportunity.id,
         sellerId: opportunity.ownerSeller.id,
@@ -1531,6 +1485,15 @@ async function createErpOrderFromOpportunityUnsafe(
         payloadSent: toJson(payload),
       },
     });
+    return { sync, numPedido, payload };
+  });
+
+  logApiEvent("INFO", "[erp order] final validated UltraFV3 /orders payload", {
+    ...operationContext,
+    correlationId: pedidoIdImportacao,
+    payloadValidado: true,
+    endpoint: "/orders",
+    payload: buildFinalValidatedOrderPayloadLog(payload),
   });
 
   logApiEvent("INFO", "[ultrafv3/order] order-pending-persisted", {
@@ -1678,23 +1641,7 @@ export async function createErpOrderFromOpportunity(
   });
 
   try {
-    const runGeneration = () => createErpOrderFromOpportunityUnsafe(opportunity, rawParams, correlationId);
-    const result = simulateOnly
-      ? await runGeneration()
-      : await erpOrderSubmissionMutex.runExclusive(async () => {
-          logApiEvent("INFO", "[erp order] acquired global UltraFV3 submission lock", {
-            opportunityId: opportunity.id,
-            correlationId,
-          });
-          try {
-            return await runGeneration();
-          } finally {
-            logApiEvent("INFO", "[erp order] released global UltraFV3 submission lock", {
-              opportunityId: opportunity.id,
-              correlationId,
-            });
-          }
-        });
+    const result = await createErpOrderFromOpportunityUnsafe(opportunity, rawParams, correlationId);
     logApiEvent("INFO", "[erp order] generation flow completed", {
       opportunityId: opportunity.id,
       correlationId,

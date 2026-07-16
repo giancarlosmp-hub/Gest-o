@@ -78,9 +78,11 @@ async function runDatabaseBootstrap() {
 
   try {
     console.log("Running prisma migrate deploy...");
-    runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+    runStep("npm run prisma:migrate:deploy -w @salesforce-pro/api", "prisma migrate deploy");
   } catch (error) {
-    console.error("MIGRATE FAILED (non-blocking):", error);
+    console.error("MIGRATE FAILED:", error);
+    process.exitCode = 1;
+    throw error;
   }
 
   try {
@@ -144,5 +146,6 @@ async function start() {
 }
 
 start().catch((error) => {
-  console.error("Falha ao inicializar API (non-blocking)", error);
+  console.error("Falha ao inicializar API", error);
+  process.exit(1);
 });

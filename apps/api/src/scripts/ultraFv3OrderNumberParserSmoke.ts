@@ -12,7 +12,13 @@ assert.equal(normalizeUltraFv3OrderNumber(3812), "3812", "NUM_PEDIDO 3812 é ace
 const sequenceServiceSource = readFileSync(new URL("../services/erpOrderNumberSequenceService.ts", import.meta.url), "utf8");
 assert.match(sequenceServiceSource, /ERP_ORDER_NUMBER_SEQUENCE_START = 900_001/, "primeiro número da sequência CRM deve ser 900001");
 assert.match(sequenceServiceSource, /nextval\('erp_order_number_seq'\)/, "reservas devem usar PostgreSQL sequence");
-assert.match(sequenceServiceSource, /pg_advisory_xact_lock/, "reservas concorrentes devem ser protegidas por advisory lock transacional");
+assert.doesNotMatch(sequenceServiceSource, /CREATE SEQUENCE|ALTER SEQUENCE|setval/i, "runtime não deve criar nem reinicializar a sequence");
+const sequenceMigrationSource = readFileSync(new URL("../../prisma/migrations/20260716120000_add_erp_order_number_sequence/migration.sql", import.meta.url), "utf8");
+assert.match(sequenceMigrationSource, /START WITH 900001/, "migration deve configurar primeira reserva como 900001");
+assert.match(sequenceMigrationSource, /MAXVALUE 999999999999999/, "sequence deve respeitar o limite de 15 dígitos");
+assert.match(sequenceMigrationSource, /"numPedido" ~ '\^\[1-9\]\[0-9\]\{0,14\}\$'/, "históricos PMR/0/UUID devem ser ignorados antes de cast numérico");
+assert.match(sequenceMigrationSource, /GREATEST\(900000, COALESCE\(max_reserved, 900000\), current_effective_last_value\)/, "migration nunca deve reduzir sequence já avançada");
+assert.match(sequenceMigrationSource, /setval\('public\.erp_order_number_seq', desired_last_value, true\)/, "setval true deve fazer o próximo nextval retornar desired_last_value + 1");
 
 const seller = { sellerErpCode: "7057" };
 assert.deepEqual(resolveSalesmenOrderContext({ CODVENDEDOR: 7057, OPERADOR: 45, NUMERO_PEDIDO: 3812 }, seller), { numeroPedido: "3812", operador: 45, codVendedor: 7057, selectedPath: "body" });

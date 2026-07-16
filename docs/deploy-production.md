@@ -44,6 +44,8 @@ git fetch origin main
 git checkout main
 git pull --ff-only origin main
 docker compose build api web
+docker compose up -d db
+docker compose run --rm api npm run prisma:migrate:deploy -w @salesforce-pro/api
 docker compose up -d api web
 docker compose ps
 ```
@@ -53,6 +55,7 @@ docker compose ps
 - Não há secrets versionados no repositório.
 - O script não altera nem recria `.env`.
 - O script não roda `git reset --hard`.
+- O script aplica migrations pendentes com `prisma migrate deploy` antes de subir a API/Web novas; se a migration falhar, o deploy para pelo `set -e`.
 - O script falha se houver alterações locais rastreadas e não commitadas em `/apps/gest-o`, evitando sobrescrever arquivos versionados do servidor sem bloquear arquivos locais ignorados como `.env`.
 - O script reconstrói e sobe apenas `api` e `web`, sem derrubar volumes e sem mexer no Firebird.
 - A integração ERP permanece dependente da API UltraFV3 e das variáveis já configuradas no ambiente da API.
