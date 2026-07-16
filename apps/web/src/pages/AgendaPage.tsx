@@ -9,6 +9,7 @@ import { getApiErrorMessage } from "../lib/apiError";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
+import WeeklyCommercialPlan from "../components/planning/WeeklyCommercialPlan";
 
 type Seller = { id: string; name: string };
 
@@ -1452,6 +1453,8 @@ export default function AgendaPage() {
           </button>
         </div>
       </header>
+
+      <WeeklyCommercialPlan sellerId={selectedSellerId || undefined} />
 
       <div className="shrink-0 space-y-2.5 rounded-xl border bg-white p-2.5 shadow-sm sm:space-y-3 sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
