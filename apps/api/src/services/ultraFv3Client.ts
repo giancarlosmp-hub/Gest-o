@@ -48,6 +48,11 @@ export type UltraFv3RequestDiagnostic = {
   correlationId: string;
   timeoutMs?: number;
 };
+export type UltraFv3RawResponse<T = unknown> = {
+  status: number;
+  headers: Record<string, string>;
+  body: T;
+};
 
 type UltraFv3AuthPayload = {
   token?: string;
@@ -685,6 +690,72 @@ class UltraFv3Client {
     if (response.status === 404) throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}. Detalhe: ${ultraMessage}`, "not_found", response.status, diagnostics);
     if (!response.ok) throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}: ${ultraMessage}`, "request_failed", response.status, diagnostics);
     return ultraResponse as T;
+  }
+
+  async requestWithCredentialsRaw<T>(
+    path: string,
+    credentials: UltraFv3Credentials,
+    options?: { method?: "GET" | "POST" | "PUT"; body?: unknown; headers?: Record<string, string>; correlationId?: string; timeoutMs?: number },
+  ): Promise<UltraFv3RawResponse<T>> {
+    const cacheKey = this.getCredentialCacheKey(credentials);
+    let cached = this.credentialTokenCache.get(cacheKey);
+    if (!cached || this.isTokenExpired(cached.expiresAt)) {
+      cached = await this.loginWithCredentials(credentials);
+      this.credentialTokenCache.set(cacheKey, cached);
+    }
+
+    const method = options?.method || "GET";
+    const correlationId = options?.correlationId || randomUUID();
+    let response: Response;
+    try {
+      response = await this.fetchWithTimeout(
+        `${this.baseUrl}${path}`,
+        {
+          method,
+          headers: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: `Bearer ${cached.token}` },
+          ...(method !== "GET" && options?.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+        },
+        { method, path, attempt: 1, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS },
+      );
+    } catch (error) {
+      if (error instanceof UltraFv3IntegrationError) throw error;
+      const timeoutMs = options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS;
+      const isTimeout = isUltraFv3TimeoutError(error);
+      const status = isTimeout || isUltraFv3NetworkResetError(error) ? 504 : 503;
+      const message = isTimeout
+        ? "Timeout ao comunicar com UltraFV3"
+        : `UltraFV3 fora do ar ou inacessível ao processar ${method} ${path}: ${error instanceof Error ? error.message : String(error)}`;
+      throw new UltraFv3IntegrationError(message, isTimeout ? "timeout" : "unavailable", status, {
+        status,
+        endpoint: path,
+        method,
+        message,
+        ultraResponse: null,
+        correlationId,
+        timeoutMs,
+      });
+    }
+
+    const headers = collectResponseHeaders(response);
+    const body = await this.safeJson(response, !response.ok, {
+      method,
+      path,
+      correlationId,
+      status: response.status,
+      requestBody: method !== "GET" ? options?.body ?? null : null,
+      requestHeaders: { ...DEFAULT_HEADERS, ...(options?.headers || {}), Authorization: "Bearer <captured-as-bearerJwt-metadata>" },
+      responseHeaders: headers,
+      authorizationToken: cached.token,
+    });
+    const ultraMessage = extractUltraMessage(body, response.status);
+    const diagnostics: UltraFv3RequestDiagnostic = { status: response.status, endpoint: path, method, message: ultraMessage, ultraResponse: body, correlationId, timeoutMs: options?.timeoutMs ?? ULTRAFV3_REQUEST_TIMEOUT_MS };
+    if (response.status === 401 || response.status === 403) {
+      this.credentialTokenCache.delete(cacheKey);
+      throw new UltraFv3IntegrationError(`Erro de autenticação no UltraFV3 ao consultar ${path} com credencial de usuário: ${ultraMessage}`, "auth_failed", response.status, diagnostics);
+    }
+    if (response.status === 404) throw new UltraFv3IntegrationError(`Endpoint UltraFV3 inexistente: ${path}. Detalhe: ${ultraMessage}`, "not_found", response.status, diagnostics);
+    if (!response.ok) throw new UltraFv3IntegrationError(`UltraFV3 retornou status ${response.status} ao consultar ${path}: ${ultraMessage}`, "request_failed", response.status, diagnostics);
+    return { status: response.status, headers, body: body as T };
   }
 
   async request<T>(

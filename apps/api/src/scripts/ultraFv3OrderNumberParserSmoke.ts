@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { normalizeUltraFv3OrderNumber, resolveSalesmenOrderContext, validateUltraFv3OrderPayload } from "../services/erpOrderService.js";
+import { collectUltraFv3OrderIdentifierHits, normalizeUltraFv3OrderNumber, resolveSalesmenOrderContext, sanitizeErpOrderPayload, validateUltraFv3OrderPayload } from "../services/erpOrderService.js";
 
 assert.equal(normalizeUltraFv3OrderNumber("0"), "", 'NUM_PEDIDO "0" é rejeitado');
 assert.equal(normalizeUltraFv3OrderNumber(0), "", "NUM_PEDIDO 0 numérico é rejeitado");
@@ -48,4 +48,24 @@ assert(validateUltraFv3OrderPayload({ ...basePayload, NUM_PEDIDO: "0" }).some((e
 assert(validateUltraFv3OrderPayload({ ...basePayload, NUM_PEDIDO: 0 } as any).some((error) => /deve ser string/.test(error)));
 assert(validateUltraFv3OrderPayload({ ...basePayload, NUM_PEDIDO: "0000" }).some((error) => /maior que zero/.test(error)));
 assert.notEqual(basePayload.NUM_PEDIDO, basePayload.PEDIDO_ID_IMPORTACAO, "pedidoIdImportacao permanece UUID separado");
+
+const protocolHits = collectUltraFv3OrderIdentifierHits({
+  data: {
+    PEDIDO_ID: 6167,
+    NUM_PEDIDO: "0",
+    nested: { ORDERNUMBER: "3811", SEQUENCIA: 10 },
+  },
+});
+assert(protocolHits.some((hit) => hit.path === "$.data.PEDIDO_ID" && hit.value === "6167"), "diagnóstico deve listar PEDIDO_ID como identificador encontrado");
+assert(protocolHits.some((hit) => hit.field === "ORDERNUMBER" && hit.value === "3811"), "diagnóstico deve listar campos ORDER/NUMERO/SEQUENCIA sem classificar automaticamente");
+
+const sanitized = JSON.stringify(sanitizeErpOrderPayload({
+  SALESMAN: [{ CODVENDEDOR: 7057, OPERADOR: 45, NOME: "IZA MARIA COMPLETA", SENHA: "1234" }],
+  cliente: { CNPJ: "12.345.678/0001-90", email: "cliente@example.com" },
+  Authorization: "Bearer token-completo-ultra",
+}));
+assert.doesNotMatch(sanitized, /"SENHA":"1234"/, "sanitização não pode conter SENHA em claro");
+assert.doesNotMatch(sanitized, /12\.345\.678\/0001-90/, "sanitização não pode conter CNPJ completo");
+assert.doesNotMatch(sanitized, /token-completo-ultra/, "sanitização não pode conter token completo");
+assert.doesNotMatch(sanitized, /IZA MARIA COMPLETA/, "sanitização não pode conter nome completo de vendedor");
 console.log("UltraFV3 order number parser smoke passed");
