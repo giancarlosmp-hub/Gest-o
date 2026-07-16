@@ -15,6 +15,7 @@ import {
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
+import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import {
   getErpOrderReadiness,
   isErpOrderSyncResendable,
@@ -1466,6 +1467,7 @@ export default function OpportunityDetailsPage() {
         </form>
 
         <h3 className="mt-5 mb-3 text-lg font-semibold">Linha do Tempo</h3>
+        <TimelineIntelligenceCard opportunityId={id} />
         <div className="space-y-2">
           {events.length ? (
             events.map((event) => (

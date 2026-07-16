@@ -7,6 +7,7 @@ import { formatCurrencyBRL, formatDateBR, formatPercentBR } from "../lib/formatt
 import { useAuth } from "../context/AuthContext";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
+import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
@@ -2329,6 +2330,7 @@ export default function OpportunitiesPage() {
 
             <div className="mt-6">
               <h4 className="text-sm font-semibold text-slate-900">Timeline</h4>
+              <TimelineIntelligenceCard opportunityId={selectedOpportunity.id} />
               <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <TimelineEventList
                   events={pipelineEvents}
