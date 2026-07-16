@@ -9,17 +9,19 @@ CREATE SEQUENCE IF NOT EXISTS public.erp_order_number_seq
 
 DO $$
 DECLARE
-  max_reserved bigint;
+  max_reserved bigint := NULL;
   current_last_value bigint;
   current_is_called boolean;
   current_effective_last_value bigint;
   desired_last_value bigint;
 BEGIN
-  SELECT MAX("numPedido"::bigint)
-    INTO max_reserved
-  FROM "ErpOrderSync"
-  WHERE "numPedido" ~ '^[1-9][0-9]{0,14}$'
-    AND "numPedido"::bigint >= 900001;
+  IF to_regclass('public."ErpOrderSync"') IS NOT NULL THEN
+    SELECT MAX("numPedido"::bigint)
+      INTO max_reserved
+    FROM public."ErpOrderSync"
+    WHERE "numPedido" ~ '^[1-9][0-9]{0,14}$'
+      AND "numPedido"::bigint >= 900001;
+  END IF;
 
   SELECT last_value, is_called
     INTO current_last_value, current_is_called

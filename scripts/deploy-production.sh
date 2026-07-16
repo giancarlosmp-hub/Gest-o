@@ -61,11 +61,6 @@ log "Reconstruindo imagens Docker: ${BUILD_SERVICES}"
 # shellcheck disable=SC2086
 docker compose build ${BUILD_SERVICES}
 
-log "Garantindo banco PostgreSQL ativo para migrations"
-docker compose up -d db
-
-log "Aplicando migrations pendentes com prisma migrate deploy"
-docker compose run --rm api npm run prisma:migrate:deploy -w @salesforce-pro/api
 
 log "Subindo containers atualizados: ${START_SERVICES}"
 # shellcheck disable=SC2086

@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { app } from "../app.js";
 import { env } from "../config/env.js";
 import { prisma } from "../config/prisma.js";
@@ -58,8 +58,21 @@ function logRuntimeContext() {
 }
 
 function runStep(command: string, label: string) {
-  console.log(`Executando ${label}...`);
-  execSync(command, { stdio: "inherit" });
+  console.log(`Executando ${label}...`, { command });
+  const result = spawnSync(command, { shell: true, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.error || result.status !== 0) {
+    console.error(`[bootstrap] ${label} failed`, {
+      command,
+      exitCode: result.status,
+      signal: result.signal,
+      error: result.error?.message ?? null,
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+    });
+    throw result.error ?? new Error(`${label} failed with exit code ${result.status}`);
+  }
 }
 
 async function runDatabaseBootstrap() {
@@ -77,10 +90,11 @@ async function runDatabaseBootstrap() {
   }
 
   try {
-    console.log("Running prisma migrate deploy...");
-    runStep("npm run prisma:migrate:deploy -w @salesforce-pro/api", "prisma migrate deploy");
+    console.log("Running prisma db push and ERP order sequence setup...");
+    runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+    runStep("npm run erp:ensure-order-sequence -w @salesforce-pro/api", "ERP order sequence setup");
   } catch (error) {
-    console.error("MIGRATE FAILED:", error);
+    console.error("DATABASE SCHEMA BOOTSTRAP FAILED:", error);
     process.exitCode = 1;
     throw error;
   }
