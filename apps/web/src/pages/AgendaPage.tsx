@@ -10,6 +10,7 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import WeeklyCommercialPlan from "../components/planning/WeeklyCommercialPlan";
+import AgendaIntelligencePanel from "../components/agenda/AgendaIntelligencePanel";
 
 type Seller = { id: string; name: string };
 
@@ -492,6 +493,7 @@ export default function AgendaPage() {
   }, [dateRange, canFilterBySeller, selectedSellerId, user?.id, user?.role]);
 
   const eventsQueryKey = useMemo(() => JSON.stringify(eventsQuery), [eventsQuery]);
+  const agendaIntelligenceDate = useMemo(() => formatDayKey(dateRange.start.toISOString()), [dateRange]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia("(max-width: 767px)");
@@ -1455,6 +1457,7 @@ export default function AgendaPage() {
       </header>
 
       <WeeklyCommercialPlan sellerId={selectedSellerId || undefined} />
+      <AgendaIntelligencePanel date={agendaIntelligenceDate} sellerId={selectedSellerId || undefined} />
 
       <div className="shrink-0 space-y-2.5 rounded-xl border bg-white p-2.5 shadow-sm sm:space-y-3 sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
