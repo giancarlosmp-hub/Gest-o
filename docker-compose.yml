@@ -22,7 +22,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro}?schema=public}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres@db:5432/salesforce_pro?schema=public}
       NODE_ENV: production
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
@@ -60,7 +60,7 @@ services:
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
       - "${API_PORT:-4000}:4000"
-    restart: always
+    restart: ${API_RESTART_POLICY:-always}
     depends_on:
       db:
         condition: service_healthy
@@ -78,7 +78,7 @@ services:
       start_period: 60s
 
   web:
-    restart: always
+    restart: ${WEB_RESTART_POLICY:-always}
     build:
       context: .
       dockerfile: apps/web/Dockerfile

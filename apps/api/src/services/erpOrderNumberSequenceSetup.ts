@@ -2,8 +2,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 
+const ORDER_SEQUENCE_REGCLASS_SQL = `SELECT to_regclass('public.erp_order_number_seq') AS regclass`;
+
 const ORDER_SEQUENCE_SETUP_SQL = `
-  CREATE SEQUENCE IF NOT EXISTS public.erp_order_number_seq
+  CREATE SEQUENCE public.erp_order_number_seq
     AS bigint
     START WITH 900001
     INCREMENT BY 1
@@ -59,8 +61,20 @@ export async function ensureErpOrderNumberSequence(): Promise<void> {
   console.log("ERP order sequence setup started");
   logApiEvent("INFO", "[erp-order-sequence] setup started", { sequence: "public.erp_order_number_seq" });
   try {
-    await prisma.$executeRawUnsafe(ORDER_SEQUENCE_SETUP_SQL);
-    await prisma.$executeRawUnsafe(ORDER_SEQUENCE_ALIGN_SQL);
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('gest-o:erp_order_number_seq:setup'))`;
+      const [existing] = await tx.$queryRawUnsafe<Array<{ regclass: string | null }>>(ORDER_SEQUENCE_REGCLASS_SQL);
+      if (!existing?.regclass) {
+        try {
+          await tx.$executeRawUnsafe(ORDER_SEQUENCE_SETUP_SQL);
+        } catch (error) {
+          const [afterCreateRace] = await tx.$queryRawUnsafe<Array<{ regclass: string | null }>>(ORDER_SEQUENCE_REGCLASS_SQL);
+          if (!afterCreateRace?.regclass) throw error;
+          logApiEvent("WARN", "[erp-order-sequence] create raced with existing relation; continuing", sanitizeSequenceSetupError(error));
+        }
+      }
+      await tx.$executeRawUnsafe(ORDER_SEQUENCE_ALIGN_SQL);
+    });
     console.log("ERP order sequence setup completed");
     logApiEvent("INFO", "[erp-order-sequence] setup completed", { sequence: "public.erp_order_number_seq" });
   } catch (error) {

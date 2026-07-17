@@ -16,6 +16,9 @@ assert.doesNotMatch(bootstrapSource, /npm run erp:ensure-order-sequence|tsx src\
 assert.match(bootstrapSource, /runStep\("npm run prisma:migrate[\s\S]*await ensureErpOrderNumberSequence\(\)[\s\S]*validateDatabaseHealth/, "bootstrap deve executar db push, depois setup da sequence, antes de validar/abrir servidor");
 const sequenceSetupSource = readFileSync(new URL("../services/erpOrderNumberSequenceSetup.ts", import.meta.url), "utf8");
 assert.match(sequenceSetupSource, /export async function ensureErpOrderNumberSequence/, "setup da sequence deve ser função reutilizável sem efeito colateral no import");
+assert.match(sequenceSetupSource, /pg_advisory_xact_lock\(hashtext\('gest-o:erp_order_number_seq:setup'\)\)/, "setup da sequence deve serializar concorrência no bootstrap");
+assert.match(sequenceSetupSource, /to_regclass\('public\.erp_order_number_seq'\)/, "setup da sequence deve checar existência antes de CREATE");
+assert.doesNotMatch(sequenceSetupSource, /CREATE SEQUENCE IF NOT EXISTS public\.erp_order_number_seq/, "setup não deve depender de CREATE SEQUENCE IF NOT EXISTS em catálogo possivelmente inconsistente");
 const sequenceCliSource = readFileSync(new URL("./ensureErpOrderNumberSequence.ts", import.meta.url), "utf8");
 assert.match(sequenceCliSource, /pathToFileURL\(process\.argv\[1\]\)/, "CLI manual deve ter guard ESM para não executar ao ser importada");
 
