@@ -88,3 +88,10 @@ assert.match(orderService, /getFunctionalOrderErrorMessage/, "HTTP 200 com erro 
 assert.match(orderService, /const erpOrderNumber = numPedido/, "Número oficial exibido deve ser sempre o NUM_PEDIDO sequencial do CRM, sem substituir por PEDIDO_ID");
 
 console.log("UltraFV3 CRM sync regression smoke passed");
+
+const prismaConfig = readFileSync(new URL("../config/prisma.ts", import.meta.url), "utf8");
+assert.match(prismaConfig, /sanitizeDatabaseUrl/, "DATABASE_URL deve ser saneada antes do PrismaClient");
+assert.match(prismaConfig, /schema=public\[}\]/, "DATABASE_URL com schema=public} deve ser corrigida para schema=public");
+const composeSource = readFileSync(new URL("../../../../docker-compose.yml", import.meta.url), "utf8");
+assert.doesNotMatch(composeSource, /DATABASE_URL:-postgresql:\/\/\$\{POSTGRES_USER/, "Compose não deve usar interpolação aninhada em DATABASE_URL");
+assert.match(composeSource, /API_RESTART_POLICY:-always/, "Compose deve permitir desativar restart automático de previews sem alterar produção");
