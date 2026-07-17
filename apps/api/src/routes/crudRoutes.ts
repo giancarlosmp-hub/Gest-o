@@ -81,6 +81,7 @@ import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode }
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
+import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -5342,6 +5343,24 @@ router.get("/ai/opportunity-message", async (req, res) => {
   return res.json({ message });
 });
 
+
+
+router.get("/ai/agenda-intelligence/day", async (req, res) => {
+  const date = req.query.date as string | undefined;
+  if (!date) return res.status(400).json({ message: "Informe date=YYYY-MM-DD." });
+  try {
+    const result = await agendaIntelligenceService.generateAgendaOptimization({
+      date,
+      sellerId: req.query.sellerId as string | undefined,
+      viewerUserId: req.user!.id,
+      viewerRole: req.user!.role,
+      refresh: req.query.refresh === "true"
+    });
+    return res.json(result);
+  } catch (error: any) {
+    return res.status(error?.statusCode || 500).json({ message: error?.message || "Não foi possível gerar a inteligência da agenda." });
+  }
+});
 
 router.get("/ai/commercial-planning/week", async (req, res) => {
   if (!req.user?.id) return res.status(401).json({ message: "Não autenticado" });
