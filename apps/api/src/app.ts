@@ -8,6 +8,7 @@ import clientLookupRoutes from "./routes/clientLookupRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import ultraFv3Routes from "./routes/ultraFv3Routes.js";
+import conversationalCrmRoutes from "./routes/conversationalCrmRoutes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
@@ -244,6 +245,8 @@ app.get("/technical-cultures", async (_req, res) => {
     return res.status(200).json({ data: [], source: "fallback" });
   }
 });
+app.use("/ai", conversationalCrmRoutes);
+app.use("/api/ai", conversationalCrmRoutes);
 app.use("/auth", authRoutes);
 app.use("/api/auth", authRoutes);
 

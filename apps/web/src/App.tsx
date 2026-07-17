@@ -23,6 +23,7 @@ import CommercialScorePage from "./pages/CommercialScorePage";
 import RouteErrorBoundary from "./components/RouteErrorBoundary";
 import WhatsAppPage from "./pages/WhatsAppPage";
 import TerritoriosPage from "./pages/TerritoriosPage";
+import CrmAssistantPage from "./pages/CrmAssistantPage";
 
 const AssistenteTecnicoPage = lazy(() => import("./pages/AssistenteTecnico"));
 
@@ -110,6 +111,8 @@ export default function App() {
         <Route path="territorios" element={<TerritoriosPage />} />
         <Route path="territórios" element={<TerritoriosPage />} />
 
+        <Route path="assistant" element={<CrmAssistantPage />} />
+        <Route path="assistente-comercial" element={<CrmAssistantPage />} />
         <Route path="assistente-tecnico" element={<AssistenteTecnicoRoute />} />
 
         <Route path="relatórios" element={<ReportsPage />} />
