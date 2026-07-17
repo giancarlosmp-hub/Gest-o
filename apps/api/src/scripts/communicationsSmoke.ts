@@ -1,0 +1,15 @@
+import { createHmac } from "node:crypto";
+process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = "verify";
+process.env.WHATSAPP_APP_SECRET = "secret";
+const { MetaWhatsAppCloudProvider } = await import("../services/communications/metaWhatsAppCloudProvider.js");
+const { PhoneNormalizationService } = await import("../services/communications/phoneNormalizationService.js");
+const phone = new PhoneNormalizationService().normalize({ rawValue: "(45) 99999-9999", channelType: "WHATSAPP" });
+if (!phone.valid || phone.normalizedValue !== "+5545999999999") throw new Error("phone normalization failed");
+const provider = new MetaWhatsAppCloudProvider();
+const body = Buffer.from(JSON.stringify({ entry: [{ id: "waba", changes: [{ value: { metadata: { phone_number_id: "phone-id" }, contacts: [{ wa_id: "5545999999999", profile: { name: "Cliente Teste" } }], messages: [{ id: "wamid.1", from: "5545999999999", timestamp: "1720000000", type: "text", text: { body: "Olá" } }] } }] }] }));
+const sig = `sha256=${createHmac("sha256", "secret").update(body).digest("hex")}`;
+if (!provider.verifyWebhookSignature({ rawBody: body, signatureHeader: sig })) throw new Error("signature failed");
+if (provider.verifyWebhookSignature({ rawBody: Buffer.from(body.toString()+"x"), signatureHeader: sig })) throw new Error("tampered signature accepted");
+const events = provider.parseWebhook({ rawBody: body, parsedBody: JSON.parse(body.toString()), headers: {} });
+if (events.length !== 1 || events[0].eventType !== "MESSAGE_RECEIVED" || events[0].messageType !== "TEXT") throw new Error("parse failed");
+console.log("communications smoke ok");

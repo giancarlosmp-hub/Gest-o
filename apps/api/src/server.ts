@@ -7,6 +7,7 @@ import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { startErpSyncScheduler } from "./jobs/erpSyncScheduler.js";
 import { startCommercialAutomationsScheduler } from "./jobs/commercialAutomationsScheduler.js";
 import { validateErpRuntimeConfigOnStartup } from "./services/erpRuntimeConfig.js";
+import { validateCommunicationsRuntimeConfigOnStartup } from "./services/communications/communicationIntegrationService.js";
 
 console.log("SERVER STARTING...");
 
@@ -41,6 +42,7 @@ async function start() {
   await validateDatabaseHealth();
   await ensureAdminBootstrap();
   validateErpRuntimeConfigOnStartup();
+  validateCommunicationsRuntimeConfigOnStartup();
   app.listen(env.port, () => {
     console.log(`SERVER RUNNING ON PORT ${env.port}`);
     logApiEvent("INFO", "API iniciada", { port: env.port, nodeEnv: env.nodeEnv });

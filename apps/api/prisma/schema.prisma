@@ -94,6 +94,7 @@ model User {
   agendaEvents              AgendaEvent[]
   territoryCities           SellerTerritoryCity[]
   knowledgeDocuments        KnowledgeDocument[]
+  assignedCommunicationConversations CommunicationConversation[]
 }
 
 model KnowledgeDocument {
@@ -151,6 +152,7 @@ model Client {
   agendaEvents      AgendaEvent[]
   agendaStops       AgendaStop[]
   activities        Activity[]
+  communicationConversations CommunicationConversation[]
 
   @@index([code])
   @@index([fantasyName])
@@ -547,4 +549,143 @@ model ErpSyncLock {
   updatedAt   DateTime @updatedAt
 
   @@index([lockedUntil])
+}
+
+enum CommunicationChannelType {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK_MESSENGER
+  EMAIL
+  SMS
+  RCS
+  TELEGRAM
+  WEBSITE_CHAT
+  OTHER
+}
+
+enum CommunicationProviderType {
+  META_WHATSAPP_CLOUD
+}
+
+enum CommunicationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CommunicationMessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  LOCATION
+  CONTACT
+  STICKER
+  REACTION
+  INTERACTIVE
+  TEMPLATE
+  UNKNOWN
+}
+
+enum CommunicationMessageStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum CommunicationConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  ARCHIVED
+  BLOCKED
+}
+
+enum CommunicationWebhookProcessingStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  DUPLICATE
+}
+
+model CommunicationConversation {
+  id                      String                          @id @default(cuid())
+  channelType             CommunicationChannelType
+  providerType            CommunicationProviderType
+  externalConversationKey String
+  externalAccountId       String?
+  clientId                String?
+  client                  Client?                         @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  assignedSellerId        String?
+  assignedSeller          User?                           @relation(fields: [assignedSellerId], references: [id], onDelete: SetNull)
+  normalizedContact       String
+  displayContact          String?
+  contactName             String?
+  status                  CommunicationConversationStatus @default(OPEN)
+  lastMessageAt           DateTime?
+  lastInboundAt           DateTime?
+  lastOutboundAt          DateTime?
+  unreadCount             Int                             @default(0)
+  lastMessagePreview      String?
+  messages                CommunicationMessage[]
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
+
+  @@unique([providerType, externalConversationKey])
+  @@index([clientId])
+  @@index([assignedSellerId])
+  @@index([lastMessageAt])
+  @@index([status])
+  @@index([normalizedContact])
+}
+
+model CommunicationMessage {
+  id                       String                     @id @default(cuid())
+  conversationId           String
+  conversation             CommunicationConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  channelType              CommunicationChannelType
+  providerType             CommunicationProviderType
+  externalMessageId        String
+  direction                CommunicationDirection
+  messageType              CommunicationMessageType
+  textContent              String?
+  mediaExternalId          String?
+  mediaMimeType            String?
+  mediaFilename            String?
+  mediaSizeBytes           Int?
+  providerTimestamp        DateTime
+  replyToExternalMessageId String?
+  status                   CommunicationMessageStatus
+  errorCode                String?
+  errorMessageSanitized    String?
+  metadata                 Json?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  @@unique([providerType, externalMessageId])
+  @@index([conversationId, providerTimestamp])
+  @@index([status])
+}
+
+model CommunicationWebhookEvent {
+  id               String                                 @id @default(cuid())
+  channelType      CommunicationChannelType
+  providerType     CommunicationProviderType
+  externalEventKey String
+  eventType        String
+  payloadHash      String
+  processingStatus CommunicationWebhookProcessingStatus    @default(RECEIVED)
+  processedAt      DateTime?
+  attemptCount     Int                                    @default(1)
+  errorSanitized   String?
+  createdAt        DateTime                               @default(now())
+  updatedAt        DateTime                               @updatedAt
+
+  @@unique([providerType, externalEventKey])
+  @@index([processingStatus])
+  @@index([createdAt])
 }

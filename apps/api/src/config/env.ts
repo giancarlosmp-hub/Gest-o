@@ -77,5 +77,14 @@ export const env = {
   erpSyncHealthcheckIntervalMs: toNumber(process.env.ERP_SYNC_HEALTHCHECK_INTERVAL_MS, 5 * 60 * 1000),
   ultraFv3ProtocolInvestigationEnabled: toBoolean(process.env.ULTRAFV3_PROTOCOL_INVESTIGATION_ENABLED, false),
   ultraFv3ProtocolInvestigationBodyMaxChars: toNumber(process.env.ULTRAFV3_PROTOCOL_INVESTIGATION_BODY_MAX_CHARS, 200_000),
-  ultraFv3OrderProtocolTestEnabled: toBoolean(process.env.ULTRAFV3_ORDER_PROTOCOL_TEST_ENABLED, false)
+  ultraFv3OrderProtocolTestEnabled: toBoolean(process.env.ULTRAFV3_ORDER_PROTOCOL_TEST_ENABLED, false),
+  communicationsEnabled: toBoolean(process.env.COMMUNICATIONS_ENABLED, false),
+  whatsappIntegrationEnabled: toBoolean(process.env.WHATSAPP_INTEGRATION_ENABLED, false),
+  whatsappProvider: cleanEnvString(process.env.WHATSAPP_PROVIDER, "meta"),
+  whatsappWebhookVerifyToken: cleanEnvString(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN),
+  whatsappAppSecret: cleanEnvString(process.env.WHATSAPP_APP_SECRET),
+  whatsappAccessToken: cleanEnvString(process.env.WHATSAPP_ACCESS_TOKEN),
+  whatsappPhoneNumberId: cleanEnvString(process.env.WHATSAPP_PHONE_NUMBER_ID),
+  whatsappBusinessAccountId: cleanEnvString(process.env.WHATSAPP_BUSINESS_ACCOUNT_ID),
+  whatsappApiVersion: cleanEnvString(process.env.WHATSAPP_API_VERSION, "v20.0")
 };

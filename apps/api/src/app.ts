@@ -15,6 +15,7 @@ import { logApiEvent, sanitizePayload } from "./utils/logger.js";
 import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath, safeJsonStringify } from "./utils/erpOrderFailureResponse.js";
 import { buildUltraFv3TimeoutPayload, isUltraFv3TimeoutError, ULTRAFV3_REQUEST_TIMEOUT_MS } from "./services/ultraFv3Client.js";
 import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./middlewares/rateLimit.js";
+import { communicationAdminRouter, communicationWebhookRouter } from "./routes/communicationRoutes.js";
 
 export const app = express();
 
@@ -164,6 +165,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(communicationWebhookRouter);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -251,12 +253,14 @@ app.use("/auth", authRoutes);
 app.use("/api/auth", authRoutes);
 
 
+app.use(communicationAdminRouter);
 app.use("/dashboard", dashboardRoutes);
 app.use("/", ultraFv3Routes);
 app.use("/", clientLookupRoutes);
 app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
+app.use("/api", communicationAdminRouter);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api", ultraFv3Routes);
 app.use("/api", clientLookupRoutes);
