@@ -12,6 +12,7 @@ import {
   MapPinned,
   Menu,
   MessageCircle,
+  Bot,
   Settings,
   Target,
   Users,
@@ -72,6 +73,7 @@ const items: SidebarNavItem[] = [
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades", icon: Target },
   { id: "atividades", label: "Atividades", path: "/atividades", icon: CheckSquare },
   { id: "agenda", label: "Agenda", path: "/agenda", icon: Calendar },
+  { id: "assistant", label: "Assistente Comercial", path: "/assistant", icon: Bot },
   { id: "whatsapp", label: "WhatsApp", path: "/whatsapp", icon: MessageCircle },
   { id: "territorios", label: "Territórios", path: "/territórios", icon: MapPinned },
   {
