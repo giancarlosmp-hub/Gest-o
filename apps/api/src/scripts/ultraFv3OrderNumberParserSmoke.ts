@@ -17,7 +17,8 @@ assert.match(bootstrapSource, /runStep\("npm run prisma:migrate[\s\S]*await ensu
 const sequenceSetupSource = readFileSync(new URL("../services/erpOrderNumberSequenceSetup.ts", import.meta.url), "utf8");
 assert.match(sequenceSetupSource, /export async function ensureErpOrderNumberSequence/, "setup da sequence deve ser função reutilizável sem efeito colateral no import");
 assert.match(sequenceSetupSource, /pg_advisory_xact_lock\(hashtext\('gest-o:erp_order_number_seq:setup'\)\)/, "setup da sequence deve serializar concorrência no bootstrap");
-assert.match(sequenceSetupSource, /to_regclass\('public\.erp_order_number_seq'\)/, "setup da sequence deve checar existência antes de CREATE");
+assert.match(sequenceSetupSource, /to_regclass\('public\.erp_order_number_seq'\) IS NOT NULL AS \"exists\"/, "setup da sequence deve checar existência com booleano suportado pelo Prisma");
+assert.doesNotMatch(sequenceSetupSource, /AS regclass|regclass: string/, "setup da sequence não pode retornar regclass diretamente ao Prisma");
 assert.doesNotMatch(sequenceSetupSource, /CREATE SEQUENCE IF NOT EXISTS public\.erp_order_number_seq/, "setup não deve depender de CREATE SEQUENCE IF NOT EXISTS em catálogo possivelmente inconsistente");
 const sequenceCliSource = readFileSync(new URL("./ensureErpOrderNumberSequence.ts", import.meta.url), "utf8");
 assert.match(sequenceCliSource, /pathToFileURL\(process\.argv\[1\]\)/, "CLI manual deve ter guard ESM para não executar ao ser importada");

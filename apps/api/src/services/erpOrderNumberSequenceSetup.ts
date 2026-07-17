@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
 
-const ORDER_SEQUENCE_REGCLASS_SQL = `SELECT to_regclass('public.erp_order_number_seq') AS regclass`;
+const ORDER_SEQUENCE_EXISTS_SQL = `SELECT to_regclass('public.erp_order_number_seq') IS NOT NULL AS "exists"`;
 
 const ORDER_SEQUENCE_SETUP_SQL = `
   CREATE SEQUENCE public.erp_order_number_seq
@@ -63,13 +63,13 @@ export async function ensureErpOrderNumberSequence(): Promise<void> {
   try {
     await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('gest-o:erp_order_number_seq:setup'))`;
-      const [existing] = await tx.$queryRawUnsafe<Array<{ regclass: string | null }>>(ORDER_SEQUENCE_REGCLASS_SQL);
-      if (!existing?.regclass) {
+      const [existing] = await tx.$queryRawUnsafe<Array<{ exists: boolean }>>(ORDER_SEQUENCE_EXISTS_SQL);
+      if (!existing?.exists) {
         try {
           await tx.$executeRawUnsafe(ORDER_SEQUENCE_SETUP_SQL);
         } catch (error) {
-          const [afterCreateRace] = await tx.$queryRawUnsafe<Array<{ regclass: string | null }>>(ORDER_SEQUENCE_REGCLASS_SQL);
-          if (!afterCreateRace?.regclass) throw error;
+          const [afterCreateRace] = await tx.$queryRawUnsafe<Array<{ exists: boolean }>>(ORDER_SEQUENCE_EXISTS_SQL);
+          if (!afterCreateRace?.exists) throw error;
           logApiEvent("WARN", "[erp-order-sequence] create raced with existing relation; continuing", sanitizeSequenceSetupError(error));
         }
       }
