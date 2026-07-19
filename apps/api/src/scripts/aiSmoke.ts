@@ -85,7 +85,7 @@ const assertOpportunityMessagePayload = (payload: unknown) => {
 };
 
 const clientContext: ClientAiContextPayload = {
-  client: { id: "client-1", name: "Cliente Teste", fantasyName: null, city: "Cidade", state: "GO", region: "Centro", potentialHa: null },
+  client: { id: "client-1", name: "Cliente Teste", fantasyName: null, isArchived: false, archiveReason: null, city: "Cidade", state: "GO", region: "Centro", potentialHa: null },
   commercialSummary: {
     openOpportunitiesCount: 0,
     totalCompletedActivities: 0,
