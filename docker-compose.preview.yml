@@ -12,10 +12,9 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-salesforce_pro_preview}"]
 
   api:
-    restart: "no"
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro_preview}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro_preview}?schema=public}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}
       ADMIN_BOOTSTRAP_ENABLED: ${ADMIN_BOOTSTRAP_ENABLED:-true}
@@ -24,10 +23,6 @@ services:
       ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:-}
       ADMIN_BOOTSTRAP_ROLE: ${ADMIN_BOOTSTRAP_ROLE:-}
       ADMIN_BOOTSTRAP_REGION: ${ADMIN_BOOTSTRAP_REGION:-}
-      ERP_SYNC_SCHEDULER_ENABLED: ${ERP_SYNC_SCHEDULER_ENABLED:-false}
-
-  web:
-    restart: "no"
 
 volumes:
   postgres_data:

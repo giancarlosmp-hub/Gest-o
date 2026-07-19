@@ -1,12 +1,13 @@
 services:
   db:
     image: postgres:16
-    restart: ${DB_RESTART_POLICY:-always}
-    command: postgres -c password_encryption=scram-sha-256
+    restart: always
+    command: postgres -c password_encryption=md5
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-salesforce_pro}
+      POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +22,7 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro}}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres@db:5432/salesforce_pro?schema=public}
       NODE_ENV: production
       PORT: 4000
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
@@ -55,16 +56,11 @@ services:
       ERP_CREDENTIAL_ENCRYPTION_KEY: ${ERP_CREDENTIAL_ENCRYPTION_KEY:-}
       API_REQUEST_TIMEOUT_MS: ${API_REQUEST_TIMEOUT_MS:-15000}
       ERP_ORDER_REQUEST_TIMEOUT_MS: ${ERP_ORDER_REQUEST_TIMEOUT_MS:-50000}
-      ERP_SYNC_SCHEDULER_ENABLED: ${ERP_SYNC_SCHEDULER_ENABLED:-false}
       SMOKE_DIRECTOR_EMAIL: diretor@empresa.com
       SMOKE_DIRECTOR_PASSWORD: "123456"
     ports:
       - "${API_PORT:-4000}:4000"
     restart: ${API_RESTART_POLICY:-always}
-    networks:
-      default:
-        aliases:
-          - api
     depends_on:
       db:
         condition: service_healthy
