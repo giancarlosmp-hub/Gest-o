@@ -33,7 +33,8 @@
     "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts",
     "smoke:ultrafv3-order-protocol-test": "tsx src/scripts/ultraFv3OrderProtocolTestSmoke.ts",
     "erp:investigate-orders": "tsx src/scripts/erpOrderSyncUltraFv3Investigation.ts",
-    "smoke:erp-order-sequence-setup": "tsx src/scripts/erpOrderNumberSequenceSetupSmoke.ts"
+    "smoke:erp-order-sequence-setup": "tsx src/scripts/erpOrderNumberSequenceSetupSmoke.ts",
+    "smoke:archived-client-read": "tsx src/scripts/archivedClientHistoricalReadSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

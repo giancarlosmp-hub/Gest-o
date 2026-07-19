@@ -30,6 +30,7 @@ import {
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
+import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -4090,8 +4091,7 @@ router.get("/clients/:id", async (req, res) => {
   const data = await prisma.client.findFirst({
     where: {
       id: req.params.id,
-      isArchived: false,
-      ...sellerWhere(req)
+      ...clientReadableForDetailsWhere(req)
     }
   });
 
@@ -4152,7 +4152,7 @@ router.get("/clients/:id/ai-context", async (req, res) => {
 
   const payload = await buildClientAiContext({
     clientId: parsed.data.id,
-    scope: sellerWhere(req)
+    scope: clientReadableForDetailsWhere(req)
   });
 
   if (!payload) {
@@ -4820,8 +4820,7 @@ router.get("/clients/:id/contacts", async (req, res) => {
   const client = await prisma.client.findFirst({
     where: {
       id: req.params.id,
-      ...sellerWhere(req),
-      isArchived: false
+      ...clientReadableForDetailsWhere(req)
     },
     select: { id: true }
   });
@@ -4830,8 +4829,7 @@ router.get("/clients/:id/contacts", async (req, res) => {
 
   const contacts = await prisma.contact.findMany({
     where: {
-      clientId: req.params.id,
-      ...sellerWhere(req)
+      clientId: req.params.id
     },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "desc" }]
   });

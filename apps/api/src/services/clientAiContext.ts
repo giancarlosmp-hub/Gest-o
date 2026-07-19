@@ -10,6 +10,8 @@ export type ClientAiContextPayload = {
     id: string;
     name: string;
     fantasyName: string | null;
+    isArchived: boolean;
+    archiveReason: string | null;
     city: string;
     state: string;
     region: string;
@@ -69,8 +71,7 @@ export const buildClientAiContext = async ({
   const client = await prisma.client.findFirst({
     where: {
       id: clientId,
-      ...scope,
-      isArchived: false
+      ...scope
     },
     select: {
       id: true,
@@ -80,6 +81,8 @@ export const buildClientAiContext = async ({
       state: true,
       region: true,
       potentialHa: true,
+      isArchived: true,
+      archiveReason: true,
       lastPurchaseDate: true,
       lastPurchaseValue: true
     }
@@ -188,7 +191,9 @@ export const buildClientAiContext = async ({
       city: client.city,
       state: client.state,
       region: client.region,
-      potentialHa: client.potentialHa
+      potentialHa: client.potentialHa,
+      isArchived: client.isArchived,
+      archiveReason: client.archiveReason
     },
     commercialSummary: {
       openOpportunitiesCount,
