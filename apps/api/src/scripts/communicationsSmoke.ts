@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
+process.env.COMMUNICATIONS_ENABLED = "false";
+process.env.WHATSAPP_INTEGRATION_ENABLED = "false";
+const { MetaWhatsAppCloudProvider } = await import("../services/communications/metaWhatsAppCloudProvider.js");
+const { normalizeBrazilianPhone } = await import("../services/communications/phoneNormalization.js");
+
+const provider = new MetaWhatsAppCloudProvider();
+assert.equal(provider.verifyChallenge({ "hub.mode": "subscribe", "hub.verify_token": "ok", "hub.challenge": "42" }, "ok").ok, true);
+assert.equal(provider.verifyChallenge({ "hub.mode": "subscribe", "hub.verify_token": "bad", "hub.challenge": "42" }, "ok").ok, false);
+assert.equal(normalizeBrazilianPhone("+55 (11) 91234-5678").status, "valid");
+assert.equal(normalizeBrazilianPhone("+55 (10) 91234-5678").status, "invalid");
+assert.equal(normalizeBrazilianPhone("+55 (11) 81234-5678").status, "ambiguous");
+const body = Buffer.from(JSON.stringify({ entry: [{ changes: [{ value: { metadata: { phone_number_id: "123" }, contacts: [{ wa_id: "5511912345678", profile: { name: "Pessoa" } }], messages: [{ id: "wamid.1", from: "5511912345678", timestamp: "1720000000", type: "text", text: { body: "Olá" } }] } }] }] }));
+const sig = "sha256=" + createHmac("sha256", "secret").update(body).digest("hex");
+assert.equal(provider.verifySignature(body, sig, "secret"), true);
+assert.equal(provider.verifySignature(Buffer.from(body.toString().replace("Olá", "Ola")), sig, "secret"), false);
+const events = provider.parseEvents(JSON.parse(body.toString()));
+assert.equal(events.length, 1);
+assert.equal(events[0].externalMessageId, "wamid.1");
+assert.equal(events[0].contact.status, "valid");
+console.log("communicationsSmoke ok");

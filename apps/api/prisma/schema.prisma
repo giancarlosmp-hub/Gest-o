@@ -88,6 +88,7 @@ model User {
   opportunityChangeLogs     OpportunityChangeLog[]
   activities                Activity[]
   timelineEvents            TimelineEvent[]
+  communicationConversations CommunicationConversation[]
   goals                     Goal[]
   activityKpis              ActivityKPI[]
   sales                     Sale[]
@@ -147,6 +148,7 @@ model Client {
   contacts          Contact[]
   opportunities     Opportunity[]
   timelineEvents    TimelineEvent[]
+  communicationConversations CommunicationConversation[]
   createdAt         DateTime        @default(now())
   agendaEvents      AgendaEvent[]
   agendaStops       AgendaStop[]
@@ -547,4 +549,148 @@ model ErpSyncLock {
   updatedAt   DateTime @updatedAt
 
   @@index([lockedUntil])
+}
+
+enum CommunicationChannelType {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK_MESSENGER
+  EMAIL
+  SMS
+  RCS
+  TELEGRAM
+  WEBSITE_CHAT
+  OTHER
+}
+
+enum CommunicationProviderType {
+  META_WHATSAPP_CLOUD
+}
+
+enum CommunicationDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CommunicationMessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  LOCATION
+  CONTACT
+  STICKER
+  REACTION
+  INTERACTIVE
+  TEMPLATE
+  UNKNOWN
+}
+
+enum CommunicationMessageStatus {
+  RECEIVED
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum CommunicationConversationStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  ARCHIVED
+  BLOCKED
+}
+
+enum CommunicationWebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+  DUPLICATE
+}
+
+model CommunicationConversation {
+  id                      String                          @id @default(cuid())
+  channel                 CommunicationChannelType
+  provider                CommunicationProviderType
+  externalConversationKey String
+  externalAccountId       String
+  tenantId                String?                         @db.VarChar(64)
+  clientId                String?
+  client                  Client?                         @relation(fields: [clientId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  assignedSellerId        String?
+  assignedSeller          User?                           @relation(fields: [assignedSellerId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contactNormalized       String?                         @db.VarChar(32)
+  contactDisplay          String?                         @db.VarChar(64)
+  contactName             String?                         @db.VarChar(120)
+  status                  CommunicationConversationStatus @default(OPEN)
+  lastMessageAt           DateTime?
+  lastInboundAt           DateTime?
+  lastOutboundAt          DateTime?
+  unreadCount             Int                             @default(0)
+  previewSanitized        String?                         @db.VarChar(240)
+  createdAt               DateTime                        @default(now())
+  updatedAt               DateTime                        @updatedAt
+  messages                CommunicationMessage[]
+
+  @@unique([provider, externalAccountId, externalConversationKey])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([assignedSellerId])
+  @@index([contactNormalized])
+  @@index([status])
+  @@index([lastMessageAt])
+}
+
+model CommunicationMessage {
+  id                       String                     @id @default(cuid())
+  conversationId           String
+  conversation             CommunicationConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  channel                  CommunicationChannelType
+  provider                 CommunicationProviderType
+  externalMessageId        String
+  externalAccountId        String
+  tenantId                 String?                    @db.VarChar(64)
+  direction                CommunicationDirection
+  type                     CommunicationMessageType
+  textContent              String?
+  mediaMetadata            Json?
+  providerTimestamp        DateTime?
+  replyToExternalMessageId String?
+  status                   CommunicationMessageStatus @default(RECEIVED)
+  errorSanitized           String?                    @db.VarChar(240)
+  metadata                 Json?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  @@unique([provider, externalAccountId, externalMessageId])
+  @@index([conversationId])
+  @@index([tenantId])
+  @@index([providerTimestamp])
+  @@index([status])
+}
+
+model CommunicationWebhookEvent {
+  id               String                     @id @default(cuid())
+  channel          CommunicationChannelType
+  provider         CommunicationProviderType
+  externalEventKey String
+  externalAccountId String
+  tenantId         String?                    @db.VarChar(64)
+  eventType        String                     @db.VarChar(64)
+  payloadHash      String                     @db.VarChar(64)
+  status           CommunicationWebhookStatus @default(RECEIVED)
+  attempts         Int                        @default(0)
+  processedAt      DateTime?
+  errorSanitized   String?                    @db.VarChar(240)
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@unique([provider, externalAccountId, externalEventKey])
+  @@index([tenantId])
+  @@index([status, createdAt])
+  @@index([payloadHash])
 }
