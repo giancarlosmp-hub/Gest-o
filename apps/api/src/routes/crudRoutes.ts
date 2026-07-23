@@ -8985,7 +8985,20 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
 
 router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), async (_req, res) => {
   const automaticSync = await refreshErpAutomaticSyncConfig();
-  return res.status(200).json({ automaticSync });
+  const reasonCode = automaticSync.enabledByEnv === false
+    ? "EXTERNAL_CONFIGURATION_REQUIRED:ERP_SYNC_SCHEDULER_ENABLED"
+    : automaticSync.lastSkippedReason || (automaticSync.configurationOk ? "READY" : "CONFIGURATION_ERROR");
+  return res.status(200).json({
+    automaticSync: {
+      enabled: Boolean(automaticSync.enabled && automaticSync.enabledByEnv),
+      initialized: Boolean(automaticSync.initialized),
+      nextRunAt: automaticSync.nextRunAt ?? null,
+      lastRunAt: automaticSync.lastRunAt ?? null,
+      lastSuccessAt: automaticSync.lastSuccessAt ?? null,
+      status: automaticSync.panelStatus,
+      reasonCode,
+    }
+  });
 });
 
 router.patch("/erp/ultrafv3/sync/automatic", authorize("diretor", "gerente"), validateBody(z.object({ enabled: z.boolean() })), async (req, res) => {

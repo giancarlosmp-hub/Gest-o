@@ -36,7 +36,8 @@
     "smoke:erp-order-sequence-setup": "tsx src/scripts/erpOrderNumberSequenceSetupSmoke.ts",
     "smoke:archived-client-read": "tsx src/scripts/archivedClientHistoricalReadSmoke.ts",
     "smoke:communications": "tsx src/scripts/communicationsSmoke.ts",
-    "smoke:communications:security": "tsx src/scripts/communicationsSecuritySmoke.ts"
+    "smoke:communications:security": "tsx src/scripts/communicationsSecuritySmoke.ts",
+    "smoke:pr18a2-http": "npm run build -w @salesforce-pro/shared && tsx src/scripts/pr18a2HttpRegression.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

@@ -301,9 +301,14 @@ export default function ErpIntegrationPanel() {
   const runAllSellerPartnersSync = async () => {
     setRunning("allSellers");
     try {
-      const response = await api.post<{ totalUsers: number; successCount: number; errorCount: number; skippedCount: number }>("/erp/ultrafv3/sync/partners/all-sellers");
-      const { totalUsers, successCount, errorCount, skippedCount } = response.data;
-      toast.success(`Sync por vendedor finalizado: ${successCount}/${totalUsers} sucesso, ${errorCount} erro(s), ${skippedCount} ignorado(s).`);
+      const response = await api.post<{ totalUsers: number; successCount: number; errorCount: number; skippedCount: number; syncedCount?: number; created?: number; updated?: number }>("/erp/ultrafv3/sync/partners/all-sellers");
+      const { totalUsers, successCount, errorCount, skippedCount, syncedCount, created, updated } = response.data;
+      const processed = Number(syncedCount ?? 0) || Number(created ?? 0) + Number(updated ?? 0);
+      if (errorCount > 0 || skippedCount > 0 || response.status === 207) {
+        toast.warning(`Sincronização parcial: ${processed} clientes processados; ${errorCount + skippedCount} vendedor(es) sem dados ou com falha.`);
+      } else {
+        toast.success(`Sync por vendedor finalizado: ${successCount}/${totalUsers} sucesso, ${processed} clientes processados.`);
+      }
       await load();
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível sincronizar clientes de todos vendedores."));
