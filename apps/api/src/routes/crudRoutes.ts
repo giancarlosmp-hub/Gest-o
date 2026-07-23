@@ -4005,6 +4005,28 @@ router.get("/reports/consistency", async (req, res) => {
   });
 });
 
+
+router.get("/clients/alerts/cooling", async (req, res) => {
+  const days = Math.min(parsePositiveInt(req.query.days, 45), 365);
+  const limit = Math.min(parsePositiveInt(req.query.limit, 20), 100);
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const where: Prisma.ClientWhereInput = {
+    ...sellerWhere(req),
+    isArchived: false,
+    OR: [{ lastPurchaseDate: { lt: cutoff } }, { lastPurchaseDate: null }],
+  };
+  const [count, clients] = await Promise.all([
+    prisma.client.count({ where }),
+    prisma.client.findMany({
+      where,
+      orderBy: [{ lastPurchaseDate: "asc" }, { name: "asc" }],
+      take: limit,
+      select: { id: true, name: true, fantasyName: true, city: true, state: true, lastPurchaseDate: true, ownerSellerId: true },
+    }),
+  ]);
+  return res.json({ count, clients, items: clients, days, generatedAt: new Date().toISOString() });
+});
+
 router.get("/clients", async (req, res) => {
   const search = String(req.query.q || "").trim();
   const state = String(req.query.uf || "").trim();

@@ -215,10 +215,12 @@ model AgendaStop {
 }
 
 model Contact {
-  id            String   @id @default(cuid())
-  name          String
-  phone         String
-  email         String
+  id              String   @id @default(cuid())
+  name            String
+  phone           String
+  phoneNormalized String?  @db.VarChar(32)
+  phoneHash       String?  @db.VarChar(64)
+  email           String
   role          String?
   department    String?
   clientId      String?
@@ -228,7 +230,10 @@ model Contact {
   ownerSellerId String
   ownerSeller   User     @relation(fields: [ownerSellerId], references: [id])
   createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt       DateTime @updatedAt
+
+  @@index([phoneHash])
+  @@index([ownerSellerId, phoneHash])
 }
 
 model Opportunity {
@@ -612,6 +617,28 @@ enum CommunicationWebhookStatus {
   DUPLICATE
 }
 
+model CommunicationIntegrationAccount {
+  id                  String                    @id @default(cuid())
+  tenantId            String                    @db.VarChar(64)
+  provider            CommunicationProviderType
+  channel             CommunicationChannelType
+  externalAccountId   String                    @db.VarChar(128)
+  displayName         String?                   @db.VarChar(120)
+  status              String                    @default("pending_configuration") @db.VarChar(40)
+  enabled             Boolean                   @default(true)
+  configurationState  String                    @default("incomplete") @db.VarChar(40)
+  credentialReference String?                   @db.VarChar(160)
+  conversations       CommunicationConversation[]
+  messages            CommunicationMessage[]
+  webhookEvents       CommunicationWebhookEvent[]
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+
+  @@unique([tenantId, provider, channel, externalAccountId])
+  @@index([provider, channel, externalAccountId])
+  @@index([tenantId, enabled])
+}
+
 model CommunicationConversation {
   id                      String                          @id @default(cuid())
   channel                 CommunicationChannelType
@@ -619,6 +646,9 @@ model CommunicationConversation {
   externalConversationKey String
   externalAccountId       String
   tenantId                String?                         @db.VarChar(64)
+  integrationAccountId    String?
+  integrationAccount      CommunicationIntegrationAccount? @relation(fields: [integrationAccountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contactPhoneHash        String?                         @db.VarChar(64)
   clientId                String?
   client                  Client?                         @relation(fields: [clientId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   assignedSellerId        String?
@@ -637,6 +667,8 @@ model CommunicationConversation {
   messages                CommunicationMessage[]
 
   @@unique([provider, externalAccountId, externalConversationKey])
+  @@index([integrationAccountId])
+  @@index([tenantId, contactPhoneHash])
   @@index([tenantId])
   @@index([clientId])
   @@index([assignedSellerId])
@@ -654,6 +686,9 @@ model CommunicationMessage {
   externalMessageId        String
   externalAccountId        String
   tenantId                 String?                    @db.VarChar(64)
+  integrationAccountId     String?
+  integrationAccount       CommunicationIntegrationAccount? @relation(fields: [integrationAccountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  contactPhoneHash         String?                    @db.VarChar(64)
   direction                CommunicationDirection
   type                     CommunicationMessageType
   textContent              String?
@@ -667,6 +702,8 @@ model CommunicationMessage {
   updatedAt                DateTime                   @updatedAt
 
   @@unique([provider, externalAccountId, externalMessageId])
+  @@index([integrationAccountId])
+  @@index([tenantId, contactPhoneHash])
   @@index([conversationId])
   @@index([tenantId])
   @@index([providerTimestamp])
@@ -680,6 +717,8 @@ model CommunicationWebhookEvent {
   externalEventKey String
   externalAccountId String
   tenantId         String?                    @db.VarChar(64)
+  integrationAccountId String?
+  integrationAccount CommunicationIntegrationAccount? @relation(fields: [integrationAccountId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   eventType        String                     @db.VarChar(64)
   payloadHash      String                     @db.VarChar(64)
   status           CommunicationWebhookStatus @default(RECEIVED)
@@ -690,6 +729,7 @@ model CommunicationWebhookEvent {
   updatedAt        DateTime                   @updatedAt
 
   @@unique([provider, externalAccountId, externalEventKey])
+  @@index([integrationAccountId])
   @@index([tenantId])
   @@index([status, createdAt])
   @@index([payloadHash])
