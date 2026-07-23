@@ -29,6 +29,15 @@ export const env = {
   isProduction: (process.env.NODE_ENV || "development") === "production",
   port: Number(process.env.PORT || 4000),
   appVersion: process.env.APP_VERSION || process.env.npm_package_version || "1.0.0",
+  appCommit: cleanEnvString(
+    process.env.APP_COMMIT ||
+      process.env.GIT_COMMIT ||
+      process.env.GITHUB_SHA ||
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      process.env.COMMIT_SHA,
+    "unknown"
+  ),
+  appBuiltAt: cleanEnvString(process.env.APP_BUILT_AT || process.env.BUILD_TIMESTAMP || process.env.BUILT_AT, "unknown"),
   corsAllowedOrigins:
     process.env.CORS_ALLOWED_ORIGINS ||
     process.env.FRONTEND_URL ||

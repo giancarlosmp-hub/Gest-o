@@ -171,11 +171,22 @@ app.use(["/webhooks/communications", "/api/webhooks/communications"], communicat
 app.use(express.json());
 app.use(cookieParser());
 
+const buildVersionPayload = () => ({
+  status: "ok",
+  version: env.appVersion,
+  commit: env.appCommit.length > 12 ? env.appCommit.slice(0, 12) : env.appCommit,
+  builtAt: env.appBuiltAt,
+  environment: env.nodeEnv,
+});
+
+app.get(["/health/version", "/api/health/version"], (_req, res) => {
+  res.status(200).json(buildVersionPayload());
+});
+
 app.get("/health", (_req, res) => {
   res.status(200).json({
-    status: "ok",
+    ...buildVersionPayload(),
     timestamp: new Date().toISOString(),
-    version: env.appVersion,
   });
 });
 

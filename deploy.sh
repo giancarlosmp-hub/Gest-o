@@ -320,6 +320,10 @@ main() {
 
   collect_counts "antes"
   load_production_env
+  export APP_COMMIT="$(git rev-parse HEAD)"
+  export APP_BUILT_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version" 2>/dev/null || printf '1.0.0')}"
+  log "[RELEASE] commit=$(git rev-parse --short HEAD) builtAt=${APP_BUILT_AT} version=${APP_VERSION}"
   inspect_cnpj_lookup_config
 
   log "[DEPLOY] Iniciando rebuild dos containers com código sincronizado de origin/main..."
