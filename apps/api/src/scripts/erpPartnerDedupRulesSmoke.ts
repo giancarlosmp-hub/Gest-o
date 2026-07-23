@@ -110,6 +110,46 @@ assert(clients.filter((client) => !client.isArchived && client.code === "2000").
 assert(!clients.filter((client) => !client.isArchived).some((client) => client.name.startsWith("[ARQUIVADO ERP DUP]")), "duplicado arquivado não deve aparecer em pesquisa/lista normal");
 assert(clients.filter((client) => client.ownerSellerId === "edirlei" && !client.isArchived).length === 0, "duplicado arquivado não deve bloquear manutenção do vendedor antigo");
 
+// PR 18A.1 regression guard: existing ERP partner, second sync and seller reassignment
+// must update the same CRM client instead of creating a duplicate. This mirrors the
+// production-critical UltraFV3 behavior: ERP code remains the primary identity.
+const walletMoveClients: Client[] = [];
+const firstWalletSync = upsertPartner(walletMoveClients, {
+  code: "5050",
+  cnpjNormalized: "5050",
+  name: "COCAMAR CD",
+  city: "Maringá",
+  state: "PR",
+  ownerSellerId: "seller-a",
+});
+assert(firstWalletSync.created === 1, "primeira sincronização do parceiro ERP deve criar cliente");
+const createdWalletClientId = walletMoveClients[0]?.id;
+const secondWalletSync = upsertPartner(walletMoveClients, {
+  code: "5050",
+  cnpjNormalized: "5050",
+  name: "COCAMAR CD",
+  city: "Maringá",
+  state: "PR",
+  ownerSellerId: "seller-a",
+});
+assert(secondWalletSync.updated === 1 && secondWalletSync.created === 0, "segunda sincronização do mesmo ERP code deve atualizar sem criar novo cliente");
+assert(walletMoveClients.length === 1, "segunda sincronização do mesmo ERP code não deve duplicar cliente");
+const walletMoveSync = upsertPartner(walletMoveClients, {
+  code: "5050",
+  cnpjNormalized: "5050",
+  name: "COCAMAR CD",
+  city: "Maringá",
+  state: "PR",
+  ownerSellerId: "seller-b",
+});
+const movedWalletClient = walletMoveClients[0]!;
+assert(walletMoveSync.updated === 1 && walletMoveSync.created === 0, "mudança de vendedor deve atualizar cliente existente sem criar novo cadastro");
+assert(walletMoveSync.sellerChanged === 1, "mudança de vendedor deve incrementar diagnóstico sellerChanged");
+assert(movedWalletClient.id === createdWalletClientId, "mudança de vendedor deve preservar o mesmo id do cliente CRM");
+assert(movedWalletClient.code === "5050", "mudança de vendedor deve preservar o mesmo ERP code como identidade prioritária");
+assert(movedWalletClient.ownerSellerId === "seller-b", "mudança de vendedor deve atualizar ownerSellerId para o novo responsável");
+assert(walletMoveClients.filter((client) => !client.isArchived && client.code === "5050").length === 1, "mudança de vendedor não pode criar cliente ativo duplicado com o mesmo ERP code");
+
 const docResult = upsertPartner(clients, { code: "9999", cnpjNormalized: "99887766000155", name: "CLIENTE DOC", city: "A", state: "PR", ownerSellerId: "seller-b" });
 const docClient = clients.find((client) => client.id === "dup-doc")!;
 assert(docResult.updated === 1 && docClient.timelineEvents.includes("timeline-doc"), "duplicado por CNPJ deveria preservar linha do tempo");
