@@ -55,6 +55,8 @@ type ScheduleItem = {
 export type AgendaOptimization = {
   date: string;
   sellerId: string;
+  scope: "seller" | "aggregate";
+  sellerIds: string[];
   summary: string;
   currentSchedule: Omit<
     ScheduleItem,
@@ -150,8 +152,9 @@ export class AgendaIntelligenceService {
         new Error("Parâmetro date deve estar em YYYY-MM-DD."),
         { statusCode: 400 },
       );
-    const sellerId = await this.resolveSeller(input);
-    const data = await this.collectData(sellerId, range.from, range.to);
+    const scope = await this.resolveSellerScope(input);
+    const sellerId = scope.cacheSellerId;
+    const data = await this.collectData(scope.sellerIds, range.from, range.to);
     const lastRelevant = this.latestUpdate(data);
     const scopeKey = `${input.viewerRole}:${input.viewerUserId}:${sellerId}`;
     const cacheKey = [
@@ -171,7 +174,7 @@ export class AgendaIntelligenceService {
         return hit.value;
       }
     }
-    const base = await this.buildDeterministic(input.date, sellerId, data);
+    const base = await this.buildDeterministic(input.date, scope, data);
     let result = base;
     let aiUsed = false;
     let fallbackUsed = true;
@@ -201,8 +204,8 @@ export class AgendaIntelligenceService {
     );
     return result;
   }
-  private async resolveSeller(input: AgendaOptimizationInput) {
-    if (input.viewerRole === "vendedor") return input.viewerUserId;
+  private async resolveSellerScope(input: AgendaOptimizationInput): Promise<{ type: "seller" | "aggregate"; cacheSellerId: string; sellerIds: string[] }> {
+    if (input.viewerRole === "vendedor") return { type: "seller", cacheSellerId: input.viewerUserId, sellerIds: [input.viewerUserId] };
     if (input.sellerId) {
       const seller = await prisma.user.findFirst({
         where: { id: input.sellerId, role: "vendedor", isActive: true },
@@ -212,24 +215,25 @@ export class AgendaIntelligenceService {
         throw Object.assign(new Error("Vendedor fora do escopo permitido."), {
           statusCode: 403,
         });
-      return seller.id;
+      return { type: "seller", cacheSellerId: seller.id, sellerIds: [seller.id] };
     }
-    const firstSeller = await prisma.user.findFirst({
+    const sellers = await prisma.user.findMany({
       where: { role: "vendedor", isActive: true },
       select: { id: true },
       orderBy: [{ name: "asc" }],
     });
-    if (!firstSeller)
+    if (!sellers.length)
       throw Object.assign(new Error("Nenhum vendedor ativo encontrado para analisar a agenda."), {
         statusCode: 404,
       });
-    return firstSeller.id;
+    const sellerIds = sellers.map((seller) => seller.id);
+    return { type: "aggregate", cacheSellerId: `aggregate:${sellerIds.join(",")}`, sellerIds };
   }
-  private async collectData(sellerId: string, from: Date, to: Date) {
+  private async collectData(sellerIds: string[], from: Date, to: Date) {
     const [events, territories] = await Promise.all([
       prisma.agendaEvent.findMany({
         where: {
-          sellerId,
+          sellerId: { in: sellerIds },
           startDateTime: { lte: to },
           endDateTime: { gte: from },
         },
@@ -304,7 +308,7 @@ export class AgendaIntelligenceService {
         orderBy: { startDateTime: "asc" },
       }),
       prisma.sellerTerritoryCity.findMany({
-        where: { sellerId },
+        where: { sellerId: { in: sellerIds } },
         select: { city: true, state: true, updatedAt: true },
       }),
     ]);
@@ -312,7 +316,7 @@ export class AgendaIntelligenceService {
   }
   private async buildDeterministic(
     date: string,
-    sellerId: string,
+    scope: { type: "seller" | "aggregate"; cacheSellerId: string; sellerIds: string[] },
     data: Awaited<ReturnType<AgendaIntelligenceService["collectData"]>>,
   ): Promise<AgendaOptimization> {
     const territoryByCity = new Map(
@@ -395,7 +399,7 @@ export class AgendaIntelligenceService {
     const conflicts = this.detectConflicts(items);
     const suggested = this.orderItems(items);
     const distance = this.estimateDistance(suggested);
-    const insertions = await this.suggestInsertions(sellerId, date, items);
+    const insertions = scope.type === "seller" ? await this.suggestInsertions(scope.sellerIds[0], date, items) : [];
     const missing = items.filter((i) => !hasValidCoordinates(i)).length;
     const fixed = items.filter((i) => !i.movable).length;
     const confidence =
@@ -406,8 +410,10 @@ export class AgendaIntelligenceService {
           : "high";
     return {
       date,
-      sellerId,
-      summary: `Análise determinística de ${items.length} visita(s)/compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
+      sellerId: scope.cacheSellerId,
+      scope: scope.type,
+      sellerIds: scope.sellerIds,
+      summary: `${scope.type === "aggregate" ? `Análise agregada de ${scope.sellerIds.length} vendedor(es): ` : ""}Análise determinística de ${items.length} visita(s)/compromisso(s); ${fixed} fixo(s) preservado(s), ${items.length - fixed} reordenável(is).`,
       currentSchedule: items.map(
         ({
           status,
