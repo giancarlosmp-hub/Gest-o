@@ -24,6 +24,8 @@ communicationWebhookRoutes.post(
       if (result.status === "misconfigured") return res.status(503).json({ message: "Integration misconfigured" });
       if (result.status === "invalid_signature") return res.status(401).json({ message: "Invalid signature" });
       if (result.status === "invalid_json") return res.status(400).json({ message: "Invalid JSON" });
+      if (result.status === "unknown_account") return res.status(202).json({ message: "Integration account not registered", ...result });
+      if (result.status === "disabled_account") return res.status(202).json({ message: "Integration account disabled", ...result });
       return res.status(200).json(result);
     } catch (error) { next(error); }
   }

@@ -198,7 +198,7 @@ export class PlanningIntelligenceService {
 
   private async enrichWithAi(base: WeeklyCommercialPlan) {
     const dto = { weekStart: base.weekStart, weekEnd: base.weekEnd, workload: base.workload, days: base.days.map((d) => ({ date: d.date, existingAppointments: d.existingAppointments.length, suggestedActions: d.suggestedActions.map((a) => ({ type: a.type, score: a.score, priorityLevel: a.priorityLevel, reason: a.reason, source: a.source })) })) };
-    const response = await aiService.chat({ system: "Você melhora o resumo de um planejamento comercial semanal. Não invente clientes, cidades, compromissos, scores ou datas. Responda JSON com summary e warnings.", messages: [{ role: "user", content: JSON.stringify(dto) }], temperature: 0.2, maxTokens: 600 });
+    const response = await aiService.chat({ system: "Você melhora o resumo de um planejamento comercial semanal para um CRM brasileiro. Responda sempre em português do Brasil. Não invente clientes, cidades, compromissos, scores ou datas. Responda JSON com summary e warnings também em português.", messages: [{ role: "user", content: JSON.stringify(dto) }], temperature: 0.2, maxTokens: 600 });
     const parsed = response?.content ? parseAiJsonObject(response.content) : null;
     if (!parsed) return null;
     const valid = aiSchema.safeParse(parsed.parsed);

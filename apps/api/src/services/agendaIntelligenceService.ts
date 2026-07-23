@@ -203,16 +203,27 @@ export class AgendaIntelligenceService {
   }
   private async resolveSeller(input: AgendaOptimizationInput) {
     if (input.viewerRole === "vendedor") return input.viewerUserId;
-    const sellerId = input.sellerId || input.viewerUserId;
-    const seller = await prisma.user.findFirst({
-      where: { id: sellerId, role: "vendedor", isActive: true },
-      select: { id: true },
-    });
-    if (!seller)
-      throw Object.assign(new Error("Vendedor fora do escopo permitido."), {
-        statusCode: 403,
+    if (input.sellerId) {
+      const seller = await prisma.user.findFirst({
+        where: { id: input.sellerId, role: "vendedor", isActive: true },
+        select: { id: true },
       });
-    return seller.id;
+      if (!seller)
+        throw Object.assign(new Error("Vendedor fora do escopo permitido."), {
+          statusCode: 403,
+        });
+      return seller.id;
+    }
+    const firstSeller = await prisma.user.findFirst({
+      where: { role: "vendedor", isActive: true },
+      select: { id: true },
+      orderBy: [{ name: "asc" }],
+    });
+    if (!firstSeller)
+      throw Object.assign(new Error("Nenhum vendedor ativo encontrado para analisar a agenda."), {
+        statusCode: 404,
+      });
+    return firstSeller.id;
   }
   private async collectData(sellerId: string, from: Date, to: Date) {
     const [events, territories] = await Promise.all([
