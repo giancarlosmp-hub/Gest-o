@@ -6,6 +6,8 @@ const agenda = readFileSync(new URL("../services/agendaIntelligenceService.ts", 
 const planning = readFileSync(new URL("../services/planningIntelligenceService.ts", import.meta.url), "utf8");
 const scheduler = readFileSync(new URL("../jobs/erpSyncScheduler.ts", import.meta.url), "utf8");
 const sync = readFileSync(new URL("../services/ultraFv3SyncService.ts", import.meta.url), "utf8");
+const app = readFileSync(new URL("../app.ts", import.meta.url), "utf8");
+const env = readFileSync(new URL("../config/env.ts", import.meta.url), "utf8");
 
 const coolingIndex = crud.indexOf('router.get("/clients/alerts/cooling"');
 const clientByIdIndex = crud.indexOf('router.get("/clients/:id"');
@@ -20,4 +22,7 @@ assert.match(sync, /syncPartnersForAllConfiguredSellers/, "all-sellers partner s
 assert.match(sync, /sellerChangedCount/, "seller change diagnostics must be preserved");
 assert.match(sync, /LEGACY_ARCHIVED_DUPLICATE_PREFIX/, "legacy archived duplicate prefix must be preserved");
 assert.match(sync, /NOT: legacyArchivedDuplicateNameWhere/, "legacy archived duplicates must not block matching");
+assert.match(app, /\["\/health\/version", "\/api\/health\/version"\]/, "version endpoint must be exposed with and without /api prefix");
+assert.match(app, /commit: env\.appCommit\.length > 12/, "version endpoint must expose a short build-provided commit without secrets");
+assert.match(env, /process\.env\.APP_COMMIT/, "build commit must come from deployment environment variables");
 console.log("PR 18A.1 regression smoke passed");

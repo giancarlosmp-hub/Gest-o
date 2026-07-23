@@ -25,6 +25,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql://postgres@db:5432/salesforce_pro?schema=public}
       NODE_ENV: production
       PORT: 4000
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      APP_COMMIT: ${APP_COMMIT:-unknown}
+      APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
       FRONTEND_URL: ${FRONTEND_URL:-https://crm.demetraagronegocios.com.br}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://crm.demetraagronegocios.com.br}
       JWT_SECRET: ${JWT_SECRET:-}

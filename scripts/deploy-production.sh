@@ -55,6 +55,10 @@ log "Branch local ativa: $(git branch --show-current)"
 log "Status Git após sincronização"
 git status --short --branch
 load_production_env
+export APP_COMMIT="$(git rev-parse HEAD)"
+export APP_BUILT_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version" 2>/dev/null || printf '1.0.0')}"
+log "Release ID: commit=$(git rev-parse --short HEAD) builtAt=${APP_BUILT_AT} version=${APP_VERSION}"
 log "Validando docker compose config"
 docker compose config >/dev/null
 log "Reconstruindo imagens Docker: ${BUILD_SERVICES}"
