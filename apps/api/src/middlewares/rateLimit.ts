@@ -48,3 +48,5 @@ const createRateLimiter = (name: string, productionLimit: number, developmentLim
 export const authLoginRateLimit = createRateLimiter("auth-login", 40, 500);
 export const authRefreshRateLimit = createRateLimiter("auth-refresh", 60, 1_000);
 export const appUsageRateLimit = createRateLimiter("app-usage", 2_000, 10_000);
+
+export const communicationsWebhookRateLimit = createRateLimiter("communications-webhook", 120, 120);

@@ -9,6 +9,8 @@ import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import ultraFv3Routes from "./routes/ultraFv3Routes.js";
 import conversationalCrmRoutes from "./routes/conversationalCrmRoutes.js";
+import { communicationWebhookRoutes } from "./routes/communicationWebhookRoutes.js";
+import { communicationRoutes } from "./routes/communicationRoutes.js";
 import { env } from "./config/env.js";
 import { requestContextMiddleware } from "./middlewares/requestLogging.js";
 import { logApiEvent, sanitizePayload } from "./utils/logger.js";
@@ -27,6 +29,7 @@ if (env.isProduction) {
 let _tcCache: { data: object; expiresAt: number } | null = null;
 
 const isErpOrderRequest = (req: Request) => isErpOrderEndpointPath(req.method, req.path);
+const isCommunicationsWebhookRequest = (req: Request) => req.path.startsWith("/webhooks/communications") || req.path.startsWith("/api/webhooks/communications");
 
 const sendControlledJson = (res: Response, status: number, payload: Record<string, unknown>) => {
   if (res.headersSent || res.writableEnded) return false;
@@ -164,6 +167,7 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(["/webhooks/communications", "/api/webhooks/communications"], communicationWebhookRoutes);
 app.use(express.json());
 app.use(cookieParser());
 
@@ -215,6 +219,7 @@ app.get("/debug/admin", async (_req, res) => {
 app.use(["/auth/login", "/api/auth/login"], authLoginRateLimit);
 app.use(["/auth/refresh", "/api/auth/refresh"], authRefreshRateLimit);
 app.use(["/auth/me", "/api/auth/me", "/auth/logout", "/api/auth/logout"], appUsageRateLimit);
+app.use(["/communications", "/api/communications"], appUsageRateLimit, communicationRoutes);
 app.use("/technical-cultures", appUsageRateLimit);
 
 app.get("/technical-cultures", async (_req, res) => {
@@ -272,7 +277,9 @@ app.use((err: any, req: any, res: any, next: any) => {
     requestId: req.requestId,
     endpoint: req.originalUrl,
     method: req.method,
-    payload: sanitizePayload({ body: req.body, params: req.params, query: req.query }),
+    payload: isCommunicationsWebhookRequest(req)
+      ? sanitizePayload({ body: "[raw-body-redacted]", params: req.params, query: req.query })
+      : sanitizePayload({ body: req.body, params: req.params, query: req.query }),
     user: req.user ? { id: req.user.id, email: req.user.email, role: req.user.role } : null,
     stack: err instanceof Error ? err.stack : String(err),
   });
@@ -299,6 +306,13 @@ app.use((err: any, req: any, res: any, next: any) => {
       message: err instanceof Error ? err.message : "Erro interno controlado no envio ao ERP.",
       correlationId: req.correlationId,
     }));
+    return;
+  }
+
+  if (isCommunicationsWebhookRequest(req)) {
+    const status = Number(err?.status || err?.statusCode || 500);
+    const httpStatus = status >= 400 && status < 500 ? status : 500;
+    sendControlledJson(res, httpStatus, { message: httpStatus === 413 ? "Payload too large" : httpStatus === 415 ? "Unsupported media type" : "Webhook processing error" });
     return;
   }
 
