@@ -28,6 +28,7 @@
     "smoke:date-only": "npm run smoke:date-only -w @salesforce-pro/api",
     "erp:investigate-partner": "npm run erp:investigate-partner -w @salesforce-pro/api",
     "crm:audit-erp-client": "npm run crm:audit-erp-client -w @salesforce-pro/api",
+    "crm:audit-erp-client:prod": "npm run crm:audit-erp-client:prod -w @salesforce-pro/api",
     "crm:repair-erp-client": "npm run crm:repair-erp-client -w @salesforce-pro/api"
   }
 }
