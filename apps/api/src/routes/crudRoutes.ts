@@ -84,10 +84,34 @@ import { timelineIntelligenceService } from "../services/timelineIntelligenceSer
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
+import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 
 const router = Router();
+
+const isErpInvestigationHttpEnabled = () =>
+  env.nodeEnv !== "production" || process.env.FEATURE_ERP_INVESTIGATION === "true";
+
+const runErpPartnerInvestigationHttp = async (req: Request, res: express.Response) => {
+  if (!isErpInvestigationHttpEnabled()) {
+    return res.status(404).json({
+      error: "erp_investigation_unavailable",
+      message: "Endpoint de investigação ERP disponível somente em DEV/PREVIEW ou com FEATURE_ERP_INVESTIGATION=true.",
+    });
+  }
+  const erpCode = req.params.erpCode ?? (req.body as { erpCode?: unknown } | undefined)?.erpCode;
+  try {
+    const report = await investigateErpPartnerReadOnly({ erpCode });
+    return res.status(200).json(report);
+  } catch (error) {
+    const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+    return res.status(status).json({
+      error: "erp_investigation_failed",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
 const ERP_ORDER_ROUTE_TIMEOUT_MS = env.erpOrderRequestTimeoutMs;
 router.use(authMiddleware);
 router.use(appUsageRateLimit);
@@ -8887,6 +8911,9 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
+router.get("/erp/investigate/:erpCode", authorize("diretor", "gerente"), runErpPartnerInvestigationHttp);
+router.post("/erp/investigate", authorize("diretor", "gerente"), runErpPartnerInvestigationHttp);
+
 router.post("/erp/ultrafv3/sync/financial-profiles", authorize("diretor", "gerente"), runUltraFv3Sync("financialProfiles"));
 router.post("/erp/ultrafv3/sync/partner-titles", authorize("diretor", "gerente"), runUltraFv3Sync("partnerTitles"));
 router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
@@ -8903,11 +8930,10 @@ router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("direto
       updated: result.updated,
       sellerChangedCount: result.sellerChangedCount,
     });
-    return res.status(result.errorCount > 0 ? 207 : 200).json({
+    return res.status(result.status === "failed" ? 502 : result.status === "partial" ? 207 : 200).json({
       scope: "partners",
       authMode: "all_sellers",
       allSellers: true,
-      syncedCount: result.results.reduce((total, item) => total + (item.syncedCount ?? 0), 0),
       ...result,
     });
   } catch (error) {
@@ -8943,7 +8969,7 @@ router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", 
 });
 router.post("/erp/ultrafv3/sync/partners/all-sellers", authorize("diretor", "gerente"), async (_req, res) => {
   const result = await syncPartnersForAllConfiguredSellers();
-  return res.status(result.errorCount > 0 ? 207 : 200).json(result);
+  return res.status(result.status === "failed" ? 502 : result.status === "partial" ? 207 : 200).json(result);
 });
 router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runUltraFv3Sync("salesmen"));
 router.post("/erp/ultrafv3/sync/payment-methods", authorize("diretor", "gerente"), runUltraFv3Sync("paymentMethods"));

@@ -244,8 +244,8 @@ const extractProductPrices = (
   return [...prices.values()];
 };
 
-const pickPartnerCode = (payload: Record<string, unknown>) =>
-  pickFirstString(payload, [
+export const pickUltraFv3PartnerCode = (payload: Record<string, unknown>) =>
+  normalizePartnerCacheCode(pickFirstString(payload, [
     "PARCEIRO",
     "CODPARCEIRO",
     "CODCLIENTE",
@@ -254,7 +254,11 @@ const pickPartnerCode = (payload: Record<string, unknown>) =>
     "codigo",
     "CODIGO",
     "partnerCode",
-  ]);
+    "PARCEIRO_OUT",
+    "IDPARCEIRO",
+  ]));
+
+const pickPartnerCode = pickUltraFv3PartnerCode;
 
 const PARTNERS_CONFIG_KEY = "erp.ultrafv3.partners";
 
@@ -541,6 +545,63 @@ export async function requestUltraFv3ReadOnlyWithCredentialsRetry<T>(
       }),
     attempts,
   );
+}
+
+
+const getPaginationNumber = (payload: unknown, keys: string[]) => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  for (const key of keys) {
+    const parsed = parseNumber((payload as Record<string, unknown>)[key]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+};
+
+type PartnerPaginationDiagnostics = {
+  pagesConsulted: number;
+  recordsPerPage: number[];
+  accumulated: number;
+  paginationError: 0 | 1;
+  repeatedPageDetected: 0 | 1;
+  malformedPayload: 0 | 1;
+  emptyPageCount: number;
+};
+
+async function fetchUltraFv3PartnerRowsForSeller(
+  credentials: UltraFv3Credentials,
+  correlationId: string,
+): Promise<{ rows: unknown[]; response: unknown; pagination: PartnerPaginationDiagnostics }> {
+  const rows: unknown[] = [];
+  const recordsPerPage: number[] = [];
+  const signatures = new Set<string>();
+  let paginationError: 0 | 1 = 0;
+  let repeatedPageDetected: 0 | 1 = 0;
+  let malformedPayload: 0 | 1 = 0;
+  let emptyPageCount = 0;
+  let lastResponse: unknown = null;
+  const pageSize = 500;
+  const maxPages = 50;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const endpoint = page === 1 ? "/partners" : `/partners?page=${page}&pageSize=${pageSize}`;
+    const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(endpoint, credentials, correlationId);
+    lastResponse = response;
+    const pageRows = toArray(response);
+    if (!Array.isArray(pageRows)) { malformedPayload = 1; paginationError = 1; break; }
+    const signature = JSON.stringify(pageRows.slice(0, 3).map((row) => row && typeof row === "object" ? pickPartnerCode(row as Record<string, unknown>) : typeof row));
+    if (signatures.has(signature) && pageRows.length > 0) { repeatedPageDetected = 1; paginationError = 1; break; }
+    signatures.add(signature);
+    recordsPerPage.push(pageRows.length);
+    if (pageRows.length === 0) emptyPageCount += 1;
+    rows.push(...pageRows);
+    const total = getPaginationNumber(response, ["total", "totalCount", "count"]);
+    const nextPage = getPaginationNumber(response, ["nextPage", "next_page"]);
+    const hasNext = response && typeof response === "object" ? Boolean((response as Record<string, unknown>).hasNext ?? (response as Record<string, unknown>).has_next) : false;
+    const objectBody = response && typeof response === "object" && !Array.isArray(response);
+    const explicitPagination = objectBody && (total !== null || nextPage !== null || "hasNext" in (response as Record<string, unknown>) || "has_next" in (response as Record<string, unknown>));
+    if (!explicitPagination || (!hasNext && !nextPage && (total === null || rows.length >= total)) || pageRows.length < pageSize) break;
+  }
+  if (recordsPerPage.length >= maxPages) paginationError = 1;
+  return { rows, response: lastResponse, pagination: { pagesConsulted: recordsPerPage.length, recordsPerPage, accumulated: rows.length, paginationError, repeatedPageDetected, malformedPayload, emptyPageCount } };
 }
 
 async function fetchUltraFv3Rows(
@@ -2008,14 +2069,10 @@ export async function syncPartnersByUser(
     "partners",
     async (correlationId) => {
       const partnersRequestStartedAt = Date.now();
-      const response =
-        await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(
-          "/partners",
-          credentials,
-          correlationId,
-        );
+      const paged = await fetchUltraFv3PartnerRowsForSeller(credentials, correlationId);
       const partnersRequestDurationMs = Date.now() - partnersRequestStartedAt;
-      const rows = toArray(response);
+      const response = paged.response;
+      const rows = paged.rows;
       await cachePartnerRows(rows);
       const candidateCounts = getCandidateCounts(response);
       const rootKeys =
@@ -2055,7 +2112,8 @@ export async function syncPartnersByUser(
           receivedRaw: rows.length,
           normalizedCount: rows.length,
           discardedAfterNormalization: 0,
-          paginationDetected: 0,
+          pagesConsulted: paged.pagination.pagesConsulted,
+          paginationError: paged.pagination.paginationError,
         },
       );
       if (!rows.length) {
@@ -2076,7 +2134,9 @@ export async function syncPartnersByUser(
             discardedAfterNormalization: 0,
             requestDurationMs: partnersRequestDurationMs,
             retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
-            paginationDetected: 0,
+            pagesConsulted: paged.pagination.pagesConsulted,
+            paginationError: paged.pagination.paginationError,
+            emptyPageCount: paged.pagination.emptyPageCount,
           },
         };
       }
@@ -2085,6 +2145,13 @@ export async function syncPartnersByUser(
         seller,
         correlationId,
       );
+      Object.assign(result.diagnostics, {
+        pagesConsulted: paged.pagination.pagesConsulted,
+        paginationError: paged.pagination.paginationError,
+        repeatedPageDetected: paged.pagination.repeatedPageDetected,
+        malformedPayload: paged.pagination.malformedPayload,
+        emptyPageCount: paged.pagination.emptyPageCount,
+      });
       const discardedAfterNormalization = Math.max(
         rows.length - result.syncedCount,
         0,
@@ -2107,7 +2174,9 @@ export async function syncPartnersByUser(
             discardedAfterNormalization,
             requestDurationMs: partnersRequestDurationMs,
             retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
-            paginationDetected: 0,
+            pagesConsulted: paged.pagination.pagesConsulted,
+            paginationError: paged.pagination.paginationError,
+            emptyPageCount: paged.pagination.emptyPageCount,
           },
           authMode: "seller",
         },
@@ -2122,7 +2191,9 @@ export async function syncPartnersByUser(
           warnings: result.warnings.length,
           requestDurationMs: partnersRequestDurationMs,
           retryAttemptsConfigured: ERP_SYNC_READ_RETRY_ATTEMPTS,
-          paginationDetected: 0,
+          pagesConsulted: paged.pagination.pagesConsulted,
+          paginationError: paged.pagination.paginationError,
+          emptyPageCount: paged.pagination.emptyPageCount,
         },
       };
     },
@@ -2157,18 +2228,25 @@ export async function syncPartnersForAllConfiguredSellers(
     orderBy: [{ name: "asc" }],
   });
   const summary = {
+    status: "failed" as "success" | "partial" | "failed",
+    sellerCount: sellers.length,
     totalUsers: sellers.length,
     successCount: 0,
+    emptyCount: 0,
     errorCount: 0,
     skippedCount: 0,
+    processed: 0,
+    syncedCount: 0,
     created: 0,
     updated: 0,
     sellerChangedCount: 0,
+    skipped: 0,
   };
   const results: Array<{
     userId: string;
     sellerName: string;
     status: "success" | "error" | "skipped";
+    reasonCode?: string;
     syncedCount?: number;
     created?: number;
     updated?: number;
@@ -2184,18 +2262,29 @@ export async function syncPartnersForAllConfiguredSellers(
         failIfLocked: false,
       });
       const skipped = Boolean(result.diagnostics?.skippedByLock);
-      if (skipped) summary.skippedCount += 1;
-      else summary.successCount += 1;
+      const empty = !skipped && (result.syncedCount ?? 0) === 0;
+      if (skipped) {
+        summary.skippedCount += 1;
+        summary.skipped += 1;
+      } else if (empty) {
+        summary.emptyCount += 1;
+        summary.successCount += 1;
+      } else {
+        summary.successCount += 1;
+      }
       const created = result.diagnostics?.created ?? 0;
       const updated = result.diagnostics?.updated ?? 0;
       const sellerChangedCount = result.diagnostics?.sellerChangedCount ?? 0;
       summary.created += created;
       summary.updated += updated;
+      summary.processed += result.syncedCount ?? 0;
+      summary.syncedCount = summary.processed;
       summary.sellerChangedCount += sellerChangedCount;
       results.push({
         userId: seller.id,
         sellerName: seller.name,
         status: skipped ? "skipped" : "success",
+        reasonCode: skipped ? "LOCKED" : empty ? "EMPTY_SUCCESS" : "SUCCESS",
         syncedCount: result.syncedCount,
         created,
         updated,
@@ -2209,6 +2298,7 @@ export async function syncPartnersForAllConfiguredSellers(
         userId: seller.id,
         sellerName: seller.name,
         status: "error",
+        reasonCode: /auth|login|credencial/i.test(message) ? "AUTH_ERROR" : "ERP_HTTP_ERROR",
         error: message,
       });
       logApiEvent(
@@ -2219,6 +2309,10 @@ export async function syncPartnersForAllConfiguredSellers(
     }
   }
 
+  summary.status =
+    summary.errorCount > 0 || summary.skippedCount > 0
+      ? (summary.successCount > 0 || summary.emptyCount > 0 ? "partial" : "failed")
+      : "success";
   return { ...summary, results };
 }
 async function syncReferenceData(

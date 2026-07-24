@@ -37,7 +37,9 @@
     "smoke:archived-client-read": "tsx src/scripts/archivedClientHistoricalReadSmoke.ts",
     "smoke:communications": "tsx src/scripts/communicationsSmoke.ts",
     "smoke:communications:security": "tsx src/scripts/communicationsSecuritySmoke.ts",
-    "smoke:pr18a2-http": "npm run build -w @salesforce-pro/shared && tsx src/scripts/pr18a2HttpRegression.ts"
+    "smoke:pr18a2-http": "npm run build -w @salesforce-pro/shared && tsx src/scripts/pr18a2HttpRegression.ts",
+    "erp:investigate-partner": "tsx src/scripts/erpInvestigatePartner.ts",
+    "smoke:pr18a3-ultrafv3-partners": "tsx src/scripts/pr18a3UltraFv3PartnerSyncSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
