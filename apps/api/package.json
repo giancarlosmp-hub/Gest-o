@@ -39,7 +39,10 @@
     "smoke:communications:security": "tsx src/scripts/communicationsSecuritySmoke.ts",
     "smoke:pr18a2-http": "npm run build -w @salesforce-pro/shared && tsx src/scripts/pr18a2HttpRegression.ts",
     "erp:investigate-partner": "tsx src/scripts/erpInvestigatePartner.ts",
-    "smoke:pr18a3-ultrafv3-partners": "tsx src/scripts/pr18a3UltraFv3PartnerSyncSmoke.ts"
+    "smoke:pr18a3-ultrafv3-partners": "tsx src/scripts/pr18a3UltraFv3PartnerSyncSmoke.ts",
+    "crm:audit-erp-client": "tsx src/scripts/crmAuditErpClient.ts",
+    "crm:repair-erp-client": "tsx src/scripts/crmRepairErpClient.ts",
+    "smoke:pr18a4-audit": "tsx src/scripts/pr18a4AuditSmoke.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
