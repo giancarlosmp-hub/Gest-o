@@ -66,8 +66,10 @@ export default function SidebarNavItem({
         title={tooltipText}
         aria-label={shouldShowTooltip ? `${label}: ${tooltipText}` : label}
         aria-describedby={shouldShowTooltip && isOpen ? tooltipId : undefined}
-        className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition ${
-          active ? "bg-white text-brand-700" : "hover:bg-brand-600"
+        className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+          active
+            ? "bg-brand-600 text-white shadow-sm ring-1 ring-white/25"
+            : "text-white/90 hover:bg-brand-600/70 hover:text-white"
         }`}
       >
         <span className="flex items-center gap-2">
