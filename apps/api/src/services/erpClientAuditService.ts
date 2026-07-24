@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { normalizeCnpj, normalizeText } from "../utils/normalize.js";
 
@@ -14,11 +15,11 @@ const legacyPrefixes = ["[ARQUIVADO ERP DUP]", "[RECUPERADO]", "[RESTAURADO]", "
 
 type AuditOptions = { erpCode: unknown; ownerSellerId?: string | null; searchName?: string | null };
 
-export async function auditErpClientReadOnly(options: AuditOptions) {
-  const erpCode = normalizeCode(options.erpCode || "5050");
+async function runAudit(options: AuditOptions, db: Prisma.TransactionClient) {
+  const erpCode = normalizeCode(options.erpCode);
   if (!erpCode) throw new Error("Informe --erp-code para a auditoria.");
 
-  const direct = await prisma.client.findMany({
+  const direct = await db.client.findMany({
     where: { OR: [{ code: erpCode }, { code: String(options.erpCode ?? "").trim() }] },
     include: { ownerSeller: { select: { id: true, name: true } }, _count: { select: { opportunities: true, activities: true, contacts: true, agendaEvents: true, agendaStops: true } } },
     orderBy: [{ isArchived: "asc" }, { erpUpdatedAt: "desc" }, { createdAt: "desc" }]
@@ -27,7 +28,7 @@ export async function auditErpClientReadOnly(options: AuditOptions) {
   const docs = [...new Set(direct.map((c) => normalizeCnpj(c.cnpj)).filter(Boolean))];
   const names = [...new Set(direct.flatMap((c) => [c.nameNormalized || normalizeText(c.name), c.fantasyName ? normalizeText(c.fantasyName) : null]).filter(Boolean) as string[])];
 
-  const related = await prisma.client.findMany({
+  const related = await db.client.findMany({
     where: {
       OR: [
         { id: { in: direct.map((c) => c.id) } },
@@ -43,15 +44,15 @@ export async function auditErpClientReadOnly(options: AuditOptions) {
 
   const byId = new Map([...direct, ...related].map((c) => [c.id, c]));
   const recordsRaw = [...byId.values()];
-  const oppIds = (await prisma.opportunity.findMany({ where: { clientId: { in: recordsRaw.map((c) => c.id) } }, select: { id: true, clientId: true } }));
+  const oppIds = (await db.opportunity.findMany({ where: { clientId: { in: recordsRaw.map((c) => c.id) } }, select: { id: true, clientId: true } }));
   const ordersByClient = new Map<string, number>();
   if (oppIds.length) {
-    const grouped = await prisma.erpOrderSync.groupBy({ by: ["opportunityId"], where: { opportunityId: { in: oppIds.map((o) => o.id) } }, _count: { _all: true } });
+    const grouped = await db.erpOrderSync.groupBy({ by: ["opportunityId"], where: { opportunityId: { in: oppIds.map((o) => o.id) } }, _count: { _all: true } });
     const oppClient = new Map(oppIds.map((o) => [o.id, o.clientId]));
     for (const row of grouped) ordersByClient.set(oppClient.get(row.opportunityId) || "", (ordersByClient.get(oppClient.get(row.opportunityId) || "") || 0) + row._count._all);
   }
 
-  const lastRun = await prisma.erpSyncRun.findFirst({ where: { scope: "partners", sellerId: options.ownerSellerId || undefined }, orderBy: { startedAt: "desc" } });
+  const lastRun = await db.erpSyncRun.findFirst({ where: { scope: "partners", sellerId: options.ownerSellerId || undefined }, orderBy: { startedAt: "desc" } });
   const active = recordsRaw.filter((c) => !c.isArchived);
   const archived = recordsRaw.filter((c) => c.isArchived);
   const lastUpdated = recordsRaw[0] ?? null;
@@ -78,6 +79,14 @@ export async function auditErpClientReadOnly(options: AuditOptions) {
     answers: { multipleActive5050: active.filter((c) => normalizeCode(c.code) === erpCode).length > 1, legacyField5050Found: false, duplicatedDocument: docs.some((doc) => recordsRaw.filter((c) => normalizeCnpj(c.cnpj) === doc || c.cnpjNormalized === doc).length > 1), recoveredWithoutErpCodeSameClient: recordsRaw.some((c) => !c.code && legacyPrefixes.some((prefix) => c.name.toUpperCase().startsWith(prefix.toUpperCase()))) },
     diagnosis: records.length === 0 ? "Nenhum registro CRM relacionado encontrado por código ERP, documento/nome derivado ou prefixos de recuperação." : archived.length && !active.length ? "Registros relacionados existem, mas todos estão arquivados e são excluídos por GET /clients padrão." : active.length > 1 ? "Há ambiguidade ativa; não reparar automaticamente." : "Auditoria read-only concluída; reparar dados somente após validação humana do dry-run."
   };
+}
+
+export async function auditErpClientReadOnly(options: AuditOptions) {
+  return prisma.$transaction(async (tx) => {
+    // PostgreSQL rejects INSERT/UPDATE/DELETE for the remainder of this transaction.
+    await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+    return runAudit(options, tx);
+  });
 }
 
 export async function repairErpClientDryRun(options: AuditOptions & { apply?: boolean }) {

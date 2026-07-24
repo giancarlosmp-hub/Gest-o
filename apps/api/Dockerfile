@@ -1,6 +1,11 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
+ARG APP_COMMIT=unknown
+ARG APP_VERSION=1.0.0
+ARG APP_BUILT_AT=unknown
+ENV APP_COMMIT=$APP_COMMIT APP_VERSION=$APP_VERSION APP_BUILT_AT=$APP_BUILT_AT
+
 RUN apk add --no-cache openssl ca-certificates
 
 COPY package*.json ./
@@ -16,6 +21,11 @@ RUN npm run build -w @salesforce-pro/shared \
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
+
+ARG APP_COMMIT=unknown
+ARG APP_VERSION=1.0.0
+ARG APP_BUILT_AT=unknown
+ENV APP_COMMIT=$APP_COMMIT APP_VERSION=$APP_VERSION APP_BUILT_AT=$APP_BUILT_AT
 
 RUN apk add --no-cache openssl ca-certificates tini \
   && mkdir -p apps/api/dist/public/brand
