@@ -177,7 +177,7 @@ const FULL_SYNC_STEPS: Array<{ key: SyncScopeKey; label: string; nonCritical?: b
 const SYNC_CARDS: SyncCardConfig[] = [
   { key: "connection", title: "Conexão UltraFV3", endpoint: "connection", description: "Valida credenciais, autenticação e disponibilidade do UltraFV3." },
   { key: "products", title: "Produtos", endpoint: "products", countLabel: "Produtos sincronizados", description: "Importa produtos com código ERP e unidade; a seleção da oportunidade exibe apenas itens com preço válido, mesmo com estoque zerado." },
-  { key: "partners", title: "Clientes/parceiros (vendedor referência/global)", endpoint: "partners", countLabel: "Clientes", description: "Sincroniza /partners com credencial global ou vendedor de referência. Para atualizar carteira completa e trocas de vendedor, use Clientes por vendedor." },
+  { key: "partners", title: "Clientes/parceiros (sync global)", endpoint: "partners", countLabel: "Processados", description: "Sincroniza /partners com credencial global ou vendedor de referência. Para atualizar carteira completa e trocas de vendedor, use Clientes por vendedor." },
   { key: "financialProfiles", title: "Perfil financeiro", endpoint: "financial-profiles", countLabel: "Perfis", description: "Sincroniza /financialProfiles e enriquece o Cliente 360 com ticket, compras, atrasos e cheques devolvidos." },
   { key: "partnerTitles", title: "Títulos em aberto", endpoint: "partner-titles", countLabel: "Títulos", description: "Sincroniza /partnerTitles, calcula saldo em aberto/vencido e exibe alertas financeiros na oportunidade." },
   { key: "orderStatus", title: "Status de pedidos", endpoint: "order-status", countLabel: "Pedidos consultados", description: "Consulta o /orderStatus em modo somente leitura para atualizar o acompanhamento operacional dos pedidos já enviados." },
@@ -301,13 +301,15 @@ export default function ErpIntegrationPanel() {
   const runAllSellerPartnersSync = async () => {
     setRunning("allSellers");
     try {
-      const response = await api.post<{ totalUsers: number; successCount: number; errorCount: number; skippedCount: number; syncedCount?: number; created?: number; updated?: number }>("/erp/ultrafv3/sync/partners/all-sellers");
-      const { totalUsers, successCount, errorCount, skippedCount, syncedCount, created, updated } = response.data;
-      const processed = Number(syncedCount ?? 0) || Number(created ?? 0) + Number(updated ?? 0);
-      if (errorCount > 0 || skippedCount > 0 || response.status === 207) {
-        toast.warning(`Sincronização parcial: ${processed} clientes processados; ${errorCount + skippedCount} vendedor(es) sem dados ou com falha.`);
+      const response = await api.post<{ status: "success" | "partial" | "failed"; sellerCount: number; successCount: number; emptyCount: number; errorCount: number; skippedCount: number; processed: number; syncedCount?: number; created?: number; updated?: number }>("/erp/ultrafv3/sync/partners/all-sellers");
+      const { status, errorCount, emptyCount, skippedCount, processed, syncedCount } = response.data;
+      const processedCount = Number(processed ?? syncedCount ?? 0);
+      if (status === "failed") {
+        toast.error("Não foi possível sincronizar clientes. Nenhum vendedor foi processado com sucesso.");
+      } else if (status === "partial" || response.status === 207) {
+        toast.warning(`Sincronização parcial: ${processedCount} clientes processados; ${errorCount + skippedCount} vendedores com falha; ${emptyCount} sem registros.`);
       } else {
-        toast.success(`Sync por vendedor finalizado: ${successCount}/${totalUsers} sucesso, ${processed} clientes processados.`);
+        toast.success(`Sincronização concluída: ${processedCount} clientes processados.`);
       }
       await load();
     } catch (error) {
