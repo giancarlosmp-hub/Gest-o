@@ -7,6 +7,7 @@ DRY_RUN="${DRY_RUN:-0}"
 CONFIRM="${CONFIRM:-}"
 OLD_API="${OLD_API:-gest-o-api-recovery-20260718}"
 DB_CONTAINER="${DB_CONTAINER:-gest-o-db-clean-v2-20260717}"
+DB_NAME="${DB_NAME:-}"
 WEB_CONTAINER="${WEB_CONTAINER:-gest-o-web-1}"
 NETWORK="${NETWORK:-gest-o_default}"
 CANDIDATE=""
@@ -64,7 +65,18 @@ docker inspect --format '{{json .NetworkSettings.Ports}} {{json .NetworkSettings
 jq -r '.[0].Config.Env[]' "$SAFE_DIR/api-old.inspect.json" >"$SAFE_DIR/api.env"
 chmod 600 "$SAFE_DIR"/*
 
-docker exec "$DB_CONTAINER" sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' >"$SAFE_DIR/postgres.dump"
+if [[ -z "$DB_NAME" ]]; then
+  DB_NAME="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_CONTAINER" \
+    | sed -n 's/^POSTGRES_DB=//p' | sed -n '1p')"
+fi
+DB_NAME="${DB_NAME:-salesforce_pro}"
+log "validando acesso administrativo local peer ao banco: $DB_NAME"
+docker exec -u postgres "$DB_CONTAINER" \
+  psql -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -tAc 'SELECT 1' >/dev/null \
+  || die "conexão administrativa local peer falhou"
+docker exec -u postgres "$DB_CONTAINER" \
+  pg_dump -U postgres -d "$DB_NAME" --format=custom --no-owner --no-acl \
+  >"$SAFE_DIR/postgres.dump"
 test -s "$SAFE_DIR/postgres.dump" || die "dump vazio"
 docker exec -i "$DB_CONTAINER" pg_restore --list <"$SAFE_DIR/postgres.dump" >"$SAFE_DIR/postgres.dump.list"
 test -s "$SAFE_DIR/postgres.dump.list" || die "pg_restore não validou o dump"
