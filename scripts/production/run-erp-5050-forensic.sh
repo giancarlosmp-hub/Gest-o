@@ -3,7 +3,9 @@
 set -Eeuo pipefail
 
 readonly EXPECTED_CONFIRMATION='FORENSIC5050'
-readonly SAFE_ROOT='/root/gest-o-safe'
+readonly SAFE_ROOT="${SAFE_ROOT:-/root/gest-o-safe}"
+readonly CONNECTION_MODE="${CONNECTION_MODE:-docker-peer}"
+readonly DB_CONTAINER="${DB_CONTAINER:-gest-o-db-clean-v2-20260717}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly SCRIPT_DIR
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
@@ -15,14 +17,35 @@ if [[ "${CONFIRM:-}" != "$EXPECTED_CONFIRMATION" ]]; then
   exit 1
 fi
 
-for command_name in psql git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
+for command_name in git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
   command -v "$command_name" >/dev/null
 done
 
 PSQL_TARGET=()
-if [[ -n "${DATABASE_URL:-}" ]]; then
-  PSQL_TARGET+=("$DATABASE_URL")
-fi
+case "$CONNECTION_MODE" in
+  docker-peer)
+    command -v docker >/dev/null
+    docker inspect "$DB_CONTAINER" >/dev/null
+    [[ "$(docker inspect --format '{{.State.Running}}' "$DB_CONTAINER")" == 'true' ]]
+    docker exec -i -u postgres "$DB_CONTAINER" command -v psql >/dev/null
+    DB_NAME="${DB_NAME:-$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_CONTAINER" | sed -n 's/^POSTGRES_DB=//p' | sed -n '1p')}"
+    DB_NAME="${DB_NAME:-salesforce_pro}"
+    PSQL_TARGET=(docker exec -i -u postgres "$DB_CONTAINER" psql -U postgres -d "$DB_NAME")
+    ;;
+  libpq)
+    command -v psql >/dev/null
+    DB_NAME="${DB_NAME:-${PGDATABASE:-}}"
+    PSQL_TARGET=(psql)
+    if [[ -n "${DATABASE_URL:-}" ]]; then
+      PSQL_TARGET+=("$DATABASE_URL")
+    fi
+    ;;
+  *)
+    printf 'ABORTADO: CONNECTION_MODE deve ser docker-peer ou libpq.\n' >&2
+    exit 1
+    ;;
+esac
+readonly DB_NAME
 
 [[ -f "$SOURCE_SQL" && -r "$SOURCE_SQL" ]]
 [[ -d "$SAFE_ROOT" && -w "$SAFE_ROOT" ]]
@@ -39,15 +62,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The connection target comes from DATABASE_URL or the standard libpq PG*
-# environment variables; no credential is persisted in the evidence directory.
-psql "${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 \
+# The default target uses local peer authentication inside the recovered database
+# container. libpq is opt-in; credentials are never persisted as evidence.
+"${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 \
   -c 'BEGIN; SET TRANSACTION READ ONLY; SET LOCAL statement_timeout='"'"'60s'"'"'; SET LOCAL lock_timeout='"'"'5s'"'"'; SELECT current_database(), current_user; ROLLBACK;' \
   >"$PREFLIGHT_STDOUT" 2>"$PREFLIGHT_STDERR"
 
-DATABASE_NAME="$(psql "${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -At -c 'SELECT current_database()' 2>"$PREFLIGHT_STDERR")"
+DATABASE_NAME="$("${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -At -c 'SELECT current_database()' 2>"$PREFLIGHT_STDERR")"
 readonly DATABASE_NAME
-DATABASE_USER="$(psql "${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -At -c 'SELECT current_user' 2>"$PREFLIGHT_STDERR")"
+DATABASE_USER="$("${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -At -c 'SELECT current_user' 2>"$PREFLIGHT_STDERR")"
 readonly DATABASE_USER
 [[ -n "$DATABASE_NAME" && -n "$DATABASE_USER" ]]
 
@@ -55,7 +78,7 @@ mkdir -m 700 -- "$EVIDENCE_DIR"
 cp -- "$SOURCE_SQL" "$EVIDENCE_DIR/consultas.sql"
 chmod 600 "$EVIDENCE_DIR/consultas.sql"
 
-psql --version >"$EVIDENCE_DIR/psql-version.txt"
+"${PSQL_TARGET[@]}" --version >"$EVIDENCE_DIR/psql-version.txt"
 git -C "$REPO_ROOT" rev-parse HEAD >"$EVIDENCE_DIR/git-revision.txt"
 hostname >"$EVIDENCE_DIR/hostname.txt"
 date -u +%Y-%m-%dT%H:%M:%SZ >"$EVIDENCE_DIR/date.txt"
@@ -63,7 +86,7 @@ printf '%s\n' "$DATABASE_NAME" >"$EVIDENCE_DIR/database.txt"
 
 # consultas.sql is an immutable copy of the versioned SQL and already contains
 # BEGIN TRANSACTION READ ONLY, both LOCAL timeouts, and COMMIT.
-psql "${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -f "$EVIDENCE_DIR/consultas.sql" \
+"${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -f "$EVIDENCE_DIR/consultas.sql" \
   >"$EVIDENCE_DIR/stdout.txt" 2>"$EVIDENCE_DIR/stderr.txt"
 
 SQL_SHA256="$(sha256sum "$EVIDENCE_DIR/consultas.sql")"
@@ -82,12 +105,15 @@ jq -n \
   --arg hostname "$HOST_NAME" \
   --arg banco "$DATABASE_NAME" \
   --arg usuario "$DATABASE_USER" \
+  --arg connection_mode "$CONNECTION_MODE" \
+  --arg db_container "$([[ "$CONNECTION_MODE" == docker-peer ]] && printf '%s' "$DB_CONTAINER")" \
   --arg script "$SOURCE_SQL" \
   --arg sha256_sql "${SQL_SHA256%% *}" \
   --argjson linhas "$OUTPUT_LINES" \
   '{data: $data, commit: $commit, hostname: $hostname, banco: $banco,
     usuario: $usuario, script_utilizado: $script, sha256_sql: $sha256_sql,
-    quantidade_linhas_produzidas: $linhas}' >"$EVIDENCE_DIR/manifest.json"
+    quantidade_linhas_produzidas: $linhas, connectionMode: $connection_mode,
+    dbContainer: $db_container, database: $banco, databaseUser: $usuario}' >"$EVIDENCE_DIR/manifest.json"
 
 (
   cd -- "$EVIDENCE_DIR"

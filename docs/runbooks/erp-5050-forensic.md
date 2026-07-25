@@ -11,10 +11,11 @@ serviços, altera schema, executa migrations ou modifica a aplicação. A execu�
 - checkout correto do repositório na VPS e o SQL
   `docs/investigations/evidence/erp-5050-read-only.sql` presente;
 - diretório `/root/gest-o-safe` já existente e gravável pelo operador;
-- `bash`, `psql`, `git`, `jq`, `sha256sum` e utilitários POSIX disponíveis;
-- conexão configurada por variáveis libpq (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER` e, quando
-  aplicável, `PGPASSWORD`) ou por `DATABASE_URL`, que o runner passa como alvo explícito ao `psql`;
-- role PostgreSQL dedicada com somente `CONNECT`, `USAGE` e `SELECT`.
+- `bash`, `docker`, `git`, `jq`, `sha256sum` e utilitários POSIX disponíveis;
+- container PostgreSQL recuperado existente e em execução, com `psql` e autenticação local peer
+  para o usuário `postgres`;
+- banco resolvido por `DB_NAME`, depois `POSTGRES_DB` inspecionado no container e, por fim,
+  `salesforce_pro`.
 
 O runner valida a conexão e abre uma transação read-only antes de criar a coleta. A consulta oficial
 também usa transação read-only, timeout de statement de 60 segundos, timeout de lock de 5 segundos e
@@ -25,8 +26,15 @@ falha imediata do `psql`.
 Na raiz do checkout, após aprovação humana explícita:
 
 ```bash
-CONFIRM=FORENSIC5050 scripts/production/run-erp-5050-forensic.sh
+DB_CONTAINER=gest-o-db-clean-v2-20260717 \
+CONFIRM=FORENSIC5050 \
+scripts/production/run-erp-5050-forensic.sh
 ```
+
+O modo padrão é `CONNECTION_MODE=docker-peer`: toda comunicação usa
+`docker exec -i -u postgres` e não lê `DATABASE_URL`. O container pode ser substituído com
+`DB_CONTAINER=<nome>`. O modo legado libpq somente é habilitado explicitamente com
+`CONNECTION_MODE=libpq`.
 
 Qualquer outro valor (inclusive vazio) aborta. Não execute o arquivo SQL separadamente: o runner é a
 única forma oficial de fazer esta coleta em produção.
@@ -39,7 +47,8 @@ Cada execução cria, sem sobrescrever diretórios existentes,
 - `consultas.sql`: cópia byte a byte do SQL versionado efetivamente executado;
 - `stdout.txt` e `stderr.txt`: saídas separadas do `psql`;
 - `psql-version.txt`, `git-revision.txt`, `hostname.txt`, `date.txt` e `database.txt`: contexto;
-- `manifest.json`: data, commit, host, banco, usuário, caminho do SQL, hash do SQL e número de linhas;
+- `manifest.json`: data, commit, host, `connectionMode`, `dbContainer`, banco, usuário, caminho do
+  SQL, hash do SQL e número de linhas, sem URL ou credenciais;
 - `consultas.sql.sha256`, `stdout.txt.sha256` e `manifest.json.sha256`: hashes dos artefatos.
 
 O terminal mostra somente o local da evidência e os três SHA256; nenhum resultado forense é resumido
@@ -62,7 +71,7 @@ checkout. Preserve o diretório completo; alterar qualquer arquivo invalida seu 
 
 ## Repetir a investigação
 
-Confirme novamente checkout, commit, role e destino de conexão. Execute outra vez o comando oficial
+Confirme novamente checkout, commit, container e banco de destino. Execute outra vez o comando oficial
 com a confirmação explícita. Cada repetição cria um diretório timestampado independente; nunca
 reutilize nem edite uma coleta anterior. Duas tentativas no mesmo segundo não sobrescrevem dados: a
 segunda aborta e deve ser repetida depois.
