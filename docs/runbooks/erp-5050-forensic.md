@@ -11,7 +11,10 @@ serviços, altera schema, executa migrations ou modifica a aplicação. A execu�
 - checkout correto do repositório na VPS e o SQL
   `docs/investigations/evidence/erp-5050-read-only.sql` presente;
 - diretório `/root/gest-o-safe` já existente e gravável pelo operador;
-- `bash`, `docker`, `git`, `jq`, `sha256sum` e utilitários POSIX disponíveis;
+- dependências comuns no host: `git`, `hostname`, `date`, `sha256sum`, `wc`, `jq`, `cp`, `chmod`,
+  `mkdir`, `mktemp` e `rm`;
+- no modo padrão `docker-peer`, apenas `docker` como dependência adicional no host (o `psql` é
+  validado e executado exclusivamente dentro do container); no modo `libpq`, `psql` no host;
 - container PostgreSQL recuperado existente e em execução, com `psql` e autenticação local peer
   para o usuário `postgres`;
 - banco resolvido por `DB_NAME`, depois `POSTGRES_DB` inspecionado no container e, por fim,

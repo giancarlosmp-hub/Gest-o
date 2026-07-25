@@ -6,7 +6,7 @@ readonly EXPECTED_CONFIRMATION='FORENSIC5050'
 readonly SAFE_ROOT="${SAFE_ROOT:-/root/gest-o-safe}"
 readonly CONNECTION_MODE="${CONNECTION_MODE:-docker-peer}"
 readonly DB_CONTAINER="${DB_CONTAINER:-gest-o-db-clean-v2-20260717}"
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)"
 readonly SCRIPT_DIR
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 readonly REPO_ROOT
@@ -17,23 +17,44 @@ if [[ "${CONFIRM:-}" != "$EXPECTED_CONFIRMATION" ]]; then
   exit 1
 fi
 
+require_host_command() {
+  local command_name="$1"
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    printf 'ABORTADO: comando obrigatório no host não encontrado: %s\n' "$command_name" >&2
+    exit 127
+  fi
+}
+
 for command_name in git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
-  command -v "$command_name" >/dev/null
+  require_host_command "$command_name"
 done
 
 PSQL_TARGET=()
 case "$CONNECTION_MODE" in
   docker-peer)
-    command -v docker >/dev/null
+    require_host_command docker
     docker inspect "$DB_CONTAINER" >/dev/null
     [[ "$(docker inspect --format '{{.State.Running}}' "$DB_CONTAINER")" == 'true' ]]
-    docker exec -i -u postgres "$DB_CONTAINER" command -v psql >/dev/null
-    DB_NAME="${DB_NAME:-$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_CONTAINER" | sed -n 's/^POSTGRES_DB=//p' | sed -n '1p')}"
+    if ! docker exec -i -u postgres "$DB_CONTAINER" command -v psql >/dev/null; then
+      printf 'ABORTADO: psql não encontrado no container PostgreSQL: %s\n' "$DB_CONTAINER" >&2
+      exit 127
+    fi
+    CONTAINER_DB_NAME=''
+    while IFS= read -r container_env; do
+      if [[ "$container_env" == POSTGRES_DB=* ]]; then
+        CONTAINER_DB_NAME="${container_env#POSTGRES_DB=}"
+        break
+      fi
+    done < <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_CONTAINER")
+    DB_NAME="${DB_NAME:-$CONTAINER_DB_NAME}"
     DB_NAME="${DB_NAME:-salesforce_pro}"
     PSQL_TARGET=(docker exec -i -u postgres "$DB_CONTAINER" psql -U postgres -d "$DB_NAME")
     ;;
   libpq)
-    command -v psql >/dev/null
+    if ! command -v psql >/dev/null 2>&1; then
+      printf 'ABORTADO: psql é obrigatório no host quando CONNECTION_MODE=libpq\n' >&2
+      exit 127
+    fi
     DB_NAME="${DB_NAME:-${PGDATABASE:-}}"
     PSQL_TARGET=(psql)
     if [[ -n "${DATABASE_URL:-}" ]]; then
@@ -125,4 +146,4 @@ chmod 600 "$EVIDENCE_DIR"/*
 
 printf 'LOCAL DAS EVIDÊNCIAS: %s\n' "$EVIDENCE_DIR"
 printf 'SHA256:\n%s\n%s\n' "$SQL_SHA256" "$OUTPUT_SHA256"
-cat "$EVIDENCE_DIR/manifest.json.sha256"
+printf '%s\n' "$(<"$EVIDENCE_DIR/manifest.json.sha256")"

@@ -59,7 +59,11 @@ fi
 shift
 [[ "$1" == -i && "$2" == -u && "$3" == postgres ]]
 shift 4
-if [[ "$1" == command && "$2" == -v && "$3" == psql ]]; then printf '/usr/bin/psql\n'; exit 0; fi
+if [[ "$1" == command && "$2" == -v && "$3" == psql ]]; then
+  [[ "${MOCK_CONTAINER_PSQL:-1}" == 1 ]] || exit 1
+  printf '/usr/bin/psql\n'
+  exit 0
+fi
 [[ "$1" == psql && "$2" == -U && "$3" == postgres && "$4" == -d ]]
 printf '%s\n' "$5" >"$MOCK_SELECTED_DB"
 shift 5
@@ -72,14 +76,32 @@ printf 'BEGIN\nSET\npostgres\nROLLBACK\n'
 MOCK
 chmod +x "$TMP/bin/docker"
 
+# An isolated host PATH proves docker-peer does not discover or execute a host
+# psql. Only the documented common dependencies and the Docker mock are exposed.
+mkdir -p "$TMP/host-without-psql" "$TMP/host-without-docker"
+for command_name in bash env git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
+  command_path="$(command -v "$command_name")"
+  ln -s "$command_path" "$TMP/host-without-psql/$command_name"
+  ln -s "$command_path" "$TMP/host-without-docker/$command_name"
+done
+ln -s "$TMP/bin/docker" "$TMP/host-without-psql/docker"
+if PATH="$TMP/host-without-psql" command -v psql >/dev/null 2>&1; then
+  printf 'isolated test PATH unexpectedly contains psql\n' >&2
+  exit 1
+fi
+
 run_success() {
   local case_dir="$TMP/$1"
   shift
   mkdir -p "$case_dir/safe"
   : >"$case_dir/docker.log"
-  env PATH="$TMP/bin:$PATH" SAFE_ROOT="$case_dir/safe" MOCK_LOG="$case_dir/docker.log" \
+  if ! env PATH="$TMP/bin:${RUNNER_HOST_PATH:-$PATH}" SAFE_ROOT="$case_dir/safe" MOCK_LOG="$case_dir/docker.log" \
     MOCK_SELECTED_DB="$case_dir/database" CONFIRM=FORENSIC5050 DATABASE_URL='postgresql://secret:never-log@db/prod' \
-    "$@" "$RUNNER" >"$case_dir/terminal.out" 2>"$case_dir/terminal.err"
+    "$@" "$RUNNER" >"$case_dir/terminal.out" 2>"$case_dir/terminal.err"; then
+    printf 'mocked docker-peer run failed:\n' >&2
+    cat "$case_dir/terminal.err" >&2
+    return 1
+  fi
   local evidence
   evidence="$(find "$case_dir/safe" -mindepth 1 -maxdepth 1 -type d)"
   [[ -n "$evidence" ]]
@@ -89,15 +111,53 @@ run_success() {
   grep -Fq 'exec -i -u postgres' "$case_dir/docker.log"
 }
 
-run_success explicit env DB_CONTAINER=custom-db DB_NAME=operator_db MOCK_POSTGRES_DB=container_db
+RUNNER_HOST_PATH="$TMP/host-without-psql" run_success explicit env DB_CONTAINER=custom-db DB_NAME=operator_db MOCK_POSTGRES_DB=container_db
 [[ "$(<"$TMP/explicit/database")" == operator_db ]]
 grep -Fq '"dbContainer": "custom-db"' "$(find "$TMP/explicit/safe" -mindepth 1 -maxdepth 1 -type d)/manifest.json"
+grep -Fq 'exec -i -u postgres custom-db command -v psql' "$TMP/explicit/docker.log"
 
 run_success container env MOCK_POSTGRES_DB=container_db
 [[ "$(<"$TMP/container/database")" == container_db ]]
 
 run_success fallback env -u MOCK_POSTGRES_DB
 [[ "$(<"$TMP/fallback/database")" == salesforce_pro ]]
+
+mkdir -p "$TMP/container-without-psql/safe"
+: >"$TMP/container-without-psql/docker.log"
+set +e
+PATH="$TMP/host-without-psql" SAFE_ROOT="$TMP/container-without-psql/safe" \
+  MOCK_LOG="$TMP/container-without-psql/docker.log" MOCK_CONTAINER_PSQL=0 \
+  CONFIRM=FORENSIC5050 DB_CONTAINER=no-psql-db "$RUNNER" \
+  >"$TMP/container-without-psql/out" 2>"$TMP/container-without-psql/err"
+container_psql_status=$?
+set -e
+[[ "$container_psql_status" == 127 ]]
+grep -Fxq 'ABORTADO: psql não encontrado no container PostgreSQL: no-psql-db' "$TMP/container-without-psql/err"
+[[ -z "$(find "$TMP/container-without-psql/safe" -mindepth 1 -print -quit)" ]]
+# Validation stops before any psql query is attempted.
+[[ "$(grep -Fc 'exec -i -u postgres' "$TMP/container-without-psql/docker.log")" == 1 ]]
+
+mkdir -p "$TMP/libpq-without-psql/safe"
+set +e
+PATH="$TMP/host-without-psql" SAFE_ROOT="$TMP/libpq-without-psql/safe" \
+  CONFIRM=FORENSIC5050 CONNECTION_MODE=libpq "$RUNNER" \
+  >"$TMP/libpq-without-psql/out" 2>"$TMP/libpq-without-psql/err"
+libpq_status=$?
+set -e
+[[ "$libpq_status" == 127 ]]
+grep -Fxq 'ABORTADO: psql é obrigatório no host quando CONNECTION_MODE=libpq' "$TMP/libpq-without-psql/err"
+[[ -z "$(find "$TMP/libpq-without-psql/safe" -mindepth 1 -print -quit)" ]]
+
+mkdir -p "$TMP/host-without-docker-safe"
+set +e
+PATH="$TMP/host-without-docker" SAFE_ROOT="$TMP/host-without-docker-safe" \
+  CONFIRM=FORENSIC5050 "$RUNNER" \
+  >"$TMP/host-without-docker.out" 2>"$TMP/host-without-docker.err"
+docker_status=$?
+set -e
+[[ "$docker_status" == 127 ]]
+grep -Fxq 'ABORTADO: comando obrigatório no host não encontrado: docker' "$TMP/host-without-docker.err"
+[[ -z "$(find "$TMP/host-without-docker-safe" -mindepth 1 -print -quit)" ]]
 
 for state in missing stopped; do
   mkdir -p "$TMP/$state/safe"
