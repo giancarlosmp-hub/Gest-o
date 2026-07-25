@@ -3,6 +3,10 @@
 > **Gate humano:** não execute na VPS sem aprovação. Esta etapa não troca, para ou desconecta a API
 > de produção. O script equivalente é `scripts/production/run-erp-audit-candidate.sh` e termina após
 > parar o candidato.
+>
+> **Decisão arquitetural:** este runbook adota a ADR de backup administrativo local registrada no
+> [Documento Mestre](documento-mestre.md#adr--backup-administrativo-local-do-postgresql-recuperado).
+> Ela substitui o uso anterior de credenciais do ambiente do container.
 
 ## A. Checkout (somente leitura)
 
@@ -37,8 +41,16 @@ docker inspect --format '{{json .NetworkSettings.Ports}} {{json .NetworkSettings
 jq -r '.[0].Config.Env[]' "$SAFE_DIR/api-old.inspect.json" >"$SAFE_DIR/api.env"
 chmod 600 "$SAFE_DIR"/*
 
-docker exec gest-o-db-clean-v2-20260717 sh -c \
-  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom --no-owner --no-acl' \
+export DB_NAME="${DB_NAME:-}"
+if test -z "$DB_NAME"; then
+  DB_NAME="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    gest-o-db-clean-v2-20260717 | sed -n 's/^POSTGRES_DB=//p' | sed -n '1p')"
+fi
+DB_NAME="${DB_NAME:-salesforce_pro}"
+docker exec -u postgres gest-o-db-clean-v2-20260717 \
+  psql -U postgres -d "$DB_NAME" -v ON_ERROR_STOP=1 -tAc 'SELECT 1' >/dev/null || exit 1
+docker exec -u postgres gest-o-db-clean-v2-20260717 \
+  pg_dump -U postgres -d "$DB_NAME" --format=custom --no-owner --no-acl \
   >"$SAFE_DIR/postgres.dump"
 test -s "$SAFE_DIR/postgres.dump" || exit 1
 docker exec -i gest-o-db-clean-v2-20260717 pg_restore --list \
@@ -48,8 +60,14 @@ wc -c <"$SAFE_DIR/postgres.dump" >"$SAFE_DIR/postgres.dump.size"
 sha256sum "$SAFE_DIR/postgres.dump" >"$SAFE_DIR/postgres.dump.sha256"
 ```
 
+O nome do banco é resolvido, nesta ordem, por `DB_NAME` informado pelo operador, `POSTGRES_DB` do
+container e o fallback `salesforce_pro`. A validação e o dump executam como o usuário local
+`postgres`, via autenticação peer. A rotina administrativa nunca consulta `DATABASE_URL`,
+`POSTGRES_USER` ou `POSTGRES_PASSWORD`.
+
 Isto lê o banco e cria arquivos locais; não restaura nem altera registros. `api.env` nunca deve ser
-impresso no terminal.
+impresso no terminal. Consulte a decisão normativa e suas consequências no
+[Documento Mestre](documento-mestre.md#adr--backup-administrativo-local-do-postgresql-recuperado).
 
 ## D–F. Build exclusivo, identidade e teste estático
 
