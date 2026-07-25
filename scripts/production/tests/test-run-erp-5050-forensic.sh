@@ -21,6 +21,11 @@ fi
 grep -Fq 'CONNECTION_MODE:-docker-peer' "$RUNNER"
 grep -Fq 'DB_CONTAINER:-gest-o-db-clean-v2-20260717' "$RUNNER"
 grep -Fq "docker exec -i -u postgres" "$RUNNER"
+grep -Fq 'docker exec -i -u postgres "$DB_CONTAINER" sh -c '\''command -v psql'\''' "$RUNNER"
+if grep -Fq 'docker exec -i -u postgres "$DB_CONTAINER" command -v psql' "$RUNNER"; then
+  printf 'runner validates container psql without a shell\n' >&2
+  exit 1
+fi
 grep -Fq "POSTGRES_DB=" "$RUNNER"
 grep -Fq "DB_NAME:-salesforce_pro" "$RUNNER"
 grep -Fq "CONFIRM:-" "$RUNNER"
@@ -59,7 +64,7 @@ fi
 shift
 [[ "$1" == -i && "$2" == -u && "$3" == postgres ]]
 shift 4
-if [[ "$1" == command && "$2" == -v && "$3" == psql ]]; then
+if [[ "$1" == sh && "$2" == -c && "$3" == 'command -v psql' ]]; then
   [[ "${MOCK_CONTAINER_PSQL:-1}" == 1 ]] || exit 1
   printf '/usr/bin/psql\n'
   exit 0
@@ -114,7 +119,9 @@ run_success() {
 RUNNER_HOST_PATH="$TMP/host-without-psql" run_success explicit env DB_CONTAINER=custom-db DB_NAME=operator_db MOCK_POSTGRES_DB=container_db
 [[ "$(<"$TMP/explicit/database")" == operator_db ]]
 grep -Fq '"dbContainer": "custom-db"' "$(find "$TMP/explicit/safe" -mindepth 1 -maxdepth 1 -type d)/manifest.json"
-grep -Fq 'exec -i -u postgres custom-db command -v psql' "$TMP/explicit/docker.log"
+grep -Fq 'exec -i -u postgres custom-db sh -c command\ -v\ psql' "$TMP/explicit/docker.log"
+# A successful validation reaches the subsequent database preflight.
+grep -Fq 'exec -i -u postgres custom-db psql -U postgres -d operator_db -X' "$TMP/explicit/docker.log"
 
 run_success container env MOCK_POSTGRES_DB=container_db
 [[ "$(<"$TMP/container/database")" == container_db ]]

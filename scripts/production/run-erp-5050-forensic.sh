@@ -35,7 +35,7 @@ case "$CONNECTION_MODE" in
     require_host_command docker
     docker inspect "$DB_CONTAINER" >/dev/null
     [[ "$(docker inspect --format '{{.State.Running}}' "$DB_CONTAINER")" == 'true' ]]
-    if ! docker exec -i -u postgres "$DB_CONTAINER" command -v psql >/dev/null; then
+    if ! docker exec -i -u postgres "$DB_CONTAINER" sh -c 'command -v psql' >/dev/null; then
       printf 'ABORTADO: psql não encontrado no container PostgreSQL: %s\n' "$DB_CONTAINER" >&2
       exit 127
     fi
