@@ -234,3 +234,4 @@ Cada etapa do fluxo existe para garantir:
 10. Documentação duplicada deve ser evitada. Sempre que possível, cada assunto deve possuir uma única fonte oficial de verdade, sendo referenciado pelos demais documentos.
 11. O Documento Mestre deve registrar apenas conhecimento consolidado, decisões oficiais, estado atual do projeto e referências. Hipóteses temporárias, discussões e anotações transitórias não devem permanecer como conteúdo permanente.
 12. Toda documentação permanente deve possuir identificação clara de sua última atualização e, sempre que aplicável, do responsável por sua manutenção.
+13. O Documento Mestre é o documento executivo e técnico de referência do Gest-o. Seu objetivo é apresentar uma visão consolidada do projeto, registrar conhecimento permanente e direcionar o leitor para ADRs, runbooks, investigações e demais documentações especializadas, evitando duplicação de conteúdo.
