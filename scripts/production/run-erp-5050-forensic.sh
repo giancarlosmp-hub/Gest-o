@@ -107,7 +107,7 @@ printf '%s\n' "$DATABASE_NAME" >"$EVIDENCE_DIR/database.txt"
 
 # consultas.sql is an immutable copy of the versioned SQL and already contains
 # BEGIN TRANSACTION READ ONLY, both LOCAL timeouts, and COMMIT.
-"${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 -f "$EVIDENCE_DIR/consultas.sql" \
+"${PSQL_TARGET[@]}" -X -v ON_ERROR_STOP=1 <"$EVIDENCE_DIR/consultas.sql" \
   >"$EVIDENCE_DIR/stdout.txt" 2>"$EVIDENCE_DIR/stderr.txt"
 
 SQL_SHA256="$(sha256sum "$EVIDENCE_DIR/consultas.sql")"

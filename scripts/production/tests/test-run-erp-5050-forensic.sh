@@ -7,6 +7,7 @@ readonly RUNNER="$ROOT/scripts/production/run-erp-5050-forensic.sh"
 readonly SQL="$ROOT/docs/investigations/evidence/erp-5050-read-only.sql"
 
 [[ -x "$RUNNER" ]]
+grep -Fxq 'set -Eeuo pipefail' "$RUNNER"
 
 # These static checks and Docker mocks never contact a real database or Docker daemon.
 if sed 's/^[[:space:]]*#.*$//' "$RUNNER" | grep -Eiq '(^|[[:space:];])(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|CREATE)[[:space:]]'; then
@@ -33,7 +34,11 @@ grep -Fq "FORENSIC5050" "$RUNNER"
 grep -Eiq '^BEGIN( TRANSACTION)? READ ONLY;' "$SQL"
 grep -Fq "SET LOCAL statement_timeout = '60s';" "$SQL"
 grep -Fq "SET LOCAL lock_timeout = '5s';" "$SQL"
-grep -Fq -- '-f "$EVIDENCE_DIR/consultas.sql"' "$RUNNER"
+grep -Fq -- '<"$EVIDENCE_DIR/consultas.sql"' "$RUNNER"
+if grep -Fq -- '-f "$EVIDENCE_DIR/consultas.sql"' "$RUNNER"; then
+  printf 'runner exposes the host SQL path to psql\n' >&2
+  exit 1
+fi
 for field in connectionMode dbContainer database databaseUser; do grep -Fq "$field" "$RUNNER"; done
 for artifact in consultas.sql stdout.txt manifest.json; do
   grep -Fq "sha256sum $artifact >$artifact.sha256" "$RUNNER"
@@ -75,7 +80,11 @@ shift 5
 if [[ " $* " == *' --version '* ]]; then printf 'psql (PostgreSQL) mock\n'; exit 0; fi
 if [[ " $* " == *' SELECT current_database()'* ]]; then printf '%s\n' "$(<"$MOCK_SELECTED_DB")"; exit 0; fi
 if [[ " $* " == *' SELECT current_user'* ]]; then printf 'postgres\n'; exit 0; fi
-if [[ " $* " == *' -f '* ]]; then printf 'mock forensic output\n'; exit 0; fi
+if [[ " $* " != *' -c '* ]]; then
+  cat >"$MOCK_SQL_STDIN"
+  printf 'mock forensic output\n'
+  exit 0
+fi
 # Successful accessibility and READ ONLY preflight.
 printf 'BEGIN\nSET\npostgres\nROLLBACK\n'
 MOCK
@@ -84,7 +93,7 @@ chmod +x "$TMP/bin/docker"
 # An isolated host PATH proves docker-peer does not discover or execute a host
 # psql. Only the documented common dependencies and the Docker mock are exposed.
 mkdir -p "$TMP/host-without-psql" "$TMP/host-without-docker"
-for command_name in bash env git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
+for command_name in bash env git hostname date sha256sum wc jq cp chmod mkdir mktemp rm cat; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$TMP/host-without-psql/$command_name"
   ln -s "$command_path" "$TMP/host-without-docker/$command_name"
@@ -101,7 +110,8 @@ run_success() {
   mkdir -p "$case_dir/safe"
   : >"$case_dir/docker.log"
   if ! env PATH="$TMP/bin:${RUNNER_HOST_PATH:-$PATH}" SAFE_ROOT="$case_dir/safe" MOCK_LOG="$case_dir/docker.log" \
-    MOCK_SELECTED_DB="$case_dir/database" CONFIRM=FORENSIC5050 DATABASE_URL='postgresql://secret:never-log@db/prod' \
+    MOCK_SELECTED_DB="$case_dir/database" MOCK_SQL_STDIN="$case_dir/sql-stdin" \
+    CONFIRM=FORENSIC5050 DATABASE_URL='postgresql://secret:never-log@db/prod' \
     "$@" "$RUNNER" >"$case_dir/terminal.out" 2>"$case_dir/terminal.err"; then
     printf 'mocked docker-peer run failed:\n' >&2
     cat "$case_dir/terminal.err" >&2
@@ -112,6 +122,10 @@ run_success() {
   [[ -n "$evidence" ]]
   grep -Fq '"connectionMode": "docker-peer"' "$evidence/manifest.json"
   grep -Fq '"databaseUser": "postgres"' "$evidence/manifest.json"
+  cmp "$SQL" "$case_dir/sql-stdin"
+  cmp "$evidence/consultas.sql" "$case_dir/sql-stdin"
+  grep -Fxq 'mock forensic output' "$evidence/stdout.txt"
+  [[ ! -s "$evidence/stderr.txt" ]]
   ! find "$case_dir" -type f -exec grep -Fq 'secret:never-log' {} \;
   grep -Fq 'exec -i -u postgres' "$case_dir/docker.log"
 }
