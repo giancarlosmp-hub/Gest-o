@@ -83,17 +83,17 @@ const releaseRequestSlot = () => {
 const requestWithoutDedup = api.request.bind(api);
 const authApi = axios.create({ baseURL: resolveApiBaseUrl(), withCredentials: true, timeout: apiTimeoutMs });
 
-const requestWithGuards = <T = unknown, R = AxiosResponse<T>, D = unknown>(
-  config: AxiosRequestConfig<D>
-): Promise<R> => {
+const requestWithGuards = <T = unknown, D = unknown, P = unknown>(
+  config: AxiosRequestConfig<D, P>
+): Promise<AxiosResponse<T, D, {}, P>> => {
   const requestKey = getRequestKey(config);
   const existingPromise = inFlightRequests.get(requestKey);
-  if (existingPromise) return existingPromise as Promise<R>;
+  if (existingPromise) return existingPromise as Promise<AxiosResponse<T, D, {}, P>>;
 
   const guardedPromise = (async () => {
     await acquireRequestSlot();
     try {
-      return await requestWithoutDedup<T, R, D>(config);
+      return await requestWithoutDedup<T, AxiosResponse<T, D, {}, P>, D, P>(config);
     } finally {
       releaseRequestSlot();
       inFlightRequests.delete(requestKey);
@@ -104,7 +104,11 @@ const requestWithGuards = <T = unknown, R = AxiosResponse<T>, D = unknown>(
   return guardedPromise;
 };
 
-(api as typeof api & { request: typeof requestWithGuards }).request = requestWithGuards;
+Object.defineProperty(api, "request", {
+  configurable: true,
+  value: requestWithGuards,
+  writable: true,
+});
 
 let accessToken = localStorage.getItem("accessToken") || "";
 export const setAccessToken = (t: string) => { accessToken = t; localStorage.setItem("accessToken", t); };
