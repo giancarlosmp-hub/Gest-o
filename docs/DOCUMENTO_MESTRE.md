@@ -1,6 +1,6 @@
 # Gest-o — Documento Mestre
 
-- **Versão:** 2.0
+- **Versão:** 2.1
 - **Última atualização:** 30 de julho de 2026
 - **Status:** referência executiva e técnica vigente
 
@@ -160,6 +160,30 @@ fontes, como a [arquitetura Agenda Activity-First](agenda-activity-first-archite
 [integração UltraFV3](erp-ultrafv3-integration-technical.md) e a
 [fundação omnichannel](communications/secure-omnichannel-foundation.md).
 
+### Arquitetura operacional vigente em produção
+
+Após a recuperação de julho de 2026, a topologia efetivamente adotada em produção é:
+
+| Componente | Identificação vigente | Papel operacional |
+|---|---|---|
+| API | `gest-o-api-recovery-20260718` | Executa a API REST, as regras de negócio e o acesso ao banco via Prisma. |
+| PostgreSQL | `gest-o-db-clean-v2-20260717` | Banco configurado como persistência da API em produção. |
+| Rede Docker | `gest-o_default` | Rede privada que permite a comunicação entre os containers, sem exigir exposição pública do PostgreSQL. |
+
+A forma sanitizada da conexão configurada é
+`postgresql://<credenciais-omitidas>@gest-o-db-clean-v2-20260717:5432/salesforce_pro?schema=public`.
+Ela registra somente protocolo, destino, porta, banco e schema; usuário e senha não fazem parte deste
+documento. O fluxo operacional é:
+
+```text
+requisição HTTP → gest-o-api-recovery-20260718 → Prisma/DATABASE_URL
+                → gest-o_default → gest-o-db-clean-v2-20260717 → PostgreSQL/salesforce_pro
+```
+
+Os nomes acima descrevem o estado vigente e devem ser conferidos antes de uma intervenção. Os
+demais containers PostgreSQL preservados após o incidente são ambientes de recuperação ou teste e
+não devem ser confundidos com o banco atualmente configurado na API.
+
 ## 8. Estado dos Módulos
 
 “Planejado” indica direção de produto, não implementação existente.
@@ -235,18 +259,62 @@ Investigações preservam hipóteses, método, evidências e conclusões; ficam 
 
 - **Objetivo:** explicar de forma reproduzível o conjunto de clientes arquivados associado ao código
   ERP 5050 e separar comportamento esperado, regressão e efeito da recuperação.
-- **Situação atual:** causa definitiva ainda não provada; análise de código e fluxo foi consolidada,
-  mas o fechamento depende de evidência operacional preservada.
+- **Situação atual:** causa definitiva ainda não provada; análise de código e fluxo foi consolidada.
+  O runner forense foi homologado em produção para coleta de evidência operacional preservada.
 - **Descobertas consolidadas:** existem múltiplos escritores do estado de arquivamento; identidade,
   representante/carteira e regras de reativação influenciam o resultado; a entidade de cliente não
   oferece toda a informação temporal necessária para atribuição histórica isolada.
-- **Próximo passo:** executar a coleta forense somente leitura no ambiente autorizado, reconciliar
-  dados, execuções e versão implantada e então registrar um veredito revisável.
+- **Runner homologado:** a execução é estritamente read-only, usa o modo `docker-peer` e envia o SQL
+  versionado ao `psql` por STDIN. Cada execução gera `manifest.json`, hashes SHA256 dos artefatos e
+  saídas separadas; `stderr.txt` vazio integra o critério de sucesso. As evidências ficam em um
+  diretório exclusivo sob `/root/gest-o-safe`.
+- **Próximo passo:** reconciliar a evidência coletada com execuções e versão implantada e então
+  registrar um veredito revisável.
 
 Fontes: [análise de causa raiz](investigations/erp-5050-root-cause-analysis.md),
 [análise forense](investigations/erp-5050-forensic-analysis.md),
 [fluxo completo](investigations/investigacao-erp-5050-fluxo-completo.md) e
 [runbook forense](runbooks/erp-5050-forensic.md).
+
+### Incidente de produção — julho de 2026
+
+#### Linha do tempo consolidada
+
+1. **Comprometimento do ambiente:** foram encontrados no volume atacado o banco
+   `readme_to_recover` e a role superuser `priv_esc`. O ambiente deixou de ser uma fonte confiável e
+   evidências, volumes e backups passaram a ser preservados.
+2. **Revisão da estratégia de backups:** procedimentos destrutivos foram proibidos durante a
+   recuperação; dumps passaram a ser validados, identificados por SHA256 e restaurados primeiro em
+   ambientes isolados. Backups administrativos locais deixaram de depender das credenciais da
+   aplicação e passaram a usar o usuário local `postgres` com autenticação peer.
+3. **Criação dos ambientes de recuperação:** containers independentes foram criados para inspecionar
+   cópias, testar dumps de datas diferentes, executar salvamento físico e ensaiar a composição final
+   sem sobrescrever produção.
+4. **Recuperação física:** o conteúdo recuperável do cluster/volume comprometido foi preservado e
+   inspecionado em ambiente de salvamento isolado, mantendo a origem intacta para auditoria.
+5. **Recuperação lógica:** dumps e dados reconciliados foram restaurados em bancos limpos; órfãos
+   foram classificados antes de correções, 273 `ProductPrice` sem pai foram preservados em tabela de
+   auditoria e removidos com guardrails, e seis FKs foram restauradas e validadas.
+6. **Consolidação de produção:** depois dos ensaios e smokes, a API
+   `gest-o-api-recovery-20260718` ficou configurada para o banco
+   `gest-o-db-clean-v2-20260717` pela rede `gest-o_default`.
+
+#### Inventário dos bancos de recuperação
+
+| Container | Finalidade permanente registrada |
+|---|---|
+| `gest-o-db-clean-v2-20260717` | Banco limpo reconciliado e **atualmente configurado na produção**; é a referência operacional vigente. |
+| `gest-o-db-final-recovery-test-20260719` | Ensaio isolado da recuperação lógica final de 19/07, usado para validar correções, integridade e procedimentos antes de produção. |
+| `gest-o-db-physical-salvage-1022` | Salvamento físico isolado do cluster/volume comprometido, mantido para extração e conferência sem alterar a origem. |
+| `gest-o-db-restore-test` | Ambiente temporário genérico para testar a restaurabilidade e a consistência de dumps. |
+| `gest-o-db-june08-test` | Restauração isolada do backup de 08/06, usada para comparar o estado histórico e os limites daquele backup. |
+| Demais bancos temporários | Cópias descartáveis ou preservadas para classificação, reconciliação, validação de dumps, FKs, smokes e rollback. Não são fontes de verdade nem destinos da API de produção. |
+
+A existência de múltiplos PostgreSQL foi deliberada: cada hipótese ou etapa de recuperação precisava
+de isolamento para impedir que testes, restaurações ou consultas sobre dados comprometidos
+alterassem o banco escolhido para produção. O nome de um container, por si só, não indica que ele
+esteja ativo ou autorizado para uso; antes de qualquer operação deve-se confirmar a ligação real da
+API e preservar os ambientes que ainda sejam evidência do incidente.
 
 ## 12. Registro Permanente de Conhecimento
 
@@ -267,6 +335,13 @@ Somente fatos validados integram este registro:
 6. Segredos de produção devem permanecer fora do repositório e integrações não devem expor
    credenciais ao frontend. Consulte a [configuração de produção](erp-production-env-setup.md).
 7. Evidências, logs e comandos pertencem às investigações e aos runbooks, não a este documento.
+8. A arquitetura operacional nunca mais será reconstruída a partir do histórico de chat: containers,
+   redes, conexões sanitizadas e papéis dos ambientes devem estar registrados em fonte permanente.
+9. Toda descoberta operacional relevante deve ser incorporada ao Documento Mestre, consolidada na
+   seção apropriada e sem depender de memória conversacional.
+10. Todo incidente deve produzir documentação permanente antes do encerramento da investigação,
+    incluindo topologia resultante, linha do tempo, ativos temporários que precisem ser preservados e
+    lições aprendidas.
 
 ## 13. Riscos Estratégicos
 
