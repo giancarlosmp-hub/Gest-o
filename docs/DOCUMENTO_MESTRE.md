@@ -154,6 +154,15 @@ acessa o PostgreSQL por meio do Prisma e integra serviços externos pelo backend
 conteinerizada, Nginx atende o frontend e encaminha chamadas à API, enquanto o banco permanece na
 rede interna.
 
+### Topologia de produção recuperada confirmada
+
+Na investigação operacional de 30 de julho de 2026 foram confirmados como alvos corretos a API
+`gest-o-api-recovery-20260718`, o PostgreSQL `gest-o-db-clean-v2-20260717` e o database
+`salesforce_pro`. A API acessa o PostgreSQL por Prisma usando a `DATABASE_URL` do próprio runtime;
+nome de container, database, rede, volume e revisão implantada devem ser verificados em conjunto.
+Containers, volumes ou databases de recuperação alternativos são fontes distintas até comparação
+forense, mesmo quando seus nomes ou dados pareçam semelhantes.
+
 As fronteiras detalhadas, diagramas e futuras visões devem residir em
 [`docs/architecture`](architecture/README.md). Blueprints e decisões específicas continuam em suas
 fontes, como a [arquitetura Agenda Activity-First](agenda-activity-first-architecture.md), a
@@ -270,6 +279,39 @@ Investigações preservam hipóteses, método, evidências e conclusões; ficam 
   diretório exclusivo sob `/root/gest-o-safe`.
 - **Próximo passo:** reconciliar a evidência coletada com execuções e versão implantada e então
   registrar um veredito revisável.
+
+#### Pipeline, métricas e investigação read-only de parceiros
+
+No pipeline vigente, `/partners` é convertido em `rows`; cada linha objeto passa por extração do
+código ERP, normalização de documento, nome e localidade, busca de candidatos por código, documento
+e identidade fraca, verificação de conflitos e persistência manual por `Client.update` ou
+`Client.create`. Uma linha não é persistida quando não é objeto, não possui código em chave
+reconhecida ou apresenta conflito forte entre código ERP e documento.
+
+Em `ErpSyncRun`, `received` é a quantidade de elementos em `rows`;
+`validAfterNormalization` é a quantidade que terminou com persistência bem-sucedida, não apenas a
+quantidade normalizada; e `discardedAfterNormalization` é `received - syncedCount`, incluindo linha
+não objeto, código ausente ou não reconhecido e conflito entre código e documento. `withoutCode`
+conta linhas objeto sem código reconhecido, `discardedNonObject` conta elementos não objeto,
+`ambiguousDuplicates` e `documentErpConflicts` são incrementados juntos no conflito forte e
+`sellerChangedCount` conta updates concluídos nos quais `ownerSellerId` efetivamente mudou.
+
+O serviço `erpPartnerInvestigationService.ts` e o comando
+`npm run erp:investigate-partner -- --erp-code=<code>` consultam vendedores CRM ativos com suas
+credenciais FV3 e não persistem parceiros. Devem ser executados no runtime da API, com Prisma Client
+compatível e `DATABASE_URL`, `ULTRAFV3_BASE_URL` e `ERP_CREDENTIAL_ENCRYPTION_KEY` já fornecidas ao
+processo e verificadas sem imprimir valores. A ferramenta consulta apenas a primeira resposta de
+`/partners`, não informa a quantidade de linhas, devolve somente a primeira chave correspondente,
+não extrai documento e não reproduz o matching completo de `persistPartnerPayload`. Assim,
+`ERP_RETURNED=false` não prova ausência em páginas posteriores nem distingue chave desconhecida, e
+`WOULD_CREATE`/`WOULD_UPDATE` são diagnósticos por `Client.code`, não decisões definitivas.
+
+A sequência oficial é confirmar container, database, rede, volume e revisão; confirmar as variáveis
+sem expô-las; executar a ferramenta read-only no runtime implantado; e correlacionar o resultado com
+o `ErpSyncRun`. Se a imagem não contiver npm, tsx ou fontes, deve-se primeiro inspecionar sua
+capacidade e então usar, se necessário, um container efêmero da mesma imagem, com a mesma rede,
+variáveis e volumes somente leitura. Não se deve instalar dependências nem gerar Prisma Client no
+container produtivo.
 
 Fontes: [análise de causa raiz](investigations/erp-5050-root-cause-analysis.md),
 [análise forense](investigations/erp-5050-forensic-analysis.md),
