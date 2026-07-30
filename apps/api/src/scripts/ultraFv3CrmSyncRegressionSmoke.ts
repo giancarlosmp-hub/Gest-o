@@ -48,7 +48,7 @@ assert.equal(updatedPrice273.price, 19.87, "Troca de preço no /prices deve atua
 const crudRoutes = readFileSync(new URL("../routes/crudRoutes.ts", import.meta.url), "utf8");
 assert.match(crudRoutes, /\/erp\/ultrafv3\/sync\/partners\/opportunity-clients/, "Endpoint do botão Atualizar clientes deve existir");
 assert.match(crudRoutes, /syncPartnersForAllConfiguredSellers/, "Endpoint do botão Atualizar clientes deve usar fluxo all-sellers");
-assert.match(crudRoutes, /return res\.status\(result\.errorCount > 0 \? 207 : 200\)\.json/, "Endpoint opportunity-clients deve retornar exatamente a resposta de sucesso do all-sellers");
+assert.match(crudRoutes, /return res\.status\(result\.status === "failed" \? 502 : result\.status === "partial" \? 207 : 200\)\.json/, "Endpoint opportunity-clients deve refletir os estados failed, partial e success do all-sellers");
 assert.match(crudRoutes, /if \(res\.headersSent\)/, "Endpoint opportunity-clients não deve tentar responder erro depois de já ter enviado resposta");
 assert.match(crudRoutes, /status: stock <= 0 \? "sem estoque" : "disponível"/, "Produto com estoque 0 deve aparecer com status de alerta para confirmação antes de adicionar");
 assert.match(crudRoutes, /\/erp\/ultrafv3\/price-diagnostics/, "Endpoint temporário de diagnóstico de preços deve existir");
