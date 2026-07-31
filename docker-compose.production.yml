@@ -2,7 +2,7 @@ name: gest-o-production
 
 services:
   api:
-    image: "gest-o-api:${APP_COMMIT:?APP_COMMIT is required}"
+    image: "${API_IMAGE:?API_IMAGE is required and must identify the planned API release}"
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -79,7 +79,7 @@ services:
       start_period: 90s
 
   web:
-    image: "gest-o-web:${APP_COMMIT:?APP_COMMIT is required}"
+    image: "${WEB_IMAGE:?WEB_IMAGE is required and must identify the planned WEB release}"
     build:
       context: .
       dockerfile: apps/web/Dockerfile

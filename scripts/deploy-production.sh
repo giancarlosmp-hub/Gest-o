@@ -11,6 +11,8 @@ export APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
 export APP_BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version")}"
+export API_IMAGE="gest-o-api:$APP_COMMIT"
+export WEB_IMAGE="gest-o-web:$APP_COMMIT"
 
 bash scripts/production-preflight.sh
 "${COMPOSE[@]}" config --services | diff -u <(printf 'api\nweb\n') - >/dev/null || die "topologia contém serviços inesperados"
@@ -23,17 +25,33 @@ log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 
 evidence="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}/$APP_COMMIT"; mkdir -p "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
-old=()
-for port in 4000 5173; do
+printf 'role\tcontainer\timage_id\trollback_tag\tport\tnetworks\trestart_policy\tprevious_commit\n' >"$evidence/previous-runtime.tsv"
+: >"$evidence/rollback-images.env"
+for spec in api:4000 web:5173; do
+  role=${spec%%:*}; port=${spec##*:}
   name=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1;exit}')
-  [[ -n "$name" ]] || continue; old+=("$name")
-  docker inspect "$name" >"$evidence/$name.inspect.json"
-  image=$(docker inspect -f '{{.Image}}' "$name"); tag="gest-o-rollback-${port}:$APP_COMMIT"; docker tag "$image" "$tag"
+  [[ -n "$name" ]] || die "nenhum container anterior encontrado na porta $port"
+  docker inspect "$name" >"$evidence/$role.previous.inspect.json"
+  image_id=$(docker inspect -f '{{.Image}}' "$name")
+  previous_commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id" 2>/dev/null || true)
+  [[ -n "$previous_commit" && "$previous_commit" != '<no value>' ]] || previous_commit=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" | sed -n 's/^APP_COMMIT=//p' | head -1)
+  release=$(printf '%s' "${previous_commit:-${image_id#sha256:}}" | tr -cd '[:alnum:]._- ' | tr ' ' '-' | cut -c1-40)
+  [[ -n "$release" ]] || die "não foi possível identificar release anterior de $role"
+  tag="gest-o-${role}-rollback:$release"
+  docker tag "$image_id" "$tag"
+  networks=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}}' "$name")
+  restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$name")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$name" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
+  printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
+  if [[ "$role" == api ]]; then
+    previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null || true)
+    previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null || true)
+    printf 'ROLLBACK_APP_COMMIT=%q\nROLLBACK_APP_VERSION=%q\nROLLBACK_APP_BUILT_AT=%q\n' "${previous_commit:-unknown}" "${previous_version:-unknown}" "${previous_built_at:-unknown}" >>"$evidence/rollback-images.env"
+  fi
 done
-printf '%s\n' "${old[@]}" >"$evidence/old-containers.txt"
 rollback(){ trap - ERR; log "Falha: executando rollback persistido de API/WEB"; EVIDENCE_DIR="$evidence" APP_DIR="$APP_DIR" PRODUCTION_ENV_FILE="$ENV_FILE" bash "$evidence/rollback.sh"; }
 trap rollback ERR
-[[ ${#old[@]} -eq 0 ]] || docker stop "${old[@]}"
+while IFS=$'\t' read -r role name _; do [[ "$role" == role ]] || docker stop "$name"; done <"$evidence/previous-runtime.tsv"
 "${COMPOSE[@]}" up -d --no-build --no-deps api web
 for service in api web; do
   id=$("${COMPOSE[@]}" ps -q "$service"); for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")" == healthy ]] && break; sleep 5; done
