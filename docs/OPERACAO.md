@@ -356,3 +356,9 @@ Não use `prisma db push` em produção. Depois de preflight e build, execute o 
 `applied.tsv`, objetos criados e contagens `incident_*` em `/var/log/gest-o/schema/<SHA>/`. Só uma
 janela posterior pode executar cutover. Rollback de containers não reverte schema; nunca apague
 volume ou tabela de incidente. Comandos completos: [investigação](investigations/production-schema-transition-july-2026.md).
+
+### Evidência estrutural pós-apply
+
+Revisar `pre-apply-diff.raw.sql`, `pre-apply-managed-diff.sql`, `post-apply-diff.raw.sql` e o
+`post-apply-diff.sql` vazio. O raw pós-apply pode conter exclusivamente os oito drops históricos que
+o Prisma propõe por não gerenciá-los; qualquer outro DDL impede `applied.tsv` e o cutover.

@@ -18,6 +18,17 @@ MODE=validate SQL_FILE="$MIGRATION" bash scripts/production-schema-preview.sh
 evidence="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$APP_COMMIT"; mkdir -p "$evidence"
 exec > >(tee -a "$evidence/apply.stdout.log") 2> >(tee -a "$evidence/apply.stderr.log" >&2)
 sha256sum "$MIGRATION" | tee "$evidence/migration.sha256"
+prisma_diff(){
+  docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
+    "gest-o-api:$APP_COMMIT" ./node_modules/.bin/prisma migrate diff \
+    --from-schema-datasource apps/api/prisma/schema.prisma \
+    --to-schema-datamodel apps/api/prisma/schema.prisma --script
+}
+# The raw catalog diff is the structural precondition. Only the eight known Prisma DROP
+# statements are excluded from management; any partial/incompatible target object aborts.
+prisma_diff >"$evidence/pre-apply-diff.raw.sql"
+node scripts/schema-diff-filter.mjs "$evidence/pre-apply-diff.raw.sql" \
+  "$evidence/pre-apply-managed-diff.sql" pre
 cat >"$evidence/incident-counts.sql" <<'SQL'
 SELECT format('%I.%I', schemaname, tablename) || E'\t' ||
        (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', schemaname, tablename), false, true, '')))[1]::text
@@ -45,5 +56,11 @@ required=$(docker run --rm --pull=never --network gest-o_default -e DATABASE_URL
   "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent')")
 [[ "$required" == 5 ]] || die "objetos obrigatórios ausentes após migration"
 printf 'required_tables\t%s\n' "$required" >"$evidence/post-validation.tsv"
+# Final authority is Prisma itself, from the same pinned API image/SHA. Preserve the raw
+# evidence, remove exclusively the eight intentional unmanaged DROP TABLE statements, and
+# require the requested post-apply-diff.sql to contain no managed DDL whatsoever.
+prisma_diff >"$evidence/post-apply-diff.raw.sql"
+node scripts/schema-diff-filter.mjs "$evidence/post-apply-diff.raw.sql" \
+  "$evidence/post-apply-diff.sql" post
 printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$APP_COMMIT" "$MIGRATION" > "$evidence/applied.tsv"
 log "schema aplicado e validado; nenhum cutover foi executado"

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS "CommunicationIntegrationAccount" (
  "displayName" VARCHAR(120), "status" VARCHAR(40) NOT NULL DEFAULT 'pending_configuration',
  "enabled" BOOLEAN NOT NULL DEFAULT true, "configurationState" VARCHAR(40) NOT NULL DEFAULT 'incomplete',
  "credentialReference" VARCHAR(160), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
- "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+ "updatedAt" TIMESTAMP(3) NOT NULL
 );
 CREATE TABLE IF NOT EXISTS "CommunicationConversation" (
  "id" TEXT PRIMARY KEY, "channel" "CommunicationChannelType" NOT NULL, "provider" "CommunicationProviderType" NOT NULL,
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS "CommunicationConversation" (
  "status" "CommunicationConversationStatus" NOT NULL DEFAULT 'OPEN', "lastMessageAt" TIMESTAMP(3),
  "lastInboundAt" TIMESTAMP(3), "lastOutboundAt" TIMESTAMP(3), "unreadCount" INTEGER NOT NULL DEFAULT 0,
  "previewSanitized" VARCHAR(240), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
- "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+ "updatedAt" TIMESTAMP(3) NOT NULL
 );
 CREATE TABLE IF NOT EXISTS "CommunicationMessage" (
  "id" TEXT PRIMARY KEY, "conversationId" TEXT NOT NULL, "channel" "CommunicationChannelType" NOT NULL,
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS "CommunicationMessage" (
  "direction" "CommunicationDirection" NOT NULL, "type" "CommunicationMessageType" NOT NULL,
  "textContent" TEXT, "mediaMetadata" JSONB, "providerTimestamp" TIMESTAMP(3), "replyToExternalMessageId" TEXT,
  "status" "CommunicationMessageStatus" NOT NULL DEFAULT 'RECEIVED', "errorSanitized" VARCHAR(240), "metadata" JSONB,
- "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+ "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" TIMESTAMP(3) NOT NULL
 );
 CREATE TABLE IF NOT EXISTS "CommunicationWebhookEvent" (
  "id" TEXT PRIMARY KEY, "channel" "CommunicationChannelType" NOT NULL, "provider" "CommunicationProviderType" NOT NULL,
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS "CommunicationWebhookEvent" (
  "integrationAccountId" TEXT, "eventType" VARCHAR(64) NOT NULL, "payloadHash" VARCHAR(64) NOT NULL,
  "status" "CommunicationWebhookStatus" NOT NULL DEFAULT 'RECEIVED', "attempts" INTEGER NOT NULL DEFAULT 0,
  "processedAt" TIMESTAMP(3), "errorSanitized" VARCHAR(240), "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
- "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+ "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- Read-only duplicate diagnostics run before every unique index. Existing duplicates fail closed.
@@ -62,20 +62,20 @@ DO $$ BEGIN
  IF EXISTS (SELECT 1 FROM "CommunicationMessage" GROUP BY "provider","externalAccountId","externalMessageId" HAVING count(*) > 1) THEN RAISE EXCEPTION 'duplicate CommunicationMessage identity'; END IF;
  IF EXISTS (SELECT 1 FROM "CommunicationWebhookEvent" GROUP BY "provider","externalAccountId","externalEventKey" HAVING count(*) > 1) THEN RAISE EXCEPTION 'duplicate CommunicationWebhookEvent identity'; END IF;
 END $$;
-CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_tenant_provider_channel_external_key" ON "CommunicationIntegrationAccount"("tenantId","provider","channel","externalAccountId");
-CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationConversation_provider_externalAccountId_externalConversationKey_key" ON "CommunicationConversation"("provider","externalAccountId","externalConversationKey");
-CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationMessage_provider_externalAccountId_externalMessageId_key" ON "CommunicationMessage"("provider","externalAccountId","externalMessageId");
-CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationWebhookEvent_provider_externalAccountId_externalEventKey_key" ON "CommunicationWebhookEvent"("provider","externalAccountId","externalEventKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_tenantId_provider_channel_e_key" ON "CommunicationIntegrationAccount"("tenantId","provider","channel","externalAccountId");
+CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationConversation_provider_externalAccountId_extern_key" ON "CommunicationConversation"("provider","externalAccountId","externalConversationKey");
+CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationMessage_provider_externalAccountId_externalMes_key" ON "CommunicationMessage"("provider","externalAccountId","externalMessageId");
+CREATE UNIQUE INDEX IF NOT EXISTS "CommunicationWebhookEvent_provider_externalAccountId_extern_key" ON "CommunicationWebhookEvent"("provider","externalAccountId","externalEventKey");
 
 CREATE INDEX IF NOT EXISTS "ClientCodeAudit_clientId_createdAt_idx" ON "ClientCodeAudit"("clientId","createdAt");
 CREATE INDEX IF NOT EXISTS "ClientCodeAudit_requestId_idx" ON "ClientCodeAudit"("requestId");
 CREATE INDEX IF NOT EXISTS "ClientCodeAudit_origin_createdAt_idx" ON "ClientCodeAudit"("origin","createdAt");
 CREATE INDEX IF NOT EXISTS "Contact_phoneHash_idx" ON "Contact"("phoneHash");
 CREATE INDEX IF NOT EXISTS "Contact_ownerSellerId_phoneHash_idx" ON "Contact"("ownerSellerId","phoneHash");
-CREATE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_provider_channel_external_idx" ON "CommunicationIntegrationAccount"("provider","channel","externalAccountId");
-CREATE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_tenant_enabled_idx" ON "CommunicationIntegrationAccount"("tenantId","enabled");
+CREATE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_provider_channel_externalAc_idx" ON "CommunicationIntegrationAccount"("provider","channel","externalAccountId");
+CREATE INDEX IF NOT EXISTS "CommunicationIntegrationAccount_tenantId_enabled_idx" ON "CommunicationIntegrationAccount"("tenantId","enabled");
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_integrationAccountId_idx" ON "CommunicationConversation"("integrationAccountId");
-CREATE INDEX IF NOT EXISTS "CommunicationConversation_tenant_phoneHash_idx" ON "CommunicationConversation"("tenantId","contactPhoneHash");
+CREATE INDEX IF NOT EXISTS "CommunicationConversation_tenantId_contactPhoneHash_idx" ON "CommunicationConversation"("tenantId","contactPhoneHash");
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_tenantId_idx" ON "CommunicationConversation"("tenantId");
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_clientId_idx" ON "CommunicationConversation"("clientId");
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_assignedSellerId_idx" ON "CommunicationConversation"("assignedSellerId");
@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS "CommunicationConversation_contactNormalized_idx" ON 
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_status_idx" ON "CommunicationConversation"("status");
 CREATE INDEX IF NOT EXISTS "CommunicationConversation_lastMessageAt_idx" ON "CommunicationConversation"("lastMessageAt");
 CREATE INDEX IF NOT EXISTS "CommunicationMessage_integrationAccountId_idx" ON "CommunicationMessage"("integrationAccountId");
-CREATE INDEX IF NOT EXISTS "CommunicationMessage_tenant_phoneHash_idx" ON "CommunicationMessage"("tenantId","contactPhoneHash");
+CREATE INDEX IF NOT EXISTS "CommunicationMessage_tenantId_contactPhoneHash_idx" ON "CommunicationMessage"("tenantId","contactPhoneHash");
 CREATE INDEX IF NOT EXISTS "CommunicationMessage_conversationId_idx" ON "CommunicationMessage"("conversationId");
 CREATE INDEX IF NOT EXISTS "CommunicationMessage_tenantId_idx" ON "CommunicationMessage"("tenantId");
 CREATE INDEX IF NOT EXISTS "CommunicationMessage_providerTimestamp_idx" ON "CommunicationMessage"("providerTimestamp");
@@ -93,7 +93,7 @@ CREATE INDEX IF NOT EXISTS "CommunicationWebhookEvent_tenantId_idx" ON "Communic
 CREATE INDEX IF NOT EXISTS "CommunicationWebhookEvent_status_createdAt_idx" ON "CommunicationWebhookEvent"("status","createdAt");
 CREATE INDEX IF NOT EXISTS "CommunicationWebhookEvent_payloadHash_idx" ON "CommunicationWebhookEvent"("payloadHash");
 
--- Add foreign keys only when absent. NOT VALID avoids a full validation scan/long lock; VALIDATE is a post-cutover task.
+-- Add validated foreign keys only when absent; incompatible/orphaned data fails the transaction.
 DO $$ DECLARE x record; BEGIN
  FOR x IN SELECT * FROM (VALUES
  ('ClientCodeAudit','ClientCodeAudit_clientId_fkey','FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE'),
@@ -107,7 +107,7 @@ DO $$ DECLARE x record; BEGIN
  ) AS v(tbl,con,definition)
  LOOP
   IF to_regclass(format('public.%I',x.tbl)) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname=x.con AND conrelid=to_regclass(format('public.%I',x.tbl))) THEN
-   EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID',x.tbl,x.con,x.definition);
+   EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s',x.tbl,x.con,x.definition);
   END IF;
  END LOOP;
 END $$;

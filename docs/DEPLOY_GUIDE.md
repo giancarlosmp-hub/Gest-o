@@ -401,3 +401,10 @@ validação das evidências e apenas depois cutover. Use `production-schema-appl
 a migration aditiva aprovada, não inicia API/WEB, não executa db push/seed e não toca em
 `incident_*`. Não use `prisma migrate deploy` até o histórico do banco recuperado receber baseline
 auditado. Consulte a [auditoria integral](investigations/production-schema-transition-july-2026.md).
+
+### Pós-validação estrutural da PR #756
+
+O apply faz diff Prisma antes e depois com `gest-o-api:<SHA>`. O diff bruto é preservado; somente os
+oito drops `incident_*` conhecidos são excluídos da visão gerenciada. `post-apply-diff.sql` deve ficar
+sem DDL antes da criação de `applied.tsv`. Execute `npm run test:production-schema:postgres` em CI com
+Docker/PostgreSQL 16 antes de aprovar a janela.

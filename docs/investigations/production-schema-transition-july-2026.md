@@ -30,7 +30,7 @@ O checkout é isolado: não há remote `origin`. O `HEAD` local `a2daeb5` conté
 | `CommunicationWebhookEvent` | sim / mesmas | inbox idempotente de webhooks | aditiva | unique provider/account/event; FK account |
 | índices não únicos Communication/Contact/Audit | sim / mesmas | consulta operacional | aditivos, podem consumir I/O/lock curto | conferir `pg_indexes`; aplicar em janela |
 | quatro índices únicos Communication | sim / mesmas | idempotência | risco de falha, não perda | cada `CREATE UNIQUE` é precedido por `GROUP BY ... HAVING count(*) > 1` que falha fechado |
-| oito FKs novas e `AgendaEvent_clientId_fkey` | sim; Agenda em `20260302170000` | integridade referencial | `NOT VALID`, aditiva, não examina/regrava linhas no apply | conferir `pg_constraint`; validar dados e depois `VALIDATE CONSTRAINT` em janela separada |
+| oito FKs novas e `AgendaEvent_clientId_fkey` | sim; Agenda em `20260302170000` | integridade referencial | validada e aditiva; órfãos abortam a transação | conferir definição e estado validado em `pg_constraint` |
 
 Todos os objetos estão no datamodel e têm migration versionada, mas o preview fornecido comprova que
 faltavam no banco recuperado. Eles são necessários às comunicações, à auditoria de código e à
@@ -91,9 +91,7 @@ enum e alterações de tipo, imprime SQL e resume aditivas/destrutivas/bloqueada
 
 ## Validação, rollback e riscos residuais
 
-Pós-apply: conferir cinco tabelas, colunas nullable, enums/índices/FKs, `applied.tsv`, hash da
-migration, logs e contagens imutáveis de `incident_*`; repetir o apply em snapshot descartável antes
-da janela. Rollback da aplicação é troca de imagem e não reverte schema. Como tudo é nullable/novo,
+Pós-apply: o diff Prisma pinado confirma integralmente colunas, tipos, nullability, defaults, sete enums/valores, PKs, índices, uniques e FKs. O SQL bruto é preservado; somente os oito `DROP TABLE incident_*` conhecidos são separados, e `post-apply-diff.sql` deve ficar vazio antes de `applied.tsv`. Nomes e contagens de `incident_*` também devem permanecer byte a byte iguais. Repetir o apply em snapshot descartável antes da janela. Rollback da aplicação é troca de imagem e não reverte schema. Como tudo é nullable/novo,
 o schema pode permanecer; qualquer rollback de schema ou restore requer decisão separada e ensaio.
 Riscos: histórico Prisma ainda sem baseline, locks de índices, enum preexistente incompatível, dados
 órfãos antes de validar FKs e impossibilidade local de provar conteúdo/dependências do banco real.
@@ -114,3 +112,24 @@ CONFIRM=PRODUCTION_SCHEMA_APPLY EXPECTED_SHA="$EXPECTED_SHA" bash scripts/produc
 # em janela posterior e aprovação separada:
 CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" MODE=cutover bash scripts/deploy-production.sh
 ```
+
+## Revisão de equivalência da PR #756
+
+A primeira versão divergia do datamodel: usava oito nomes manuais longos para índices/uniques em vez
+dos nomes truncados gerados pelo Prisma; e atribuía `DEFAULT CURRENT_TIMESTAMP` a `updatedAt` nas
+quatro tabelas Communication, embora `@updatedAt` gere `TIMESTAMP(3) NOT NULL` sem default de banco.
+As FKs também eram criadas `NOT VALID`, estado substituído por constraints validadas. A migration
+agora reproduz os nomes e definições obtidos por `prisma migrate diff --from-empty`.
+
+Antes da transação, o apply gera um diff do catálogo real com o datamodel usando a imagem pinada.
+Somente os oito `DROP TABLE incident_*` exatos são retirados da visão gerenciada. O restante aceita
+apenas a allowlist desta transição; tabela parcialmente existente com coluna, tipo, nullability,
+default, enum ou constraint divergente produz DDL fora da allowlist e aborta antes do `psql`.
+
+Depois da transação, o mesmo comando/imagem gera `post-apply-diff.raw.sql`; o filtro preserva o raw,
+remove exclusivamente os oito drops históricos e grava `post-apply-diff.sql`. Qualquer DDL gerenciada
+restante falha, de modo que essa pós-condição Prisma valida o contrato completo. `applied.tsv` é a
+última escrita. O teste `production-schema-postgres.sh` cria um PostgreSQL 16 descartável, deriva o
+schema base do próprio Prisma, simula o snapshot recuperado com oito tabelas e dados, aplica duas
+vezes, compara contagens e testa rejeição de tabela parcial. No ambiente sem Docker, ele retorna 77 e
+não constitui validação end-to-end; deve rodar no CI antes da janela.
