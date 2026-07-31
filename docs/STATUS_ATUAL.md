@@ -12,11 +12,11 @@
 
 **Última PR:**
 
-#750
+#751
 
 **Último commit:**
 
-`fdfce21`
+`cdba39d`
 
 ### Produção
 
@@ -70,7 +70,7 @@ mudança.
 
 ## Última PR
 
-**#750**, “atualizar e revisar Documento Mestre”, merge `fdfce21` em 31/07/2026.
+**#751**, “reorganizar Documento Mestre do projeto Gest-o”, merge `cdba39d` em 31/07/2026.
 
 ## Próximos passos
 

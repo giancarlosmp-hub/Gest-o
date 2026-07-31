@@ -8,9 +8,9 @@
 
 | Campo | Estado oficial em 31/07/2026 |
 |---|---|
-| **Versão atual** | Documento Mestre **4.0**; aplicação na revisão de repositório `fdfce21` |
+| **Versão atual** | Documento Mestre **4.0**; aplicação na revisão de repositório `cdba39d` |
 | **Último commit em produção** | **Não comprovado.** A revisão implantada deve ser coletada no próximo acesso à VPS; não inferir produção pelo `HEAD` do Git. |
-| **Última PR mesclada** | **#750** — “atualizar e revisar Documento Mestre”, merge `fdfce21` em 31/07/2026 |
+| **Última PR mesclada** | **#751** — “reorganizar Documento Mestre do projeto Gest-o”, merge `cdba39d` em 31/07/2026 |
 | **Sprint atual** | **Estabilização, identidade UltraFV3 e verificabilidade de produção** |
 | **Status do sistema** | Produção: **🟡 Atenção** — operação recuperada, porém a revisão implantada não está registrada e o incidente 5050×4484 segue em homologação. |
 | **Última atualização** | 31/07/2026 |
@@ -21,6 +21,26 @@ identidade de filiais UltraFV3 foi implementada, mas ainda precisa ser comprovad
 produção. Não ampliar canais, IA ou domínios ERP antes de fechar os bloqueadores. A produção usa a
 API `gest-o-api-recovery-20260718`, PostgreSQL `gest-o-db-clean-v2-20260717`, database
 `salesforce_pro` e rede `gest-o_default`; confirmar tudo antes de intervir.
+
+## ESTADO ATUAL DA PRODUÇÃO
+
+> **Painel fixo de rastreabilidade.** Atualizar após toda publicação ou tentativa de publicação.
+> Nenhum valor pode ser inferido do Git local: preencher somente com evidência obtida pelo
+> [`OPERACAO.md`](OPERACAO.md). Enquanto não houver evidência, manter “Não comprovado”.
+
+| Campo | Estado comprovado |
+|---|---|
+| **Versão implantada** | **Não comprovada.** A versão declarada no repositório é `1.0.0`, mas ainda precisa ser conferida no runtime. |
+| **Commit implantado** | **Não comprovado.** Consultar `/api/health/version` e comparar com o container e a VPS. |
+| **Último deploy** | **Não comprovado.** Data, horário UTC e operador ainda não foram registrados. |
+| **Última PR publicada** | **Não comprovada.** Não inferir a partir de merge ou do `HEAD` local. |
+| **Última PR apenas mesclada** | **#751**, merge `cdba39d` em 31/07/2026; publicação ainda sem evidência registrada. |
+| **Última PR aguardando deploy** | **#751**, até que a REGRA 001 seja executada e suas evidências sejam registradas. |
+| **Última validação operacional** | **Não comprovada.** Pendente executar integralmente o `OPERACAO.md`. |
+
+Uma mesma PR pode aparecer como “apenas mesclada” e “aguardando deploy”: ela só sai desses campos
+quando a publicação for comprovada. Depois do deploy, mas antes dos testes, seu estágio é
+**🟠 Deploy**; somente após toda a REGRA 001 ela pode constar como **🟢 Produção**.
 
 ## 2. ONDE PARAMOS
 
@@ -98,7 +118,8 @@ continuar ausente**, ainda que os testes de código estejam verdes.
 | INC-PROD-2026-07 | Comprometimento e recuperação do PostgreSQL de produção | **CORRIGIDO** | Backup restaurável exercitado, hardening revisado, revisão implantada registrada e monitoramento sem recorrência; então mover para Encerrado. | [Recuperação](incidents/2026-07-19-final-recovery-runbook.md) e [reconciliação](incidents/2026-07-17-prod-recovery-reconciliation.md) | Smokes de recuperação registrados; novo exercício de restauração pendente. |
 
 Fluxo permitido: **ABERTO → INVESTIGANDO → CORRIGIDO → HOMOLOGANDO → ENCERRADO**. Um incidente só é
-encerrado com critérios satisfeitos, evidências ligadas e data/resultado do último teste registrados.
+encerrado com critérios satisfeitos, evidências ligadas, data/resultado do último teste registrados
+e cumprimento da [REGRA 002](#regra-002--encerramento-de-incidentes).
 
 ## 5. PRÓXIMA SPRINT
 
@@ -181,20 +202,6 @@ encerrado com critérios satisfeitos, evidências ligadas e data/resultado do ú
 9. Na entrega, informe commit/PR, evidências, limitações e próximo passo. Não marque concluído sem
    aceite objetivo; hipótese não vira fato.
 
-### Como iniciar uma nova Sprint
-
-Antes de planejar ou executar qualquer item, sempre ler, nesta ordem:
-
-1. **Documento Mestre** — estado oficial, bloqueadores, decisões e prioridades;
-2. **STATUS_ATUAL** — resumo operacional para retomada rápida;
-3. **NEXT_SPRINT** — a seção [Próxima Sprint](#5-próxima-sprint) deste documento;
-4. **Última PR** — descrição, diff, testes, limitações e próximo passo do último merge;
-5. **Incidentes Abertos** — a seção [Incidentes](#4-incidentes) e suas evidências ligadas.
-
-Essa sequência substitui a reconstrução de contexto por conversas antigas. Ao abrir a sprint,
-confirmar se os fatos ainda são válidos, encerrar ou transportar itens incompletos e atualizar a
-seção Próxima Sprint com objetivo, ordem e critérios verificáveis.
-
 ### Regras permanentes
 - O Documento Mestre governa estado e prioridade; ADR governa o porquê; runbook governa execução;
   investigação guarda hipótese/evidência; arquitetura governa limites técnicos.
@@ -226,10 +233,39 @@ A descrição da PR ou o registro operacional deve declarar explicitamente a evi
 do Documento Mestre, da seção **NEXT_SPRINT** e do **CHANGELOG Executivo** nunca pode ser omitida;
 quando não houver mudança, registrar expressamente “revisado, sem alteração necessária”.
 
+### REGRA 002 — encerramento de incidentes
+
+Nenhum incidente poderá ser encerrado enquanto existir qualquer teste funcional pendente em
+produção.
+
+A existência de código corrigido, teste local aprovado, Pull Request criada ou PR mesclada não é
+evidência suficiente. O encerramento depende de validação operacional no ambiente de produção, com
+resultado, data e evidências registrados no incidente.
+
+Se a correção estiver mesclada ou implantada, mas o teste funcional em produção ainda estiver
+pendente, o incidente deve permanecer em **CORRIGIDO** ou **HOMOLOGANDO**, conforme o estágio
+comprovado. Somente a validação completa permite **ENCERRADO**.
+
+### REGRA 003 — início obrigatório de Sprint
+
+Toda Sprint começa obrigatoriamente lendo, nesta ordem:
+
+1. [`STATUS_ATUAL.md`](STATUS_ATUAL.md) — retomada operacional e alertas imediatos;
+2. **Documento Mestre** — estado oficial, decisões, prioridades e gates;
+3. **Incidentes abertos** — seção [Incidentes](#4-incidentes) e respectivas evidências;
+4. **Última PR publicada** — identificada no painel [Estado Atual da Produção](#estado-atual-da-produção), com evidência operacional;
+5. **Backlog P0** — seção [Backlog](#6-backlog), antes de escolher qualquer novo desenvolvimento.
+
+Somente depois dessa leitura e da confirmação de que as informações continuam válidas pode começar
+novo desenvolvimento. Itens incompletos devem ser encerrados ou transportados explicitamente, e a
+seção Próxima Sprint deve registrar objetivo, ordem e critérios verificáveis. Conversas antigas não
+substituem essa sequência.
+
 ## 9. CHANGELOG EXECUTIVO
 
 | Data | Grande entrega |
 |---|---|
+| 31/07/2026 | Criado o painel fixo Estado Atual da Produção e instituídas as REGRA 002 (incidentes) e REGRA 003 (início de Sprint). |
 | 31/07/2026 | Instituída a REGRA 001 para fechamento obrigatório do ciclo pós-merge e a escala Codex → PR → Merge → Deploy → Produção. |
 | 31/07/2026 | Documento Mestre 4.0 convertido em fonte única operacional, com estado, gates, backlog e procedimentos VPS; criado resumo `STATUS_ATUAL.md`. |
 | 30/07/2026 | Dashboard Saúde da Plataforma entregue (PR #749). |
