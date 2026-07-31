@@ -153,10 +153,31 @@ model Client {
   agendaEvents      AgendaEvent[]
   agendaStops       AgendaStop[]
   activities        Activity[]
+  codeAuditEvents   ClientCodeAudit[]
 
   @@index([code])
   @@index([fantasyName])
   @@index([isArchived])
+}
+
+model ClientCodeAudit {
+  id           String   @id @default(cuid())
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  partnerErp   String?
+  oldValue     String?
+  newValue     String?
+  origin       String
+  actorUserId  String?
+  actorEmail   String?
+  requestIp    String?
+  requestId    String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([requestId])
+  @@index([origin, createdAt])
 }
 
 model AgendaEvent {

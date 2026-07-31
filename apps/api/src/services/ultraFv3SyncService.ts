@@ -11,7 +11,8 @@ import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
 import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type ErpRuntimeEnvironmentDiagnostics } from "./erpRuntimeConfig.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
-import { resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
+import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
+import { recordClientCodeChange } from "./clientCodeAuditService.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -1462,6 +1463,14 @@ type PartnerPersistenceDiagnostics = {
   receivedWithDocument: number;
   receivedWithoutDocument: number;
   updatedDocumentCount: number;
+  code_exact: number;
+  document_exact: number;
+  identity_fallback_no_document: number;
+  rejected_document_conflict: number;
+  create_no_safe_match: number;
+  ambiguous_identity_no_document: number;
+  updatedByCode: number;
+  updatedByDocument: number;
 };
 
 type PartnerMappedData = {
@@ -1734,6 +1743,12 @@ async function mergeDuplicateClientsIntoPrimary(
         archiveReason: `MERGED_INTO:${primary.id}`,
       },
     });
+    await recordClientCodeChange(tx, {
+      clientId: duplicate.id, oldValue: duplicate.code,
+      newValue: duplicate.code ? `${duplicate.code}__MERGED__${now}` : null,
+      partnerErp: data.code, origin: "UltraFV3 Partner Sync", requestId: correlationId,
+      metadata: { operation: "duplicate_merge", primaryClientId: primary.id },
+    });
     await createUltraFv3ClientAuditEvent(tx, {
       clientId: primary.id,
       ownerSellerId: primary.ownerSellerId,
@@ -1776,6 +1791,7 @@ async function persistPartnerPayload(
     byIdentity: found.byIdentity,
     normalizeCandidateDocument: (candidate) => candidate.cnpjNormalized || normalizeDocument(candidate.cnpj),
   });
+  incrementPartnerMatchCounter(diagnostics, resolution.matchStrategy);
   const candidates = resolution.candidates;
   const { byCode, byDocument } = found;
   const ambiguityReasons = getPartnerAmbiguityReasons({ data, normalizedDocument, byCode, byDocument });
@@ -1846,6 +1862,11 @@ async function persistPartnerPayload(
     await prisma.$transaction(async (tx) => {
       if (duplicates.length) await mergeDuplicateClientsIntoPrimary(tx, primary, duplicates, data, correlationId);
       await tx.client.update({ where: { id: primary.id }, data: updateData });
+      await recordClientCodeChange(tx, {
+        clientId: primary.id, oldValue: primary.code, newValue: data.code, partnerErp: data.code,
+        origin: "UltraFV3 Partner Sync", requestId: correlationId,
+        metadata: { matchStrategy: resolution.matchStrategy, documentPresent: Boolean(normalizedDocument) },
+      });
       if (sellerChanged) {
         const newSeller = await tx.user.findUnique({ where: { id: ownerSellerId }, select: { name: true } });
         await createUltraFv3ClientAuditEvent(tx, {
@@ -1867,11 +1888,13 @@ async function persistPartnerPayload(
     if (sellerChanged) diagnostics.sellerChangedCount += 1;
     if (cityChanged || (currentCityPlaceholder && mappedCity)) diagnostics.cityCorrectedCount += 1;
     if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
+    if (resolution.matchStrategy === "code_exact") diagnostics.updatedByCode += 1;
+    if (resolution.matchStrategy === "document_exact") diagnostics.updatedByDocument += 1;
     return true;
   }
 
-  await prisma.client.create({
-    data: {
+  await prisma.$transaction(async (tx) => {
+    const created = await tx.client.create({ data: {
       code: data.code,
       name: data.name,
       fantasyName: data.fantasyName,
@@ -1886,7 +1909,12 @@ async function persistPartnerPayload(
       erpUpdatedAt: data.erpUpdatedAt,
       nameNormalized: data.nameNormalized,
       cityNormalized: data.cityNormalized,
-    },
+    }});
+    await recordClientCodeChange(tx, {
+      clientId: created.id, oldValue: null, newValue: created.code, partnerErp: data.code,
+      origin: "UltraFV3 Partner Sync", requestId: correlationId,
+      metadata: { matchStrategy: resolution.matchStrategy, documentPresent: Boolean(normalizedDocument) },
+    });
   });
   diagnostics.created += 1;
   return true;
@@ -1912,6 +1940,14 @@ async function persistPartnerRowsForSeller(
     receivedWithDocument: 0,
     receivedWithoutDocument: 0,
     updatedDocumentCount: 0,
+    updatedByCode: 0,
+    updatedByDocument: 0,
+    code_exact: 0,
+    document_exact: 0,
+    identity_fallback_no_document: 0,
+    rejected_document_conflict: 0,
+    create_no_safe_match: 0,
+    ambiguous_identity_no_document: 0,
   };
   let syncedCount = 0;
 
@@ -1979,6 +2015,14 @@ export async function syncPartners(options?: RunSyncOptions) {
         receivedWithDocument: 0,
         receivedWithoutDocument: 0,
         updatedDocumentCount: 0,
+        updatedByCode: 0,
+        updatedByDocument: 0,
+        code_exact: 0,
+        document_exact: 0,
+        identity_fallback_no_document: 0,
+        rejected_document_conflict: 0,
+        create_no_safe_match: 0,
+        ambiguous_identity_no_document: 0,
       };
       let syncedCount = 0;
       for (const row of rows) {

@@ -86,6 +86,7 @@ import { agendaIntelligenceService } from "../services/agendaIntelligenceService
 import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
+import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 
 const router = Router();
@@ -4544,7 +4545,13 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
     const payload = withClientNormalizedFields({ ...req.body, ownerSellerId });
     await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
 
-    const data = await prisma.client.create({ data: payload });
+    const data = await prisma.$transaction(async (tx) => {
+      const created = await tx.client.create({ data: payload });
+      await recordClientCodeChange(tx, { clientId: created.id, oldValue: null, newValue: created.code,
+        origin: "API", actorUserId: req.user?.id, actorEmail: req.user?.email,
+        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
+      return created;
+    });
     res.status(201).json(data);
   } catch (error) {
     if (error instanceof DuplicateClientError) {
@@ -4715,9 +4722,12 @@ router.post("/clients/import", async (req, res) => {
           ignoreClientId: existingResolution.match.id
         });
 
-        const updatedClient = await prisma.client.update({
-          where: { id: existingResolution.match.id },
-          data: resolvedUpdateData
+        const updatedClient = await prisma.$transaction(async (tx) => {
+          const changed = await tx.client.update({ where: { id: existingResolution.match!.id }, data: resolvedUpdateData });
+          await recordClientCodeChange(tx, { clientId: changed.id, oldValue: existingResolution.match!.code,
+            newValue: changed.code, origin: "Importador", actorUserId: req.user?.id, actorEmail: req.user?.email,
+            requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
+          return changed;
         });
 
         const updatedIndex = existingClients.findIndex((client) => client.id === updatedClient.id);
@@ -4740,7 +4750,13 @@ router.post("/clients/import", async (req, res) => {
 
       const payload = resolveImportCreateData(item.payload, req);
       await ensureClientIsNotDuplicate({ candidate: payload, scope: scopedWhere });
-      const createdClient = await prisma.client.create({ data: payload });
+      const createdClient = await prisma.$transaction(async (tx) => {
+        const created = await tx.client.create({ data: payload });
+        await recordClientCodeChange(tx, { clientId: created.id, oldValue: null, newValue: created.code,
+          origin: "Importador", actorUserId: req.user?.id, actorEmail: req.user?.email,
+          requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
+        return created;
+      });
       existingClients.push(createdClient as (typeof existingClients)[number]);
       indexClient(createdClient as (typeof existingClients)[number]);
       created += 1;
@@ -4796,15 +4812,18 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
       ignoreClientId: old.id
     });
 
-    const data = await prisma.client.update({
-      where: { id: req.params.id },
-      data: {
+    const data = await prisma.$transaction(async (tx) => {
+      const changed = await tx.client.update({ where: { id: req.params.id }, data: {
         ...req.body,
         state: normalized.state,
         nameNormalized: normalized.nameNormalized,
         cityNormalized: normalized.cityNormalized,
         cnpjNormalized: normalized.cnpjNormalized || null
-      }
+      }});
+      await recordClientCodeChange(tx, { clientId: changed.id, oldValue: old.code, newValue: changed.code,
+        origin: "Interface Administrativa", actorUserId: req.user?.id, actorEmail: req.user?.email,
+        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
+      return changed;
     });
     res.json(data);
   } catch (error) {
@@ -6402,6 +6421,13 @@ router.post("/clients/diagnostics/merge-duplicates", authorize("diretor", "geren
           isArchived: true,
           archiveReason: reason || "manual_duplicate_merge"
         }
+      });
+      await recordClientCodeChange(tx, {
+        clientId: duplicate.id, oldValue: duplicate.code,
+        newValue: duplicate.code ? `${duplicate.code}__MERGED__${now.getTime()}` : null,
+        origin: "Interface Administrativa", actorUserId: req.user?.id, actorEmail: req.user?.email,
+        requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
+        metadata: { operation: "manual_duplicate_merge", primaryClientId: primary.id },
       });
     }
     return duplicates.map((item) => item.id);

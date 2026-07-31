@@ -4,6 +4,10 @@
 - **Última atualização:** 30 de julho de 2026
 - **Status:** referência executiva e técnica vigente
 
+## Governança pós-deploy da identidade UltraFV3 (31/07/2026)
+
+A regra aprovada de matching permanece inalterada. A governança passa a contar decisões por estratégia nos diagnósticos de execução e manter trilha permanente e transacional para mudanças de `Client.code`, sem registrar CPF/CNPJ completo. Consulte o [Guia Operacional](post-deploy/guia-operacional.md), o [Plano de Monitoramento](post-deploy/plano-monitoramento.md) e o [Plano Futuro de Unicidade](post-deploy/plano-unicidade-client-code.md).
+
 > **Papel deste documento.** Este é o ponto de entrada para compreender o Gest-o, seu estado,
 > direção e governança. Ele resume conhecimento consolidado e encaminha para as fontes
 > especializadas; não substitui ADRs, runbooks, investigações, planos ou evidências.

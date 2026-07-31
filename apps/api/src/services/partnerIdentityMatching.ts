@@ -20,6 +20,14 @@ export type PartnerIdentityResolution<T extends PartnerIdentityCandidate> = {
   ambiguous: boolean;
 };
 
+export const incrementPartnerMatchCounter = <T extends Record<PartnerMatchStrategy, number>>(
+  counters: T,
+  strategy: PartnerMatchStrategy,
+) => {
+  counters[strategy] += 1;
+  return counters;
+};
+
 const uniqueById = <T extends PartnerIdentityCandidate>(candidates: T[]) =>
   [...new Map(candidates.map((candidate) => [candidate.id, candidate])).values()];
 
