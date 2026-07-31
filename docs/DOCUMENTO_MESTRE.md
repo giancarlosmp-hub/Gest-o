@@ -499,3 +499,7 @@ considerada concluída enquanto:
 Assim, documentação é parte oficial da **Definition of Done (DoD)** do Gest-o. Toda revisão e merge
 com impacto relevante deve verificar explicitamente a atualização deste documento e das fontes
 especializadas relacionadas.
+
+## Saúde da Plataforma (31/07/2026)
+
+O Gest-o passa a oferecer um dashboard técnico e executivo, somente leitura, complementar ao Dashboard Comercial. A arquitetura, indicadores, fontes, cache, permissões, notificações e plano de evolução estão documentados em [Dashboard Saúde da Plataforma](dashboard-saude-plataforma.md). A implementação reutiliza os contadores das execuções ERP e a tabela `ClientCodeAudit`, sem modificar matching ou sincronizações.
