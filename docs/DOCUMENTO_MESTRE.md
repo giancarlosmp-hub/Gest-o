@@ -1,3 +1,9 @@
+# ADENDO — segurança de deploy pós-recuperação
+
+> 🔵 Entrega em PR (31/07/2026), sem VPS ou produção. A topologia isolada API/WEB exige identidade do banco recuperado, separa build/preflight do cutover humano, permite rollback dos containers históricos e prova o SHA. O banco recuperado segue vigente até migração formal e o incidente continua aberto. Consulte `DEPLOY_GUIDE.md`.
+
+---
+
 # Gest-o — Documento Mestre
 
 > **Fonte única de verdade do projeto.** Comece por este documento. Investigações, ADRs e runbooks

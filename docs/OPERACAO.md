@@ -1,3 +1,9 @@
+# ADENDO OPERACIONAL PÓS-RECUPERAÇÃO
+
+> 🔵 PR ainda não aplicada. Use exclusivamente `scripts/deploy-production.sh` e `docker-compose.production.yml` em futura janela aprovada. O PostgreSQL recuperado permanece separado; o Compose genérico é proibido para deploy. Preflight, cutover, rollback, evidências e comandos exatos estão no adendo de `DEPLOY_GUIDE.md`. O incidente não está encerrado.
+
+---
+
 # Operação pós-merge do Gest-o
 
 > **Pergunta que este runbook responde:** “Acabei de mesclar uma PR. O que faço agora?”

@@ -78,8 +78,7 @@ function runStep(command: string, label: string) {
 
 async function runDatabaseBootstrap() {
   if (!process.env.DATABASE_URL || process.env.DATABASE_URL.trim().length === 0) {
-    console.error("DB CONNECTION FAILED:", new Error("DATABASE_URL não definida no ambiente"));
-    return;
+    throw new Error("DATABASE_URL não definida no ambiente");
   }
 
   try {
@@ -87,7 +86,7 @@ async function runDatabaseBootstrap() {
     console.log("DB CONNECTED");
   } catch (error) {
     console.error("DB CONNECTION FAILED:", error);
-    return;
+    throw error;
   }
 
   try {
