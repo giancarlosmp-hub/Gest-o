@@ -1,3 +1,27 @@
+# ADENDO CANÔNICO — deploy pós-recuperação (31/07/2026)
+
+> 🔵 **PR, não produção.** O incidente permanece aberto. A topologia canônica candidata é `docker-compose.production.yml`, somente API/WEB na rede externa `gest-o_default`. O Compose genérico é legado/local e é proibido na VPS porque seu `depends_on` e fallback podem iniciar/apontar ao PostgreSQL padrão.
+
+A divergência Git × runtime ocorreu porque o checkout chegou à `main`, mas containers históricos sem metadados continuaram nas portas. O banco vigente até migração formal é o recuperado `gest-o-db-clean-v2-20260717`, volume `gest-o_pgdata_clean_v2_20260717`, administrado separadamente. Fluxo: GitHub → workflow manual → SSH `/apps/gest-o` → preflight → build com SHA → aprovação `production-cutover` → troca só de API/WEB → Nginx host → domínio. Segredos ficam apenas em `/root/demetra-env/production.env`.
+
+```bash
+# Futuro, na VPS, após aprovação; não executado nesta PR
+cd /apps/gest-o
+git fetch origin main && git switch main && git pull --ff-only origin main
+MODE=build EXPECTED_SHA="$(git rev-parse HEAD)" bash scripts/deploy-production.sh
+set -a; . /root/demetra-env/production.env; set +a
+bash scripts/production-schema-preview.sh > /var/log/gest-o/schema-preview.sql
+MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$(git rev-parse HEAD)" bash scripts/deploy-production.sh
+```
+
+A matriz completa e auditável de configuração está em [`PRODUCTION_ENV_MATRIX.md`](PRODUCTION_ENV_MATRIX.md). O preflight exige URL/host/container/volume esperados, database `salesforce_pro`, TCP, rede/mount, Git, disco e backup recente com SHA256, sem imprimir a URL. O build precede toda parada. O cutover registra inspect, etiqueta imagens e gera rollback; em falha reinicia os containers anteriores e nunca administra PostgreSQL. Depois, comparar `/health/version` local/público ao SHA, assets local/público, login/menu sem escrita e scheduler somente por consulta.
+
+Containers são descartáveis: a unidade real de rollback é a imagem versionada, nunca o nome do container. Antes do cutover, API e WEB anteriores recebem tags distintas (`gest-o-api-rollback:<release>` e `gest-o-web-rollback:<release>`), e image IDs, nomes, portas, redes, restart policy e commit disponível são gravados nas evidências. O rollback persistido carrega o env seguro, remove somente os novos `api`/`web`, aguarda as portas e recria ambos via Compose com `API_IMAGE`/`WEB_IMAGE` apontando às tags salvas. Depois valida image IDs, API/WEB e reconfirma que o PostgreSQL segue running com o mesmo mount. Isso funciona tanto para containers históricos externos quanto para containers de um cutover Compose posterior, mesmo que os containers anteriores já não existam. O preview de schema executa `./node_modules/.bin/prisma` dentro de `gest-o-api:$APP_COMMIT`, sem download no host.
+
+O bootstrap ainda executa `prisma db push`, prepara a sequence e somente então abre HTTP/scheduler; conexão/schema falhos fecham o processo. Backup e preview são gates. Uma futura adoção de `prisma migrate deploy` é recomendada, mas não integra esta correção emergencial. Para instalar o unit após aprovação: `sudo install -m 0644 docs/ops/gest-o.service /etc/systemd/system/gest-o.service && sudo systemctl daemon-reload`.
+
+---
+
 # Guia oficial de deploy e auditoria de produção — Gest-o
 
 > **Escopo:** este documento descreve o que está versionado no repositório em 31/07/2026 e os comandos para comprovar o estado real da VPS. Ele não afirma ter observado a VPS, o DNS ou uma execução do GitHub Actions. Onde a configuração não está no repositório, a validação operacional é obrigatória.

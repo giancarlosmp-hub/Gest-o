@@ -1,42 +1,42 @@
 name: Deploy Production
-
 on:
   workflow_dispatch:
     inputs:
-      confirm_environment:
-        description: 'Digite production para confirmar o deploy manual em produção'
+      phase:
+        description: "build executa preflight/build; cutover requer aprovação do environment"
         required: true
-        type: string
-  push:
-    branches:
-      - main
-
-permissions:
-  contents: read
-
+        type: choice
+        options: [build, cutover]
+permissions: { contents: read }
 concurrency:
   group: deploy-production
   cancel-in-progress: false
-
 jobs:
-  deploy-production:
-    name: Deploy production to /apps/gest-o
+  production:
+    environment: ${{ inputs.phase == 'cutover' && 'production-cutover' || 'production-build' }}
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || inputs.confirm_environment == 'production'
     steps:
-      - name: Deploy via SSH
+      - name: Preflight, build e cutover controlado na VPS
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          DEPLOY_MODE: ${{ inputs.phase }}
         with:
           host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || '22022' }}
+          envs: EXPECTED_SHA,DEPLOY_MODE
           script_stop: true
           script: |
             set -euo pipefail
-
             cd /apps/gest-o
             git fetch origin main
-            git checkout main
+            git switch main
             git pull --ff-only origin main
-            bash scripts/deploy-production.sh
+            test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+            if [ "$DEPLOY_MODE" = cutover ]; then
+              MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
+            else
+              MODE=build EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
+            fi

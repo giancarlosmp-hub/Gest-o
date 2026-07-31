@@ -5,6 +5,9 @@ ARG APP_COMMIT=unknown
 ARG APP_VERSION=1.0.0
 ARG APP_BUILT_AT=unknown
 ENV APP_COMMIT=$APP_COMMIT APP_VERSION=$APP_VERSION APP_BUILT_AT=$APP_BUILT_AT
+LABEL org.opencontainers.image.revision=$APP_COMMIT \
+      org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.created=$APP_BUILT_AT
 
 RUN apk add --no-cache openssl ca-certificates
 
@@ -26,6 +29,9 @@ ARG APP_COMMIT=unknown
 ARG APP_VERSION=1.0.0
 ARG APP_BUILT_AT=unknown
 ENV APP_COMMIT=$APP_COMMIT APP_VERSION=$APP_VERSION APP_BUILT_AT=$APP_BUILT_AT
+LABEL org.opencontainers.image.revision=$APP_COMMIT \
+      org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.created=$APP_BUILT_AT
 
 RUN apk add --no-cache openssl ca-certificates tini \
   && mkdir -p apps/api/dist/public/brand

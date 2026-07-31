@@ -1,3 +1,9 @@
+# 🔵 PR — deploy seguro preservando PostgreSQL recuperado (31/07/2026)
+
+Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A causa é checkout atualizado com containers antigos somado ao risco do Compose genérico iniciar o banco padrão. A candidata contém apenas API/WEB, usa `gest-o_default`, exige banco recuperado e metadados do commit; o cutover é confirmado e reversível. A revisão da PR acrescenta paridade completa de variáveis, rollback executável e Prisma pinado na imagem. O incidente permanece aberto até execução e validação controladas.
+
+---
+
 ==========================================
 
 # GEST-O

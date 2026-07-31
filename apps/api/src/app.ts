@@ -175,9 +175,8 @@ app.use(cookieParser());
 const buildVersionPayload = () => ({
   status: "ok",
   version: env.appVersion,
-  commit: env.appCommit.length > 12 ? env.appCommit.slice(0, 12) : env.appCommit,
+  commit: env.appCommit,
   builtAt: env.appBuiltAt,
-  environment: env.nodeEnv,
 });
 
 app.get(["/health/version", "/api/health/version"], (_req, res) => {
