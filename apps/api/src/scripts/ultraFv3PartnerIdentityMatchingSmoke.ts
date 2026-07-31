@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  incrementPartnerMatchCounter,
   resolvePartnerIdentityMatch,
   type PartnerIdentityCandidate,
 } from "../services/partnerIdentityMatching.js";
@@ -83,5 +84,14 @@ assert.equal(later4484.matchStrategy, "code_exact");
 assert.equal(later4484.candidates.length, 1);
 assert.equal(later4484.candidates[0]?.id, "crm-4484");
 assert.equal(after5050Created.find((item) => item.id === "crm-5050")?.code, "5050");
+
+const counters = {
+  code_exact: 0, document_exact: 0, identity_fallback_no_document: 0,
+  rejected_document_conflict: 0, create_no_safe_match: 0, ambiguous_identity_no_document: 0,
+};
+incrementPartnerMatchCounter(counters, later4484.matchStrategy);
+incrementPartnerMatchCounter(counters, "rejected_document_conflict");
+assert.equal(counters.code_exact, 1);
+assert.equal(counters.rejected_document_conflict, 1);
 
 console.log("UltraFV3 partner identity matching smoke passed (cases A-H)");
