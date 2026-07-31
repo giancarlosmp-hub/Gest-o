@@ -2,7 +2,7 @@
 
 > **Pergunta que este runbook responde:** “Acabei de mesclar uma PR. O que faço agora?”
 
-Este é o roteiro curto e executável do operador. A explicação completa da arquitetura, dos riscos, do rollback e dos diagnósticos está em [`../DEPLOY_GUIDE.md`](../DEPLOY_GUIDE.md).
+Este é o roteiro curto e executável do operador. A explicação completa da arquitetura, dos riscos, do rollback e dos diagnósticos está em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
 
 ## Resposta rápida
 
@@ -176,7 +176,7 @@ Resultado esperado:
 - os logs não contêm `SCHEMA BOOTSTRAP FAILED` nem `DB CONNECTION FAILED`;
 - o bootstrap registra a sincronização do schema e a preparação da sequence ERP.
 
-O projeto não possui hoje um ledger confiável de “última migration aplicada”, pois usa `db push`. Para a auditoria detalhada de `_prisma_migrations`, drift e objetos SQL, siga a seção **Banco e migrations** do `DEPLOY_GUIDE.md`.
+O projeto não possui hoje um ledger confiável de “última migration aplicada”, pois usa `db push`. Para a auditoria detalhada de `_prisma_migrations`, drift e objetos SQL, siga a seção **Banco e migrations** do [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
 
 ## 6. Health checks da API e da WEB
 
@@ -334,5 +334,5 @@ Marque o deploy como concluído somente quando todos os itens obrigatórios esti
 1. Pare; não execute comandos destrutivos para “tentar de novo”.
 2. Preserve logs, SHA e image IDs.
 3. Determine se a falha está no Git, build, container, banco, Nginx, DNS ou navegador.
-4. Consulte os cenários de versão antiga e o checklist de rollback em [`../DEPLOY_GUIDE.md`](../DEPLOY_GUIDE.md).
+4. Consulte os cenários de versão antiga e o checklist de rollback em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
 5. Para rollback, prefira um revert revisado e mesclado em `main`; nunca use `down -v`, `migrate reset` ou remoção do volume do banco.
