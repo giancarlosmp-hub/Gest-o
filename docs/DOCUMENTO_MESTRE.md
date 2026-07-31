@@ -43,6 +43,25 @@ API `gest-o-api-recovery-20260718`, PostgreSQL `gest-o-db-clean-v2-20260717`, da
 
 ## 3. FUNCIONALIDADES
 
+### Estágios oficiais de entrega
+
+Esta classificação registra **até onde uma entrega comprovadamente avançou**. Ela não substitui o
+status funcional da tabela abaixo: um módulo pode estar operacional enquanto uma nova alteração
+desse módulo ainda está em Codex, PR, Merge ou Deploy.
+
+| Status | Significado |
+|---|---|
+| 🟣 **Codex** | Apenas desenvolvido; ainda não há Pull Request criada. |
+| 🔵 **PR** | Pull Request criada, em revisão ou aguardando merge. |
+| 🟡 **Merge** | Mesclado no GitHub, ainda sem publicação comprovada na VPS. |
+| 🟠 **Deploy** | Publicado na VPS, ainda sem validação completa em produção. |
+| 🟢 **Produção** | Deploy, operação, health checks e smoke tests validados em produção. |
+
+Os estágios são progressivos e baseados em evidência. **“Pronto” sem deploy e validação nunca
+significa Produção.** Por exemplo, uma entrega mesclada, mas ainda não validada na VPS, permanece
+em **🟡 Merge**, e não em **🟢 Produção**. A promoção para Produção obedece obrigatoriamente à
+[REGRA 001](#regra-001--encerramento-obrigatório-do-ciclo-da-pull-request).
+
 Os únicos status válidos nesta tabela são **Não iniciado**, **Em desenvolvimento**, **Em
 homologação**, **Em produção** e **Pausado**. “Em produção” descreve disponibilidade conhecida, não
 elimina dívida ou próximos passos. `—` significa que não há commit/PR específico comprovado no
@@ -183,22 +202,35 @@ seção Próxima Sprint com objetivo, ordem e critérios verificáveis.
   com autenticação peer; não dependem de `POSTGRES_USER`, `POSTGRES_PASSWORD` ou `DATABASE_URL`.
 - Dados reais, código do repositório e revisão implantada são fontes distintas e devem ser correlacionadas.
 
-### Regra permanente de encerramento de Pull Request
+### REGRA 001 — encerramento obrigatório do ciclo da Pull Request
 
-Nenhuma Pull Request pode ser encerrada sem:
+Nenhuma Pull Request poderá ser considerada concluída até que **todas** as etapas abaixo estejam
+concluídas:
 
-- ✓ atualizar o **Documento Mestre** quando houver mudança de estado, decisão, prioridade ou operação;
-- ✓ atualizar o **STATUS_ATUAL** para refletir a posição real do projeto;
-- ✓ atualizar o **CHANGELOG Executivo** quando a PR representar uma grande entrega;
-- ✓ revisar a seção **NEXT_SPRINT**, mesmo quando nenhuma alteração for necessária.
+- [ ] Merge realizado.
+- [ ] Deploy realizado.
+- [ ] [`OPERACAO.md`](OPERACAO.md) executado.
+- [ ] Health check aprovado.
+- [ ] Smoke tests aprovados.
+- [ ] Produção validada.
+- [ ] `STATUS_ATUAL.md` atualizado.
+- [ ] Documento Mestre atualizado.
+- [ ] Incidente atualizado, quando aplicável.
 
-A descrição da PR deve declarar explicitamente a execução destes quatro itens. “Não aplicável” é
-aceito somente com justificativa; a revisão de cada item nunca pode ser omitida.
+Somente após todos esses itens a funcionalidade poderá receber o estágio **🟢 Produção**. Até lá,
+deve permanecer no último estágio objetivamente comprovado da tabela de estágios oficiais de
+entrega, mesmo que o desenvolvimento e o merge já tenham terminado.
+
+A descrição da PR ou o registro operacional deve declarar explicitamente a evidência de cada item.
+“Não aplicável” é aceito somente para incidente, com justificativa. A revisão do `STATUS_ATUAL.md`,
+do Documento Mestre, da seção **NEXT_SPRINT** e do **CHANGELOG Executivo** nunca pode ser omitida;
+quando não houver mudança, registrar expressamente “revisado, sem alteração necessária”.
 
 ## 9. CHANGELOG EXECUTIVO
 
 | Data | Grande entrega |
 |---|---|
+| 31/07/2026 | Instituída a REGRA 001 para fechamento obrigatório do ciclo pós-merge e a escala Codex → PR → Merge → Deploy → Produção. |
 | 31/07/2026 | Documento Mestre 4.0 convertido em fonte única operacional, com estado, gates, backlog e procedimentos VPS; criado resumo `STATUS_ATUAL.md`. |
 | 30/07/2026 | Dashboard Saúde da Plataforma entregue (PR #749). |
 | 30/07/2026 | Observabilidade/auditoria da identidade UltraFV3 e trilha de `Client.code` entregues (PR #748). |
@@ -215,6 +247,8 @@ O histórico detalhado anterior foi preservado integralmente em
 |---|---|
 | **Documento Mestre** | [Fonte única de estado, prioridade e continuidade](DOCUMENTO_MESTRE.md) |
 | **Status Atual** | [Resumo operacional de uma página](STATUS_ATUAL.md) |
+| **Operação pós-merge** | [Checklist obrigatório da REGRA 001](OPERACAO.md) |
+| **Guia de deploy** | [Arquitetura, deploy, validação e rollback](DEPLOY_GUIDE.md) |
 | **Roadmap** | [Horizontes estratégicos](roadmap/README.md) |
 | **Dashboard Saúde** | [Estado e operação do módulo](dashboard-saude-plataforma.md) |
 | **Arquitetura** | [Limites e topologia técnica](architecture/README.md) |
