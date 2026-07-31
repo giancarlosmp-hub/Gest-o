@@ -13,7 +13,7 @@ assert.equal(normalizeUltraFv3OrderNumber(3812), "3812", "NUM_PEDIDO 3812 é ace
 const bootstrapSource = readFileSync(new URL("./bootstrap.ts", import.meta.url), "utf8");
 assert.match(bootstrapSource, /import \{ ensureErpOrderNumberSequence \} from "\.\.\/services\/erpOrderNumberSequenceSetup\.js"/, "bootstrap deve importar o setup da sequence diretamente do service compilado");
 assert.doesNotMatch(bootstrapSource, /npm run erp:ensure-order-sequence|tsx src\/scripts\/ensureErpOrderNumberSequence|node src\//, "bootstrap não pode chamar npm/tsx/src para setup da sequence");
-assert.match(bootstrapSource, /runStep\("npm run prisma:migrate[\s\S]*await ensureErpOrderNumberSequence\(\)[\s\S]*validateDatabaseHealth/, "bootstrap deve executar db push, depois setup da sequence, antes de validar/abrir servidor");
+assert.match(bootstrapSource, /NODE_ENV === "production"[\s\S]*automatic Prisma schema changes are disabled[\s\S]*await ensureErpOrderNumberSequence\(\)[\s\S]*validateDatabaseHealth/, "produção deve bloquear alterações automáticas antes de validar/abrir servidor");
 const sequenceSetupSource = readFileSync(new URL("../services/erpOrderNumberSequenceSetup.ts", import.meta.url), "utf8");
 assert.match(sequenceSetupSource, /export async function ensureErpOrderNumberSequence/, "setup da sequence deve ser função reutilizável sem efeito colateral no import");
 assert.match(sequenceSetupSource, /pg_advisory_xact_lock\(hashtext\('gest-o:erp_order_number_seq:setup'\)\)/, "setup da sequence deve serializar concorrência no bootstrap");

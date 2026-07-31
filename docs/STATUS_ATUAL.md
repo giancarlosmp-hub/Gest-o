@@ -83,3 +83,11 @@ mudança.
 1. Fechar todos os P0 com evidência objetiva.
 2. Atualizar este resumo e o Documento Mestre após a validação/deploy.
 3. Só então iniciar Activity First; não ampliar IA, canais, Financeiro, Fretes, aplicativo ou ERP futuro.
+
+## Gate de schema de produção — 31/07/2026
+
+O cutover permanece bloqueado. O preview encontrou DDL aditiva legítima e oito tabelas históricas
+`incident_*` que `prisma db push` tentaria excluir. Foi preparado fluxo versionado de preview/apply,
+sem acesso à VPS ou produção; o banco recuperado permanece preservado. As imagens do commit
+`a2daeb5e2b8470a8a68bc5e5b164627a7cc18743` foram construídas, mas não publicadas. O incidente
+5050×4484 continua em homologação. Consulte a [auditoria](investigations/production-schema-transition-july-2026.md).

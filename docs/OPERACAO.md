@@ -347,3 +347,12 @@ Marque o deploy como concluído somente quando todos os itens obrigatórios esti
 3. Determine se a falha está no Git, build, container, banco, Nginx, DNS ou navegador.
 4. Consulte os cenários de versão antiga e o checklist de rollback em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
 5. Para rollback, prefira um revert revisado e mesclado em `main`; nunca use `down -v`, `migrate reset` ou remoção do volume do banco.
+
+## Gate operacional de schema antes do cutover
+
+Não use `prisma db push` em produção. Depois de preflight e build, execute o preview com
+`MODE=validate`, revise todo o SQL e, com aprovação humana/backup SHA256, execute separadamente
+`CONFIRM=PRODUCTION_SCHEMA_APPLY bash scripts/production-schema-apply.sh`. Revise logs, hash,
+`applied.tsv`, objetos criados e contagens `incident_*` em `/var/log/gest-o/schema/<SHA>/`. Só uma
+janela posterior pode executar cutover. Rollback de containers não reverte schema; nunca apague
+volume ou tabela de incidente. Comandos completos: [investigação](investigations/production-schema-transition-july-2026.md).

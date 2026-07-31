@@ -90,8 +90,15 @@ async function runDatabaseBootstrap() {
   }
 
   try {
-    console.log("Running prisma db push and ERP order sequence setup...");
-    runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
+    if (process.env.NODE_ENV === "production") {
+      // Production schema changes are a separate, approved operation.  In particular,
+      // Automatic reconciliation must never drop recovery/audit objects unknown to Prisma.
+      console.log("Production schema is externally gated; automatic Prisma schema changes are disabled");
+    } else {
+      console.log("Running development prisma db push...");
+      runStep("npm run prisma:migrate -w @salesforce-pro/api", "development prisma db push");
+    }
+    console.log("Ensuring ERP order sequence...");
     await ensureErpOrderNumberSequence();
   } catch (error) {
     console.error("DATABASE SCHEMA BOOTSTRAP FAILED:", error);

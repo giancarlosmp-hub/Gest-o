@@ -392,3 +392,12 @@ imagem WEB recém-construída
 ```
 
 Além disso, banco, proxy, scheduler e integração devem passar seus checks. “Workflow verde”, “Git atualizado” ou “container Up” isoladamente não são evidência suficiente.
+
+## Etapa separada e obrigatória: schema de produção
+
+O bootstrap de produção não reconcilia schema. O cutover exige evidência do apply para o mesmo SHA.
+A ordem obrigatória é preflight, build, preview `MODE=validate`, aprovação humana, apply confirmado,
+validação das evidências e apenas depois cutover. Use `production-schema-apply.sh`; ele aplica somente
+a migration aditiva aprovada, não inicia API/WEB, não executa db push/seed e não toca em
+`incident_*`. Não use `prisma migrate deploy` até o histórico do banco recuperado receber baseline
+auditado. Consulte a [auditoria integral](investigations/production-schema-transition-july-2026.md).

@@ -24,6 +24,9 @@ docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require
 log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 [[ "${MODE:-build}" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
 [[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER"
+schema_evidence="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$APP_COMMIT/applied.tsv"
+[[ -s "$schema_evidence" ]] || die "cutover bloqueado: schema apply do SHA sem evidência ($schema_evidence)"
+grep -Fq "$APP_COMMIT" "$schema_evidence" || die "evidência de schema não corresponde ao SHA"
 
 evidence="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}/$APP_COMMIT"; mkdir -p "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"

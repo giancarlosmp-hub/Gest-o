@@ -305,3 +305,12 @@ O histórico detalhado anterior foi preservado integralmente em
 - Registrar somente grandes entregas no changelog; o Git preserva o detalhe.
 - Não apagar histórico: mover versões substituídas para `docs/historico/` e ligar a partir daqui.
 - Revisar links e fatos a cada deploy. Campos não comprovados permanecem explicitamente “não comprovado”.
+
+## Adendo — gate obrigatório de schema (31/07/2026)
+
+O deploy permanece bloqueado até revisão e execução separada do schema apply. Produção não deve
+executar `prisma db push`; o primeiro cutover usa somente a migration aditiva versionada, preserva
+todas as `incident_*` e exige evidência por SHA antes do cutover. As imagens de `a2daeb5...` foram
+construídas, não publicadas, e o banco recuperado continua preservado. Não houve deploy nesta mudança
+e INC-5050-4484 permanece em homologação. Processo e riscos estão na
+[auditoria de transição](investigations/production-schema-transition-july-2026.md).
