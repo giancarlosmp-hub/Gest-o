@@ -5,6 +5,14 @@ const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy
 assert.doesNotMatch(compose,/^\s{2}db:/m); assert.doesNotMatch(compose,/depends_on/);
 assert.match(compose,/DATABASE_URL:\s*"\$\{DATABASE_URL:\?/); assert.match(compose,/external:\s*true/); assert.match(compose,/name: gest-o_default/);
 assert.doesNotMatch(compose,/gest-o_pgdata/); assert.match(pre,/hostname do banco não autorizado/); assert.match(pre,/DATABASE_URL is required/);
+assert.doesNotMatch(pre,/\/dev\/tcp/); assert.doesNotMatch(pre,/\bgetent\b/); assert.doesNotMatch(pre,/172\.18\.0\.2/);
+assert.match(pre,/docker image inspect postgres:16/); assert.doesNotMatch(pre,/docker pull/);
+assert.match(pre,/timeout "\$\{PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15\}s"/);
+assert.match(pre,/docker run --rm --pull=never/); assert.match(pre,/--network gest-o_default/);
+assert.match(pre,/postgres:16\s+\\\s+pg_isready -h "\$DB_HOST" -p "\$DB_PORT" -d "\$DB_NAME"/);
+const postgresProbe = pre.match(/timeout "\$\{PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15\}s"[\s\S]*?pg_isready[^\n]*/)?.[0] ?? "";
+assert.ok(postgresProbe); assert.doesNotMatch(postgresProbe,/DATABASE_URL|--publish|--volume|-v\s|--user|--password|-p\s+\d+:/);
+for (const requiredCheck of ["PRODUCTION_DB_CONTAINER_EXPECTED","gest-o_default","PRODUCTION_DB_VOLUME_EXPECTED","PRODUCTION_BACKUP_FILE","sha256sum","git status --porcelain"]) assert.ok(pre.includes(requiredCheck),`preflight perdeu validação: ${requiredCheck}`);
 assert.ok(deploy.indexOf('build api web') < deploy.indexOf('docker stop')); assert.match(deploy,/CONFIRM.*PRODUCTION_CUTOVER/); assert.match(deploy,/trap rollback ERR/);
 assert.match(compose,/APP_COMMIT/); assert.match(compose,/APP_BUILT_AT/); assert.doesNotMatch(api,/environment: env\.nodeEnv/);
 assert.match(compose,/image:\s*"\$\{API_IMAGE:\?/); assert.match(compose,/image:\s*"\$\{WEB_IMAGE:\?/);
