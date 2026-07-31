@@ -14,6 +14,7 @@ import {
   MessageCircle,
   Bot,
   Settings,
+  ShieldCheck,
   Target,
   Users,
   X,
@@ -68,6 +69,7 @@ function isSidebarItemActive(currentPath: string, itemPath: string) {
 const items: SidebarNavItem[] = [
   { id: "home", label: "Central do Dia", path: "/", icon: LayoutDashboard },
   { id: "dashboard", label: "Dashboard", path: "/dashboard", icon: BarChart3 },
+  { id: "platform-health", label: "Saúde da Plataforma", path: "/saude-da-plataforma", route: "saudePlataforma", icon: ShieldCheck },
   { id: "equipe", label: "Equipe", path: "/equipe", route: "equipe", icon: Users },
   { id: "clientes", label: "Clientes", path: "/clientes", icon: Building2 },
   { id: "oportunidades", label: "Oportunidades", path: "/oportunidades", icon: Target },

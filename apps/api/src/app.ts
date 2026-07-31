@@ -7,6 +7,7 @@ import authRoutes from "./routes/authRoutes.js";
 import clientLookupRoutes from "./routes/clientLookupRoutes.js";
 import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import platformHealthRoutes from "./routes/platformHealthRoutes.js";
 import ultraFv3Routes from "./routes/ultraFv3Routes.js";
 import conversationalCrmRoutes from "./routes/conversationalCrmRoutes.js";
 import { communicationWebhookRoutes } from "./routes/communicationWebhookRoutes.js";
@@ -274,6 +275,7 @@ app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/platform-health", platformHealthRoutes);
 app.use("/api", ultraFv3Routes);
 app.use("/api", clientLookupRoutes);
 app.use("/api", crudRoutes);

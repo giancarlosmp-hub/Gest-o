@@ -6,6 +6,7 @@ import LoginPage from "./pages/LoginPage";
 import AppLayout from "./layouts/AppLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
+import PlatformHealthPage from "./pages/PlatformHealthPage";
 import HomePage from "./pages/HomePage";
 import CrudSimplePage from "./pages/CrudSimplePage";
 import OpportunitiesPage from "./pages/OpportunitiesPage";
@@ -63,6 +64,7 @@ export default function App() {
       >
         <Route index element={<HomePage />} />
         <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="saude-da-plataforma" element={<RoleRoute route="saudePlataforma"><PlatformHealthPage /></RoleRoute>} />
         <Route path="dashboard/score-comercial" element={<CommercialScorePage />} />
 
         <Route path="equipe" element={<RoleRoute route="equipe"><TeamPage /></RoleRoute>} />
