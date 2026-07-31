@@ -14,6 +14,7 @@ services:
   api:
     environment:
       NODE_ENV: production
+      DATABASE_SCHEMA_MODE: ephemeral-push
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro_preview}?schema=public}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}

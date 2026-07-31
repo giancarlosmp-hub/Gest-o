@@ -35,6 +35,7 @@ jobs:
 
       - name: Validate Docker Compose config
         env:
+          DATABASE_SCHEMA_MODE: "ephemeral-push"
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
           ADMIN_BOOTSTRAP_ENABLED: "true"
@@ -46,6 +47,7 @@ jobs:
 
       - name: Build and start stack
         env:
+          DATABASE_SCHEMA_MODE: "ephemeral-push"
           ENABLE_SMOKE_BOOTSTRAP: "true"
           SEED_ON_BOOTSTRAP: "true"
           ADMIN_BOOTSTRAP_ENABLED: "true"

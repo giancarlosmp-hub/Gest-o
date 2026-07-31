@@ -408,3 +408,11 @@ O apply faz diff Prisma antes e depois com `gest-o-api:<SHA>`. O diff bruto é p
 oito drops `incident_*` conhecidos são excluídos da visão gerenciada. `post-apply-diff.sql` deve ficar
 sem DDL antes da criação de `applied.tsv`. Execute `npm run test:production-schema:postgres` em CI com
 Docker/PostgreSQL 16 antes de aprovar a janela.
+
+## Autoridade explícita de schema
+
+`NODE_ENV=production` configura o runtime da aplicação, mas não autoriza nem proíbe DDL.
+`DATABASE_SCHEMA_MODE=external` é literal e obrigatório no Compose de produção: não há db push,
+sequence setup ou seed/bootstrap de dados; use exclusivamente `production-schema-apply.sh`. Os
+stacks descartáveis de CI/preview declaram `ephemeral-push`, permitindo criar o schema novo e executar
+somente os seeds habilitados pelas flags de smoke. Valor ausente/inválido impede a API de iniciar.

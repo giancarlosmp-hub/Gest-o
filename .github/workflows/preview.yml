@@ -75,6 +75,7 @@ jobs:
             COMPOSE_PROJECT_NAME=gesto-pr-${PR_NUMBER}
             POSTGRES_DB=salesforce_pro_preview_pr_${PR_NUMBER}
             POSTGRES_VOLUME_NAME=gesto_pgdata_pr_${PR_NUMBER}
+            DATABASE_SCHEMA_MODE=ephemeral-push
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
             ADMIN_BOOTSTRAP_EMAIL=pr${PR_NUMBER}@preview.local

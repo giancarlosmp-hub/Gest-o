@@ -362,3 +362,13 @@ volume ou tabela de incidente. Comandos completos: [investigação](investigatio
 Revisar `pre-apply-diff.raw.sql`, `pre-apply-managed-diff.sql`, `post-apply-diff.raw.sql` e o
 `post-apply-diff.sql` vazio. O raw pós-apply pode conter exclusivamente os oito drops históricos que
 o Prisma propõe por não gerenciá-los; qualquer outro DDL impede `applied.tsv` e o cutover.
+
+## `DATABASE_SCHEMA_MODE`
+
+- Produção real: `external`, fixo no `docker-compose.production.yml`; alteração de schema somente pelo
+  apply separado e nunca por bootstrap.
+- CI/preview descartável: `ephemeral-push`, explícito no Compose/workflow; o banco novo recebe `db
+  push` antes de admin/smoke/preview seed.
+
+`NODE_ENV` não é sinal de propriedade do banco. Nunca mude produção para `ephemeral-push`, nem use
+flags de seed como autorização indireta. Ausência ou valor inválido deve falhar fechado.

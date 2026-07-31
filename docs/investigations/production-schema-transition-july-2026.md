@@ -133,3 +133,25 @@ restante falha, de modo que essa pós-condição Prisma valida o contrato comple
 schema base do próprio Prisma, simula o snapshot recuperado com oito tabelas e dados, aplica duas
 vezes, compara contagens e testa rejeição de tabela parcial. No ambiente sem Docker, ele retorna 77 e
 não constitui validação end-to-end; deve rodar no CI antes da janela.
+
+## Autoridade de schema independente de `NODE_ENV` — correção dos checks da PR #756
+
+Os checks Docker Compose CI e Preview Deploy usam `NODE_ENV=production`, embora criem PostgreSQL
+novo e descartável. Condicionar a autorização de schema a `NODE_ENV` fez o bootstrap pular o `db
+push`; por isso `User`, `Opportunity`, `AppConfig`, `KnowledgeDocument` e demais tabelas não existiam,
+e login, seed e scheduler falharam. `NODE_ENV` descreve o comportamento da aplicação, não a
+autoridade sobre o banco.
+
+`DATABASE_SCHEMA_MODE` agora é obrigatório e aceita somente:
+
+- `external`: produção real. O bootstrap não altera schema, não garante a sequence e não executa
+  admin bootstrap, smoke seed, seed comum ou preview seed. A única autoridade é
+  `production-schema-apply.sh`, com pós-diff vazio e `applied.tsv` antes do cutover;
+- `ephemeral-push`: Docker Compose CI, Preview Deploy e Compose genérico com volume descartável.
+  Autoriza explicitamente `prisma db push`, setup da sequence e os bootstraps/seeds habilitados pelas
+  flags existentes.
+
+Ausência ou valor desconhecido aborta o bootstrap; não há fallback por `NODE_ENV`, `CI`, flags de
+seed ou interpolação no Compose de produção. A política é literal nos três arquivos Compose e também
+visível nos workflows. O incidente permanece em homologação e a entrega em 🔵 PR até Docker Compose
+CI, Preview Deploy e os demais checks reais ficarem verdes.

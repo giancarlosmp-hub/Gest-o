@@ -68,3 +68,13 @@
 | `BOOTSTRAP_SMOKE_EXIT`, `SEED_FIXTURE_CLEAN` | execução de testes | Fora do runtime de produção | omitidas |
 
 O teste `scripts/smoke/production-deploy-safety.mjs` extrai automaticamente as referências de `process.env` de `config/env.ts` e falha se uma variável de runtime não estiver no Compose, excetuando apenas aliases e bootstrap/smoke deliberadamente desativados e documentados acima.
+
+## Autoridade de schema
+
+| Variável | Produção real | CI/Preview descartável | Regra |
+|---|---|---|---|
+| `NODE_ENV` | `production` | `production` | comportamento do runtime; não concede DDL |
+| `DATABASE_SCHEMA_MODE` | `external` literal no Compose | `ephemeral-push` literal | obrigatório; valor ausente/inválido falha fechado |
+
+Em `external`, seeds e alterações automáticas são proibidos. Em `ephemeral-push`, somente o banco
+incluído no stack descartável pode ser reconciliado e as flags existentes controlam os seeds.
