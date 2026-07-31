@@ -21,6 +21,13 @@ process.on("unhandledRejection", (err) => {
 
 const MAX_DB_RETRIES = 60;
 const RETRY_DELAY_MS = 3000;
+type DatabaseSchemaMode = "external" | "ephemeral-push";
+
+function readDatabaseSchemaMode(): DatabaseSchemaMode {
+  const value = process.env.DATABASE_SCHEMA_MODE;
+  if (value === "external" || value === "ephemeral-push") return value;
+  throw new Error("DATABASE_SCHEMA_MODE must be explicitly set to external or ephemeral-push");
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -89,10 +96,18 @@ async function runDatabaseBootstrap() {
     throw error;
   }
 
+  const schemaMode = readDatabaseSchemaMode();
+
   try {
-    console.log("Running prisma db push and ERP order sequence setup...");
-    runStep("npm run prisma:migrate -w @salesforce-pro/api", "prisma db push");
-    await ensureErpOrderNumberSequence();
+    if (schemaMode === "external") {
+      // The production operation applies and validates schema before this container starts.
+      console.log("Database schema authority is external; automatic schema and bootstrap writes are disabled");
+    } else if (schemaMode === "ephemeral-push") {
+      console.log("Disposable database explicitly authorized: running prisma db push...");
+      runStep("npm run prisma:migrate -w @salesforce-pro/api", "ephemeral prisma db push");
+      console.log("Ensuring ERP order sequence in disposable database...");
+      await ensureErpOrderNumberSequence();
+    }
   } catch (error) {
     console.error("DATABASE SCHEMA BOOTSTRAP FAILED:", error);
     process.exitCode = 1;
@@ -105,13 +120,15 @@ async function runDatabaseBootstrap() {
     console.error("DATABASE HEALTH CHECK FAILED (non-blocking):", error);
   }
 
-  try {
-    await ensureAdminBootstrap();
-  } catch (error) {
-    console.error("ADMIN BOOTSTRAP FAILED (non-blocking):", error);
-  }
+  if (schemaMode === "ephemeral-push") {
+    try {
+      await ensureAdminBootstrap();
+    } catch (error) {
+      console.error("ADMIN BOOTSTRAP FAILED (non-blocking):", error);
+    }
+  } else console.log("Admin bootstrap desabilitado por DATABASE_SCHEMA_MODE=external");
 
-  if (env.enableSmokeBootstrap) {
+  if (schemaMode === "ephemeral-push" && env.enableSmokeBootstrap) {
     try {
       await ensureSmokeBootstrap();
     } catch (error) {
@@ -121,7 +138,7 @@ async function runDatabaseBootstrap() {
     console.log("Bootstrap smoke desabilitado (ENABLE_SMOKE_BOOTSTRAP=false)");
   }
 
-  if (env.seedOnBootstrap) {
+  if (schemaMode === "ephemeral-push" && env.seedOnBootstrap) {
     try {
       runStep("npm run prisma:seed -w @salesforce-pro/api", "seed");
     } catch (error) {
@@ -131,7 +148,7 @@ async function runDatabaseBootstrap() {
     console.log("Seed automático desabilitado (SEED_ON_BOOTSTRAP=false)");
   }
 
-  if (env.enablePreviewSeed) {
+  if (schemaMode === "ephemeral-push" && env.enablePreviewSeed) {
     try {
       runStep("npm run seed:preview -w @salesforce-pro/api", "preview seed");
     } catch (error) {

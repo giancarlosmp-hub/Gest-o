@@ -13,6 +13,8 @@ services:
     environment:
       DATABASE_URL: "${DATABASE_URL:?DATABASE_URL must come from the protected production env file}"
       NODE_ENV: production
+      # Literal fail-closed policy: never interpolate or override this in production.
+      DATABASE_SCHEMA_MODE: external
       PORT: 4000
       APP_COMMIT: "${APP_COMMIT:?APP_COMMIT is required}"
       APP_VERSION: "${APP_VERSION:?APP_VERSION is required}"

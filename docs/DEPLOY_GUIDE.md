@@ -392,3 +392,27 @@ imagem WEB recém-construída
 ```
 
 Além disso, banco, proxy, scheduler e integração devem passar seus checks. “Workflow verde”, “Git atualizado” ou “container Up” isoladamente não são evidência suficiente.
+
+## Etapa separada e obrigatória: schema de produção
+
+O bootstrap de produção não reconcilia schema. O cutover exige evidência do apply para o mesmo SHA.
+A ordem obrigatória é preflight, build, preview `MODE=validate`, aprovação humana, apply confirmado,
+validação das evidências e apenas depois cutover. Use `production-schema-apply.sh`; ele aplica somente
+a migration aditiva aprovada, não inicia API/WEB, não executa db push/seed e não toca em
+`incident_*`. Não use `prisma migrate deploy` até o histórico do banco recuperado receber baseline
+auditado. Consulte a [auditoria integral](investigations/production-schema-transition-july-2026.md).
+
+### Pós-validação estrutural da PR #756
+
+O apply faz diff Prisma antes e depois com `gest-o-api:<SHA>`. O diff bruto é preservado; somente os
+oito drops `incident_*` conhecidos são excluídos da visão gerenciada. `post-apply-diff.sql` deve ficar
+sem DDL antes da criação de `applied.tsv`. Execute `npm run test:production-schema:postgres` em CI com
+Docker/PostgreSQL 16 antes de aprovar a janela.
+
+## Autoridade explícita de schema
+
+`NODE_ENV=production` configura o runtime da aplicação, mas não autoriza nem proíbe DDL.
+`DATABASE_SCHEMA_MODE=external` é literal e obrigatório no Compose de produção: não há db push,
+sequence setup ou seed/bootstrap de dados; use exclusivamente `production-schema-apply.sh`. Os
+stacks descartáveis de CI/preview declaram `ephemeral-push`, permitindo criar o schema novo e executar
+somente os seeds habilitados pelas flags de smoke. Valor ausente/inválido impede a API de iniciar.

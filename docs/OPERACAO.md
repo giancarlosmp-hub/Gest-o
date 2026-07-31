@@ -347,3 +347,28 @@ Marque o deploy como concluído somente quando todos os itens obrigatórios esti
 3. Determine se a falha está no Git, build, container, banco, Nginx, DNS ou navegador.
 4. Consulte os cenários de versão antiga e o checklist de rollback em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
 5. Para rollback, prefira um revert revisado e mesclado em `main`; nunca use `down -v`, `migrate reset` ou remoção do volume do banco.
+
+## Gate operacional de schema antes do cutover
+
+Não use `prisma db push` em produção. Depois de preflight e build, execute o preview com
+`MODE=validate`, revise todo o SQL e, com aprovação humana/backup SHA256, execute separadamente
+`CONFIRM=PRODUCTION_SCHEMA_APPLY bash scripts/production-schema-apply.sh`. Revise logs, hash,
+`applied.tsv`, objetos criados e contagens `incident_*` em `/var/log/gest-o/schema/<SHA>/`. Só uma
+janela posterior pode executar cutover. Rollback de containers não reverte schema; nunca apague
+volume ou tabela de incidente. Comandos completos: [investigação](investigations/production-schema-transition-july-2026.md).
+
+### Evidência estrutural pós-apply
+
+Revisar `pre-apply-diff.raw.sql`, `pre-apply-managed-diff.sql`, `post-apply-diff.raw.sql` e o
+`post-apply-diff.sql` vazio. O raw pós-apply pode conter exclusivamente os oito drops históricos que
+o Prisma propõe por não gerenciá-los; qualquer outro DDL impede `applied.tsv` e o cutover.
+
+## `DATABASE_SCHEMA_MODE`
+
+- Produção real: `external`, fixo no `docker-compose.production.yml`; alteração de schema somente pelo
+  apply separado e nunca por bootstrap.
+- CI/preview descartável: `ephemeral-push`, explícito no Compose/workflow; o banco novo recebe `db
+  push` antes de admin/smoke/preview seed.
+
+`NODE_ENV` não é sinal de propriedade do banco. Nunca mude produção para `ephemeral-push`, nem use
+flags de seed como autorização indireta. Ausência ou valor inválido deve falhar fechado.
