@@ -1,6 +1,6 @@
 # Gest-o — Documento Mestre
 
-- **Versão:** 2.1
+- **Versão:** 2.3
 - **Última atualização:** 30 de julho de 2026
 - **Status:** referência executiva e técnica vigente
 
@@ -226,6 +226,8 @@ oficial é [`docs/adr`](adr/README.md); este documento mantém apenas o resumo e
   contratos legados durante a transição ([blueprint](agenda-activity-first-architecture.md));
 - integrações com UltraFV3 devem passar pelo backend, possuir configuração controlada, persistência
   de execução e proteções contra duplicidade ([arquitetura técnica](erp-ultrafv3-integration-technical.md));
+- a identidade de parceiros UltraFV3 distingue estabelecimentos por CPF/CNPJ completo e restringe
+  fallback textual a registros sem documento ([ADR 001](adr/001-ultrafv3-partner-establishment-identity.md));
 - a fundação omnichannel separa contas, conversas, mensagens e eventos de webhook, com segurança e
   gates explícitos antes da evolução ([architecture freeze](communications/architecture-freeze-2026-07-21.md));
 - backups administrativos locais do PostgreSQL recuperado usam a identidade administrativa local e
@@ -279,6 +281,42 @@ Investigações preservam hipóteses, método, evidências e conclusões; ficam 
   diretório exclusivo sob `/root/gest-o-safe`.
 - **Próximo passo:** reconciliar a evidência coletada com execuções e versão implantada e então
   registrar um veredito revisável.
+
+#### Incidente de identidade de filiais UltraFV3 — parceiros 5050 e 4484
+
+Em 30/07/2026, no ambiente relatado `gest-o-api-recovery-20260718` /
+`gest-o-db-clean-v2-20260717`, o parceiro 5050 (COCAMAR CD, CNPJ
+`79.114.450/0033-**`) foi associado ao cliente 4484 (COCAMAR SEDE, CNPJ
+`79.114.450/0040-**`). Os logs registraram candidato único por identidade e update do `clientId` de
+4484; o estado final não continha 5050, enquanto o perfil financeiro de 4484 carregava
+`PARCEIRO_OUT=5050`.
+
+A causa comprovada no código era o fallback por razão social+cidade+UF depois de falharem código e
+documento. Os candidatos desse fallback não eram validados contra documentos completos ou códigos
+divergentes. A persistência então sobrescrevia código/CNPJ e uma linha posterior podia sobrescrever
+o mesmo cliente novamente. Isso tornava filiais da mesma empresa vulneráveis a deduplicação e merge
+indevidos.
+
+A regra permanente passa a aceitar código exato ou documento completo exato; nome+cidade+UF só é
+fallback quando payload e candidato não possuem documento válido, o candidato não tem código
+conflitante e o resultado é único. Documentos completos distintos são estabelecimentos distintos:
+não atualizam nem participam de merge. A decisão gera `matchStrategy` estruturada sem expor o
+documento completo. Ambiguidade sem documento permanece sem escrita automática destrutiva.
+
+A regressão cobre os casos A–H, incluindo 5050×4484, documento exato com código diferente, fallback
+sem documento, ambiguidade, duas filiais independentes e processamento posterior no mesmo sync.
+Dados previamente afetados não são reparados automaticamente. A auditoria final comprovou que
+`Client.code` pode ser reescrito pelo próprio `persistPartnerPayload()` para uma linha posterior e
+pela edição administrativa `PUT /clients/:id`; importações só preenchem código vazio e merges geram
+sufixos. Como o perfil financeiro 5050 só é gravado quando o cliente ainda tem `code=5050`, o estado
+final exato 4484 prova uma escrita posterior ao financeiro. O full sync executa `partners` uma única
+vez antes do financeiro, logo essa escrita final pertence necessariamente a outro partner sync ou a
+um PUT posterior — não a uma etapa restante do mesmo full sync.
+
+Após deploy, validar em homologação, monitorar estratégias/conflitos, confirmar IDs independentes e
+reconciliar perfis financeiros sem rodar saneamentos. Detalhes, inventário completo de escritores,
+diagramas, prova de ordem, limites de atribuição e procedimento completo estão na
+[investigação de identidade 5050×4484](investigations/ultrafv3-partner-identity-5050-4484.md).
 
 #### Pipeline, métricas e investigação read-only de parceiros
 

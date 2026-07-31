@@ -11,6 +11,7 @@ import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { logApiEvent } from "../utils/logger.js";
 import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type ErpRuntimeEnvironmentDiagnostics } from "./erpRuntimeConfig.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
+import { resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -1678,8 +1679,11 @@ const getPartnerAmbiguityReasons = (params: {
     });
     if (conflictingDocs.length) reasons.push("same_erp_code_conflicting_document");
   }
-  if (params.data.code) {
-    const conflictingCodes = params.byDocument.filter((candidate) => candidate.code && candidate.code !== params.data.code);
+  if (params.data.code && params.byCode.length) {
+    const byCodeIds = new Set(params.byCode.map((candidate) => candidate.id));
+    const conflictingCodes = params.byDocument.filter(
+      (candidate) => candidate.code && candidate.code !== params.data.code && !byCodeIds.has(candidate.id),
+    );
     if (conflictingCodes.length) reasons.push("same_document_conflicting_erp_code");
   }
   return reasons;
@@ -1742,7 +1746,7 @@ async function mergeDuplicateClientsIntoPrimary(
       duplicateHistoryScore: getCandidateHistoryScore(duplicate),
       match: {
         code: data.code || null,
-        cnpjNormalized: data.cnpjNormalized || null,
+        documentPresent: Boolean(data.cnpjNormalized),
       },
     });
   }
@@ -1763,19 +1767,52 @@ async function persistPartnerPayload(
   if (cnpj) diagnostics.receivedWithDocument += 1;
   else diagnostics.receivedWithoutDocument += 1;
 
-  const { candidates, byCode, byDocument } = await findPartnerClientCandidates(data, normalizedDocument);
+  const found = await findPartnerClientCandidates(data, normalizedDocument);
+  const resolution = resolvePartnerIdentityMatch({
+    code: data.code,
+    normalizedDocument,
+    byCode: found.byCode,
+    byDocument: found.byDocument,
+    byIdentity: found.byIdentity,
+    normalizeCandidateDocument: (candidate) => candidate.cnpjNormalized || normalizeDocument(candidate.cnpj),
+  });
+  const candidates = resolution.candidates;
+  const { byCode, byDocument } = found;
   const ambiguityReasons = getPartnerAmbiguityReasons({ data, normalizedDocument, byCode, byDocument });
-  if (ambiguityReasons.length) {
+  if (resolution.ambiguous || ambiguityReasons.length) {
     diagnostics.ambiguousDuplicates += 1;
-    diagnostics.documentErpConflicts += 1;
+    if (ambiguityReasons.length || resolution.matchStrategy === "rejected_document_conflict") {
+      diagnostics.documentErpConflicts += 1;
+    }
     logApiEvent("WARN", "[ultrafv3 sync partners] ambiguous duplicate not merged", {
       correlationId,
-      reasons: ambiguityReasons,
+      reasons: ambiguityReasons.length ? ambiguityReasons : [resolution.matchStrategy],
+      matchStrategy: resolution.matchStrategy,
       code: data.code,
-      cnpjNormalized: normalizedDocument || null,
-      candidateIds: candidates.map((candidate) => candidate.id),
+      documentPresent: Boolean(normalizedDocument),
+      candidateIds: resolution.rejectedCandidateIds,
     });
     return false;
+  }
+
+  if (resolution.matchStrategy === "rejected_document_conflict") {
+    diagnostics.documentErpConflicts += 1;
+    logApiEvent("WARN", "[ultrafv3 sync partners] identity candidate rejected", {
+      correlationId,
+      reason: "rejected_document_conflict",
+      matchStrategy: resolution.matchStrategy,
+      code: data.code,
+      documentPresent: true,
+      candidateIds: resolution.rejectedCandidateIds,
+    });
+  } else {
+    logApiEvent("INFO", "[ultrafv3 sync partners] identity resolved", {
+      correlationId,
+      matchStrategy: resolution.matchStrategy,
+      code: data.code,
+      documentPresent: Boolean(normalizedDocument),
+      candidateCount: candidates.length,
+    });
   }
 
   const primary = choosePrimaryPartnerClient(candidates, ownerSellerId);
