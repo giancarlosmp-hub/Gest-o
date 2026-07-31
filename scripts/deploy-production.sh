@@ -15,7 +15,9 @@ export API_IMAGE="gest-o-api:$APP_COMMIT"
 export WEB_IMAGE="gest-o-web:$APP_COMMIT"
 
 bash scripts/production-preflight.sh
-"${COMPOSE[@]}" config --services | diff -u <(printf 'api\nweb\n') - >/dev/null || die "topologia contém serviços inesperados"
+actual_services="$("${COMPOSE[@]}" config --services | sort)"
+expected_services="$(printf 'api\nweb\n' | sort)"
+[[ "$actual_services" == "$expected_services" ]] || die "topologia contém serviços inesperados"
 log "Build começa enquanto os containers atuais permanecem atendendo"
 "${COMPOSE[@]}" build api web
 docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require('./apps/api/dist/build-info.json');if(b.commit!=='$APP_COMMIT'||!b.builtAt)process.exit(1)"

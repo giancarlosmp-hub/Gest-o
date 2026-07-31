@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
@@ -13,7 +14,22 @@ assert.match(pre,/postgres:16\s+\\\s+pg_isready -h "\$DB_HOST" -p "\$DB_PORT" -d
 const postgresProbe = pre.match(/timeout "\$\{PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15\}s"[\s\S]*?pg_isready[^\n]*/)?.[0] ?? "";
 assert.ok(postgresProbe); assert.doesNotMatch(postgresProbe,/DATABASE_URL|--publish|--volume|-v\s|--user|--password|-p\s+\d+:/);
 for (const requiredCheck of ["PRODUCTION_DB_CONTAINER_EXPECTED","gest-o_default","PRODUCTION_DB_VOLUME_EXPECTED","PRODUCTION_BACKUP_FILE","sha256sum","git status --porcelain"]) assert.ok(pre.includes(requiredCheck),`preflight perdeu validação: ${requiredCheck}`);
+assert.match(deploy,/actual_services="\$\("\$\{COMPOSE\[@\]\}" config --services \| sort\)"/);
+assert.match(deploy,/expected_services="\$\(printf 'api\\nweb\\n' \| sort\)"/);
+assert.match(deploy,/\[\[ "\$actual_services" == "\$expected_services" \]\] \|\| die "topologia contém serviços inesperados"/);
+assert.doesNotMatch(deploy,/config --services \|\s*diff/);
+const acceptsComposeServices = services => spawnSync("bash", ["-c", `
+  actual_services="$(printf '%s\\n' "$@" | sort)"
+  expected_services="$(printf 'api\\nweb\\n' | sort)"
+  [[ "$actual_services" == "$expected_services" ]]
+`, "production-topology-test", ...services]).status === 0;
+assert.equal(acceptsComposeServices(["api", "web"]), true);
+assert.equal(acceptsComposeServices(["web", "api"]), true);
+for (const services of [["api", "web", "db"], ["api", "web", "worker"], ["api"], ["web"]]) {
+  assert.equal(acceptsComposeServices(services), false, `topologia inválida aceita: ${services.join(", ")}`);
+}
 assert.ok(deploy.indexOf('build api web') < deploy.indexOf('docker stop')); assert.match(deploy,/CONFIRM.*PRODUCTION_CUTOVER/); assert.match(deploy,/trap rollback ERR/);
+assert.match(deploy,/"\$\{COMPOSE\[@\]\}" build api web/); assert.doesNotMatch(deploy,/"\$\{COMPOSE\[@\]\}" build (?:db|worker)/);
 assert.match(compose,/APP_COMMIT/); assert.match(compose,/APP_BUILT_AT/); assert.doesNotMatch(api,/environment: env\.nodeEnv/);
 assert.match(compose,/image:\s*"\$\{API_IMAGE:\?/); assert.match(compose,/image:\s*"\$\{WEB_IMAGE:\?/);
 assert.match(unit,/docker-compose\.production\.yml/); assert.doesNotMatch(workflow,/docker-compose\.yml/);
