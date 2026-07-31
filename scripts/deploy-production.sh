@@ -22,17 +22,16 @@ log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 [[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER"
 
 evidence="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}/$APP_COMMIT"; mkdir -p "$evidence"
-: >"$evidence/rollback.sh"; chmod 700 "$evidence/rollback.sh"
+install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
 old=()
 for port in 4000 5173; do
   name=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1;exit}')
   [[ -n "$name" ]] || continue; old+=("$name")
   docker inspect "$name" >"$evidence/$name.inspect.json"
   image=$(docker inspect -f '{{.Image}}' "$name"); tag="gest-o-rollback-${port}:$APP_COMMIT"; docker tag "$image" "$tag"
-  printf 'docker start %q\n' "$name" >>"$evidence/rollback.sh"
 done
 printf '%s\n' "${old[@]}" >"$evidence/old-containers.txt"
-rollback(){ log "Falha: restaurando somente API/WEB anteriores"; "${COMPOSE[@]}" stop api web >/dev/null 2>&1 || true; [[ ${#old[@]} -eq 0 ]] || docker start "${old[@]}"; }
+rollback(){ trap - ERR; log "Falha: executando rollback persistido de API/WEB"; EVIDENCE_DIR="$evidence" APP_DIR="$APP_DIR" PRODUCTION_ENV_FILE="$ENV_FILE" bash "$evidence/rollback.sh"; }
 trap rollback ERR
 [[ ${#old[@]} -eq 0 ]] || docker stop "${old[@]}"
 "${COMPOSE[@]}" up -d --no-build --no-deps api web
