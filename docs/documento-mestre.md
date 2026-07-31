@@ -1,6 +1,9 @@
-# Documento Mestre — decisões operacionais e arquiteturais
+# Documento Mestre — registro legado de decisão operacional
 
-Este documento é a fonte normativa das decisões que afetam procedimentos de produção. O procedimento
+> **Documento histórico.** A fonte única de verdade vigente é o [Documento Mestre 4.0](DOCUMENTO_MESTRE.md).
+> Este registro preserva a decisão de backup sem apagar seu contexto original.
+
+Este documento foi a fonte normativa das decisões que afetam procedimentos de produção. O procedimento
 executável da Etapa 1 permanece no [runbook da auditoria ERP 5050](production-erp-5050-runbook.md).
 
 A engenharia reversa consolidada do ciclo de vida de clientes, troca de carteira, arquivamento, histórico de commits/PRs e riscos está em [Investigação ERP 5050 — Fluxo completo ERP → CRM](investigations/investigacao-erp-5050-fluxo-completo.md).
