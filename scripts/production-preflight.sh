@@ -18,7 +18,7 @@ read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
 [[ "$DB_HOST" != db && "$DB_HOST" != localhost && "$DB_HOST" != 127.0.0.1 ]] || die "hostname de banco proibido"
 [[ "$DB_NAME" == salesforce_pro ]] || die "database não autorizado"
 
-for command in git docker node sha256sum df; do need "$command"; done
+for command in git docker node sha256sum df timeout; do need "$command"; done
 
 [[ -z "$(git status --porcelain)" ]] || die "worktree não está limpa"
 [[ "$(git branch --show-current)" == main ]] || die "branch ativa não é main"
@@ -31,7 +31,13 @@ docker volume inspect "$PRODUCTION_DB_VOLUME_EXPECTED" >/dev/null 2>&1 || die "v
 docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" |
   awk -v v="$PRODUCTION_DB_VOLUME_EXPECTED" '$1==v && $2=="/var/lib/postgresql/data"{ok=1} END{exit !ok}' || die "mount PostgreSQL esperado divergente"
 [[ "$PRODUCTION_DB_VOLUME_EXPECTED" != gest-o_pgdata ]] || die "volume legado não é autorizado"
-(exec 3<>"/dev/tcp/$DB_HOST/$DB_PORT") 2>/dev/null || die "conexão TCP com PostgreSQL indisponível"
+docker image inspect postgres:16 >/dev/null 2>&1 || die "imagem local postgres:16 ausente; não será feito pull automático"
+timeout "${PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15}s" \
+  docker run --rm --pull=never \
+    --network gest-o_default \
+    postgres:16 \
+    pg_isready -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" >/dev/null 2>&1 ||
+  die "PostgreSQL não está aceitando conexões na rede gest-o_default"
 [[ -f "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" ]] || die "backup ou SHA256 ausente"
 (cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null) || die "SHA256 do backup inválido"
 max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"; age=$(( $(date +%s) - $(stat -c %Y "$PRODUCTION_BACKUP_FILE") )); (( age <= max_age )) || die "backup não é recente"

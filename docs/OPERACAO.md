@@ -2,6 +2,8 @@
 
 > 🔵 PR ainda não aplicada. Use exclusivamente `scripts/deploy-production.sh` e `docker-compose.production.yml` em futura janela aprovada. O PostgreSQL recuperado permanece separado; o Compose genérico é proibido para deploy. Preflight, cutover, rollback, evidências e comandos exatos estão no adendo de `DEPLOY_GUIDE.md`. O incidente não está encerrado.
 
+O preflight corrige um falso negativo sem alterar a produção: como o hostname do PostgreSQL existe somente no DNS da rede Docker, a sondagem usa um container efêmero local `postgres:16`, sem pull automático, dentro de `gest-o_default`. Ela não consulta o DNS do host, não fixa IP e não recebe senha nem a `DATABASE_URL`. Nenhum deploy foi realizado; o estágio permanece 🔵 PR.
+
 
 **Rollback:** nomes de containers não são artefatos de release. Antes de cada cutover, as imagens anteriores de API e WEB são etiquetadas separadamente e inventariadas. O rollback remove somente API/WEB novas e recria os serviços com as tags salvas; não depende de o container anterior existir e não administra o PostgreSQL. Consulte `DEPLOY_GUIDE.md`.
 
