@@ -1,7 +1,9 @@
+import { getDashboardMonth } from "./dashboard-month.mjs";
+
 const baseUrl = process.env.API_BASE_URL || "http://localhost:4000";
 
 const now = new Date();
-const month = now.toISOString().slice(0, 7);
+const month = getDashboardMonth(now);
 const todayIso = now.toISOString();
 const tomorrowIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
 const yesterdayIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
