@@ -8,6 +8,8 @@ die(){ log "ERRO: $*" >&2; exit 1; }
 [[ "${CONFIRM:-}" == PRODUCTION_SCHEMA_APPLY ]] || die "exige CONFIRM=PRODUCTION_SCHEMA_APPLY"
 [[ -f "$ENV_FILE" ]] || die "arquivo seguro de ambiente ausente: $ENV_FILE"
 cd "$APP_DIR"; set -a; source "$ENV_FILE"; set +a
+PSQL_DATABASE_URL=$(DATABASE_URL="$DATABASE_URL" node scripts/postgres-connection-url.mjs)
+export PSQL_DATABASE_URL
 APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"; export APP_COMMIT
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
 # This performs backup/SHA, origin/main, expected PostgreSQL/network/volume and runtime checks.
@@ -37,22 +39,22 @@ WHERE schemaname='public' AND tablename LIKE 'incident\_%' ESCAPE '\'
 ORDER BY tablename;
 SQL
 incident_counts(){
-  docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
+  docker run --rm --pull=never --network gest-o_default -e PSQL_DATABASE_URL \
     -v "$evidence/incident-counts.sql:/counts.sql:ro" postgres:16 \
-    psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atf /counts.sql
+    psql "$PSQL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atf /counts.sql
 }
 incident_counts >"$evidence/incident.before.tsv"
 [[ "$(wc -l <"$evidence/incident.before.tsv")" -eq 8 ]] || die "inventário incident_* divergente; apply bloqueado"
 log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
-docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
+docker run --rm --pull=never --network gest-o_default -e PSQL_DATABASE_URL \
   -v "$APP_DIR/$MIGRATION:/migration.sql:ro" postgres:16 \
-  sh -ceu 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f /migration.sql'
+  sh -ceu 'psql "$PSQL_DATABASE_URL" -v ON_ERROR_STOP=1 --single-transaction -f /migration.sql'
 
 # Postconditions are read-only: all incident table names and row counts must be byte-identical.
 incident_counts >"$evidence/incident.after.tsv"
 cmp "$evidence/incident.before.tsv" "$evidence/incident.after.tsv" || die "tabelas incident_* foram alteradas"
-required=$(docker run --rm --pull=never --network gest-o_default -e DATABASE_URL postgres:16 \
-  psql "$DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc \
+required=$(docker run --rm --pull=never --network gest-o_default -e PSQL_DATABASE_URL postgres:16 \
+  psql "$PSQL_DATABASE_URL" -X -v ON_ERROR_STOP=1 -Atc \
   "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent')")
 [[ "$required" == 5 ]] || die "objetos obrigatórios ausentes após migration"
 printf 'required_tables\t%s\n' "$required" >"$evidence/post-validation.tsv"

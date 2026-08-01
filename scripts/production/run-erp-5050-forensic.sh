@@ -25,7 +25,7 @@ require_host_command() {
   fi
 }
 
-for command_name in git hostname date sha256sum wc jq cp chmod mkdir mktemp rm; do
+for command_name in git hostname date sha256sum wc jq cp chmod mkdir mktemp rm node; do
   require_host_command "$command_name"
 done
 
@@ -58,7 +58,8 @@ case "$CONNECTION_MODE" in
     DB_NAME="${DB_NAME:-${PGDATABASE:-}}"
     PSQL_TARGET=(psql)
     if [[ -n "${DATABASE_URL:-}" ]]; then
-      PSQL_TARGET+=("$DATABASE_URL")
+      PSQL_DATABASE_URL=$(DATABASE_URL="$DATABASE_URL" node "$REPO_ROOT/scripts/postgres-connection-url.mjs")
+      PSQL_TARGET+=("$PSQL_DATABASE_URL")
     fi
     ;;
   *)
