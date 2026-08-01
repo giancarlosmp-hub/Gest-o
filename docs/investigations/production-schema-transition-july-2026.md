@@ -3,6 +3,17 @@
 **Estado:** bloqueador de cutover; implementação somente no repositório. Nenhum acesso à VPS, deploy,
 Prisma contra produção ou sincronização UltraFV3 foi realizado nesta auditoria.
 
+## Diagnóstico da reutilização de evidência (01/08/2026)
+
+O diagnóstico read-only posterior na VPS confirmou a integridade de `applied.tsv`, do checksum da
+migration autorizada e do `post-apply-diff.sql` vazio. A migration atual e a árvore
+`apps/api/prisma` permanecem equivalentes às do commit evidenciado. A reutilização falhou apenas
+porque a allowlist operacional estava incompleta diante dos arquivos de deploy, rollback e
+documentação alterados entre os commits. A correção mantém uma lista fechada de oito arquivos e
+continua rejeitando código, Prisma, migrations e configuração de runtime; caminhos bloqueadores
+passam a ser exibidos antes da falha. Produção e containers antigos foram preservados, nenhum
+cutover ou deploy ocorreu, e o cutover e o incidente continuam pendentes no estágio 🔵 PR.
+
 ## Evidência e causa raiz
 
 O preview read-only informado para o banco recuperado compara o catálogo real com

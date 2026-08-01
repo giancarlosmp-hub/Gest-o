@@ -35,7 +35,32 @@ assert.match(deploy,/git show "\$evidence_commit:\$schema_migration" \| sha256su
 assert.match(deploy,/post-apply-diff\.sql" && ! -s "\$evidence_dir\/post-apply-diff\.sql/);
 assert.match(deploy,/schema-diff-filter\.mjs "\$schema_validation_tmp\/raw\.sql" "\$schema_validation_tmp\/managed\.sql" post/);
 assert.match(deploy,/\[\[ ! -s "\$schema_validation_tmp\/managed\.sql" \]\]/);
-assert.match(deploy,/grep -Evq '\^\(scripts\//);
+const allowlistCase = deploy.match(/is_schema_evidence_operational_path\(\)\{[\s\S]*?\n\}/)?.[0] ?? "";
+assert.ok(allowlistCase, "função da allowlist operacional ausente");
+const operationalAllowlist = [
+  "scripts/deploy-production.sh",
+  "scripts/production-rollback.sh",
+  "scripts/smoke/production-deploy-safety.mjs",
+  "docs/DEPLOY_GUIDE.md",
+  "docs/OPERACAO.md",
+  "docs/STATUS_ATUAL.md",
+  "docs/DOCUMENTO_MESTRE.md",
+  "docs/investigations/production-schema-transition-july-2026.md",
+];
+const casePaths = (allowlistCase.match(/^    (.+)\) return 0 ;;$/m)?.[1] ?? "").split("|");
+assert.deepEqual(casePaths, operationalAllowlist, "allowlist deve conter somente os oito caminhos exatos");
+for (const path of operationalAllowlist) assert.ok(casePaths.includes(path), `allowlist rejeitou ${path}`);
+for (const path of [
+  "apps/api/src/app.ts",
+  "apps/web/src/App.tsx",
+  "apps/api/prisma/schema.prisma",
+  "apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql",
+  "package.json",
+  "docker-compose.production.yml",
+  ".github/workflows/deploy-production.yml",
+]) assert.ok(!casePaths.includes(path), `allowlist aceitou caminho proibido: ${path}`);
+assert.match(deploy,/log "evidência rejeitada: arquivos fora da allowlist:"/);
+assert.match(deploy,/printf '%s\\n' "\$blocked_paths" >&2/);
 assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
 const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
 for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {

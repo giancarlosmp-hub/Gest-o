@@ -1,3 +1,13 @@
+# 🔵 PR — allowlist exata para reutilização da evidência de schema (01/08/2026)
+
+O diagnóstico read-only na VPS confirmou `applied.tsv` e checksum íntegros, migration autorizada
+idêntica, `post-apply-diff.sql` vazio e a árvore `apps/api/prisma` equivalente. O bloqueio ocorreu
+somente porque a allowlist operacional não acompanhava os arquivos de deploy, rollback e
+documentação modificados pelas próprias PRs. Esta PR limita a reutilização aos oito caminhos
+operacionais explicitamente autorizados e registra no log qualquer caminho bloqueador. Produção e
+containers antigos continuam preservados; nenhum cutover ou deploy ocorreu, o incidente permanece
+aberto, o cutover segue pendente e o estágio continua 🔵 PR.
+
 # 🔵 PR — correção de URI Prisma para `psql` após tentativa controlada (01/08/2026)
 
 O apply controlado foi iniciado na VPS. Preflight, backup, allowlist e validação da migration

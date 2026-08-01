@@ -42,6 +42,13 @@ validate_schema_evidence(){
   SCHEMA_EVIDENCE_COMMIT=$evidence_commit
 }
 
+is_schema_evidence_operational_path(){
+  case "$1" in
+    scripts/deploy-production.sh|scripts/production-rollback.sh|scripts/smoke/production-deploy-safety.mjs|docs/DEPLOY_GUIDE.md|docs/OPERACAO.md|docs/STATUS_ATUAL.md|docs/DOCUMENTO_MESTRE.md|docs/investigations/production-schema-transition-july-2026.md) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
 if [[ -s "$schema_evidence" ]] && validate_schema_evidence "$schema_evidence" && [[ "$SCHEMA_EVIDENCE_COMMIT" == "$APP_COMMIT" ]]; then
   log "evidência de schema validada para o SHA atual"
@@ -52,7 +59,13 @@ else
     git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT" -- apps/api/prisma || continue
     changed_paths=$(git diff --name-only "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT")
     [[ -n "$changed_paths" ]] || continue
-    if printf '%s\n' "$changed_paths" | grep -Evq '^(scripts/(deploy-production\.sh|smoke/production-deploy-safety\.mjs)|docs/(DEPLOY_GUIDE|OPERACAO|STATUS_ATUAL)\.md)$'; then
+    blocked_paths=""
+    while IFS= read -r changed_path; do
+      is_schema_evidence_operational_path "$changed_path" || blocked_paths+="${blocked_paths:+$'\n'}$changed_path"
+    done <<<"$changed_paths"
+    if [[ -n "$blocked_paths" ]]; then
+      log "evidência rejeitada: arquivos fora da allowlist:" >&2
+      printf '%s\n' "$blocked_paths" >&2
       continue
     fi
     schema_evidence=$candidate
