@@ -72,35 +72,78 @@ else
   rm -rf "$schema_validation_tmp"; trap - EXIT
 fi
 
-evidence="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}/$APP_COMMIT"; mkdir -p "$evidence"
+evidence_root="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}"
+evidence="$evidence_root/$APP_COMMIT"
+if [[ -e "$evidence" ]]; then
+  [[ -d "$evidence" ]] || die "caminho de evidência existente não é diretório"
+  [[ ! -e "$evidence/cutover-started" ]] || die "evidência do SHA indica cutover iniciado; revisão manual obrigatória"
+  aborted="$evidence_root/$APP_COMMIT.aborted-$(date -u +%Y%m%dT%H%M%SZ)"
+  [[ ! -e "$aborted" ]] || die "destino da tentativa abortada já existe"
+  mv "$evidence" "$aborted"
+  log "evidência parcial anterior preservada em $aborted"
+fi
+install -d -m 700 "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
-printf 'role\tcontainer\timage_id\trollback_tag\tport\tnetworks\trestart_policy\tprevious_commit\n' >"$evidence/previous-runtime.tsv"
+printf 'role\trollback_mode\tcontainer_name\tcontainer_id\timage_id\trollback_tag\tport\tnetworks\trestart_policy\tprevious_commit\n' >"$evidence/previous-runtime.tsv"
+printf 'role\tcontainer_name\tcontainer_id\n' >"$evidence/rollback-containers.tsv"
 : >"$evidence/rollback-images.env"
+chmod 600 "$evidence/previous-runtime.tsv" "$evidence/rollback-containers.tsv" "$evidence/rollback-images.env"
 for spec in api:4000 web:5173; do
   role=${spec%%:*}; port=${spec##*:}
-  name=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1;exit}')
+  owners=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1}')
+  [[ "$(printf '%s\n' "$owners" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "porta $port não possui proprietário único"
+  name=$owners
   [[ -n "$name" ]] || die "nenhum container anterior encontrado na porta $port"
-  docker inspect "$name" >"$evidence/$role.previous.inspect.json"
+  container_id=$(docker inspect -f '{{.Id}}' "$name")
+  [[ "$(docker inspect -f '{{.State.Running}}' "$container_id")" == true ]] || die "container anterior de $role não está running"
+  docker inspect "$container_id" >"$evidence/$role.previous.inspect.json"
+  chmod 600 "$evidence/$role.previous.inspect.json"
   image_id=$(docker inspect -f '{{.Image}}' "$name")
+  networks=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}}' "$container_id")
+  [[ ",$networks" == *,gest-o_default,* ]] || die "container anterior de $role fora da rede esperada"
+  restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container_id")
+  case "$restart_policy" in no|on-failure|always|unless-stopped) ;; *) die "restart policy desconhecida para $role";; esac
   previous_commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id" 2>/dev/null || true)
   [[ -n "$previous_commit" && "$previous_commit" != '<no value>' ]] || previous_commit=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" | sed -n 's/^APP_COMMIT=//p' | head -1)
-  release=$(printf '%s' "${previous_commit:-${image_id#sha256:}}" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40)
-  [[ -n "$release" ]] || die "não foi possível identificar release anterior de $role"
-  tag="gest-o-${role}-rollback:$release"
-  docker tag "$image_id" "$tag"
-  networks=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}}' "$name")
-  restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$name")
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$name" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
-  printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
-  if [[ "$role" == api ]]; then
+  rollback_mode=container; tag="-"
+  if docker image inspect "$image_id" >/dev/null 2>&1; then
+    rollback_mode=image
+    release=$(printf '%s' "${previous_commit:-${image_id#sha256:}}" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40)
+    [[ -n "$release" ]] || die "não foi possível identificar release anterior de $role"
+    tag="gest-o-${role}-rollback:$release"
+    docker tag "$image_id" "$tag"
+    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
+  else
+    compose_project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$container_id" 2>/dev/null || true)
+    [[ "$compose_project" != gest-o-production ]] || die "$role pertence a gest-o-production e sua imagem está ausente; fallback por container proibido"
+    printf '%s\t%s\t%s\n' "$role" "$name" "$container_id" >>"$evidence/rollback-containers.tsv"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
+  if [[ "$role" == api && "$rollback_mode" == image ]]; then
     previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null || true)
     previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null || true)
     printf 'ROLLBACK_APP_COMMIT=%q\nROLLBACK_APP_VERSION=%q\nROLLBACK_APP_BUILT_AT=%q\n' "${previous_commit:-unknown}" "${previous_version:-unknown}" "${previous_built_at:-unknown}" >>"$evidence/rollback-images.env"
   fi
 done
+# Último gate antes de qualquer parada: artefato executável/sintático, mecanismos,
+# identidade/running/porta/rede dos runtimes e PostgreSQL/volume já validados.
+bash -n "$evidence/rollback.sh"
+for role in api web; do
+  line=$(awk -F'\t' -v r="$role" '$1==r{print; n++} END{if(n!=1)exit 1}' "$evidence/previous-runtime.tsv") || die "evidência incompleta para $role"
+  IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous <<<"$line"
+  case "$mode" in
+    image) docker image inspect "$tag" >/dev/null 2>&1 || die "tag de rollback inválida para $role" ;;
+    container) [[ "$(docker inspect -f '{{.Id}}|{{.State.Running}}' "$name")" == "$container_id|true" ]] || die "container histórico de $role mudou" ;;
+    *) die "mecanismo de rollback inválido para $role" ;;
+  esac
+  [[ "$(docker ps --format '{{.ID}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1}')" == "${container_id:0:12}" ]] || die "proprietário da porta $port mudou"
+done
+[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")" == true ]] || die "PostgreSQL deixou de executar antes do cutover"
+docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" | awk -v v="$PRODUCTION_DB_VOLUME_EXPECTED" '$1==v && $2=="/var/lib/postgresql/data"{ok=1} END{exit !ok}' || die "volume PostgreSQL divergente antes do cutover"
 rollback(){ trap - ERR; log "Falha: executando rollback persistido de API/WEB"; EVIDENCE_DIR="$evidence" APP_DIR="$APP_DIR" PRODUCTION_ENV_FILE="$ENV_FILE" bash "$evidence/rollback.sh"; }
 trap rollback ERR
-while IFS=$'\t' read -r role name _; do [[ "$role" == role ]] || docker stop "$name"; done <"$evidence/previous-runtime.tsv"
+: >"$evidence/cutover-started"; chmod 600 "$evidence/cutover-started"
+while IFS=$'\t' read -r role mode name container_id _; do [[ "$role" == role ]] || docker stop "$container_id"; done <"$evidence/previous-runtime.tsv"
 "${COMPOSE[@]}" up -d --no-build --no-deps api web
 for service in api web; do
   id=$("${COMPOSE[@]}" ps -q "$service"); for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")" == healthy ]] && break; sleep 5; done

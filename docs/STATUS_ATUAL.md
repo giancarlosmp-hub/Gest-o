@@ -131,3 +131,16 @@ transação DDL e validações administrativas indispensáveis ao `postgres` loc
 `gest-o-db-clean-v2-20260717`, via `docker exec --user postgres`. Não há concessão permanente,
 troca de owner, senha administrativa ou porta publicada. Produção **não** está atualizada, o schema
 **não** está aplicado e o incidente continua aberto com cutover bloqueado.
+
+## Segundo ensaio de cutover — rollback histórico híbrido
+
+O schema de produção foi aplicado e validado, e a evidência originalmente emitida para
+`0f1391fee481254dc1896a18ec261ef168e5bbe3` foi revalidada com sucesso para o SHA operacional
+`c178a69efc79cf78862b697229c7192b607fbcc6`. A segunda tentativa terminou **antes de qualquer
+parada de container e antes do cutover**: a imagem `sha256:0ce92e...`, referenciada pelo container
+histórico `gest-o-api-recovery-20260718`, já não existia no catálogo local do Docker.
+
+Os containers antigos continuaram running e atendendo, PostgreSQL/schema foram preservados e o
+cutover segue pendente. Esta 🔵 PR adiciona rollback híbrido por role: imagem quando o objeto ainda
+existe; container histórico externo, por nome e ID exatos, quando a imagem desapareceu. O incidente
+não está encerrado e nenhuma conclusão de cutover deve ser inferida desta correção.
