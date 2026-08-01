@@ -1,3 +1,12 @@
+# 🔵 PR — governança de desenvolvimento institucionalizada (01/08/2026)
+
+O Comitê de Arquitetura, o Sprint Brief obrigatório, o ciclo de ADR, a avaliação de Enterprise
+Readiness, a revisão de PR e a Definition of Done foram consolidados em
+[`GOVERNANCA_DESENVOLVIMENTO.md`](GOVERNANCA_DESENVOLVIMENTO.md). A mudança é exclusivamente
+documental: não altera aplicação, banco, deploy, produção, incidentes ou os bloqueios atuais. A
+ausência de uma baseline própria de Enterprise Readiness foi registrada como recomendação formal de
+backlog, sem implementação automática.
+
 # 🔵 PR — allowlist exata para reutilização da evidência de schema (01/08/2026)
 
 O diagnóstico read-only na VPS confirmou `applied.tsv` e checksum íntegros, migration autorizada

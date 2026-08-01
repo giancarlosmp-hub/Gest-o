@@ -273,6 +273,7 @@ substituem essa sequência.
 
 | Data | Grande entrega |
 |---|---|
+| 01/08/2026 | Governança de desenvolvimento institucionalizada: Comitê de Arquitetura, Sprint Brief, ciclo de ADR, Enterprise Readiness, revisão, testes, rollback e Definition of Done consolidados em norma permanente, sem alteração de runtime ou produção. |
 | 01/08/2026 | Diagnóstico confirmou evidência de schema íntegra e Prisma equivalente; allowlist operacional incompleta foi o único bloqueio. Produção e containers antigos preservados, sem deploy ou cutover; correção em 🔵 PR e cutover pendente. |
 | 01/08/2026 | Schema aplicado/validado e evidência revalidada para `c178a69e`; segundo ensaio parou antes de containers por ausência da imagem histórica da API. Produção antiga preservada, cutover pendente e rollback híbrido em 🔵 PR; incidente aberto. |
 | 01/08/2026 | Schema apply permanece pendente: a tentativa controlada foi bloqueada com segurança, antes de qualquer SQL, pela incompatibilidade da URI Prisma com `psql`; correção operacional em PR, produção e tabelas `incident_*` preservadas e cutover ainda bloqueado. |
@@ -296,6 +297,7 @@ O histórico detalhado anterior foi preservado integralmente em
 | **Status Atual** | [Resumo operacional de uma página](STATUS_ATUAL.md) |
 | **Operação pós-merge** | [Checklist obrigatório da REGRA 001](OPERACAO.md) |
 | **Guia de deploy** | [Arquitetura, deploy, validação e rollback](DEPLOY_GUIDE.md) |
+| **Governança de desenvolvimento** | [Comitê de Arquitetura, Sprint Brief, decisões e Definition of Done](GOVERNANCA_DESENVOLVIMENTO.md) |
 | **Roadmap** | [Horizontes estratégicos](roadmap/README.md) |
 | **Dashboard Saúde** | [Estado e operação do módulo](dashboard-saude-plataforma.md) |
 | **Arquitetura** | [Limites e topologia técnica](architecture/README.md) |
