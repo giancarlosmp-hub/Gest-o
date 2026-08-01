@@ -29,6 +29,18 @@ for (const services of [["api", "web", "db"], ["api", "web", "worker"], ["api"],
   assert.equal(acceptsComposeServices(services), false, `topologia inválida aceita: ${services.join(", ")}`);
 }
 assert.ok(deploy.indexOf('build api web') < deploy.indexOf('docker stop')); assert.match(deploy,/CONFIRM.*PRODUCTION_CUTOVER/); assert.match(deploy,/trap rollback ERR/);
+assert.ok(deploy.includes("tr -cd '[:alnum:]._ -'")); assert.ok(!deploy.includes("tr -cd '[:alnum:]._- '"));
+assert.match(deploy,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
+assert.match(deploy,/git show "\$evidence_commit:\$schema_migration" \| sha256sum/);
+assert.match(deploy,/post-apply-diff\.sql" && ! -s "\$evidence_dir\/post-apply-diff\.sql/);
+assert.match(deploy,/schema-diff-filter\.mjs "\$schema_validation_tmp\/raw\.sql" "\$schema_validation_tmp\/managed\.sql" post/);
+assert.match(deploy,/\[\[ ! -s "\$schema_validation_tmp\/managed\.sql" \]\]/);
+assert.match(deploy,/grep -Evq '\^\(scripts\//);
+assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
+const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
+for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {
+  const result = sanitizeRelease(input); assert.equal(result.status, 0); assert.equal(result.stdout, `${expected}\n`);
+}
 assert.match(deploy,/"\$\{COMPOSE\[@\]\}" build api web/); assert.doesNotMatch(deploy,/"\$\{COMPOSE\[@\]\}" build (?:db|worker)/);
 assert.match(compose,/APP_COMMIT/); assert.match(compose,/APP_BUILT_AT/); assert.doesNotMatch(api,/environment: env\.nodeEnv/);
 assert.match(compose,/image:\s*"\$\{API_IMAGE:\?/); assert.match(compose,/image:\s*"\$\{WEB_IMAGE:\?/);
