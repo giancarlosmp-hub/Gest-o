@@ -273,6 +273,7 @@ substituem essa sequência.
 
 | Data | Grande entrega |
 |---|---|
+| 01/08/2026 | Schema apply permanece pendente: a tentativa controlada foi bloqueada com segurança, antes de qualquer SQL, pela incompatibilidade da URI Prisma com `psql`; correção operacional em PR, produção e tabelas `incident_*` preservadas e cutover ainda bloqueado. |
 | 31/07/2026 | Criado o painel fixo Estado Atual da Produção e instituídas as REGRA 002 (incidentes) e REGRA 003 (início de Sprint). |
 | 31/07/2026 | Instituída a REGRA 001 para fechamento obrigatório do ciclo pós-merge e a escala Codex → PR → Merge → Deploy → Produção. |
 | 31/07/2026 | Documento Mestre 4.0 convertido em fonte única operacional, com estado, gates, backlog e procedimentos VPS; criado resumo `STATUS_ATUAL.md`. |

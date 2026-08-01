@@ -1,3 +1,12 @@
+# 🔵 PR — correção de URI Prisma para `psql` após tentativa controlada (01/08/2026)
+
+O apply controlado foi iniciado na VPS. Preflight, backup, allowlist e validação da migration
+passaram, mas a execução foi interrompida antes da aplicação SQL: o `psql` rejeitou o parâmetro
+Prisma `?schema=public` presente em `DATABASE_URL`. Nenhuma migration foi aplicada, nenhuma tabela
+foi alterada e nenhum cutover ocorreu. A sanitização automática da conexão está nesta PR. Após o
+merge e todos os checks verdes, o próximo passo é atualizar a `main` na VPS e repetir
+`production-schema-apply.sh` desde o início; o schema apply e o cutover continuam pendentes.
+
 # 🔵 PR — Prisma descartável executado pela imagem da API (01/08/2026)
 
 O build da PR #757 foi aprovado, inclusive com Prisma 5.22.0 pinado na imagem da API. A execução

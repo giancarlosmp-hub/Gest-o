@@ -172,3 +172,46 @@ efêmero e se comunica apenas por uma rede Docker recém-criada, sem porta no ho
 exclusivamente para o container e database `gesto_test`. Entradas herdadas que indiquem o hostname
 de produção, `salesforce_pro`, loopback ou `gest-o_default` são rejeitadas, e o trap remove banco,
 rede e arquivos temporários. O cutover segue bloqueado e esta correção permanece no estágio 🔵 PR.
+
+## Incompatibilidade Prisma `DATABASE_URL` × libpq/`psql`
+
+Em 01/08/2026, o apply controlado chegou a ser iniciado na VPS. O preflight confirmou a identidade
+esperada do banco e do runtime, a existência e o SHA256 do backup e os demais gates operacionais. O
+preview, a allowlist e a validação da migration aditiva também passaram. A execução parou então com
+o erro exato:
+
+```text
+psql: error: invalid URI query parameter: "schema"
+```
+
+A falha ocorreu na primeira chamada de inventário `incident_*` feita pelo `psql`, antes do comando
+posterior que abre `--single-transaction` e lê `/migration.sql`. O erro é de parsing da URI pelo
+cliente, antes de uma conexão ou de qualquer instrução SQL: portanto, o arquivo da migration não
+foi entregue ao servidor. Não houve migration aplicada, tabela criada ou alterada, mudança nas
+`incident_*` nem cutover.
+
+A causa raiz foi o uso direto da `DATABASE_URL` do Prisma como URI de conexão do libpq/`psql`.
+Embora usuário, senha, host, porta e database sejam compatíveis, `schema` configura o connector do
+Prisma e não é um parâmetro de conexão reconhecido pelo libpq. A correção cria uma URI exclusiva
+para `psql` e remove os parâmetros próprios do Prisma `schema`, `connection_limit`, `pool_timeout`,
+`pgbouncer`, `statement_cache_size` e `socket_timeout`. Protocolo, usuário, senha, host, porta,
+database e parâmetros PostgreSQL/libpq, como `sslmode`, são preservados.
+
+Foram auditados todos os scripts shell que invocam `psql`. `production-schema-apply.sh` passa a usar
+a URI sanitizada nas contagens anteriores e posteriores, na transação da migration e na validação
+das tabelas obrigatórias. O modo `libpq` de `production/run-erp-5050-forensic.sh`, único outro fluxo
+que podia anexar `DATABASE_URL` ao comando, usa o mesmo conversor. `production-schema-preview.sh`
+usa a URL somente com Prisma; `production-preflight.sh` decompõe host, porta e database para
+`pg_isready`; e `smoke/production-schema-postgres.sh` e os demais chamadores de `psql` usam flags de
+conexão separadas, portanto não encaminham a URI Prisma.
+
+O smoke automatizado agora exercita uma URL com `?schema=public`, confirma a remoção dos parâmetros
+Prisma e a preservação de credenciais, destino e `sslmode`. Ele também percorre os scripts
+operacionais e falha se `$DATABASE_URL` voltar a ser enviada diretamente ao `psql`; o harness do
+coletor forense continua validando seu fluxo isolado. A mudança é exclusivamente de compatibilidade
+da conexão: não altera a migration, sua transação, a allowlist, os gates do deploy ou o cutover.
+
+Operacionalmente, o apply permanece pendente e deve ser reiniciado integralmente, não retomado do
+ponto da falha. Depois do merge e de todos os checks verdes, deve-se atualizar a `main` na VPS e
+repetir `production-schema-apply.sh` desde o início. Até essa execução controlada terminar e suas
+evidências serem revisadas, o banco permanece inalterado e o cutover continua bloqueado.
