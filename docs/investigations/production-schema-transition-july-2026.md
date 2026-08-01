@@ -215,3 +215,30 @@ Operacionalmente, o apply permanece pendente e deve ser reiniciado integralmente
 ponto da falha. Depois do merge e de todos os checks verdes, deve-se atualizar a `main` na VPS e
 repetir `production-schema-apply.sh` desde o início. Até essa execução controlada terminar e suas
 evidências serem revisadas, o banco permanece inalterado e o cutover continua bloqueado.
+
+## Falha segura de autoridade DDL em 01/08/2026
+
+A nova tentativa partiu da `main` no SHA `6041ddac24a6be0bb85a63498656b4d183ccd5d7` e validou
+backup/SHA256, preflight, imagens pinadas, allowlist, migration e o inventário inicial das oito
+`incident_*`. Dentro de `--single-transaction`, o primeiro `CREATE TYPE` recebeu `permission denied
+for schema public`. Como foi o primeiro DDL e a unidade transacional abortou, nada persistiu:
+nenhuma migration foi concluída e nenhum cutover ocorreu.
+
+A causa raiz é a mistura anterior entre conexão runtime e autoridade de migration. A role da
+`DATABASE_URL` deliberadamente não possui `CREATE`; ampliar seus privilégios, transferir ownership
+ou conceder acesso permanente contrariaria o isolamento esperado. A decisão passa a ser permanente:
+
+- a URL sanitizada da aplicação continua sendo usada por Prisma diff, inventário read-only e health;
+- imediatamente antes do DDL, todos os gates mutáveis são repetidos e o processo confirma que o
+  container exato está running, com volume/destino/database esperados, e que a sessão local retorna
+  `salesforce_pro`/`postgres`;
+- somente a migration transacional enviada por stdin e consultas de catálogo indispensáveis usam
+  `docker exec --user postgres`; não se lê senha, não se publica porta e não se modifica o banco ou
+  seu container;
+- `applied.tsv` continua sendo criado apenas após incidentes idênticos, cinco tabelas, sete enums,
+  duas colunas de telefone e diff Prisma gerenciado vazio.
+
+O teste descartável agora cria uma role runtime sem `CREATE`, demonstra sua recusa, demonstra o apply
+administrativo, rollback integral em falha intermediária, idempotência, equivalência Prisma e
+preservação byte a byte do inventário `incident_*`. Esta mudança permanece 🔵 PR; não comprova
+produção atualizada, schema aplicado nem encerramento do incidente.

@@ -315,3 +315,14 @@ todas as `incident_*` e exige evidência por SHA antes do cutover. As imagens de
 construídas, não publicadas, e o banco recuperado continua preservado. Não houve deploy nesta mudança
 e INC-5050-4484 permanece em homologação. Processo e riscos estão na
 [auditoria de transição](investigations/production-schema-transition-july-2026.md).
+
+## Decisão permanente: autoridade runtime × migration (01/08/2026)
+
+A tentativa controlada no SHA `6041ddac...` falhou com segurança no primeiro `CREATE TYPE`: a role
+runtime não possui `CREATE` em `public`. Nada persistiu, nenhuma migration ou cutover ocorreu e as
+oito `incident_*` foram preservadas. O apply passa a manter `DATABASE_URL` para Prisma e leituras,
+usando `docker exec --user postgres` no container PostgreSQL já validado somente durante a migration
+transacional e verificações administrativas mínimas. É proibido conceder DDL ao runtime, trocar
+owners ou expor credenciais/portas. O estágio continua 🔵 PR, com schema pendente e incidente aberto.
+Veja [ADR 002](adr/002-runtime-migration-authority-separation.md) e a
+[auditoria](investigations/production-schema-transition-july-2026.md).

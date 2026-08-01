@@ -49,6 +49,7 @@ id="$$-$RANDOM"
 PG_NAME="gesto-schema-test-pg-$id"
 NETWORK_NAME="gesto-schema-test-$id"
 PG_PASSWORD="schema-test-$id"
+RUNTIME_PASSWORD="runtime-test-$id"
 tmp=$(mktemp -d)
 pg_created=false
 network_created=false
@@ -79,9 +80,11 @@ for _ in {1..60}; do
 done
 docker exec "$PG_NAME" pg_isready -U postgres -d gesto_test >/dev/null
 
-TEST_DATABASE_URL="postgresql://postgres:${PG_PASSWORD}@${PG_NAME}:5432/gesto_test?schema=public"
+docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
+  "CREATE ROLE runtime LOGIN PASSWORD '${RUNTIME_PASSWORD}'; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE gesto_test TO runtime; GRANT USAGE ON SCHEMA public TO runtime" >/dev/null
+TEST_DATABASE_URL="postgresql://runtime:${RUNTIME_PASSWORD}@${PG_NAME}:5432/gesto_test?schema=public"
 reject_production_target "$NETWORK_NAME"
-[[ "$TEST_DATABASE_URL" == *"@${PG_NAME}:5432/gesto_test?schema=public" ]] || {
+[[ "$TEST_DATABASE_URL" == "postgresql://runtime:"*"@${PG_NAME}:5432/gesto_test?schema=public" ]] || {
   echo 'disposable database URL invariant failed' >&2
   exit 1
 }
@@ -120,13 +123,32 @@ INSERT INTO incident_20260719_orphan_productprice_audit VALUES (1,'keep');
 INSERT INTO incident_20260719_product_snapshot_map VALUES (1,'keep');
 SQL
 docker exec -i "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 <"$tmp/recovered.sql" >/dev/null
+docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
+  'GRANT SELECT ON ALL TABLES IN SCHEMA public TO runtime' >/dev/null
 count_incidents() { docker exec "$PG_NAME" psql -U postgres -d gesto_test -Atc "SELECT tablename||':'||(xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM %I',tablename),false,true,'')))[1]::text FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'incident\_%' ESCAPE '\\' ORDER BY 1"; }
 count_incidents >"$tmp/before"
 
 # Preflight accepts the exact additive transition.
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/pre.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/pre.raw.sql" "$tmp/pre.sql" pre
-docker exec -i "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 --single-transaction <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+if docker exec -i "$PG_NAME" psql -U runtime -d gesto_test -v ON_ERROR_STOP=1 --single-transaction \
+  <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >"$tmp/runtime.out" 2>&1; then
+  echo 'runtime role unexpectedly acquired DDL authority' >&2
+  exit 1
+fi
+grep -q 'permission denied for schema public' "$tmp/runtime.out"
+
+# A failure after successful DDL in the same transaction must leave no partial object.
+printf 'CREATE TABLE rollback_probe(id int);\nSELECT missing_mid_migration();\n' >"$tmp/rollback.sql"
+if docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
+  <"$tmp/rollback.sql" >/dev/null 2>&1; then
+  echo 'deliberately broken migration unexpectedly succeeded' >&2
+  exit 1
+fi
+test "$(docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -Atc "SELECT to_regclass('public.rollback_probe') IS NULL")" = t
+
+docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
+  <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
 count_incidents >"$tmp/after-first"
 cmp "$tmp/before" "$tmp/after-first"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
@@ -134,7 +156,7 @@ node scripts/schema-diff-filter.mjs "$tmp/post.raw.sql" "$tmp/post.sql" post
 test ! -s "$tmp/post.sql"
 
 # A second application is safe and leaves both managed schema and incident evidence unchanged.
-docker exec -i "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 --single-transaction <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
 count_incidents >"$tmp/after-second"
 cmp "$tmp/before" "$tmp/after-second"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post2.raw.sql"
