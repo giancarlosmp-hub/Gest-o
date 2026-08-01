@@ -93,7 +93,7 @@ chmod +x "$TMP/bin/docker"
 # An isolated host PATH proves docker-peer does not discover or execute a host
 # psql. Only the documented common dependencies and the Docker mock are exposed.
 mkdir -p "$TMP/host-without-psql" "$TMP/host-without-docker"
-for command_name in bash env git hostname date sha256sum wc jq cp chmod mkdir mktemp rm cat; do
+for command_name in bash env git hostname date sha256sum wc jq cp chmod mkdir mktemp rm cat node; do
   command_path="$(command -v "$command_name")"
   ln -s "$command_path" "$TMP/host-without-psql/$command_name"
   ln -s "$command_path" "$TMP/host-without-docker/$command_name"

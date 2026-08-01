@@ -69,6 +69,27 @@ assert.match(malicious.stdout + malicious.stderr, /BLOQUEADO/);
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 assert.match(apply, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.doesNotMatch(apply, /db push|prisma:seed|seedOnBootstrap/);
+assert.match(apply, /PSQL_DATABASE_URL=\$\(DATABASE_URL="\$DATABASE_URL" node scripts\/postgres-connection-url\.mjs\)/);
+assert.doesNotMatch(apply, /psql\s+"\$DATABASE_URL"/, "Prisma DATABASE_URL must never be sent directly to psql");
+
+const prismaUrl = "postgresql://user:p%40ss@db.example:5433/gesto?schema=public&sslmode=require&connection_limit=8";
+const sanitized = spawnSync("node", [resolve(root, "scripts/postgres-connection-url.mjs"), prismaUrl], { encoding: "utf8" });
+assert.equal(sanitized.status, 0, sanitized.stderr);
+const sanitizedUrl = new URL(sanitized.stdout);
+assert.equal(sanitizedUrl.username, "user");
+assert.equal(sanitizedUrl.password, "p%40ss");
+assert.equal(sanitizedUrl.hostname, "db.example");
+assert.equal(sanitizedUrl.port, "5433");
+assert.equal(sanitizedUrl.pathname, "/gesto");
+assert.equal(sanitizedUrl.searchParams.get("sslmode"), "require");
+assert.equal(sanitizedUrl.searchParams.has("schema"), false);
+assert.equal(sanitizedUrl.searchParams.has("connection_limit"), false);
+
+for (const script of readdirSync(resolve(root, "scripts"), { recursive: true })
+  .filter((name) => name.endsWith(".sh"))) {
+  const source = readFileSync(resolve(root, "scripts", script), "utf8");
+  assert.doesNotMatch(source, /psql[^\n]*\$DATABASE_URL/, `${script} sends Prisma DATABASE_URL directly to psql`);
+}
 const unconfirmed = spawnSync("bash", [resolve(root, "scripts/production-schema-apply.sh")], {
   cwd: root, env: { PATH: process.env.PATH ?? "" }, encoding: "utf8"
 });
