@@ -117,3 +117,17 @@ O cutover permanece bloqueado. O preview encontrou DDL aditiva legítima e oito 
 sem acesso à VPS ou produção; o banco recuperado permanece preservado. As imagens do commit
 `a2daeb5e2b8470a8a68bc5e5b164627a7cc18743` foram construídas, mas não publicadas. O incidente
 5050×4484 continua em homologação. Consulte a [auditoria](investigations/production-schema-transition-july-2026.md).
+
+## Tentativa segura de schema apply — 01/08/2026
+
+No SHA `6041ddac24a6be0bb85a63498656b4d183ccd5d7`, o apply passou pelos gates, chegou à
+transação única e falhou no primeiro `CREATE TYPE` com `permission denied for schema public`.
+A causa é correta do ponto de vista de segurança: a role da `DATABASE_URL` é a identidade runtime e
+não tem `CREATE` em `public`. A transação não persistiu alteração, nenhuma migration foi concluída,
+as oito `incident_*` permaneceram preservadas e não houve cutover.
+
+A correção em 🔵 PR mantém a URL runtime para Prisma, leituras e health checks, mas entrega somente a
+transação DDL e validações administrativas indispensáveis ao `postgres` local do container
+`gest-o-db-clean-v2-20260717`, via `docker exec --user postgres`. Não há concessão permanente,
+troca de owner, senha administrativa ou porta publicada. Produção **não** está atualizada, o schema
+**não** está aplicado e o incidente continua aberto com cutover bloqueado.

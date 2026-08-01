@@ -7,3 +7,5 @@ Cada decisão deverá ser vinculada ao [Documento Mestre](../DOCUMENTO_MESTRE.md
 ## Decisões
 
 - [ADR 001 — Identidade de estabelecimento de parceiros UltraFV3](001-ultrafv3-partner-establishment-identity.md)
+
+- [ADR 002 — Separação de autoridade runtime e migration](002-runtime-migration-authority-separation.md)

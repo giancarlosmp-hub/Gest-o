@@ -71,6 +71,13 @@ assert.match(apply, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.doesNotMatch(apply, /db push|prisma:seed|seedOnBootstrap/);
 assert.match(apply, /PSQL_DATABASE_URL=\$\(DATABASE_URL="\$DATABASE_URL" node scripts\/postgres-connection-url\.mjs\)/);
 assert.doesNotMatch(apply, /psql\s+"\$DATABASE_URL"/, "Prisma DATABASE_URL must never be sent directly to psql");
+assert.match(apply, /PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717/);
+assert.match(apply, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED"[\s\S]*psql --dbname="\$DB_NAME" -X -v ON_ERROR_STOP=1/);
+assert.match(apply, /admin_psql --single-transaction -f - < "\$MIGRATION"/);
+assert.match(apply, /current_database\(\)[\s\S]*current_user/);
+assert.doesNotMatch(apply, /POSTGRES_PASSWORD|GRANT\s+CREATE|ALTER\s+SCHEMA[\s\S]*OWNER|ALTER\s+TABLE[\s\S]*OWNER/i);
+assert.doesNotMatch(apply, /docker\s+compose\s+down|docker\s+volume\s+rm|docker\s+(?:rm|volume rm)[^\n]*postgres/i);
+assert.ok(apply.indexOf("incident.after.tsv") < apply.indexOf("post-apply-diff.sql"));
 
 const prismaUrl = "postgresql://user:p%40ss@db.example:5433/gesto?schema=public&sslmode=require&connection_limit=8";
 const sanitized = spawnSync("node", [resolve(root, "scripts/postgres-connection-url.mjs"), prismaUrl], { encoding: "utf8" });
@@ -98,6 +105,10 @@ assert.match(unconfirmed.stdout + unconfirmed.stderr, /CONFIRM=PRODUCTION_SCHEMA
 assert.match(apply, /pre-apply-diff\.raw\.sql[\s\S]*schema-diff-filter\.mjs[\s\S]*--single-transaction/);
 assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*applied\.tsv/);
 assert.ok(apply.indexOf("post-apply-diff.sql") < apply.indexOf('> "$evidence/applied.tsv"'), "evidence must only be released after empty Prisma diff");
+assert.match(postgresSmoke, /CREATE ROLE runtime/);
+assert.match(postgresSmoke, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
+assert.match(postgresSmoke, /psql -U runtime[\s\S]*--single-transaction/);
+assert.match(postgresSmoke, /rollback_probe[\s\S]*missing_mid_migration[\s\S]*to_regclass/);
 const partialDir = mkdtempSync(resolve(tmpdir(), "gesto-schema-partial-"));
 const partialSql = resolve(partialDir, "partial.sql");
 const partialOut = resolve(partialDir, "out.sql");
