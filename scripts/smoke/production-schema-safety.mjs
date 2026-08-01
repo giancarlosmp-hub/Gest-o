@@ -56,6 +56,37 @@ writeFileSync(partialSql, 'ALTER TABLE "CommunicationMessage" ALTER COLUMN "upda
 const partial = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), partialSql, partialOut, "pre"], { encoding: "utf8" });
 rmSync(partialDir, { recursive: true });
 assert.notEqual(partial.status, 0, "partial/incompatible target table must fail preflight");
+
+function assertContactDiff(name, sql, accepted) {
+  const testDir = mkdtempSync(resolve(tmpdir(), "gesto-contact-diff-"));
+  const input = resolve(testDir, "input.sql");
+  const output = resolve(testDir, "output.sql");
+  writeFileSync(input, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-diff-filter.mjs"), input, output, "pre"], { encoding: "utf8" });
+  rmSync(testDir, { recursive: true });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+
+assertContactDiff("grouped Contact columns", `ALTER TABLE "Contact"
+ADD COLUMN "phoneHash" VARCHAR(64),
+ADD COLUMN "phoneNormalized" VARCHAR(32);`, true);
+assertContactDiff("grouped Contact columns in reverse order", `ALTER TABLE "Contact"
+ADD COLUMN "phoneNormalized" VARCHAR(32),
+ADD COLUMN "phoneHash" VARCHAR(64);`, true);
+assertContactDiff("separate Contact statements", `ALTER TABLE "Contact" ADD COLUMN "phoneHash" VARCHAR(64);
+ALTER TABLE "Contact" ADD COLUMN "phoneNormalized" VARCHAR(32);`, true);
+assertContactDiff("unexpected third Contact column", `ALTER TABLE "Contact"
+ADD COLUMN "phoneHash" VARCHAR(64),
+ADD COLUMN "phoneNormalized" VARCHAR(32),
+ADD COLUMN "unexpected" TEXT;`, false);
+assertContactDiff("wrong Contact column size", 'ALTER TABLE "Contact" ADD COLUMN "phoneHash" VARCHAR(32);', false);
+assertContactDiff("non-null Contact column", 'ALTER TABLE "Contact" ADD COLUMN "phoneHash" VARCHAR(64) NOT NULL;', false);
+assertContactDiff("defaulted Contact column", `ALTER TABLE "Contact" ADD COLUMN "phoneHash" VARCHAR(64) DEFAULT 'x';`, false);
+assertContactDiff("altered Contact column", `ALTER TABLE "Contact" ALTER COLUMN "phoneHash" SET DEFAULT 'x';`, false);
+assertContactDiff("dropped Contact column", 'ALTER TABLE "Contact" DROP COLUMN "phoneHash";', false);
+assertContactDiff("mixed Contact operations", `ALTER TABLE "Contact"
+ADD COLUMN "phoneHash" VARCHAR(64),
+DROP COLUMN "phoneNormalized";`, false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

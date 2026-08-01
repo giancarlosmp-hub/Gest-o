@@ -1,3 +1,10 @@
+# 🔵 PR — correção do preflight de schema (01/08/2026)
+
+O teste PostgreSQL descartável comprovou um falso negativo no parser da allowlist: o Prisma 5.22.0
+agrupou as duas colunas aditivas aprovadas de `Contact` em uma única instrução `ALTER TABLE`, formato
+que o filtro não reconhecia. A migration não foi aplicada, nenhuma produção ou VPS foi acessada e o
+cutover continua bloqueado. A entrega permanece 🔵 PR.
+
 # 🔵 PR — deploy seguro preservando PostgreSQL recuperado (31/07/2026)
 
 Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A causa é checkout atualizado com containers antigos somado ao risco do Compose genérico iniciar o banco padrão. A candidata contém apenas API/WEB, usa `gest-o_default`, exige banco recuperado e metadados do commit; o cutover é confirmado e reversível. A revisão da PR acrescenta paridade completa de variáveis, rollback executável e Prisma pinado na imagem. Esta PR corrige ainda o falso negativo do preflight: o hostname interno do PostgreSQL é resolvido por `pg_isready` em container efêmero dentro de `gest-o_default`, e não pelo host ou por IP fixo. Nenhum deploy foi realizado e o estágio permanece 🔵 PR. O incidente permanece aberto até execução e validação controladas.
