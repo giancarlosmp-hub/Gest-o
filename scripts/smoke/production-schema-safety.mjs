@@ -26,6 +26,34 @@ assert.equal(generated.status, 0, generated.stderr);
 const expectedIndexes = [...generated.stdout.matchAll(/CREATE (?:UNIQUE )?INDEX "([^"]+)" ON "(?:ClientCodeAudit|Contact|Communication[^"]+)"/g)].map((match) => match[1]);
 for (const name of expectedIndexes) assert.match(approved, new RegExp(`CREATE (?:UNIQUE )?INDEX IF NOT EXISTS "${name}"`), `missing Prisma index name ${name}`);
 
+const postgresSmoke = readFileSync(resolve(root, "scripts/smoke/production-schema-postgres.sh"), "utf8");
+assert.match(postgresSmoke, /APP_COMMIT=\$\{APP_COMMIT:-\$\{EXPECTED_SHA:-\}\}/, "disposable test must require the tested SHA");
+assert.match(postgresSmoke, /API_IMAGE=\$\{API_IMAGE:-"gest-o-api:\$\{APP_COMMIT\}"\}/, "API image must default to the tested SHA");
+assert.match(postgresSmoke, /docker image inspect "\$API_IMAGE"/);
+assert.match(postgresSmoke, /org\.opencontainers\.image\.revision/);
+assert.match(postgresSmoke, /image_revision" != "\$APP_COMMIT"/);
+assert.match(postgresSmoke, /docker network create "\$NETWORK_NAME"/);
+assert.match(postgresSmoke, /--network "\$NETWORK_NAME"/);
+assert.match(postgresSmoke, /--pull=never/);
+assert.doesNotMatch(postgresSmoke, /docker run[^\n]*\s-p(?:\s|$)/, "PostgreSQL must not publish a host port");
+assert.doesNotMatch(postgresSmoke, /^\s*-p(?:\s|$)/m, "multiline docker arguments must not publish a host port");
+assert.doesNotMatch(postgresSmoke, /(?:source|\.)\s+[^\n]*production\.env/, "test must not load production.env");
+assert.match(postgresSmoke, /reject_production_target "\$\{TEST_DATABASE_URL:-\}"/);
+assert.match(postgresSmoke, /reject_production_target "\$\{DATABASE_URL:-\}"/);
+assert.match(postgresSmoke, /gest-o-db-clean-v2-20260717/);
+assert.match(postgresSmoke, /PRODUCTION_DB_HOST_EXPECTED/);
+assert.match(postgresSmoke, /localhost/);
+assert.match(postgresSmoke, /127\.0\.0\.1/);
+assert.match(postgresSmoke, /salesforce_pro/);
+assert.match(postgresSmoke, /gest-o_default/);
+assert.match(postgresSmoke, /docker rm -f "\$PG_NAME"[\s\S]*docker network rm "\$NETWORK_NAME"[\s\S]*rm -rf "\$tmp"/, "trap cleanup must remove every disposable resource");
+assert.match(postgresSmoke, /prisma_diff\(\)[\s\S]*docker run --rm[\s\S]*"\$API_IMAGE"[\s\S]*\.\/node_modules\/\.bin\/prisma migrate diff/, "Prisma must run inside the API image");
+assert.equal((postgresSmoke.match(/prisma_diff --/g) ?? []).length, 5, "full generation and all four schema scenarios must use containerized Prisma");
+assert.equal((postgresSmoke.match(/\.\/node_modules\/\.bin\/prisma/g) ?? []).length, 1, "the Prisma binary may only appear in the docker run wrapper");
+for (const scenario of ["recovered.sql", "before", "after-first", "post.raw.sql", "after-second", "post2.raw.sql", "partial.raw.sql"]) {
+  assert.match(postgresSmoke, new RegExp(scenario.replace(".", "\\.")), `missing disposable migration scenario: ${scenario}`);
+}
+
 const preview = resolve(root, "scripts/production-schema-preview.sh");
 const temporary = mkdtempSync(resolve(tmpdir(), "gesto-schema-test-"));
 const maliciousSql = resolve(temporary, "destructive.sql");

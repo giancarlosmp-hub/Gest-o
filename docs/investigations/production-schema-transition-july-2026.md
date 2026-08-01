@@ -155,3 +155,20 @@ Ausência ou valor desconhecido aborta o bootstrap; não há fallback por `NODE_
 seed ou interpolação no Compose de produção. A política é literal nos três arquivos Compose e também
 visível nos workflows. O incidente permanece em homologação e a entrega em 🔵 PR até Docker Compose
 CI, Preview Deploy e os demais checks reais ficarem verdes.
+
+## Falha operacional posterior à PR #757: Prisma ausente no host
+
+O build da PR #757 concluiu com sucesso e a imagem `gest-o-api:<APP_COMMIT>` contém o Prisma 5.22.0
+pinado. Já o ensaio PostgreSQL descartável encerrou antes da primeira migration: seu script ainda
+invocava `./node_modules/.bin/prisma` no checkout da VPS, onde dependências Node não são instaladas
+por decisão da topologia de deploy. Portanto, a falha não indica drift ou erro na migration. Nenhum
+schema foi aplicado, o banco de produção não foi acessado ou alterado, não houve cutover e os
+containers anteriores continuaram atendendo.
+
+O ensaio passa a exigir `APP_COMMIT` ou `EXPECTED_SHA`, validar a existência local da imagem (sem
+pull) e exigir que `org.opencontainers.image.revision` seja exatamente o SHA testado. Cada comando
+`prisma migrate diff` roda em container efêmero dessa imagem. O PostgreSQL 16 também é
+efêmero e se comunica apenas por uma rede Docker recém-criada, sem porta no host; sua URL aponta
+exclusivamente para o container e database `gesto_test`. Entradas herdadas que indiquem o hostname
+de produção, `salesforce_pro`, loopback ou `gest-o_default` são rejeitadas, e o trap remove banco,
+rede e arquivos temporários. O cutover segue bloqueado e esta correção permanece no estágio 🔵 PR.
