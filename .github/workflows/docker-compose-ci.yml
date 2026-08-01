@@ -116,7 +116,9 @@ jobs:
           docker compose exec -T api node -e "const { PrismaClient } = require('@prisma/client'); (async () => { const prisma = new PrismaClient(); const [director, sellerCount] = await Promise.all([prisma.user.findUnique({ where: { email: 'diretor@empresa.com' }, select: { id: true, email: true, role: true, isActive: true, passwordHash: true } }), prisma.user.count({ where: { role: 'vendedor' } })]); console.log('SMOKE_DIRECTOR_LOOKUP_RESULT: ' + JSON.stringify(director && { ...director, passwordHashPrefix: director.passwordHash.slice(0, 4), passwordHashLength: director.passwordHash.length, passwordHash: undefined })); console.log('SMOKE_SELLER_COUNT: ' + sellerCount); await prisma.\$disconnect(); })().catch(async (error) => { console.error(error); process.exitCode = 1; });"
 
       - name: Smoke test opportunities + dashboard flow
-        run: node scripts/smoke/compose-smoke.mjs
+        run: |
+          node --test scripts/smoke/dashboard-month.test.mjs
+          node scripts/smoke/compose-smoke.mjs
 
       - name: Print service status
         if: always()

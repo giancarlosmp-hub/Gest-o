@@ -34,11 +34,34 @@ const indexes = [
   "CommunicationWebhookEvent_integrationAccountId_idx", "CommunicationWebhookEvent_tenantId_idx", "CommunicationWebhookEvent_status_createdAt_idx", "CommunicationWebhookEvent_payloadHash_idx", "CommunicationWebhookEvent_provider_externalAccountId_extern_key"
 ];
 const constraints = ["ClientCodeAudit_clientId_fkey", "AgendaEvent_clientId_fkey", "CommunicationConversation_integrationAccountId_fkey", "CommunicationConversation_clientId_fkey", "CommunicationConversation_assignedSellerId_fkey", "CommunicationMessage_conversationId_fkey", "CommunicationMessage_integrationAccountId_fkey", "CommunicationWebhookEvent_integrationAccountId_fkey"];
+const approvedContactColumns = new Map([
+  ["phoneHash", "VARCHAR(64)"],
+  ["phoneNormalized", "VARCHAR(32)"]
+]);
+function isApprovedContactAddition(statement) {
+  const match = statement.match(/^ALTER\s+TABLE\s+"Contact"\s+([\s\S]+)$/);
+  if (!match) return false;
+
+  const clauses = match[1].split(",").map((clause) => clause.trim());
+  if (clauses.length === 0 || clauses.length > approvedContactColumns.size) return false;
+
+  const addedColumns = new Set();
+  for (const clause of clauses) {
+    const addition = clause.match(/^ADD\s+COLUMN\s+"(phoneHash|phoneNormalized)"\s+(VARCHAR\s*\(\s*\d+\s*\))$/);
+    if (!addition) return false;
+
+    const [, column, rawType] = addition;
+    const normalizedType = rawType.replace(/\s+/g, "");
+    if (approvedContactColumns.get(column) !== normalizedType || addedColumns.has(column)) return false;
+    addedColumns.add(column);
+  }
+  return true;
+}
 const statements = meaningful.split(/;\s*/).map((s) => s.replace(/^\s*--.*$/gm, "").trim()).filter(Boolean);
 for (const statement of statements) {
   const allowed = new RegExp(`^CREATE TYPE "${enums}" AS ENUM`, "s").test(statement)
     || new RegExp(`^CREATE TABLE "${tables}" \\(`, "s").test(statement)
-    || /^ALTER TABLE "Contact" ADD COLUMN "phone(?:Hash|Normalized)"/.test(statement)
+    || isApprovedContactAddition(statement)
     || indexes.some((name) => new RegExp(`^CREATE (?:UNIQUE )?INDEX "${name}" `).test(statement))
     || constraints.some((name) => new RegExp(`^ALTER TABLE ".+" ADD CONSTRAINT "${name}" FOREIGN KEY`).test(statement));
   if (!allowed) throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
