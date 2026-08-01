@@ -242,3 +242,18 @@ O teste descartável agora cria uma role runtime sem `CREATE`, demonstra sua rec
 administrativo, rollback integral em falha intermediária, idempotência, equivalência Prisma e
 preservação byte a byte do inventário `incident_*`. Esta mudança permanece 🔵 PR; não comprova
 produção atualizada, schema aplicado nem encerramento do incidente.
+
+## Imagem histórica ausente no primeiro cutover (01/08/2026)
+
+O schema foi aplicado e validado. No SHA operacional
+`c178a69efc79cf78862b697229c7192b607fbcc6`, o deploy também revalidou com sucesso a evidência de
+schema de `0f1391fee481254dc1896a18ec261ef168e5bbe3`. Em seguida, a preparação do rollback falhou em
+`docker image inspect`/tag porque o image ID `sha256:0ce92e...` do
+`gest-o-api-recovery-20260718` não estava mais no catálogo, embora o container permanecesse running.
+
+A falha ocorreu antes de `docker stop`; API/WEB antigas, PostgreSQL, volume e schema permaneceram
+intactos. O cutover continua pendente e o incidente aberto. A correção em 🔵 PR registra, por role,
+rollback por imagem ou pelo ID imutável de um container histórico externo ao projeto
+`gest-o-production`. Evidências completas e protegidas, validações de porta/rede/restart/DB e o
+rollback instalado são obrigatórios antes da primeira parada; containers do próprio projeto sem
+imagem falham fechado para impedir restauração ambígua após reutilização de nome.

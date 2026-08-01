@@ -51,12 +51,32 @@ const nonRuntimeAliases = new Set(["GIT_COMMIT","GITHUB_SHA","VERCEL_GIT_COMMIT_
 const deliberatelyDisabledBootstrap = new Set(["ADMIN_BOOTSTRAP_ENABLED","ADMIN_BOOTSTRAP_NAME","ADMIN_BOOTSTRAP_EMAIL","ADMIN_BOOTSTRAP_PASSWORD","ADMIN_BOOTSTRAP_ROLE","ADMIN_BOOTSTRAP_REGION","SMOKE_DIRECTOR_EMAIL","SMOKE_DIRECTOR_PASSWORD","SMOKE_SELLER_EMAIL"]);
 for (const variable of runtimeVars) if (!nonRuntimeAliases.has(variable) && !deliberatelyDisabledBootstrap.has(variable)) assert.ok(composeVars.has(variable),`Compose de produção omite ${variable} usado por config/env.ts`);
 for (const variable of ["OPENAI_ENABLED","OPENAI_API_KEY","OPENAI_MODEL","FEATURE_ERP_INVESTIGATION"]) assert.ok(composeVars.has(variable),`Compose omite compatibilidade ${variable}`);
-assert.doesNotMatch(rollback,/docker start/); assert.match(rollback,/API_ROLLBACK_IMAGE/); assert.match(rollback,/WEB_ROLLBACK_IMAGE/);
+assert.match(rollback,/docker start "\$container_id"/); assert.match(rollback,/API_ROLLBACK_IMAGE/); assert.match(rollback,/WEB_ROLLBACK_IMAGE/);
 assert.ok(rollback.indexOf('stop api web') < rollback.indexOf('up -d --no-build'),"rollback deve parar novos antes de recriar antigos");
-assert.match(rollback,/rm -f api web/); assert.match(rollback,/--force-recreate api web/); assert.match(rollback,/4000 5173/); assert.match(rollback,/\/health/);
-assert.match(rollback,/API_ROLLBACK_IMAGE_ID/); assert.match(rollback,/WEB_ROLLBACK_IMAGE_ID/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
+assert.match(rollback,/rm -f api web/); assert.match(rollback,/--force-recreate "\$role"/); assert.match(rollback,/4000 5173/); assert.match(rollback,/\/health/);
+assert.match(rollback,/restaurado não usa o image ID anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
 assert.match(deploy,/gest-o-\$\{role\}-rollback:\$release/); assert.match(deploy,/previous-runtime\.tsv/); assert.match(deploy,/rollback-images\.env/);
+assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\timage_id\\trollback_tag\\tport\\tnetworks\\trestart_policy\\tprevious_commit/);
+assert.match(deploy,/rollback-containers\.tsv/);
+assert.match(deploy,/docker image inspect "\$image_id"/); // imagem disponível -> modo image
+assert.match(deploy,/rollback_mode=container/); // API ou WEB históricos podem usar container
+assert.match(deploy,/compose_project.*com\.docker\.compose\.project/);
+assert.match(deploy,/"\$compose_project" != gest-o-production/); // ausência de imagem no projeto atual falha fechada
+assert.match(deploy,/docker inspect "\$container_id" >"\$evidence\/\$role\.previous\.inspect\.json"/);
+assert.doesNotMatch(deploy,/docker rm[^\n]*\$container_id/); // container histórico é apenas parado
+assert.ok(deploy.indexOf('bash -n "$evidence/rollback.sh"') < deploy.indexOf('docker stop "$container_id"'));
+assert.ok(deploy.indexOf('evidência incompleta para $role') < deploy.indexOf('docker stop "$container_id"'));
+assert.match(deploy,/\.aborted-\$\(date -u/); assert.match(deploy,/mv "\$evidence" "\$aborted"/);
+assert.match(deploy,/install -d -m 700/); assert.match(deploy,/chmod 600/);
+assert.match(rollback,/"\$recorded" == "\$name\|\$container_id"/); // inicia e reconfirma o ID exato
+assert.match(rollback,/\$container_id\|true/);
 assert.doesNotMatch(rollback,/compose[^\n]*(?:down|\bdb\b)/); assert.doesNotMatch(rollback,/docker\s+volume\s+rm|docker\s+compose[^\n]*(?:--volumes|\s-v(?:\s|$))/);
+for (const [name,text] of [["deploy",deploy],["rollback",rollback]]) {
+  assert.doesNotMatch(text,/docker\s+commit/);
+  assert.doesNotMatch(text,/docker\s+(?:container\s+)?rm[^\n]*(?:histor|container_id)/);
+  assert.doesNotMatch(text,/docker\s+(?:stop|rm)[^\n]*(?:postgres|PRODUCTION_DB)/i);
+  assert.doesNotMatch(text,/docker\s+volume\s+(?:rm|prune)/);
+}
 // Simula dois cutovers com o mesmo nome Compose: containers são substituídos,
 // mas tags imutáveis continuam resolvendo os image IDs anteriores.
 const images = new Map(), containers = new Map();
@@ -66,6 +86,16 @@ containers.set("api","sha256:historical-api"); containers.set("web","sha256:hist
 assert.equal(containers.get("api"),"sha256:historical-api"); assert.equal(containers.get("web"),"sha256:historical-web");
 containers.set("api","sha256:v1-api"); containers.set("web","sha256:v1-web"); cutover("v1","sha256:v2-api","sha256:v2-web"); restore("v1");
 assert.equal(containers.get("api"),"sha256:v1-api"); assert.equal(containers.get("web"),"sha256:v1-web");
+// Primeiro cutover aceita modos por role e os posteriores continuam usando imagem.
+const mechanisms = (apiImage, webImage, apiExternal=true, webExternal=true) => ({
+  api: apiImage ? "image" : apiExternal ? "container" : "fail-closed",
+  web: webImage ? "image" : webExternal ? "container" : "fail-closed",
+});
+assert.deepEqual(mechanisms(true,true), {api:"image",web:"image"});
+assert.deepEqual(mechanisms(false,true), {api:"container",web:"image"});
+assert.deepEqual(mechanisms(true,false), {api:"image",web:"container"});
+assert.deepEqual(mechanisms(false,false), {api:"container",web:"container"});
+assert.equal(mechanisms(false,true,false).api,"fail-closed");
 assert.doesNotMatch(preview,/npx\s+prisma|npm\s+(install|i)\b|npx\s+--yes/); assert.match(preview,/gest-o-api:\$\{APP_COMMIT\}/); assert.match(preview,/\.\/node_modules\/\.bin\/prisma migrate diff/);
 for (const [name,text] of [["compose",compose],["deploy",deploy],["preflight",pre],["rollback",rollback],["preview",preview],["unit",unit],["workflow",workflow]]) {
   for (const forbidden of ["down -v","volume rm","migrate reset","prisma:seed"]) assert.ok(!text.includes(forbidden),`${name} contém operação proibida`);
