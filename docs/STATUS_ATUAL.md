@@ -1,4 +1,14 @@
-# 🔵 PR — correção do preflight de schema (01/08/2026)
+# 🔵 PR — Prisma descartável executado pela imagem da API (01/08/2026)
+
+O build da PR #757 foi aprovado, inclusive com Prisma 5.22.0 pinado na imagem da API. A execução
+operacional do teste PostgreSQL descartável parou antes de aplicar qualquer migration porque o
+checkout da VPS, intencionalmente sem `node_modules`, ainda tentava iniciar o Prisma pelo host. A
+correção usa a imagem local do SHA, depois de validar seu label OCI, e conecta essa imagem e um
+PostgreSQL temporário por uma rede Docker isolada, sem porta publicada. Nenhum schema foi aplicado,
+nenhum cutover ocorreu e a produção permaneceu intacta com os containers anteriores atendendo. O
+cutover continua bloqueado e a entrega permanece 🔵 PR.
+
+# Histórico — correção do preflight de schema (01/08/2026)
 
 O teste PostgreSQL descartável comprovou um falso negativo no parser da allowlist: o Prisma 5.22.0
 agrupou as duas colunas aditivas aprovadas de `Contact` em uma única instrução `ALTER TABLE`, formato
