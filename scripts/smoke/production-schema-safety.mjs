@@ -86,6 +86,10 @@ for (const checkpoint of ["fixture-base.tsv", "after-predecessor.tsv", "after-co
 assert.match(postgresSmoke, /schema-predecessor-checkpoint\.mjs "\$tmp\/after-predecessor-diff\.sql"/, "predecessor checkpoint must have a dedicated strict validator");
 assert.match(postgresSmoke, /AFTER PREDECESSOR RAW DIFF[\s\S]*AFTER PREDECESSOR MANAGED DIFF[\s\S]*AFTER PREDECESSOR CATALOG/, "intermediate failure must expose all checkpoint evidence");
 assert.match(postgresSmoke, /expected-predecessor-fks\.tsv[\s\S]*cmp "\$tmp\/expected-predecessor-fks\.tsv" "\$tmp\/after-predecessor-fks\.tsv"/, "every predecessor FK definition must be verified before control plane");
+assert.match(postgresSmoke, /FK_EXPECTED[\s\S]*CASE WHEN c\.oid IS NULL THEN 'ABSENT' ELSE 'PRESENT'[\s\S]*source=[\s\S]*target=[\s\S]*validated=/, "catalog must report every expected FK as PRESENT or ABSENT with its exact definition");
+assert.match(postgresSmoke, /after-predecessor-fk-status\.tsv[\s\S]*cat "\$tmp\/after-predecessor-fk-status\.tsv"/, "per-FK catalog status must be visible in CI");
+assert.equal((postgresSmoke.match(/^grant_runtime_table_dml$/gm) ?? []).length, 3, "runtime DML/catalog visibility must be reconciled after fixture, predecessor and control-plane table creation");
+assert.match(postgresSmoke, /GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO runtime/, "disposable runtime must model application DML privileges, not SELECT-only visibility");
 assert.match(postgresSmoke, /cmp "\$tmp\/after-predecessor-fks\.tsv" "\$tmp\/after-control-plane-fks\.tsv"/, "control plane must preserve every predecessor FK");
 assert.match(postgresSmoke, /schema-diff-filter\.mjs "\$tmp\/post\.raw\.sql" "\$tmp\/post\.sql" post[\s\S]*test ! -s "\$tmp\/post\.sql"/, "final managed diff must remain strictly empty");
 assert.match(postgresSmoke, /set \+e[\s\S]*schema-diff-filter\.mjs "\$tmp\/post\.raw\.sql" "\$tmp\/post\.sql" post[\s\S]*FILTER_STATUS=\$\?[\s\S]*set -e/, "post-filter exit code must be captured without weakening fail-fast globally");

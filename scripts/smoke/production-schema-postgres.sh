@@ -128,8 +128,11 @@ INSERT INTO incident_20260719_orphan_productprice_audit VALUES (1,'keep');
 INSERT INTO incident_20260719_product_snapshot_map VALUES (1,'keep');
 SQL
 docker exec -i "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 <"$tmp/recovered.sql" >/dev/null
-docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
-  'GRANT SELECT ON ALL TABLES IN SCHEMA public TO runtime' >/dev/null
+grant_runtime_table_dml() {
+  docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
+    'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO runtime' >/dev/null
+}
+grant_runtime_table_dml
 count_incidents() { docker exec "$PG_NAME" psql -U postgres -d gesto_test -Atc "SELECT tablename||':'||(xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM %I',tablename),false,true,'')))[1]::text FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'incident\_%' ESCAPE '\\' ORDER BY 1"; }
 count_incidents >"$tmp/before"
 
@@ -173,6 +176,26 @@ ORDER BY c.conname,sk.n;
 SQL
 }
 
+predecessor_fk_status() {
+  docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 -At <<'SQL'
+WITH expected(conname) AS (VALUES
+ ('AgendaEvent_clientId_fkey'),('ClientCodeAudit_clientId_fkey'),
+ ('CommunicationConversation_assignedSellerId_fkey'),('CommunicationConversation_clientId_fkey'),
+ ('CommunicationConversation_integrationAccountId_fkey'),('CommunicationMessage_conversationId_fkey'),
+ ('CommunicationMessage_integrationAccountId_fkey'),('CommunicationWebhookEvent_integrationAccountId_fkey'))
+SELECT 'FK_EXPECTED', e.conname,
+ CASE WHEN c.oid IS NULL THEN 'ABSENT' ELSE 'PRESENT' END,
+ CASE WHEN c.oid IS NULL THEN '' ELSE
+   'source='||src.relname||'.'||sa.attname||' target='||dst.relname||'.'||da.attname||
+   ' delete='||c.confdeltype||' update='||c.confupdtype||' validated='||c.convalidated END
+FROM expected e LEFT JOIN pg_constraint c ON c.conname=e.conname AND c.contype='f'
+LEFT JOIN pg_class src ON src.oid=c.conrelid LEFT JOIN pg_class dst ON dst.oid=c.confrelid
+LEFT JOIN pg_attribute sa ON sa.attrelid=src.oid AND sa.attnum=c.conkey[1]
+LEFT JOIN pg_attribute da ON da.attrelid=dst.oid AND da.attnum=c.confkey[1]
+ORDER BY e.conname;
+SQL
+}
+
 structural_catalog | LC_ALL=C sort >"$tmp/fixture-base.tsv"
 
 # Preflight accepts the exact additive transition.
@@ -196,11 +219,14 @@ test "$(docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -Atc 
 
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
   <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+grant_runtime_table_dml
 structural_catalog | LC_ALL=C sort >"$tmp/after-predecessor.tsv"
 comm -23 "$tmp/fixture-base.tsv" "$tmp/after-predecessor.tsv" >"$tmp/removed-after-predecessor.tsv"
 comm -13 "$tmp/fixture-base.tsv" "$tmp/after-predecessor.tsv" >"$tmp/recreated-by-predecessor.tsv"
 cp "$tmp/after-predecessor.tsv" "$tmp/after-predecessor-catalog.tsv"
 predecessor_foreign_keys >"$tmp/after-predecessor-fks.tsv"
+predecessor_fk_status >"$tmp/after-predecessor-fk-status.tsv"
+cat "$tmp/after-predecessor-fk-status.tsv"
 cat >"$tmp/expected-predecessor-fks.tsv" <<'TSV'
 AgendaEvent_clientId_fkey	AgendaEvent	clientId	Client	id	n	c	t
 ClientCodeAudit_clientId_fkey	ClientCodeAudit	clientId	Client	id	r	c	t
@@ -226,11 +252,13 @@ if [[ "$PREDECESSOR_FILTER_STATUS" -ne 0 || "$PREDECESSOR_FK_STATUS" -ne 0 ]]; t
   printf '%s\n' '===== AFTER PREDECESSOR RAW DIFF ====='; cat "$tmp/after-predecessor-diff.raw.sql"
   printf '%s\n' '===== AFTER PREDECESSOR MANAGED DIFF ====='; cat "$tmp/after-predecessor-diff.sql"
   printf '%s\n' '===== AFTER PREDECESSOR CATALOG ====='; cat "$tmp/after-predecessor-catalog.tsv"
+  cat "$tmp/after-predecessor-fk-status.tsv"
   [[ "$PREDECESSOR_FILTER_STATUS" -ne 0 ]] && exit "$PREDECESSOR_FILTER_STATUS"
   exit "$PREDECESSOR_FK_STATUS"
 fi
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
   <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
+grant_runtime_table_dml
 structural_catalog | LC_ALL=C sort >"$tmp/after-control-plane.tsv"
 comm -23 "$tmp/after-predecessor.tsv" "$tmp/after-control-plane.tsv" >"$tmp/removed-after-control-plane.tsv"
 comm -13 "$tmp/after-predecessor.tsv" "$tmp/after-control-plane.tsv" >"$tmp/recreated-by-control-plane.tsv"
