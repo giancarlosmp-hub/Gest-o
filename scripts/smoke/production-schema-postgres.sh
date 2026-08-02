@@ -133,11 +133,53 @@ docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
 count_incidents() { docker exec "$PG_NAME" psql -U postgres -d gesto_test -Atc "SELECT tablename||':'||(xpath('/row/c/text()',query_to_xml(format('SELECT count(*) c FROM %I',tablename),false,true,'')))[1]::text FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'incident\_%' ESCAPE '\\' ORDER BY 1"; }
 count_incidents >"$tmp/before"
 
+structural_catalog() {
+  docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT 'table', c.relname, '', '' FROM pg_class c
+WHERE c.relnamespace='public'::regnamespace AND c.relkind='r'
+  AND c.relname IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent','Tenant','TenantMembership')
+UNION ALL SELECT 'enum', t.typname, e.enumsortorder::text, e.enumlabel
+FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
+WHERE t.typnamespace='public'::regnamespace AND (t.typname LIKE 'Communication%' OR t.typname IN ('TenantStatus','TenantMembershipStatus','TenantRole'))
+UNION ALL SELECT 'column', table_name, ordinal_position::text, column_name || E'\t' || udt_name || E'\t' || is_nullable || E'\t' || coalesce(column_default,'')
+FROM information_schema.columns WHERE table_schema='public' AND ((table_name='Contact' AND column_name IN ('phoneHash','phoneNormalized')) OR table_name IN ('Tenant','TenantMembership'))
+UNION ALL SELECT 'index', tablename, indexname, indexdef FROM pg_indexes
+WHERE schemaname='public' AND tablename IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent','Contact','Tenant','TenantMembership')
+UNION ALL SELECT CASE c.contype WHEN 'f' THEN 'foreign_key' WHEN 'c' THEN 'check' ELSE 'constraint' END,
+  r.relname, c.conname, pg_get_constraintdef(c.oid,true)
+FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
+WHERE c.connamespace='public'::regnamespace AND c.contype IN ('f','c')
+  AND r.relname IN ('ClientCodeAudit','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent','AgendaEvent','Tenant','TenantMembership')
+ORDER BY 1,2,3,4;
+SQL
+}
+
+predecessor_foreign_keys() {
+  docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT c.conname, src.relname, sa.attname, dst.relname, da.attname,
+       c.confdeltype, c.confupdtype, c.convalidated
+FROM pg_constraint c
+JOIN pg_class src ON src.oid=c.conrelid JOIN pg_class dst ON dst.oid=c.confrelid
+JOIN unnest(c.conkey) WITH ORDINALITY sk(attnum,n) ON true
+JOIN unnest(c.confkey) WITH ORDINALITY dk(attnum,n) ON dk.n=sk.n
+JOIN pg_attribute sa ON sa.attrelid=src.oid AND sa.attnum=sk.attnum
+JOIN pg_attribute da ON da.attrelid=dst.oid AND da.attnum=dk.attnum
+WHERE c.contype='f' AND c.conname IN (
+ 'ClientCodeAudit_clientId_fkey','CommunicationConversation_clientId_fkey',
+ 'CommunicationConversation_assignedSellerId_fkey','CommunicationConversation_integrationAccountId_fkey',
+ 'CommunicationMessage_conversationId_fkey','CommunicationMessage_integrationAccountId_fkey',
+ 'CommunicationWebhookEvent_integrationAccountId_fkey','AgendaEvent_clientId_fkey')
+ORDER BY c.conname,sk.n;
+SQL
+}
+
+structural_catalog | LC_ALL=C sort >"$tmp/fixture-base.tsv"
+
 # Preflight accepts the exact additive transition.
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/pre.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/pre.raw.sql" "$tmp/pre.sql" pre
-if docker exec -i "$PG_NAME" psql -U runtime -d gesto_test -v ON_ERROR_STOP=1 --single-transaction \
-  <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >"$tmp/runtime.out" 2>&1; then
+if printf 'CREATE TABLE runtime_ddl_probe(id int);\n' | docker exec -i "$PG_NAME" \
+  psql -U runtime -d gesto_test -v ON_ERROR_STOP=1 --single-transaction >"$tmp/runtime.out" 2>&1; then
   echo 'runtime role unexpectedly acquired DDL authority' >&2
   exit 1
 fi
@@ -154,8 +196,51 @@ test "$(docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -Atc 
 
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
   <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+structural_catalog | LC_ALL=C sort >"$tmp/after-predecessor.tsv"
+comm -23 "$tmp/fixture-base.tsv" "$tmp/after-predecessor.tsv" >"$tmp/removed-after-predecessor.tsv"
+comm -13 "$tmp/fixture-base.tsv" "$tmp/after-predecessor.tsv" >"$tmp/recreated-by-predecessor.tsv"
+cp "$tmp/after-predecessor.tsv" "$tmp/after-predecessor-catalog.tsv"
+predecessor_foreign_keys >"$tmp/after-predecessor-fks.tsv"
+cat >"$tmp/expected-predecessor-fks.tsv" <<'TSV'
+AgendaEvent_clientId_fkey	AgendaEvent	clientId	Client	id	n	c	t
+ClientCodeAudit_clientId_fkey	ClientCodeAudit	clientId	Client	id	r	c	t
+CommunicationConversation_assignedSellerId_fkey	CommunicationConversation	assignedSellerId	User	id	n	c	t
+CommunicationConversation_clientId_fkey	CommunicationConversation	clientId	Client	id	n	c	t
+CommunicationConversation_integrationAccountId_fkey	CommunicationConversation	integrationAccountId	CommunicationIntegrationAccount	id	n	c	t
+CommunicationMessage_conversationId_fkey	CommunicationMessage	conversationId	CommunicationConversation	id	c	c	t
+CommunicationMessage_integrationAccountId_fkey	CommunicationMessage	integrationAccountId	CommunicationIntegrationAccount	id	n	c	t
+CommunicationWebhookEvent_integrationAccountId_fkey	CommunicationWebhookEvent	integrationAccountId	CommunicationIntegrationAccount	id	n	c	t
+TSV
+prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/after-predecessor-diff.raw.sql"
+set +e
+node scripts/schema-diff-filter.mjs "$tmp/after-predecessor-diff.raw.sql" "$tmp/after-predecessor-diff.sql" pre
+PREDECESSOR_FILTER_STATUS=$?
+if [[ "$PREDECESSOR_FILTER_STATUS" -eq 0 ]]; then
+  node scripts/schema-predecessor-checkpoint.mjs "$tmp/after-predecessor-diff.sql"
+  PREDECESSOR_FILTER_STATUS=$?
+fi
+cmp "$tmp/expected-predecessor-fks.tsv" "$tmp/after-predecessor-fks.tsv"
+PREDECESSOR_FK_STATUS=$?
+set -e
+if [[ "$PREDECESSOR_FILTER_STATUS" -ne 0 || "$PREDECESSOR_FK_STATUS" -ne 0 ]]; then
+  printf '%s\n' '===== AFTER PREDECESSOR RAW DIFF ====='; cat "$tmp/after-predecessor-diff.raw.sql"
+  printf '%s\n' '===== AFTER PREDECESSOR MANAGED DIFF ====='; cat "$tmp/after-predecessor-diff.sql"
+  printf '%s\n' '===== AFTER PREDECESSOR CATALOG ====='; cat "$tmp/after-predecessor-catalog.tsv"
+  [[ "$PREDECESSOR_FILTER_STATUS" -ne 0 ]] && exit "$PREDECESSOR_FILTER_STATUS"
+  exit "$PREDECESSOR_FK_STATUS"
+fi
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
   <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
+structural_catalog | LC_ALL=C sort >"$tmp/after-control-plane.tsv"
+comm -23 "$tmp/after-predecessor.tsv" "$tmp/after-control-plane.tsv" >"$tmp/removed-after-control-plane.tsv"
+comm -13 "$tmp/after-predecessor.tsv" "$tmp/after-control-plane.tsv" >"$tmp/recreated-by-control-plane.tsv"
+test ! -s "$tmp/removed-after-control-plane.tsv"
+predecessor_foreign_keys >"$tmp/after-control-plane-fks.tsv"
+if ! cmp "$tmp/after-predecessor-fks.tsv" "$tmp/after-control-plane-fks.tsv"; then
+  printf '%s\n' '===== AFTER PREDECESSOR CATALOG ====='; cat "$tmp/after-predecessor.tsv"
+  printf '%s\n' '===== AFTER CONTROL PLANE CATALOG ====='; cat "$tmp/after-control-plane.tsv"
+  exit 1
+fi
 count_incidents >"$tmp/after-first"
 cmp "$tmp/before" "$tmp/after-first"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
@@ -196,8 +281,7 @@ SQL
 fi
 test ! -s "$tmp/post.sql"
 
-# The historical repeatable transition remains safe; the new Prisma migration is applied exactly once.
-docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+# Revalidate idempotent observation without executing either migration again.
 count_incidents >"$tmp/after-second"
 cmp "$tmp/before" "$tmp/after-second"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post2.raw.sql"

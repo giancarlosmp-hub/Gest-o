@@ -27,6 +27,21 @@ const expectedIndexes = [...generated.stdout.matchAll(/CREATE (?:UNIQUE )?INDEX 
 for (const name of expectedIndexes) assert.match(approved, new RegExp(`CREATE (?:UNIQUE )?INDEX IF NOT EXISTS "${name}"`), `missing Prisma index name ${name}`);
 
 const postgresSmoke = readFileSync(resolve(root, "scripts/smoke/production-schema-postgres.sh"), "utf8");
+const predecessorCheckpoint = readFileSync(resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), "utf8");
+for (const name of ["TenantStatus", "TenantMembershipStatus", "TenantRole", "Tenant", "TenantMembership", "Tenant_slug_key", "TenantMembership_tenantId_fkey", "TenantMembership_userId_fkey"]) {
+  assert.match(predecessorCheckpoint, new RegExp(name), `strict predecessor checkpoint must recognize ${name}`);
+}
+assert.doesNotMatch(predecessorCheckpoint, /Communication|ClientCodeAudit|Contact|AgendaEvent/, "checkpoint allowlist must not accept predecessor residual DDL");
+const checkpointDir = mkdtempSync(resolve(tmpdir(), "gesto-predecessor-checkpoint-"));
+const checkpointAllowed = resolve(checkpointDir, "allowed.sql");
+const checkpointResidual = resolve(checkpointDir, "residual.sql");
+writeFileSync(checkpointAllowed, 'CREATE TYPE "TenantStatus" AS ENUM (\'active\', \'suspended\', \'archived\');\nCREATE TABLE "Tenant" ("id" TEXT NOT NULL);\nCREATE UNIQUE INDEX "Tenant_slug_key" ON "Tenant"("slug");\n');
+writeFileSync(checkpointResidual, 'ALTER TABLE "ClientCodeAudit" ADD CONSTRAINT "ClientCodeAudit_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id");\n');
+const checkpointAccepted = spawnSync("node", [resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), checkpointAllowed], { encoding: "utf8" });
+const checkpointRejected = spawnSync("node", [resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), checkpointResidual], { encoding: "utf8" });
+rmSync(checkpointDir, { recursive: true });
+assert.equal(checkpointAccepted.status, 0, checkpointAccepted.stderr);
+assert.notEqual(checkpointRejected.status, 0, "predecessor residual FK must fail the intermediate checkpoint");
 assert.match(postgresSmoke, /APP_COMMIT=\$\{APP_COMMIT:-\$\{EXPECTED_SHA:-\}\}/, "disposable test must require the tested SHA");
 assert.match(postgresSmoke, /API_IMAGE=\$\{API_IMAGE:-"gest-o-api:\$\{APP_COMMIT\}"\}/, "API image must default to the tested SHA");
 assert.match(postgresSmoke, /docker image inspect "\$API_IMAGE"/);
@@ -48,7 +63,7 @@ assert.match(postgresSmoke, /salesforce_pro/);
 assert.match(postgresSmoke, /gest-o_default/);
 assert.match(postgresSmoke, /docker rm -f "\$PG_NAME"[\s\S]*docker network rm "\$NETWORK_NAME"[\s\S]*rm -rf "\$tmp"/, "trap cleanup must remove every disposable resource");
 assert.match(postgresSmoke, /prisma_diff\(\)[\s\S]*docker run --rm[\s\S]*"\$API_IMAGE"[\s\S]*\.\/node_modules\/\.bin\/prisma migrate diff/, "Prisma must run inside the API image");
-assert.equal((postgresSmoke.match(/prisma_diff --/g) ?? []).length, 5, "full generation and all four schema scenarios must use containerized Prisma");
+assert.equal((postgresSmoke.match(/prisma_diff --/g) ?? []).length, 6, "full generation and all five schema scenarios must use containerized Prisma");
 assert.equal((postgresSmoke.match(/\.\/node_modules\/\.bin\/prisma/g) ?? []).length, 1, "the Prisma binary may only appear in the docker run wrapper");
 for (const scenario of ["recovered.sql", "before", "after-first", "post.raw.sql", "after-second", "post2.raw.sql", "partial.raw.sql"]) {
   assert.match(postgresSmoke, new RegExp(scenario.replace(".", "\\.")), `missing disposable migration scenario: ${scenario}`);
@@ -56,10 +71,23 @@ for (const scenario of ["recovered.sql", "before", "after-first", "post.raw.sql"
 assert.match(postgresSmoke, /DROP TABLE "TenantMembership", "Tenant";/, "recovered fixture must not start with an already materialized control plane");
 assert.match(postgresSmoke, /DROP TYPE "TenantMembershipStatus", "TenantRole", "TenantStatus";/, "recovered fixture must not retain control-plane enums");
 assert.equal(
+  (postgresSmoke.match(/<apps\/api\/prisma\/migrations\/20260731150000_safe_production_schema_transition\/migration\.sql/g) ?? []).length,
+  1,
+  "predecessor migration must be executed exactly once"
+);
+assert.equal(
   (postgresSmoke.match(/<apps\/api\/prisma\/migrations\/20260802120000_tenancy_control_plane\/migration\.sql/g) ?? []).length,
   1,
   "control-plane migration must be executed exactly once"
 );
+for (const checkpoint of ["fixture-base.tsv", "after-predecessor.tsv", "after-control-plane.tsv", "after-predecessor-diff.raw.sql", "after-predecessor-diff.sql", "after-predecessor-catalog.tsv"]) {
+  assert.match(postgresSmoke, new RegExp(checkpoint.replaceAll(".", "\\.")), `missing structural checkpoint ${checkpoint}`);
+}
+assert.match(postgresSmoke, /schema-predecessor-checkpoint\.mjs "\$tmp\/after-predecessor-diff\.sql"/, "predecessor checkpoint must have a dedicated strict validator");
+assert.match(postgresSmoke, /AFTER PREDECESSOR RAW DIFF[\s\S]*AFTER PREDECESSOR MANAGED DIFF[\s\S]*AFTER PREDECESSOR CATALOG/, "intermediate failure must expose all checkpoint evidence");
+assert.match(postgresSmoke, /expected-predecessor-fks\.tsv[\s\S]*cmp "\$tmp\/expected-predecessor-fks\.tsv" "\$tmp\/after-predecessor-fks\.tsv"/, "every predecessor FK definition must be verified before control plane");
+assert.match(postgresSmoke, /cmp "\$tmp\/after-predecessor-fks\.tsv" "\$tmp\/after-control-plane-fks\.tsv"/, "control plane must preserve every predecessor FK");
+assert.match(postgresSmoke, /schema-diff-filter\.mjs "\$tmp\/post\.raw\.sql" "\$tmp\/post\.sql" post[\s\S]*test ! -s "\$tmp\/post\.sql"/, "final managed diff must remain strictly empty");
 assert.match(postgresSmoke, /set \+e[\s\S]*schema-diff-filter\.mjs "\$tmp\/post\.raw\.sql" "\$tmp\/post\.sql" post[\s\S]*FILTER_STATUS=\$\?[\s\S]*set -e/, "post-filter exit code must be captured without weakening fail-fast globally");
 assert.match(postgresSmoke, /if \[\[ "\$FILTER_STATUS" -ne 0 \]\]; then[\s\S]*POST-APPLY PRISMA DIFF RAW[\s\S]*cat "\$tmp\/post\.raw\.sql"[\s\S]*POST-APPLY MANAGED DIFF[\s\S]*cat "\$tmp\/post\.sql"[\s\S]*CONTROL-PLANE STRUCTURAL CATALOG[\s\S]*cat "\$tmp\/control-plane-catalog\.tsv"[\s\S]*exit "\$FILTER_STATUS"/, "failed post-filter must expose structural evidence and preserve failure");
 assert.match(postgresSmoke, /information_schema\.columns[\s\S]*pg_indexes[\s\S]*pg_constraint/, "diagnostic catalog must cover columns, indexes, FKs and checks");
