@@ -19,49 +19,44 @@ function withTimeout<T>(promise: Promise<T>, timeoutError: string, timeoutMs = L
 
 export async function login(req: Request, res: Response) {
   const { email, password } = req.body;
+  const startedAt = Date.now();
   let timedOut = false;
   const sendLoginResponse = (status: number, body: Record<string, unknown>) => {
-    console.log("LOGIN_RESPONSE_STATUS=", status);
     return res.status(status).json(body);
   };
 
-  try {
-    logApiEvent("INFO", "LOGIN_START", { email });
-    console.log("LOGIN_EMAIL=", email);
+  const logLogin = (event: "auth_login_success" | "auth_login_failure", status: number, reason: "authenticated" | "invalid_credentials" | "internal_error") => {
+    logApiEvent(status >= 500 ? "ERROR" : status >= 400 ? "WARN" : "INFO", event, {
+      requestId: req.requestId,
+      reason,
+      status,
+      durationMs: Date.now() - startedAt,
+    });
+  };
 
+  try {
     const loginLogic = async () => {
-      logApiEvent("INFO", "BEFORE_DB", { email });
       const user = await withTimeout(prisma.user.findUnique({ where: { email } }), "LOGIN_DB_TIMEOUT");
-      logApiEvent("INFO", "AFTER_DB", { email, userFound: Boolean(user) });
-      console.log("USER_FOUND_EMAIL=", user?.email ?? null);
-      console.log("USER_FOUND_ID=", user?.id ?? null);
-      console.log("PASSWORD_HASH_PRESENT=", Boolean(user?.passwordHash));
-      if (user?.passwordHash) {
-        console.log("LOGIN_PASSWORD_LENGTH=", typeof password === "string" ? password.length : 0);
-        console.log("LOGIN_HASH_PREFIX=", user.passwordHash.slice(0, 4));
-        console.log("LOGIN_HASH_LENGTH=", user.passwordHash.length);
-      }
 
       if (timedOut || res.headersSent) return;
-      if (!user) {
-        console.log("USER NOT FOUND IN DATABASE");
+      if (!user || !user.isActive) {
+        logLogin("auth_login_failure", 401, "invalid_credentials");
         return sendLoginResponse(401, { message: "Credenciais inválidas" });
       }
-      if (!user.isActive) return sendLoginResponse(403, { message: "Usuário desativado. Procure o administrador." });
 
-      logApiEvent("INFO", "BEFORE_BCRYPT", { email, userId: user.id });
       const ok = await withTimeout(verifyPassword(password, user.passwordHash), "LOGIN_BCRYPT_TIMEOUT");
-      console.log("BCRYPT_COMPARE_RESULT=", ok);
-      console.log("LOGIN_PASSWORD_MATCHES=", ok);
 
       if (timedOut || res.headersSent) return;
-      if (!ok) return sendLoginResponse(401, { message: "Credenciais inválidas" });
+      if (!ok) {
+        logLogin("auth_login_failure", 401, "invalid_credentials");
+        return sendLoginResponse(401, { message: "Credenciais inválidas" });
+      }
 
       const payload = { id: user.id, email: user.email, role: user.role, region: user.region };
       const accessToken = signAccessToken(payload);
       const refreshToken = signRefreshToken(payload);
       res.cookie("refreshToken", refreshToken, cookieConfig);
-      logApiEvent("INFO", "SUCCESS", { email, userId: user.id });
+      logLogin("auth_login_success", 200, "authenticated");
       return sendLoginResponse(200, { accessToken, user: { id: user.id, name: user.name, email: user.email, role: user.role, region: user.region } });
     };
 
@@ -75,10 +70,7 @@ export async function login(req: Request, res: Response) {
       ),
     ]);
   } catch (error) {
-    logApiEvent("ERROR", "LOGIN_RUNTIME_ERROR", {
-      email,
-      error: error instanceof Error ? error.message : "UNKNOWN_LOGIN_ERROR",
-    });
+    logLogin("auth_login_failure", 503, "internal_error");
 
     if (!res.headersSent) {
       return sendLoginResponse(503, { message: "LOGIN_RUNTIME_ERROR" });
