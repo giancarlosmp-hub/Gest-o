@@ -1,3 +1,40 @@
+# 🟢 Produção validada após cutover — 01/08/2026
+
+## Comprovado
+
+- schema aplicado em produção, com `applied.tsv`, checksum da migration validado e
+  `post-apply-diff.sql` gerenciado vazio;
+- cinco tabelas, sete enums e duas colunas de `Contact` confirmados, com as oito tabelas
+  `incident_*` preservadas;
+- cutover local concluído para `a08a62670c4940322ce037d0c86c54959db32f71` e novos containers de
+  API e WEB iniciados;
+- CRM acessado após o cutover, com login e navegação funcionando;
+- sincronização de clientes aprovada, cliente ERP 5050 presente e Saúde da Plataforma disponível;
+- banco preservado e nenhum relato de perda de dados após o cutover.
+
+A validação complementar falhou apenas porque `API_IMAGE` e `WEB_IMAGE` não estavam exportadas no
+shell que executou `docker compose ps`, **depois** da mensagem “Cutover concluído localmente”. Isso
+não invalida o deploy já executado, mas também não substitui as verificações pendentes abaixo.
+
+## Ainda pendente
+
+- consolidar a evidência técnica externa de API/WEB por SHA em `/health/version` e
+  `build-info.json`, caso as saídas não tenham sido preservadas;
+- validação prolongada de estabilidade;
+- restore integral em ambiente isolado e definição de RPO/RTO;
+- fechamento formal dos incidentes segundo todos os seus critérios;
+- correção dos P0 de segurança TD-ER-001 e TD-ER-002.
+
+# 🔵 PR — baseline de Enterprise Readiness reconciliada (02/08/2026)
+
+A Sprint 0.1 cria uma baseline documental/read-only em 17 dimensões e um backlog de achados baseado
+em evidências do repositório. Nenhum código de aplicação, banco, migration, Docker, deploy, VPS ou
+produção foi alterado ou acessado. A entrega não declara o Gest-o Enterprise-ready, não infere
+produção pelo Git e não encerra `INC-5050-4484`, `INC-ERP-5050` nem `INC-PROD-2026-07`.
+Consulte [`ENTERPRISE_READINESS.md`](ENTERPRISE_READINESS.md),
+[`TECH_DEBT.md`](TECH_DEBT.md) e o
+[`Sprint Brief`](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md).
+
 # 🔵 PR — governança de desenvolvimento institucionalizada (01/08/2026)
 
 O Comitê de Arquitetura, o Sprint Brief obrigatório, o ciclo de ADR, a avaliação de Enterprise
@@ -7,7 +44,7 @@ documental: não altera aplicação, banco, deploy, produção, incidentes ou os
 ausência de uma baseline própria de Enterprise Readiness foi registrada como recomendação formal de
 backlog, sem implementação automática.
 
-# 🔵 PR — allowlist exata para reutilização da evidência de schema (01/08/2026)
+# Histórico — allowlist exata para reutilização da evidência de schema (01/08/2026)
 
 O diagnóstico read-only na VPS confirmou `applied.tsv` e checksum íntegros, migration autorizada
 idêntica, `post-apply-diff.sql` vazio e a árvore `apps/api/prisma` equivalente. O bloqueio ocorreu
@@ -17,7 +54,7 @@ operacionais explicitamente autorizados e registra no log qualquer caminho bloqu
 containers antigos continuam preservados; nenhum cutover ou deploy ocorreu, o incidente permanece
 aberto, o cutover segue pendente e o estágio continua 🔵 PR.
 
-# 🔵 PR — correção de URI Prisma para `psql` após tentativa controlada (01/08/2026)
+# Histórico — correção de URI Prisma para `psql` após tentativa controlada (01/08/2026)
 
 O apply controlado foi iniciado na VPS. Preflight, backup, allowlist e validação da migration
 passaram, mas a execução foi interrompida antes da aplicação SQL: o `psql` rejeitou o parâmetro
@@ -26,7 +63,7 @@ foi alterada e nenhum cutover ocorreu. A sanitização automática da conexão e
 merge e todos os checks verdes, o próximo passo é atualizar a `main` na VPS e repetir
 `production-schema-apply.sh` desde o início; o schema apply e o cutover continuam pendentes.
 
-# 🔵 PR — Prisma descartável executado pela imagem da API (01/08/2026)
+# Histórico — Prisma descartável executado pela imagem da API (01/08/2026)
 
 O build da PR #757 foi aprovado, inclusive com Prisma 5.22.0 pinado na imagem da API. A execução
 operacional do teste PostgreSQL descartável parou antes de aplicar qualquer migration porque o
@@ -43,7 +80,7 @@ agrupou as duas colunas aditivas aprovadas de `Contact` em uma única instruçã
 que o filtro não reconhecia. A migration não foi aplicada, nenhuma produção ou VPS foi acessada e o
 cutover continua bloqueado. A entrega permanece 🔵 PR.
 
-# 🔵 PR — deploy seguro preservando PostgreSQL recuperado (31/07/2026)
+# Histórico — deploy seguro preservando PostgreSQL recuperado (31/07/2026)
 
 Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A causa é checkout atualizado com containers antigos somado ao risco do Compose genérico iniciar o banco padrão. A candidata contém apenas API/WEB, usa `gest-o_default`, exige banco recuperado e metadados do commit; o cutover é confirmado e reversível. A revisão da PR acrescenta paridade completa de variáveis, rollback executável e Prisma pinado na imagem. Esta PR corrige ainda o falso negativo do preflight: o hostname interno do PostgreSQL é resolvido por `pg_isready` em container efêmero dentro de `gest-o_default`, e não pelo host ou por IP fixo. Nenhum deploy foi realizado e o estágio permanece 🔵 PR. O incidente permanece aberto até execução e validação controladas.
 
@@ -59,15 +96,15 @@ Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A cau
 
 **Última atualização:**
 
-31/07/2026
+02/08/2026
 
 **Última PR:**
 
-#751
+#765
 
 **Último commit:**
 
-`cdba39d`
+PR #765 (reconciliação documental atual); revisão operacional conhecida `a08a626`
 
 ### Produção
 
@@ -85,7 +122,8 @@ Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A cau
 
 > Resumo operacional de uma página derivado do
 > [Documento Mestre 4.0](DOCUMENTO_MESTRE.md), fonte única de verdade. Os indicadores acima formam
-> uma legenda; o estado vigente é **🟡 Em Homologação**.
+> uma legenda; a plataforma está operacional após o cutover, mas os incidentes e gates enterprise
+> permanecem em homologação/atenção.
 
 ## Onde paramos
 
@@ -94,42 +132,47 @@ Código, testes e runbooks foram preparados, sem deploy nem acesso à VPS. A cau
   auditoria; ainda falta validar as duas filiais independentes e seus perfis em homologação.
 - **Próxima funcionalidade:** Activity First, começando por inventário, plano de migração e testes;
   implementação bloqueada até a estabilização.
-- **Bloqueadores:** comprovar revisão/topologia de produção, concluir homologação 5050×4484,
-  publicar veredito ERP 5050, testar restauração de backup e revisar hardening da VPS.
+- **Bloqueadores:** preservar a confirmação externa de SHA de API/WEB, concluir homologação
+  5050×4484, publicar veredito ERP 5050, testar restauração de backup, corrigir os P0 de segurança e
+  revisar hardening da VPS.
 
 ## Próxima sprint
 
-1. Registrar commit, imagem, stack, banco, volume e migrações reais de produção.
-2. Homologar A–H e sincronização controlada; confirmar 5050 e 4484 independentes.
-3. Reconciliar perfis financeiros e fechar o veredito ERP 5050.
-4. Restaurar backup com SHA256 em ambiente isolado e revisar hardening.
-5. Aprovar inventário/plano Activity First sem alterar contratos vigentes.
+1. Na primeira Sprint de implementação, corrigir TD-ER-001 (`/debug/admin`) e TD-ER-002 (logs
+   sensíveis de login), sem implementar essas correções nesta PR documental.
+2. Consolidar as saídas externas de SHA de API/WEB e monitorar estabilidade prolongada.
+3. Homologar A–H e sincronização controlada; confirmar 5050 e 4484 independentes.
+4. Reconciliar perfis financeiros e fechar o veredito ERP 5050.
+5. Restaurar backup com SHA256 em ambiente isolado e revisar hardening.
 
 ## Incidente aberto
 
-**INC-5050-4484 — EM HOMOLOGAÇÃO.** Permanece nesse estado enquanto qualquer filial esperada
+**INC-5050-4484 — EM HOMOLOGAÇÃO.** O 5050 foi confirmado no CRM. O incidente permanece nesse estado enquanto qualquer filial esperada
 estiver ausente. Encerramento exige revisão confirmada, A–H aprovados, 5050/4484 com identidades
-próprias, perfis reconciliados e evidências preservadas. O INC-ERP-5050 continua investigando o
-arquivamento/ausência associado ao ERP 5050.
+próprias, perfis reconciliados e evidências preservadas. O `INC-ERP-5050` registra recuperação
+funcional do 5050, mas continua investigando a causa do arquivamento/ausência. O
+`INC-PROD-2026-07` permanece corrigido aguardando encerramento, validação prolongada e restore isolado.
 
 ## Último deploy
 
-A topologia conhecida é API `gest-o-api-recovery-20260718`, PostgreSQL
-`gest-o-db-clean-v2-20260717`, database `salesforce_pro` e rede `gest-o_default`. **Data e commit do
-último deploy não estão comprovados no repositório** e devem ser coletados na VPS antes de qualquer
-mudança.
+A última revisão operacional conhecida é `a08a62670c4940322ce037d0c86c54959db32f71`: schema aplicado,
+cutover local concluído e novos containers API/WEB iniciados. PostgreSQL, database `salesforce_pro`,
+rede `gest-o_default` e tabelas `incident_*` foram preservados. A convergência do SHA público via
+`/health/version` e `build-info.json` continua não comprovada caso suas saídas não tenham sido
+preservadas.
 
 ## Última PR
 
-**#751**, “reorganizar Documento Mestre do projeto Gest-o”, merge `cdba39d` em 31/07/2026.
+**#765**, “docs: cria baseline de Enterprise Readiness do Gest-o”, em 🔵 PR. O histórico de #751 foi
+substituído neste cabeçalho consolidado, sem apagá-lo das entradas históricas.
 
 ## Próximos passos
 
 1. Fechar todos os P0 com evidência objetiva.
-2. Atualizar este resumo e o Documento Mestre após a validação/deploy.
+2. Corrigir TD-ER-001 e TD-ER-002 na primeira Sprint de implementação após esta baseline.
 3. Só então iniciar Activity First; não ampliar IA, canais, Financeiro, Fretes, aplicativo ou ERP futuro.
 
-## Gate de schema de produção — 31/07/2026
+## Histórico — gate de schema de produção em 31/07/2026
 
 O cutover permanece bloqueado. O preview encontrou DDL aditiva legítima e oito tabelas históricas
 `incident_*` que `prisma db push` tentaria excluir. Foi preparado fluxo versionado de preview/apply,
@@ -137,7 +180,7 @@ sem acesso à VPS ou produção; o banco recuperado permanece preservado. As ima
 `a2daeb5e2b8470a8a68bc5e5b164627a7cc18743` foram construídas, mas não publicadas. O incidente
 5050×4484 continua em homologação. Consulte a [auditoria](investigations/production-schema-transition-july-2026.md).
 
-## Tentativa segura de schema apply — 01/08/2026
+## Histórico — tentativa segura de schema apply em 01/08/2026
 
 No SHA `6041ddac24a6be0bb85a63498656b4d183ccd5d7`, o apply passou pelos gates, chegou à
 transação única e falhou no primeiro `CREATE TYPE` com `permission denied for schema public`.
@@ -151,7 +194,7 @@ transação DDL e validações administrativas indispensáveis ao `postgres` loc
 troca de owner, senha administrativa ou porta publicada. Produção **não** está atualizada, o schema
 **não** está aplicado e o incidente continua aberto com cutover bloqueado.
 
-## Segundo ensaio de cutover — rollback histórico híbrido
+## Histórico — segundo ensaio de cutover e rollback híbrido
 
 O schema de produção foi aplicado e validado, e a evidência originalmente emitida para
 `0f1391fee481254dc1896a18ec261ef168e5bbe3` foi revalidada com sucesso para o SHA operacional

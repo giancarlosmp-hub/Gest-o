@@ -1,6 +1,9 @@
-# ADENDO — segurança de deploy pós-recuperação
+# ADENDO HISTÓRICO — segurança de deploy pós-recuperação
 
 > 🔵 Entrega em PR (31/07/2026), sem VPS ou produção. A topologia isolada API/WEB exige identidade do banco recuperado, separa build/preflight do cutover humano, permite rollback dos containers históricos e prova o SHA. O banco recuperado segue vigente até migração formal e o incidente continua aberto. Consulte `DEPLOY_GUIDE.md`.
+
+> Este adendo preserva o estado intermediário de 31/07. O estado vigente após o cutover de 01/08
+> está no painel [Estado Atual da Produção](#estado-atual-da-produção).
 
 > O preflight de PostgreSQL deve resolver o hostname interno por um container efêmero na rede `gest-o_default`, nunca pelo DNS do host ou por IP fixo. A imagem `postgres:16` precisa existir localmente e não pode ser baixada automaticamente durante a janela.
 
@@ -12,23 +15,33 @@
 > guardam detalhe e evidência, mas o estado oficial, a prioridade e os gates são os registrados aqui.
 > Em caso de divergência, corrija este documento na mesma PR da mudança.
 
+## Índice oficial
+
+- [Estado atual](STATUS_ATUAL.md)
+- [Operação pós-merge](OPERACAO.md)
+- [Guia de deploy](DEPLOY_GUIDE.md)
+- [Governança de desenvolvimento](GOVERNANCA_DESENVOLVIMENTO.md)
+- [Enterprise Readiness — baseline oficial](ENTERPRISE_READINESS.md)
+- [Sprint 0.1 — Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md)
+- [Dívida técnica auditada](TECH_DEBT.md)
+- [ADRs](adr/README.md)
+
 ## 1. RESUMO EXECUTIVO
 
-| Campo | Estado oficial em 31/07/2026 |
+| Campo | Estado oficial em 02/08/2026 |
 |---|---|
-| **Versão atual** | Documento Mestre **4.0**; aplicação na revisão de repositório `cdba39d` |
-| **Último commit em produção** | **Não comprovado.** A revisão implantada deve ser coletada no próximo acesso à VPS; não inferir produção pelo `HEAD` do Git. |
-| **Última PR mesclada** | **#751** — “reorganizar Documento Mestre do projeto Gest-o”, merge `cdba39d` em 31/07/2026 |
+| **Versão atual** | Documento Mestre **4.0**; última revisão operacional conhecida `a08a62670c4940322ce037d0c86c54959db32f71` |
+| **Último commit em produção** | Cutover local comprovado para `a08a62670c4940322ce037d0c86c54959db32f71`; confirmação pública por `/health/version` e `build-info.json` permanece não comprovada caso as saídas não tenham sido preservadas. |
+| **Última PR mesclada** | **#763**, merge `a08a626` em 01/08/2026, como revisão operacional do cutover; a baseline documental está na PR #765. |
 | **Sprint atual** | **Estabilização, identidade UltraFV3 e verificabilidade de produção** |
-| **Status do sistema** | Produção: **🟡 Atenção** — operação recuperada, porém a revisão implantada não está registrada e o incidente 5050×4484 segue em homologação. |
-| **Última atualização** | 31/07/2026 |
+| **Status do sistema** | Produção funcionalmente validada após cutover; **🟡 Atenção** permanece para estabilidade prolongada, restore, P0 de segurança e incidentes ainda não encerrados. |
+| **Última atualização** | 02/08/2026 |
 | **Responsável** | **Não designado no repositório**; até designação formal, o responsável por cada deploy/PR deve atualizar este documento. |
 
-**Leitura em cinco minutos:** o CRM está funcional; o Dashboard Saúde foi entregue; a proteção de
-identidade de filiais UltraFV3 foi implementada, mas ainda precisa ser comprovada em homologação e
-produção. Não ampliar canais, IA ou domínios ERP antes de fechar os bloqueadores. A produção usa a
-API `gest-o-api-recovery-20260718`, PostgreSQL `gest-o-db-clean-v2-20260717`, database
-`salesforce_pro` e rede `gest-o_default`; confirmar tudo antes de intervir.
+**Leitura em cinco minutos:** schema e cutover local foram concluídos para `a08a626`; novos
+containers iniciaram e o usuário validou login, navegação, sincronização, presença do 5050 e Saúde da
+Plataforma. Isso comprova recuperação funcional, não certificação Enterprise nem encerramento dos
+incidentes. Persistem confirmação pública por SHA, estabilidade prolongada, restore e P0 de segurança.
 
 ## ESTADO ATUAL DA PRODUÇÃO
 
@@ -39,12 +52,12 @@ API `gest-o-api-recovery-20260718`, PostgreSQL `gest-o-db-clean-v2-20260717`, da
 | Campo | Estado comprovado |
 |---|---|
 | **Versão implantada** | **Não comprovada.** A versão declarada no repositório é `1.0.0`, mas ainda precisa ser conferida no runtime. |
-| **Commit implantado** | **Não comprovado.** Consultar `/api/health/version` e comparar com o container e a VPS. |
-| **Último deploy** | **Não comprovado.** Data, horário UTC e operador ainda não foram registrados. |
-| **Última PR publicada** | **Não comprovada.** Não inferir a partir de merge ou do `HEAD` local. |
-| **Última PR apenas mesclada** | **#751**, merge `cdba39d` em 31/07/2026; publicação ainda sem evidência registrada. |
-| **Última PR aguardando deploy** | **#751**, até que a REGRA 001 seja executada e suas evidências sejam registradas. |
-| **Última validação operacional** | **Não comprovada.** Pendente executar integralmente o `OPERACAO.md`. |
+| **Commit implantado** | Cutover local associado a `a08a62670c4940322ce037d0c86c54959db32f71`; falta consolidar prova pública por `/health/version` e `build-info.json`, caso não preservada. |
+| **Último deploy** | 01/08/2026: schema aplicado, cutover local concluído e containers API/WEB iniciados. Horário UTC e operador não constam desta reconciliação. |
+| **Última PR publicada** | Revisão operacional conhecida da PR #763 (`a08a626`); publicação pública por SHA ainda requer evidência técnica preservada. |
+| **Última PR apenas mesclada** | PR #764 (`e2a41a7`) no histórico local; publicação não inferida. PR #765 segue em 🔵 PR. |
+| **Última PR aguardando deploy** | PR #765, exclusivamente documental; seu merge/deploy não é inferido. |
+| **Última validação operacional** | Usuário confirmou CRM, login, navegação, sync de clientes, ERP 5050 e Saúde da Plataforma; estabilidade prolongada, restore e prova pública completa por SHA permanecem pendentes. |
 
 Uma mesma PR pode aparecer como “apenas mesclada” e “aguardando deploy”: ela só sai desses campos
 quando a publicação for comprovada. Depois do deploy, mas antes dos testes, seu estágio é
@@ -57,7 +70,7 @@ quando a publicação for comprovada. Depois do deploy, mas antes dos testes, se
 | **Última funcionalidade concluída** | Dashboard Saúde da Plataforma, mesclado na PR **#749** (`2f9cfd2`), com visão operacional de saúde e auditoria. |
 | **Última funcionalidade parcialmente concluída** | Correção do matching de identidade UltraFV3 para filiais 5050×4484: regra, regressões A–H, auditoria de escritores e monitoramento foram implementados; a validação com filiais independentes ainda não terminou. |
 | **Próxima funcionalidade** | Convergência **Activity First**, inicialmente apenas inventário dos contratos legados, plano de migração e testes de não regressão. Implementação só começa depois dos gates abaixo. |
-| **Bloqueadores** | (1) confirmar commit, stack, banco e migrações efetivamente implantados; (2) homologar 5050×4484 mantendo as filiais independentes e reconciliar perfis financeiros; (3) produzir veredito revisável do ERP 5050; (4) provar backup restaurável e revisar hardening do VPS/PostgreSQL. |
+| **Bloqueadores** | (1) preservar confirmação pública de SHA de API/WEB; (2) homologar 5050×4484 incluindo 4484 e perfis; (3) produzir veredito do ERP 5050; (4) provar restore e revisar hardening; (5) corrigir TD-ER-001 e TD-ER-002. |
 | **Decisões tomadas** | Documento completo e código exato são identidades fortes; nome+cidade+UF só é fallback sem documento e sem código conflitante; documentos completos distintos nunca são mesclados; integrações passam pelo backend; atividades são a direção da agenda; deploy nunca reseta dados; evidências precedem saneamento. |
 
 ### Não iniciar antes de concluir os bloqueadores
@@ -121,9 +134,9 @@ continuar ausente**, ainda que os testes de código estejam verdes.
 
 | ID | Título | Status | Critérios para encerramento | Evidências | Último teste |
 |---|---|---|---|---|---|
-| INC-5050-4484 | Merge indevido de filiais UltraFV3 5050 e 4484 | **EM HOMOLOGAÇÃO** | Revisão implantada confirmada; casos A–H aprovados; 5050 e 4484 presentes com IDs, códigos e documentos próprios; perfis financeiros reconciliados; nenhuma filial ausente; métricas/logs preservados sem PII. | [Investigação 5050×4484](investigations/ultrafv3-partner-identity-5050-4484.md), ADR 001 e auditoria `Client.code` | Smoke A–H implementado; execução completa em homologação **não registrada**. |
-| INC-ERP-5050 | Arquivamento/ausência de clientes associado ao ERP 5050 | **INVESTIGANDO** | Evidência read-only correlacionada com revisão, runtime e `ErpSyncRun`; causa/veredito revisável; correção validada; documentação e monitoramento atualizados. | [Análise forense](investigations/erp-5050-forensic-analysis.md) e [runbook](runbooks/erp-5050-forensic.md) | Runner forense homologado; reconciliação final pendente. |
-| INC-PROD-2026-07 | Comprometimento e recuperação do PostgreSQL de produção | **CORRIGIDO** | Backup restaurável exercitado, hardening revisado, revisão implantada registrada e monitoramento sem recorrência; então mover para Encerrado. | [Recuperação](incidents/2026-07-19-final-recovery-runbook.md) e [reconciliação](incidents/2026-07-17-prod-recovery-reconciliation.md) | Smokes de recuperação registrados; novo exercício de restauração pendente. |
+| INC-5050-4484 | Merge indevido de filiais UltraFV3 5050 e 4484 | **EM HOMOLOGAÇÃO** | Revisão implantada confirmada; casos A–H aprovados; 5050 e 4484 presentes com IDs, códigos e documentos próprios; perfis financeiros reconciliados; nenhuma filial ausente; métricas/logs preservados sem PII. | [Investigação 5050×4484](investigations/ultrafv3-partner-identity-5050-4484.md), ADR 001 e auditoria `Client.code` | Sincronização aprovada e 5050 presente; ainda faltam comprovação de 4484, perfis, A–H completos e demais evidências formais. |
+| INC-ERP-5050 | Arquivamento/ausência de clientes associado ao ERP 5050 | **INVESTIGANDO** | Evidência read-only correlacionada com revisão, runtime e `ErpSyncRun`; causa/veredito revisável; correção validada; documentação e monitoramento atualizados. | [Análise forense](investigations/erp-5050-forensic-analysis.md) e [runbook](runbooks/erp-5050-forensic.md) | Recuperação funcional comprovada: sync aprovado e 5050 presente; causa raiz/veredito formal continuam pendentes. |
+| INC-PROD-2026-07 | Comprometimento e recuperação do PostgreSQL de produção | **CORRIGIDO — AGUARDANDO ENCERRAMENTO** | Backup restaurável exercitado, hardening revisado, revisão implantada registrada e monitoramento sem recorrência; então mover para Encerrado. | [Recuperação](incidents/2026-07-19-final-recovery-runbook.md) e [reconciliação](incidents/2026-07-17-prod-recovery-reconciliation.md) | Schema/cutover e validação funcional concluídos sem relato de perda; estabilidade prolongada e restore isolado pendentes. |
 
 Fluxo permitido: **ABERTO → INVESTIGANDO → CORRIGIDO → HOMOLOGANDO → ENCERRADO**. Um incidente só é
 encerrado com critérios satisfeitos, evidências ligadas, data/resultado do último teste registrados
@@ -131,7 +144,7 @@ e cumprimento da [REGRA 002](#regra-002--encerramento-de-incidentes).
 
 ## 5. PRÓXIMA SPRINT
 
-1. Capturar e registrar commit, imagem, containers, rede, database, volume e migrações reais de produção.
+1. Corrigir TD-ER-001 e TD-ER-002 na primeira Sprint de implementação após esta baseline.
 2. Homologar a identidade UltraFV3 com os casos A–H e uma sincronização controlada, sem saneamento destrutivo.
 3. Confirmar que 5050 e 4484 existem como filiais independentes e reconciliar seus perfis financeiros.
 4. Correlacionar a coleta forense com `ErpSyncRun` e publicar o veredito do incidente ERP 5050.
@@ -142,6 +155,7 @@ e cumprimento da [REGRA 002](#regra-002--encerramento-de-incidentes).
 ## 6. BACKLOG
 
 ### P0 — impede avanço seguro
+- Corrigir TD-ER-001 (`/debug/admin`) e TD-ER-002 (logs sensíveis de login).
 - Homologar e encerrar 5050×4484 sem filiais ausentes.
 - Confirmar revisão/topologia de produção e concluir o veredito ERP 5050.
 - Exercitar restauração de backup e revisar hardening do VPS.
@@ -273,6 +287,8 @@ substituem essa sequência.
 
 | Data | Grande entrega |
 |---|---|
+| 02/08/2026 | Baseline reconciliada com a operação de 01/08: schema aplicado, pós-diff gerenciado vazio, oito `incident_*` preservadas, cutover local em `a08a626` e validação funcional de login, sync, 5050 e Saúde; prova pública completa por SHA, estabilidade, restore, P0 e encerramento de incidentes permanecem pendentes. |
+| 02/08/2026 | Baseline oficial de Enterprise Readiness e Sprint 0.1 criadas em 🔵 PR, com 17 dimensões e backlog baseado em evidências; auditoria exclusivamente documental/read-only, sem alteração ou declaração sobre produção e sem encerramento de incidentes. |
 | 01/08/2026 | Governança de desenvolvimento institucionalizada: Comitê de Arquitetura, Sprint Brief, ciclo de ADR, Enterprise Readiness, revisão, testes, rollback e Definition of Done consolidados em norma permanente, sem alteração de runtime ou produção. |
 | 01/08/2026 | Diagnóstico confirmou evidência de schema íntegra e Prisma equivalente; allowlist operacional incompleta foi o único bloqueio. Produção e containers antigos preservados, sem deploy ou cutover; correção em 🔵 PR e cutover pendente. |
 | 01/08/2026 | Schema aplicado/validado e evidência revalidada para `c178a69e`; segundo ensaio parou antes de containers por ausência da imagem histórica da API. Produção antiga preservada, cutover pendente e rollback híbrido em 🔵 PR; incidente aberto. |
@@ -298,6 +314,9 @@ O histórico detalhado anterior foi preservado integralmente em
 | **Operação pós-merge** | [Checklist obrigatório da REGRA 001](OPERACAO.md) |
 | **Guia de deploy** | [Arquitetura, deploy, validação e rollback](DEPLOY_GUIDE.md) |
 | **Governança de desenvolvimento** | [Comitê de Arquitetura, Sprint Brief, decisões e Definition of Done](GOVERNANCA_DESENVOLVIMENTO.md) |
+| **Enterprise Readiness** | [Baseline oficial baseada em evidências](ENTERPRISE_READINESS.md) |
+| **Sprint 0.1** | [Brief da Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md) |
+| **Dívida técnica** | [Achados priorizados da auditoria](TECH_DEBT.md) |
 | **Roadmap** | [Horizontes estratégicos](roadmap/README.md) |
 | **Dashboard Saúde** | [Estado e operação do módulo](dashboard-saude-plataforma.md) |
 | **Arquitetura** | [Limites e topologia técnica](architecture/README.md) |
