@@ -1,3 +1,12 @@
+# 🔵 PR — assessment e roadmap Enterprise Multi-Tenancy (02/08/2026)
+
+A Sprint 0.6 confirma que o checkout é single-tenant: somente quatro models de Communications têm
+`tenantId` parcial; identidade, 23 models centrais, APIs, raw SQL, caches, schedulers e ERP não têm
+boundary empresarial ponta a ponta. O inventário e o roadmap 1.0A–1.0F estão no
+[`TENANCY_ASSESSMENT.md`](TENANCY_ASSESSMENT.md), e a ADR 003 propõe schema compartilhado com
+isolamento por linha. A entrega é somente documental: não cria migration, não altera API/banco,
+não acessa produção e não muda o estado de incidentes ou débitos.
+
 # 🔵 PR — validação operacional Enterprise repetível (02/08/2026)
 
 A Sprint 0.5 cria uma única rotina estritamente read-only para responder, por SHA, se uma instalação
@@ -172,12 +181,10 @@ PR #765 (reconciliação documental atual); revisão operacional conhecida `a08a
 
 ## Próxima sprint
 
-1. Na primeira Sprint de implementação, corrigir TD-ER-001 (`/debug/admin`) e TD-ER-002 (logs
-   sensíveis de login), sem implementar essas correções nesta PR documental.
-2. Consolidar as saídas externas de SHA de API/WEB e monitorar estabilidade prolongada.
-3. Homologar A–H e sincronização controlada; confirmar 5050 e 4484 independentes.
-4. Reconciliar perfis financeiros e fechar o veredito ERP 5050.
-5. Restaurar backup com SHA256 em ambiente isolado e revisar hardening.
+1. Concluir os gates P0 operacionais e de segurança ainda abertos; Git local não substitui evidência.
+2. Submeter a ADR 003 ao Comitê e iniciar 1.0A somente após aceite, threat model e owners definidos.
+3. Não criar migration de tenancy antes dos gates de control plane, backfill e rollback do assessment.
+4. Manter homologação 5050×4484, restore e estabilidade como dependências, sem misturá-los à tenancy.
 
 ## Incidente aberto
 
