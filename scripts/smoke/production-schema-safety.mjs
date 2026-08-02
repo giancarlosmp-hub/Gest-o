@@ -60,6 +60,12 @@ assert.equal(
   1,
   "control-plane migration must be executed exactly once"
 );
+assert.match(postgresSmoke, /set \+e[\s\S]*schema-diff-filter\.mjs "\$tmp\/post\.raw\.sql" "\$tmp\/post\.sql" post[\s\S]*FILTER_STATUS=\$\?[\s\S]*set -e/, "post-filter exit code must be captured without weakening fail-fast globally");
+assert.match(postgresSmoke, /if \[\[ "\$FILTER_STATUS" -ne 0 \]\]; then[\s\S]*POST-APPLY PRISMA DIFF RAW[\s\S]*cat "\$tmp\/post\.raw\.sql"[\s\S]*POST-APPLY MANAGED DIFF[\s\S]*cat "\$tmp\/post\.sql"[\s\S]*CONTROL-PLANE STRUCTURAL CATALOG[\s\S]*cat "\$tmp\/control-plane-catalog\.tsv"[\s\S]*exit "\$FILTER_STATUS"/, "failed post-filter must expose structural evidence and preserve failure");
+assert.match(postgresSmoke, /information_schema\.columns[\s\S]*pg_indexes[\s\S]*pg_constraint/, "diagnostic catalog must cover columns, indexes, FKs and checks");
+assert.doesNotMatch(postgresSmoke, /result\.tsv/, "disposable harness must not publish PASS evidence");
+const diagnosticFailure = postgresSmoke.slice(postgresSmoke.indexOf('if [[ "$FILTER_STATUS" -ne 0 ]]'), postgresSmoke.indexOf('test ! -s "$tmp/post.sql"'));
+assert.doesNotMatch(diagnosticFailure, /DATABASE_URL|PASSWORD|email|token|secret|SELECT \*/, "failure diagnostics must not expose connection secrets or row data");
 
 const preview = resolve(root, "scripts/production-schema-preview.sh");
 const temporary = mkdtempSync(resolve(tmpdir(), "gesto-schema-test-"));

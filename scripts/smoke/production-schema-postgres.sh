@@ -159,7 +159,41 @@ docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERRO
 count_incidents >"$tmp/after-first"
 cmp "$tmp/before" "$tmp/after-first"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
+set +e
 node scripts/schema-diff-filter.mjs "$tmp/post.raw.sql" "$tmp/post.sql" post
+FILTER_STATUS=$?
+set -e
+if [[ "$FILTER_STATUS" -ne 0 ]]; then
+  docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 -At <<'SQL' >"$tmp/control-plane-catalog.tsv"
+SELECT 'enum', t.typname, e.enumsortorder::text, e.enumlabel
+FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid
+WHERE t.typnamespace='public'::regnamespace
+  AND t.typname IN ('TenantStatus','TenantMembershipStatus','TenantRole')
+UNION ALL
+SELECT 'column', table_name, ordinal_position::text,
+       column_name || E'\t' || data_type || E'\t' || is_nullable || E'\t' || coalesce(column_default,'')
+FROM information_schema.columns
+WHERE table_schema='public' AND table_name IN ('Tenant','TenantMembership')
+UNION ALL
+SELECT 'index', tablename, indexname, indexdef
+FROM pg_indexes
+WHERE schemaname='public' AND tablename IN ('Tenant','TenantMembership')
+UNION ALL
+SELECT CASE c.contype WHEN 'f' THEN 'foreign_key' WHEN 'c' THEN 'check' ELSE 'constraint' END,
+       r.relname, c.conname, pg_get_constraintdef(c.oid, true)
+FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid
+WHERE c.connamespace='public'::regnamespace
+  AND r.relname IN ('Tenant','TenantMembership') AND c.contype IN ('f','c')
+ORDER BY 1,2,3;
+SQL
+  printf '%s\n' '===== POST-APPLY PRISMA DIFF RAW ====='
+  cat "$tmp/post.raw.sql"
+  printf '%s\n' '===== POST-APPLY MANAGED DIFF ====='
+  cat "$tmp/post.sql"
+  printf '%s\n' '===== CONTROL-PLANE STRUCTURAL CATALOG ====='
+  cat "$tmp/control-plane-catalog.tsv"
+  exit "$FILTER_STATUS"
+fi
 test ! -s "$tmp/post.sql"
 
 # The historical repeatable transition remains safe; the new Prisma migration is applied exactly once.
