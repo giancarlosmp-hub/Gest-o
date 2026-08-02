@@ -203,7 +203,7 @@ preservar aliases durante janela anunciada.
 
 ## Estratégia oficial de migração
 
-1. **Gate 0 — decisão e ownership:** aceitar ADR 003; nomear Arquitetura, Segurança, DBA e Produto;
+1. **Gate 0 — decisão e ownership:** manter os gates da ADR 003 aceita; nomear Arquitetura, Segurança, DBA e Produto;
    congelar alegação multiempresa e definir SLO/RPO/RTO.
 2. **Control plane:** implementar `Tenant`, lifecycle e membership; tenant default representa a
    empresa atual. Ainda sem liberar múltiplas empresas.
@@ -262,7 +262,7 @@ preservar aliases durante janela anunciada.
 
 | Marco | Entrega | Critério de conclusão |
 | --- | --- | --- |
-| 1.0A | ADR aceita, threat model, control plane e memberships | tenant confiável e nenhum produto multiempresa anunciado |
+| 1.0A | ADR aceita, threat model, desenho/control plane default-only e memberships projetadas | tenant confiável e nenhum produto multiempresa anunciado |
 | 1.0B | expand/backfill default e reconciliação | contagens/FKs/hashes, quarentena zero ou aprovada |
 | 1.0C | repositories, auth/context, raw SQL e policies | nenhum Prisma de negócio sem tenant; testes arquiteturais |
 | 1.0D | caches, jobs, logs, ERP, WhatsApp e IA | namespace e testes concorrentes A×B |
@@ -281,3 +281,12 @@ uniqueness/FKs globais, tenant context/JWT, jobs-caches-logs, ERP/webhook e prov
 O inventário foi produzido por leitura integral das fontes obrigatórias, schema, rotas, services,
 scripts, migrations, testes e histórico local. Ele descreve o checkout, não produção. Alterações
 futuras devem regenerar contagens e reexecutar a auditoria antes da primeira migration de tenancy.
+
+
+## Atualização Sprint 1.0A
+
+A ADR 003 foi aceita com condições, e o threat model, RACI, modelos e contratos default-only estão no
+[Brief 1.0A](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md). Isso atualiza a decisão, não o
+diagnóstico: não há migration, memberships persistidas, isolamento transversal ou segundo tenant;
+o sistema continua single-tenant e Multiempresa permanece 🔴. A expansão futura está no
+[plano 1.0B](tenancy/MIGRATION_EXPAND_PLAN.md).

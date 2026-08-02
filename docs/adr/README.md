@@ -10,4 +10,4 @@ Cada decisão deverá ser vinculada ao [Documento Mestre](../DOCUMENTO_MESTRE.md
 
 - [ADR 002 — Separação de autoridade runtime e migration](002-runtime-migration-authority-separation.md)
 
-- [ADR 003 — Boundary multiempresa em schema compartilhado](003-shared-schema-tenant-boundary.md)
+- [ADR 003 — Boundary multiempresa em schema compartilhado](003-shared-schema-tenant-boundary.md) — **aceita em 02/08/2026**, com gates obrigatórios e sem autorização de migration/deploy

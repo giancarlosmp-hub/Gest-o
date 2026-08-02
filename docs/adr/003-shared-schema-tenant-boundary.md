@@ -1,7 +1,9 @@
 # ADR 003 — Boundary multiempresa em schema compartilhado
 
-- **Status:** proposta para a Sprint 1.0; implementação condicionada aos gates deste ADR
-- **Data:** 02/08/2026
+- **Status:** aceita; implementação condicionada aos gates desta ADR
+- **Data da proposta:** 02/08/2026
+- **Data do aceite:** 02/08/2026
+- **Comitê (papéis participantes):** CTO/Arquitetura (**A**), Segurança, DBA, Backend, DevOps, QA, Product Owner e LGPD/Jurídico (**C**). Os papéis não representam presença nominal inventada; a ocupação formal permanece gate operacional.
 
 ## Contexto
 
@@ -47,3 +49,15 @@ schema. Antes do rollout: inventário fechado, backfill determinístico, constra
 testes negativos cross-tenant, dual-read controlado, observabilidade por tenant, restore ensaiado e
 rollback aprovado. Esta ADR não autoriza migration, deploy ou alteração de API nesta Sprint.
 
+
+## Condições obrigatórias do aceite
+
+1. O aceite autoriza o desenho e o scaffolding default-only, **não** migration, backfill, deploy, segundo tenant ou alegação multiempresa.
+2. `TenantContext` é imutável, fail-closed e só nasce de fonte confiável; body, query e header livre jamais são autoridade.
+3. Todo futuro data access empresarial exige contexto; escape de plataforma é interface separada, nomeada, temporária e auditada.
+4. Expand/backfill/constrain/contract ocorrem em Sprints separadas, com reconciliação, quarentena, rollback e restore aprovados.
+5. FK e uniques compostas precedem liberação multiempresa; RLS é defesa adicional sob role sem bypass, nunca substituto do filtro.
+6. ERP, webhooks, IA, cache, jobs, locks, logs e métricas precisam de prova A×B antes do piloto.
+7. O tenant default é a única compatibilidade autorizada até os gates 1.0B–1.0E.
+
+A revisão crítica não identificou bloqueador arquitetural: os custos operacionais do schema compartilhado são tratados pelos controles acima e pela possibilidade de ADR futura para tenants regulados.

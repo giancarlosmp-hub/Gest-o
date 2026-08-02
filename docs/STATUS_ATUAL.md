@@ -1,3 +1,11 @@
+# 🔵 PR — fundação do control plane multiempresa (02/08/2026)
+
+A Sprint 1.0A aceita a ADR 003 sob gates obrigatórios, cria threat model STRIDE, RACI, contratos
+de `Tenant`, `TenantMembership` e `TenantContext`, provas arquiteturais default-only e o plano da
+migration expand futura. Não há migration, backfill, RLS, deploy, produção acessada ou segundo tenant.
+O Gest-o continua single-tenant e Multiempresa permanece 🔴. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md).
+
 # 🔵 PR — assessment e roadmap Enterprise Multi-Tenancy (02/08/2026)
 
 A Sprint 0.6 confirma que o checkout é single-tenant: somente quatro models de Communications têm

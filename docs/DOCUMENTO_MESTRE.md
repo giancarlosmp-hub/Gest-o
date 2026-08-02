@@ -26,6 +26,9 @@
 - [Sprint 0.5 — Validação operacional Enterprise](sprints/SPRINT_0_5_ENTERPRISE_OPERATIONAL_VALIDATION.md)
 - [Dívida técnica auditada](TECH_DEBT.md)
 - [ADRs](adr/README.md)
+- [Sprint 1.0A — Multi-Tenancy Foundation](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md)
+- [Threat Model Multi-Tenancy](security/MULTI_TENANCY_THREAT_MODEL.md)
+- [Plano da migration expand](tenancy/MIGRATION_EXPAND_PLAN.md)
 
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 
@@ -34,6 +37,15 @@ descrita em [`OPERACAO.md`](OPERACAO.md). Ela coleta evidência por SHA sem cons
 banco e sem executar publicação ou recuperação. A existência do validador no Git não comprova sua
 execução nem muda o estado conhecido da produção; promoção depende de `result.tsv` PASS revisado
 no host autorizado. O estágio desta entrega permanece 🔵 PR.
+
+## ADENDO DA SPRINT 1.0A — DECISÃO E CONTROL PLANE
+
+A [ADR 003](adr/003-shared-schema-tenant-boundary.md) foi aceita em 02/08/2026 pelo Comitê
+registrado por papéis, condicionada a contexto fail-closed, data access tenant-required, expansão
+progressiva, constraints compostas, RLS defensiva e provas A×B. A entrega adiciona somente contratos
+e testes default-only; não altera schema, banco, deploy ou produção e não habilita outra empresa.
+Multiempresa continua 🔴 até o roadmap 1.0B–1.0F e a evidência operacional. O threat model, RACI e
+gates estão no [Brief 1.0A](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md).
 
 ## 1. RESUMO EXECUTIVO
 
