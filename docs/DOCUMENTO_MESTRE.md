@@ -411,3 +411,7 @@ defensiva. Ela deve ser aceita pelo Comitê antes da Sprint 1.0.
 
 Este adendo não implementa tenancy, não cria migration, não altera APIs/banco/regras, não executa
 Docker/deploy e não presume produção. Incidentes e débitos mantêm seus estados vigentes.
+
+## ADENDO SPRINT 1.0B.1-OP — SOMENTE OPERAÇÃO FUTURA
+
+A operação do control plane foi separada em preview, DDL administrativo, dry-run e DML administrativo, com registry fechado, imagem/SHA pinados e provas distintas. A PR não executou nenhuma etapa em produção e não integra tenancy ao runtime. O gate e as limitações estão no [Brief 1.0B.1-OP](sprints/SPRINT_1_0B_1_OP_CONTROL_PLANE_OPERATION.md); Multiempresa permanece 🔴.

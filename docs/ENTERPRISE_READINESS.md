@@ -126,3 +126,14 @@ permanece 🔴 e nenhuma outra classificação da matriz é alterada.
 | Identidade/autorização | 🟡 Parcialmente comprovado | memberships determinísticas e role mapping fechado | JWT/refresh/RBAC legado inalterados |
 | Multiempresa | 🔴 Crítico ou não conforme | somente compatibilidade default-only | nenhum isolamento dos models centrais ou segundo tenant |
 | Governança | 🟢 Comprovado | brief, runbook, confirmações por SHA e reconciliação sem PII | checks/apply/evidência operacional ainda exigidos |
+
+## Registro 1.0B.1-OP (🔵 PR; sem promoção de classificação)
+
+| Dimensão | Atualização limitada |
+|---|---|
+| Banco | Registry/checks de catálogo e operação futura preparados; sem apply comprovado. |
+| Deploy/rollback | Operação explicitamente fora de deploy/cutover; rollback não destrutivo documentado. |
+| Identidade/autorização | DDL e DML administrativas temporárias separadas da role runtime; execução não comprovada. |
+| Multiempresa | 🔴; não há boundary nos models empresariais nem ativação. |
+| Operação | Evidência por migration e preparação desenhada; falta execução autorizada e revisão. |
+| Governança | Novo ID exige código/teste/PR; gates 1.0B.2 permanecem. |

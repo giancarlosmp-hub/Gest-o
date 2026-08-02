@@ -103,8 +103,8 @@ const unconfirmed = spawnSync("bash", [resolve(root, "scripts/production-schema-
 assert.notEqual(unconfirmed.status, 0, "apply must fail without explicit confirmation");
 assert.match(unconfirmed.stdout + unconfirmed.stderr, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.match(apply, /pre-apply-diff\.raw\.sql[\s\S]*schema-diff-filter\.mjs[\s\S]*--single-transaction/);
-assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*applied\.tsv/);
-assert.ok(apply.indexOf("post-apply-diff.sql") < apply.indexOf('> "$evidence/applied.tsv"'), "evidence must only be released after empty Prisma diff");
+assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*result\.tsv[\s\S]*schema-state\.tsv/);
+assert.ok(apply.indexOf("post-apply-diff.sql") < apply.indexOf('>"$evidence/result.tsv"'), "evidence must only be released after empty Prisma diff");
 assert.match(postgresSmoke, /CREATE ROLE runtime/);
 assert.match(postgresSmoke, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
 assert.match(postgresSmoke, /psql -U runtime[\s\S]*--single-transaction/);

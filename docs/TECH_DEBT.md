@@ -91,3 +91,9 @@ Os subitens detalham, mas não duplicam, TD-ER-004. Nenhum está encerrado. TD-E
 |---|---|---|---|---|---|---|---|
 | TD-ER-013 | Documentação de arquitetura e produto contém apenas páginas introdutórias | [`architecture/README.md`](architecture/README.md), [`roadmap/README.md`](roadmap/README.md), [`product/README.md`](product/README.md) | Média | Conhecimento concentrado e análise de impacto lenta | Inventário oficial | Mapas atuais de domínio/componentes/ownership e visão de produto vinculados ao mestre | Épico 3 |
 | TD-ER-014 | TODO/FIXME sem triagem única | Busca estruturada em `apps/api/src` e `apps/web/src` | Baixa | Dívida pode permanecer invisível ou misturada a texto/dados | Owners por domínio | Ocorrências técnicas confirmadas triadas; falsos positivos descartados e itens válidos rastreados | Épico 6 |
+
+### Atualização Sprint 1.0B.1-OP
+
+- **TD-ER-004A — aberto, operacionalização em PR:** registry, wrappers e testes foram preparados; só pode fechar após migration aplicada em operação autorizada, tenant default preparado, runtime validado e evidências revisadas.
+- **TD-ER-004B — não iniciado.** Os 23 models empresariais não foram alterados.
+- **TD-ER-004 permanece aberto**; a existência dos scripts não comprova produção nem Multiempresa.

@@ -262,3 +262,7 @@ Os containers antigos continuaram running e atendendo, PostgreSQL/schema foram p
 cutover segue pendente. Esta 🔵 PR adiciona rollback híbrido por role: imagem quando o objeto ainda
 existe; container histórico externo, por nome e ID exatos, quando a imagem desapareceu. O incidente
 não está encerrado e nenhuma conclusão de cutover deve ser inferida desta correção.
+
+## 🔵 PR — Sprint 1.0B.1-OP (02/08/2026)
+
+Fluxo futuro de preview, DDL, dry-run e DML do control plane foi operacionalizado com registry fechado e evidência imutável. Nenhuma produção/VPS foi acessada; não houve apply, deploy, cutover ou ativação. Runtime permanece sem `TENANCY_MODE=default-only`; Multiempresa segue 🔴. Consulte o [Brief 1.0B.1-OP](sprints/SPRINT_1_0B_1_OP_CONTROL_PLANE_OPERATION.md).

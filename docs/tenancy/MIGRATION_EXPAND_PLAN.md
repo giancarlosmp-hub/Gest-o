@@ -45,3 +45,7 @@ Antes da aplicação futura: backup com checksum e restore em ambiente isolado. 
 ## Entregáveis da 1.0B
 
 Migration aditiva separada, preview, fixtures sintéticas, runner de backfill idempotente/dry-run, ledger, relatório de reconciliação, plano de execução/rollback e testes PostgreSQL descartáveis. Sem segundo tenant funcional e sem alegação multiempresa.
+
+## Gate operacional da migration do control plane
+
+A migration `20260802120000_tenancy_control_plane` integra o registry fechado após a predecessora `20260731150000_safe_production_schema_transition`. Apply futuro exige checksum, SHA/OCI, autoridade DDL administrativa, transação única, catálogo completo e diff integral vazio. A preparação de dados é uma operação posterior e nunca é incluída no DDL. Não houve execução em produção nesta PR.

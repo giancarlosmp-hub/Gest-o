@@ -6,6 +6,10 @@ MODE="${MODE:-preview}"
 SQL_FILE="${SQL_FILE:-}"
 tmp=""; trap '[[ -z "$tmp" ]] || rm -f "$tmp"' EXIT
 
+if [[ -n "${MIGRATION_ID:-}" ]]; then
+  registry_line=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID") || exit 42
+  IFS=$'\t' read -r _ SQL_FILE _ _ _ <<<"$registry_line"
+fi
 if [[ -n "$SQL_FILE" ]]; then
   [[ -f "$SQL_FILE" ]] || die "SQL_FILE ausente: $SQL_FILE"
   sql="$SQL_FILE"
@@ -17,14 +21,16 @@ else
   [[ "$host" == "$PRODUCTION_DB_HOST_EXPECTED" ]] || die "host não autorizado"
   image="gest-o-api:${APP_COMMIT}"
   docker image inspect "$image" >/dev/null 2>&1 || die "imagem API pinada ausente: $image"
+  [[ "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")" == "$APP_COMMIT" ]] || die "label OCI divergente"
   tmp=$(mktemp); sql="$tmp"
   log "Prisma pinado em $image; diff somente leitura; nenhuma alteração aplicada"
-  docker run --rm --network gest-o_default -e DATABASE_URL "$image" \
+  docker run --rm --pull=never --network gest-o_default -e DATABASE_URL "$image" \
     ./node_modules/.bin/prisma migrate diff \
     --from-schema-datasource apps/api/prisma/schema.prisma \
     --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$sql"
 fi
 
+[[ -z "${RAW_DIFF_OUTPUT:-}" ]] || { [[ ! -e "$RAW_DIFF_OUTPUT" ]] || die "evidência raw já existe"; install -m 600 "$sql" "$RAW_DIFF_OUTPUT"; }
 cat "$sql"
 normalized=$(sed -E 's/--.*$//' "$sql")
 additive=$(printf '%s\n' "$normalized" | grep -Eic '^[[:space:]]*(CREATE (TYPE|TABLE|UNIQUE INDEX|INDEX)|ALTER TABLE .*ADD (COLUMN|CONSTRAINT))' || true)

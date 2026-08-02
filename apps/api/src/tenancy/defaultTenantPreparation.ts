@@ -65,7 +65,11 @@ export async function prepareDefaultTenant(prisma: PrismaClient, options: { appl
   await writeFile(`${options.evidenceDir}/tenants-before.tsv`, tsv([{ total: before.metrics.tenants, defaultFound: before.metrics.defaultTenantFound, unexpected: before.metrics.unexpectedTenants }]), { mode: 0o600 });
   const missing = before.users.filter(user => !before.memberships.some(item => item.userId === user.id));
   await writeFile(`${options.evidenceDir}/dry-run-plan.tsv`, tsv([{ createTenant: before.metrics.tenants === 0 ? 1 : 0, createMemberships: missing.length }]), { mode: 0o600 });
-  if (!options.apply) return before.metrics;
+  if (!options.apply) {
+    const expected = before.users.map(user => ({ userId: user.id, tenantId: DEFAULT_TENANT.id, role: mapUserRole(user.role), version: 1 }));
+    await writeFile(`${options.evidenceDir}/result.tsv`, tsv([{ result: "PASS", aggregateHash: membershipAggregateHash(expected), plannedMemberships: missing.length }]), { mode: 0o600, flag: "wx" });
+    return before.metrics;
+  }
 
   await prisma.$transaction(async tx => {
     const locked = await snapshot(tx);

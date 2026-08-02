@@ -410,3 +410,9 @@ depois de todas as verificações; qualquer `FAIL` significa instalação **não
 triagem e não autoriza ação corretiva automática. Ausência de Docker é SKIP apenas no ambiente de
 desenvolvimento/CI e nunca equivale a PASS operacional. Preserve permissões 0700 e não anexe
 credenciais, corpos de autenticação ou logs brutos a tickets.
+
+## Ordem futura — control plane default-only (Sprint 1.0B.1-OP)
+
+Esta sequência **ainda não foi executada** e não pertence ao cutover: (1) atualizar `main`; (2) build da imagem pinada; (3) backup/preflight; (4) preview read-only; (5) apply confirmado apenas da migration registrada `20260802120000_tenancy_control_plane`; (6) dry-run do tenant default; (7) revisão humana das evidências sem PII; (8) apply DML confirmado e separado; (9) reconciliação; (10) confirmar runtime disabled; (11) não executar cutover; (12) só então avaliar 1.0B.2. Os campos operacionais de alvo, backup e credencial administrativa devem ser preenchidos no host autorizado; esta documentação não autoriza comandos de VPS.
+
+As quatro autoridades não iniciam/paralisam API/WEB, não fazem seed/db push, não alteram `production.env` e não habilitam tenancy no Compose. Consulte o [Brief](sprints/SPRINT_1_0B_1_OP_CONTROL_PLANE_OPERATION.md).

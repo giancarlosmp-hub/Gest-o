@@ -36,6 +36,20 @@ jobs:
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         run: docker pull postgres:16
 
+      - name: Build SHA-pinned API image for operational schema proof
+        run: docker build --pull=false --build-arg APP_COMMIT="$GITHUB_SHA" --build-arg APP_VERSION=ci --build-arg APP_BUILT_AT=ci -t "gest-o-api:$GITHUB_SHA" -f apps/api/Dockerfile .
+
+      - name: Validate control-plane operation statically
+        run: npm run test:production-schema && npm run test:tenancy-control-plane
+
+      - name: Prove schema preview/apply in disposable PostgreSQL 16
+        env:
+          APP_COMMIT: ${{ github.sha }}
+        run: npm run test:production-schema:postgres
+
+      - name: Prove default tenant dry-run/apply/reconciliation
+        run: npm run test:tenancy-control-plane:postgres
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

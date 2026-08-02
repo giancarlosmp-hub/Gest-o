@@ -39,3 +39,7 @@ Rollback de código mantém `TENANCY_MODE=disabled`. Objetos aditivos e dados pe
 revogação automática; divergência exige plano aprovado. CRM, ERP, Communications, JWT, handlers,
 caches e jobs continuam single-tenant. A Sprint 1.0B.2 poderá iniciar apenas após apply/preparação
 operacionais comprovados e tratar tenantização dos models e data access.
+
+## Contrato operacional 1.0B.1-OP
+
+A execução futura usa `scripts/production-tenant-default-prepare.sh` e o JS compilado da imagem API pinada. O wrapper compara Git/`EXPECTED_SHA`/label OCI, exige `schema-state.tsv`, monta manifesto efêmero com nonce e SHA-256 e fornece a credencial DML temporária distinta da runtime. Dry-run e apply têm confirmações/evidências separadas e PASS não é sobrescrito. A variável `OPERATIONAL_GATES_VERIFIED=1` isolada não é bypass: sem arquivo íntegro e identidades coincidentes o runner falha. O modo `default-only` existe somente no container efêmero; runtime permanece disabled.

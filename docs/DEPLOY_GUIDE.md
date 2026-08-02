@@ -416,3 +416,7 @@ Docker/PostgreSQL 16 antes de aprovar a janela.
 sequence setup ou seed/bootstrap de dados; use exclusivamente `production-schema-apply.sh`. Os
 stacks descartáveis de CI/preview declaram `ephemeral-push`, permitindo criar o schema novo e executar
 somente os seeds habilitados pelas flags de smoke. Valor ausente/inválido impede a API de iniciar.
+
+## Limite: preparação do control plane
+
+Preview/apply da migration do control plane e dry-run/apply do tenant default são operações administrativas separadas e **não fazem parte de deploy, rollback ou cutover**. `deploy-production.sh` não deve invocá-las. Nesta fase o runtime de produção não recebe `TENANCY_MODE=default-only`; concluir a preparação não autoriza ativação.

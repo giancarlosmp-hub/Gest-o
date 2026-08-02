@@ -22,7 +22,7 @@ for (const table of ["Client", "Contact", "Opportunity", "Activity", "AgendaEven
 }
 assert.doesNotMatch(bootstrap, /prepareDefaultTenant/);
 assert.doesNotMatch(seeds, /tenant-default-v1|TenantMembership|tenant\.create/);
-assert.doesNotMatch(compose, /TENANCY_MODE/);
+assert.match(compose, /TENANCY_MODE:\s*disabled/);
 assert.match(mode, /"disabled" \| "default-only"/);
 assert.doesNotMatch(mode, /multi-tenant/);
 assert.doesNotMatch(runner, /body|query|header|production\.env/i);
@@ -31,4 +31,18 @@ assert.match(preparation, /isolationLevel: "Serializable"/);
 assert.match(runner, /CONFIRM/);
 assert.match(runner, /EXPECTED_SHA/);
 for (const path of ["scripts/deploy-production.sh", "docker-compose.production.yml"]) assert.doesNotMatch(read(path), /prisma\s+db\s+push/);
+
+const registry = read("scripts/production-schema-migrations.mjs");
+const wrapper = read("scripts/production-tenant-default-prepare.sh");
+assert.match(registry, /20260731150000_safe_production_schema_transition/);
+assert.match(registry, /20260802120000_tenancy_control_plane/);
+assert.match(registry, /MIGRATION_CHECKSUM_MISMATCH/);
+assert.match(registry, /UNKNOWN_MIGRATION_ID/);
+assert.match(wrapper, /OPERATIONAL_GATE_SHA256/);
+assert.match(wrapper, /org\.opencontainers\.image\.revision/);
+assert.match(wrapper, /schema-state\.tsv/);
+assert.match(wrapper, /dry-run\.PASS\.tsv/);
+assert.match(wrapper, /CONFIRM=PREPARE_DEFAULT_TENANT/);
+assert.doesNotMatch(wrapper, /docker compose (?:up|down)|production\.env|prisma db push/);
+assert.doesNotMatch(compose, /TENANCY_MODE:\s*default-only/);
 console.log("tenancy control-plane static safety passed");

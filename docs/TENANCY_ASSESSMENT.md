@@ -297,3 +297,7 @@ O control plane foi modelado em PR com migration aditiva, tenant default determi
 memberships por usuário, runner/ledger e adapter Prisma não integrado. Nenhum dos 23 models centrais
 foi tenantizado e nenhum handler/JWT mudou. A prova é local/descartável: apply e estado de produção
 continuam desconhecidos; Multiempresa permanece 🔴 e a expansão de dados fica para 1.0B.2.
+
+## Estado da operacionalização 1.0B.1-OP
+
+Em 🔵 PR, foram separados preview, DDL, dry-run e DML do tenant default. O runtime continua single-tenant/disabled, nenhum model empresarial recebeu `tenantId`, nenhum segundo tenant foi criado e Multiempresa permanece 🔴. Evidência operacional real e todos os gates do [Brief](sprints/SPRINT_1_0B_1_OP_CONTROL_PLANE_OPERATION.md) são pré-condições de 1.0B.2.
