@@ -25,6 +25,14 @@ não invalida o deploy já executado, mas também não substitui as verificaçõ
 - fechamento formal dos incidentes segundo todos os seus critérios;
 - correção dos P0 de segurança TD-ER-001 e TD-ER-002.
 
+# 🔵 PR — remoção dos P0 locais de autenticação (02/08/2026)
+
+A Sprint 0.2 remove do runtime `/debug/admin`, sanitiza login e bootstrap administrativo e adiciona
+testes negativos de rota, contrato, logs, erro, rate limit e autenticação. TD-ER-001 e TD-ER-002
+estão em **correção em PR**, não encerrados: merge, deploy e validação por SHA continuam obrigatórios.
+Não houve acesso ou alegação sobre produção; Segurança e LGPD não estão integralmente resolvidas.
+Consulte o [Sprint Brief](sprints/SPRINT_0_2_AUTH_SECURITY_P0.md).
+
 # 🔵 PR — baseline de Enterprise Readiness reconciliada (02/08/2026)
 
 A Sprint 0.1 cria uma baseline documental/read-only em 17 dimensões e um backlog de achados baseado

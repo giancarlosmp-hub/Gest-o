@@ -285,6 +285,10 @@ substituem essa sequência.
 
 ## 9. CHANGELOG EXECUTIVO
 
+- **02/08/2026 — Sprint 0.2 em 🔵 PR:** remove `/debug/admin` e minimiza logs de autenticação.
+  TD-ER-001/002 seguem abertos até merge, deploy e validação por SHA; não há inferência de produção
+  nem declaração de Segurança/LGPD resolvidas.
+
 | Data | Grande entrega |
 |---|---|
 | 02/08/2026 | Baseline reconciliada com a operação de 01/08: schema aplicado, pós-diff gerenciado vazio, oito `incident_*` preservadas, cutover local em `a08a626` e validação funcional de login, sync, 5050 e Saúde; prova pública completa por SHA, estabilidade, restore, P0 e encerramento de incidentes permanecem pendentes. |

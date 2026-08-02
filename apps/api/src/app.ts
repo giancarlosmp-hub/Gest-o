@@ -21,6 +21,9 @@ import { appUsageRateLimit, authLoginRateLimit, authRefreshRateLimit } from "./m
 
 export const app = express();
 
+// Reserva o antigo caminho diagnóstico como inexistente antes das rotas dinâmicas legadas.
+app.all(/^\/debug\/admin\/?$/, (_req, res) => res.sendStatus(404));
+
 const processStartedAt = new Date();
 
 if (env.isProduction) {
@@ -206,24 +209,6 @@ app.get("/debug", (_req, res) => {
   res.status(200).json({
     status: "ok",
     time: new Date(),
-  });
-});
-
-app.get("/debug/admin", async (_req, res) => {
-  const { prisma } = await import("./config/prisma.js");
-  const admin = await prisma.user.findFirst({
-    where: { email: { in: ["admin@preview.local", "admin@preview.com"] } },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, email: true, role: true, isActive: true, createdAt: true, passwordHash: true },
-  });
-
-  return res.status(200).json({
-    id: admin?.id ?? null,
-    email: admin?.email ?? null,
-    role: admin?.role ?? null,
-    isActive: admin?.isActive ?? null,
-    createdAt: admin?.createdAt ?? null,
-    passwordHashPrefix: admin?.passwordHash ? admin.passwordHash.slice(0, 12) : null,
   });
 });
 

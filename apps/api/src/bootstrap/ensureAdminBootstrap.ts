@@ -1,7 +1,7 @@
 import { Role } from "@prisma/client";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
-import { hashPassword, verifyPassword } from "../utils/password.js";
+import { hashPassword } from "../utils/password.js";
 
 const DEFAULT_PREVIEW_ADMIN = {
   name: "Admin Preview",
@@ -61,27 +61,11 @@ export async function ensureAdminBootstrap() {
       region: adminBootstrap.region,
       isActive: adminBootstrap.isActive
     },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      region: true,
-      isActive: true,
-      passwordHash: true
-    }
+    select: { role: true, isActive: true }
   });
 
-  const passwordMatches = await verifyPassword(adminBootstrap.password, upsertedUser.passwordHash);
-
-  logApiEvent("INFO", "Usuário admin técnico garantido via bootstrap", {
-    id: upsertedUser.id,
-    email: upsertedUser.email,
+  logApiEvent("INFO", "admin_bootstrap_completed", {
     role: upsertedUser.role,
-    region: upsertedUser.region,
-    isActive: upsertedUser.isActive,
-    passwordLength: adminBootstrap.password.length,
-    hashPrefix: upsertedUser.passwordHash.slice(0, 4),
-    hashLength: upsertedUser.passwordHash.length,
-    passwordMatches
+    isActive: upsertedUser.isActive
   });
 }

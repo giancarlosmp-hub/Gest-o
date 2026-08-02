@@ -175,50 +175,18 @@ jobs:
               -e NODE_ENV=development \
               api npm run seed:preview -w @salesforce-pro/api
 
-            echo "=== DEBUG ADMIN ==="
-            curl -i "http://127.0.0.1:${API_PORT}/debug/admin"
-
             echo "=== LOGIN ADMIN PREVIEW ==="
-            LOGIN_RESPONSE=$(
-              curl -sS -i -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+            LOGIN_RESPONSE_STATUS=$(
+              curl -sS -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
               -H "Content-Type: application/json" \
               --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}"
             )
-            echo "${LOGIN_RESPONSE}"
-            LOGIN_RESPONSE_STATUS=$(echo "${LOGIN_RESPONSE}" | awk 'NR==1 {print $2}')
-            echo "LOGIN_RESPONSE_STATUS=${LOGIN_RESPONSE_STATUS}"
-
-            echo "=== DIAGNOSE HASH ==="
-            set +e
-            DIAG_OUTPUT=$(
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-                env ADMIN_BOOTSTRAP_EMAIL="${ADMIN_BOOTSTRAP_EMAIL}" ADMIN_BOOTSTRAP_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD}" \
-                npm run auth:diagnose-hash -w @salesforce-pro/api 2>&1
-            )
-            DIAG_STATUS=$?
-            set -e
-            echo "$DIAG_OUTPUT"
-            if [ "$DIAG_STATUS" -ne 0 ]; then
-              echo "Diagnose exited with status ${DIAG_STATUS}"
-              exit 1
-            fi
-
-            if ! echo "$DIAG_OUTPUT" | grep -q '"passwordMatches": true'; then
-              echo "passwordMatches=false"
-              exit 1
-            fi
-
-            if ! echo "$DIAG_OUTPUT" | grep -q "\"email\": \"${ADMIN_BOOTSTRAP_EMAIL}\""; then
-              echo "Diagnose output is not using ADMIN_BOOTSTRAP_EMAIL"
-              exit 1
-            fi
-
             if [ "${LOGIN_RESPONSE_STATUS}" != "200" ]; then
-              echo "Login status is not 200"
+              echo "Preview login smoke failed"
               exit 1
             fi
 
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
+
 
       - name: Comment preview link on PR
         uses: peter-evans/create-or-update-comment@v4
@@ -229,6 +197,5 @@ jobs:
 
             Preview URL (HTTPS): ${{ env.PREVIEW_URL }}
             Preview URL (HTTP fallback): ${{ env.PREVIEW_URL_HTTP }}
-            Preview email: ${{ env.ADMIN_BOOTSTRAP_EMAIL }}
-            Preview password: ${{ env.ADMIN_BOOTSTRAP_PASSWORD }}
             Banco do preview é isolado e populado com dados fictícios via ENABLE_PREVIEW_SEED=true.
+            Use as credenciais do canal seguro; elas não são publicadas em comentários ou logs.

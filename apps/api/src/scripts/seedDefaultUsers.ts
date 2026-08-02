@@ -34,7 +34,7 @@ export async function seedDefaultUsers() {
         }
       });
 
-      console.log(`Seed user created: ${user.email}`);
+      console.log("Seed user created");
       continue;
     }
 
@@ -50,7 +50,7 @@ export async function seedDefaultUsers() {
           isActive: true
         }
       });
-      console.log(`Seed user password refreshed: ${user.email}`);
+      console.log("Seed user password refreshed");
       continue;
     }
 
@@ -64,6 +64,6 @@ export async function seedDefaultUsers() {
       }
     });
 
-    console.log(`Seed user already valid: ${user.email}`);
+    console.log("Seed user already valid");
   }
 }

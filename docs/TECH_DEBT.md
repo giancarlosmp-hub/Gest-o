@@ -9,6 +9,8 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 ### TD-ER-001 — Endpoint diagnóstico público expõe metadado de credencial
 
+- **Estado:** correção em 🔵 PR na Sprint 0.2; aberto até merge, deploy e evidência por SHA.
+
 - **Descrição:** `/debug/admin` não exige autenticação e retorna, quando encontra usuário, prefixo e
   presença material do hash de senha.
 - **Fonte:** [`apps/api/src/app.ts`](../apps/api/src/app.ts), rota `/debug/admin`.
@@ -21,6 +23,8 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 - **Sprint sugerida:** Épico 1 — Fechamento dos P0 e incidentes.
 
 ### TD-ER-002 — Login registra dados pessoais e metadados de hash
+
+- **Estado:** correção em 🔵 PR na Sprint 0.2; aberto até merge, deploy e evidência por SHA.
 
 - **Descrição:** fluxo de login escreve e-mail, ID, prefixo/comprimento de hash e resultado de
   comparação em `console`/eventos.
