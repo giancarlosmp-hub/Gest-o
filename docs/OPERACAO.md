@@ -378,3 +378,35 @@ o Prisma propõe por não gerenciá-los; qualquer outro DDL impede `applied.tsv`
 
 `NODE_ENV` não é sinal de propriedade do banco. Nunca mude produção para `ephemeral-push`, nem use
 flags de seed como autorização indireta. Ausência ou valor inválido deve falhar fechado.
+
+
+## Validação operacional Enterprise — Sprint 0.5
+
+A pergunta “esta instalação está saudável?” possui uma única rotina oficial. Ela é somente leitura,
+não consulta o banco e não substitui deploy, restore, monitoramento prolongado ou decisão humana.
+Execute apenas no host autorizado, depois de confirmar o SHA por fonte independente e preparar uma
+conta de teste com privilégio mínimo. Não publique credenciais nem os logs brutos.
+
+```bash
+cd /apps/gest-o
+EXPECTED_SHA='<sha-completo-esperado>' \
+CONFIRM=PRODUCTION_HEALTH_VALIDATE \
+AUTH_TEST_EMAIL="$AUTH_TEST_EMAIL" \
+AUTH_TEST_PASSWORD="$AUTH_TEST_PASSWORD" \
+DB_VOLUME='<volume-postgresql-aprovado>' \
+SCHEMA_EVIDENCE_FILE='<applied.tsv-ou-manifesto-aprovado>' \
+bash scripts/production-health-validation.sh
+```
+
+Pré-condições: checkout limpo no SHA, Docker disponível, containers conhecidos, DNS/TLS público,
+evidência anterior de schema legível e diretório `/var/log/gest-o/health` gravável pelo operador.
+A rotina falha se o diretório daquele SHA já existir, evitando sobrescrever prova. As credenciais e
+token ficam somente em memória. O arquivo de schema é lido como evidência externa: nenhuma conexão
+PostgreSQL é aberta.
+
+A revisão deve conferir `health.tsv`, `runtime.tsv`, `containers.tsv`, `images.tsv`, `network.tsv`,
+`storage.tsv`, `system.tsv`, `security.tsv`, `erp.tsv` e `summary.tsv`. `result.tsv` é criado somente
+depois de todas as verificações; qualquer `FAIL` significa instalação **não certificada**, exige
+triagem e não autoriza ação corretiva automática. Ausência de Docker é SKIP apenas no ambiente de
+desenvolvimento/CI e nunca equivale a PASS operacional. Preserve permissões 0700 e não anexe
+credenciais, corpos de autenticação ou logs brutos a tickets.

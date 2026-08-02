@@ -82,3 +82,22 @@ Sem datas fictícias e condicionada aos gates existentes:
 4. **Multiempresa** — ADR, modelo de tenancy e provas de isolamento em todos os componentes.
 5. **Onboarding e comercialização** — oferta, licenciamento, provisioning, suporte e offboarding.
 6. **Evolução funcional** — somente após os gates anteriores, conforme prioridade de produto.
+
+## Atualização controlada — Sprint 0.5
+
+Somente as quatro dimensões operacionais abaixo são atualizadas nesta Sprint. As classificações das
+demais dimensões permanecem exatamente como na baseline; a existência de código no Git não comprova
+execução em produção.
+
+| Dimensão atualizada | Classificação | Evidência acrescentada | Limite remanescente |
+|---|---|---|---|
+| Operação | ⚪ Não comprovado | Rotina única, contrato PASS/FAIL e procedimento em [`OPERACAO.md`](OPERACAO.md), com Sprint Brief auditável | Suporte, ownership, SLA, on-call e execução por SHA continuam não comprovados. |
+| Observabilidade | 🟡 Parcialmente comprovado | TSVs uniformes de health, runtime, sistema, segurança e ERP; resultado somente após coleta completa | Não há SLO, alerta externo, tracing, retenção central ou game day comprovado. |
+| Infraestrutura | 🟡 Parcialmente comprovado | Inspeção read-only de containers, imagens, rede, volume, nginx/TLS, recursos e restart policy | Execução no host, rollback real, hardening e capacidade sob carga continuam pendentes. |
+| Continuidade | 🟡 Parcialmente comprovado, condicionado ao check Docker da PR | Verificação não invasiva da configuração de backup/restore e da cadeia de evidência de schema/incidentes | Não executa restore, não consulta o banco e não comprova cópia real, off-site, RPO ou RTO. |
+
+O validador é [`../scripts/production-health-validation.sh`](../scripts/production-health-validation.sh)
+e seu smoke estático é
+[`../scripts/smoke/production-health-validation-safety.mjs`](../scripts/smoke/production-health-validation-safety.mjs).
+Nenhuma classificação de Segurança, Identidade, LGPD, Banco, Qualidade, Performance, Produto,
+Arquitetura, Multiempresa, Integrações, UI/UX, Governança ou Comercialização foi alterada.

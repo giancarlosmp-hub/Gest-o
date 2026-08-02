@@ -25,6 +25,7 @@
     "test:production-deploy": "node scripts/smoke/production-deploy-safety.mjs",
     "test:production-schema": "node scripts/smoke/production-schema-safety.mjs",
     "test:production-backup-restore": "node scripts/smoke/production-backup-restore-safety.mjs",
+    "test:production-health-validation": "node scripts/smoke/production-health-validation-safety.mjs",
     "test:production-backup-restore:postgres": "bash scripts/smoke/production-backup-restore-postgres.sh",
     "test:production-auth-security-validate": "node scripts/smoke/production-auth-security-validate-safety.mjs",
     "test:auth-security": "npm run test:auth-security -w @salesforce-pro/api",
