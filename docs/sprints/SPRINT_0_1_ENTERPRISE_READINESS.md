@@ -8,6 +8,24 @@ worktree limpo. Não havia branch `main` local, referência `origin/main` nem re
 a relação atual com `main` não foi comprovada. O histórico local registra como última PR a #764, mas
 merge, deploy e produção não são inferidos desse registro.
 
+## Reconciliação posterior ao intake
+
+Após a baseline inicial, foram fornecidas evidências operacionais da VPS de 01/08/2026. A matriz foi
+reconciliada sem reexecutar operações:
+
+- **Evidência do repositório:** código, schema, ADRs, migrations, workflows, scripts, testes e
+  documentação versionados; prova o artefato auditado, não sua execução.
+- **Evidência operacional da VPS:** `applied.tsv`, checksum validado, pós-diff gerenciado vazio,
+  cinco tabelas, sete enums, duas colunas de `Contact` e oito `incident_*` preservadas; cutover local
+  para `a08a62670c4940322ce037d0c86c54959db32f71` e containers API/WEB iniciados.
+- **Validação funcional humana:** CRM acessível, login/navegação, sincronização de clientes, 5050
+  presente e Saúde da Plataforma carregando, sem relato de perda de dados.
+
+A validação complementar por `docker compose ps` falhou depois do cutover porque `API_IMAGE` e
+`WEB_IMAGE` não estavam exportadas no shell. Essa falha posterior não torna o deploy malsucedido.
+Por outro lado, a validação humana ou eventual screenshot não prova SHA público, `build-info.json`,
+rollback, restore, componentes internos, estabilidade prolongada ou encerramento dos incidentes.
+
 ## Objetivo
 
 Produzir a primeira baseline verificável de maturidade comercial e técnica do Gest-o.
@@ -49,10 +67,11 @@ existe uma matriz única que mostre:
   depois investigações, roadmap, arquitetura e Dashboard Saúde.
 - ADR 001 mantém estabelecimentos UltraFV3 distintos por documento completo; dados corrompidos não
   são reparados automaticamente.
-- ADR 002 separa autoridade runtime e migration; sua própria redação deixa a execução em produção
-  pendente.
+- ADR 002 separa autoridade runtime e migration; a reconciliação operacional comprova o apply sem
+  conceder DDL permanente à identidade runtime.
 - `INC-5050-4484` continua em homologação e `INC-ERP-5050` continua sem causa raiz comprovada.
-- Cutover e revisão implantada continuam não comprovados. A baseline não altera esses estados.
+- Cutover local e revisão operacional `a08a626` estão comprovados; a convergência pública do SHA
+  continua não comprovada caso as saídas técnicas não tenham sido preservadas.
 - Dependência de gate: fechar P0 e obter evidência operacional antes de evolução funcional,
   multiempresa ou alegação comercial enterprise.
 
@@ -66,8 +85,8 @@ existe uma matriz única que mostre:
 ## Riscos e rollback
 
 O risco principal é uma leitura documental ser confundida com certificação operacional. A mitigação é
-marcar limitações e manter produção como não comprovada. O rollback é reverter apenas esta PR
-documental; não há efeito em runtime ou dados.
+marcar separadamente o que foi comprovado na VPS e o que continua pendente. O rollback desta entrega
+é reverter apenas a PR documental; não há efeito em runtime ou dados.
 
 ## Documentação obrigatória
 

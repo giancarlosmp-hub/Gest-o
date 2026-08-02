@@ -1,8 +1,9 @@
 # Dívida técnica — achados da Sprint 0.1
 
 Este backlog contém somente achados desta auditoria. Ele não implementa correções, não duplica
-incidentes e não altera seu estado. `INC-5050-4484`, `INC-ERP-5050` e o gate de schema/cutover
-continuam nas fontes oficiais; são dependências referenciadas, não novos itens.
+incidentes e não altera seu estado. `INC-5050-4484`, `INC-ERP-5050` e `INC-PROD-2026-07`
+continuam nas fontes oficiais; são dependências referenciadas, não novos itens. Schema e cutover
+local foram comprovados posteriormente, sem comprovar restore ou encerramento dos incidentes.
 
 ## P0 — risco imediato a dados, segurança ou produção
 
@@ -37,9 +38,9 @@ continuam nas fontes oficiais; são dependências referenciadas, não novos iten
 - `INC-5050-4484`: permanece **EM HOMOLOGAÇÃO**, conforme [`DOCUMENTO_MESTRE.md`](DOCUMENTO_MESTRE.md).
 - `INC-ERP-5050`: causa raiz continua não comprovada, conforme
   [`investigations/erp-5050-root-cause-analysis.md`](investigations/erp-5050-root-cause-analysis.md).
-- Gate de schema/cutover e restauração: permanecem abertos conforme
-  [`STATUS_ATUAL.md`](STATUS_ATUAL.md) e
-  [`investigations/production-schema-transition-july-2026.md`](investigations/production-schema-transition-july-2026.md).
+- `INC-PROD-2026-07`: schema/cutover e validação funcional estão comprovados; permanece corrigido
+  aguardando encerramento, estabilidade prolongada e restore isolado, conforme
+  [`STATUS_ATUAL.md`](STATUS_ATUAL.md).
 
 ## P1 — bloqueia plataforma comercial
 

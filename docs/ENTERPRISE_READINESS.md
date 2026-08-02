@@ -2,9 +2,10 @@
 
 **Baseline:** Sprint 0.1 — Auditoria Enterprise
 **Estado:** 🔵 PR
-**Escopo probatório:** repositório no `HEAD e2a41a7` antes desta mudança. Inspeção documental e
-estática, sem acesso à VPS, serviços externos ou produção. Esta baseline **não declara o Gest-o
-Enterprise-ready**, não fecha incidentes e não transforma código versionado em prova operacional.
+**Escopo probatório:** inspeção documental/estática inicialmente realizada no `HEAD e2a41a7`, depois
+reconciliada com evidências operacionais da VPS e validação funcional humana de 01/08/2026. Esta
+baseline **não declara o Gest-o Enterprise-ready**, não fecha incidentes e não transforma interface
+visível em prova de todos os componentes internos.
 
 ## Método e escala
 
@@ -29,9 +30,9 @@ não que foi executado em produção.
 | 3. Segurança | Hardening web, segredos e superfície de diagnóstico seguros | 🔴 Crítico ou não conforme | `helmet`, CORS allowlist e rate limit em [`apps/api/src/app.ts`](../apps/api/src/app.ts); endpoint público `/debug/admin` retorna prefixo do hash em [`apps/api/src/app.ts`](../apps/api/src/app.ts); investigação de secrets em [`investigations/github-ssh-secrets-check.md`](investigations/github-ssh-secrets-check.md) | O endpoint diagnóstico não exige autenticação; não há threat model, SAST/DAST, gestão de vulnerabilidades ou comprovação do hardening da VPS. | Divulgação de metadados de credencial e ampliação da superfície de ataque. | Remover/restringir diagnóstico por Sprint autorizada e estabelecer baseline de segurança com testes negativos. | Crítica | Gate de segurança; TD-ER-001 | Segurança | Épico 1 |
 | 4. Identidade, autenticação e autorização | Sessões revogáveis, RBAC completo e autorização negativa | 🟡 Parcialmente comprovado | JWT e refresh cookie em [`apps/api/src/controllers/authController.ts`](../apps/api/src/controllers/authController.ts); RBAC em [`apps/api/src/middlewares/authorize.ts`](../apps/api/src/middlewares/authorize.ts); rate limit em [`apps/api/src/middlewares/rateLimit.ts`](../apps/api/src/middlewares/rateLimit.ts) | Refresh token não tem rotação/revogação persistida comprovada; logout apenas limpa cookie; não há MFA/SSO nem suíte abrangente de autorização negativa. | Sessão roubada permanece válida e privilégios podem regredir sem detecção. | Definir política de sessão e matriz RBAC; testar negações por rota e objeto. | Alta | Segurança | Segurança / QA | Épico 2 |
 | 5. Privacidade e LGPD | Inventário de dados, base legal, direitos, retenção e logs minimizados | 🔴 Crítico ou não conforme | Login registra e-mail e metadados de hash em [`apps/api/src/controllers/authController.ts`](../apps/api/src/controllers/authController.ts); sanitização genérica em [`apps/api/src/utils/logger.ts`](../apps/api/src/utils/logger.ts); retenção de webhook configurável em [`apps/api/src/config/env.ts`](../apps/api/src/config/env.ts) | Não há registro de operações de tratamento, bases legais, DPO, política de retenção global, DSAR ou evidência de expurgo; logging de identidade é excessivo. | Exposição de dados pessoais e incapacidade de atender direitos do titular. | Cessar logging sensível via Sprint própria e aprovar programa LGPD com inventário e testes de retenção. | Crítica | TD-ER-002; gate de segurança | Segurança / Jurídico-Privacidade | Épico 1 |
-| 6. Banco de dados | Schema versionado, integridade e migrations reproduzíveis | 🟡 Parcialmente comprovado | Schema, índices e constraints em [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma); ADR de autoridade em [`adr/002-runtime-migration-authority-separation.md`](adr/002-runtime-migration-authority-separation.md); transição em [`investigations/production-schema-transition-july-2026.md`](investigations/production-schema-transition-july-2026.md) | Histórico recuperado não possui ledger confiável e apply/cutover permanecem pendentes; queries raw não têm revisão central comprovada. | Drift, rollback incompatível e integridade divergente entre ambientes. | Baselinear migrations e revisar raw SQL/constraints em base descartável, sem tocar produção nesta entrega. | Crítica | Gate de schema e incidente aberto | DBA PostgreSQL | Épico 1 |
+| 6. Banco de dados | Schema versionado, integridade e migrations reproduzíveis | 🟡 Parcialmente comprovado | Schema, índices e constraints em [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma); ADR em [`adr/002-runtime-migration-authority-separation.md`](adr/002-runtime-migration-authority-separation.md); operação de 01/08 confirmou `applied.tsv`, checksum, pós-diff gerenciado vazio, cinco tabelas, sete enums, duas colunas de `Contact` e oito `incident_*` preservadas | Schema/apply estão comprovados; faltam ledger histórico confiável, restore isolado e revisão central das queries raw. | Drift histórico, recuperação não demonstrada e SQL crítico sem governança uniforme. | Baselinear o histórico de migrations, provar restore isolado e revisar raw SQL/constraints. | Crítica | INC-PROD-2026-07; restore | DBA PostgreSQL | Épico 1 |
 | 7. Backup e restauração | Backup íntegro, protegido e restauração ensaiada | 🔴 Crítico ou não conforme | Criação/validação/rotação em [`ops/backup.md`](ops/backup.md) e [`../backup.sh`](../backup.sh); restauração simples em [`../restore.sh`](../restore.sh); bloqueador registrado em [`STATUS_ATUAL.md`](STATUS_ATUAL.md) | Não há evidência versionada de restore isolado validado, RPO/RTO, criptografia, cópia off-site ou teste periódico; o restore não possui pré/pós-checks robustos. | Perda de dados ou backup inutilizável durante incidente. | Executar e preservar ensaio isolado aprovado; definir RPO/RTO, proteção e runbook de restauração. | Crítica | Gate operacional existente | DBA / DevOps | Épico 1 |
-| 8. Deploy e rollback | Publicação identificável, controlada e reversível | 🟡 Parcialmente comprovado | Workflow manual em [`.github/workflows/deploy-production.yml`](../.github/workflows/deploy-production.yml); runbook em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md); scripts `production-*` | Scripts e gates estão versionados, mas cutover, SHA implantado, rollback ensaiado e última produção continuam não comprovados. | Indisponibilidade ou versão divergente sem recuperação demonstrada. | Executar janela aprovada e registrar todas as identidades e rollback; não inferir deploy do merge. | Crítica | Cutover e incidentes abertos | DevOps | Épico 1 |
+| 8. Deploy e rollback | Publicação identificável, controlada e reversível | 🟡 Parcialmente comprovado | Workflow em [`.github/workflows/deploy-production.yml`](../.github/workflows/deploy-production.yml); runbook em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md); cutover local de 01/08 concluído para `a08a626`, containers API/WEB iniciados e validação funcional humana aprovada | Deploy/cutover local foram executados; rollback pós-cutover não foi executado e a confirmação pública completa por `/health/version`/`build-info.json` pode não ter sido preservada. | Divergência de versão pública ou reversão não demonstrada em falha real. | Consolidar prova pública por SHA, monitorar estabilidade e executar ensaio de rollback em janela aprovada. | Crítica | INC-PROD-2026-07 | DevOps | Épico 1 |
 | 9. Observabilidade e resposta a incidentes | Métricas, alertas, SLOs, runbooks e resposta auditável | 🟡 Parcialmente comprovado | [`dashboard-saude-plataforma.md`](dashboard-saude-plataforma.md); logs estruturados em [`apps/api/src/utils/logger.ts`](../apps/api/src/utils/logger.ts); incidentes em [`incidents/`](incidents/) | Painel existe, porém adaptadores de alerta e SLOs são plano; não há traces, on-call, retenção central ou exercício de resposta comprovados. | Falhas podem ser percebidas tarde e sem contexto preservado. | Definir SLIs/SLOs, alertas acionáveis, responsáveis, retenção e game day. | Alta | P0 encerrados | Observabilidade / Operação | Épico 3 |
 | 10. Qualidade e testes | Pirâmide automatizada com evidência por revisão e ambiente | 🟡 Parcialmente comprovado | Testes Node em `apps/api/src/**/*.test.ts`; smoke Compose em [`.github/workflows/docker-compose-ci.yml`](../.github/workflows/docker-compose-ci.yml); checklists manuais em [`manual-test-checklist.md`](manual-test-checklist.md) | Não foi encontrada suíte E2E browser, cobertura/threshold, testes de acessibilidade ou evidência desses testes na produção; login no CI usa diagnóstico permissivo durante coleta. | Regressões críticas e de jornada escapam para release. | Formalizar matriz de testes, E2E de fluxos críticos, autorização negativa e evidência por SHA. | Alta | Ambientes representativos | QA | Épico 3 |
 | 11. Performance e escalabilidade | Capacidade, limites, concorrência e metas verificadas | ⚪ Não comprovado | Limites/cache descritos em [`dashboard-saude-plataforma.md`](dashboard-saude-plataforma.md); locks/scheduler em [`apps/api/src/jobs/erpSyncScheduler.ts`](../apps/api/src/jobs/erpSyncScheduler.ts) | Não foram encontrados SLO de latência/capacidade, testes de carga, sizing ou resultados de concorrência. | Saturação e custo imprevisíveis com crescimento. | Definir workload, metas e teste reprodutível antes de alegar escala. | Alta | Observabilidade e arquitetura | Plataforma / Performance | Épico 3 |
@@ -44,7 +45,7 @@ não que foi executado em produção.
 
 ## Evidências transversais e limites
 
-- **Autenticação:** access JWT e refresh cookie existem; sua execução em produção não foi observada.
+- **Autenticação:** access JWT e refresh cookie existem; login humano funcionou após o cutover, sem que isso prove rotação/revogação ou todas as rotas de autorização.
 - **RBAC:** middleware 401/403 e várias rotas com `authorize` existem; cobertura negativa completa não
   foi encontrada.
 - **Secrets:** `.env.example`, arquivo externo e GitHub Secrets são padrões versionados; configuração
@@ -58,21 +59,20 @@ não que foi executado em produção.
 
 ## Pontos não comprovados prioritários
 
-1. SHA, imagem, stack e data da revisão realmente implantada.
-2. Restore isolado bem-sucedido e objetivos de recuperação aprovados.
-3. Causa raiz e população real do incidente ERP 5050.
-4. Homologação integral 5050×4484 com perfis reconciliados.
-5. Capacidade, latência e concorrência sob carga representativa.
-6. Isolamento multiempresa fora de Communications.
-7. SLOs, alertas externos, on-call e exercício de incidente.
-8. Conformidade LGPD, acessibilidade e modelo comercial/contratual.
+1. Convergência pública do SHA `a08a626` via `/health/version` e `build-info.json`, caso as saídas não tenham sido preservadas.
+2. Rollback efetivamente executado após o cutover.
+3. Restore isolado bem-sucedido, RPO/RTO e estabilidade prolongada.
+4. Causa raiz e população real do incidente ERP 5050, apesar da recuperação funcional do 5050.
+5. Homologação integral 5050×4484, incluindo 4484 e perfis reconciliados.
+6. Capacidade, latência e concorrência sob carga representativa.
+7. Isolamento multiempresa, LGPD, SLOs/alertas, acessibilidade e modelo comercial.
 
 ## Proposta de sequência de épicos
 
 Sem datas fictícias e condicionada aos gates existentes:
 
-1. **Fechamento dos P0 e incidentes** — remover exposições por Sprint própria, comprovar restore,
-   concluir gates de schema/cutover e preservar evidências dos incidentes sem encerramento antecipado.
+1. **Fechamento dos P0 e incidentes** — corrigir TD-ER-001/TD-ER-002, comprovar restore/rollback e
+   preservar evidências dos incidentes sem encerramento antecipado.
 2. **Segurança e isolamento** — threat model, sessão/RBAC, LGPD, secrets e fronteiras de dados.
 3. **Qualidade e observabilidade** — E2E, testes negativos, performance, SLOs, alertas e resposta.
 4. **Multiempresa** — ADR, modelo de tenancy e provas de isolamento em todos os componentes.
