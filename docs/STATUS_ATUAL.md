@@ -1,3 +1,12 @@
+# 🔵 PR — validação operacional Enterprise repetível (02/08/2026)
+
+A Sprint 0.5 cria uma única rotina estritamente read-only para responder, por SHA, se uma instalação
+está saudável. A rotina consolida runtime, containers, imagens, rede, storage, sistema, segurança e
+ERP em TSVs sanitizados sob `/var/log/gest-o/health/<SHA>/`; `result.tsv` só é emitido ao final.
+Esta entrega não acessou produção ou banco, não realizou deploy/restore e não altera o estado dos
+incidentes nem transforma o Git em evidência de produção. Consulte o
+[Sprint Brief](sprints/SPRINT_0_5_ENTERPRISE_OPERATIONAL_VALIDATION.md).
+
 # 🟢 Produção validada após cutover — 01/08/2026
 
 # 🔵 PR — preparação de validação operacional de segurança e restore (02/08/2026)

@@ -23,8 +23,17 @@
 - [Governança de desenvolvimento](GOVERNANCA_DESENVOLVIMENTO.md)
 - [Enterprise Readiness — baseline oficial](ENTERPRISE_READINESS.md)
 - [Sprint 0.1 — Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md)
+- [Sprint 0.5 — Validação operacional Enterprise](sprints/SPRINT_0_5_ENTERPRISE_OPERATIONAL_VALIDATION.md)
 - [Dívida técnica auditada](TECH_DEBT.md)
 - [ADRs](adr/README.md)
+
+## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
+
+A rotina oficial de certificação de uma instalação é `scripts/production-health-validation.sh`,
+descrita em [`OPERACAO.md`](OPERACAO.md). Ela coleta evidência por SHA sem consultar ou alterar o
+banco e sem executar publicação ou recuperação. A existência do validador no Git não comprova sua
+execução nem muda o estado conhecido da produção; promoção depende de `result.tsv` PASS revisado
+no host autorizado. O estágio desta entrega permanece 🔵 PR.
 
 ## 1. RESUMO EXECUTIVO
 
