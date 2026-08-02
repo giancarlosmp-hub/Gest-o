@@ -9,7 +9,11 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 ### TD-ER-001 — Endpoint diagnóstico público expõe metadado de credencial
 
-- **Estado:** correção em 🔵 PR na Sprint 0.2; aberto até merge, deploy e evidência por SHA.
+- **Estado:** correção mesclada na PR #766; aberto até deploy e evidência por SHA.
+- **Artefato operacional:** validação sanitizada preparada em
+  [`../scripts/production-auth-security-validate.sh`](../scripts/production-auth-security-validate.sh)
+  e governada pela [Sprint 0.4](sprints/SPRINT_0_4_SECURITY_RESTORE_OPERATIONAL_VALIDATION.md); a
+  existência do artefato não encerra o item.
 
 - **Descrição:** `/debug/admin` não exige autenticação e retorna, quando encontra usuário, prefixo e
   presença material do hash de senha.
@@ -24,7 +28,9 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 ### TD-ER-002 — Login registra dados pessoais e metadados de hash
 
-- **Estado:** correção em 🔵 PR na Sprint 0.2; aberto até merge, deploy e evidência por SHA.
+- **Estado:** correção mesclada na PR #766; aberto até deploy e evidência por SHA.
+- **Artefato operacional:** o mesmo validador compara contratos inválidos e examina somente o
+  intervalo sanitizado; execução por SHA ainda é obrigatória.
 
 - **Descrição:** fluxo de login escreve e-mail, ID, prefixo/comprimento de hash e resultado de
   comparação em `console`/eventos.
@@ -50,7 +56,7 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 | ID | Descrição | Fonte | Severidade | Impacto | Dependências | Critério de encerramento | Sprint sugerida |
 |---|---|---|---|---|---|---|---|
-| TD-ER-003 | Restauração e objetivos de recuperação não comprovados — **correção/validação em 🔵 PR na Sprint 0.3; não encerrado** | [`ops/backup.md`](ops/backup.md), [`ops/backup-restore-readiness.md`](ops/backup-restore-readiness.md), [`../restore.sh`](../restore.sh), [`STATUS_ATUAL.md`](STATUS_ATUAL.md) | Crítica | Perda de dados/continuidade não demonstrada | Merge, check Docker, ensaio autorizado e validação operacional | Restore integral ensaiado com checksum, pré/pós-condições, RPO/RTO e evidência aprovada; teste sintético isolado não basta | Épico 1 |
+| TD-ER-003 | Restauração e objetivos de recuperação não comprovados — **correção/validação em 🔵 PR na Sprint 0.3; não encerrado** | [`ops/backup.md`](ops/backup.md), [`ops/backup-restore-readiness.md`](ops/backup-restore-readiness.md), [harness](../scripts/smoke/production-backup-restore-postgres.sh), [operação Sprint 0.4](sprints/SPRINT_0_4_SECURITY_RESTORE_OPERATIONAL_VALIDATION.md), [`../restore.sh`](../restore.sh), [`STATUS_ATUAL.md`](STATUS_ATUAL.md) | Crítica | Perda de dados/continuidade não demonstrada | Merge, check Docker, ensaio autorizado e validação operacional | Restore integral ensaiado com checksum, pré/pós-condições, RPO/RTO e evidência aprovada; teste sintético isolado não basta | Épico 1 |
 | TD-ER-004 | Tenancy incompleta nos domínios centrais | [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma), [`GOVERNANCA_DESENVOLVIMENTO.md`](GOVERNANCA_DESENVOLVIMENTO.md) | Crítica | Risco de acesso cruzado e alegação comercial indevida | ADR, identidade e autorização | ADR aceita e testes negativos provam isolamento de banco, cache, jobs, uploads e integrações | Épico 4 |
 | TD-ER-005 | Gestão de sessão sem rotação/revogação comprovada | [`apps/api/src/controllers/authController.ts`](../apps/api/src/controllers/authController.ts), [`apps/api/src/utils/jwt.ts`](../apps/api/src/utils/jwt.ts) | Alta | Refresh token roubado segue válido até expirar | Política de identidade | Política aprovada; rotação, revogação e testes de replay/logout comprovados | Épico 2 |
 | TD-ER-006 | Programa LGPD não documentado | [`ENTERPRISE_READINESS.md`](ENTERPRISE_READINESS.md#matriz-por-dimensão) | Crítica | Direitos, retenção e base legal não demonstráveis | Inventário de dados e jurídico | ROPA, bases legais, retenção, DSAR, responsáveis e evidências de execução aprovados | Épico 2 |

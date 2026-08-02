@@ -285,6 +285,10 @@ substituem essa sequência.
 
 ## 9. CHANGELOG EXECUTIVO
 
+- **02/08/2026 — Sprint 0.4 em 🔵 PR:** preparação read-only separa explicitamente merge, deploy
+  oficial, validação de TD-ER-001/002 por SHA, estabilidade e restore autorizado descartável. Os
+  merges #766/#767 não comprovam publicação; nenhum restore, débito ou incidente foi encerrado.
+
 - **02/08/2026 — Sprint 0.3 em 🔵 PR:** ensaio sintético e isolado de restore em PostgreSQL 16,
   checksum, catálogo, pós-condições e evidência metadatal, com RPO/RTO apenas propostos. Não houve
   restore real; `INC-PROD-2026-07` e `TD-ER-003` permanecem abertos até validação operacional.
@@ -295,6 +299,7 @@ substituem essa sequência.
 
 | Data | Grande entrega |
 |---|---|
+| 02/08/2026 | Sprint 0.4 prepara evidência sanitizada pós-deploy e comando de restore autorizado separado, sem VPS, deploy, restore real ou mudança de classificação. |
 | 02/08/2026 | Sprint 0.3 cria ensaio descartável de recuperação e CI sintético, sem VPS ou produção; continuidade, restore real e RPO/RTO aprovados continuam não comprovados. |
 | 02/08/2026 | Baseline reconciliada com a operação de 01/08: schema aplicado, pós-diff gerenciado vazio, oito `incident_*` preservadas, cutover local em `a08a626` e validação funcional de login, sync, 5050 e Saúde; prova pública completa por SHA, estabilidade, restore, P0 e encerramento de incidentes permanecem pendentes. |
 | 02/08/2026 | Baseline oficial de Enterprise Readiness e Sprint 0.1 criadas em 🔵 PR, com 17 dimensões e backlog baseado em evidências; auditoria exclusivamente documental/read-only, sem alteração ou declaração sobre produção e sem encerramento de incidentes. |

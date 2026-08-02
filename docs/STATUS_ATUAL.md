@@ -1,5 +1,14 @@
 # 🟢 Produção validada após cutover — 01/08/2026
 
+# 🔵 PR — preparação de validação operacional de segurança e restore (02/08/2026)
+
+A Sprint 0.4 prepara um validador pós-deploy exclusivamente read-only e a ordem operacional
+`deploy → SHA → segurança → estabilidade → restore separado`. O histórico local confirma os merges
+das PRs #766 e #767, mas a atualização do remote falhou no proxy (HTTP 403), impedindo verificar
+GitHub/checks atuais; não houve VPS, deploy ou restore. TD-ER-001/002 continuam aguardando deploy e evidência por SHA;
+TD-ER-003 continua aguardando ensaio com cópia aprovada. Nenhum incidente, inclusive
+`INC-PROD-2026-07`, foi encerrado. Consulte o [Sprint Brief](sprints/SPRINT_0_4_SECURITY_RESTORE_OPERATIONAL_VALIDATION.md).
+
 # 🔵 PR — ensaio isolado de backup e restore (02/08/2026)
 
 A Sprint 0.3 adiciona prova descartável em PostgreSQL 16, com checksum, catálogo, pós-condições,
