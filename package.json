@@ -30,6 +30,8 @@
     "test:production-auth-security-validate": "node scripts/smoke/production-auth-security-validate-safety.mjs",
     "test:auth-security": "npm run test:auth-security -w @salesforce-pro/api",
     "test:tenancy": "npm run test:tenancy -w @salesforce-pro/api",
+    "test:tenancy-control-plane": "npm run test:tenancy-control-plane -w @salesforce-pro/api && node scripts/smoke/tenancy-control-plane-safety.mjs",
+    "test:tenancy-control-plane:postgres": "bash scripts/smoke/tenancy-control-plane-postgres.sh",
     "erp:fix-duplicates": "npm run erp:fix-duplicates -w @salesforce-pro/api",
     "erp:fix-archived-flag": "npm run erp:fix-archived-flag -w @salesforce-pro/api",
     "smoke:ai": "npm run smoke:ai -w @salesforce-pro/api",

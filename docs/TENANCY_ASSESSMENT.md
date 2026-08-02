@@ -290,3 +290,10 @@ A ADR 003 foi aceita com condições, e o threat model, RACI, modelos e contrato
 diagnóstico: não há migration, memberships persistidas, isolamento transversal ou segundo tenant;
 o sistema continua single-tenant e Multiempresa permanece 🔴. A expansão futura está no
 [plano 1.0B](tenancy/MIGRATION_EXPAND_PLAN.md).
+
+## Atualização Sprint 1.0B.1
+
+O control plane foi modelado em PR com migration aditiva, tenant default determinístico,
+memberships por usuário, runner/ledger e adapter Prisma não integrado. Nenhum dos 23 models centrais
+foi tenantizado e nenhum handler/JWT mudou. A prova é local/descartável: apply e estado de produção
+continuam desconhecidos; Multiempresa permanece 🔴 e a expansão de dados fica para 1.0B.2.

@@ -29,6 +29,8 @@
 - [Sprint 1.0A — Multi-Tenancy Foundation](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md)
 - [Threat Model Multi-Tenancy](security/MULTI_TENANCY_THREAT_MODEL.md)
 - [Plano da migration expand](tenancy/MIGRATION_EXPAND_PLAN.md)
+- [Sprint 1.0B.1 — persistência do control plane](sprints/SPRINT_1_0B_1_CONTROL_PLANE_PERSISTENCE.md)
+- [Preparação do control plane](tenancy/CONTROL_PLANE_PREPARATION.md)
 
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 
@@ -46,6 +48,13 @@ progressiva, constraints compostas, RLS defensiva e provas A×B. A entrega adici
 e testes default-only; não altera schema, banco, deploy ou produção e não habilita outra empresa.
 Multiempresa continua 🔴 até o roadmap 1.0B–1.0F e a evidência operacional. O threat model, RACI e
 gates estão no [Brief 1.0A](sprints/SPRINT_1_0A_MULTI_TENANCY_FOUNDATION.md).
+
+## ADENDO DA SPRINT 1.0B.1 — PERSISTÊNCIA DEFAULT-ONLY
+
+Esta entrega em 🔵 PR persiste o control plane e prepara um único tenant default por runner
+explícito, transacional e reconciliável. Não aplicou migration em produção, não executou deploy e
+não altera models empresariais, autenticação ou handlers. O runtime legado continua single-tenant e
+Multiempresa permanece 🔴 até os gates das etapas seguintes.
 
 ## 1. RESUMO EXECUTIVO
 

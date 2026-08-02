@@ -23,9 +23,10 @@ if (mode === "post") {
   if (meaningful) throw new Error("managed post-apply Prisma diff is not empty");
   process.exit(0);
 }
-const enums = "Communication(?:ChannelType|ProviderType|Direction|MessageType|MessageStatus|ConversationStatus|WebhookStatus)";
-const tables = "(?:ClientCodeAudit|CommunicationIntegrationAccount|CommunicationConversation|CommunicationMessage|CommunicationWebhookEvent)";
+const enums = "(?:Communication(?:ChannelType|ProviderType|Direction|MessageType|MessageStatus|ConversationStatus|WebhookStatus)|TenantStatus|TenantMembershipStatus|TenantRole)";
+const tables = "(?:ClientCodeAudit|CommunicationIntegrationAccount|CommunicationConversation|CommunicationMessage|CommunicationWebhookEvent|Tenant|TenantMembership)";
 const indexes = [
+  "Tenant_slug_key", "TenantMembership_tenantId_userId_key", "TenantMembership_userId_status_idx", "TenantMembership_tenantId_status_idx",
   "ClientCodeAudit_clientId_createdAt_idx", "ClientCodeAudit_requestId_idx", "ClientCodeAudit_origin_createdAt_idx",
   "Contact_phoneHash_idx", "Contact_ownerSellerId_phoneHash_idx",
   "CommunicationIntegrationAccount_provider_channel_externalAc_idx", "CommunicationIntegrationAccount_tenantId_enabled_idx", "CommunicationIntegrationAccount_tenantId_provider_channel_e_key",
@@ -33,7 +34,7 @@ const indexes = [
   "CommunicationMessage_integrationAccountId_idx", "CommunicationMessage_tenantId_contactPhoneHash_idx", "CommunicationMessage_conversationId_idx", "CommunicationMessage_tenantId_idx", "CommunicationMessage_providerTimestamp_idx", "CommunicationMessage_status_idx", "CommunicationMessage_provider_externalAccountId_externalMes_key",
   "CommunicationWebhookEvent_integrationAccountId_idx", "CommunicationWebhookEvent_tenantId_idx", "CommunicationWebhookEvent_status_createdAt_idx", "CommunicationWebhookEvent_payloadHash_idx", "CommunicationWebhookEvent_provider_externalAccountId_extern_key"
 ];
-const constraints = ["ClientCodeAudit_clientId_fkey", "AgendaEvent_clientId_fkey", "CommunicationConversation_integrationAccountId_fkey", "CommunicationConversation_clientId_fkey", "CommunicationConversation_assignedSellerId_fkey", "CommunicationMessage_conversationId_fkey", "CommunicationMessage_integrationAccountId_fkey", "CommunicationWebhookEvent_integrationAccountId_fkey"];
+const constraints = ["TenantMembership_tenantId_fkey", "TenantMembership_userId_fkey", "ClientCodeAudit_clientId_fkey", "AgendaEvent_clientId_fkey", "CommunicationConversation_integrationAccountId_fkey", "CommunicationConversation_clientId_fkey", "CommunicationConversation_assignedSellerId_fkey", "CommunicationMessage_conversationId_fkey", "CommunicationMessage_integrationAccountId_fkey", "CommunicationWebhookEvent_integrationAccountId_fkey"];
 const approvedContactColumns = new Map([
   ["phoneHash", "VARCHAR(64)"],
   ["phoneNormalized", "VARCHAR(32)"]

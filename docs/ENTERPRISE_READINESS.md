@@ -116,3 +116,13 @@ permanece 🔴 e nenhuma outra classificação da matriz é alterada.
 | Identidade/autorização | 🟡 Parcialmente comprovado | TenantContext fail-closed e contrato futuro de sessão/JWT | JWT atual não tem tenant nem sessão persistida |
 | Multiempresa | 🔴 Crítico ou não conforme | Decisão, RACI e control plane default-only | Não existe isolamento ponta a ponta nem segundo tenant autorizado |
 | Governança | 🟢 Comprovado | aceite formal, condições, owners por papel e gates 1.0B | Ocupantes e aprovações operacionais ainda devem ser confirmados |
+
+### Delta da Sprint 1.0B.1 (🔵 PR)
+
+| Dimensão autorizada | Estado | Evidência nova | Limite preservado |
+|---|---|---|---|
+| Arquitetura | 🟡 Parcialmente comprovado | control plane persistido e adapter Prisma isolado | handlers/data access não integrados |
+| Banco | 🟡 Parcialmente comprovado | migration aditiva e smoke PostgreSQL 16 descartável | produção não aplicada nem inspecionada |
+| Identidade/autorização | 🟡 Parcialmente comprovado | memberships determinísticas e role mapping fechado | JWT/refresh/RBAC legado inalterados |
+| Multiempresa | 🔴 Crítico ou não conforme | somente compatibilidade default-only | nenhum isolamento dos models centrais ou segundo tenant |
+| Governança | 🟢 Comprovado | brief, runbook, confirmações por SHA e reconciliação sem PII | checks/apply/evidência operacional ainda exigidos |
