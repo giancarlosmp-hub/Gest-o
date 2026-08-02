@@ -12,6 +12,17 @@
 > guardam detalhe e evidência, mas o estado oficial, a prioridade e os gates são os registrados aqui.
 > Em caso de divergência, corrija este documento na mesma PR da mudança.
 
+## Índice oficial
+
+- [Estado atual](STATUS_ATUAL.md)
+- [Operação pós-merge](OPERACAO.md)
+- [Guia de deploy](DEPLOY_GUIDE.md)
+- [Governança de desenvolvimento](GOVERNANCA_DESENVOLVIMENTO.md)
+- [Enterprise Readiness — baseline oficial](ENTERPRISE_READINESS.md)
+- [Sprint 0.1 — Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md)
+- [Dívida técnica auditada](TECH_DEBT.md)
+- [ADRs](adr/README.md)
+
 ## 1. RESUMO EXECUTIVO
 
 | Campo | Estado oficial em 31/07/2026 |
@@ -273,6 +284,7 @@ substituem essa sequência.
 
 | Data | Grande entrega |
 |---|---|
+| 02/08/2026 | Baseline oficial de Enterprise Readiness e Sprint 0.1 criadas em 🔵 PR, com 17 dimensões e backlog baseado em evidências; auditoria exclusivamente documental/read-only, sem alteração ou declaração sobre produção e sem encerramento de incidentes. |
 | 01/08/2026 | Governança de desenvolvimento institucionalizada: Comitê de Arquitetura, Sprint Brief, ciclo de ADR, Enterprise Readiness, revisão, testes, rollback e Definition of Done consolidados em norma permanente, sem alteração de runtime ou produção. |
 | 01/08/2026 | Diagnóstico confirmou evidência de schema íntegra e Prisma equivalente; allowlist operacional incompleta foi o único bloqueio. Produção e containers antigos preservados, sem deploy ou cutover; correção em 🔵 PR e cutover pendente. |
 | 01/08/2026 | Schema aplicado/validado e evidência revalidada para `c178a69e`; segundo ensaio parou antes de containers por ausência da imagem histórica da API. Produção antiga preservada, cutover pendente e rollback híbrido em 🔵 PR; incidente aberto. |
@@ -298,6 +310,9 @@ O histórico detalhado anterior foi preservado integralmente em
 | **Operação pós-merge** | [Checklist obrigatório da REGRA 001](OPERACAO.md) |
 | **Guia de deploy** | [Arquitetura, deploy, validação e rollback](DEPLOY_GUIDE.md) |
 | **Governança de desenvolvimento** | [Comitê de Arquitetura, Sprint Brief, decisões e Definition of Done](GOVERNANCA_DESENVOLVIMENTO.md) |
+| **Enterprise Readiness** | [Baseline oficial baseada em evidências](ENTERPRISE_READINESS.md) |
+| **Sprint 0.1** | [Brief da Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md) |
+| **Dívida técnica** | [Achados priorizados da auditoria](TECH_DEBT.md) |
 | **Roadmap** | [Horizontes estratégicos](roadmap/README.md) |
 | **Dashboard Saúde** | [Estado e operação do módulo](dashboard-saude-plataforma.md) |
 | **Arquitetura** | [Limites e topologia técnica](architecture/README.md) |

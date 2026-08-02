@@ -1,3 +1,13 @@
+# 🔵 PR — baseline de Enterprise Readiness (02/08/2026)
+
+A Sprint 0.1 cria uma baseline documental/read-only em 17 dimensões e um backlog de achados baseado
+em evidências do repositório. Nenhum código de aplicação, banco, migration, Docker, deploy, VPS ou
+produção foi alterado ou acessado. A entrega não declara o Gest-o Enterprise-ready, não infere
+produção pelo Git e não encerra `INC-5050-4484`, `INC-ERP-5050` nem o gate de schema/cutover.
+Consulte [`ENTERPRISE_READINESS.md`](ENTERPRISE_READINESS.md),
+[`TECH_DEBT.md`](TECH_DEBT.md) e o
+[`Sprint Brief`](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md).
+
 # 🔵 PR — governança de desenvolvimento institucionalizada (01/08/2026)
 
 O Comitê de Arquitetura, o Sprint Brief obrigatório, o ciclo de ADR, a avaliação de Enterprise
