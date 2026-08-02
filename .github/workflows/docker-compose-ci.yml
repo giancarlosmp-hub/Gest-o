@@ -33,6 +33,12 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
+      - name: Cache PostgreSQL 16 image for pull-free restore harness
+        run: docker pull postgres:16
+
+      - name: Prove synthetic PostgreSQL 16 backup restore
+        run: npm run test:production-backup-restore:postgres
+
       - name: Validate Docker Compose config
         env:
           DATABASE_SCHEMA_MODE: "ephemeral-push"

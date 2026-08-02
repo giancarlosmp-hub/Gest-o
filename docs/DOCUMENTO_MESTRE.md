@@ -285,12 +285,17 @@ substituem essa sequência.
 
 ## 9. CHANGELOG EXECUTIVO
 
+- **02/08/2026 — Sprint 0.3 em 🔵 PR:** ensaio sintético e isolado de restore em PostgreSQL 16,
+  checksum, catálogo, pós-condições e evidência metadatal, com RPO/RTO apenas propostos. Não houve
+  restore real; `INC-PROD-2026-07` e `TD-ER-003` permanecem abertos até validação operacional.
+
 - **02/08/2026 — Sprint 0.2 em 🔵 PR:** remove `/debug/admin` e minimiza logs de autenticação.
   TD-ER-001/002 seguem abertos até merge, deploy e validação por SHA; não há inferência de produção
   nem declaração de Segurança/LGPD resolvidas.
 
 | Data | Grande entrega |
 |---|---|
+| 02/08/2026 | Sprint 0.3 cria ensaio descartável de recuperação e CI sintético, sem VPS ou produção; continuidade, restore real e RPO/RTO aprovados continuam não comprovados. |
 | 02/08/2026 | Baseline reconciliada com a operação de 01/08: schema aplicado, pós-diff gerenciado vazio, oito `incident_*` preservadas, cutover local em `a08a626` e validação funcional de login, sync, 5050 e Saúde; prova pública completa por SHA, estabilidade, restore, P0 e encerramento de incidentes permanecem pendentes. |
 | 02/08/2026 | Baseline oficial de Enterprise Readiness e Sprint 0.1 criadas em 🔵 PR, com 17 dimensões e backlog baseado em evidências; auditoria exclusivamente documental/read-only, sem alteração ou declaração sobre produção e sem encerramento de incidentes. |
 | 01/08/2026 | Governança de desenvolvimento institucionalizada: Comitê de Arquitetura, Sprint Brief, ciclo de ADR, Enterprise Readiness, revisão, testes, rollback e Definition of Done consolidados em norma permanente, sem alteração de runtime ou produção. |
@@ -320,6 +325,8 @@ O histórico detalhado anterior foi preservado integralmente em
 | **Governança de desenvolvimento** | [Comitê de Arquitetura, Sprint Brief, decisões e Definition of Done](GOVERNANCA_DESENVOLVIMENTO.md) |
 | **Enterprise Readiness** | [Baseline oficial baseada em evidências](ENTERPRISE_READINESS.md) |
 | **Sprint 0.1** | [Brief da Auditoria Enterprise](sprints/SPRINT_0_1_ENTERPRISE_READINESS.md) |
+| **Sprint 0.3** | [Brief de backup e restore isolado](sprints/SPRINT_0_3_BACKUP_RESTORE_READINESS.md) |
+| **Prontidão de restore** | [Diagnóstico, procedimento, evidências e RPO/RTO propostos](ops/backup-restore-readiness.md) |
 | **Dívida técnica** | [Achados priorizados da auditoria](TECH_DEBT.md) |
 | **Roadmap** | [Horizontes estratégicos](roadmap/README.md) |
 | **Dashboard Saúde** | [Estado e operação do módulo](dashboard-saude-plataforma.md) |
