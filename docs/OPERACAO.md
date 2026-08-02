@@ -41,6 +41,12 @@ confirmar scheduler e UltraFV3
 registrar o resultado
 ```
 
+Para as correções já mescladas de segurança e restore, a ordem não cria um segundo deploy nem
+mistura recuperação à publicação: **deploy oficial → convergência do SHA → validação read-only de
+segurança → estabilidade → restore descartável em etapa separada e novamente autorizada**. Após o
+deploy, use o [Brief da Sprint 0.4](sprints/SPRINT_0_4_SECURITY_RESTORE_OPERATIONAL_VALIDATION.md) e
+`scripts/production-auth-security-validate.sh`; o restore nunca integra o deploy ou seu rollback.
+
 ## Regra principal
 
 Um merge em `main` dispara automaticamente o workflow **Deploy Production**. O caminho preferencial é acompanhar esse workflow, não executar um segundo deploy em paralelo.
