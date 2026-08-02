@@ -57,12 +57,25 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 | ID | Descrição | Fonte | Severidade | Impacto | Dependências | Critério de encerramento | Sprint sugerida |
 |---|---|---|---|---|---|---|---|
 | TD-ER-003 | Restauração e objetivos de recuperação não comprovados — **correção/validação em 🔵 PR na Sprint 0.3; não encerrado** | [`ops/backup.md`](ops/backup.md), [`ops/backup-restore-readiness.md`](ops/backup-restore-readiness.md), [harness](../scripts/smoke/production-backup-restore-postgres.sh), [operação Sprint 0.4](sprints/SPRINT_0_4_SECURITY_RESTORE_OPERATIONAL_VALIDATION.md), [`../restore.sh`](../restore.sh), [`STATUS_ATUAL.md`](STATUS_ATUAL.md) | Crítica | Perda de dados/continuidade não demonstrada | Merge, check Docker, ensaio autorizado e validação operacional | Restore integral ensaiado com checksum, pré/pós-condições, RPO/RTO e evidência aprovada; teste sintético isolado não basta | Épico 1 |
-| TD-ER-004 | Tenancy incompleta nos domínios centrais | [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma), [`GOVERNANCA_DESENVOLVIMENTO.md`](GOVERNANCA_DESENVOLVIMENTO.md) | Crítica | Risco de acesso cruzado e alegação comercial indevida | ADR, identidade e autorização | ADR aceita e testes negativos provam isolamento de banco, cache, jobs, uploads e integrações | Épico 4 |
+| TD-ER-004 | Tenancy inexistente/incompleta em dados, identidade e processamento — assessment concluído, implementação não iniciada | [`TENANCY_ASSESSMENT.md`](TENANCY_ASSESSMENT.md), [ADR 003 proposta](adr/003-shared-schema-tenant-boundary.md), [`apps/api/prisma/schema.prisma`](../apps/api/prisma/schema.prisma) | Crítica | Acesso cruzado por consultas, IDs, FK, cache, job, log, JWT, webhook ou ERP e alegação comercial indevida | Aceite da ADR, identidade, segurança, DBA, restore e SLO | Roadmap 1.0A–1.0F concluído; FK/unique compostas, repository/RLS e testes negativos provam isolamento de banco, cache, jobs, logs e integrações | Épico 4 |
 | TD-ER-005 | Gestão de sessão sem rotação/revogação comprovada | [`apps/api/src/controllers/authController.ts`](../apps/api/src/controllers/authController.ts), [`apps/api/src/utils/jwt.ts`](../apps/api/src/utils/jwt.ts) | Alta | Refresh token roubado segue válido até expirar | Política de identidade | Política aprovada; rotação, revogação e testes de replay/logout comprovados | Épico 2 |
 | TD-ER-006 | Programa LGPD não documentado | [`ENTERPRISE_READINESS.md`](ENTERPRISE_READINESS.md#matriz-por-dimensão) | Crítica | Direitos, retenção e base legal não demonstráveis | Inventário de dados e jurídico | ROPA, bases legais, retenção, DSAR, responsáveis e evidências de execução aprovados | Épico 2 |
 | TD-ER-007 | Oferta, onboarding, licenciamento e suporte ausentes da documentação | [`product/README.md`](product/README.md), [`DOCUMENTO_MESTRE.md`](DOCUMENTO_MESTRE.md) | Alta | Comercialização e operação não repetíveis | Segurança, isolamento e owners | Oferta, limites, termos, provisioning, onboarding/offboarding e suporte aprovados/testados | Épico 5 |
 
 ## P2 — importante para escala ou qualidade
+
+### Decomposição oficial do TD-ER-004 (Sprint 0.6)
+
+| Subitem | Lacuna | Gate de encerramento |
+| --- | --- | --- |
+| TD-ER-004A | `Tenant`, lifecycle e memberships inexistentes | control plane e tenant context confiável testados |
+| TD-ER-004B | 23 models centrais sem tenant e quatro Communications parciais | backfill reconciliado; tenant obrigatório e FKs/uniques compostas |
+| TD-ER-004C | zero repositories e Prisma/raw SQL sem boundary comum | data-access deny-by-default e teste arquitetural sem escape implícito |
+| TD-ER-004D | JWT/RBAC, caches, logs, jobs e locks globais | namespace/contexto tenant e testes concorrentes A×B |
+| TD-ER-004E | UltraFV3, IA, CNPJ e webhook/WhatsApp sem isolamento integral | credenciais, quota, conta externa, idempotência e auditoria por tenant |
+| TD-ER-004F | ausência de prova, rollout e rollback multiempresa | RLS defensiva, restore/carga/IDOR verdes e piloto por coorte aprovado |
+
+Os subitens detalham, mas não duplicam, TD-ER-004. Nenhum está encerrado pela auditoria documental.
 
 | ID | Descrição | Fonte | Severidade | Impacto | Dependências | Critério de encerramento | Sprint sugerida |
 |---|---|---|---|---|---|---|---|

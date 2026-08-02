@@ -374,3 +374,19 @@ transacional e verificações administrativas mínimas. É proibido conceder DDL
 owners ou expor credenciais/portas. O estágio continua 🔵 PR, com schema pendente e incidente aberto.
 Veja [ADR 002](adr/002-runtime-migration-authority-separation.md) e a
 [auditoria](investigations/production-schema-transition-july-2026.md).
+# Adendo 4.1 — Sprint 0.6: arquitetura oficial para Multi-Tenancy
+
+Em 02/08/2026, a auditoria documental da Sprint 0.6 concluiu que o Gest-o permanece single-tenant.
+Dos 27 models Prisma, somente os quatro de Communications carregam `tenantId` parcial; não existe
+entidade `Tenant`, membership, contexto autenticado, repository, RLS ou isolamento completo de
+consultas, caches, jobs, logs, JWT e UltraFV3. A comercialização como multiempresa continua
+bloqueada.
+
+O inventário, riscos, estratégia expand/backfill/contract, compatibilidade, rollout, rollback e
+roadmap 1.0A–1.0F estão em [`TENANCY_ASSESSMENT.md`](TENANCY_ASSESSMENT.md). A
+[ADR 003](adr/003-shared-schema-tenant-boundary.md) propõe schema PostgreSQL compartilhado com
+isolamento por linha, `Tenant`/memberships, chaves compostas, data-access obrigatório e RLS
+defensiva. Ela deve ser aceita pelo Comitê antes da Sprint 1.0.
+
+Este adendo não implementa tenancy, não cria migration, não altera APIs/banco/regras, não executa
+Docker/deploy e não presume produção. Incidentes e débitos mantêm seus estados vigentes.
