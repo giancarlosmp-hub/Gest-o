@@ -53,6 +53,13 @@ assert.equal((postgresSmoke.match(/\.\/node_modules\/\.bin\/prisma/g) ?? []).len
 for (const scenario of ["recovered.sql", "before", "after-first", "post.raw.sql", "after-second", "post2.raw.sql", "partial.raw.sql"]) {
   assert.match(postgresSmoke, new RegExp(scenario.replace(".", "\\.")), `missing disposable migration scenario: ${scenario}`);
 }
+assert.match(postgresSmoke, /DROP TABLE "TenantMembership", "Tenant";/, "recovered fixture must not start with an already materialized control plane");
+assert.match(postgresSmoke, /DROP TYPE "TenantMembershipStatus", "TenantRole", "TenantStatus";/, "recovered fixture must not retain control-plane enums");
+assert.equal(
+  (postgresSmoke.match(/<apps\/api\/prisma\/migrations\/20260802120000_tenancy_control_plane\/migration\.sql/g) ?? []).length,
+  1,
+  "control-plane migration must be executed exactly once"
+);
 
 const preview = resolve(root, "scripts/production-schema-preview.sh");
 const temporary = mkdtempSync(resolve(tmpdir(), "gesto-schema-test-"));

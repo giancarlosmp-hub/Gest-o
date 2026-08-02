@@ -101,6 +101,11 @@ prisma_diff() {
 prisma_diff --from-empty --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/full.sql"
 docker exec -i "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 <"$tmp/full.sql" >/dev/null
 cat >"$tmp/recovered.sql" <<'SQL'
+-- The generated from-empty SQL materializes the current datamodel, including the control plane.
+-- The recovered-production fixture predates both authorized migrations, so remove those
+-- generated objects here. The control-plane migration is then executed exactly once below.
+DROP TABLE "TenantMembership", "Tenant";
+DROP TYPE "TenantMembershipStatus", "TenantRole", "TenantStatus";
 DROP TABLE "CommunicationMessage", "CommunicationWebhookEvent", "CommunicationConversation", "CommunicationIntegrationAccount", "ClientCodeAudit";
 ALTER TABLE "Contact" DROP COLUMN "phoneHash", DROP COLUMN "phoneNormalized";
 ALTER TABLE "AgendaEvent" DROP CONSTRAINT "AgendaEvent_clientId_fkey";
