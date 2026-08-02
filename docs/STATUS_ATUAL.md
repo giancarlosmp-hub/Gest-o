@@ -1,5 +1,13 @@
 # 🟢 Produção validada após cutover — 01/08/2026
 
+# 🔵 PR — ensaio isolado de backup e restore (02/08/2026)
+
+A Sprint 0.3 adiciona prova descartável em PostgreSQL 16, com checksum, catálogo, pós-condições,
+cleanup e evidência sem dados, além de propor RPO/RTO. Não houve VPS, dump ou restore real. O teste
+sintético não comprova restore de produção: `INC-PROD-2026-07` e `TD-ER-003` permanecem abertos em
+correção/validação, dependentes de merge, check Docker e validação operacional futura. Consulte o
+[Sprint Brief](sprints/SPRINT_0_3_BACKUP_RESTORE_READINESS.md).
+
 ## Comprovado
 
 - schema aplicado em produção, com `applied.tsv`, checksum da migration validado e
