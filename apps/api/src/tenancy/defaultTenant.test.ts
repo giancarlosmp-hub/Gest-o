@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import { DEFAULT_TENANT, deterministicMembershipId, mapUserRole, membershipAggregateHash } from "./defaultTenant.js";
+import { readTenancyMode } from "./tenancyMode.js";
+for (const role of ["diretor", "gerente", "vendedor"] as const) assert.equal(mapUserRole(role), role);
+assert.throws(() => mapUserRole("administrador"), /UNKNOWN_USER_ROLE/);
+assert.equal(DEFAULT_TENANT.id, "tenant-default-v1");
+assert.equal(deterministicMembershipId("user-a"), deterministicMembershipId("user-a"));
+assert.notEqual(deterministicMembershipId("user-a"), deterministicMembershipId("user-b"));
+const rows = [{ userId: "b", tenantId: DEFAULT_TENANT.id, role: "gerente", version: 1 }, { userId: "a", tenantId: DEFAULT_TENANT.id, role: "diretor", version: 1 }];
+assert.equal(membershipAggregateHash(rows), membershipAggregateHash([...rows].reverse()));
+assert.equal(readTenancyMode("disabled"), "disabled");
+assert.equal(readTenancyMode("default-only"), "default-only");
+assert.throws(() => readTenancyMode(undefined));
+assert.throws(() => readTenancyMode("multi-tenant"));
+console.log("default tenant unit tests passed");

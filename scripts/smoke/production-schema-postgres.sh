@@ -149,13 +149,15 @@ test "$(docker exec --user postgres "$PG_NAME" psql --dbname=gesto_test -X -Atc 
 
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
   <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
+docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - \
+  <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
 count_incidents >"$tmp/after-first"
 cmp "$tmp/before" "$tmp/after-first"
 prisma_diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/post.raw.sql" "$tmp/post.sql" post
 test ! -s "$tmp/post.sql"
 
-# A second application is safe and leaves both managed schema and incident evidence unchanged.
+# The historical repeatable transition remains safe; the new Prisma migration is applied exactly once.
 docker exec --user postgres -i "$PG_NAME" psql --dbname=gesto_test -X -v ON_ERROR_STOP=1 --single-transaction -f - <apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql >/dev/null
 count_incidents >"$tmp/after-second"
 cmp "$tmp/before" "$tmp/after-second"

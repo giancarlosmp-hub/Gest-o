@@ -1,3 +1,10 @@
+# 🔵 PR — persistência default-only do control plane (02/08/2026)
+
+A Sprint 1.0B.1 adiciona em PR a migration aditiva de `Tenant`/`TenantMembership`, tenant default
+determinístico, preparação transacional auditável, adapter Prisma e testes descartáveis. Não houve
+produção, apply ou deploy; nenhum model empresarial ganhou `tenantId`, handlers/JWT não foram
+integrados e Multiempresa permanece 🔴. Consulte o [Brief](sprints/SPRINT_1_0B_1_CONTROL_PLANE_PERSISTENCE.md).
+
 # 🔵 PR — fundação do control plane multiempresa (02/08/2026)
 
 A Sprint 1.0A aceita a ADR 003 sob gates obrigatórios, cria threat model STRIDE, RACI, contratos

@@ -1,4 +1,7 @@
-# Plano da migration expand — Sprint 1.0B
+# Plano da migration expand — Sprints 1.0B.1 e 1.0B.2
+
+> A 1.0B foi dividida: 1.0B.1 persiste somente o control plane default-only; 1.0B.2 tratará os
+> models empresariais após os gates operacionais. Esta PR não aplica migration em produção.
 
 **Estado:** plano futuro; nenhuma migration foi criada, aplicada ou executada nesta Sprint.
 **Princípio:** expandir de forma aditiva, reconciliar e somente depois restringir. O tenant default representa exclusivamente a empresa atual; não habilita um segundo tenant.

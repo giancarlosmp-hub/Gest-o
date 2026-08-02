@@ -68,8 +68,8 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 | Subitem | Lacuna | Gate de encerramento |
 | --- | --- | --- |
-| TD-ER-004A | Arquitetura/control plane default-only concluídos em código; models/migration/deploy ainda inexistentes | permanece aberto até deploy e provas do control plane; tenant context confiável integrado e testado |
-| TD-ER-004B | 23 models centrais sem tenant e quatro Communications parciais | backfill reconciliado; tenant obrigatório e FKs/uniques compostas |
+| TD-ER-004A | Control plane persistido em PR na Sprint 1.0B.1, com migration, tenant default, runner, reconciliação e adapter; ainda não aplicado nem integrado | permanece aberto até migration aplicada, default preparado, adapter integrado e evidência operacional revisada |
+| TD-ER-004B | Não iniciado: 23 models centrais sem tenant e quatro Communications parciais | backfill reconciliado; tenant obrigatório e FKs/uniques compostas |
 | TD-ER-004C | zero repositories e Prisma/raw SQL sem boundary comum | data-access deny-by-default e teste arquitetural sem escape implícito |
 | TD-ER-004D | JWT/RBAC, caches, logs, jobs e locks globais | namespace/contexto tenant e testes concorrentes A×B |
 | TD-ER-004E | UltraFV3, IA, CNPJ e webhook/WhatsApp sem isolamento integral | credenciais, quota, conta externa, idempotência e auditoria por tenant |
