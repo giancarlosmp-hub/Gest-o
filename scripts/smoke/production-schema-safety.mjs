@@ -28,20 +28,55 @@ for (const name of expectedIndexes) assert.match(approved, new RegExp(`CREATE (?
 
 const postgresSmoke = readFileSync(resolve(root, "scripts/smoke/production-schema-postgres.sh"), "utf8");
 const predecessorCheckpoint = readFileSync(resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), "utf8");
-for (const name of ["TenantStatus", "TenantMembershipStatus", "TenantRole", "Tenant", "TenantMembership", "Tenant_slug_key", "TenantMembership_tenantId_fkey", "TenantMembership_userId_fkey"]) {
+for (const name of ["TenantStatus", "TenantMembershipStatus", "TenantRole", "Tenant", "TenantMembership", "Tenant_slug_key", "TenantMembership_tenantId_fkey", "TenantMembership_userId_fkey", "AFTER_PREDECESSOR_STATEMENT_COUNT"]) {
   assert.match(predecessorCheckpoint, new RegExp(name), `strict predecessor checkpoint must recognize ${name}`);
 }
 assert.doesNotMatch(predecessorCheckpoint, /Communication|ClientCodeAudit|Contact|AgendaEvent/, "checkpoint allowlist must not accept predecessor residual DDL");
 const checkpointDir = mkdtempSync(resolve(tmpdir(), "gesto-predecessor-checkpoint-"));
-const checkpointAllowed = resolve(checkpointDir, "allowed.sql");
-const checkpointResidual = resolve(checkpointDir, "residual.sql");
-writeFileSync(checkpointAllowed, 'CREATE TYPE "TenantStatus" AS ENUM (\'active\', \'suspended\', \'archived\');\nCREATE TABLE "Tenant" ("id" TEXT NOT NULL);\nCREATE UNIQUE INDEX "Tenant_slug_key" ON "Tenant"("slug");\n');
-writeFileSync(checkpointResidual, 'ALTER TABLE "ClientCodeAudit" ADD CONSTRAINT "ClientCodeAudit_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id");\n');
-const checkpointAccepted = spawnSync("node", [resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), checkpointAllowed], { encoding: "utf8" });
-const checkpointRejected = spawnSync("node", [resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), checkpointResidual], { encoding: "utf8" });
+const controlPlaneNames = /"(?:TenantStatus|TenantMembershipStatus|TenantRole|Tenant|TenantMembership|Tenant_slug_key|TenantMembership_userId_status_idx|TenantMembership_tenantId_status_idx|TenantMembership_tenantId_userId_key|TenantMembership_tenantId_fkey|TenantMembership_userId_fkey)"/;
+const realControlPlaneDiff = generated.stdout.split(/;\s*/).map(part => `${part.trim()};\n`).filter(part => {
+  const sql = part.replace(/^\s*--.*$/gm, "").trim();
+  return /^(?:CREATE TYPE|CREATE TABLE|CREATE (?:UNIQUE )?INDEX|ALTER TABLE)/.test(sql) && controlPlaneNames.test(sql);
+}).join("\n");
+assert.equal((realControlPlaneDiff.match(/;\s*(?:\n|$)/g) ?? []).length, 11, "Prisma 5.22 control-plane fixture must contain exactly eleven statements");
+function validateCheckpoint(name, sql, accepted) {
+  const file = resolve(checkpointDir, `${name}.sql`);
+  writeFileSync(file, sql);
+  const result = spawnSync("node", [resolve(root, "scripts/schema-predecessor-checkpoint.mjs"), file], { encoding: "utf8" });
+  assert.equal(result.status === 0, accepted, `${name}: ${result.stdout}${result.stderr}`);
+}
+validateCheckpoint("prisma-real", realControlPlaneDiff, true);
+validateCheckpoint("comments-whitespace", `-- diagnostic fixture\n\n${realControlPlaneDiff.replaceAll("\n", "\n  \n")}`, true);
+const without = (pattern) => realControlPlaneDiff.replace(pattern, "");
+const negativeCheckpoints = new Map([
+  ["enum-missing", without(/-- CreateEnum\s*\nCREATE TYPE "TenantStatus"[\s\S]*?;\s*/)],
+  ["enum-value", realControlPlaneDiff.replace("'archived'", "'deleted'")],
+  ["enum-extra", `${realControlPlaneDiff}CREATE TYPE "UnexpectedEnum" AS ENUM ('x');\n`],
+  ["table-missing", without(/-- CreateTable\s*\nCREATE TABLE "Tenant"[\s\S]*?;\s*/)],
+  ["third-table", `${realControlPlaneDiff}CREATE TABLE "Unexpected" ("id" TEXT NOT NULL);\n`],
+  ["column-missing", realControlPlaneDiff.replace(/\s*"suspendedAt" TIMESTAMP\(3\),?/, "")],
+  ["column-extra", realControlPlaneDiff.replace('CONSTRAINT "Tenant_pkey"', '"unexpected" TEXT, CONSTRAINT "Tenant_pkey"')],
+  ["type-different", realControlPlaneDiff.replace('"legalName" TEXT NOT NULL', '"legalName" INTEGER NOT NULL')],
+  ["size-different", realControlPlaneDiff.replace('"legalName" TEXT NOT NULL', '"legalName" VARCHAR(64) NOT NULL')],
+  ["default-different", realControlPlaneDiff.replace("DEFAULT 'active'", "DEFAULT 'suspended'")],
+  ["nullability-different", realControlPlaneDiff.replace('"updatedAt" TIMESTAMP(3) NOT NULL', '"updatedAt" TIMESTAMP(3)')],
+  ["pk-missing", realControlPlaneDiff.replace(/,?\s*CONSTRAINT "Tenant_pkey" PRIMARY KEY \("id"\)/, "")],
+  ["index-missing", without(/-- CreateIndex\s*\nCREATE UNIQUE INDEX "Tenant_slug_key"[\s\S]*?;\s*/)],
+  ["index-name", realControlPlaneDiff.replace('"Tenant_slug_key"', '"Tenant_slug_wrong"')],
+  ["index-columns", realControlPlaneDiff.replace('"Tenant"("slug")', '"Tenant"("displayName")')],
+  ["fk-missing", without(/-- AddForeignKey\s*\nALTER TABLE "TenantMembership" ADD CONSTRAINT "TenantMembership_userId_fkey"[\s\S]*?;\s*/)],
+  ["fk-target", realControlPlaneDiff.replace('REFERENCES "User"("id")', 'REFERENCES "Tenant"("id")')],
+  ["fk-delete", realControlPlaneDiff.replace(/ON DELETE RESTRICT/, "ON DELETE CASCADE")],
+  ["communication", `${realControlPlaneDiff}CREATE TABLE "CommunicationUnexpected" ("id" TEXT);\n`],
+  ["client-audit", `${realControlPlaneDiff}ALTER TABLE "ClientCodeAudit" ADD COLUMN "x" TEXT;\n`],
+  ["drop", `${realControlPlaneDiff}DROP TABLE "Tenant";\n`],
+  ["truncate", `${realControlPlaneDiff}TRUNCATE "Tenant";\n`],
+  ["alter-outside", `${realControlPlaneDiff}ALTER TABLE "User" ADD COLUMN "x" TEXT;\n`],
+  ["additional-sql", `${realControlPlaneDiff}SELECT 1;\n`],
+  ["partial", realControlPlaneDiff.trimEnd().replace(/;$/, "")]
+]);
+for (const [name, sql] of negativeCheckpoints) validateCheckpoint(name, sql, false);
 rmSync(checkpointDir, { recursive: true });
-assert.equal(checkpointAccepted.status, 0, checkpointAccepted.stderr);
-assert.notEqual(checkpointRejected.status, 0, "predecessor residual FK must fail the intermediate checkpoint");
 assert.match(postgresSmoke, /APP_COMMIT=\$\{APP_COMMIT:-\$\{EXPECTED_SHA:-\}\}/, "disposable test must require the tested SHA");
 assert.match(postgresSmoke, /API_IMAGE=\$\{API_IMAGE:-"gest-o-api:\$\{APP_COMMIT\}"\}/, "API image must default to the tested SHA");
 assert.match(postgresSmoke, /docker image inspect "\$API_IMAGE"/);
