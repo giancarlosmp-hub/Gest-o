@@ -22,7 +22,8 @@ for (const table of ["Client", "Contact", "Opportunity", "Activity", "AgendaEven
 }
 assert.doesNotMatch(bootstrap, /prepareDefaultTenant/);
 assert.doesNotMatch(seeds, /tenant-default-v1|TenantMembership|tenant\.create/);
-assert.doesNotMatch(compose, /TENANCY_MODE/);
+assert.match(compose, /TENANCY_MODE:\s*disabled/);
+assert.doesNotMatch(compose, /TENANCY_MODE:\s*default-only/);
 assert.match(mode, /"disabled" \| "default-only"/);
 assert.doesNotMatch(mode, /multi-tenant/);
 assert.doesNotMatch(runner, /body|query|header|production\.env/i);

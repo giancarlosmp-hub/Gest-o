@@ -14,7 +14,7 @@ docker run -d --rm --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWO
 for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres -d tenancy >/dev/null 2>&1 && break; sleep 1; done
 docker exec "$pg" pg_isready -U postgres -d tenancy >/dev/null
 url="postgresql://postgres:test@$pg:5432/tenancy?schema=public"
-run_node(){ docker run --rm --pull=never --network "$net" -v "$root:/repo:ro" -v "$tmp:/evidence" -w /repo -e DATABASE_URL="$url" -e TENANCY_MODE="${TENANCY_MODE:-disabled}" -e EVIDENCE_DIR=/evidence ${CONFIRM:+-e CONFIRM="$CONFIRM"} ${EXPECTED_SHA:+-e EXPECTED_SHA="$EXPECTED_SHA"} node:20 "$@"; }
+run_node(){ docker run --rm --pull=never --network "$net" -v "$root:/repo:ro" -v "$tmp:/evidence" -w /repo -e DATABASE_URL="$url" -e TENANCY_MODE="${TENANCY_MODE:-disabled}" -e EVIDENCE_DIR=/evidence -e APP_COMMIT="$(git rev-parse HEAD)" ${CONFIRM:+-e CONFIRM="$CONFIRM"} ${EXPECTED_SHA:+-e EXPECTED_SHA="$EXPECTED_SHA"} ${EXPECTED_AGGREGATE_HASH:+-e EXPECTED_AGGREGATE_HASH="$EXPECTED_AGGREGATE_HASH"} node:20 "$@"; }
 # Disposable-only schema materialization; production bootstrap remains external-authority.
 run_node ./node_modules/.bin/prisma db push --schema apps/api/prisma/schema.prisma --skip-generate >/dev/null
 docker exec "$pg" psql -U postgres -d tenancy -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
@@ -24,6 +24,7 @@ INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VA
 ('synthetic-seller','Synthetic','seller@example.invalid','synthetic','vendedor',false,now());
 SQL
 run_node ./node_modules/.bin/tsx apps/api/src/scripts/prepareDefaultTenant.ts --dry-run >/dev/null
+EXPECTED_AGGREGATE_HASH=$(awk -F '\t' 'NR==2{for(i=1;i<=NF;i++) if(h[i]=="expectedAggregateHash") print $i} NR==1{for(i=1;i<=NF;i++)h[i]=$i}' "$tmp/dry-run-result.tsv"); export EXPECTED_AGGREGATE_HASH
 test "$(docker exec "$pg" psql -U postgres -d tenancy -Atc 'SELECT count(*) FROM "Tenant"')" = 0
 if run_node ./node_modules/.bin/tsx apps/api/src/scripts/prepareDefaultTenant.ts --apply >/dev/null 2>&1; then echo 'apply without confirmation succeeded' >&2; exit 1; fi
 export CONFIRM=PREPARE_DEFAULT_TENANT EXPECTED_SHA
@@ -31,6 +32,7 @@ EXPECTED_SHA=$(git rev-parse HEAD); export TENANCY_MODE=default-only
 run_node ./node_modules/.bin/tsx apps/api/src/scripts/prepareDefaultTenant.ts --apply >/dev/null
 test "$(docker exec "$pg" psql -U postgres -d tenancy -Atc 'SELECT count(*) FROM "Tenant"')" = 1
 test "$(docker exec "$pg" psql -U postgres -d tenancy -Atc 'SELECT count(*) FROM "TenantMembership" WHERE status='"'"'active'"'"' AND version=1')" = 3
+rm -f "$tmp/result.tsv"
 run_node ./node_modules/.bin/tsx apps/api/src/scripts/prepareDefaultTenant.ts --apply >/dev/null
 test "$(docker exec "$pg" psql -U postgres -d tenancy -Atc 'SELECT count(*) FROM "TenantMembership"')" = 3
 run_node ./node_modules/.bin/prisma migrate diff --from-schema-datasource apps/api/prisma/schema.prisma --to-schema-datamodel apps/api/prisma/schema.prisma --exit-code >/dev/null
