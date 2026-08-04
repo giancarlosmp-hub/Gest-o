@@ -13,13 +13,22 @@ catálogo read-only, apply administrativo unitário, preparação DML separada e
 
 ## Estado anterior autoritativo
 
-O primeiro pai do merge da PR #772 é `dc7ceb0f0a23b77fc45a58960f3371b50c7f7365`. Seu
-`apps/api/prisma/schema.prisma` tem SHA-256
-`0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c`; não contém `Tenant`,
+A investigação com `git log -S`, `git log --follow` e o tree histórico comprovou que o primeiro
+commit a introduzir os cinco objetos do control plane foi
+`581fbae0a545f53800db7707ab8b28f52dcd3fa1`. Seu pai direto é
+`dc7ceb0f0a23b77fc45a58960f3371b50c7f7365`. Nesse pai existe exatamente um schema Prisma, em
+`apps/api/prisma/schema.prisma`, com SHA-256
+`0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c`; ele não contém `Tenant`,
 `TenantMembership`, `TenantStatus`, `TenantMembershipStatus` ou `TenantRole`. A última migration é
-`20260731150000_safe_production_schema_transition`. Esse commit é a origem correta porque é o pai
-main imediatamente anterior ao merge que introduziu o control plane. O harness extrai esse arquivo
-diretamente do Git; não usa banco vazio, `sed`, regex, `DROP` ou schema final mutilado.
+`20260731150000_safe_production_schema_transition`.
+
+Os valores originalmente registrados estavam corretos no clone completo, mas o harness os usava
+diretamente por `git show` sem primeiro provar a existência do commit/path. O checkout raso do CI
+não disponibilizava o objeto histórico e produziu uma mensagem que mencionava apenas o arquivo do
+working tree. A correção configura checkout com histórico completo e usa o resolvedor versionado:
+ele valida os commits, relação pai/filho, unicidade e path no tree por `git cat-file`, tokens,
+checksum, migration final e última migration antes de gravar o fixture. Não há fallback para o
+arquivo em disco, banco vazio, `sed`, regex ou `DROP`.
 
 ## Arquitetura e escopo reduzido
 

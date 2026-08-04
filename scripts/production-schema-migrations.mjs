@@ -10,7 +10,13 @@ export const migrations = Object.freeze({
     id: "20260802120000_tenancy_control_plane",
     path: "apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql",
     sha256: "b9298218b3c34cdadaf35f31a6d0e8a6e1942e9d1cbf5ae5c77ae305d1cc554d",
-    predecessor: "20260731150000_safe_production_schema_transition",
+    introCommit: "581fbae0a545f53800db7707ab8b28f52dcd3fa1",
+    predecessor: Object.freeze({
+      commit: "dc7ceb0f0a23b77fc45a58960f3371b50c7f7365",
+      schemaPath: "apps/api/prisma/schema.prisma",
+      schemaSha256: "0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c",
+      lastMigration: "20260731150000_safe_production_schema_transition"
+    }),
     objects: Object.freeze({
       enums: ["TenantStatus", "TenantMembershipStatus", "TenantRole"],
       tables: ["Tenant", "TenantMembership"],

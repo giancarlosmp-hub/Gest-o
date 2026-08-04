@@ -14,10 +14,10 @@ for c in "$ref" "$path"; do docker run -d --rm --pull=never --name "$c" --networ
 for c in "$ref" "$path"; do for _ in {1..60}; do docker exec "$c" pg_isready -U postgres -d gesto >/dev/null 2>&1&&break;sleep 1;done; docker exec "$c" pg_isready -U postgres -d gesto >/dev/null; done
 refurl="postgresql://postgres:test@$ref:5432/gesto?schema=public"; pathurl="postgresql://postgres:test@$path:5432/gesto?schema=public"
 run_api(){ local url=$1; shift; docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$@"; }
-# A is the final reference. B is the authoritative pre-#772 Git datamodel, never a filtered schema.
+# A is the final reference. B is the registry-validated historical datamodel, never a filtered schema.
 run_api "$refurl" "$image" ./node_modules/.bin/prisma db push --schema apps/api/prisma/schema.prisma --skip-generate >/dev/null
-git show dc7ceb0f0a23b77fc45a58960f3371b50c7f7365:apps/api/prisma/schema.prisma >"$tmp/predecessor.prisma"
-[[ $(sha256sum "$tmp/predecessor.prisma"|awk '{print $1}') == 0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c ]]
+node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predecessor.prisma" >"$tmp/predecessor.json"
+[[ $(sha256sum "$tmp/predecessor.prisma"|awk '{print $1}') == $(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).predecessorSchemaSha256)' "$tmp/predecessor.json") ]]
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$tmp/predecessor.prisma:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('Tenant','TenantMembership')")" = 0
 docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -1 <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
