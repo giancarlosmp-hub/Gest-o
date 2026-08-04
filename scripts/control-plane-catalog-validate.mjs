@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { validateForeignKeys } from "./control-plane-foreign-key.mjs";
 
 const input = process.argv[2];
 if (!input) throw new Error("usage: control-plane-catalog-validate.mjs INVENTORY.tsv");
@@ -42,9 +43,8 @@ const expectedColumns = {
 if (columns.size !== Object.keys(expectedColumns).length) throw new Error("CATALOG_COLUMN_COUNT_MISMATCH");
 for (const [name, expected] of Object.entries(expectedColumns)) if (columns.get(name) !== expected) throw new Error(`CATALOG_COLUMN_MISMATCH:${name}`);
 const detail = name => rows.find(row => row.object === name)?.detail || "";
+validateForeignKeys(rows);
 for (const [name, fragments] of Object.entries({
-  TenantMembership_tenantId_fkey:["FOREIGN KEY (\"tenantId\")", "REFERENCES \"Tenant\"(id)", "ON UPDATE CASCADE", "ON DELETE RESTRICT"],
-  TenantMembership_userId_fkey:["FOREIGN KEY (\"userId\")", "REFERENCES \"User\"(id)", "ON UPDATE CASCADE", "ON DELETE RESTRICT"],
   TenantMembership_version_positive:["CHECK", "version > 0"],
   TenantMembership_lifecycle_coherent:["invited", "active", "revoked", "acceptedAt", "revokedAt"]
 })) for (const fragment of fragments) if (!detail(name).includes(fragment)) throw new Error(`CATALOG_DEFINITION_MISMATCH:${name}`);

@@ -43,6 +43,10 @@ arquivo em disco, banco vazio, `sed`, regex ou `DROP`.
 5. O teste usa PostgreSQL 16 isolado: banco A materializa o datamodel final; banco B materializa o
    schema predecessor obtido do Git e recebe a migration exatamente uma vez.
 
+Nota técnica: `pg_get_constraintdef` continua preservado no inventário como diagnóstico humano das
+FKs. A autoridade automática usa campos estruturados de `pg_constraint`, `pg_class`, `pg_attribute`,
+`conkey`/`confkey`, ações referenciais e `convalidated`; formatação textual não decide equivalência.
+
 Ficam fora do escopo `tenantId` empresarial, JWT/handlers tenant-aware, RLS, segundo tenant,
 cutover, deploy, produção, ativação do runtime, TD-ER-004A e Sprint 1.0B.2. Multiempresa permanece 🔴.
 
