@@ -21,7 +21,10 @@ node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predeces
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$tmp/predecessor.prisma:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('Tenant','TenantMembership')")" = 0
 docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -1 <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
-docker exec -i "$path" psql -X -U postgres -d gesto -AtF $'\t' <scripts/control-plane-catalog.sql >"$tmp/catalog.tsv"
+if ! docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -AtF $'\t' <scripts/control-plane-catalog.sql >"$tmp/catalog.tsv"; then
+  printf '%s\n' '===== CATALOG_QUERY_FAILED =====' >&2
+  exit 1
+fi
 if ! node scripts/control-plane-catalog-validate.mjs "$tmp/catalog.tsv" >/dev/null; then
   printf '%s\n' '===== ACTUAL FK CATALOG ROWS =====' >&2
   awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$tmp/catalog.tsv" >&2

@@ -22,8 +22,8 @@ SELECT 'fk', con.conname, 0,
        ';target_schema=' || dst_ns.nspname ||
        ';target=' || dst.relname ||
        ';target_columns=' || dst_cols.columns ||
-       ';delete=' || CASE con.confdeltype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE 'UNKNOWN:' || con.confdeltype END ||
-       ';update=' || CASE con.confupdtype WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE' WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT' ELSE 'UNKNOWN:' || con.confupdtype END ||
+       ';delete=' || CASE con.confdeltype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confdeltype::text) END ||
+       ';update=' || CASE con.confupdtype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confupdtype::text) END ||
        ';validated=' || con.convalidated::text ||
        ';definition=' || replace(replace(pg_get_constraintdef(con.oid, true), E'\t', ' '), E'\n', ' ')
 FROM pg_constraint con
