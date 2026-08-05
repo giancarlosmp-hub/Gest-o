@@ -7,6 +7,7 @@ const root=resolve(import.meta.dirname,"../.."); const read=p=>readFileSync(reso
 const registry=read("scripts/production-schema-migrations.mjs"), preview=read("scripts/production-tenancy-control-plane-preview.sh");
 const apply=read("scripts/production-tenancy-control-plane-apply.sh"), prepare=read("scripts/production-tenant-default-prepare.sh");
 const catalog=read("scripts/control-plane-catalog.sql"), validator=read("scripts/control-plane-catalog-validate.mjs");
+const operationPostgres=read("scripts/smoke/tenancy-control-plane-operation-postgres.sh");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh")+read("apps/api/src/scripts/bootstrap.ts");
 assert.equal(spawnSync(process.execPath,[resolve(root,"scripts/production-schema-migrations.mjs"),"unknown"],{encoding:"utf8"}).status,2);
 for(const value of ["20260802120000_tenancy_control_plane","b9298218b3c34cdadaf35f31a6d0e8a6e1942e9d1cbf5ae5c77ae305d1cc554d","581fbae0a545f53800db7707ab8b28f52dcd3fa1","dc7ceb0f0a23b77fc45a58960f3371b50c7f7365","0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c","20260731150000_safe_production_schema_transition","evidenceVersion"]) assert.match(registry,new RegExp(value));
@@ -19,6 +20,8 @@ for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORAR
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
+for (const token of ['-v ON_ERROR_STOP=1 -AtF', '===== CATALOG QUERY FAILED =====', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
+assert.match(operationPostgres, /if ! docker exec -i "\$path" psql[\s\S]*<scripts\/control-plane-catalog\.sql >"\$tmp\/catalog\.tsv"; then[\s\S]*===== CATALOG QUERY FAILED =====[\s\S]*exit 1[\s\S]*fi[\s\S]*if ! node scripts\/control-plane-catalog-validate\.mjs/);
 assert.match(compose,/TENANCY_MODE:\s*disabled/); assert.doesNotMatch(compose,/TENANCY_MODE:\s*default-only/);
 assert.doesNotMatch(deploy,/prepareDefaultTenant|tenant-default-prepare/);
 assert.equal(spawnSync("bash",[resolve(root,"scripts/production-tenant-default-prepare.sh")],{env:{...process.env,MODE:"apply"},encoding:"utf8"}).status,1);
