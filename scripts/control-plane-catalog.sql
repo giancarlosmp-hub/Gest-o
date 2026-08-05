@@ -16,15 +16,18 @@ FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n
 WHERE n.nspname='public' AND c.relname IN ('Tenant','TenantMembership') AND con.contype IN ('p','c')
 UNION ALL
 SELECT 'fk', con.conname, 0,
-       'source_schema=' || src_ns.nspname ||
-       ';source=' || src.relname ||
-       ';source_columns=' || src_cols.columns ||
-       ';target_schema=' || dst_ns.nspname ||
-       ';target=' || dst.relname ||
-       ';target_columns=' || dst_cols.columns ||
-       ';delete=' || CASE con.confdeltype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confdeltype::text) END ||
-       ';update=' || CASE con.confupdtype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confupdtype::text) END ||
-       ';validated=' || con.convalidated::text
+       format(
+         'source_schema=%s;source=%s;source_columns=%s;target_schema=%s;target=%s;target_columns=%s;delete=%s;update=%s;validated=%s',
+         src_ns.nspname,
+         src.relname,
+         src_cols.columns,
+         dst_ns.nspname,
+         dst.relname,
+         dst_cols.columns,
+         CASE con.confdeltype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confdeltype::text) END,
+         CASE con.confupdtype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confupdtype::text) END,
+         con.convalidated::text
+       )
 FROM pg_constraint con
 JOIN pg_class src ON src.oid=con.conrelid
 JOIN pg_namespace src_ns ON src_ns.oid=src.relnamespace

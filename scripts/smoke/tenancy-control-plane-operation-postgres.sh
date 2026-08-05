@@ -34,12 +34,32 @@ if ! docker exec -i "$path" psql \
   printf '%s\n' '===== CATALOG QUERY FAILED =====' >&2
   exit 1
 fi
-awk -F '\t' '
-  $1 == "fk" {
-    printf "FK_TSV_META\tname=%s\tfields=%d\tbytes=%d\n", $2, NF, length($0) > "/dev/stderr"
-    if (NF != 4 || $4 !~ /validated=true$/) exit 1
+if ! awk -F '\t' '
+  BEGIN {
+    expected["TenantMembership_tenantId_fkey"] = "source_schema=public;source=TenantMembership;source_columns=tenantId;target_schema=public;target=Tenant;target_columns=id;delete=RESTRICT;update=CASCADE;validated=true"
+    expected["TenantMembership_userId_fkey"] = "source_schema=public;source=TenantMembership;source_columns=userId;target_schema=public;target=User;target_columns=id;delete=RESTRICT;update=CASCADE;validated=true"
   }
-' "$catalog_file"
+  $1 == "fk" {
+    seen[$2] = 1
+    printf "FK_TSV_META\tname=%s\tfields=%d\ttotal_bytes=%d\tdetail_bytes=%d\n", $2, NF, length($0), length($4) > "/dev/stderr"
+    if (!($2 in expected) || NF != 4 || $4 != expected[$2]) {
+      failed = 1
+      printf "CATALOG_FK_DETAIL_INCOMPLETE:%s\n", $2 > "/dev/stderr"
+      printf "FK_DETAIL[%s]=%s\n", $2, $4 > "/dev/stderr"
+    }
+  }
+  END {
+    for (name in expected) if (!(name in seen)) {
+      failed = 1
+      printf "CATALOG_FK_DETAIL_INCOMPLETE:%s\n", name > "/dev/stderr"
+      printf "FK_DETAIL[%s]=MISSING\n", name > "/dev/stderr"
+    }
+    exit failed
+  }
+' "$catalog_file"; then
+  awk -F '\t' '$1=="fk" { print "===== FK ROW HEX " $2 " ====="; print $0 | "od -An -tx1c >&2"; close("od -An -tx1c >&2") }' "$catalog_file" >&2
+  exit 1
+fi
 if ! node scripts/control-plane-catalog-validate.mjs "$catalog_file" >/dev/null; then
   printf '%s\n' '===== ACTUAL FK CATALOG ROWS =====' >&2
   awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$catalog_file" >&2

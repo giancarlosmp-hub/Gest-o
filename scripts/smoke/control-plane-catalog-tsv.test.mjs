@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { parseCatalogRows } from "../control-plane-catalog-validate.mjs";
 import { validateForeignKeys } from "../control-plane-foreign-key.mjs";
+
+const catalogSql = readFileSync("scripts/control-plane-catalog.sql", "utf8");
+const fkFormat = catalogSql.match(new RegExp("format\\(\\n\\s*'source_schema=%s;source=%s;source_columns=%s;target_schema=%s;target=%s;target_columns=%s;delete=%s;update=%s;validated=%s',[\\s\\S]*?\\n\\s*\\)"))?.[0] ?? "";
+const detailFormatLiteral = fkFormat.match(/'([^']+)'/)?.[1] ?? "";
+assert.equal((detailFormatLiteral.match(/%s/g) || []).length, 9);
+for (const token of ["src_ns.nspname", "src.relname", "src_cols.columns", "dst_ns.nspname", "dst.relname", "dst_cols.columns", "con.confdeltype", "con.confupdtype", "con.convalidated::text"]) assert.ok(fkFormat.includes(token), token);
+assert.doesNotMatch(fkFormat, /source_columns=%s'\s*,\s*src_cols\.columns\s*\)/);
 
 const tenantDetail = "source_schema=public;source=TenantMembership;source_columns=tenantId;target_schema=public;target=Tenant;target_columns=id;delete=RESTRICT;update=CASCADE;validated=true";
 const userDetail = "source_schema=public;source=TenantMembership;source_columns=userId;target_schema=public;target=User;target_columns=id;delete=RESTRICT;update=CASCADE;validated=true";
