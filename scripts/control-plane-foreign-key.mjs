@@ -9,7 +9,7 @@ export const parseForeignKeyDetail = detail => {
     if (separator < 1) throw new Error("CATALOG_FK_INCOMPLETE_TSV");
     return [part.slice(0, separator), part.slice(separator + 1)];
   }));
-  const required = ["source_schema", "source", "source_columns", "target_schema", "target", "target_columns", "delete", "update", "validated", "definition"];
+  const required = ["source_schema", "source", "source_columns", "target_schema", "target", "target_columns", "delete", "update", "validated"];
   if (required.some(field => !(field in fields))) throw new Error("CATALOG_FK_INCOMPLETE_TSV");
   return fields;
 };

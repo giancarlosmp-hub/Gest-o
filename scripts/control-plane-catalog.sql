@@ -24,8 +24,7 @@ SELECT 'fk', con.conname, 0,
        ';target_columns=' || dst_cols.columns ||
        ';delete=' || CASE con.confdeltype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confdeltype::text) END ||
        ';update=' || CASE con.confupdtype WHEN 'a'::"char" THEN 'NO ACTION'::text WHEN 'r'::"char" THEN 'RESTRICT'::text WHEN 'c'::"char" THEN 'CASCADE'::text WHEN 'n'::"char" THEN 'SET NULL'::text WHEN 'd'::"char" THEN 'SET DEFAULT'::text ELSE format('UNKNOWN:%s', con.confupdtype::text) END ||
-       ';validated=' || con.convalidated::text ||
-       ';definition=' || replace(replace(pg_get_constraintdef(con.oid, true), E'\t', ' '), E'\n', ' ')
+       ';validated=' || con.convalidated::text
 FROM pg_constraint con
 JOIN pg_class src ON src.oid=con.conrelid
 JOIN pg_namespace src_ns ON src_ns.oid=src.relnamespace

@@ -7,7 +7,7 @@ sha=$(git rev-parse HEAD); image=${API_IMAGE:-gest-o-api:$sha}
 docker image inspect "$image" >/dev/null 2>&1 || { echo "SKIP: pinned API image unavailable: $image" >&2; exit 77; }
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image") == "$sha" ]] || { echo 'image SHA mismatch' >&2; exit 1; }
 [[ -z ${DATABASE_URL:-} && -z ${TEST_DATABASE_URL:-} ]] || { echo 'refusing inherited database URL' >&2; exit 1; }
-id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d)
+id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d); catalog_file="$tmp/catalog.tsv"
 cleanup(){ docker rm -f "$ref" "$path" >/dev/null 2>&1||true; docker network rm "$net" >/dev/null 2>&1||true; rm -rf "$tmp"; }; trap cleanup EXIT
 docker network create --internal "$net" >/dev/null
 for c in "$ref" "$path"; do docker run -d --rm --pull=never --name "$c" --network "$net" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gesto postgres:16 >/dev/null; done
@@ -21,13 +21,28 @@ node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predeces
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$tmp/predecessor.prisma:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('Tenant','TenantMembership')")" = 0
 docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -1 <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
-if ! docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -AtF $'\t' <scripts/control-plane-catalog.sql >"$tmp/catalog.tsv"; then
+if ! docker exec -i "$path" psql \
+  -X \
+  -U postgres \
+  -d gesto \
+  -v ON_ERROR_STOP=1 \
+  --no-align \
+  --tuples-only \
+  --field-separator=$'\t' \
+  --pset=pager=off \
+  <scripts/control-plane-catalog.sql >"$catalog_file"; then
   printf '%s\n' '===== CATALOG QUERY FAILED =====' >&2
   exit 1
 fi
-if ! node scripts/control-plane-catalog-validate.mjs "$tmp/catalog.tsv" >/dev/null; then
+awk -F '\t' '
+  $1 == "fk" {
+    printf "FK_TSV_META\tname=%s\tfields=%d\tbytes=%d\n", $2, NF, length($0) > "/dev/stderr"
+    if (NF != 4 || $4 !~ /validated=true$/) exit 1
+  }
+' "$catalog_file"
+if ! node scripts/control-plane-catalog-validate.mjs "$catalog_file" >/dev/null; then
   printf '%s\n' '===== ACTUAL FK CATALOG ROWS =====' >&2
-  awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$tmp/catalog.tsv" >&2
+  awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$catalog_file" >&2
   exit 1
 fi
 run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.sql"
@@ -37,11 +52,11 @@ docker exec "$path" psql -U postgres -d gesto -v ON_ERROR_STOP=1 -c 'CREATE ROLE
 if docker exec "$path" psql -U runtime_test -d gesto -c 'CREATE TABLE permission_probe(id int)' >/dev/null 2>&1; then echo 'runtime CREATE succeeded' >&2; exit 1; fi
 # Catalog mutations exercise partial/divergent enum, table, column/type/default/nullability, index, FK and CHECK.
 for pattern in '^enum\tTenantStatus' '^table\tTenant' '^column\tTenant.id' '^index\tTenant_slug_key' '^fk\tTenantMembership_tenantId_fkey' '^check\tTenantMembership_version_positive'; do
-  awk -v p="$pattern" '$0 !~ p' "$tmp/catalog.tsv" >"$tmp/bad.tsv"
+  awk -v p="$pattern" '$0 !~ p' "$catalog_file" >"$tmp/bad.tsv"
   if node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1; then echo "catalog mutation accepted: $pattern" >&2; exit 1; fi
 done
-sed '0,/active/{s/active/divergent/}' "$tmp/catalog.tsv" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
-sed '0,/text|text|NO|/{s/text|text|NO|/integer|int4|YES|0/}' "$tmp/catalog.tsv" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
+sed '0,/active/{s/active/divergent/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
+sed '0,/text|text|NO|/{s/text|text|NO|/integer|int4|YES|0/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
 docker exec "$path" psql -U postgres -d gesto -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VALUES
 ('op-d','Synthetic','d@example.invalid','x','diretor',true,now()),('op-g','Synthetic','g@example.invalid','x','gerente',true,now()),('op-v','Synthetic','v@example.invalid','x','vendedor',false,now());

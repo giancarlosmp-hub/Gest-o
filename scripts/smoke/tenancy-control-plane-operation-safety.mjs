@@ -20,8 +20,9 @@ for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORAR
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
-for (const token of ['-v ON_ERROR_STOP=1 -AtF', '===== CATALOG QUERY FAILED =====', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
-assert.match(operationPostgres, /if ! docker exec -i "\$path" psql[\s\S]*<scripts\/control-plane-catalog\.sql >"\$tmp\/catalog\.tsv"; then[\s\S]*===== CATALOG QUERY FAILED =====[\s\S]*exit 1[\s\S]*fi[\s\S]*if ! node scripts\/control-plane-catalog-validate\.mjs/);
+for (const token of ['--no-align', '--tuples-only', '--field-separator=$\'\\t\'', '--pset=pager=off', '===== CATALOG QUERY FAILED =====', 'FK_TSV_META', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
+assert.match(operationPostgres, /if ! docker exec -i "\$path" psql[\s\S]*--no-align[\s\S]*--tuples-only[\s\S]*--field-separator=\$'\\t'[\s\S]*--pset=pager=off[\s\S]*<scripts\/control-plane-catalog\.sql >"\$catalog_file"; then[\s\S]*===== CATALOG QUERY FAILED =====[\s\S]*exit 1[\s\S]*fi[\s\S]*awk -F '\\t'[\s\S]*if ! node scripts\/control-plane-catalog-validate\.mjs/);
+assert.doesNotMatch(operationPostgres, /column -t|\bcut\b|\bfold\b|\$\([^)]*control-plane-catalog|CATALOG=.*control-plane-catalog/);
 assert.match(compose,/TENANCY_MODE:\s*disabled/); assert.doesNotMatch(compose,/TENANCY_MODE:\s*default-only/);
 assert.doesNotMatch(deploy,/prepareDefaultTenant|tenant-default-prepare/);
 assert.equal(spawnSync("bash",[resolve(root,"scripts/production-tenant-default-prepare.sh")],{env:{...process.env,MODE:"apply"},encoding:"utf8"}).status,1);
