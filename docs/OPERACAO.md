@@ -1,5 +1,13 @@
 # ADENDO OPERACIONAL PÓS-RECUPERAÇÃO
 
+## Control plane default-only — R2 em PR
+
+O fluxo futuro usa `production-tenancy-control-plane-preview.sh` (somente leitura),
+`production-tenancy-control-plane-apply.sh` (DDL administrativo confirmado) e
+`production-tenant-default-prepare.sh` (dry-run/apply DML separados). O registry não aceita paths
+livres. Esta inclusão não autoriza execução: merge/check do mesmo SHA, backup, preflight, imagem OCI
+pinada, identidades aprovadas e revisão das evidências são gates. Runtime continua `disabled`.
+
 > 🔵 PR ainda não aplicada. Use exclusivamente `scripts/deploy-production.sh` e `docker-compose.production.yml` em futura janela aprovada. O PostgreSQL recuperado permanece separado; o Compose genérico é proibido para deploy. Preflight, cutover, rollback, evidências e comandos exatos estão no adendo de `DEPLOY_GUIDE.md`. O incidente não está encerrado.
 
 O preflight corrige um falso negativo sem alterar a produção: como o hostname do PostgreSQL existe somente no DNS da rede Docker, a sondagem usa um container efêmero local `postgres:16`, sem pull automático, dentro de `gest-o_default`. Ela não consulta o DNS do host, não fixa IP e não recebe senha nem a `DATABASE_URL`. Nenhum deploy foi realizado; o estágio permanece 🔵 PR.

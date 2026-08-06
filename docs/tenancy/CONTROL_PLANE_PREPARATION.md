@@ -1,5 +1,10 @@
 # Preparação do control plane default-only
 
+> **R2 em 🔵 PR:** a PR #773 foi encerrada sem merge. O procedimento vigente em preparação está no
+> [Brief 1.0B.1-OP-R2](../sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md) e separa registry,
+> preview, apply de schema e preparação DML. Nenhuma execução real é autorizada por este documento;
+> o apply DML segue bloqueado até existir credencial temporária aprovada.
+
 ## Contrato
 
 A migration `20260802120000_tenancy_control_plane` cria somente enums, `Tenant`,

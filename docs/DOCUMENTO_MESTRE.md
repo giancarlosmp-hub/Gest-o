@@ -31,6 +31,7 @@
 - [Plano da migration expand](tenancy/MIGRATION_EXPAND_PLAN.md)
 - [Sprint 1.0B.1 — persistência do control plane](sprints/SPRINT_1_0B_1_CONTROL_PLANE_PERSISTENCE.md)
 - [Preparação do control plane](tenancy/CONTROL_PLANE_PREPARATION.md)
+- [Sprint 1.0B.1-OP-R2 — operação limpa do control plane](sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md)
 
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 

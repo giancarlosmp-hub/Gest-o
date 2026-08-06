@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,8 +35,19 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
+      - name: Validate control-plane operational gates
+        run: npm run test:tenancy-control-plane-operation
+
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         run: docker pull postgres:16
+
+      - name: Build SHA-pinned API image for control-plane harness
+        run: docker build --pull=false --build-arg APP_COMMIT="$GITHUB_SHA" --build-arg APP_VERSION=ci --build-arg APP_BUILT_AT="$(date -u +%FT%TZ)" -t "gest-o-api:$GITHUB_SHA" -f apps/api/Dockerfile .
+
+      - name: Prove control-plane migration and tenant preparation
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:tenancy-control-plane-operation:postgres
 
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres

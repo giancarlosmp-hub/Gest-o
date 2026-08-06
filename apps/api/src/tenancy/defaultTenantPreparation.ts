@@ -1,4 +1,5 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { DEFAULT_TENANT, deterministicMembershipId, mapUserRole, membershipAggregateHash } from "./defaultTenant.js";
@@ -57,15 +58,26 @@ function validate(current: Awaited<ReturnType<typeof snapshot>>, allowMissing = 
 export async function prepareDefaultTenant(prisma: PrismaClient, options: { apply: boolean; evidenceDir: string }) {
   const started = performance.now();
   await mkdir(options.evidenceDir, { recursive: true, mode: 0o700 });
-  await rm(`${options.evidenceDir}/result.tsv`, { force: true });
+  if (existsSync(`${options.evidenceDir}/result.tsv`)) throw new Error("COMPLETED_EVIDENCE_IMMUTABLE");
   const before = await snapshot(prisma);
   validate(before);
   await writeFile(`${options.evidenceDir}/metadata.tsv`, tsv([{ mode: options.apply ? "apply" : "dry-run", identityVersion: 1 }]), { mode: 0o600 });
   await writeFile(`${options.evidenceDir}/users-before.tsv`, tsv([{ total: before.metrics.users, ...Object.fromEntries(Object.entries(before.metrics.usersByRole).map(([k,v]) => [`role_${k}`,v])), ...Object.fromEntries(Object.entries(before.metrics.usersByActive).map(([k,v]) => [`active_${k}`,v])) }]), { mode: 0o600 });
   await writeFile(`${options.evidenceDir}/tenants-before.tsv`, tsv([{ total: before.metrics.tenants, defaultFound: before.metrics.defaultTenantFound, unexpected: before.metrics.unexpectedTenants }]), { mode: 0o600 });
   const missing = before.users.filter(user => !before.memberships.some(item => item.userId === user.id));
+  const expectedAggregateHash = membershipAggregateHash([
+    ...before.memberships,
+    ...missing.map(user => ({ userId: user.id, tenantId: DEFAULT_TENANT.id, role: mapUserRole(user.role), version: 1 }))
+  ]);
   await writeFile(`${options.evidenceDir}/dry-run-plan.tsv`, tsv([{ createTenant: before.metrics.tenants === 0 ? 1 : 0, createMemberships: missing.length }]), { mode: 0o600 });
-  if (!options.apply) return before.metrics;
+  await writeFile(`${options.evidenceDir}/dry-run.tsv`, tsv([{ users: before.metrics.users, tenants: before.metrics.tenants, memberships: before.metrics.memberships, missingMemberships: missing.length, inconsistencies: before.metrics.membershipsWithoutUser + before.metrics.membershipsWithoutTenant + before.metrics.duplicateMemberships, createTenant: before.metrics.tenants === 0 ? 1 : 0, createMemberships: missing.length, expectedAggregateHash }]), { mode: 0o600 });
+  if (!options.apply) {
+    const durationMs = Math.round(performance.now() - started);
+    await writeFile(`${options.evidenceDir}/dry-run-result.tsv`, tsv([{ result: "PASS", expectedAggregateHash, durationMs }]), { mode: 0o600 });
+    return { ...before.metrics, expectedAggregateHash };
+  }
+
+  if (!process.env.EXPECTED_AGGREGATE_HASH || process.env.EXPECTED_AGGREGATE_HASH !== expectedAggregateHash) throw new Error("DRY_RUN_STATE_HASH_MISMATCH");
 
   await prisma.$transaction(async tx => {
     const locked = await snapshot(tx);
@@ -81,8 +93,9 @@ export async function prepareDefaultTenant(prisma: PrismaClient, options: { appl
   const after = await snapshot(prisma);
   validate(after, false);
   if (after.metrics.memberships !== after.metrics.users || after.metrics.usersWithoutMembership) throw new Error("RECONCILIATION_FAILED");
+  if (after.metrics.aggregateHash !== expectedAggregateHash) throw new Error("APPLY_AGGREGATE_HASH_MISMATCH");
   const durationMs = Math.round(performance.now() - started);
-  await writeFile(`${options.evidenceDir}/apply-result.tsv`, tsv([{ committed: true, createdTenant: before.metrics.tenants === 0 ? 1 : 0, createdMemberships: missing.length }]), { mode: 0o600 });
+  await writeFile(`${options.evidenceDir}/apply.tsv`, tsv([{ committed: true, createdTenant: before.metrics.tenants === 0 ? 1 : 0, createdMemberships: missing.length, aggregateHash: after.metrics.aggregateHash }]), { mode: 0o600 });
   await writeFile(`${options.evidenceDir}/tenants-after.tsv`, tsv([{ total: after.metrics.tenants, defaultFound: after.metrics.defaultTenantFound, unexpected: after.metrics.unexpectedTenants }]), { mode: 0o600 });
   await writeFile(`${options.evidenceDir}/memberships-after.tsv`, tsv([{ total: after.metrics.memberships, ...Object.fromEntries(Object.entries(after.metrics.membershipsByRole).map(([k,v]) => [`role_${k}`,v])), ...Object.fromEntries(Object.entries(after.metrics.membershipsByStatus).map(([k,v]) => [`status_${k}`,v])) }]), { mode: 0o600 });
   await writeFile(`${options.evidenceDir}/reconciliation.tsv`, tsv([{ ...after.metrics, usersByRole: JSON.stringify(after.metrics.usersByRole), usersByActive: JSON.stringify(after.metrics.usersByActive), membershipsByRole: JSON.stringify(after.metrics.membershipsByRole), membershipsByStatus: JSON.stringify(after.metrics.membershipsByStatus), durationMs }]), { mode: 0o600 });

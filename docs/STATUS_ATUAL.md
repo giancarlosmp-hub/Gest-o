@@ -1,4 +1,12 @@
-# 🔵 PR — persistência default-only do control plane (02/08/2026)
+# 🔵 PR — operacionalização limpa do control plane default-only (04/08/2026)
+
+A PR #773 foi encerrada sem merge. A Sprint 1.0B.1-OP-R2 recomeça da `main` com registry fechado,
+preview read-only, apply administrativo separado, preparação dry-run/apply e harness PostgreSQL 16
+baseado no schema predecessor obtido do Git. Nada foi executado em produção; o apply DML real segue
+bloqueado até existir autoridade temporária aprovada, `TENANCY_MODE` permanece `disabled` e
+Multiempresa permanece 🔴. Consulte o [Brief R2](sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md).
+
+# Histórico — persistência default-only do control plane (02/08/2026)
 
 A Sprint 1.0B.1 adiciona em PR a migration aditiva de `Tenant`/`TenantMembership`, tenant default
 determinístico, preparação transacional auditável, adapter Prisma e testes descartáveis. Não houve
