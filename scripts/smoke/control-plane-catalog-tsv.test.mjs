@@ -5,6 +5,11 @@ import { parseCatalogRows } from "../control-plane-catalog-validate.mjs";
 import { validateForeignKeys } from "../control-plane-foreign-key.mjs";
 
 const catalogSql = readFileSync("scripts/control-plane-catalog.sql", "utf8");
+assert.match(catalogSql, /e\.enumlabel::text AS detail/);
+assert.doesNotMatch(catalogSql, /e\.enumlabel\s+AS detail/);
+assert.match(catalogSql, /format\([\s\S]*?con\.convalidated::text[\s\S]*?\)::text/);
+assert.doesNotMatch(catalogSql, /::name\b|CAST\s*\([^)]*\s+AS\s+name\)|(?:varchar|character varying|char)\s*\(\s*63\s*\)|\b(?:substring|left|right)\s*\(/i);
+assert.match(catalogSql, /SELECT pg_typeof\(detail\)::text FROM catalog LIMIT 1/);
 const fkFormat = catalogSql.match(new RegExp("format\\(\\n\\s*'source_schema=%s;source=%s;source_columns=%s;target_schema=%s;target=%s;target_columns=%s;delete=%s;update=%s;validated=%s',[\\s\\S]*?\\n\\s*\\)"))?.[0] ?? "";
 const detailFormatLiteral = fkFormat.match(/'([^']+)'/)?.[1] ?? "";
 assert.equal((detailFormatLiteral.match(/%s/g) || []).length, 9);

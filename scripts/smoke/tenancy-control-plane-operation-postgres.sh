@@ -34,6 +34,12 @@ if ! docker exec -i "$path" psql \
   printf '%s\n' '===== CATALOG QUERY FAILED =====' >&2
   exit 1
 fi
+detail_sql_type=$(awk -F '\t' '$1=="meta" && $2=="detail_sql_type" { print $4 }' "$catalog_file")
+printf 'CATALOG_DETAIL_SQL_TYPE=%s\n' "$detail_sql_type" >&2
+if [[ "$detail_sql_type" != text ]]; then
+  printf 'CATALOG_DETAIL_TYPE_MISMATCH:%s\n' "${detail_sql_type:-missing}" >&2
+  exit 1
+fi
 if ! awk -F '\t' '
   BEGIN {
     expected["TenantMembership_tenantId_fkey"] = "source_schema=public;source=TenantMembership;source_columns=tenantId;target_schema=public;target=Tenant;target_columns=id;delete=RESTRICT;update=CASCADE;validated=true"
