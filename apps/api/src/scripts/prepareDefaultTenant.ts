@@ -4,9 +4,9 @@ import { PrismaClient } from "@prisma/client";
 import { DEFAULT_TENANT } from "../tenancy/defaultTenant.js";
 import { prepareDefaultTenant } from "../tenancy/defaultTenantPreparation.js";
 import { readTenancyMode } from "../tenancy/tenancyMode.js";
+import { parsePrepareDefaultTenantArgs } from "./prepareDefaultTenantArgs.js";
 
-const apply = process.argv.includes("--apply");
-if (process.argv.some(arg => !["--apply", "--dry-run"].includes(arg))) throw new Error("usage: prepareDefaultTenant [--dry-run|--apply]");
+const { apply } = parsePrepareDefaultTenantArgs(process.argv.slice(2));
 readTenancyMode();
 const root = resolve(import.meta.dirname, "../../../..");
 const sha = process.env.APP_COMMIT;

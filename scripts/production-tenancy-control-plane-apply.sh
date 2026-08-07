@@ -4,12 +4,17 @@ root=$(cd "$(dirname "$0")/.." && pwd); cd "$root"
 die(){ printf '[control-plane-apply] ERROR %s\n' "$*" >&2; exit 1; }
 [[ ${CONFIRM:-} == PRODUCTION_SCHEMA_APPLY ]] || die 'CONFIRM=PRODUCTION_SCHEMA_APPLY required'
 : "${EXPECTED_SHA:?EXPECTED_SHA is required}"; : "${MIGRATION_ID:?MIGRATION_ID is required}"
+: "${API_IMAGE:?API_IMAGE is required}"
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
 : "${PRODUCTION_DB_NAME_EXPECTED:?PRODUCTION_DB_NAME_EXPECTED is required}"
 : "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"; : "${PREFLIGHT_RESULT_FILE:?PREFLIGHT_RESULT_FILE is required}"
 [[ $(git rev-parse HEAD) == "$EXPECTED_SHA" ]] || die 'HEAD/SHA mismatch'
 [[ -z $(git status --porcelain) ]] || die 'worktree is dirty'
 [[ $(git rev-parse origin/main) == "$EXPECTED_SHA" ]] || die 'origin/main/SHA mismatch'
+[[ ${RUNTIME_TENANCY_MODE:-} == disabled ]] || die 'RUNTIME_TENANCY_MODE=disabled evidence is required'
+[[ ${DATABASE_SCHEMA_MODE:-} == external ]] || die 'DATABASE_SCHEMA_MODE=external is required'
+docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image is not local'
+[[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'API image revision label mismatch'
 rg -q '^PASS([[:space:]]|$)' "$BACKUP_RESULT_FILE" || die 'recent backup PASS required'
 rg -q '^PASS([[:space:]]|$)' "$PREFLIGHT_RESULT_FILE" || die 'preflight PASS required'
 registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID") || die 'registry/checksum failed'
