@@ -86,12 +86,23 @@ for pattern in '^enum\tTenantStatus' '^table\tTenant' '^column\tTenant.id' '^ind
 done
 sed '0,/active/{s/active/divergent/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
 sed '0,/text|text|NO|/{s/text|text|NO|/integer|int4|YES|0/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
-docker exec "$path" psql -U postgres -d gesto -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+fail(){ printf 'HARNESS_FAIL\t%s\n' "$1" >&2; exit 1; }
+checkpoint(){ printf 'HARNESS_CHECKPOINT\t%s\n' "$1" >&2; }
+docker exec -i "$path" psql \
+  -X \
+  -U postgres \
+  -d gesto \
+  -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VALUES
 ('op-d','Synthetic','d@example.invalid','x','diretor',true,now()),('op-g','Synthetic','g@example.invalid','x','gerente',true,now()),('op-v','Synthetic','v@example.invalid','x','vendedor',false,now());
 SQL
-fail(){ printf 'HARNESS_FAIL\t%s\n' "$1" >&2; exit 1; }
-checkpoint(){ printf 'HARNESS_CHECKPOINT\t%s\n' "$1" >&2; }
+synthetic_user_count=$(docker exec "$path" psql -X -U postgres -d gesto -Atc 'SELECT count(*) FROM "User"') || fail SYNTHETIC_FIXTURE_COUNT_QUERY_FAILED
+printf 'SYNTHETIC_USER_COUNT_BEFORE_DRY_RUN=%s\n' "$synthetic_user_count" >&2
+[[ "$synthetic_user_count" == 3 ]] || fail "SYNTHETIC_FIXTURE_SETUP_FAILED:$synthetic_user_count"
+read -r synthetic_diretor_count synthetic_gerente_count synthetic_vendedor_count < <(docker exec "$path" psql -X -U postgres -d gesto -AtF ' ' -c 'SELECT count(*) FILTER (WHERE role=$$diretor$$), count(*) FILTER (WHERE role=$$gerente$$), count(*) FILTER (WHERE role=$$vendedor$$) FROM "User"') || fail SYNTHETIC_ROLE_COUNTS_QUERY_FAILED
+printf 'SYNTHETIC_ROLE_COUNTS diretor=%s gerente=%s vendedor=%s\n' "$synthetic_diretor_count" "$synthetic_gerente_count" "$synthetic_vendedor_count" >&2
+[[ "$synthetic_diretor_count" == 1 && "$synthetic_gerente_count" == 1 && "$synthetic_vendedor_count" == 1 ]] || fail "SYNTHETIC_ROLE_COUNTS_MISMATCH:$synthetic_diretor_count:$synthetic_gerente_count:$synthetic_vendedor_count"
+checkpoint synthetic_fixture_ready
 validate_evidence_file(){
   local evidence_dir=$1 evidence_file=$2 owner_uid owner_gid mode size
   [[ -f "$evidence_dir/$evidence_file" ]] || fail "EVIDENCE_FILE_MISSING:$evidence_file"
