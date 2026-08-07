@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 root=$(cd "$(dirname "$0")/../.." && pwd); cd "$root"
 command -v docker >/dev/null || { echo 'SKIP: docker unavailable' >&2; exit 77; }
 docker image inspect postgres:16 >/dev/null 2>&1 || { echo 'SKIP: postgres:16 unavailable locally' >&2; exit 77; }
@@ -7,6 +8,8 @@ sha=$(git rev-parse HEAD); image=${API_IMAGE:-gest-o-api:$sha}
 docker image inspect "$image" >/dev/null 2>&1 || { echo "SKIP: pinned API image unavailable: $image" >&2; exit 77; }
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image") == "$sha" ]] || { echo 'image SHA mismatch' >&2; exit 1; }
 [[ -z ${DATABASE_URL:-} && -z ${TEST_DATABASE_URL:-} ]] || { echo 'refusing inherited database URL' >&2; exit 1; }
+HOST_UID="$(id -u)"; HOST_GID="$(id -g)"
+printf 'HOST_IDENTITY\tuid=%s\tgid=%s\n' "$HOST_UID" "$HOST_GID" >&2
 id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d); catalog_file="$tmp/catalog.tsv"
 cleanup(){ docker rm -f "$ref" "$path" >/dev/null 2>&1||true; docker network rm "$net" >/dev/null 2>&1||true; rm -rf "$tmp"; }; trap cleanup EXIT
 docker network create --internal "$net" >/dev/null
@@ -87,11 +90,28 @@ docker exec "$path" psql -U postgres -d gesto -v ON_ERROR_STOP=1 <<'SQL' >/dev/n
 INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VALUES
 ('op-d','Synthetic','d@example.invalid','x','diretor',true,now()),('op-g','Synthetic','g@example.invalid','x','gerente',true,now()),('op-v','Synthetic','v@example.invalid','x','vendedor',false,now());
 SQL
-mkdir "$tmp/evidence"
-runner(){ run_api "$pathurl" -e APP_COMMIT="$sha" -e EXPECTED_SHA="$sha" -e TENANCY_MODE=default-only -e EVIDENCE_DIR=/evidence -v "$tmp/evidence:/evidence" ${CONFIRM:+-e CONFIRM} ${EXPECTED_AGGREGATE_HASH:+-e EXPECTED_AGGREGATE_HASH} "$image" node apps/api/dist/scripts/prepareDefaultTenant.js "$@"; }
-runner --dry-run >/dev/null; test "$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"')" = 0
+mkdir -m 700 "$tmp/evidence"
+printf 'EVIDENCE_DIRECTORY\t' >&2; stat -c '%u:%g %a %n' "$tmp/evidence" >&2
+docker image inspect --format 'IMAGE_CONFIG_USER\t{{json .Config.User}}' "$image" >&2
+docker run --rm --pull=never "$image" id >&2
+runner(){ run_api "$pathurl" --user "$HOST_UID:$HOST_GID" -e APP_COMMIT="$sha" -e EXPECTED_SHA="$sha" -e TENANCY_MODE=default-only -e EVIDENCE_DIR=/evidence -v "$tmp/evidence:/evidence" ${CONFIRM:+-e CONFIRM} ${EXPECTED_AGGREGATE_HASH:+-e EXPECTED_AGGREGATE_HASH} "$image" node apps/api/dist/scripts/prepareDefaultTenant.js "$@"; }
+runner --dry-run >/dev/null
+printf 'DRY_RUN_RESULT\t' >&2; stat -c '%u:%g %a %n' "$tmp/evidence/dry-run-result.tsv" >&2
+for evidence_file in metadata.tsv dry-run-result.tsv; do
+  read -r owner_uid owner_gid mode < <(stat -c '%u %g %a' "$tmp/evidence/$evidence_file")
+  [[ "$owner_uid" == "$HOST_UID" && "$owner_gid" == "$HOST_GID" ]] || { echo "evidence owner mismatch: $evidence_file" >&2; exit 1; }
+  (( (8#$mode & 8#007) == 0 )) || { echo "evidence permissions expose other: $evidence_file" >&2; exit 1; }
+done
+[[ $(stat -c '%u:%g %a' "$tmp/evidence") == "$HOST_UID:$HOST_GID 700" ]] || { echo 'evidence directory ownership/mode mismatch' >&2; exit 1; }
+test "$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"')" = 0
 EXPECTED_AGGREGATE_HASH=$(awk -F '\t' 'NR==2{for(i=1;i<=NF;i++)if(h[i]=="expectedAggregateHash")print $i}NR==1{for(i=1;i<=NF;i++)h[i]=$i}' "$tmp/evidence/dry-run-result.tsv"); export EXPECTED_AGGREGATE_HASH CONFIRM=PREPARE_DEFAULT_TENANT
 runner --apply >/dev/null
+for evidence_file in metadata.tsv dry-run-result.tsv result.tsv; do
+  read -r owner_uid owner_gid mode < <(stat -c '%u %g %a' "$tmp/evidence/$evidence_file")
+  [[ "$owner_uid" == "$HOST_UID" && "$owner_gid" == "$HOST_GID" ]] || { echo "evidence owner mismatch: $evidence_file" >&2; exit 1; }
+  (( (8#$mode & 8#007) == 0 )) || { echo "evidence permissions expose other: $evidence_file" >&2; exit 1; }
+done
+test "$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"')" = 1
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "TenantMembership"')" = 3
 rm -f "$tmp/evidence/result.tsv"; runner --apply >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "TenantMembership"')" = 3

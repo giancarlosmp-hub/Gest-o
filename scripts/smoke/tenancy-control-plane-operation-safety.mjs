@@ -16,11 +16,15 @@ for(const token of ["EXPECTED_SHA","origin/main","status --porcelain","RUNTIME_T
 assert.doesNotMatch(preview,/db push|migrate deploy|CREATE TABLE|ALTER TABLE/);
 for(const token of ["PRODUCTION_SCHEMA_APPLY","API_IMAGE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","BACKUP_RESULT_FILE","PREFLIGHT_RESULT_FILE","BEGIN;","ON_ERROR_STOP","ALREADY_APPLIED","post-apply-diff.sql"]) assert.ok(apply.includes(token),token);
 assert.doesNotMatch(apply,/IF NOT EXISTS|GRANT|ALTER OWNER|DROP|TRUNCATE/);
-for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never"]) assert.ok(prepare.includes(token),token);
+for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never","operator_uid=$(id -u)","operator_gid=$(id -g)","--user \"$operator_uid:$operator_gid\""]) assert.ok(prepare.includes(token),token);
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
 for (const token of ['--no-align', '--tuples-only', '--field-separator=$\'\\t\'', '--pset=pager=off', '===== CATALOG QUERY FAILED =====', 'CATALOG_DETAIL_SQL_TYPE=', 'CATALOG_DETAIL_TYPE_MISMATCH:', 'FK_TSV_META', 'CATALOG_FK_DETAIL_INCOMPLETE', 'FK_DETAIL[', 'od -An -tx1c', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
+for (const token of ['HOST_UID="$(id -u)"', 'HOST_GID="$(id -g)"', '--user "$HOST_UID:$HOST_GID"', "stat -c '%u:%g %a %n'", 'dry-run-result.tsv', 'metadata.tsv', 'result.tsv']) assert.ok(operationPostgres.includes(token), token);
+assert.doesNotMatch(prepare + operationPostgres, /chmod\s+(?:777|666|644)\b|umask\s+000\b/);
+assert.match(prepare, /run_runner\(\)\{ docker run[^\n]*--user "\$operator_uid:\$operator_gid"[\s\S]*-v "\$evidence:\/evidence"/);
+assert.match(operationPostgres, /runner\(\)\{ run_api "\$pathurl" --user "\$HOST_UID:\$HOST_GID"[\s\S]*-v "\$tmp\/evidence:\/evidence"/);
 assert.match(operationPostgres, /if ! docker exec -i "\$path" psql[\s\S]*--no-align[\s\S]*--tuples-only[\s\S]*--field-separator=\$'\\t'[\s\S]*--pset=pager=off[\s\S]*<scripts\/control-plane-catalog\.sql >"\$catalog_file"; then[\s\S]*===== CATALOG QUERY FAILED =====[\s\S]*exit 1[\s\S]*fi[\s\S]*awk -F '\\t'[\s\S]*if ! node scripts\/control-plane-catalog-validate\.mjs/);
 assert.doesNotMatch(operationPostgres, /column -t|\bcut\b|\bfold\b|\$\([^)]*control-plane-catalog|CATALOG=.*control-plane-catalog/);
 assert.match(compose,/TENANCY_MODE:\s*disabled/); assert.doesNotMatch(compose,/TENANCY_MODE:\s*default-only/);
