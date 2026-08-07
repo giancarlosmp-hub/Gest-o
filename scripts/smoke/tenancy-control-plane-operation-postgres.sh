@@ -23,6 +23,25 @@ node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predeces
 [[ $(sha256sum "$tmp/predecessor.prisma"|awk '{print $1}') == $(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).predecessorSchemaSha256)' "$tmp/predecessor.json") ]]
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$tmp/predecessor.prisma:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('Tenant','TenantMembership')")" = 0
+incident_tables=(
+  incident_20260718_client_enrichment_audit incident_20260718_client_map
+  incident_20260718_june_client_source incident_20260718_recovery_audit
+  incident_20260719_erp_code_enrichment_audit incident_20260719_erp_partner_client_map
+  incident_20260719_orphan_productprice_audit incident_20260719_product_snapshot_map
+)
+for table in "${incident_tables[@]}"; do
+  docker exec "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -c "CREATE TABLE \"$table\" (id integer)" >/dev/null
+done
+run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/pre-apply-diff.raw.sql"
+node scripts/schema-diff-filter.mjs "$tmp/pre-apply-diff.raw.sql" "$tmp/pre-apply-diff.sql" pre
+for table in "${incident_tables[@]}"; do
+  rg -q "DROP TABLE \"$table\";" "$tmp/pre-apply-diff.raw.sql"
+done
+! rg -q 'incident_' "$tmp/pre-apply-diff.sql"
+rg -q 'CREATE (TYPE|TABLE)' "$tmp/pre-apply-diff.sql"
+test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname = ANY (ARRAY['Tenant','TenantMembership'])")" = 0
+test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname LIKE 'incident\\_%' ESCAPE '\\'")" = 8
+printf 'CONTROL_PLANE_PREVIEW_STATE=ABSENT_COMPATIBLE\n' >&2
 docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -1 <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null
 if ! docker exec -i "$path" psql \
   -X \
@@ -74,8 +93,10 @@ if ! node scripts/control-plane-catalog-validate.mjs "$catalog_file" >/dev/null;
   awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$catalog_file" >&2
   exit 1
 fi
-run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.sql"
+run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
+node scripts/schema-diff-filter.mjs "$tmp/post.raw.sql" "$tmp/post.sql" post
 test -z "$(sed '/^[[:space:]]*--/d;/^[[:space:]]*$/d' "$tmp/post.sql")"
+test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname LIKE 'incident\\_%' ESCAPE '\\'")" = 8
 if docker exec -i "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -1 <apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql >/dev/null 2>&1; then echo 'literal reapply succeeded' >&2; exit 1; fi
 docker exec "$path" psql -U postgres -d gesto -v ON_ERROR_STOP=1 -c 'CREATE ROLE runtime_test LOGIN; GRANT USAGE ON SCHEMA public TO runtime_test' >/dev/null
 if docker exec "$path" psql -U runtime_test -d gesto -c 'CREATE TABLE permission_probe(id int)' >/dev/null 2>&1; then echo 'runtime CREATE succeeded' >&2; exit 1; fi

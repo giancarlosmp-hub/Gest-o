@@ -36,7 +36,9 @@ else die 'partial or divergent control plane'; fi
 docker run --rm --pull=never --network container:"$PRODUCTION_DB_CONTAINER_EXPECTED" -e DATABASE_URL "$API_IMAGE" \
   ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" \
   --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$evidence/pre-apply-diff.raw.sql"
-cp "$evidence/pre-apply-diff.raw.sql" "$evidence/pre-apply-diff.sql"
-if rg -n 'DROP[[:space:]]+(TABLE|COLUMN|TYPE)|TRUNCATE|DROP[^;]*CASCADE|incident_' "$evidence/pre-apply-diff.sql" >/dev/null; then die 'destructive, unmanaged, or incident drift'; fi
+node scripts/schema-diff-filter.mjs \
+  "$evidence/pre-apply-diff.raw.sql" \
+  "$evidence/pre-apply-diff.sql" \
+  pre
 printf 'state\t%s\nsha\t%s\n' "$state" "$EXPECTED_SHA" >"$evidence/preview-result.tsv"
 printf '%s\n' "$state"
