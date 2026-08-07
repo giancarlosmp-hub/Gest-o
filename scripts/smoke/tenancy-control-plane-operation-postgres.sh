@@ -35,10 +35,10 @@ done
 run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/pre-apply-diff.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/pre-apply-diff.raw.sql" "$tmp/pre-apply-diff.sql" pre
 for table in "${incident_tables[@]}"; do
-  rg -q "DROP TABLE \"$table\";" "$tmp/pre-apply-diff.raw.sql"
+  grep -Fq "DROP TABLE \"$table\";" "$tmp/pre-apply-diff.raw.sql"
 done
-! rg -q 'incident_' "$tmp/pre-apply-diff.sql"
-rg -q 'CREATE (TYPE|TABLE)' "$tmp/pre-apply-diff.sql"
+! grep -Fq 'incident_' "$tmp/pre-apply-diff.sql"
+grep -Eq 'CREATE (TYPE|TABLE)' "$tmp/pre-apply-diff.sql"
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname = ANY (ARRAY['Tenant','TenantMembership'])")" = 0
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname LIKE 'incident\\_%' ESCAPE '\\'")" = 8
 printf 'CONTROL_PLANE_PREVIEW_STATE=ABSENT_COMPATIBLE\n' >&2

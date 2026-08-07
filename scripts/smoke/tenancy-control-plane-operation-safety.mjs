@@ -35,6 +35,7 @@ assert.match(prepare, /run_runner\(\)\{ docker run[^\n]*--user "\$operator_uid:\
 assert.match(operationPostgres, /runner\(\)\{ run_api "\$pathurl" --user "\$HOST_UID:\$HOST_GID"[\s\S]*-v "\$evidence:\/evidence"/);
 assert.match(operationPostgres, /if ! docker exec -i "\$path" psql[\s\S]*--no-align[\s\S]*--tuples-only[\s\S]*--field-separator=\$'\\t'[\s\S]*--pset=pager=off[\s\S]*<scripts\/control-plane-catalog\.sql >"\$catalog_file"; then[\s\S]*===== CATALOG QUERY FAILED =====[\s\S]*exit 1[\s\S]*fi[\s\S]*awk -F '\\t'[\s\S]*if ! node scripts\/control-plane-catalog-validate\.mjs/);
 assert.doesNotMatch(operationPostgres, /column -t|\bcut\b|\bfold\b|\$\([^)]*control-plane-catalog|CATALOG=.*control-plane-catalog/);
+assert.doesNotMatch(operationPostgres, /\brg\b/);
 assert.match(compose,/TENANCY_MODE:\s*disabled/); assert.doesNotMatch(compose,/TENANCY_MODE:\s*default-only/);
 assert.doesNotMatch(deploy,/prepareDefaultTenant|tenant-default-prepare/);
 assert.equal(spawnSync("bash",[resolve(root,"scripts/production-tenant-default-prepare.sh")],{env:{...process.env,MODE:"apply"},encoding:"utf8"}).status,1);
