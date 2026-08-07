@@ -1,5 +1,11 @@
 # 🔵 PR — hotfix do preview do control plane (07/08/2026)
 
+O Gate Humano 1 também encontrou preventivamente, na revisão
+`a4002d90f8108699f5fcdad41c78996d017cf050`, que o pós-apply não usava o filtro gerenciado em modo
+`post`. A janela permanece suspensa antes da DDL: nenhum apply produtivo foi executado e nenhuma
+produção foi alterada. O hotfix preserva o diff bruto e torna o filtro oficial a única autoridade do
+diff gerenciado pós-apply.
+
 Uma janela operacional autorizada chegou à Fase 3: backup **PASS** e preflight **PASS**. No SHA
 `5c2a43a3c9537b26813912f54eda9ee73c5da0a7`, o preview bloqueou porque tratava como drift os oito
 `DROP TABLE incident_*` forenses conhecidos emitidos pelo Prisma, sem usar o filtro oficial. Nenhuma

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,6 +19,14 @@ assert.doesNotMatch(preview,/cp "\$evidence\/pre-apply-diff\.raw\.sql"|rg -n .*i
 assert.doesNotMatch(preview,/db push|migrate deploy|CREATE TABLE|ALTER TABLE/);
 for(const token of ["PRODUCTION_SCHEMA_APPLY","API_IMAGE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","BACKUP_RESULT_FILE","PREFLIGHT_RESULT_FILE","BEGIN;","ON_ERROR_STOP","ALREADY_APPLIED","post-apply-diff.sql"]) assert.ok(apply.includes(token),token);
 assert.doesNotMatch(apply,/IF NOT EXISTS|GRANT|ALTER OWNER|DROP|TRUNCATE/);
+assert.doesNotMatch(apply,/\brg\b/);
+assert.match(apply,/grep -Eq '\^PASS\(\[\[:space:\]\]\|\$\)' "\$BACKUP_RESULT_FILE"/);
+assert.match(apply,/grep -Eq '\^PASS\(\[\[:space:\]\]\|\$\)' "\$PREFLIGHT_RESULT_FILE"/);
+assert.match(apply,/node scripts\/schema-diff-filter\.mjs \\\n\s+"\$evidence\/post-apply-diff\.raw\.sql" \\\n\s+"\$evidence\/post-apply-diff\.sql" \\\n\s+post/);
+assert.doesNotMatch(apply,/cp "\$evidence\/post-apply-diff\.raw\.sql"|managed post-diff is not empty/);
+for (const prerequisite of ["cat \"$migration\"", "control-plane-catalog-validate.mjs", "control plane is not empty before preparation", "schema-diff-filter.mjs"]) {
+  assert.ok(apply.indexOf(prerequisite) < apply.indexOf("state\\tAPPLIED_ONCE"), `APPLIED_ONCE result precedes ${prerequisite}`);
+}
 for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never","operator_uid=$(id -u)","operator_gid=$(id -g)","--user \"$operator_uid:$operator_gid\""]) assert.ok(prepare.includes(token),token);
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
@@ -48,7 +56,7 @@ const incidentTables = [
   "incident_20260719_orphan_productprice_audit", "incident_20260719_product_snapshot_map"
 ];
 const scratch=mkdtempSync(join(tmpdir(),"control-plane-filter-"));
-const filter=(sql,mode="pre")=>{ const input=join(scratch,"input.sql"),output=join(scratch,"output.sql"); writeFileSync(input,sql); const result=spawnSync(process.execPath,[resolve(root,"scripts/schema-diff-filter.mjs"),input,output,mode],{encoding:"utf8"}); return {...result,output:result.status===0?readFileSync(output,"utf8"):null}; };
+const filter=(sql,mode="pre")=>{ const input=join(scratch,"input.sql"),output=join(scratch,"output.sql"); writeFileSync(input,sql); rmSync(output,{force:true}); const result=spawnSync(process.execPath,[resolve(root,"scripts/schema-diff-filter.mjs"),input,output,mode],{encoding:"utf8"}); return {...result,output:existsSync(output)?readFileSync(output,"utf8"):null}; };
 const incidentDrops=incidentTables.map(name=>`DROP TABLE "${name}";`).join("\n");
 const approved='CREATE TYPE "TenantStatus" AS ENUM (\'active\', \'suspended\');\nCREATE TABLE "Tenant" ("id" TEXT NOT NULL);';
 assert.equal(filter(`${incidentDrops}\n${approved}`).status,0); // positive A
@@ -60,6 +68,18 @@ for(const sql of [
   'TRUNCATE TABLE "User";',
   'CREATE TABLE "NotApproved" ("id" TEXT);'
 ]) assert.notEqual(filter(sql).status,0,sql);
+
+// Post mode removes only the eight forensic drops and rejects every meaningful remainder.
+const postIncidents=filter(incidentDrops,"post"); assert.equal(postIncidents.status,0); assert.equal(postIncidents.output.trim(),"");
+for (const sql of [
+  'DROP TABLE "UnexpectedBusinessTable";', // negative A: unexpected normal DROP
+  `ALTER TABLE "${incidentTables[0]}" DROP COLUMN "id";`, // negative B: non-allowlisted incident operation
+  'CREATE INDEX "unexpected_idx" ON "User" ("email");' // negative C: any other significant DDL
+]) {
+  const rejected=filter(sql,"post");
+  assert.notEqual(rejected.status,0,sql);
+  if (rejected.output !== null) assert.equal(rejected.output.trim(),sql);
+}
 
 // A failed official filter must leave raw evidence and must never publish preview PASS.
 const fakeBin=join(scratch,"bin"), evidenceRoot=join(scratch,"evidence"); mkdirSync(fakeBin); mkdirSync(evidenceRoot);

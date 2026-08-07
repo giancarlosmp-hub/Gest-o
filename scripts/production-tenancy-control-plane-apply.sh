@@ -15,8 +15,8 @@ die(){ printf '[control-plane-apply] ERROR %s\n' "$*" >&2; exit 1; }
 [[ ${DATABASE_SCHEMA_MODE:-} == external ]] || die 'DATABASE_SCHEMA_MODE=external is required'
 docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image is not local'
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'API image revision label mismatch'
-rg -q '^PASS([[:space:]]|$)' "$BACKUP_RESULT_FILE" || die 'recent backup PASS required'
-rg -q '^PASS([[:space:]]|$)' "$PREFLIGHT_RESULT_FILE" || die 'preflight PASS required'
+grep -Eq '^PASS([[:space:]]|$)' "$BACKUP_RESULT_FILE" || die 'recent backup PASS required'
+grep -Eq '^PASS([[:space:]]|$)' "$PREFLIGHT_RESULT_FILE" || die 'preflight PASS required'
 registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID") || die 'registry/checksum failed'
 migration=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).absolutePath)' "$registry")
 evidence_root=${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}; evidence="$evidence_root/$EXPECTED_SHA/migrations/$MIGRATION_ID"
@@ -34,6 +34,8 @@ node scripts/control-plane-catalog-validate.mjs "$evidence/post-objects.tsv" >/d
 [[ $(psql_admin -Atc 'SELECT (SELECT count(*) FROM "Tenant")+(SELECT count(*) FROM "TenantMembership")') == 0 ]] || die 'control plane is not empty before preparation'
 docker run --rm --pull=never --network container:"$PRODUCTION_DB_CONTAINER_EXPECTED" -e DATABASE_URL "$API_IMAGE" \
   ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$evidence/post-apply-diff.raw.sql"
-cp "$evidence/post-apply-diff.raw.sql" "$evidence/post-apply-diff.sql"
-[[ -z $(sed '/^[[:space:]]*--/d;/^[[:space:]]*$/d' "$evidence/post-apply-diff.sql") ]] || die 'managed post-diff is not empty'
+node scripts/schema-diff-filter.mjs \
+  "$evidence/post-apply-diff.raw.sql" \
+  "$evidence/post-apply-diff.sql" \
+  post
 printf 'result\tPASS\nstate\tAPPLIED_ONCE\n' >"$evidence/result.tsv"
