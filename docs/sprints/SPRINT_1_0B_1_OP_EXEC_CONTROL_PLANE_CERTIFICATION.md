@@ -13,6 +13,14 @@ publicação comprovada; **🟢 Produção** validação operacional por SHA. Ne
 
 ## Janela suspensa na Fase 3 e hotfix
 
+O **Gate Humano 1** identificou preventivamente um segundo defeito no caminho pós-apply da revisão
+`a4002d90f8108699f5fcdad41c78996d017cf050`: o script copiava o diff bruto para o gerenciado e o
+validava manualmente, sem o filtro oficial. Se o apply fosse autorizado, os oito drops forenses
+esperados poderiam marcar a operação como falha somente depois de a DDL ter sido aplicada. Nenhum
+apply produtivo foi executado, nenhuma produção foi alterada e a janela continua suspensa antes da
+DDL. O pós-diff agora deve passar por `schema-diff-filter.mjs` em modo `post`, preservando o raw e
+aceitando como vazio gerenciado apenas a remoção dos oito drops conhecidos.
+
 A janela autorizada alcançou a Fase 3 após backup **PASS** e preflight **PASS**. No SHA
 `5c2a43a3c9537b26813912f54eda9ee73c5da0a7`, o diff bruto continha exclusivamente os oito `DROP
 TABLE incident_*` forenses conhecidos, mas o preview copiou o raw para o diff gerenciado e bloqueou
