@@ -11,6 +11,20 @@ deploy. Esta Sprint está **🔵 PR** e não executa produção.
 Legenda: **🟣 Codex** trabalho local; **🔵 PR** revisão; **🟡 Merge** em `main`; **🟠 Deploy**
 publicação comprovada; **🟢 Produção** validação operacional por SHA. Nenhuma etapa implica a seguinte.
 
+## Janela suspensa na Fase 3 e hotfix
+
+A janela autorizada alcançou a Fase 3 após backup **PASS** e preflight **PASS**. No SHA
+`5c2a43a3c9537b26813912f54eda9ee73c5da0a7`, o diff bruto continha exclusivamente os oito `DROP
+TABLE incident_*` forenses conhecidos, mas o preview copiou o raw para o diff gerenciado e bloqueou
+qualquer referência `incident_*`, em vez de chamar `schema-diff-filter.mjs`. O preview falhou antes
+de qualquer apply: nenhuma DDL ou DML ocorreu, o control plane continuou ausente e os objetos
+forenses foram preservados.
+
+A janela permanece suspensa aguardando o hotfix e nova autorização. O hotfix mantém o raw imutável,
+submete o diff gerenciado ao filtro oficial em modo `pre` e continua fail-closed para toda operação
+desconhecida ou destrutiva. Ele não comprova atualização de produção e não altera o estado de nenhum
+incidente.
+
 ## Objetivo, escopo e fora de escopo
 
 O objetivo é tornar auditável, repetível e fail-closed uma futura aplicação do control plane já

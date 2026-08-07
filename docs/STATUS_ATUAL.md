@@ -1,3 +1,11 @@
+# 🔵 PR — hotfix do preview do control plane (07/08/2026)
+
+Uma janela operacional autorizada chegou à Fase 3: backup **PASS** e preflight **PASS**. No SHA
+`5c2a43a3c9537b26813912f54eda9ee73c5da0a7`, o preview bloqueou porque tratava como drift os oito
+`DROP TABLE incident_*` forenses conhecidos emitidos pelo Prisma, sem usar o filtro oficial. Nenhuma
+DDL ou DML ocorreu, as tabelas forenses foram preservadas e a janela ficou suspensa aguardando este
+hotfix. Produção **não** deve ser declarada atualizada; os estados dos incidentes permanecem iguais.
+
 # 🔵 PR — certificação operacional do control plane default-only (07/08/2026)
 
 **Git/main:** o histórico local comprova a PR #774 mesclada no commit
