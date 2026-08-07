@@ -6,6 +6,10 @@ die(){ printf '[tenant-default-prepare] ERROR %s\n' "$*" >&2; exit 1; }
 : "${EXPECTED_SHA:?EXPECTED_SHA is required}"; : "${API_IMAGE:?API_IMAGE is required}"
 : "${DATABASE_URL:?temporary DML DATABASE_URL is required}"; : "${PRODUCTION_DB_CONTAINER_EXPECTED:?approved container is required}"
 [[ "$EXPECTED_SHA" == $(git rev-parse HEAD) ]] || die 'EXPECTED_SHA mismatch'
+[[ -z $(git status --porcelain) ]] || die 'worktree is dirty'
+[[ $(git rev-parse origin/main) == "$EXPECTED_SHA" ]] || die 'origin/main/SHA mismatch'
+[[ ${RUNTIME_TENANCY_MODE:-} == disabled ]] || die 'RUNTIME_TENANCY_MODE=disabled evidence is required'
+[[ ${DATABASE_SCHEMA_MODE:-} == external ]] || die 'DATABASE_SCHEMA_MODE=external is required'
 label=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE" 2>/dev/null) || die 'local API image required'
 [[ "$label" == "$EXPECTED_SHA" ]] || die 'API image revision label mismatch'
 schema_result="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$EXPECTED_SHA/migrations/20260802120000_tenancy_control_plane/result.tsv"

@@ -33,6 +33,17 @@
 - [Preparação do control plane](tenancy/CONTROL_PLANE_PREPARATION.md)
 - [Sprint 1.0B.1-OP-R2 — operação limpa do control plane](sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md)
 
+## ADENDO VIGENTE — SPRINT 1.0B.1-OP-EXEC
+
+A PR #774 está **🟡 Merge** em `main` local (`57cb0b6`), sem evidência de deploy ou produção. A
+entrega OP-EXEC está **🔵 PR** e define o único caminho vigente para uma futura janela autorizada no
+[Brief de certificação](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md). Produção usa
+`DATABASE_SCHEMA_MODE=external`: bootstrap não executa `db push`, seed ou DDL; schema e tenant
+default têm preview/dry-run, revisões humanas e autorizações administrativas separadas.
+`TENANCY_MODE=disabled` permanece obrigatório. Seções antigas que descrevem `db push` no bootstrap
+são registro histórico, não instrução operacional atual. A revisão de produção comprovada permanece
+`a08a626`; Git não a altera.
+
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 
 A rotina oficial de certificação de uma instalação é `scripts/production-health-validation.sh`,

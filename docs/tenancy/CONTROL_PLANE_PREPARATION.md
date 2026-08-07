@@ -1,9 +1,9 @@
 # Preparação do control plane default-only
 
-> **R2 em 🔵 PR:** a PR #773 foi encerrada sem merge. O procedimento vigente em preparação está no
-> [Brief 1.0B.1-OP-R2](../sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md) e separa registry,
-> preview, apply de schema e preparação DML. Nenhuma execução real é autorizada por este documento;
-> o apply DML segue bloqueado até existir credencial temporária aprovada.
+> **Estado reconciliado:** a PR #773 foi encerrada sem merge e a PR #774 está **🟡 Merge** no SHA
+> `57cb0b6`. O procedimento canônico está no [Brief OP-EXEC](../sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md).
+> Esta entrega permanece **🔵 PR**; nenhuma execução real é autorizada. O apply DML continua
+> bloqueado até existir credencial temporária aprovada e evidência da janela.
 
 ## Contrato
 

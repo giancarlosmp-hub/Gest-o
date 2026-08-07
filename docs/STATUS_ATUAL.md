@@ -1,3 +1,15 @@
+# 🔵 PR — certificação operacional do control plane default-only (07/08/2026)
+
+**Git/main:** o histórico local comprova a PR #774 mesclada no commit
+`57cb0b6da02342c5243e4e4aa6857f3ee870d377` (**🟡 Merge**). As PRs #766–#772 e #774 têm
+merge commits locais; a #773 foi encerrada sem merge. O acesso ao remote/GitHub falhou por proxy
+HTTP 403, portanto checks e estado remoto atual não foram inferidos.
+
+**Produção:** a última revisão operacional comprovada continua `a08a626`; o merge #774 não é deploy
+nem evidência de produção. Esta Sprint 1.0B.1-OP-EXEC permanece **🔵 PR**, prepara certificação e
+não acessa produção, não aplica schema/DML e mantém `TENANCY_MODE=disabled`. Consulte o
+[Brief OP-EXEC](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md).
+
 # 🔵 PR — operacionalização limpa do control plane default-only (04/08/2026)
 
 A PR #773 foi encerrada sem merge. A Sprint 1.0B.1-OP-R2 recomeça da `main` com registry fechado,

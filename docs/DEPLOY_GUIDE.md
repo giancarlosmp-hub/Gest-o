@@ -1,3 +1,13 @@
+# AVISO CANÔNICO — SCHEMA EXTERNO EM PRODUÇÃO (07/08/2026)
+
+> O contrato vigente é `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. Bootstrap e
+> deploy da API **não** executam `prisma db push`, seed, sequence setup, DDL ou preparação do tenant.
+> Use somente o fluxo futuro, administrativo e autorizado do
+> [Brief OP-EXEC](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md). As seções abaixo que
+> narram `db push` preservam o histórico do procedimento anterior; não são instruções vigentes. A PR
+> #774 está **🟡 Merge**, sem evidência de deploy/produção; a revisão operacional comprovada segue
+> `a08a626`.
+
 # ADENDO CANÔNICO — deploy pós-recuperação (31/07/2026)
 
 > 🔵 **PR, não produção.** O incidente permanece aberto. A topologia canônica candidata é `docker-compose.production.yml`, somente API/WEB na rede externa `gest-o_default`. O Compose genérico é legado/local e é proibido na VPS porque seu `depends_on` e fallback podem iniciar/apontar ao PostgreSQL padrão.

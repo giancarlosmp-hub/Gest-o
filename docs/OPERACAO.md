@@ -1,3 +1,13 @@
+# CONTRATO VIGENTE DE PRODUÇÃO — OP-EXEC (07/08/2026)
+
+> **Canônico e prevalente sobre as seções históricas abaixo.** Produção deve usar
+> `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. O bootstrap da API não executa
+> `prisma db push`, seed, sequence setup ou qualquer DDL/DML de preparação. Schema só muda pelo
+> fluxo administrativo versionado do [Brief OP-EXEC](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md),
+> com backup, preflight, preview read-only, pausa humana e confirmação separada. A PR #774 está
+> **🟡 Merge**, não em produção; esta entrega está **🔵 PR**. Toda descrição posterior de bootstrap
+> com `db push` documenta operação anterior e não autoriza seu uso vigente.
+
 # ADENDO OPERACIONAL PÓS-RECUPERAÇÃO
 
 ## Control plane default-only — R2 em PR

@@ -7,6 +7,11 @@ die(){ printf '[control-plane-preview] ERROR %s\n' "$*" >&2; exit 1; }
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
 : "${PRODUCTION_DB_NAME_EXPECTED:?PRODUCTION_DB_NAME_EXPECTED is required}"
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'EXPECTED_SHA must be a full SHA'
+[[ $(git rev-parse HEAD) == "$EXPECTED_SHA" ]] || die 'HEAD/SHA mismatch'
+[[ -z $(git status --porcelain) ]] || die 'worktree is dirty'
+[[ $(git rev-parse origin/main) == "$EXPECTED_SHA" ]] || die 'origin/main/SHA mismatch'
+[[ ${RUNTIME_TENANCY_MODE:-} == disabled ]] || die 'RUNTIME_TENANCY_MODE=disabled evidence is required'
+[[ ${DATABASE_SCHEMA_MODE:-} == external ]] || die 'DATABASE_SCHEMA_MODE=external is required'
 registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID") || die 'unknown migration or checksum mismatch'
 [[ $(node -e 'process.stdout.write(JSON.parse(process.argv[1]).id)' "$registry") == "$MIGRATION_ID" ]] || die 'registry mismatch'
 docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image is not local'

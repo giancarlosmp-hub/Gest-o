@@ -12,11 +12,11 @@ const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy
 assert.equal(spawnSync(process.execPath,[resolve(root,"scripts/production-schema-migrations.mjs"),"unknown"],{encoding:"utf8"}).status,2);
 for(const value of ["20260802120000_tenancy_control_plane","b9298218b3c34cdadaf35f31a6d0e8a6e1942e9d1cbf5ae5c77ae305d1cc554d","581fbae0a545f53800db7707ab8b28f52dcd3fa1","dc7ceb0f0a23b77fc45a58960f3371b50c7f7365","0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c","20260731150000_safe_production_schema_transition","evidenceVersion"]) assert.match(registry,new RegExp(value));
 assert.doesNotMatch(registry,/process\.env\.(?:MIGRATION_PATH|SQL_FILE)|glob|wildcard/i);
-for(const token of ["EXPECTED_SHA","--pull=never","org.opencontainers.image.revision","pre-apply-diff.raw.sql","ABSENT_COMPATIBLE","ALREADY_APPLIED","partial or divergent"]) assert.ok(preview.includes(token),token);
+for(const token of ["EXPECTED_SHA","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","--pull=never","org.opencontainers.image.revision","pre-apply-diff.raw.sql","ABSENT_COMPATIBLE","ALREADY_APPLIED","partial or divergent"]) assert.ok(preview.includes(token),token);
 assert.doesNotMatch(preview,/db push|migrate deploy|CREATE TABLE|ALTER TABLE/);
-for(const token of ["PRODUCTION_SCHEMA_APPLY","origin/main","status --porcelain","BACKUP_RESULT_FILE","PREFLIGHT_RESULT_FILE","BEGIN;","ON_ERROR_STOP","ALREADY_APPLIED","post-apply-diff.sql"]) assert.ok(apply.includes(token),token);
+for(const token of ["PRODUCTION_SCHEMA_APPLY","API_IMAGE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","BACKUP_RESULT_FILE","PREFLIGHT_RESULT_FILE","BEGIN;","ON_ERROR_STOP","ALREADY_APPLIED","post-apply-diff.sql"]) assert.ok(apply.includes(token),token);
 assert.doesNotMatch(apply,/IF NOT EXISTS|GRANT|ALTER OWNER|DROP|TRUNCATE/);
-for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never"]) assert.ok(prepare.includes(token),token);
+for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never"]) assert.ok(prepare.includes(token),token);
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
