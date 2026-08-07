@@ -103,6 +103,8 @@ read -r synthetic_diretor_count synthetic_gerente_count synthetic_vendedor_count
 printf 'SYNTHETIC_ROLE_COUNTS diretor=%s gerente=%s vendedor=%s\n' "$synthetic_diretor_count" "$synthetic_gerente_count" "$synthetic_vendedor_count" >&2
 [[ "$synthetic_diretor_count" == 1 && "$synthetic_gerente_count" == 1 && "$synthetic_vendedor_count" == 1 ]] || fail "SYNTHETIC_ROLE_COUNTS_MISMATCH:$synthetic_diretor_count:$synthetic_gerente_count:$synthetic_vendedor_count"
 checkpoint synthetic_fixture_ready
+attempt_one_files=(metadata.tsv dry-run-result.tsv result.tsv apply.tsv reconciliation.tsv)
+attempt_two_files=(metadata.tsv result.tsv apply.tsv reconciliation.tsv)
 validate_evidence_file(){
   local evidence_dir=$1 evidence_file=$2 owner_uid owner_gid mode size
   [[ -f "$evidence_dir/$evidence_file" ]] || fail "EVIDENCE_FILE_MISSING:$evidence_file"
@@ -140,7 +142,7 @@ apply_rc=$?
 set -e
 (( apply_rc == 0 )) || fail "APPLY_RUNNER_FAILED:$apply_rc"
 checkpoint apply_completed
-for evidence_file in metadata.tsv dry-run-result.tsv result.tsv apply.tsv reconciliation.tsv; do validate_evidence_file "$evidence" "$evidence_file"; done
+for evidence_file in "${attempt_one_files[@]}"; do validate_evidence_file "$evidence" "$evidence_file"; done
 checkpoint apply_evidence_permissions_pass
 tenant_count_after_apply=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"') || fail TENANT_COUNT_AFTER_APPLY_QUERY_FAILED
 membership_count_after_apply=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "TenantMembership"') || fail MEMBERSHIP_COUNT_AFTER_APPLY_QUERY_FAILED
@@ -158,21 +160,33 @@ checkpoint apply_reconciliation_pass
 first_aggregate_hash=$(awk -F '\t' 'NR==1{for(i=1;i<=NF;i++)h[$i]=i} NR==2&&h["aggregateHash"]{print $h["aggregateHash"]}' "$evidence/result.tsv") || fail FIRST_RESULT_HASH_PARSE_FAILED
 [[ "$first_aggregate_hash" =~ ^[0-9a-f]{64}$ ]] || fail FIRST_RESULT_HASH_INVALID
 checkpoint idempotent_reapply_start
-first_evidence="$evidence"; evidence="$tmp/evidence-attempt-2"; mkdir -m 700 "$evidence"
+first_evidence="$evidence"
+for evidence_file in "${attempt_one_files[@]}"; do validate_evidence_file "$first_evidence" "$evidence_file"; done
+first_result_sha256=$(sha256sum "$first_evidence/result.tsv" | awk '{print $1}') || fail FIRST_RESULT_CHECKSUM_FAILED
+evidence="$tmp/evidence-attempt-2"; mkdir -m 700 "$evidence"
 set +e
 runner --apply >/dev/null
 reapply_rc=$?
 set -e
 (( reapply_rc == 0 )) || fail "IDEMPOTENT_REAPPLY_RUNNER_FAILED:$reapply_rc"
 checkpoint idempotent_reapply_completed
-for evidence_file in metadata.tsv dry-run-result.tsv result.tsv apply.tsv reconciliation.tsv; do validate_evidence_file "$evidence" "$evidence_file"; done
-[[ -f "$first_evidence/result.tsv" ]] || fail FIRST_PASS_EVIDENCE_NOT_PRESERVED
+for evidence_file in "${attempt_two_files[@]}"; do validate_evidence_file "$evidence" "$evidence_file"; done
+for evidence_file in "${attempt_one_files[@]}"; do validate_evidence_file "$first_evidence" "$evidence_file"; done
+first_result_sha256_after=$(sha256sum "$first_evidence/result.tsv" | awk '{print $1}') || fail FIRST_RESULT_CHECKSUM_REVALIDATION_FAILED
+[[ "$first_result_sha256_after" == "$first_result_sha256" ]] || fail FIRST_PASS_EVIDENCE_CHANGED
 second_aggregate_hash=$(awk -F '\t' 'NR==1{for(i=1;i<=NF;i++)h[$i]=i} NR==2&&h["aggregateHash"]{print $h["aggregateHash"]}' "$evidence/result.tsv") || fail SECOND_RESULT_HASH_PARSE_FAILED
 [[ "$second_aggregate_hash" == "$first_aggregate_hash" ]] || fail IDEMPOTENT_AGGREGATE_HASH_MISMATCH
-tenant_count_after_reapply=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"') || fail TENANT_COUNT_AFTER_REAPPLY_QUERY_FAILED
-membership_count_after_reapply=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "TenantMembership"') || fail MEMBERSHIP_COUNT_AFTER_REAPPLY_QUERY_FAILED
-printf 'TENANT_COUNT_AFTER_REAPPLY=%s\nMEMBERSHIP_COUNT_AFTER_REAPPLY=%s\n' "$tenant_count_after_reapply" "$membership_count_after_reapply" >&2
-[[ "$tenant_count_after_reapply" == 1 ]] || fail "IDEMPOTENT_TENANT_COUNT_MISMATCH:$tenant_count_after_reapply"
-[[ "$membership_count_after_reapply" == "$user_count_after_apply" ]] || fail "IDEMPOTENT_MEMBERSHIP_COUNT_MISMATCH:$membership_count_after_reapply:$user_count_after_apply"
+printf 'IDEMPOTENT_AGGREGATE_HASH_MATCH=PASS\n' >&2
+second_tenant_count=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant"') || fail SECOND_TENANT_COUNT_QUERY_FAILED
+second_membership_count=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "TenantMembership"') || fail SECOND_MEMBERSHIP_COUNT_QUERY_FAILED
+second_user_count=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "User"') || fail SECOND_USER_COUNT_QUERY_FAILED
+printf 'SECOND_TENANT_COUNT=%s\nSECOND_MEMBERSHIP_COUNT=%s\nSECOND_USER_COUNT=%s\n' "$second_tenant_count" "$second_membership_count" "$second_user_count" >&2
+[[ "$second_tenant_count" == 1 ]] || fail "IDEMPOTENT_TENANT_COUNT_MISMATCH:$second_tenant_count"
+[[ "$second_membership_count" == 3 ]] || fail "IDEMPOTENT_MEMBERSHIP_COUNT_MISMATCH:$second_membership_count"
+[[ "$second_user_count" == 3 ]] || fail "IDEMPOTENT_USER_COUNT_MISMATCH:$second_user_count"
+second_default_identity_count=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant" WHERE id=$$tenant-default-v1$$ AND slug=$$default-v1$$ AND status=$$active$$') || fail SECOND_DEFAULT_TENANT_IDENTITY_QUERY_FAILED
+second_unexpected_tenant_count=$(docker exec "$path" psql -U postgres -d gesto -Atc 'SELECT count(*) FROM "Tenant" WHERE id<>$$tenant-default-v1$$') || fail SECOND_UNEXPECTED_TENANT_QUERY_FAILED
+[[ "$second_default_identity_count" == 1 ]] || fail SECOND_DEFAULT_TENANT_IDENTITY_MISMATCH
+[[ "$second_unexpected_tenant_count" == 0 ]] || fail "SECOND_UNEXPECTED_TENANT_COUNT:$second_unexpected_tenant_count"
 checkpoint idempotency_pass
-printf 'tenancy control-plane operation PostgreSQL test passed\n'
+printf 'TENANCY_CONTROL_PLANE_OPERATION_POSTGRES=PASS\n'

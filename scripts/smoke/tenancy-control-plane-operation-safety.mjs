@@ -22,6 +22,10 @@ for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
 for (const token of ['--no-align', '--tuples-only', '--field-separator=$\'\\t\'', '--pset=pager=off', '===== CATALOG QUERY FAILED =====', 'CATALOG_DETAIL_SQL_TYPE=', 'CATALOG_DETAIL_TYPE_MISMATCH:', 'FK_TSV_META', 'CATALOG_FK_DETAIL_INCOMPLETE', 'FK_DETAIL[', 'od -An -tx1c', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
 for (const token of ['HOST_UID="$(id -u)"', 'HOST_GID="$(id -g)"', '--user "$HOST_UID:$HOST_GID"', "stat -c '%u:%g %a %n'", 'dry-run-result.tsv', 'metadata.tsv', 'result.tsv', 'apply.tsv', 'reconciliation.tsv', 'HARNESS_CHECKPOINT', 'HARNESS_FAIL', 'dry_run_completed', 'evidence_permissions_pass', 'dry_run_hash_pass', 'apply_start', 'apply_completed', 'idempotent_reapply_start', 'idempotency_pass', 'evidence-attempt-1', 'evidence-attempt-2']) assert.ok(operationPostgres.includes(token), token);
+assert.match(operationPostgres, /attempt_one_files=\(metadata\.tsv dry-run-result\.tsv result\.tsv apply\.tsv reconciliation\.tsv\)/);
+assert.match(operationPostgres, /attempt_two_files=\(metadata\.tsv result\.tsv apply\.tsv reconciliation\.tsv\)/);
+assert.doesNotMatch(operationPostgres.match(/attempt_two_files=\([^\n]+/)?.[0] || "", /dry-run-result\.tsv/);
+for (const token of ['IDEMPOTENT_AGGREGATE_HASH_MATCH=PASS', 'SECOND_TENANT_COUNT=', 'SECOND_MEMBERSHIP_COUNT=', 'SECOND_USER_COUNT=', 'TENANCY_CONTROL_PLANE_OPERATION_POSTGRES=PASS']) assert.ok(operationPostgres.includes(token), token);
 assert.doesNotMatch(prepare + operationPostgres, /chmod\s+(?:777|666|644)\b|umask\s+000\b/);
 assert.doesNotMatch(operationPostgres, /rm\s+-f\s+[^\n]*result\.tsv/);
 assert.match(prepare, /run_runner\(\)\{ docker run[^\n]*--user "\$operator_uid:\$operator_gid"[\s\S]*-v "\$evidence:\/evidence"/);
