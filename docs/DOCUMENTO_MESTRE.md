@@ -4,6 +4,9 @@ Plan/dry-run, ledger imutável, batches, hashes, quarentena e reconciliação do
 preparados com apply exclusivamente sintético. Produção, runtime, backfill e cutover permanecem
 inalterados e bloqueados. Consulte o
 [Sprint Brief](sprints/SPRINT_1_0B_2_B_BACKFILL_TOOLING_LEDGER.md).
+O harness prova exclusão de escopo somente no banco descartável; o arquivo imutável não fornece lock
+distribuído produtivo. A 1.0B.2-C permanece dedicada a TenantContext/Auth compatibility, enquanto
+ledger/lock produtivo exige decisão operacional futura anterior a qualquer backfill de produção.
 
 # ADENDO HISTÓRICO — segurança de deploy pós-recuperação
 

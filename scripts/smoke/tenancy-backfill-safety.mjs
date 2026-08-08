@@ -5,6 +5,7 @@ const runner = fs.readFileSync("apps/api/src/tenancy/backfillTooling.ts", "utf8"
 const api = fs.readFileSync("apps/api/src/app.ts", "utf8");
 const bootstrap = fs.readFileSync("apps/api/src/scripts/bootstrap.ts", "utf8");
 const harness = fs.readFileSync("scripts/smoke/tenancy-backfill-postgres.sh", "utf8");
+const workflow = fs.readFileSync(".github/workflows/docker-compose-ci.yml", "utf8");
 for (const root of ["Client", "AgendaEvent", "Product", "AppConfig", "Goal", "ActivityKPI", "Sale", "SellerTerritoryCity", "KnowledgeDocument", "ErpSyncRun", "ErpSyncLock"]) assert.ok(runner.includes(`"${root}"`), root);
 assert.doesNotMatch(runner, /tenant-default-v1|DATABASE_URL|TENANCY_MODE|DATABASE_SCHEMA_MODE/);
 assert.doesNotMatch(runner, /\b(?:DELETE|DROP|TRUNCATE)\b/i);
@@ -18,4 +19,15 @@ assert.match(harness, /docker exec -i/);
 assert.match(harness, /psql -X/);
 assert.match(harness, /ON_ERROR_STOP=1/);
 assert.match(harness, /TENANCY_BACKFILL_TOOLING_POSTGRES=PASS/);
+
+const expandStepStart = workflow.indexOf("- name: Prove tenancy roots expand on PostgreSQL 16");
+const backfillStepStart = workflow.indexOf("- name: Prove tenancy backfill tooling on PostgreSQL 16");
+assert.ok(expandStepStart >= 0, "tenancy expand PostgreSQL gate is required");
+assert.ok(backfillStepStart > expandStepStart, "backfill gate must follow tenancy expand gate");
+const nextStepStart = workflow.indexOf("\n      - name:", backfillStepStart + 1);
+assert.ok(nextStepStart > backfillStepStart, "backfill gate must be a bounded workflow step");
+const backfillStep = workflow.slice(backfillStepStart, nextStepStart);
+assert.match(backfillStep, /run:\s*npm run test:tenancy-backfill:postgres(?:\s|$)/);
+assert.match(backfillStep, /API_IMAGE:\s*gest-o-api:\$\{\{ github\.sha \}\}/);
+assert.doesNotMatch(backfillStep, /continue-on-error|\bif\s*:|exit\s+77|\|\||SKIP/);
 console.log("tenancy backfill static safety passed");

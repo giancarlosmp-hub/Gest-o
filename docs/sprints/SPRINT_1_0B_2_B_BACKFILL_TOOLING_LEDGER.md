@@ -25,9 +25,11 @@ batches; nunca troca valor não nulo.
 Foram comparados ledger PostgreSQL (transacional/lock distribuído, porém exige DDL e autoridade de
 escrita) e evidência imutável em arquivo (padrão já usado, mínima e portável). Foi escolhida a
 **evidência imutável**: o objeto canônico deve ser criado exclusivamente, com checksum/permissão
-restrita, sem PII, payload, URL ou segredo. Risco: filesystem não dá lock distribuído; produção
-permanece bloqueada e 1.0B.2-C deve decidir/persistir o lock operacional. O harness demonstra o
-índice único futuro. Arquivo parcial ou estado diferente de `reconciled` nunca é PASS.
+restrita, sem PII, payload, URL ou segredo. Risco: filesystem não oferece lock distribuído
+produtivo. O harness demonstra exclusão por escopo apenas no PostgreSQL sintético descartável; isso
+não cria nem autoriza ledger/lock produtivo. Essa decisão operacional permanece bloqueada para uma
+fase futura, obrigatoriamente antes de qualquer backfill produtivo. Arquivo parcial ou estado
+diferente de `reconciled` nunca é PASS.
 
 Lifecycle: `planned → dry_run_passed → approved → applying → reconciled`; `aborted`, `failed` e
 `quarantined` são terminais para a tentativa. Aprovação e apply sintético têm autoridades distintas.
@@ -49,10 +51,13 @@ idêntico e quarentena zero ou registrada.
 | evidência incompleta | somente `reconciled` pode ser PASS |
 
 Rollback é abortar, preservar nullable/runtime/ledger e reconciliar; nunca `DROP`, `DELETE` ou troca
-automática. A prova não mede volume, WAL, locks reais, SLO ou restore. Aceite exige os 11 roots,
-dry-run read-only, batches/hash/quarentena/lifecycle, gates negativos e PostgreSQL 16 explícito.
-1.0B.2-C revisará ledger/lock/autoridade, timeout, performance e operação. Não houve VPS, produção,
-deploy, backfill real, segundo tenant funcional, RLS, NOT NULL, runtime ou cutover.
+automática. A prova não mede volume, WAL, locks produtivos, SLO ou restore. Aceite exige os 11 roots,
+dry-run read-only, batches/hash/quarentena/lifecycle, gates negativos e PostgreSQL 16 explícito no
+CI. A sequência oficial preserva **1.0B.2-C para TenantContext/Auth compatibility**; ela não recebe
+o objetivo de decidir ledger ou lock produtivo. Autoridade, ledger/lock distribuído, timeout,
+performance e operação continuam bloqueados para decisão futura antes de qualquer backfill real.
+Não houve VPS, produção, deploy, backfill real, segundo tenant funcional, RLS, NOT NULL, runtime ou
+cutover.
 
 `DATABASE_SCHEMA_MODE=external`; `TENANCY_MODE=disabled`;
 `READY_FOR_MULTI_TENANT_CUTOVER=NO`; `READY_FOR_BACKFILL_PRODUCTION=NO`.
