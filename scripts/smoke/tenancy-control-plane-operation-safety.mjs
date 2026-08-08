@@ -29,6 +29,15 @@ for (const prerequisite of ["cat \"$migration\"", "control-plane-catalog-validat
 }
 for(const token of ["MODE","dry-run","PREPARE_DEFAULT_TENANT","APPROVED_TEMPORARY_ROLE","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","default-only","EXPECTED_AGGREGATE_HASH","dry-run-result.tsv","--pull=never","operator_uid=$(id -u)","operator_gid=$(id -g)","--user \"$operator_uid:$operator_gid\""]) assert.ok(prepare.includes(token),token);
 assert.doesNotMatch(prepare,/docker compose|deploy|seed|migrate|production\.env|restart/);
+assert.doesNotMatch(prepare,/\brg\b/);
+assert.match(prepare,/: "\$\{READONLY_DATABASE_URL:\?approved read-only READONLY_DATABASE_URL is required for dry-run\}"/);
+assert.match(prepare,/: "\$\{DML_DATABASE_URL:\?temporary least-privilege DML_DATABASE_URL is required for apply\}"/);
+assert.match(prepare,/grep -Fxq \$'result\\tPASS' "\$schema_result"/);
+assert.match(prepare,/grep -Eq '\^PASS\(\[\[:space:\]\]\|\$\)' "\$BACKUP_RESULT_FILE"/);
+assert.match(prepare,/grep -Eq '\^PASS\(\[\[:space:\]\]\|\$\)' "\$PREFLIGHT_RESULT_FILE"/);
+assert.ok(prepare.indexOf("DATABASE_URL=$READONLY_DATABASE_URL") < prepare.indexOf("run_runner --dry-run"));
+assert.ok(prepare.indexOf("DML_AUTHORITY_PROVISIONING") < prepare.indexOf("run_runner --apply"));
+assert.doesNotMatch(prepare.match(/if \[\[ "\$MODE" == dry-run \]\]; then[\s\S]*?\nfi/)?.[0] || "",/--apply|INSERT|UPDATE|DELETE/);
 for(const name of ["TenantStatus","TenantMembershipStatus","TenantRole"]) assert.ok(catalog.includes(name)&&validator.includes(name),name);
 for(const name of ["TenantMembership_version_positive","TenantMembership_lifecycle_coherent"]) assert.ok(validator.includes(name),name);
 for (const token of ['--no-align', '--tuples-only', '--field-separator=$\'\\t\'', '--pset=pager=off', '===== CATALOG QUERY FAILED =====', 'CATALOG_DETAIL_SQL_TYPE=', 'CATALOG_DETAIL_TYPE_MISMATCH:', 'FK_TSV_META', 'CATALOG_FK_DETAIL_INCOMPLETE', 'FK_DETAIL[', 'od -An -tx1c', 'control-plane-catalog-validate.mjs']) assert.ok(operationPostgres.includes(token), token);
@@ -93,4 +102,34 @@ const failedEvidence=join(evidenceRoot,sha,"migrations",migration);
 assert.ok(readFileSync(join(failedEvidence,"pre-apply-diff.raw.sql"),"utf8").includes("incident_20990101_unknown"));
 assert.equal(spawnSync("test",["-e",join(failedEvidence,"preview-result.tsv")]).status,1);
 rmSync(scratch,{recursive:true,force:true});
+
+// The wrapper must select read-only authority itself and invoke only the runner's read-only mode.
+const wrapperScratch=mkdtempSync(join(tmpdir(),"tenant-default-wrapper-"));
+const wrapperBin=join(wrapperScratch,"bin"), schemaRoot=join(wrapperScratch,"schema"), tenancyRoot=join(wrapperScratch,"tenancy");
+mkdirSync(wrapperBin); mkdirSync(join(schemaRoot,sha,"migrations",migration),{recursive:true});
+writeFileSync(join(schemaRoot,sha,"migrations",migration,"result.tsv"),"result\tPASS\nstate\tAPPLIED_ONCE\n");
+writeFileSync(join(wrapperBin,"git"),`#!/bin/sh\ncase "$1 $2" in "rev-parse HEAD"|"rev-parse origin/main") echo ${sha};; "status --porcelain") :;; *) exit 1;; esac\n`);
+writeFileSync(join(wrapperBin,"docker"),`#!/bin/sh
+if [ "$1 $2" = "image inspect" ]; then echo ${sha}; exit 0; fi
+if [ "$1" = run ]; then
+  printf 'DATABASE_URL=%s\\nARGS=%s\\n' "$DATABASE_URL" "$*" >${wrapperScratch}/docker.log
+  for arg in "$@"; do case "$arg" in ${tenancyRoot}/*:/evidence) host="\${arg%:/evidence}";; esac; done
+  printf 'expectedAggregateHash\\tplan\\n%s\\tread-only\\n' '${"a".repeat(64)}' >"$host/dry-run-result.tsv"
+  exit 0
+fi
+exit 1
+`);
+chmodSync(join(wrapperBin,"git"),0o755); chmodSync(join(wrapperBin,"docker"),0o755);
+const wrapperBase={...process.env,PATH:`${wrapperBin}:${process.env.PATH}`,EXPECTED_SHA:sha,API_IMAGE:`gest-o-api:${sha}`,PRODUCTION_DB_CONTAINER_EXPECTED:"db",RUNTIME_TENANCY_MODE:"disabled",DATABASE_SCHEMA_MODE:"external",SCHEMA_EVIDENCE_DIR:schemaRoot,TENANCY_EVIDENCE_DIR:tenancyRoot};
+const invokeWrapper=extra=>spawnSync("bash",[resolve(root,"scripts/production-tenant-default-prepare.sh")],{cwd:root,encoding:"utf8",env:{...wrapperBase,...extra}});
+const dryRun=invokeWrapper({MODE:"dry-run",READONLY_DATABASE_URL:"postgresql://approved-readonly"});
+assert.equal(dryRun.status,0,dryRun.stderr);
+const dockerLog=readFileSync(join(wrapperScratch,"docker.log"),"utf8");
+assert.match(dockerLog,/DATABASE_URL=postgresql:\/\/approved-readonly/);
+assert.match(dockerLog,/--dry-run/); assert.doesNotMatch(dockerLog,/--apply|-e CONFIRM/);
+assert.match(invokeWrapper({MODE:"dry-run",READONLY_DATABASE_URL:"postgresql://approved-readonly",CONFIRM:"PREPARE_DEFAULT_TENANT"}).stderr,/accepts no write confirmation/);
+assert.match(invokeWrapper({MODE:"apply"}).stderr,/DML_DATABASE_URL/);
+assert.match(invokeWrapper({MODE:"apply",DML_DATABASE_URL:"postgresql://temporary-dml"}).stderr,/temporary least-privilege DML role is not provisioned/);
+assert.match(invokeWrapper({MODE:"apply",DML_DATABASE_URL:"postgresql://temporary-dml",DML_AUTHORITY_PROVISIONING:"APPROVED_TEMPORARY_ROLE"}).stderr,/CONFIRM=PREPARE_DEFAULT_TENANT required/);
+rmSync(wrapperScratch,{recursive:true,force:true});
 console.log("tenancy control-plane operation static safety passed");
