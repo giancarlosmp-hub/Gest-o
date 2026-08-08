@@ -104,3 +104,9 @@ iniciado**; esta PR não altera models empresariais nem inicia 1.0B.2. TD-ER-004
 ## TD-MT-EXPAND-ROOTS — constraints transitórias após 1.0B.2-A
 
 Os roots da primeira onda possuem ownership nullable, mas uniques empresariais continuam globais, em especial `AppConfig.key`, Product código+classe, metas/territórios por seller e `ErpSyncLock.scope`. A 1.0B.2-D deve migrar data access e medir colisões; a fase constrain posterior substitui constraints somente após backfill e prova A×B. NULL significa registro não migrado e não pode gerar fallback para `tenant-default-v1`.
+
+### Progresso 1.0B.2-B
+
+Plan/dry-run, batches, hashes, quarentena e reconciliação foram implementados com ledger mínimo em
+evidência imutável e apply apenas no harness. TD-ER-004B continua aberto: nenhuma linha real mudou;
+lock/autoridade operacional seguem para 1.0B.2-C e não há isolamento runtime.

@@ -1,3 +1,10 @@
+# 🔵 Sprint 1.0B.2-B — tooling de backfill somente em desenvolvimento (08/08/2026)
+
+A PR incremental cria plan/dry-run, hashes, batches, quarentena, reconciliação, abort e ledger de
+evidência para os 11 roots da PR #783. Apply existe somente no harness sintético. Não houve
+backfill, produção, deploy ou cutover. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0B_2_B_BACKFILL_TOOLING_LEDGER.md).
+
 # 🟢 Gate humano — desenvolvimento controlado da Sprint 1.0B.2 aprovado (08/08/2026)
 
 Foi recebida a decisão humana explícita `COMMITTEE_DECISION=APPROVE_1_0B_2_DEVELOPMENT`. Os gates

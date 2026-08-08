@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import { assertReconciled, authorizeSyntheticApply, BACKFILL_ROOTS, buildBackfillPlan } from "./backfillTooling.js";
+
+const snapshots = BACKFILL_ROOTS.map((root) => ({ root, rows: [{ id: "b", tenantId: null }, { id: "a", tenantId: "tenant-a" }] }));
+const plan = buildBackfillPlan({ targetTenantId: "tenant-a", targetTenantActive: true, knownTenantIds: ["tenant-a"], snapshots, batchSize: 1, now: "2026-08-08T00:00:00.000Z" });
+assert.equal(plan.state, "dry_run_passed");
+assert.equal(plan.roots.length, 11);
+assert.deepEqual(plan.roots[0].batches[0].ids, ["b"]);
+assert.equal(plan.roots[0].total, 2);
+assert.equal(plan.roots[0].nullCount, 1);
+assert.throws(() => buildBackfillPlan({ targetTenantId: "tenant-a", targetTenantActive: true, knownTenantIds: ["tenant-a", "tenant-b"], snapshots }), /UNEXPECTED_TENANT/);
+assert.throws(() => authorizeSyntheticApply({ plan, approvedHash: plan.aggregateHash, confirmation: "APPLY_SYNTHETIC_FIXTURES" }), /PRODUCTION_APPLY_NOT_IMPLEMENTED/);
+assert.throws(() => authorizeSyntheticApply({ plan, approvedHash: "wrong", confirmation: "APPLY_SYNTHETIC_FIXTURES", syntheticHarness: true }), /APPROVED_HASH_MISMATCH/);
+authorizeSyntheticApply({ plan, approvedHash: plan.aggregateHash, confirmation: "APPLY_SYNTHETIC_FIXTURES", syntheticHarness: true });
+assertReconciled(plan, BACKFILL_ROOTS.map((root) => ({ root, rows: [{ id: "a", tenantId: "tenant-a" }, { id: "b", tenantId: "tenant-a" }] })));
+assert.throws(() => assertReconciled(plan, BACKFILL_ROOTS.map((root) => ({ root, rows: [{ id: "a", tenantId: "tenant-a" }, { id: "changed", tenantId: "tenant-a" }] }))), /APPLIED_HASH_MISMATCH/);
+const quarantined = buildBackfillPlan({ targetTenantId: "tenant-a", targetTenantActive: true, knownTenantIds: ["tenant-a"], snapshots: BACKFILL_ROOTS.map((root) => ({ root, rows: [{ id: "technical-id", tenantId: null, referenceValid: false }] })), now: "2026-08-08T00:00:00.000Z" });
+assert.equal(quarantined.state, "quarantined");
+assert.equal(quarantined.roots[0].quarantine[0].idHash.length, 64);
+assert.equal(JSON.stringify(quarantined).includes("technical-id"), false);
+console.log("tenancy backfill tooling contract passed");
