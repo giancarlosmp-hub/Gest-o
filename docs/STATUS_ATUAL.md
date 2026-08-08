@@ -1,3 +1,10 @@
+# 🔵 Sprint 1.0B.2-D — data access tenant-scoped aditivo (08/08/2026)
+
+Contrato fail-closed e piloto isolado de Client provam CRUD/count A×B com `tenantId` no predicado
+Prisma, sem conexão aos controllers ou ativação runtime. O inventário registra a superfície legada
+remanescente; `TENANCY_MODE=disabled`. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0B_2_D_TENANT_DATA_ACCESS_PROPAGATION.md).
+
 # 🔵 Sprint 1.0B.2-C — TenantContext/Auth compatível e fail-closed (08/08/2026)
 
 O scaffolding backend consolida TenantContext imutável, resolução tenant-aware reconciliada e

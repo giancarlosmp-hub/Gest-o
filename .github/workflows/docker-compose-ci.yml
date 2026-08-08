@@ -62,6 +62,9 @@ jobs:
       - name: Prove TenantContext auth compatibility
         run: npm run test:tenant-context-auth
 
+      - name: Prove tenant-scoped data access isolation
+        run: npm run test:tenant-data-access
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 
