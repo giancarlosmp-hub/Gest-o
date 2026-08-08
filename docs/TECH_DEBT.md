@@ -68,14 +68,17 @@ local foram comprovados posteriormente, sem comprovar restore ou encerramento do
 
 | Subitem | Lacuna | Gate de encerramento |
 | --- | --- | --- |
-| TD-ER-004A | Control plane persistido em PR na Sprint 1.0B.1, com migration, tenant default, runner, reconciliação e adapter; ainda não aplicado nem integrado | permanece aberto até migration aplicada, default preparado, adapter integrado e evidência operacional revisada |
+| TD-ER-004A | Parcialmente cumprido: migration aplicada, tenant default preparado, 8 memberships reconciliadas, runtime validado disabled e evidência operacional preservada; adapter ainda não integrado ao runtime | permanece aberto até o adapter/runtime ser integrado sob gate próprio e o critério completo ser revisado; não confundir control plane default-only com Multiempresa |
 | TD-ER-004B | Não iniciado: 23 models centrais sem tenant e quatro Communications parciais | backfill reconciliado; tenant obrigatório e FKs/uniques compostas |
 | TD-ER-004C | zero repositories e Prisma/raw SQL sem boundary comum | data-access deny-by-default e teste arquitetural sem escape implícito |
 | TD-ER-004D | JWT/RBAC, caches, logs, jobs e locks globais | namespace/contexto tenant e testes concorrentes A×B |
 | TD-ER-004E | UltraFV3, IA, CNPJ e webhook/WhatsApp sem isolamento integral | credenciais, quota, conta externa, idempotência e auditoria por tenant |
 | TD-ER-004F | ausência de prova, rollout e rollback multiempresa | RLS defensiva, restore/carga/IDOR verdes e piloto por coorte aprovado |
 
-Os subitens detalham, mas não duplicam, TD-ER-004. Nenhum está encerrado. TD-ER-004A avançou em arquitetura/scaffolding na Sprint 1.0A, mas continua aberto até deploy e provas; TD-ER-004 geral não é encerrado.
+Os subitens detalham, mas não duplicam, TD-ER-004. Nenhum está encerrado. TD-ER-004A possui
+prova operacional de migration, default, reconciliação, runtime disabled e evidências, mas continua
+aberto porque seu critério também exige integração do adapter/runtime. TD-ER-004B continua **não
+iniciado**; esta PR não altera models empresariais nem inicia 1.0B.2. TD-ER-004 geral não é encerrado.
 
 | ID | Descrição | Fonte | Severidade | Impacto | Dependências | Critério de encerramento | Sprint sugerida |
 |---|---|---|---|---|---|---|---|
