@@ -1,3 +1,12 @@
+# GATE DOCUMENTAL — DESENVOLVIMENTO 1.0B.2 (08/08/2026)
+
+A decisão humana explícita aprova somente o desenvolvimento incremental do estágio EXPAND:
+`READY_FOR_1_0B_2_DEVELOPMENT = YES`. Operação produtiva não foi autorizada:
+`READY_FOR_MULTI_TENANT_CUTOVER = NO`, `DATABASE_SCHEMA_MODE=external` e
+`TENANCY_MODE=disabled`. Não executar deploy, DDL, DML, backfill ou cutover com base neste gate.
+**DEVELOPMENT APPROVED ≠ PRODUCTION CUTOVER APPROVED.** Consulte o
+[registro de aprovação](sprints/SPRINT_1_0B_1_GATE_APPROVAL_FOR_1_0B_2.md).
+
 # ENCERRAMENTO OPERACIONAL — OP-EXEC (08/08/2026)
 
 No SHA `36be802887a005431dc5e1d9f4f7129d2145f102`, a evidência operacional fornecida comprova a
