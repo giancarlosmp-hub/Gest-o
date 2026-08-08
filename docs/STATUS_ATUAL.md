@@ -329,3 +329,7 @@ Os containers antigos continuaram running e atendendo, PostgreSQL/schema foram p
 cutover segue pendente. Esta 🔵 PR adiciona rollback híbrido por role: imagem quando o objeto ainda
 existe; container histórico externo, por nome e ID exatos, quando a imagem desapareceu. O incidente
 não está encerrado e nenhuma conclusão de cutover deve ser inferida desta correção.
+
+## Sprint 1.0B.2-A — schema expand de roots
+
+A fase EXPAND adiciona ownership opcional a 11 roots (`Client`, `AgendaEvent`, `Product`, `AppConfig`, `Goal`, `ActivityKPI`, `Sale`, `SellerTerritoryCity`, `KnowledgeDocument`, `ErpSyncRun` e `ErpSyncLock`). NULL significa registro ainda não migrado, nunca acesso global ou fallback para o tenant default. Uniques globais e runtime permanecem inalterados; backfill é obrigatoriamente separado. `TENANCY_MODE=disabled` e `READY_FOR_MULTI_TENANT_CUTOVER = NO`. No head remoto `59d1243` da PR #783, Preview Deploy e compose-smoke ficaram verdes e o harness PostgreSQL 16 terminou com `TENANCY_EXPAND_POSTGRES=PASS`. O estado continua **em PR**: não houve merge, deploy, migration produtiva ou cutover.

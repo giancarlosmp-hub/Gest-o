@@ -1,0 +1,35 @@
+ALTER TABLE "KnowledgeDocument" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "Client" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "AgendaEvent" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "Goal" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "ActivityKPI" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "Sale" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "SellerTerritoryCity" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "AppConfig" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "Product" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "ErpSyncRun" ADD COLUMN "tenantId" TEXT;
+ALTER TABLE "ErpSyncLock" ADD COLUMN "tenantId" TEXT;
+
+CREATE INDEX "KnowledgeDocument_tenantId_idx" ON "KnowledgeDocument"("tenantId");
+CREATE INDEX "Client_tenantId_idx" ON "Client"("tenantId");
+CREATE INDEX "AgendaEvent_tenantId_idx" ON "AgendaEvent"("tenantId");
+CREATE INDEX "Goal_tenantId_idx" ON "Goal"("tenantId");
+CREATE INDEX "ActivityKPI_tenantId_idx" ON "ActivityKPI"("tenantId");
+CREATE INDEX "Sale_tenantId_idx" ON "Sale"("tenantId");
+CREATE INDEX "SellerTerritoryCity_tenantId_idx" ON "SellerTerritoryCity"("tenantId");
+CREATE INDEX "AppConfig_tenantId_idx" ON "AppConfig"("tenantId");
+CREATE INDEX "Product_tenantId_idx" ON "Product"("tenantId");
+CREATE INDEX "ErpSyncRun_tenantId_idx" ON "ErpSyncRun"("tenantId");
+CREATE INDEX "ErpSyncLock_tenantId_idx" ON "ErpSyncLock"("tenantId");
+
+ALTER TABLE "KnowledgeDocument" ADD CONSTRAINT "KnowledgeDocument_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "Client" ADD CONSTRAINT "Client_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "AgendaEvent" ADD CONSTRAINT "AgendaEvent_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "Goal" ADD CONSTRAINT "Goal_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "ActivityKPI" ADD CONSTRAINT "ActivityKPI_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "Sale" ADD CONSTRAINT "Sale_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "SellerTerritoryCity" ADD CONSTRAINT "SellerTerritoryCity_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "AppConfig" ADD CONSTRAINT "AppConfig_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "Product" ADD CONSTRAINT "Product_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "ErpSyncRun" ADD CONSTRAINT "ErpSyncRun_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");
+ALTER TABLE "ErpSyncLock" ADD CONSTRAINT "ErpSyncLock_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id");

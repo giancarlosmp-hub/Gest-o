@@ -30,6 +30,7 @@ export function resolveControlPlanePredecessor({ cwd = root, migration = resolve
   const introSchema = git(cwd, ["show", `${introCommit}:${predecessor.schemaPath}`]);
   for (const token of tokens) if (!containsToken(introSchema, token)) throw new Error(`CONTROL_PLANE_TOKEN_MISSING_FROM_INTRO:${token}`);
   const checksum = createHash("sha256").update(schema).digest("hex");
+  const introSchemaSha256 = createHash("sha256").update(introSchema).digest("hex");
   if (checksum !== predecessor.schemaSha256) throw new Error("PREDECESSOR_SCHEMA_CHECKSUM_MISMATCH");
   const migrationPath = migration.path;
   try { git(cwd, ["cat-file", "-e", `${introCommit}:${migrationPath}`]); } catch { throw new Error("CONTROL_PLANE_MIGRATION_MISSING_FROM_INTRO"); }
@@ -38,7 +39,7 @@ export function resolveControlPlanePredecessor({ cwd = root, migration = resolve
     .map(path => path.split("/").at(-2)).sort();
   const lastMigration = migrations.at(-1);
   if (lastMigration !== predecessor.lastMigration) throw new Error(`LAST_MIGRATION_MISMATCH:${lastMigration}`);
-  return { introCommit, predecessorCommit: predecessor.commit, predecessorSchemaPath: predecessor.schemaPath, predecessorSchemaSha256: checksum, lastMigration, schema };
+  return { introCommit, predecessorCommit: predecessor.commit, predecessorSchemaPath: predecessor.schemaPath, predecessorSchemaSha256: checksum, introSchemaSha256, lastMigration, schema, introSchema };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -50,7 +51,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (!output) throw new Error("WRITE_SCHEMA_PATH_REQUIRED");
       writeFileSync(output, result.schema, { flag: "wx", mode: 0o600 });
     }
-    const { schema: _schema, ...metadata } = result;
+    const introOutputIndex = process.argv.indexOf("--write-intro-schema");
+    if (introOutputIndex !== -1) {
+      const output = process.argv[introOutputIndex + 1];
+      if (!output) throw new Error("WRITE_INTRO_SCHEMA_PATH_REQUIRED");
+      writeFileSync(output, result.introSchema, { flag: "wx", mode: 0o600 });
+    }
+    const { schema: _schema, introSchema: _introSchema, ...metadata } = result;
     process.stdout.write(`${JSON.stringify(metadata)}\n`);
   } catch (error) { console.error(error.message); process.exit(2); }
 }

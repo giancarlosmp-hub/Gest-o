@@ -49,6 +49,11 @@ jobs:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:tenancy-control-plane-operation:postgres
 
+      - name: Prove tenancy roots expand on PostgreSQL 16
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:tenancy-expand:postgres
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

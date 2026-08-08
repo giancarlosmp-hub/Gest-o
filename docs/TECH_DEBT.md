@@ -100,3 +100,7 @@ iniciado**; esta PR não altera models empresariais nem inicia 1.0B.2. TD-ER-004
 |---|---|---|---|---|---|---|---|
 | TD-ER-013 | Documentação de arquitetura e produto contém apenas páginas introdutórias | [`architecture/README.md`](architecture/README.md), [`roadmap/README.md`](roadmap/README.md), [`product/README.md`](product/README.md) | Média | Conhecimento concentrado e análise de impacto lenta | Inventário oficial | Mapas atuais de domínio/componentes/ownership e visão de produto vinculados ao mestre | Épico 3 |
 | TD-ER-014 | TODO/FIXME sem triagem única | Busca estruturada em `apps/api/src` e `apps/web/src` | Baixa | Dívida pode permanecer invisível ou misturada a texto/dados | Owners por domínio | Ocorrências técnicas confirmadas triadas; falsos positivos descartados e itens válidos rastreados | Épico 6 |
+
+## TD-MT-EXPAND-ROOTS — constraints transitórias após 1.0B.2-A
+
+Os roots da primeira onda possuem ownership nullable, mas uniques empresariais continuam globais, em especial `AppConfig.key`, Product código+classe, metas/territórios por seller e `ErpSyncLock.scope`. A 1.0B.2-D deve migrar data access e medir colisões; a fase constrain posterior substitui constraints somente após backfill e prova A×B. NULL significa registro não migrado e não pode gerar fallback para `tenant-default-v1`.
