@@ -49,3 +49,10 @@ Migration aditiva separada, preview, fixtures sintéticas, runner de backfill id
 ## Decisão executada na 1.0B.2-A
 
 A primeira onda seleciona Client, AgendaEvent, Product, AppConfig, Goal, ActivityKPI, Sale, SellerTerritoryCity, KnowledgeDocument, ErpSyncRun e ErpSyncLock. Todos recebem somente `tenantId` nullable, FK opcional NO ACTION e índice simples. NULL significa registro ainda não migrado; não é globalidade nem fallback. Uniques globais permanecem transitórios. Filhos, backfill, data access e constraints tenant-scoped seguem separados nas subfases posteriores.
+
+## Tooling desenvolvido na 1.0B.2-B
+
+O mecanismo separado inventaria os 11 roots, gera batches por PK/cursor e SHA-256, classifica
+quarentena e reconcilia contagens/ownership. O ledger mínimo é evidência imutável sem PII; apply
+produtivo não existe e a única escrita usa fixtures PostgreSQL 16 descartáveis. A 1.0B.2-C revisará
+ledger/lock e gates operacionais; este estágio não autoriza backfill.
