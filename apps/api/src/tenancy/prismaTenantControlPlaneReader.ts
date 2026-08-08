@@ -8,6 +8,13 @@ export class PrismaTenantControlPlaneReader implements TenantControlPlaneReader 
     return this.prisma.tenant.findUnique({ where: { id: tenantId }, select: { id: true, status: true } });
   }
 
+  async findMembershipsForUser(userId: string) {
+    return this.prisma.tenantMembership.findMany({
+      where: { userId },
+      select: { id: true, tenantId: true, userId: true, role: true, status: true, version: true }
+    });
+  }
+
   async findMembership(membershipId: string) {
     return this.prisma.tenantMembership.findUnique({
       where: { id: membershipId },

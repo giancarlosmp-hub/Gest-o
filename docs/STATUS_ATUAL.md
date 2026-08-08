@@ -1,3 +1,13 @@
+# 🔵 Sprint 1.0B.2-C — TenantContext/Auth compatível e fail-closed (08/08/2026)
+
+O scaffolding backend consolida TenantContext imutável, resolução tenant-aware reconciliada e
+compatibilidade legada default-only inequívoca, com fixtures A×B sintéticas. JWT, handlers, data
+access e autorização legados não foram integrados ou alterados; `TENANCY_MODE=disabled`, sem
+produção, backfill, deploy ou cutover. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0B_2_C_TENANT_CONTEXT_AUTH_COMPATIBILITY.md).
+O ajuste da PR #785 preserva aditivamente todos os contratos anteriores e inclui o gate obrigatório
+`Prove TenantContext auth compatibility` no Docker Compose CI, sem ativação global do resolver.
+
 # 🔵 Sprint 1.0B.2-B — tooling de backfill somente em desenvolvimento (08/08/2026)
 
 A PR incremental cria plan/dry-run, hashes, batches, quarentena, reconciliação, abort e ledger de

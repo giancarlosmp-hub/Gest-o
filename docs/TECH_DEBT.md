@@ -1,5 +1,10 @@
 # Dívida técnica — achados da Sprint 0.1
 
+> **Progresso 1.0B.2-C (08/08/2026):** TenantContext e resolver fail-closed existem como
+> scaffolding isolado com testes A×B sintéticos e compatibilidade legada default-only. TD-ER-004D
+> permanece aberto porque JWT, middleware, data access, cache, jobs e RBAC não foram ativados;
+> TD-ER-005 permanece integralmente aberto. `TENANCY_MODE=disabled`, sem produção ou cutover.
+
 > **Gate 1.0B.2 (08/08/2026):** a decisão humana explícita autorizou somente o desenvolvimento
 > incremental do estágio EXPAND. `READY_FOR_1_0B_2_DEVELOPMENT = YES`, mas
 > `READY_FOR_MULTI_TENANT_CUTOVER = NO`; TD-ER-004/004B permanecem abertas e não houve implementação,

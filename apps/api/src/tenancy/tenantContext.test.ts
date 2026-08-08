@@ -9,7 +9,8 @@ const tenant: TenantRecord = { id: "tenant-default", status: "active" };
 const membership: MembershipRecord = { id: "membership-1", tenantId: tenant.id, userId: "user-1", role: "diretor", status: "active", version: 3 };
 const reader = (t: TenantRecord | null = tenant, m: MembershipRecord | null = membership): TenantControlPlaneReader => ({
   findTenant: async () => t,
-  findMembership: async () => m
+  findMembership: async () => m,
+  findMembershipsForUser: async () => m ? [m] : [],
 });
 const evidence = { source: "access_token" as const, principal: { tenantId: tenant.id, userId: membership.userId, membershipId: membership.id, tenantRole: membership.role, membershipVersion: membership.version } };
 const options = { defaultTenantId: tenant.id, defaultOnly: true };
@@ -29,6 +30,12 @@ await denied(createTenantContext(evidence, "", reader(), options), "TENANT_REQUI
 const breakGlass = { source: "platform_break_glass" as const, principal: { ...evidence.principal, platformRole: "platform_support" as const }, reason: "INC-TEST", auditId: "audit-1", expiresAt: new Date(Date.now() + 60_000) };
 assert.equal((await createTenantContext(breakGlass, "request-8", reader(), options)).source, "platform_break_glass");
 await denied(createTenantContext({ ...breakGlass, reason: "" }, "request-9", reader(), options), "BREAK_GLASS_DENIED");
+await denied(createTenantContext({ ...breakGlass, expiresAt: new Date(Date.now() - 1) }, "request-10", reader(), options), "BREAK_GLASS_DENIED");
+await denied(createTenantContext({ ...breakGlass, principal: { ...evidence.principal } }, "request-11", reader(), options), "BREAK_GLASS_DENIED");
+const webhookEvidence = { source: "webhook_account" as const, principal: evidence.principal, externalAccountId: "wa-account" };
+const schedulerEvidence = { source: "scheduler_job" as const, principal: evidence.principal, jobId: "job-trusted" };
+assert.equal((await createTenantContext(webhookEvidence, "request-webhook", reader(), options)).source, "webhook_account");
+assert.equal((await createTenantContext(schedulerEvidence, "request-scheduler", reader(), options)).source, "scheduler_job");
 
 const repository: TenantRepository<string> = { findById: async (ctx, id) => `${ctx.tenantId}:${id}`, save: async (_ctx, value) => value };
 assert.equal(await repository.findById(context, "resource"), "tenant-default:resource");
