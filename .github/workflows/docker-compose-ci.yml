@@ -59,6 +59,9 @@ jobs:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:tenancy-backfill:postgres
 
+      - name: Prove TenantContext auth compatibility
+        run: npm run test:tenant-context-auth
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

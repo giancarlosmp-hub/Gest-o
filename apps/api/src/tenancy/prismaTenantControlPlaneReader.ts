@@ -14,4 +14,11 @@ export class PrismaTenantControlPlaneReader implements TenantControlPlaneReader 
       select: { id: true, tenantId: true, userId: true, role: true, status: true, version: true }
     });
   }
+
+  async findMembership(membershipId: string) {
+    return this.prisma.tenantMembership.findUnique({
+      where: { id: membershipId },
+      select: { id: true, tenantId: true, userId: true, role: true, status: true, version: true }
+    });
+  }
 }

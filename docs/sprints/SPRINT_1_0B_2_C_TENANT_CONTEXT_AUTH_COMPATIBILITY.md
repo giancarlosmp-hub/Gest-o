@@ -31,7 +31,14 @@ remoto não são inferidos. A branch desta entrega nasceu diretamente desse HEAD
 
 ## Contrato canônico e resolução fail-closed
 
-`TenantContext` contém `tenantId`, slug sanitizável opcional, `userId`, `membershipId`, status e
+A implementação é estritamente **aditiva**. O contrato original `TenantContext`, os tipos
+`TenantContextEvidence`/`TrustedTenantPrincipal`, `createTenantContext` e suas fontes confiáveis
+`access_token`, `webhook_account`, `scheduler_job` e `platform_break_glass` permanecem disponíveis
+com `requestId`, `membershipVersion`, `source`, `tenantRole` e `platformRole`. A validação
+fail-closed de break-glass também foi preservada. O novo contrato de autenticação tem o nome
+distinto `AuthTenantContext`, evitando reinterpretar consumidores anteriores.
+
+`AuthTenantContext` contém `tenantId`, slug sanitizável opcional, `userId`, `membershipId`, status e
 role da membership, `legacyUserRole`, `resolutionSource` e `contextVersion=1`. O objeto é congelado
 e produzido apenas pelo resolver backend. A projeção de logs omite user, roles, slug, token, PII,
 credenciais e payload empresarial.
@@ -71,6 +78,12 @@ O gate estático proíbe entrada HTTP, tenant default hardcoded, `memberships[0]
 logs sensíveis, ativação produtiva, integração em handlers e emissão JWT tenant obrigatória. Logs
 permitidos expõem apenas IDs técnicos validados, request ID, source e versão.
 
+O workflow **Docker Compose CI / compose-smoke** contém a etapa obrigatória
+`Prove TenantContext auth compatibility`, executando `npm run test:tenant-context-auth` depois dos
+gates de tenancy e antes dos smokes gerais, sem bypass, skip ou supressão de erro. `test:tenancy`
+continua cobrindo repositories, administração, jobs, cache, webhook, SQL auditado, logs, scheduler
+e break-glass anteriores; a nova suíte cobre somente AuthTenantContext A×B, reader e gate estático.
+
 ## Riscos, limitações e decisões adiadas
 
 JWT ainda contém e-mail e não possui issuer/audience/jti; rotação/revogação segue em TD-ER-005.
@@ -84,6 +97,7 @@ review próprio; emissão tenant-aware e seleção/troca de tenant exigem gate s
 Rollback mantém `TENANCY_MODE=disabled`, remove/desabilita o scaffolding não obrigatório e preserva
 tokens/autenticação legados. Não desfaz schema/migrations, não altera dados e não executa restore.
 Não houve VPS, produção, deploy, DML, backfill ou cutover.
+O scaffolding não foi instalado como middleware nem ativado globalmente.
 
 `READY_FOR_1_0B_2_C_REVIEW = YES`  
 `READY_FOR_TENANT_AWARE_RUNTIME = NO`  
