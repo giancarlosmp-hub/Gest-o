@@ -34,19 +34,27 @@ url="postgresql://postgres:test@$pg:5432/expand?schema=public"
 run_tooling(){ docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$url" "$image" "$@"; }
 step predecessor_materialization "materialize predecessor schema"
 run_tooling ./node_modules/.bin/prisma db push --schema /work/predecessor.prisma --skip-generate >/dev/null
-step fixtures "create synthetic pre-expand fixtures"
-# Synthetic pre-existing rows cover legacy inserts, global uniques and integration lock/idempotency semantics.
-docker exec "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
-INSERT INTO "AppConfig" (id,key,value,"createdAt","updatedAt") VALUES ('cfg','synthetic-key','value',now(),now());
-INSERT INTO "Product" (id,"erpProductCode","erpProductClassCode",name,"isActive","isSuspended","createdAt","updatedAt") VALUES ('product','P1','C1','Synthetic',true,false,now(),now());
-INSERT INTO "ErpSyncRun" (id,scope,trigger,status,"authMode","startedAt","syncedCount","createdAt") VALUES ('run','products','manual','success','global',now(),1,now());
-INSERT INTO "ErpSyncLock" (scope,"runId","lockedUntil","createdAt","updatedAt") VALUES ('products','run',now()+interval '1 minute',now(),now());
-CREATE TABLE "incident_synthetic" (id integer PRIMARY KEY);
-INSERT INTO "incident_synthetic" VALUES (1);
+step fixtures "create synthetic incident fixture before all fixture reads"
+docker exec -i "$pg" psql -X -U postgres -d expand -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+CREATE TABLE public."incident_synthetic" (id integer PRIMARY KEY);
+INSERT INTO public."incident_synthetic" (id) VALUES (1);
+SQL
+step fixture_validation "verify synthetic incident and business fixtures before baseline"
+HARNESS_COMMAND="verify synthetic incident fixture"
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT to_regclass('public.incident_synthetic') IS NOT NULL")" = t
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='incident_synthetic' AND column_name='id' AND data_type='integer' AND is_nullable='NO'")" = 1
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conrelid='public.incident_synthetic'::regclass AND contype='p'")" = 1
+HARNESS_COMMAND="create remaining synthetic pre-expand fixtures"
+docker exec -i "$pg" psql -X -U postgres -d expand -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+INSERT INTO public."AppConfig" (id,key,value,"createdAt","updatedAt") VALUES ('cfg','synthetic-key','value',now(),now());
+INSERT INTO public."Product" (id,"erpProductCode","erpProductClassCode",name,"isActive","isSuspended","createdAt","updatedAt") VALUES ('product','P1','C1','Synthetic',true,false,now(),now());
+INSERT INTO public."ErpSyncRun" (id,scope,trigger,status,"authMode","startedAt","syncedCount","createdAt") VALUES ('run','products','manual','success','global',now(),1,now());
+INSERT INTO public."ErpSyncLock" (scope,"runId","lockedUntil","createdAt","updatedAt") VALUES ('products','run',now()+interval '1 minute',now(),now());
 SQL
 roots=(KnowledgeDocument Client AgendaEvent Goal ActivityKPI Sale SellerTerritoryCity AppConfig Product ErpSyncRun ErpSyncLock)
-for table in "${roots[@]}"; do docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM \"$table\"" > "$tmp/$table.before"; done
-incident_before=$(docker exec "$pg" psql -U postgres -d expand -Atc 'SELECT count(*) FROM "incident_synthetic"')
+for table in "${roots[@]}"; do docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM public.\"$table\"" > "$tmp/$table.before"; done
+incident_before=$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')
+test "$incident_before" = 1
 step migration_apply "apply tenancy expand migration exactly once"
 docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null 2>&1; then echo 'migration unexpectedly applied twice' >&2; exit 1; fi
@@ -58,7 +66,11 @@ for table in "${roots[@]}"; do
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='${table}_tenantId_idx'")" = 1
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conname='${table}_tenantId_fkey' AND confdeltype='a'")" = 1
 done
-test "$(docker exec "$pg" psql -U postgres -d expand -Atc 'SELECT count(*) FROM "incident_synthetic"')" = "$incident_before"
+HARNESS_COMMAND="verify synthetic incident preservation after migration"
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT to_regclass('public.incident_synthetic') IS NOT NULL")" = t
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')" = "$incident_before"
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='incident_synthetic' AND column_name='id' AND data_type='integer' AND is_nullable='NO'")" = 1
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conrelid='public.incident_synthetic'::regclass AND contype='p'")" = 1
 step fk_negative_test "prove valid ownership and reject unknown tenant foreign key"
 # Old writes remain valid; valid ownership succeeds; unknown ownership is rejected.
 docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"AppConfig\" (id,key,value,\"createdAt\",\"updatedAt\") VALUES ('legacy','legacy-key','value',now(),now())" >/dev/null
@@ -67,10 +79,10 @@ if docker exec "$pg" psql -U postgres -d expand -c "UPDATE \"AppConfig\" SET \"t
 step unique_negative_test "prove existing global unique remains enforced"
 # Existing global unique constraints still reject duplicates.
 if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"AppConfig\" (id,key,value,\"createdAt\",\"updatedAt\") VALUES ('duplicate','synthetic-key','value',now(),now())" >/dev/null 2>&1; then echo 'global unique changed' >&2; exit 1; fi
-step post_diff_validation "validate final schema diff"
+step post_diff "validate final schema diff"
 run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --script > "$tmp/post-diff.raw.sql"
 # The sole raw diff is the deliberately unmanaged forensic fixture; stripping that exact block yields an empty managed diff.
 sed '/-- DropTable/,/DROP TABLE "incident_synthetic";/d' "$tmp/post-diff.raw.sql" | sed '/^[[:space:]]*$/d' > "$tmp/post-diff.managed.sql"
 test "$(rg -c 'DROP TABLE "incident_synthetic"' "$tmp/post-diff.raw.sql")" = 1
 test ! -s "$tmp/post-diff.managed.sql"
-echo 'tenancy expand disposable PostgreSQL 16 test passed'
+echo 'TENANCY_EXPAND_POSTGRES=PASS'

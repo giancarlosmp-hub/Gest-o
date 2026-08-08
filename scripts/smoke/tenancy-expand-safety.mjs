@@ -23,5 +23,16 @@ assert.match(harness, /required pinned API tooling image unavailable[\s\S]*exit 
 assert.match(harness, /command -v docker[\s\S]*exit 77/);
 assert.match(harness, /--diff-filter=A -- apps\/api\/prisma\/migrations\/20260808120000_tenancy_expand_roots\/migration\.sql/);
 assert.doesNotMatch(harness, /git show HEAD:apps\/api\/prisma\/schema\.prisma/);
-for (const token of ["docker_network_setup", "postgres_readiness", "predecessor_materialization", "migration_apply", "catalog_validation", "fixtures", "fk_negative_test", "unique_negative_test", "post_diff_validation", "HARNESS_STEP=", "HARNESS_COMMAND=", "HARNESS_RESULT=FAIL", "EXIT_CODE="]) assert.ok(harness.includes(token), token);
+for (const token of ["docker_network_setup", "postgres_readiness", "predecessor_materialization", "migration_apply", "catalog_validation", "fixtures", "fk_negative_test", "unique_negative_test", "post_diff", "HARNESS_STEP=", "HARNESS_COMMAND=", "HARNESS_RESULT=FAIL", "EXIT_CODE="]) assert.ok(harness.includes(token), token);
 console.log("tenancy expand harness contract passed");
+
+const createIncident = harness.indexOf('CREATE TABLE public."incident_synthetic"');
+const verifyIncident = harness.indexOf("SELECT to_regclass('public.incident_synthetic') IS NOT NULL");
+const baselineIncident = harness.indexOf('SELECT count(*) FROM public."incident_synthetic"');
+const migrationApply = harness.indexOf('step migration_apply');
+const preservationCheck = harness.indexOf('HARNESS_COMMAND="verify synthetic incident preservation after migration"');
+assert.ok(createIncident >= 0 && createIncident < verifyIncident && verifyIncident < baselineIncident && baselineIncident < migrationApply && migrationApply < preservationCheck);
+assert.match(harness.slice(harness.indexOf('step fixtures'), migrationApply), /docker exec -i "\$pg" psql[^]*CREATE TABLE public\."incident_synthetic"/);
+assert.doesNotMatch(harness.slice(harness.indexOf('step fixtures'), harness.indexOf('step post_diff')), /\|\| true/);
+assert.doesNotMatch(harness, /incident_2026|incident_2025|incident_2024/);
+assert.match(harness.slice(preservationCheck), /to_regclass\('public\.incident_synthetic'\)[^]*count\(\*\) FROM public\."incident_synthetic"[^]*contype='p'/);
