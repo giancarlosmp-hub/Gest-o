@@ -80,7 +80,7 @@ Abortar a promoção, manter as colunas nullable e o runtime legado disabled. N�
 Os uniques e locks ainda são globais, `tenantId` permanece nulo e o runtime não oferece isolamento. Índices adicionam custo de escrita e FKs tomam lock de catálogo durante DDL; o harness e a futura operação devem medir janela. A fase não autoriza alegação multiempresa.
 
 ## Evidências
-Schema Prisma formatado/validado; migration submetida ao gate allowlist; harness e CI versionados. Checks remotos do SHA da PR só podem ser afirmados após execução no GitHub.
+No head remoto `59d1243` da PR #783, o GitHub Actions comprovou `Preview Deploy = SUCCESS`, `Docker Compose CI / compose-smoke = SUCCESS`, `Prove tenancy roots expand on PostgreSQL 16 = PASS` e `TENANCY_EXPAND_POSTGRES=PASS`, sem command not found, exit 77 ou falha de fixture. O harness executou create → verify → baseline → apply → preserve sobre `public."incident_synthetic"` exclusivamente sintética e descartável, validando existência, coluna `id`, tipo `integer`, `NOT NULL`, PK e count antes/depois. A evidência comprova somente o banco descartável: não houve merge, deploy, apply produtivo, backfill ou cutover.
 
 ## Critérios de aceite
 Roots justificados; expansão somente nullable/aditiva; zero alteração de dados/runtime; uniques preservados; FK segura; testes antigos e novos verdes; PostgreSQL 16 e post-diff verdes no CI; documentação reconciliada. `READY_FOR_MULTI_TENANT_CUTOVER = NO`.

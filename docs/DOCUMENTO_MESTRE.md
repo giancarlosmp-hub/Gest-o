@@ -500,3 +500,23 @@ Docker/deploy e não presume produção. Incidentes e débitos mantêm seus esta
 ## Decisão arquitetural — expand de roots da 1.0B.2
 
 A primeira onda de ownership empresarial abrange Client, AgendaEvent, Product, AppConfig, Goal, ActivityKPI, Sale, SellerTerritoryCity, KnowledgeDocument, ErpSyncRun e ErpSyncLock. O campo `tenantId` nasce nullable e sem default: NULL significa exclusivamente “registro ainda não migrado”. Uniques globais são preservados até a fase constrain; backfill ocorre em subfase separada e não existe fallback automático para `tenant-default-v1`.
+
+### Lições comprovadas do harness PostgreSQL da fase expand
+
+A execução descartável da 1.0B.2-A comprovou dois guardrails operacionais. Primeiro, heredoc enviado
+por `docker exec` sem `-i` não conectava o stdin do host ao `psql`: o processo recebia EOF, não
+executava as fixtures e ainda podia encerrar com sucesso. O diagnóstico objetivo foi a ausência de
+`incident_synthetic` no primeiro count. A correção usa `docker exec -i`, `psql -X` e
+`ON_ERROR_STOP=1`; a prevenção obrigatória é validar cada fixture imediatamente antes de produzir
+baseline ou aplicar migration.
+
+Segundo, o harness dependia de `rg`, ferramenta não garantida no runner, e falhou no post-diff com
+exit 127. A contagem foi substituída por `grep -Fxc`. Harnesses operacionais devem usar ferramentas
+garantidas pelo ambiente ou declarar e provisionar explicitamente suas dependências.
+
+`public."incident_synthetic"` é uma fixture exclusivamente sintética e descartável. A prova valida
+existência, coluna `id`, tipo `integer`, `NOT NULL`, primary key e count antes e depois da migration,
+na ordem **create → verify → baseline → apply → preserve**. Essa evidência é apenas de PostgreSQL 16
+em CI: a migration continua exclusivamente aditiva e não foi aplicada em produção por esta PR. Não
+houve backfill, runtime tenant-aware, deploy ou cutover; `TENANCY_MODE=disabled` e
+`READY_FOR_MULTI_TENANT_CUTOVER = NO` permanecem invariantes.
