@@ -23,10 +23,12 @@ evidence="$evidence_root/$EXPECTED_SHA/migrations/$MIGRATION_ID"
 mkdir -p "$evidence"; chmod 700 "$evidence"
 printf 'sha\t%s\nmigration_id\t%s\nevidence_version\t1\n' "$EXPECTED_SHA" "$MIGRATION_ID" >"$evidence/metadata.tsv"
 node -e 'const x=JSON.parse(process.argv[1]); console.log(`${x.actualSha256}  ${x.path}`)' "$registry" >"$evidence/migration.sha256"
-psql_admin(){ docker exec --user postgres "$PRODUCTION_DB_CONTAINER_EXPECTED" psql -X -v ON_ERROR_STOP=1 -d "$PRODUCTION_DB_NAME_EXPECTED" "$@"; }
+psql_admin(){ docker exec --user postgres -i "$PRODUCTION_DB_CONTAINER_EXPECTED" psql -X -v ON_ERROR_STOP=1 -d "$PRODUCTION_DB_NAME_EXPECTED" "$@"; }
 identity=$(psql_admin -Atc "SELECT current_database()||E'\\t'||current_user")
 [[ "$identity" == "$PRODUCTION_DB_NAME_EXPECTED"$'\tpostgres' ]] || die 'catalog identity is not approved admin/database'
-psql_admin -AtF $'\t' -f - <scripts/control-plane-catalog.sql >"$evidence/pre-objects.tsv"
+if ! psql_admin -AtF $'\t' -f - <scripts/control-plane-catalog.sql >"$evidence/pre-objects.tsv"; then
+  die 'CATALOG_QUERY_FAILED'
+fi
 object_count=$(wc -l <"$evidence/pre-objects.tsv")
 state=PARTIAL
 if (( object_count == 0 )); then state=ABSENT_COMPATIBLE
