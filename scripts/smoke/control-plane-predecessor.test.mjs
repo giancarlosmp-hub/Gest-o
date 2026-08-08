@@ -37,6 +37,12 @@ fails({migrationInIntro:false},/CONTROL_PLANE_MIGRATION_MISSING_FROM_INTRO/);
 const harness=readFileSync(resolve("scripts/smoke/tenancy-control-plane-operation-postgres.sh"),"utf8");
 assert.match(harness,/resolve-control-plane-predecessor\.mjs --write-schema/);
 assert.doesNotMatch(harness,/git show .*schema\.prisma|cp .*apps\/api\/prisma\/schema\.prisma|cat apps\/api\/prisma\/schema\.prisma/);
+assert.match(harness,/--write-intro-schema/);
+assert.match(harness,/--to-schema-datamodel \/tmp\/control-plane\.prisma/);
+assert.doesNotMatch(harness,/--to-schema-datamodel apps\/api\/prisma\/schema\.prisma/);
+assert.match(harness,/HARNESS_STEP=%s.*HARNESS_RESULT=FAIL.*EXIT_CODE=%s/s);
+// Regression for PR #783: later root expands must not enter the historical control-plane diff.
+{ const registered = resolveControlPlanePredecessor(); const current = readFileSync(resolve("apps/api/prisma/schema.prisma"), "utf8"); assert.match(current, /TenantClients/); assert.doesNotMatch(registered.introSchema, /TenantClients|TenantErpSyncRuns/); }
 const resolver=readFileSync(resolve("scripts/resolve-control-plane-predecessor.mjs"),"utf8");
 assert.match(resolver,/cat-file.*predecessor\.commit.*predecessor\.schemaPath/s);
 console.log("control-plane predecessor resolver regressions passed");

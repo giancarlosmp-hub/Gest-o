@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eEuo pipefail
 umask 077
+HARNESS_STEP=bootstrap
+HARNESS_COMMAND="initialize harness"
+HARNESS_REPORTED=0
+harness_error(){
+  local rc=$?
+  trap - ERR
+  HARNESS_REPORTED=1
+  printf 'HARNESS_STEP=%s\nHARNESS_COMMAND=%s\nHARNESS_RESULT=FAIL\nEXIT_CODE=%s\n' "$HARNESS_STEP" "$HARNESS_COMMAND" "$rc" >&2
+  exit "$rc"
+}
+step(){ HARNESS_STEP=$1; HARNESS_COMMAND=$2; }
+trap harness_error ERR
 root=$(cd "$(dirname "$0")/../.." && pwd); cd "$root"
 command -v docker >/dev/null || { echo 'SKIP: docker unavailable' >&2; exit 77; }
 docker image inspect postgres:16 >/dev/null 2>&1 || { echo 'SKIP: postgres:16 unavailable locally' >&2; exit 77; }
@@ -10,17 +22,33 @@ docker image inspect "$image" >/dev/null 2>&1 || { echo "SKIP: pinned API image 
 [[ -z ${DATABASE_URL:-} && -z ${TEST_DATABASE_URL:-} ]] || { echo 'refusing inherited database URL' >&2; exit 1; }
 HOST_UID="$(id -u)"; HOST_GID="$(id -g)"
 printf 'HOST_IDENTITY\tuid=%s\tgid=%s\n' "$HOST_UID" "$HOST_GID" >&2
-id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d); catalog_file="$tmp/catalog.tsv"
-cleanup(){ docker rm -f "$ref" "$path" >/dev/null 2>&1||true; docker network rm "$net" >/dev/null 2>&1||true; rm -rf "$tmp"; }; trap cleanup EXIT
+step temporary_directory "create private temporary directory"
+id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d); catalog_file="$tmp/catalog.tsv"; control_schema="$tmp/control-plane.prisma"
+cleanup(){ docker rm -f "$ref" "$path" >/dev/null 2>&1||true; docker network rm "$net" >/dev/null 2>&1||true; rm -rf "$tmp"; }
+finish(){
+  local rc=$?
+  cleanup
+  if (( rc != 0 && HARNESS_REPORTED == 0 )); then
+    printf 'HARNESS_STEP=%s\nHARNESS_COMMAND=%s\nHARNESS_RESULT=FAIL\nEXIT_CODE=%s\n' "$HARNESS_STEP" "$HARNESS_COMMAND" "$rc" >&2
+  fi
+  return "$rc"
+}
+trap finish EXIT
+step docker_network "create internal Docker network"
 docker network create --internal "$net" >/dev/null
+step postgres_containers "start disposable PostgreSQL 16 containers"
 for c in "$ref" "$path"; do docker run -d --rm --pull=never --name "$c" --network "$net" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gesto postgres:16 >/dev/null; done
+step postgres_readiness "wait for disposable PostgreSQL readiness"
 for c in "$ref" "$path"; do for _ in {1..60}; do docker exec "$c" pg_isready -U postgres -d gesto >/dev/null 2>&1&&break;sleep 1;done; docker exec "$c" pg_isready -U postgres -d gesto >/dev/null; done
 refurl="postgresql://postgres:test@$ref:5432/gesto?schema=public"; pathurl="postgresql://postgres:test@$path:5432/gesto?schema=public"
 run_api(){ local url=$1; shift; docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$@"; }
-# A is the final reference. B is the registry-validated historical datamodel, never a filtered schema.
-run_api "$refurl" "$image" ./node_modules/.bin/prisma db push --schema apps/api/prisma/schema.prisma --skip-generate >/dev/null
-node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predecessor.prisma" >"$tmp/predecessor.json"
+# Both schemas are registry-validated historical snapshots. The current datamodel may contain later expands.
+step predecessor_resolution "resolve registered predecessor and control-plane intro schemas"
+node scripts/resolve-control-plane-predecessor.mjs --write-schema "$tmp/predecessor.prisma" --write-intro-schema "$control_schema" >"$tmp/predecessor.json"
+step reference_materialization "materialize registered control-plane intro schema"
+docker run --rm --pull=never --network "$net" -e DATABASE_URL="$refurl" -v "$control_schema:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 [[ $(sha256sum "$tmp/predecessor.prisma"|awk '{print $1}') == $(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1])).predecessorSchemaSha256)' "$tmp/predecessor.json") ]]
+step predecessor_materialization "materialize registered predecessor schema"
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$tmp/predecessor.prisma:/tmp/schema.prisma:ro" "$image" ./node_modules/.bin/prisma db push --schema /tmp/schema.prisma --skip-generate >/dev/null
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname IN ('Tenant','TenantMembership')")" = 0
 incident_tables=(
@@ -32,7 +60,8 @@ incident_tables=(
 for table in "${incident_tables[@]}"; do
   docker exec "$path" psql -X -U postgres -d gesto -v ON_ERROR_STOP=1 -c "CREATE TABLE \"$table\" (id integer)" >/dev/null
 done
-run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/pre-apply-diff.raw.sql"
+step control_plane_preview "diff predecessor against registered control-plane intro schema"
+docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$control_schema:/tmp/control-plane.prisma:ro" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel /tmp/control-plane.prisma --script >"$tmp/pre-apply-diff.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/pre-apply-diff.raw.sql" "$tmp/pre-apply-diff.sql" pre
 for table in "${incident_tables[@]}"; do
   grep -Fq "DROP TABLE \"$table\";" "$tmp/pre-apply-diff.raw.sql"
@@ -93,7 +122,8 @@ if ! node scripts/control-plane-catalog-validate.mjs "$catalog_file" >/dev/null;
   awk -F '\t' '$1=="fk" && ($2=="TenantMembership_tenantId_fkey" || $2=="TenantMembership_userId_fkey")' "$catalog_file" >&2
   exit 1
 fi
-run_api "$pathurl" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.raw.sql"
+step post_apply_diff "diff applied control plane against registered intro schema"
+docker run --rm --pull=never --network "$net" -e DATABASE_URL="$pathurl" -v "$control_schema:/tmp/control-plane.prisma:ro" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$pathurl" --to-schema-datamodel /tmp/control-plane.prisma --script >"$tmp/post.raw.sql"
 node scripts/schema-diff-filter.mjs "$tmp/post.raw.sql" "$tmp/post.sql" post
 test -z "$(sed '/^[[:space:]]*--/d;/^[[:space:]]*$/d' "$tmp/post.sql")"
 test "$(docker exec "$path" psql -U postgres -d gesto -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relname LIKE 'incident\\_%' ESCAPE '\\'")" = 8
@@ -107,7 +137,7 @@ for pattern in '^enum\tTenantStatus' '^table\tTenant' '^column\tTenant.id' '^ind
 done
 sed '0,/active/{s/active/divergent/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
 sed '0,/text|text|NO|/{s/text|text|NO|/integer|int4|YES|0/}' "$catalog_file" >"$tmp/bad.tsv"; ! node scripts/control-plane-catalog-validate.mjs "$tmp/bad.tsv" >/dev/null 2>&1
-fail(){ printf 'HARNESS_FAIL\t%s\n' "$1" >&2; exit 1; }
+fail(){ HARNESS_COMMAND="assertion failed: $1"; return 1; }
 checkpoint(){ printf 'HARNESS_CHECKPOINT\t%s\n' "$1" >&2; }
 docker exec -i "$path" psql \
   -X \
