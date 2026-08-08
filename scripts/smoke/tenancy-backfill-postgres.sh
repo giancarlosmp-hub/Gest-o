@@ -67,7 +67,31 @@ step resume_and_idempotency 'resume remaining batches and prove reapply changes 
 while test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference")" != 0; do
   docker exec "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -c "WITH batch AS (SELECT root,id FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference ORDER BY root,id LIMIT 5) UPDATE root_rows r SET tenant_id='synthetic-a' FROM batch b WHERE (r.root,r.id)=(b.root,b.id) AND r.tenant_id IS NULL" >/dev/null
 done
-test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "WITH batch AS (SELECT root,id FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference ORDER BY root,id LIMIT 5) UPDATE root_rows r SET tenant_id='synthetic-a' FROM batch b WHERE (r.root,r.id)=(b.root,b.id) AND r.tenant_id IS NULL RETURNING 1")" = ''
+eligible_before_reapply=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference')
+quarantine_before_reapply=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows WHERE invalid_reference AND tenant_id IS NULL')
+cross_tenant_before_reapply=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows WHERE original_tenant IS NOT NULL AND tenant_id<>original_tenant')
+test "$eligible_before_reapply" = 0
+test "$quarantine_before_reapply" = 11
+test "$cross_tenant_before_reapply" = 0
+reapply_count=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "
+WITH batch AS (
+  SELECT root,id FROM root_rows
+  WHERE tenant_id IS NULL AND NOT invalid_reference
+  ORDER BY root,id
+  LIMIT 5
+),
+updated AS (
+  UPDATE root_rows r SET tenant_id='synthetic-a'
+  FROM batch b
+  WHERE (r.root,r.id)=(b.root,b.id) AND r.tenant_id IS NULL
+  RETURNING 1
+)
+SELECT count(*) FROM updated;
+")
+test "$reapply_count" = 0
+test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows')" = "$before"
+test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference')" = 0
+test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows WHERE invalid_reference AND tenant_id IS NULL')" = 11
 step reconciliation 'preserve totals, cross-tenant ownership and formal quarantine'
 test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows')" = "$before"
 test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM root_rows WHERE original_tenant IS NOT NULL AND tenant_id<>original_tenant")" = 0

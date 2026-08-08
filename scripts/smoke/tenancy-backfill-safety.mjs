@@ -36,6 +36,19 @@ assert.doesNotMatch(harness, /-c\s+["'][^\n]*:'(?:hash|approved_hash)'/);
 assert.doesNotMatch(ledgerBlock, /INSERT INTO ledger[^\n]*\$plan_hash/);
 assert.match(harness.slice(negativeGateStart), /INSERT INTO ledger VALUES \(gen_random_uuid\(\),'all-roots','planned'/, "concurrent scope rejection must remain covered");
 
+const resumeStart = harness.indexOf("step resume_and_idempotency");
+const reconciliationStart = harness.indexOf("step reconciliation", resumeStart);
+assert.ok(resumeStart >= 0 && reconciliationStart > resumeStart, "idempotency proof must precede reconciliation");
+const idempotencyBlock = harness.slice(resumeStart, reconciliationStart);
+assert.match(idempotencyBlock, /eligible_before_reapply[\s\S]*test "\$eligible_before_reapply" = 0/);
+assert.match(idempotencyBlock, /quarantine_before_reapply[\s\S]*test "\$quarantine_before_reapply" = 11/);
+assert.match(idempotencyBlock, /cross_tenant_before_reapply[\s\S]*test "\$cross_tenant_before_reapply" = 0/);
+assert.match(idempotencyBlock, /reapply_count=\$\(docker exec "\$name" psql -X[\s\S]*-At -v ON_ERROR_STOP=1 -c/);
+assert.match(idempotencyBlock, /WITH batch AS[\s\S]*tenant_id IS NULL AND NOT invalid_reference[\s\S]*ORDER BY root,id[\s\S]*LIMIT 5[\s\S]*updated AS \([\s\S]*UPDATE root_rows[\s\S]*tenant_id IS NULL[\s\S]*RETURNING 1[\s\S]*SELECT count\(\*\) FROM updated/);
+assert.match(idempotencyBlock, /test "\$reapply_count" = 0/);
+assert.match(idempotencyBlock, /SELECT count\(\*\) FROM root_rows'\)" = "\$before"[\s\S]*tenant_id IS NULL AND NOT invalid_reference'\)" = 0[\s\S]*invalid_reference AND tenant_id IS NULL'\)" = 11/);
+assert.doesNotMatch(idempotencyBlock, /= ''|UPDATE 0|\b(?:grep|awk)\b|\|\| true/);
+
 const expandStepStart = workflow.indexOf("- name: Prove tenancy roots expand on PostgreSQL 16");
 const backfillStepStart = workflow.indexOf("- name: Prove tenancy backfill tooling on PostgreSQL 16");
 assert.ok(expandStepStart >= 0, "tenancy expand PostgreSQL gate is required");
