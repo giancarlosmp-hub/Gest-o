@@ -14,6 +14,9 @@ assert.equal(spawnSync(process.execPath,[resolve(root,"scripts/production-schema
 for(const value of ["20260802120000_tenancy_control_plane","b9298218b3c34cdadaf35f31a6d0e8a6e1942e9d1cbf5ae5c77ae305d1cc554d","581fbae0a545f53800db7707ab8b28f52dcd3fa1","dc7ceb0f0a23b77fc45a58960f3371b50c7f7365","0576893d97a0d7b55ca73316cfe6af6774eeccc1e91807fe4fa45c8fdad7f24c","20260731150000_safe_production_schema_transition","evidenceVersion"]) assert.match(registry,new RegExp(value));
 assert.doesNotMatch(registry,/process\.env\.(?:MIGRATION_PATH|SQL_FILE)|glob|wildcard/i);
 for(const token of ["EXPECTED_SHA","origin/main","status --porcelain","RUNTIME_TENANCY_MODE","DATABASE_SCHEMA_MODE","--pull=never","org.opencontainers.image.revision","pre-apply-diff.raw.sql","ABSENT_COMPATIBLE","ALREADY_APPLIED","partial or divergent"]) assert.ok(preview.includes(token),token);
+assert.match(preview,/psql_admin\(\)\{ docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" psql/);
+assert.match(preview,/if ! psql_admin -AtF \$'\\t' -f - <scripts\/control-plane-catalog\.sql >"\$evidence\/pre-objects\.tsv"; then\n\s+die 'CATALOG_QUERY_FAILED'\nfi/);
+assert.doesNotMatch(preview.match(/if ! psql_admin[\s\S]*?\nfi/)?.[0] || "",/\|\| true/);
 assert.match(preview,/node scripts\/schema-diff-filter\.mjs \\\n\s+"\$evidence\/pre-apply-diff\.raw\.sql" \\\n\s+"\$evidence\/pre-apply-diff\.sql" \\\n\s+pre/);
 assert.doesNotMatch(preview,/cp "\$evidence\/pre-apply-diff\.raw\.sql"|rg -n .*incident_/);
 assert.doesNotMatch(preview,/db push|migrate deploy|CREATE TABLE|ALTER TABLE/);

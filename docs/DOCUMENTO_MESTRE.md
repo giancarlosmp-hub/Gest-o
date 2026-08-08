@@ -44,6 +44,15 @@ default têm preview/dry-run, revisões humanas e autorizações administrativas
 são registro histórico, não instrução operacional atual. A revisão de produção comprovada permanece
 `a08a626`; Git não a altera.
 
+**Lição operacional — transporte de stdin.** Problema: um `docker exec` sem `-i` atendia um
+`psql -f -` dependente de stdin. Efeito: o SQL não chegou ao `psql`, o catálogo ficou vazio e um
+estado existente foi interpretado incorretamente como `ABSENT_COMPATIBLE`. O diagnóstico comparou o
+artefato do preview (0 bytes) à execução direta com `docker exec -i` (43 linhas, 3190 bytes e
+validator PASS). A correção conecta stdin explicitamente; testes distinguem zero objetos legítimo de
+falha de execução/transporte. Regra preventiva: todo `docker exec ... psql -f -`, heredoc ou
+redirecionamento de stdin para comando no container deve comprovar transporte com `-i`. O hotfix só
+será considerado comprovado após testes e CI verdes.
+
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 
 A rotina oficial de certificação de uma instalação é `scripts/production-health-validation.sh`,

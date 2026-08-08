@@ -29,6 +29,29 @@ role DML temporária de menor privilégio. É proibido substituir essa role pela
 superuser, credencial permanente ou `GRANT` implícito. Internamente, somente a URL selecionada é
 exportada ao container como `DATABASE_URL`; nenhuma nova autoridade permanente é criada.
 
+### Revalidação do control plane e hotfix de stdin (08/08/2026)
+
+A migration produtiva já havia sido aplicada anteriormente. O estado produtivo comprovado continua
+com `Tenant` e `TenantMembership` presentes, ambas com zero linhas, pós-diff gerenciado de 0 bytes e
+as oito tabelas `incident_*` preservadas. Na tentativa de revalidar esse estado no SHA
+`f6dd569cbd2fae25da88ce712fe9a6729541e4c3`, o preview registrou falsamente
+`ABSENT_COMPATIBLE`: `pre-objects.tsv` ficou com 0 linhas e 0 bytes.
+
+A execução direta do mesmo `scripts/control-plane-catalog.sql`, no mesmo PostgreSQL, com
+`docker exec -i ... psql ... -f -`, produziu 43 linhas e 3190 bytes; o validator encerrou com
+`CONTROL_PLANE_CATALOG_PASS`. A causa raiz foi o helper do preview usar `docker exec` sem `-i`: em
+um fluxo `psql -f -` com redirecionamento de stdin, o SQL do host não foi conectado ao processo no
+container e o `psql` recebeu EOF. O hotfix conecta stdin explicitamente e trata falha da consulta
+como `CATALOG_QUERY_FAILED`, nunca como ausência legítima. A correção permanece **🔵 PR** e só será
+considerada comprovada após testes e CI verdes.
+
+Nenhuma DDL ou DML foi executada durante esse diagnóstico, nenhum tenant default ou membership foi
+criado e a Fase 7 permanece suspensa. A auditoria dos scripts operacionais confirmou que o apply já
+usa `docker exec ... -i` no helper administrativo, inclusive nos caminhos que enviam a migration por
+pipe e o catálogo por `-f -`/redirecionamento. Consultas fornecidas por `-c` e verificações
+`pg_isready` não dependem de stdin; os usos de catálogo, migration e heredoc dependentes de stdin
+devem sempre portar `-i`.
+
 ## Janela suspensa na Fase 3 e hotfix
 
 O **Gate Humano 1** identificou preventivamente um segundo defeito no caminho pós-apply da revisão
