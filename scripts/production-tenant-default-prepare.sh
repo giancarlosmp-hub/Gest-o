@@ -5,7 +5,18 @@ root=$(cd "$(dirname "$0")/.." && pwd); cd "$root"
 die(){ printf '[tenant-default-prepare] ERROR %s\n' "$*" >&2; exit 1; }
 : "${MODE:?MODE=dry-run or MODE=apply is required}"; [[ "$MODE" == dry-run || "$MODE" == apply ]] || die 'invalid MODE'
 : "${EXPECTED_SHA:?EXPECTED_SHA is required}"; : "${API_IMAGE:?API_IMAGE is required}"
-: "${DATABASE_URL:?temporary DML DATABASE_URL is required}"; : "${PRODUCTION_DB_CONTAINER_EXPECTED:?approved container is required}"
+: "${PRODUCTION_DB_CONTAINER_EXPECTED:?approved container is required}"
+if [[ "$MODE" == dry-run ]]; then
+  : "${READONLY_DATABASE_URL:?approved read-only READONLY_DATABASE_URL is required for dry-run}"
+  [[ -z ${CONFIRM:-} ]] || die 'dry-run accepts no write confirmation'
+  DATABASE_URL=$READONLY_DATABASE_URL
+else
+  : "${DML_DATABASE_URL:?temporary least-privilege DML_DATABASE_URL is required for apply}"
+  [[ ${DML_AUTHORITY_PROVISIONING:-} == APPROVED_TEMPORARY_ROLE ]] || die 'approved temporary least-privilege DML role is not provisioned'
+  [[ ${CONFIRM:-} == PREPARE_DEFAULT_TENANT ]] || die 'CONFIRM=PREPARE_DEFAULT_TENANT required'
+  DATABASE_URL=$DML_DATABASE_URL
+fi
+export DATABASE_URL
 [[ "$EXPECTED_SHA" == $(git rev-parse HEAD) ]] || die 'EXPECTED_SHA mismatch'
 [[ -z $(git status --porcelain) ]] || die 'worktree is dirty'
 [[ $(git rev-parse origin/main) == "$EXPECTED_SHA" ]] || die 'origin/main/SHA mismatch'
@@ -14,7 +25,7 @@ die(){ printf '[tenant-default-prepare] ERROR %s\n' "$*" >&2; exit 1; }
 label=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE" 2>/dev/null) || die 'local API image required'
 [[ "$label" == "$EXPECTED_SHA" ]] || die 'API image revision label mismatch'
 schema_result="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$EXPECTED_SHA/migrations/20260802120000_tenancy_control_plane/result.tsv"
-rg -q $'^result\tPASS$' "$schema_result" || die 'control-plane schema PASS required'
+grep -Fxq $'result\tPASS' "$schema_result" || die 'control-plane schema PASS required'
 operator_uid=$(id -u); operator_gid=$(id -g)
 evidence="${TENANCY_EVIDENCE_DIR:-/var/log/gest-o/tenancy}/$EXPECTED_SHA/default-tenant"
 mkdir -p "$evidence"; chmod 700 "$evidence"
@@ -26,7 +37,6 @@ run_runner(){ docker run --rm --pull=never --user "$operator_uid:$operator_gid" 
   ${CONFIRM:+-e CONFIRM} ${EXPECTED_AGGREGATE_HASH:+-e EXPECTED_AGGREGATE_HASH} -e EXPECTED_SHA \
   -v "$evidence:/evidence" "$API_IMAGE" node apps/api/dist/scripts/prepareDefaultTenant.js "$@"; }
 if [[ "$MODE" == dry-run ]]; then
-  [[ -z ${CONFIRM:-} ]] || die 'dry-run accepts no write confirmation'
   run_runner --dry-run
   for evidence_file in metadata.tsv dry-run-result.tsv; do
     [[ $(stat -c '%u:%g' "$evidence/$evidence_file") == "$operator_uid:$operator_gid" ]] || die "evidence owner mismatch: $evidence_file"
@@ -34,11 +44,9 @@ if [[ "$MODE" == dry-run ]]; then
   done
   exit 0
 fi
-[[ ${CONFIRM:-} == PREPARE_DEFAULT_TENANT ]] || die 'CONFIRM=PREPARE_DEFAULT_TENANT required'
-[[ ${DML_AUTHORITY_PROVISIONING:-} == APPROVED_TEMPORARY_ROLE ]] || die 'approved temporary least-privilege DML role is not provisioned'
 : "${BACKUP_RESULT_FILE:?backup PASS required}"; : "${PREFLIGHT_RESULT_FILE:?preflight PASS required}"
-rg -q '^PASS([[:space:]]|$)' "$BACKUP_RESULT_FILE" || die 'backup did not PASS'
-rg -q '^PASS([[:space:]]|$)' "$PREFLIGHT_RESULT_FILE" || die 'preflight did not PASS'
+grep -Eq '^PASS([[:space:]]|$)' "$BACKUP_RESULT_FILE" || die 'backup did not PASS'
+grep -Eq '^PASS([[:space:]]|$)' "$PREFLIGHT_RESULT_FILE" || die 'preflight did not PASS'
 [[ -f "$evidence/dry-run-result.tsv" ]] || die 'dry-run of same SHA required'
 EXPECTED_AGGREGATE_HASH=$(awk -F '\t' 'NR==2{for(i=1;i<=NF;i++) if(h[i]=="expectedAggregateHash") print $i} NR==1{for(i=1;i<=NF;i++)h[i]=$i}' "$evidence/dry-run-result.tsv")
 [[ "$EXPECTED_AGGREGATE_HASH" =~ ^[0-9a-f]{64}$ ]] || die 'dry-run hash missing'

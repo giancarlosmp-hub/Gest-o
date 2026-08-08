@@ -11,6 +11,24 @@ deploy. Esta Sprint está **🔵 PR** e não executa produção.
 Legenda: **🟣 Codex** trabalho local; **🔵 PR** revisão; **🟡 Merge** em `main`; **🟠 Deploy**
 publicação comprovada; **🟢 Produção** validação operacional por SHA. Nenhuma etapa implica a seguinte.
 
+## Estado produtivo recebido e pausa antes da Fase 7 (07/08/2026)
+
+No SHA `672d985ca0bcb22a78e7c25d8b3e31ee0f41f4cd`, as Fases 5 e 6 produtivas foram
+registradas como **PASS**: migration em `APPLIED_ONCE`, `Tenant` e `TenantMembership` presentes e
+ambas com zero linhas, pós-diff bruto preservado, pós-diff gerenciado vazio (0 bytes) e as oito
+tabelas `incident_*` preservadas. O runtime permaneceu com `TENANCY_MODE=disabled` e
+`DATABASE_SCHEMA_MODE=external`, sem restart, tenant default ou membership criada. A janela está
+pausada antes da Fase 7; isso não declara multiempresa ativo nem inicia a Sprint 1.0B.2.
+
+O wrapper da Fase 7 seleciona explicitamente `READONLY_DATABASE_URL` em `MODE=dry-run`; esse modo
+não recebe confirmação nem exige autoridade DML e produz apenas evidência de leitura, plano e hash.
+`MODE=apply` seleciona exclusivamente `DML_DATABASE_URL`, exige
+`DML_AUTHORITY_PROVISIONING=APPROVED_TEMPORARY_ROLE`, confirmação, backup/preflight PASS e dry-run do
+mesmo SHA com hash válido. O apply permanece bloqueado até a aprovação e o provisionamento de uma
+role DML temporária de menor privilégio. É proibido substituir essa role pela identidade runtime,
+superuser, credencial permanente ou `GRANT` implícito. Internamente, somente a URL selecionada é
+exportada ao container como `DATABASE_URL`; nenhuma nova autoridade permanente é criada.
+
 ## Janela suspensa na Fase 3 e hotfix
 
 O **Gate Humano 1** identificou preventivamente um segundo defeito no caminho pós-apply da revisão
