@@ -19,6 +19,22 @@ assert.match(harness, /docker exec -i/);
 assert.match(harness, /psql -X/);
 assert.match(harness, /ON_ERROR_STOP=1/);
 assert.match(harness, /TENANCY_BACKFILL_TOOLING_POSTGRES=PASS/);
+assert.doesNotMatch(harness, /\beval\b|\|\| true/);
+
+const ledgerInsertStart = harness.indexOf('docker exec -i "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -v run_id="$run_id" -v approved_hash="$plan_hash"');
+const negativeGateStart = harness.indexOf("step negative_gates", ledgerInsertStart);
+assert.ok(ledgerInsertStart >= 0 && negativeGateStart > ledgerInsertStart, "ledger INSERT must use the guarded stdin transport before negative gates");
+const ledgerBlock = harness.slice(ledgerInsertStart, negativeGateStart);
+assert.match(ledgerBlock, /<<'SQL'/, "ledger SQL must use a quoted heredoc");
+assert.match(ledgerBlock, /INSERT INTO ledger\(run_id,scope,state,approved_hash\)[\s\S]*:'run_id'::uuid[\s\S]*:'approved_hash'/);
+assert.match(ledgerBlock, /ledger_check=\$\(docker exec -i[\s\S]*scope='all-roots'[\s\S]*state='dry_run_passed'[\s\S]*approved_hash=:'approved_hash'[\s\S]*length\(approved_hash\)=64[\s\S]*approved_hash ~ '\^\[0-9a-f\]\{64\}\$'[\s\S]*test "\$ledger_check" = 1/);
+const hashValidationEnd = harness.indexOf("docker exec -i", harness.indexOf("run_id=00000000"));
+const hashValidation = harness.slice(harness.indexOf("run_id=00000000"), hashValidationEnd);
+assert.match(hashValidation, /\[\[ \$run_id =~ \^\[0-9a-f\]/);
+assert.match(hashValidation, /\[\[ \$plan_hash =~ \^\[0-9a-f\]\{64\}\$ \]\]/);
+assert.doesNotMatch(harness, /-c\s+["'][^\n]*:'(?:hash|approved_hash)'/);
+assert.doesNotMatch(ledgerBlock, /INSERT INTO ledger[^\n]*\$plan_hash/);
+assert.match(harness.slice(negativeGateStart), /INSERT INTO ledger VALUES \(gen_random_uuid\(\),'all-roots','planned'/, "concurrent scope rejection must remain covered");
 
 const expandStepStart = workflow.indexOf("- name: Prove tenancy roots expand on PostgreSQL 16");
 const backfillStepStart = workflow.indexOf("- name: Prove tenancy backfill tooling on PostgreSQL 16");

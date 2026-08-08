@@ -32,10 +32,26 @@ SQL
 before=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows')
 step dry_run 'read deterministic keyset plan and prove no DML'
 plan_hash=$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "SELECT encode(digest(string_agg(root||E'\\t'||id||E'\\t'||'synthetic-a',E'\\n' ORDER BY root,id),'sha256'),'hex') FROM root_rows WHERE tenant_id IS NULL AND NOT invalid_reference")
-test -n "$plan_hash"
 test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM root_rows')" = "$before"
 run_id=00000000-0000-4000-8000-000000000001
-docker exec "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -v hash="$plan_hash" -c "INSERT INTO ledger(run_id,scope,state,approved_hash) VALUES ('$run_id','all-roots','dry_run_passed',:'hash')" >/dev/null
+[[ $run_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$ ]]
+[[ $plan_hash =~ ^[0-9a-f]{64}$ ]]
+docker exec -i "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -v run_id="$run_id" -v approved_hash="$plan_hash" <<'SQL' >/dev/null
+INSERT INTO ledger(run_id,scope,state,approved_hash)
+VALUES (:'run_id'::uuid,'all-roots','dry_run_passed',:'approved_hash');
+SQL
+ledger_check=$(docker exec -i "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -v run_id="$run_id" -v approved_hash="$plan_hash" <<'SQL'
+SELECT count(*)
+FROM ledger
+WHERE run_id=:'run_id'::uuid
+  AND scope='all-roots'
+  AND state='dry_run_passed'
+  AND approved_hash=:'approved_hash'
+  AND length(approved_hash)=64
+  AND approved_hash ~ '^[0-9a-f]{64}$';
+SQL
+)
+test "$ledger_check" = 1
 step negative_gates 'reject concurrent scope and wrong approved hash'
 if docker exec "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -c "INSERT INTO ledger VALUES (gen_random_uuid(),'all-roots','planned',NULL,now())" >/dev/null 2>&1; then exit 1; fi
 test "$(docker exec "$name" psql -X -U postgres -d backfill -At -v ON_ERROR_STOP=1 -c "SELECT approved_hash='$plan_hash' FROM ledger WHERE run_id='$run_id'")" = t
