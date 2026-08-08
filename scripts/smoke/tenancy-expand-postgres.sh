@@ -83,6 +83,6 @@ step post_diff "validate final schema diff"
 run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --script > "$tmp/post-diff.raw.sql"
 # The sole raw diff is the deliberately unmanaged forensic fixture; stripping that exact block yields an empty managed diff.
 sed '/-- DropTable/,/DROP TABLE "incident_synthetic";/d' "$tmp/post-diff.raw.sql" | sed '/^[[:space:]]*$/d' > "$tmp/post-diff.managed.sql"
-test "$(rg -c 'DROP TABLE "incident_synthetic"' "$tmp/post-diff.raw.sql")" = 1
+test "$(grep -Fxc 'DROP TABLE "incident_synthetic";' "$tmp/post-diff.raw.sql")" = 1
 test ! -s "$tmp/post-diff.managed.sql"
 echo 'TENANCY_EXPAND_POSTGRES=PASS'
