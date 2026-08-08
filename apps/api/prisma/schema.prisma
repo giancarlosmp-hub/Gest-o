@@ -126,6 +126,19 @@ model Tenant {
   updatedAt   DateTime           @updatedAt
   suspendedAt DateTime?
   memberships TenantMembership[]
+
+  // Business roots introduced as nullable ownership during Sprint 1.0B.2-A expand.
+  clients            Client[]              @relation("TenantClients")
+  agendaEvents       AgendaEvent[]         @relation("TenantAgendaEvents")
+  products           Product[]             @relation("TenantProducts")
+  appConfigs         AppConfig[]           @relation("TenantAppConfigs")
+  goals              Goal[]                @relation("TenantGoals")
+  activityKpis       ActivityKPI[]         @relation("TenantActivityKpis")
+  sales              Sale[]                @relation("TenantSales")
+  territoryCities    SellerTerritoryCity[] @relation("TenantTerritoryCities")
+  knowledgeDocuments KnowledgeDocument[]   @relation("TenantKnowledgeDocuments")
+  erpSyncRuns        ErpSyncRun[]          @relation("TenantErpSyncRuns")
+  erpSyncLocks       ErpSyncLock[]         @relation("TenantErpSyncLocks")
 }
 
 model TenantMembership {
@@ -149,6 +162,8 @@ model TenantMembership {
 }
 
 model KnowledgeDocument {
+  tenantId    String?
+  tenant      Tenant?  @relation("TenantKnowledgeDocuments", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id          String   @id @default(cuid())
   title       String
   category    String
@@ -167,9 +182,12 @@ model KnowledgeDocument {
   @@index([sourceType])
   @@index([isActive])
   @@index([createdById])
+  @@index([tenantId])
 }
 
 model Client {
+  tenantId                   String?
+  tenant                     Tenant?                     @relation("TenantClients", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id                         String                      @id @default(cuid())
   code                       String?
   fantasyName                String?
@@ -209,6 +227,7 @@ model Client {
   @@index([code])
   @@index([fantasyName])
   @@index([isArchived])
+  @@index([tenantId])
 }
 
 model ClientCodeAudit {
@@ -232,6 +251,8 @@ model ClientCodeAudit {
 }
 
 model AgendaEvent {
+  tenantId      String?
+  tenant        Tenant?           @relation("TenantAgendaEvents", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id            String            @id @default(cuid())
   title         String
   type          AgendaEventType
@@ -254,6 +275,7 @@ model AgendaEvent {
   @@index([sellerId, startDateTime])
   @@index([startDateTime, endDateTime])
   @@index([opportunityId])
+  @@index([tenantId])
 }
 
 model AgendaStop {
@@ -397,6 +419,8 @@ model Activity {
 }
 
 model Goal {
+  tenantId    String?
+  tenant      Tenant?  @relation("TenantGoals", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id          String   @id @default(cuid())
   month       String
   targetValue Float
@@ -406,9 +430,12 @@ model Goal {
   updatedAt   DateTime @updatedAt
 
   @@unique([sellerId, month])
+  @@index([tenantId])
 }
 
 model ActivityKPI {
+  tenantId    String?
+  tenant      Tenant?  @relation("TenantActivityKpis", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id          String   @id @default(cuid())
   sellerId    String
   type        String
@@ -420,18 +447,25 @@ model ActivityKPI {
   seller User @relation(fields: [sellerId], references: [id])
 
   @@unique([sellerId, month, type])
+  @@index([tenantId])
 }
 
 model Sale {
+  tenantId  String?
+  tenant    Tenant?  @relation("TenantSales", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id        String   @id @default(cuid())
   date      DateTime
   value     Float
   sellerId  String
   seller    User     @relation(fields: [sellerId], references: [id])
   createdAt DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 model SellerTerritoryCity {
+  tenantId  String?
+  tenant    Tenant?  @relation("TenantTerritoryCities", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id        String   @id @default(cuid())
   sellerId  String
   seller    User     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
@@ -444,14 +478,19 @@ model SellerTerritoryCity {
   @@unique([sellerId, state, city])
   @@index([sellerId])
   @@index([state, city])
+  @@index([tenantId])
 }
 
 model AppConfig {
+  tenantId  String?
+  tenant    Tenant?  @relation("TenantAppConfigs", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id        String   @id @default(uuid())
   key       String   @unique
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
 }
 
 model CultureCatalog {
@@ -477,6 +516,8 @@ model CultureCatalog {
 }
 
 model Product {
+  tenantId            String?
+  tenant              Tenant?           @relation("TenantProducts", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id                  String            @id @default(cuid())
   erpProductCode      String
   erpProductClassCode String
@@ -498,6 +539,7 @@ model Product {
 
   @@unique([erpProductCode, erpProductClassCode])
   @@index([name])
+  @@index([tenantId])
 }
 
 model ProductPrice {
@@ -595,6 +637,8 @@ enum ErpSyncTrigger {
 }
 
 model ErpSyncRun {
+  tenantId      String?
+  tenant        Tenant?          @relation("TenantErpSyncRuns", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id            String           @id @default(cuid())
   scope         String
   trigger       ErpSyncTrigger   @default(manual)
@@ -616,9 +660,12 @@ model ErpSyncRun {
   @@index([sellerId, startedAt])
   @@index([authMode, startedAt])
   @@index([status, startedAt])
+  @@index([tenantId])
 }
 
 model ErpSyncLock {
+  tenantId    String?
+  tenant      Tenant?  @relation("TenantErpSyncLocks", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   scope       String   @id
   runId       String
   lockedUntil DateTime
@@ -626,6 +673,7 @@ model ErpSyncLock {
   updatedAt   DateTime @updatedAt
 
   @@index([lockedUntil])
+  @@index([tenantId])
 }
 
 enum CommunicationChannelType {

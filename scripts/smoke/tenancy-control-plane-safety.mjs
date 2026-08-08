@@ -16,9 +16,10 @@ const compose = read("docker-compose.production.yml");
 assert.match(schema, /model Tenant \{/);
 assert.match(schema, /model TenantMembership \{/);
 assert.doesNotMatch(migration, /\b(?:DROP|TRUNCATE)\b|ON DELETE CASCADE/i);
-for (const table of ["Client", "Contact", "Opportunity", "Activity", "AgendaEvent", "Product", "KnowledgeDocument"]) {
+// The control plane remains isolated from children deferred by the roots-only expand.
+for (const table of ["Contact", "Opportunity", "Activity"]) {
   const body = schema.match(new RegExp(`model ${table} \\{([\\s\\S]*?)\\n\\}`))?.[1] || "";
-  assert.doesNotMatch(body, /^\s*tenantId\s/m, `${table} acquired tenantId`);
+  assert.doesNotMatch(body, /^\s*tenantId\s/m, `${table} unexpectedly acquired tenantId`);
 }
 assert.doesNotMatch(bootstrap, /prepareDefaultTenant/);
 assert.doesNotMatch(seeds, /tenant-default-v1|TenantMembership|tenant\.create/);

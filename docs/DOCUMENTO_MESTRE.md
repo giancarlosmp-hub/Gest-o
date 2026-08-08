@@ -496,3 +496,7 @@ defensiva. Ela deve ser aceita pelo Comitê antes da Sprint 1.0.
 
 Este adendo não implementa tenancy, não cria migration, não altera APIs/banco/regras, não executa
 Docker/deploy e não presume produção. Incidentes e débitos mantêm seus estados vigentes.
+
+## Decisão arquitetural — expand de roots da 1.0B.2
+
+A primeira onda de ownership empresarial abrange Client, AgendaEvent, Product, AppConfig, Goal, ActivityKPI, Sale, SellerTerritoryCity, KnowledgeDocument, ErpSyncRun e ErpSyncLock. O campo `tenantId` nasce nullable e sem default: NULL significa exclusivamente “registro ainda não migrado”. Uniques globais são preservados até a fase constrain; backfill ocorre em subfase separada e não existe fallback automático para `tenant-default-v1`.

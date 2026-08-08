@@ -45,3 +45,7 @@ Antes da aplicação futura: backup com checksum e restore em ambiente isolado. 
 ## Entregáveis da 1.0B
 
 Migration aditiva separada, preview, fixtures sintéticas, runner de backfill idempotente/dry-run, ledger, relatório de reconciliação, plano de execução/rollback e testes PostgreSQL descartáveis. Sem segundo tenant funcional e sem alegação multiempresa.
+
+## Decisão executada na 1.0B.2-A
+
+A primeira onda seleciona Client, AgendaEvent, Product, AppConfig, Goal, ActivityKPI, Sale, SellerTerritoryCity, KnowledgeDocument, ErpSyncRun e ErpSyncLock. Todos recebem somente `tenantId` nullable, FK opcional NO ACTION e índice simples. NULL significa registro ainda não migrado; não é globalidade nem fallback. Uniques globais permanecem transitórios. Filhos, backfill, data access e constraints tenant-scoped seguem separados nas subfases posteriores.
