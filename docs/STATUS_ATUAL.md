@@ -1,3 +1,11 @@
+# 🟢 Gate humano — desenvolvimento controlado da Sprint 1.0B.2 aprovado (08/08/2026)
+
+Foi recebida a decisão humana explícita `COMMITTEE_DECISION=APPROVE_1_0B_2_DEVELOPMENT`. Os gates
+técnicos predecessores permanecem válidos e autorizam somente o primeiro estágio EXPAND,
+incremental e default-only. `READY_FOR_1_0B_2_DEVELOPMENT = YES` e
+`READY_FOR_MULTI_TENANT_CUTOVER = NO`. **DEVELOPMENT APPROVED ≠ PRODUCTION CUTOVER APPROVED.**
+Consulte o [registro do gate](sprints/SPRINT_1_0B_1_GATE_APPROVAL_FOR_1_0B_2.md).
+
 # 🟢 Sprint 1.0B.1-OP-EXEC — operacionalmente concluída (08/08/2026)
 
 > Esta certificação documental usa a evidência operacional produtiva fornecida para o SHA
@@ -14,7 +22,7 @@
 | Cutover | **NÃO REALIZADO** |
 | Autoridades temporárias | Removidas; `TEMP_ROLE_COUNT=0` e `TEMP_HBA_COUNT=0` |
 | Multiempresa | 🔴 **não ativo**; a presença do control plane default-only não comprova isolamento multiempresa |
-| Sprint 1.0B.2 | **NÃO INICIADA**; `READY_FOR_1_0B_2 = NO` até os gates documentados remanescentes |
+| Sprint 1.0B.2 | **DESENVOLVIMENTO APROVADO**; `READY_FOR_1_0B_2_DEVELOPMENT = YES`, somente EXPAND |
 
 O dry-run leu 8 Users (2 `diretor`, 1 `gerente`, 5 `vendedor`; 5 ativos e 3 inativos), planejou
 um Tenant e 8 memberships e terminou sem DML: as contagens permaneceram 8/0/0. O apply autorizado

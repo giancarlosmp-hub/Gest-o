@@ -1,5 +1,11 @@
 # Dívida técnica — achados da Sprint 0.1
 
+> **Gate 1.0B.2 (08/08/2026):** a decisão humana explícita autorizou somente o desenvolvimento
+> incremental do estágio EXPAND. `READY_FOR_1_0B_2_DEVELOPMENT = YES`, mas
+> `READY_FOR_MULTI_TENANT_CUTOVER = NO`; TD-ER-004/004B permanecem abertas e não houve implementação,
+> produção ou alteração de dados. Consulte o
+> [registro do gate](sprints/SPRINT_1_0B_1_GATE_APPROVAL_FOR_1_0B_2.md).
+
 Este backlog contém somente achados desta auditoria. Ele não implementa correções, não duplica
 incidentes e não altera seu estado. `INC-5050-4484`, `INC-ERP-5050` e `INC-PROD-2026-07`
 continuam nas fontes oficiais; são dependências referenciadas, não novos itens. Schema e cutover

@@ -32,6 +32,15 @@
 - [Sprint 1.0B.1 — persistência do control plane](sprints/SPRINT_1_0B_1_CONTROL_PLANE_PERSISTENCE.md)
 - [Preparação do control plane](tenancy/CONTROL_PLANE_PREPARATION.md)
 - [Sprint 1.0B.1-OP-R2 — operação limpa do control plane](sprints/SPRINT_1_0B_1_OP_R2_CONTROL_PLANE_OPERATION.md)
+- [Gate de aprovação para a Sprint 1.0B.2](sprints/SPRINT_1_0B_1_GATE_APPROVAL_FOR_1_0B_2.md)
+
+## ADENDO VIGENTE — GATE DE APROVAÇÃO DA SPRINT 1.0B.2
+
+Em 08/08/2026 foi fornecida a decisão humana explícita
+`COMMITTEE_DECISION=APPROVE_1_0B_2_DEVELOPMENT`. Mantidos os gates técnicos certificados,
+`READY_FOR_1_0B_2_DEVELOPMENT = YES`; a autorização limita-se ao primeiro estágio EXPAND,
+incremental, nullable, sem backfill e com runtime disabled. `READY_FOR_MULTI_TENANT_CUTOVER = NO`.
+**DEVELOPMENT APPROVED ≠ PRODUCTION CUTOVER APPROVED.**
 
 ## ADENDO VIGENTE — SPRINT 1.0B.1-OP-EXEC
 
@@ -42,7 +51,7 @@ esta conclusão não foi inferida do Git. A migration `20260802120000_tenancy_co
 `tenant-default-v1` e 8 memberships foram preparados e reconciliados com PASS e hash coincidente.
 As autoridades temporárias e regras HBA foram removidas. O runtime permaneceu
 `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`; não houve cutover, segundo tenant ou
-ativação multiempresa. A Sprint 1.0B.2 não foi iniciada.
+ativação multiempresa. Na conclusão da OP-EXEC, a Sprint 1.0B.2 ainda não havia sido iniciada.
 
 ### Lições operacionais comprovadas
 
