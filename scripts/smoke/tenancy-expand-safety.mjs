@@ -15,3 +15,13 @@ for (const root of roots) {
 }
 assert.equal(new Set(statements).size, statements.length);
 console.log("tenancy expand migration safety passed");
+
+const harness = fs.readFileSync("scripts/smoke/tenancy-expand-postgres.sh", "utf8");
+assert.doesNotMatch(harness, /docker image inspect node:20|\bnode:20\b/);
+assert.match(harness, /image=\$\{API_IMAGE:-gest-o-api:\$sha\}/);
+assert.match(harness, /required pinned API tooling image unavailable[\s\S]*exit 1/);
+assert.match(harness, /command -v docker[\s\S]*exit 77/);
+assert.match(harness, /--diff-filter=A -- apps\/api\/prisma\/migrations\/20260808120000_tenancy_expand_roots\/migration\.sql/);
+assert.doesNotMatch(harness, /git show HEAD:apps\/api\/prisma\/schema\.prisma/);
+for (const token of ["docker_network_setup", "postgres_readiness", "predecessor_materialization", "migration_apply", "catalog_validation", "fixtures", "fk_negative_test", "unique_negative_test", "post_diff_validation", "HARNESS_STEP=", "HARNESS_COMMAND=", "HARNESS_RESULT=FAIL", "EXIT_CODE="]) assert.ok(harness.includes(token), token);
+console.log("tenancy expand harness contract passed");
