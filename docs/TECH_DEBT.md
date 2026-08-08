@@ -1,3 +1,10 @@
+# Progresso 1.0B.2-D — propagação por domínio ainda incompleta
+
+O repository isolado de Client prova o contrato, mas acessos Prisma produtivos, ownership transitiva
+de Opportunity/Activity, User, uniques/lock ERP, raw SQL, caches, includes e transações ainda
+precisam ondas próprias antes de runtime tenant-aware. Consulte o
+[brief](sprints/SPRINT_1_0B_2_D_TENANT_DATA_ACCESS_PROPAGATION.md).
+
 # Dívida técnica — achados da Sprint 0.1
 
 > **Progresso 1.0B.2-C (08/08/2026):** TenantContext e resolver fail-closed existem como

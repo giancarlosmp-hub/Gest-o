@@ -1,3 +1,9 @@
+# Sprint 1.0B.2-D — data access tenant-scoped aditivo
+
+Um piloto isolado de Client prova predicados Prisma A×B; controllers, JWT, jobs, webhooks e
+`TENANCY_MODE=disabled` permanecem preservados. A camada não está ativa no runtime. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0B_2_D_TENANT_DATA_ACCESS_PROPAGATION.md).
+
 # Sprint 1.0B.2-B — tooling de backfill em desenvolvimento
 
 Plan/dry-run, ledger imutável, batches, hashes, quarentena e reconciliação dos 11 roots foram
