@@ -44,6 +44,8 @@
     "crm:repair-erp-client": "npm run crm:repair-erp-client -w @salesforce-pro/api",
     "test:production-schema:postgres": "bash scripts/smoke/production-schema-postgres.sh",
     "test:tenancy-expand": "node scripts/smoke/tenancy-expand-safety.mjs",
-    "test:tenancy-expand:postgres": "bash scripts/smoke/tenancy-expand-postgres.sh"
+    "test:tenancy-expand:postgres": "bash scripts/smoke/tenancy-expand-postgres.sh",
+    "test:tenancy-backfill": "npm run test:tenancy-backfill -w @salesforce-pro/api && node scripts/smoke/tenancy-backfill-safety.mjs",
+    "test:tenancy-backfill:postgres": "bash scripts/smoke/tenancy-backfill-postgres.sh"
   }
 }

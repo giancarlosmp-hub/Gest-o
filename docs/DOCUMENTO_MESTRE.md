@@ -1,3 +1,10 @@
+# Sprint 1.0B.2-B — tooling de backfill em desenvolvimento
+
+Plan/dry-run, ledger imutável, batches, hashes, quarentena e reconciliação dos 11 roots foram
+preparados com apply exclusivamente sintético. Produção, runtime, backfill e cutover permanecem
+inalterados e bloqueados. Consulte o
+[Sprint Brief](sprints/SPRINT_1_0B_2_B_BACKFILL_TOOLING_LEDGER.md).
+
 # ADENDO HISTÓRICO — segurança de deploy pós-recuperação
 
 > 🔵 Entrega em PR (31/07/2026), sem VPS ou produção. A topologia isolada API/WEB exige identidade do banco recuperado, separa build/preflight do cutover humano, permite rollback dos containers históricos e prova o SHA. O banco recuperado segue vigente até migração formal e o incidente continua aberto. Consulte `DEPLOY_GUIDE.md`.

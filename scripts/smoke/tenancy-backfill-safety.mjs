@@ -1,0 +1,21 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+const runner = fs.readFileSync("apps/api/src/tenancy/backfillTooling.ts", "utf8");
+const api = fs.readFileSync("apps/api/src/app.ts", "utf8");
+const bootstrap = fs.readFileSync("apps/api/src/scripts/bootstrap.ts", "utf8");
+const harness = fs.readFileSync("scripts/smoke/tenancy-backfill-postgres.sh", "utf8");
+for (const root of ["Client", "AgendaEvent", "Product", "AppConfig", "Goal", "ActivityKPI", "Sale", "SellerTerritoryCity", "KnowledgeDocument", "ErpSyncRun", "ErpSyncLock"]) assert.ok(runner.includes(`"${root}"`), root);
+assert.doesNotMatch(runner, /tenant-default-v1|DATABASE_URL|TENANCY_MODE|DATABASE_SCHEMA_MODE/);
+assert.doesNotMatch(runner, /\b(?:DELETE|DROP|TRUNCATE)\b/i);
+assert.match(runner, /PRODUCTION_APPLY_NOT_IMPLEMENTED/);
+assert.match(runner, /EXPLICIT_CONFIRMATION_REQUIRED/);
+assert.match(runner, /APPROVED_HASH_MISMATCH/);
+assert.match(runner, /UNEXPECTED_TENANT/);
+assert.doesNotMatch(`${api}\n${bootstrap}`, /backfillTooling|tenancy-backfill/);
+assert.doesNotMatch(harness, /\brg\b|\|\| true|DATABASE_URL/);
+assert.match(harness, /docker exec -i/);
+assert.match(harness, /psql -X/);
+assert.match(harness, /ON_ERROR_STOP=1/);
+assert.match(harness, /TENANCY_BACKFILL_TOOLING_POSTGRES=PASS/);
+console.log("tenancy backfill static safety passed");
