@@ -19,6 +19,7 @@
     "admin:ensure-user": "tsx src/scripts/adminEnsureUser.ts",
     "test:auth-security": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/authSecurity.test.ts",
     "test:tenancy": "tsx src/tenancy/tenantContext.test.ts && node ../../scripts/smoke/tenancy-architecture.mjs",
+    "test:tenant-context-auth": "tsx src/tenancy/tenantContext.test.ts && node ../../scripts/smoke/tenant-context-auth-safety.mjs",
     "test:tenancy-control-plane": "npm run prisma:generate && tsx src/tenancy/defaultTenant.test.ts && tsx src/scripts/prepareDefaultTenantArgs.test.ts",
     "test:tenancy-backfill": "tsx src/tenancy/backfillTooling.test.ts",
     "tenancy:prepare-default": "tsx src/scripts/prepareDefaultTenant.ts",

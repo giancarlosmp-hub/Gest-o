@@ -15,9 +15,9 @@ export const tenantCacheKey = (context: TenantContext, area: string, key: string
   `tenant:${context.tenantId}:${area}:${key}`;
 
 const SAFE_LOG_ID = /^[A-Za-z0-9_-]{1,128}$/;
-export const tenantLogFields = (context: TenantContext) => {
-  if (!SAFE_LOG_ID.test(context.tenantId) || !SAFE_LOG_ID.test(context.requestId)) throw new Error("UNSAFE_TENANT_LOG_CONTEXT");
-  return Object.freeze({ tenantId: context.tenantId, requestId: context.requestId });
+export const tenantLogFields = (context: TenantContext, requestId: string) => {
+  if (!SAFE_LOG_ID.test(context.tenantId) || !SAFE_LOG_ID.test(requestId)) throw new Error("UNSAFE_TENANT_LOG_CONTEXT");
+  return Object.freeze({ tenantId: context.tenantId, requestId, resolutionSource: context.resolutionSource, contextVersion: context.contextVersion });
 };
 
 export type ResolvedWebhook = Readonly<{ tenantId: string; externalAccountId: string }>;

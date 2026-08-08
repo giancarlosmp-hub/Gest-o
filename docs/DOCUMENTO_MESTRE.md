@@ -530,3 +530,10 @@ na ordem **create → verify → baseline → apply → preserve**. Essa evidên
 em CI: a migration continua exclusivamente aditiva e não foi aplicada em produção por esta PR. Não
 houve backfill, runtime tenant-aware, deploy ou cutover; `TENANCY_MODE=disabled` e
 `READY_FOR_MULTI_TENANT_CUTOVER = NO` permanecem invariantes.
+# Atualização 1.0B.2-C — TenantContext/Auth compatibility (08/08/2026)
+
+A fundação fail-closed de TenantContext foi consolidada apenas como scaffolding backend testável.
+Tokens, RBAC por `User.role`, handlers e consultas atuais permanecem inalterados, e membership role
+não ganhou autoridade produtiva. A entrega não acessou produção nem executou deploy/backfill/cutover;
+`TENANCY_MODE=disabled` e os gates de multiempresa continuam fechados. Detalhes no
+[Sprint Brief](sprints/SPRINT_1_0B_2_C_TENANT_CONTEXT_AUTH_COMPATIBILITY.md).

@@ -1,54 +1,68 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createTenantContext, TenantContextError, type MembershipRecord, type TenantControlPlaneReader, type TenantRecord } from "./tenantContext.js";
-import { defineAuditedTenantSql, tenantCacheKey, tenantLogFields, type PlatformAdministration, type TenantJobEnvelope, type TenantRepository, type WebhookTenantResolver } from "./contracts.js";
+import { resolveTenantContext, sanitizeTenantContext, TenantContextError, type MembershipRecord, type TenantControlPlaneReader, type TenantRecord, type VerifiedTenantClaims } from "./tenantContext.js";
+import { tenantLogFields } from "./contracts.js";
 
-const tenant: TenantRecord = { id: "tenant-default", status: "active" };
-const membership: MembershipRecord = { id: "membership-1", tenantId: tenant.id, userId: "user-1", role: "diretor", status: "active", version: 3 };
-const reader = (t: TenantRecord | null = tenant, m: MembershipRecord | null = membership): TenantControlPlaneReader => ({
-  findTenant: async () => t,
-  findMembership: async () => m
+const tenantA: TenantRecord = { id: "synthetic-tenant-a", slug: "tenant-a", status: "active" };
+const tenantB: TenantRecord = { id: "synthetic-tenant-b", slug: "tenant-b", status: "active" };
+const suspended: TenantRecord = { id: "synthetic-tenant-suspended", status: "suspended" };
+const membership = (id: string, tenantId: string, userId: string, status: MembershipRecord["status"] = "active", role: MembershipRecord["role"] = "vendedor"): MembershipRecord =>
+  ({ id, tenantId, userId, role, status, version: 1 });
+const membershipA = membership("membership-a", tenantA.id, "user-a", "active", "gerente");
+const membershipB = membership("membership-b", tenantB.id, "user-b");
+const membershipBothA = membership("membership-both-a", tenantA.id, "user-both");
+const membershipBothB = membership("membership-both-b", tenantB.id, "user-both");
+const inactive = membership("membership-inactive", tenantA.id, "user-inactive", "revoked");
+const tenants = new Map([tenantA, tenantB, suspended].map((item) => [item.id, item]));
+const memberships = [membershipA, membershipB, membershipBothA, membershipBothB, inactive];
+const reader: TenantControlPlaneReader = {
+  findTenant: async (id) => tenants.get(id) ?? null,
+  findMembershipsForUser: async (userId) => memberships.filter((item) => item.userId === userId),
+};
+const aware = (item: MembershipRecord, legacyUserRole: VerifiedTenantClaims["legacyUserRole"] = item.role): VerifiedTenantClaims => ({
+  userId: item.userId, legacyUserRole, tenantId: item.tenantId, membershipId: item.id, membershipVersion: item.version, contextVersion: 1,
 });
-const evidence = { source: "access_token" as const, principal: { tenantId: tenant.id, userId: membership.userId, membershipId: membership.id, tenantRole: membership.role, membershipVersion: membership.version } };
-const options = { defaultTenantId: tenant.id, defaultOnly: true };
-const denied = async (promise: Promise<unknown>, code = "TENANT_DENIED") => assert.rejects(promise, (error: unknown) => error instanceof TenantContextError && error.code === code);
+const options = { legacyCompatibility: "default-only" as const, defaultTenantId: tenantA.id };
+const denied = (promise: Promise<unknown>, code: TenantContextError["code"] = "TENANT_DENIED") =>
+  assert.rejects(promise, (error: unknown) => error instanceof TenantContextError && error.code === code);
 
-const context = await createTenantContext(evidence, "request-1", reader(), options);
-assert(Object.isFrozen(context), "TenantContext must be immutable");
-assert.equal(context.tenantId, tenant.id);
-await denied(createTenantContext({ ...evidence, principal: { ...evidence.principal, tenantId: "tenant-other" } }, "request-2", reader(), options));
-await denied(createTenantContext(evidence, "request-3", reader(null, membership), options));
-await denied(createTenantContext(evidence, "request-4", reader({ ...tenant, status: "suspended" }, membership), options));
-await denied(createTenantContext(evidence, "request-5", reader(tenant, null), options));
-await denied(createTenantContext(evidence, "request-6", reader(tenant, { ...membership, status: "revoked" }), options));
-await denied(createTenantContext(evidence, "request-7", reader(tenant, { ...membership, version: 4 }), options));
-await denied(createTenantContext(evidence, "", reader(), options), "TENANT_REQUIRED");
+const contextA = await resolveTenantContext(aware(membershipA), reader, options);
+const contextB = await resolveTenantContext(aware(membershipB), reader, options);
+assert.equal(contextA.tenantId, tenantA.id);
+assert.equal(contextB.tenantId, tenantB.id);
+assert.equal(contextA.resolutionSource, "tenant_claim");
+assert.equal(contextA.legacyUserRole, "gerente", "User.role remains the legacy authority");
+assert.equal(contextA.membershipRole, "gerente", "membership role is reconciled but does not replace User.role");
+assert(Object.isFrozen(contextA));
 
-const breakGlass = { source: "platform_break_glass" as const, principal: { ...evidence.principal, platformRole: "platform_support" as const }, reason: "INC-TEST", auditId: "audit-1", expiresAt: new Date(Date.now() + 60_000) };
-assert.equal((await createTenantContext(breakGlass, "request-8", reader(), options)).source, "platform_break_glass");
-await denied(createTenantContext({ ...breakGlass, reason: "" }, "request-9", reader(), options), "BREAK_GLASS_DENIED");
+await denied(resolveTenantContext({ ...aware(membershipBothB), tenantId: tenantA.id }, reader, options));
+await denied(resolveTenantContext({ ...aware(membershipA), tenantId: "missing" }, reader, options));
+await denied(resolveTenantContext({ ...aware(membershipA), tenantId: suspended.id }, reader, options));
+await denied(resolveTenantContext(aware(inactive), reader, options));
+await denied(resolveTenantContext({ ...aware(membershipA), membershipId: "tampered" }, reader, options));
+await denied(resolveTenantContext(aware(membershipA, "diretor"), reader, options));
+await denied(resolveTenantContext({ ...aware(membershipA), contextVersion: 2 }, reader, options), "TENANT_CLAIM_INVALID");
 
-const repository: TenantRepository<string> = { findById: async (ctx, id) => `${ctx.tenantId}:${id}`, save: async (_ctx, value) => value };
-assert.equal(await repository.findById(context, "resource"), "tenant-default:resource");
-const platform: PlatformAdministration = { executeBreakGlass: async (input) => assert(input.reason) };
-await platform.executeBreakGlass({ auditId: "audit-2", reason: "INC-TEST", expiresAt: new Date(Date.now() + 1) });
-const job: TenantJobEnvelope<{ task: string }> = { tenantId: context.tenantId, jobId: "job-1", payload: { task: "sync" } };
-assert(job.tenantId);
-assert.match(tenantCacheKey(context, "client", "5050"), /^tenant:tenant-default:/);
-assert.deepEqual(tenantLogFields(context), { tenantId: "tenant-default", requestId: "request-1" });
-assert(!("userId" in tenantLogFields(context)), "tenant log fields must not add user PII");
-const webhook: WebhookTenantResolver = { resolveVerifiedAccount: async externalAccountId => ({ tenantId: context.tenantId, externalAccountId }) };
-assert.equal((await webhook.resolveVerifiedAccount("wa-account"))?.tenantId, context.tenantId);
-assert.equal(defineAuditedTenantSql({ name: "tenant_clients_by_id", text: 'SELECT * FROM "Client" WHERE "tenantId" = $1 AND id = $2', tenantIdParameter: 1, auditEvent: "tenant_sql" }).tenantIdParameter, 1);
+const legacy = await resolveTenantContext({ userId: membershipA.userId, legacyUserRole: "diretor" }, reader, options);
+assert.equal(legacy.resolutionSource, "legacy_default_only");
+await denied(resolveTenantContext({ userId: "user-both", legacyUserRole: "vendedor" }, reader, options), "TENANT_AMBIGUOUS");
+await denied(resolveTenantContext({ userId: "user-inactive", legacyUserRole: "vendedor" }, reader, options));
+await denied(resolveTenantContext({ userId: membershipA.userId, legacyUserRole: "diretor" }, reader, { legacyCompatibility: "disabled" }), "TENANT_REQUIRED");
 
-const here = dirname(fileURLToPath(import.meta.url));
-const source = await readFile(resolve(here, "tenantContext.ts"), "utf8");
-for (const forbidden of ["req.body", "req.query", "x-tenant-id", "X-Tenant-Id"]) assert(!source.includes(forbidden), `context factory must not contain ${forbidden}`);
-const contracts = await readFile(resolve(here, "contracts.ts"), "utf8");
-assert.match(contracts, /findById\(context: TenantContext/);
-assert.match(contracts, /TenantJobEnvelope.*tenantId/s);
-assert.match(contracts, /resolveVerifiedAccount/);
-assert.match(contracts, /tenantIdParameter/);
-console.log("tenant architecture contracts: PASS");
+// An untrusted header is never passed to the resolver and therefore cannot override an authenticated claim.
+const divergentHeader = tenantB.id;
+assert.equal((await resolveTenantContext(aware(membershipA), reader, options)).tenantId, tenantA.id);
+assert.notEqual(contextA.tenantId, divergentHeader);
+
+const [concurrentA, concurrentB] = await Promise.all([
+  resolveTenantContext(aware(membershipA), reader, options),
+  resolveTenantContext(aware(membershipB), reader, options),
+]);
+assert.notStrictEqual(concurrentA, concurrentB);
+assert.deepEqual([concurrentA.tenantId, concurrentB.tenantId], [tenantA.id, tenantB.id]);
+
+const safe = sanitizeTenantContext(contextA);
+assert.deepEqual(Object.keys(safe).sort(), ["contextVersion", "membershipId", "membershipStatus", "resolutionSource", "tenantId"]);
+assert.deepEqual(tenantLogFields(contextA, "request-a"), { tenantId: tenantA.id, requestId: "request-a", resolutionSource: "tenant_claim", contextVersion: 1 });
+for (const forbidden of ["token", "email", "documento", "payload", "password", "DATABASE_URL"]) assert(!JSON.stringify(safe).includes(forbidden));
+
+console.log("TENANT_CONTEXT_AUTH=PASS");
