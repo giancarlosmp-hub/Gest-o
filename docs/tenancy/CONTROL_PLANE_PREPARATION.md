@@ -1,8 +1,22 @@
 # Preparação do control plane default-only
 
-> **Estado reconciliado:** a PR #773 foi encerrada sem merge e a PR #774 está **🟡 Merge** no SHA
+## Estado operacional certificado em 08/08/2026
+
+Com base na evidência produtiva fornecida para
+`36be802887a005431dc5e1d9f4f7129d2145f102`, a migration está aplicada, o único tenant
+`tenant-default-v1` foi criado e 8 memberships foram reconciliadas com **PASS**, zero tenant
+inesperado, zero ausência, orfandade ou duplicidade. O hash final coincidiu com o hash esperado do
+dry-run. As autoridades temporárias e regras HBA foram removidas (`TEMP_ROLE_COUNT=0` e
+`TEMP_HBA_COUNT=0`). O runtime permanece `TENANCY_MODE=disabled`; isso não realiza cutover, não cria
+segundo tenant e não ativa Multiempresa.
+
+Dos 8 Users, 3 tinham `isActive=false`; a preparação preservou esse atributo e, conforme o contrato
+implementado, criou `Membership.status=active` para todos os 8. A distinção é comportamento
+explícito desta execução, não equivalência entre atividade do User e status da membership.
+
+> **Estado histórico anterior à execução:** a PR #773 foi encerrada sem merge e a PR #774 está **🟡 Merge** no SHA
 > `57cb0b6`. O procedimento canônico está no [Brief OP-EXEC](../sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md).
-> Esta entrega permanece **🔵 PR**; nenhuma execução real é autorizada. O apply DML continua
+> Naquele momento, a entrega permanecia **🔵 PR**; nenhuma execução real era autorizada. O apply DML continuava
 > bloqueado até existir credencial temporária aprovada e evidência da janela.
 
 ## Contrato

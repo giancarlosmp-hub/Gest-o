@@ -1,6 +1,26 @@
-# CONTRATO VIGENTE DE PRODUÇÃO — OP-EXEC (07/08/2026)
+# ENCERRAMENTO OPERACIONAL — OP-EXEC (08/08/2026)
 
-> **Canônico e prevalente sobre as seções históricas abaixo.** Produção deve usar
+No SHA `36be802887a005431dc5e1d9f4f7129d2145f102`, a evidência operacional fornecida comprova a
+conclusão do control plane default-only. Esta seção registra resultados; não é autorização nem
+comando para nova execução.
+
+- [x] schema preview;
+- [x] schema apply da migration `20260802120000_tenancy_control_plane` (`APPLIED_ONCE`);
+- [x] validação posterior (`ALREADY_APPLIED`, sem reaplicação; managed diff 0 bytes);
+- [x] dry-run do tenant default sem DML;
+- [x] revisão humana (Gate Humano 2);
+- [x] tenant apply: `tenant-default-v1` e 8 memberships;
+- [x] reconciliação PASS, zero tenant inesperado, órfã ou duplicidade;
+- [x] remoção das autoridades temporárias, credenciais e HBA (`TEMP_ROLE_COUNT=0`,
+  `TEMP_HBA_COUNT=0`).
+
+O runtime continua `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. Não houve cutover e
+Multiempresa continua 🔴. **Próxima etapa futura:** avaliar o gate documental e humano para a
+Sprint 1.0B.2; este runbook não autoriza nem fornece comandos de cutover.
+
+# HISTÓRICO — CONTRATO DE PRODUÇÃO OP-EXEC (07/08/2026)
+
+> **Contrato histórico preservado.** Produção deve usar
 > `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. O bootstrap da API não executa
 > `prisma db push`, seed, sequence setup ou qualquer DDL/DML de preparação. Schema só muda pelo
 > fluxo administrativo versionado do [Brief OP-EXEC](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md),

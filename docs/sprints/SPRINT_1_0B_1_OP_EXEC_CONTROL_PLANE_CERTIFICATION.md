@@ -1,5 +1,27 @@
 # Sprint 1.0B.1-OP-EXEC — certificação do control plane default-only
 
+## Encerramento operacional documentado (08/08/2026)
+
+A evidência operacional fornecida para o SHA
+`36be802887a005431dc5e1d9f4f7129d2145f102` certifica a Sprint como **OPERACIONALMENTE
+CONCLUÍDA**. A migration ficou `PASS/APPLIED_ONCE` e foi depois revalidada como
+`PASS/ALREADY_APPLIED`, sem reaplicação; `Tenant`/`TenantMembership` estão presentes e o managed
+post-diff tem 0 bytes. O dry-run foi read-only, planejou 1 tenant e 8 memberships e preservou as
+contagens 8/0/0. Após o Gate Humano 2, o apply criou somente `tenant-default-v1` e 8 memberships; a
+reconciliação retornou PASS, hash final igual ao esperado, zero tenant inesperado, ausência, órfã
+ou duplicidade.
+
+As duas autoridades temporárias e suas regras HBA foram removidas; `TEMP_ROLE_COUNT=0` e
+`TEMP_HBA_COUNT=0`. O runtime continuou `DATABASE_SCHEMA_MODE=external` e
+`TENANCY_MODE=disabled`. Não houve cutover, segundo tenant ou ativação multiempresa. Dos 8 Users,
+3 tinham `isActive=false`; esse estado foi preservado, enquanto a implementação atual criou as 8
+memberships com status `active`.
+
+`READY_FOR_1_0B_2 = NO`: embora os gates operacionais do control plane/default tenham sido
+satisfeitos, o próprio critério desta Sprint ainda exige certificação integrada/fases completas,
+resolução dos bloqueadores aplicáveis e nova aprovação do Comitê para propor a etapa seguinte.
+Esta certificação documental não inicia a 1.0B.2.
+
 ## Contexto e estado inicial
 
 O histórico local inicia em `57cb0b6da02342c5243e4e4aa6857f3ee870d377`, merge da PR #774.

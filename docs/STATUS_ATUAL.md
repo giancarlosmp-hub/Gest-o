@@ -1,4 +1,29 @@
-# 🔵 PR — hotfix do preview do control plane (07/08/2026)
+# 🟢 Sprint 1.0B.1-OP-EXEC — operacionalmente concluída (08/08/2026)
+
+> Esta certificação documental usa a evidência operacional produtiva fornecida para o SHA
+> `36be802887a005431dc5e1d9f4f7129d2145f102`; o Git, isoladamente, não comprova produção.
+
+| Controle | Estado comprovado |
+|---|---|
+| Migration `20260802120000_tenancy_control_plane` | **APLICADA**: `PASS/APPLIED_ONCE`; revalidação posterior `PASS/ALREADY_APPLIED`, sem reaplicação |
+| Control Plane | **PRESENTE**; `Tenant` e `TenantMembership`; pós-diff gerenciado com 0 bytes e oito `incident_*` preservadas |
+| Tenant default | **PREPARADO**: somente `tenant-default-v1` (`default-v1`, `active`), zero tenant inesperado |
+| Memberships | **8 reconciliadas** para 8 Users distintos e um tenant; zero ausência, órfã, duplicidade ou referência inválida |
+| Reconciliação | **PASS**; hash final igual ao hash esperado do dry-run |
+| Runtime | `DATABASE_SCHEMA_MODE=external`; `TENANCY_MODE=disabled` |
+| Cutover | **NÃO REALIZADO** |
+| Autoridades temporárias | Removidas; `TEMP_ROLE_COUNT=0` e `TEMP_HBA_COUNT=0` |
+| Multiempresa | 🔴 **não ativo**; a presença do control plane default-only não comprova isolamento multiempresa |
+| Sprint 1.0B.2 | **NÃO INICIADA**; `READY_FOR_1_0B_2 = NO` até os gates documentados remanescentes |
+
+O dry-run leu 8 Users (2 `diretor`, 1 `gerente`, 5 `vendedor`; 5 ativos e 3 inativos), planejou
+um Tenant e 8 memberships e terminou sem DML: as contagens permaneceram 8/0/0. O apply autorizado
+preservou `User.isActive`, inclusive os 3 Users inativos, e criou `Membership.status=active` para
+todos os 8 Users, comportamento explícito da implementação atual. As evidências sanitizadas foram
+preservadas com owner `root:root` e mode `600`; credenciais, PII e payload empresarial não integram
+esta documentação.
+
+# Histórico — hotfix do preview do control plane (07/08/2026)
 
 O Gate Humano 1 também encontrou preventivamente, na revisão
 `a4002d90f8108699f5fcdad41c78996d017cf050`, que o pós-apply não usava o filtro gerenciado em modo

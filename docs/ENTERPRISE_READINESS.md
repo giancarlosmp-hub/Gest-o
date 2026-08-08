@@ -126,3 +126,22 @@ permanece 🔴 e nenhuma outra classificação da matriz é alterada.
 | Identidade/autorização | 🟡 Parcialmente comprovado | memberships determinísticas e role mapping fechado | JWT/refresh/RBAC legado inalterados |
 | Multiempresa | 🔴 Crítico ou não conforme | somente compatibilidade default-only | nenhum isolamento dos models centrais ou segundo tenant |
 | Governança | 🟢 Comprovado | brief, runbook, confirmações por SHA e reconciliação sem PII | checks/apply/evidência operacional ainda exigidos |
+
+### Delta operacional da Sprint 1.0B.1-OP-EXEC (08/08/2026)
+
+Somente os campos afetados pela evidência operacional fornecida são atualizados. As classificações
+permanecem conservadoras: control plane default-only presente não equivale a isolamento multiempresa.
+
+| Dimensão | Classificação | Evidência comprovada | Risco/lacuna preservado |
+|---|---|---|---|
+| Banco | 🟡 Parcialmente comprovado | migration aplicada uma vez, revalidação sem reaplicação, objetos presentes, managed diff 0 bytes e `incident_*` preservadas | restore isolado, ledger histórico e revisão ampla de raw SQL continuam pendentes |
+| Deploy/rollback | 🟡 Parcialmente comprovado | execução de schema/preparação por SHA e backup/preflight PASS; nenhum cutover nesta Sprint | rollback pós-cutover e convergência pública por SHA continuam não comprovados |
+| Identidade/autorização | 🟡 Parcialmente comprovado | um tenant default e 8 memberships reconciliadas; autoridades read-only/DML separadas e removidas | JWT, refresh, RBAC e data access legados continuam sem boundary tenant ponta a ponta |
+| Multiempresa | 🔴 Crítico ou não conforme | somente control plane default-only; exatamente um tenant e zero inesperado | nenhum segundo tenant, isolamento A×B, tenantId central, RLS ou cutover; Multiempresa não ativo |
+| Operação | 🟡 Parcialmente comprovado | preview, apply, dry-run, gate humano, preparação, reconciliação e cleanup concluídos; evidências mode 600 | suporte, SLA, on-call e continuidade de negócio permanecem não comprovados |
+| Governança | 🟢 Comprovado | separação de autoridades, evidência sem PII/segredos e cleanup auditável | gate e aprovação específicos da 1.0B.2 ainda necessários |
+
+**Gate:** `READY_FOR_1_0B_2 = NO`. O control plane, tenant default, reconciliação, runtime
+disabled, evidências e cleanup satisfazem a parcela operacional da 1.0B.1. Permanecem, contudo, os
+gates documentados de certificação integrada/fases completas, resolução dos bloqueadores aplicáveis
+e nova aprovação do Comitê antes de propor a 1.0B.2. Esta avaliação não inicia implementação.

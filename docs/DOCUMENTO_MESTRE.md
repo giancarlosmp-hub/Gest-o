@@ -35,23 +35,78 @@
 
 ## ADENDO VIGENTE — SPRINT 1.0B.1-OP-EXEC
 
-A PR #774 está **🟡 Merge** em `main` local (`57cb0b6`), sem evidência de deploy ou produção. A
-entrega OP-EXEC está **🔵 PR** e define o único caminho vigente para uma futura janela autorizada no
-[Brief de certificação](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md). Produção usa
-`DATABASE_SCHEMA_MODE=external`: bootstrap não executa `db push`, seed ou DDL; schema e tenant
-default têm preview/dry-run, revisões humanas e autorizações administrativas separadas.
-`TENANCY_MODE=disabled` permanece obrigatório. Seções antigas que descrevem `db push` no bootstrap
-são registro histórico, não instrução operacional atual. A revisão de produção comprovada permanece
-`a08a626`; Git não a altera.
+A execução operacional do control plane default-only foi concluída no SHA
+`36be802887a005431dc5e1d9f4f7129d2145f102`, conforme evidência produtiva fornecida e preservada;
+esta conclusão não foi inferida do Git. A migration `20260802120000_tenancy_control_plane` ficou
+`APPLIED_ONCE` e depois foi revalidada como `ALREADY_APPLIED`, sem reaplicação. O tenant
+`tenant-default-v1` e 8 memberships foram preparados e reconciliados com PASS e hash coincidente.
+As autoridades temporárias e regras HBA foram removidas. O runtime permaneceu
+`DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`; não houve cutover, segundo tenant ou
+ativação multiempresa. A Sprint 1.0B.2 não foi iniciada.
 
-**Lição operacional — transporte de stdin.** Problema: um `docker exec` sem `-i` atendia um
-`psql -f -` dependente de stdin. Efeito: o SQL não chegou ao `psql`, o catálogo ficou vazio e um
-estado existente foi interpretado incorretamente como `ABSENT_COMPATIBLE`. O diagnóstico comparou o
-artefato do preview (0 bytes) à execução direta com `docker exec -i` (43 linhas, 3190 bytes e
-validator PASS). A correção conecta stdin explicitamente; testes distinguem zero objetos legítimo de
-falha de execução/transporte. Regra preventiva: todo `docker exec ... psql -f -`, heredoc ou
-redirecionamento de stdin para comando no container deve comprovar transporte com `-i`. O hotfix só
-será considerado comprovado após testes e CI verdes.
+### Lições operacionais comprovadas
+
+1. **`docker exec` + stdin.** **PROBLEMA:** faltava `-i` em caminhos com `psql -f -`, heredoc ou
+   stdin. **EFEITO:** SQL não chegava ao container, observado na fixture PostgreSQL e no catálogo do
+   preview. **DIAGNÓSTICO:** execução direta com `-i` produziu o catálogo esperado. **CORREÇÃO:**
+   conectar stdin explicitamente. **PREVENÇÃO:** exigir `-i` e regressão em todo caminho dependente
+   de stdin.
+2. **`process.argv`.** **PROBLEMA:** o parser processava `process.argv` inteiro. **EFEITO:** `node` e
+   o entrypoint viravam argumentos inválidos. **DIAGNÓSTICO:** a falha incluía os dois argumentos do
+   processo. **CORREÇÃO:** `process.argv.slice(2)`. **PREVENÇÃO:** parser puro e testes unitários de
+   aceitação/rejeição.
+3. **Ownership de bind mount.** **PROBLEMA:** o container gravava evidência com UID diferente do
+   runner. **EFEITO:** o host não lia `dry-run-result.tsv`. **DIAGNÓSTICO:** owner do artefato
+   divergia. **CORREÇÃO:** `--user HOST_UID:HOST_GID`. **PREVENÇÃO:** validar owner e mode.
+4. **Idempotência e evidência.** **PROBLEMA:** a segunda tentativa exigia artefatos de dry-run e
+   removia `result.tsv`. **EFEITO:** o contrato idempotente invalidava evidência PASS anterior.
+   **DIAGNÓSTICO:** attempt-2 dependia indevidamente de attempt-1. **CORREÇÃO:** contratos próprios
+   para attempt-1/attempt-2 e PASS anterior imutável. **PREVENÇÃO:** testar reaplicação e
+   imutabilidade separadamente.
+5. **Dependência `rg`.** **PROBLEMA:** o harness pressupunha ripgrep. **EFEITO:** runner sem a
+   ferramenta falhava. **DIAGNÓSTICO:** dependência ambiental não declarada. **CORREÇÃO:** `grep`
+   POSIX/GNU disponível. **PREVENÇÃO:** não exigir ferramenta sem garanti-la no ambiente.
+6. **FK e `pg_constraint` `"char"`.** **PROBLEMA:** `confdeltype`/`confupdtype` internos causavam
+   ambiguidade na concatenação. **EFEITO:** consulta de validação falhava. **DIAGNÓSTICO:** tipos
+   internos incompatíveis. **CORREÇÃO:** casts explícitos e representação semântica canônica.
+   **PREVENÇÃO:** normalizar tipos internos antes de comparar/concatenar.
+7. **Validação de FK.** **PROBLEMA:** `pg_get_constraintdef` textual era autoridade frágil.
+   **EFEITO:** formatação podia causar falso resultado. **DIAGNÓSTICO:** texto não expressava contrato
+   estável. **CORREÇÃO:** validar `pg_constraint`, `conkey`/`confkey`, origem/destino, ações e
+   `validated`. **PREVENÇÃO:** preferir semântica de catálogo a texto renderizado.
+8. **TSV.** **PROBLEMA:** transporte do catálogo permitia interpretação ambígua. **EFEITO:** campos
+   podiam ser lidos incorretamente. **DIAGNÓSTICO:** formato do `psql` e aridade não estavam
+   fechados. **CORREÇÃO:** `--no-align`, `--tuples-only`, TAB explícito, pager off e parser de
+   exatamente quatro campos. **PREVENÇÃO:** validar framing e aridade.
+9. **`incident_*` no pre-diff.** **PROBLEMA:** oito `DROP TABLE` forenses conhecidos pareciam drift
+   destrutivo. **EFEITO:** preview bloqueava incorretamente. **DIAGNÓSTICO:** raw era tratado como
+   managed. **CORREÇÃO:** `schema-diff-filter.mjs` como autoridade. **PREVENÇÃO:** preservar raw e
+   decidir somente pelo managed diff filtrado.
+10. **`incident_*` no post-diff.** **PROBLEMA:** o mesmo ruído afetava o pós-apply. **EFEITO:** PASS
+    poderia ser negado após DDL válida. **DIAGNÓSTICO:** faltava o filtro no modo post.
+    **CORREÇÃO:** raw preservado e managed filtrado antes do PASS. **PREVENÇÃO:** aplicar a mesma
+    autoridade nos dois lados.
+11. **Separação de autoridades.** **PROBLEMA:** misturar autoridades amplia privilégio e auditoria.
+    **EFEITO:** runtime ou leitura poderiam ganhar escrita indevida. **DIAGNÓSTICO:** DDL, dry-run,
+    preparação e runtime têm necessidades distintas. **CORREÇÃO:** administrativa para DDL,
+    read-only para dry-run, DML temporária mínima para preparação e `gesto_app` para runtime.
+    **PREVENÇÃO:** nunca misturar essas autoridades.
+12. **`pg_hba.conf`.** **PROBLEMA:** criar role não garante conexão. **EFEITO:** grants corretos
+    ainda eram rejeitados; SSL estava off e a rede Docker só admitia `gesto_app`. **DIAGNÓSTICO:**
+    `pg_hba_file_rules` mostrou rejects. **CORREÇÃO:** regras temporárias específicas, depois
+    removidas. **PREVENÇÃO:** validar HBA antes de atribuir falha a Prisma/grants.
+13. **Connection limit.** **PROBLEMA:** `Promise.all` excedeu o limite 2 da role read-only.
+    **EFEITO:** `too many connections for role`. **DIAGNÓSTICO:** teste concorrente abriu conexões
+    demais. **CORREÇÃO:** teste sequencial/`connection_limit=1` no client. **PREVENÇÃO:** adaptar o
+    teste ao menor privilégio, sem ampliar a role.
+14. **`.env`/`source`.** **PROBLEMA:** URL com `&` era carregada como shell. **EFEITO:** caracteres
+    especiais eram interpretados como código. **DIAGNÓSTICO:** `source arquivo.env` violava a
+    fronteira dado/código. **CORREÇÃO:** ler com `sed`/`awk` ou parser de env. **PREVENÇÃO:** nunca
+    tratar segredo/configuração como código shell.
+15. **Falha de execução não é ausência.** **PROBLEMA:** catálogo vazio por falha de stdin parecia
+    zero objetos. **EFEITO:** falso `ABSENT_COMPATIBLE`. **DIAGNÓSTICO:** consulta direta provou os
+    objetos. **CORREÇÃO:** `CATALOG_QUERY_FAILED`. **PREVENÇÃO:** reservar `ABSENT_COMPATIBLE`
+    exclusivamente à ausência real comprovada.
 
 ## ADENDO DA SPRINT 0.5 — CERTIFICAÇÃO OPERACIONAL
 
