@@ -209,15 +209,21 @@ jobs:
             print_shadow_diagnostic() {
               echo "loginStatus=${LOGIN_HTTP_STATUS:-unavailable} loginExitCode=${LOGIN_CURL_EXIT:-unavailable} tokenExitCode=${TOKEN_EXTRACTION_EXIT:-unavailable}"
               for request in 1 2 3 4; do
-                request_id="${PROOF_PREFIX:-preview-shadow-unavailable}-${request}"
-                status="unavailable"; exit_code="unavailable"
+                request_id="unavailable"; status="unavailable"; exit_code="unavailable"; event_count="unavailable"
+                if [ -f "${RESULT_DIR}/${request}.request-id" ]; then request_id="$(cat "${RESULT_DIR}/${request}.request-id")"; fi
                 if [ -f "${RESULT_DIR}/${request}.status" ]; then status="$(cat "${RESULT_DIR}/${request}.status")"; fi
                 if [ -f "${RESULT_DIR}/${request}.exit" ]; then exit_code="$(cat "${RESULT_DIR}/${request}.exit")"; fi
-                echo "requestId=${request_id} status=${status} exitCode=${exit_code}"
+                if [ -f "${RESULT_DIR}/${request}.events" ]; then event_count="$(cat "${RESULT_DIR}/${request}.events")"; fi
+                echo "index=${request} requestId=${request_id} status=${status} exitCode=${exit_code} eventCount=${event_count}"
               done
               echo "MATCH_COUNT=${MATCH_COUNT:-0} MISMATCH_COUNT=${MISMATCH_COUNT:-0}"
               if [ -s "$SHADOW_LOG" ]; then
-                awk -v prefix="${PROOF_PREFIX:-preview-shadow-unavailable}" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix)' "$SHADOW_LOG"
+                for request in 1 2 3 4; do
+                  if [ -f "${RESULT_DIR}/${request}.request-id" ]; then
+                    returned_id="$(cat "${RESULT_DIR}/${request}.request-id")"
+                    awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id)' "$SHADOW_LOG"
+                  fi
+                done
               fi
             }
 
@@ -279,11 +285,9 @@ jobs:
             fi
 
             SHADOW_SINCE="$(date -u +%FT%TZ)"
-            PROOF_PREFIX="preview-shadow-${PR_NUMBER}-$(date +%s)-$$"
             PIDS=()
             for request in 1 2 3 4; do
-              request_id="${PROOF_PREFIX}-${request}"
-              curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "X-Request-Id: ${request_id}" \
+              curl -sS -D "${RESULT_DIR}/${request}.headers" -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" \
                 "http://127.0.0.1:${API_PORT}/clients" > "${RESULT_DIR}/${request}.status" &
               PIDS+=("$!")
             done
@@ -296,18 +300,36 @@ jobs:
             done
             echo "TENANT_READ_PREVIEW_REQUESTS=WAITED"
 
+            declare -A SEEN_REQUEST_IDS=()
+            for request in 1 2 3 4; do
+              header_count="$(awk 'tolower($1)=="x-request-id:"{n++} END{print n+0}' "${RESULT_DIR}/${request}.headers")"
+              if [ "$header_count" != "1" ]; then fail_shadow_proof response_request_id; fi
+              returned_id="$(awk 'tolower($1)=="x-request-id:"{gsub(/\r/,"",$2); print $2}' "${RESULT_DIR}/${request}.headers")"
+              if [[ ! "$returned_id" =~ ^req-[0-9a-f]{8}$ ]]; then fail_shadow_proof response_request_id; fi
+              if [ "${SEEN_REQUEST_IDS[$returned_id]+present}" = "present" ]; then fail_shadow_proof response_request_id; fi
+              SEEN_REQUEST_IDS["$returned_id"]=1
+              printf '%s\n' "$returned_id" > "${RESULT_DIR}/${request}.request-id"
+            done
+            if [ "${#SEEN_REQUEST_IDS[@]}" != "4" ]; then fail_shadow_proof response_request_id; fi
+            echo "TENANT_READ_PREVIEW_REQUEST_IDS=ACQUIRED"
+
             if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs --since "$SHADOW_SINCE" api > "$SHADOW_LOG"; then
               fail_shadow_proof requests_or_events
             fi
-            MATCH_COUNT="$(awk -v prefix="$PROOF_PREFIX" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
-            MISMATCH_COUNT="$(awk -v prefix="$PROOF_PREFIX" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,"\"result\":\"MISMATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
+            MATCH_COUNT=0
+            MISMATCH_COUNT=0
             PROOF_FAILED=false
             for request in 1 2 3 4; do
-              request_id="${PROOF_PREFIX}-${request}"
+              returned_id="$(cat "${RESULT_DIR}/${request}.request-id")"
               status="$(cat "${RESULT_DIR}/${request}.status")"
               exit_code="$(cat "${RESULT_DIR}/${request}.exit")"
-              event_count="$(awk -v prefix="$PROOF_PREFIX" -v id="\"requestId\":\"${request_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,id) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
-              if [ "$status" != "200" ] || [ "$exit_code" != "0" ] || [ "$event_count" != "1" ]; then PROOF_FAILED=true; fi
+              event_count="$(awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id){n++} END{print n+0}' "$SHADOW_LOG")"
+              request_match_count="$(awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
+              request_mismatch_count="$(awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id) && index($0,"\"result\":\"MISMATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
+              printf '%s\n' "$event_count" > "${RESULT_DIR}/${request}.events"
+              MATCH_COUNT=$((MATCH_COUNT + request_match_count))
+              MISMATCH_COUNT=$((MISMATCH_COUNT + request_mismatch_count))
+              if [ "$status" != "200" ] || [ "$exit_code" != "0" ] || [ "$event_count" != "1" ] || [ "$request_match_count" != "1" ] || [ "$request_mismatch_count" != "0" ]; then PROOF_FAILED=true; fi
             done
             if [ "$MATCH_COUNT" != "4" ] || [ "$MISMATCH_COUNT" != "0" ]; then PROOF_FAILED=true; fi
             if [ "$PROOF_FAILED" = "true" ]; then fail_shadow_proof requests_or_events; fi
