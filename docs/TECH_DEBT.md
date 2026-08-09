@@ -150,7 +150,11 @@ Os adapters 1.0B.2-G não estão no runtime. AgendaStop e Activity por Agenda ai
 
 ### TD-TENANCY-READ-PILOT — certificar dataset de preview
 
-**Aberto.** O seed de preview ainda não prova `tenantId`/memberships coerentes para habilitar o shadow de Client. Manter `TENANT_READ_PILOT_ENABLED=false` fora dos testes até preparação e evidência A×B no preview isolado.
+**Aberto.** O seed de preview prova `tenantId`/memberships sintéticos desde 1.0B.2-J, mas isso não prova estabilidade produtiva nem encerra o piloto. Manter `TENANT_READ_PILOT_ENABLED=false` fora do preview/testes e exigir evidência A×B isolada.
 
 ### Observação prolongada do shadow preview
 **Aberto.** O dataset sintético e o gate MATCH estão certificados na 1.0B.2-J, mas estabilidade prolongada ainda não autoriza runtime tenant-aware, backfill ou produção.
+
+### Progresso 1.0B.2-K — observação bounded do shadow
+
+O gate proposto cobre 10 ciclos/40 reads sintéticos, correlação interna, isolamento de logs e rerun com volume reutilizado. TD-TENANCY-READ-PILOT permanece aberto: a prova é curta, não produtiva e ainda `NOT_PROVEN` até checks reais verdes. Rate limit, timeout, atraso/retenção de logs e estabilidade temporal produtiva seguem como dívida; não há autorização de runtime, backfill ou cutover.

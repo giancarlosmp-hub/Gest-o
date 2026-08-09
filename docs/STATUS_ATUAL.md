@@ -1,3 +1,7 @@
+# 🔵 Sprint 1.0B.2-K — estabilidade sintética do shadow preview (09/08/2026)
+
+A janela bounded proposta executa 10 ciclos × 4 GET `/clients`, exige 40 HTTP 200/MATCH, IDs internos únicos e zero MISMATCH, inclusive em rerun com volume reutilizado. É evidência sintética curta, não estabilidade produtiva; rollback restaura `disabled/false` e recria somente a API. Até Docker Compose CI e Preview Deploy reais verdes: `READY_FOR_1_0B_2_K_REVIEW = NO` e `TENANT_READ_PREVIEW_STABILITY = NOT_PROVEN`. Produção não foi acessada nem autorizada. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).
+
 # 🔵 Sprint 1.0B.2-H — descendentes de Agenda isolados (09/08/2026)
 
 PR #789 integrada e verde. AgendaStop e Activity somente-Agenda agora têm adapters de prova fail-closed, A×B e gate CI, sem integração runtime. Multi-parent, órfãos, NULL e cross-tenant negam; FKs, produção e `TENANCY_MODE=disabled` permanecem inalterados.

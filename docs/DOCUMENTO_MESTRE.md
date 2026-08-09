@@ -1,3 +1,7 @@
+# Sprint 1.0B.2-K — observação bounded do shadow preview
+
+O contrato adiciona 40 amostras sintéticas (10 ciclos de quatro GET `/clients` concorrentes), com correlação exclusiva por IDs internos retornados, janela de logs limitada e rollback `disabled/false`. Rerun com volume reutilizado não pode contar eventos antigos nem alterar cardinalidades. A amostra curta não comprova estabilidade temporal/produtiva; rate limit, timeout e atraso de logs permanecem riscos. Sem checks reais verdes: `READY_FOR_1_0B_2_K_REVIEW = NO`, `TENANT_READ_PREVIEW_STABILITY = NOT_PROVEN`; sem produção, mutation, backfill ou cutover. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).
+
 # Sprint 1.0B.2-H — descendentes de Agenda
 
 Após a PR #789 verde, AgendaStop e o canal restrito Activity somente-Agenda possuem prova isolada tenant-scoped. Multi-parent não foi liberado; adapters seguem fora do runtime, sem DDL ou produção.

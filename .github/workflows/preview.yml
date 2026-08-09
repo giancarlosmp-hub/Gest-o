@@ -191,8 +191,18 @@ jobs:
             LOGIN_FILE="$(mktemp)"; LOGIN_HTTP_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"; RESULT_DIR="$(mktemp -d)"
             PILOT_ACTIVATED=false
             ROLLBACK_ATTEMPTED=false
+            STABILITY_CYCLES=10
+            REQUESTS_PER_CYCLE=4
+            PLANNED_REQUESTS=$((STABILITY_CYCLES * REQUESTS_PER_CYCLE))
+            COMPLETED_CYCLES=0
+            COMPLETED_REQUESTS=0
+            HTTP_200_COUNT=0
             MATCH_COUNT=0
             MISMATCH_COUNT=0
+            MISSING_ID_COUNT=0
+            DUPLICATE_ID_COUNT=0
+            STABILITY_RUN_ID="stability-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+            STABILITY_STARTED_EPOCH="$(date +%s)"
 
             rollback_preview_pilot() {
               ROLLBACK_ATTEMPTED=true
@@ -208,17 +218,19 @@ jobs:
 
             print_shadow_diagnostic() {
               echo "loginStatus=${LOGIN_HTTP_STATUS:-unavailable} loginExitCode=${LOGIN_CURL_EXIT:-unavailable} tokenExitCode=${TOKEN_EXTRACTION_EXIT:-unavailable}"
-              for request in 1 2 3 4; do
+              for request in $(seq 1 "$PLANNED_REQUESTS"); do
+                cycle=$(( (request - 1) / REQUESTS_PER_CYCLE + 1 ))
+                index=$(( (request - 1) % REQUESTS_PER_CYCLE + 1 ))
                 request_id="unavailable"; status="unavailable"; exit_code="unavailable"; event_count="unavailable"
                 if [ -f "${RESULT_DIR}/${request}.request-id" ]; then request_id="$(cat "${RESULT_DIR}/${request}.request-id")"; fi
                 if [ -f "${RESULT_DIR}/${request}.status" ]; then status="$(cat "${RESULT_DIR}/${request}.status")"; fi
                 if [ -f "${RESULT_DIR}/${request}.exit" ]; then exit_code="$(cat "${RESULT_DIR}/${request}.exit")"; fi
                 if [ -f "${RESULT_DIR}/${request}.events" ]; then event_count="$(cat "${RESULT_DIR}/${request}.events")"; fi
-                echo "index=${request} requestId=${request_id} status=${status} exitCode=${exit_code} eventCount=${event_count}"
+                echo "cycle=${cycle} index=${index} requestId=${request_id} status=${status} exitCode=${exit_code} eventCount=${event_count}"
               done
               echo "MATCH_COUNT=${MATCH_COUNT:-0} MISMATCH_COUNT=${MISMATCH_COUNT:-0}"
               if [ -s "$SHADOW_LOG" ]; then
-                for request in 1 2 3 4; do
+                for request in $(seq 1 "$PLANNED_REQUESTS"); do
                   if [ -f "${RESULT_DIR}/${request}.request-id" ]; then
                     returned_id="$(cat "${RESULT_DIR}/${request}.request-id")"
                     awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id)' "$SHADOW_LOG"
@@ -229,8 +241,10 @@ jobs:
 
             fail_shadow_proof() {
               stage="$1"
+              failed_duration=$(( $(date +%s) - STABILITY_STARTED_EPOCH ))
               echo "TENANT_READ_PREVIEW_FAILURE_STAGE=${stage}"
               print_shadow_diagnostic
+              echo "TENANT_READ_PREVIEW_STABILITY={\"runId\":\"${STABILITY_RUN_ID}\",\"cyclesPlanned\":${STABILITY_CYCLES},\"cyclesCompleted\":${COMPLETED_CYCLES},\"requestsPlanned\":${PLANNED_REQUESTS},\"requestsCompleted\":${COMPLETED_REQUESTS},\"http200Total\":${HTTP_200_COUNT},\"matchTotal\":${MATCH_COUNT},\"mismatchTotal\":${MISMATCH_COUNT},\"missingIds\":${MISSING_ID_COUNT},\"duplicateIds\":${DUPLICATE_ID_COUNT},\"durationSeconds\":${failed_duration},\"result\":\"FAIL\"}"
               if ! rollback_preview_pilot; then
                 echo "TENANT_READ_PREVIEW_FAILURE_STAGE=${stage}_rollback"
               fi
@@ -285,41 +299,66 @@ jobs:
             fi
 
             SHADOW_SINCE="$(date -u +%FT%TZ)"
-            PIDS=()
-            for request in 1 2 3 4; do
-              curl -sS -D "${RESULT_DIR}/${request}.headers" -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" \
-                "http://127.0.0.1:${API_PORT}/clients" > "${RESULT_DIR}/${request}.status" &
-              PIDS+=("$!")
-            done
-            for request in 1 2 3 4; do
-              if wait "${PIDS[$((request - 1))]}"; then
-                printf '0\n' > "${RESULT_DIR}/${request}.exit"
-              else
-                printf '%s\n' "$?" > "${RESULT_DIR}/${request}.exit"
-              fi
-            done
-            echo "TENANT_READ_PREVIEW_REQUESTS=WAITED"
-
             declare -A SEEN_REQUEST_IDS=()
-            for request in 1 2 3 4; do
-              header_count="$(awk 'tolower($1)=="x-request-id:"{n++} END{print n+0}' "${RESULT_DIR}/${request}.headers")"
-              if [ "$header_count" != "1" ]; then fail_shadow_proof response_request_id; fi
-              returned_id="$(awk 'tolower($1)=="x-request-id:"{gsub(/\r/,"",$2); print $2}' "${RESULT_DIR}/${request}.headers")"
-              if [[ ! "$returned_id" =~ ^req-[0-9a-f]{8}$ ]]; then fail_shadow_proof response_request_id; fi
-              if [ "${SEEN_REQUEST_IDS[$returned_id]+present}" = "present" ]; then fail_shadow_proof response_request_id; fi
-              SEEN_REQUEST_IDS["$returned_id"]=1
-              printf '%s\n' "$returned_id" > "${RESULT_DIR}/${request}.request-id"
+            for cycle in $(seq 1 "$STABILITY_CYCLES"); do
+              PIDS=()
+              for index in $(seq 1 "$REQUESTS_PER_CYCLE"); do
+                request=$(( (cycle - 1) * REQUESTS_PER_CYCLE + index ))
+                curl --max-time 15 -sS -D "${RESULT_DIR}/${request}.headers" -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer ${TOKEN}" "http://127.0.0.1:${API_PORT}/clients" \
+                  > "${RESULT_DIR}/${request}.status" &
+                PIDS+=("$!")
+              done
+              for index in $(seq 1 "$REQUESTS_PER_CYCLE"); do
+                request=$(( (cycle - 1) * REQUESTS_PER_CYCLE + index ))
+                if wait "${PIDS[$((index - 1))]}"; then
+                  printf '0\n' > "${RESULT_DIR}/${request}.exit"
+                else
+                  printf '%s\n' "$?" > "${RESULT_DIR}/${request}.exit"
+                fi
+                status="$(cat "${RESULT_DIR}/${request}.status")"
+                exit_code="$(cat "${RESULT_DIR}/${request}.exit")"
+                if [ "$status" != "200" ] || [ "$exit_code" != "0" ]; then fail_shadow_proof request; fi
+                HTTP_200_COUNT=$((HTTP_200_COUNT + 1))
+                COMPLETED_REQUESTS=$((COMPLETED_REQUESTS + 1))
+
+                header_count="$(awk 'tolower($1)=="x-request-id:"{n++} END{print n+0}' "${RESULT_DIR}/${request}.headers")"
+                if [ "$header_count" != "1" ]; then MISSING_ID_COUNT=$((MISSING_ID_COUNT + 1)); fail_shadow_proof response_request_id; fi
+                returned_id="$(awk 'tolower($1)=="x-request-id:"{gsub(/\r/,"",$2); print $2}' "${RESULT_DIR}/${request}.headers")"
+                if [[ ! "$returned_id" =~ ^req-[0-9a-f]{8}$ ]]; then MISSING_ID_COUNT=$((MISSING_ID_COUNT + 1)); fail_shadow_proof response_request_id; fi
+                if [ "${SEEN_REQUEST_IDS[$returned_id]+present}" = "present" ]; then DUPLICATE_ID_COUNT=$((DUPLICATE_ID_COUNT + 1)); fail_shadow_proof response_request_id; fi
+                SEEN_REQUEST_IDS["$returned_id"]=1
+                printf '%s\n' "$returned_id" > "${RESULT_DIR}/${request}.request-id"
+              done
+              COMPLETED_CYCLES=$((COMPLETED_CYCLES + 1))
             done
-            if [ "${#SEEN_REQUEST_IDS[@]}" != "4" ]; then fail_shadow_proof response_request_id; fi
+            if [ "${#SEEN_REQUEST_IDS[@]}" != "$PLANNED_REQUESTS" ]; then fail_shadow_proof response_request_id; fi
+            echo "TENANT_READ_PREVIEW_REQUESTS=WAITED"
             echo "TENANT_READ_PREVIEW_REQUEST_IDS=ACQUIRED"
 
-            if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs --since "$SHADOW_SINCE" api > "$SHADOW_LOG"; then
-              fail_shadow_proof requests_or_events
-            fi
-            MATCH_COUNT=0
-            MISMATCH_COUNT=0
+            # Bound the evidence to this run's timestamps and returned internal IDs. A few short
+            # retries tolerate container log delivery delay without turning preview into a long soak.
+            SHADOW_UNTIL="$(date -u -d '+1 second' +%FT%TZ)"
+            EVENTS_COMPLETE=false
+            for log_attempt in 1 2 3 4 5; do
+              if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml \
+                logs --since "$SHADOW_SINCE" --until "$SHADOW_UNTIL" api > "$SHADOW_LOG"; then
+                fail_shadow_proof requests_or_events
+              fi
+              observed=0
+              for request in $(seq 1 "$PLANNED_REQUESTS"); do
+                returned_id="$(cat "${RESULT_DIR}/${request}.request-id")"
+                event_count="$(awk -v id="\"requestId\":\"${returned_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id){n++} END{print n+0}' "$SHADOW_LOG")"
+                observed=$((observed + event_count))
+              done
+              if [ "$observed" = "$PLANNED_REQUESTS" ]; then EVENTS_COMPLETE=true; break; fi
+              sleep 1
+              SHADOW_UNTIL="$(date -u -d '+1 second' +%FT%TZ)"
+            done
+            if [ "$EVENTS_COMPLETE" != "true" ]; then fail_shadow_proof requests_or_events; fi
+
             PROOF_FAILED=false
-            for request in 1 2 3 4; do
+            for request in $(seq 1 "$PLANNED_REQUESTS"); do
               returned_id="$(cat "${RESULT_DIR}/${request}.request-id")"
               status="$(cat "${RESULT_DIR}/${request}.status")"
               exit_code="$(cat "${RESULT_DIR}/${request}.exit")"
@@ -331,10 +370,17 @@ jobs:
               MISMATCH_COUNT=$((MISMATCH_COUNT + request_mismatch_count))
               if [ "$status" != "200" ] || [ "$exit_code" != "0" ] || [ "$event_count" != "1" ] || [ "$request_match_count" != "1" ] || [ "$request_mismatch_count" != "0" ]; then PROOF_FAILED=true; fi
             done
-            if [ "$MATCH_COUNT" != "4" ] || [ "$MISMATCH_COUNT" != "0" ]; then PROOF_FAILED=true; fi
+            if [ "$MATCH_COUNT" != "$PLANNED_REQUESTS" ] || [ "$MISMATCH_COUNT" != "0" ]; then PROOF_FAILED=true; fi
             if [ "$PROOF_FAILED" = "true" ]; then fail_shadow_proof requests_or_events; fi
-            echo "TENANT_READ_PREVIEW_HTTP=200,200,200,200"
+            STABILITY_DURATION_SECONDS=$(( $(date +%s) - STABILITY_STARTED_EPOCH ))
+            echo "TENANT_READ_PREVIEW_HTTP=200x${HTTP_200_COUNT}"
             echo "TENANT_READ_PREVIEW_SHADOW=MATCH"
+            echo "TENANT_READ_PREVIEW_STABILITY_CYCLES=10"
+            echo "TENANT_READ_PREVIEW_STABILITY_REQUESTS=40"
+            echo "TENANT_READ_PREVIEW_STABILITY_MATCH=40"
+            echo "TENANT_READ_PREVIEW_STABILITY_MISMATCH=0"
+            echo "TENANT_READ_PREVIEW_STABILITY={\"runId\":\"${STABILITY_RUN_ID}\",\"cyclesPlanned\":${STABILITY_CYCLES},\"cyclesCompleted\":${COMPLETED_CYCLES},\"requestsPlanned\":${PLANNED_REQUESTS},\"requestsCompleted\":${COMPLETED_REQUESTS},\"http200Total\":${HTTP_200_COUNT},\"matchTotal\":${MATCH_COUNT},\"mismatchTotal\":${MISMATCH_COUNT},\"missingIds\":${MISSING_ID_COUNT},\"duplicateIds\":${DUPLICATE_ID_COUNT},\"durationSeconds\":${STABILITY_DURATION_SECONDS},\"result\":\"PASS\"}"
+            echo "TENANT_READ_PREVIEW_STABILITY=PASS"
             PILOT_ACTIVATED=false
 
 
