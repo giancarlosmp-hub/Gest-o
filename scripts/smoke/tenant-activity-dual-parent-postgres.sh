@@ -75,6 +75,7 @@ checkpoint concurrency
 # relink conflicts with the composite key. Neither can commit a divergent state.
 cat > "$tmp/parent.sql" <<'SQL'
 \set ON_ERROR_STOP on
+\set VERBOSITY verbose
 BEGIN;
 SELECT pg_advisory_xact_lock(4242);
 UPDATE public."Opportunity" SET "clientId"='client-a2' WHERE id='opportunity-a1';
@@ -82,18 +83,51 @@ COMMIT;
 SQL
 cat > "$tmp/activity.sql" <<'SQL'
 \set ON_ERROR_STOP on
+\set VERBOSITY verbose
 BEGIN;
 SELECT pg_advisory_xact_lock(4242);
 UPDATE public."Activity" SET "clientId"='client-a2' WHERE id='new-convergent';
 COMMIT;
 SQL
-set +e
 psql_exec < "$tmp/parent.sql" >"$tmp/parent.out" 2>&1 & p1=$!
 psql_exec < "$tmp/activity.sql" >"$tmp/activity.out" 2>&1 & p2=$!
-wait "$p1"; r1=$?; wait "$p2"; r2=$?
-set -e
-test "$r1" -ne 0; test "$r2" -ne 0
+r1=0
+r2=0
+if wait "$p1"; then
+  r1=0
+else
+  r1=$?
+fi
+if wait "$p2"; then
+  r2=0
+else
+  r2=$?
+fi
+printf 'ACTIVITY_DUAL_PARENT_CONCURRENCY_PARENT_EXIT=%s\n' "$r1"
+printf 'ACTIVITY_DUAL_PARENT_CONCURRENCY_ACTIVITY_EXIT=%s\n' "$r2"
+if (( r1 == 0 )); then
+  printf 'parent operation unexpectedly succeeded\nACTIVITY_DUAL_PARENT_RESULT=FAIL\n' >&2
+  exit 1
+fi
+if (( r2 == 0 )); then
+  printf 'activity operation unexpectedly succeeded\nACTIVITY_DUAL_PARENT_RESULT=FAIL\n' >&2
+  exit 1
+fi
+test -s "$tmp/parent.out"
+test -s "$tmp/activity.out"
+test "$(grep -Ec 'ERROR:.*23503:|SQL state: 23503' "$tmp/parent.out")" -gt 0
+test "$(grep -Ec 'Activity_opportunityId_clientId_fkey' "$tmp/parent.out")" -gt 0
+test "$(grep -Ec 'ERROR:.*23503:|SQL state: 23503' "$tmp/activity.out")" -gt 0
+test "$(grep -Ec 'Activity_opportunityId_clientId_fkey' "$tmp/activity.out")" -gt 0
+
+checkpoint concurrency_post_validation
 test "$(psql_exec -Atc "SELECT count(*) FROM public.\"Activity\" a JOIN public.\"Opportunity\" o ON o.id=a.\"opportunityId\" WHERE a.\"clientId\" IS NOT NULL AND a.\"clientId\"<>o.\"clientId\" AND a.id NOT LIKE 'historical-%'")" = 0
+test "$(psql_exec -Atc "SELECT \"clientId\" FROM public.\"Opportunity\" WHERE id='opportunity-a1'")" = client-a1
+test "$(psql_exec -Atc "SELECT \"clientId\" FROM public.\"Activity\" WHERE id='new-convergent'")" = client-a1
+test "$(psql_exec -Atc "SELECT count(*) FROM public.\"Activity\" a JOIN public.\"Opportunity\" o ON o.id=a.\"opportunityId\" AND o.\"clientId\"=a.\"clientId\" WHERE a.id IN ('dual-convergent','new-convergent')")" = 2
+test "$(psql_exec -Atc "SELECT count(*) FROM public.\"Activity\" WHERE id IN ('historical-divergent','historical-cross-tenant')")" = 2
+test "$(psql_exec -Atc "SELECT count(*) FROM pg_constraint WHERE conname='Activity_opportunityId_clientId_fkey' AND contype='f' AND NOT convalidated")" = 1
+test "$(psql_exec -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='Opportunity_id_clientId_key' AND indexdef LIKE 'CREATE UNIQUE INDEX%'")" = 1
 
 checkpoint catalog
 test "$(psql_exec -Atc "SELECT count(*) FROM pg_constraint WHERE conname='Activity_opportunityId_clientId_fkey' AND contype='f' AND NOT convalidated")" = 1

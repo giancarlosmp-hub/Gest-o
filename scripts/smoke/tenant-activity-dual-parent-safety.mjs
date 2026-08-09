@@ -13,6 +13,20 @@ for (const proof of ["postgres:16", "docker exec -i", "psql -X", "ON_ERROR_STOP=
 assert.ok(harness.indexOf("fixtures_before_ddl") < harness.indexOf("candidate_ddl"));
 assert.ok(harness.indexOf("baseline_before_ddl") < harness.indexOf("candidate_ddl"));
 for (const forbidden of ["|| true", "IF EXISTS", "incident_"]) assert.ok(!harness.includes(forbidden), `forbidden harness bypass/dependency: ${forbidden}`);
+for (const concurrencyContract of [
+  'psql_exec < "$tmp/parent.sql" >"$tmp/parent.out" 2>&1 & p1=$!',
+  'psql_exec < "$tmp/activity.sql" >"$tmp/activity.out" 2>&1 & p2=$!',
+  'if wait "$p1"; then', 'if wait "$p2"; then', 'r1=$?', 'r2=$?',
+  'test -s "$tmp/parent.out"', 'test -s "$tmp/activity.out"',
+  "ACTIVITY_DUAL_PARENT_CONCURRENCY_PARENT_EXIT=", "ACTIVITY_DUAL_PARENT_CONCURRENCY_ACTIVITY_EXIT=",
+  "concurrency_post_validation", "Opportunity_id_clientId_key", "Activity_opportunityId_clientId_fkey",
+  "historical-divergent", "historical-cross-tenant", "new-convergent",
+]) assert.ok(harness.includes(concurrencyContract), `missing concurrency regression contract: ${concurrencyContract}`);
+assert.match(harness, /if wait "\$p1"; then[\s\S]*?else\s+r1=\$\?\s+fi/);
+assert.match(harness, /if wait "\$p2"; then[\s\S]*?else\s+r2=\$\?\s+fi/);
+assert.ok(harness.includes("if (( r1 == 0 ))") && harness.includes("if (( r2 == 0 ))"), "unexpected concurrent success must fail");
+assert.ok(!harness.includes('wait "$p1"; r1=$?') && !harness.includes('wait "$p2"; r2=$?'), "ERR-unsafe wait capture forbidden");
+assert.ok(!harness.includes("trap - ERR"), "ERR trap suppression forbidden");
 for (const candidate of ["UNIQUE INDEX", "(id, \"clientId\")", "FOREIGN KEY (\"opportunityId\", \"clientId\")", "NOT VALID", "PROOF ONLY"]) assert.ok(ddl.includes(candidate), `missing candidate DDL: ${candidate}`);
 for (const xor of ["hasClient === hasOpportunity", "clientId: { not: null }, opportunityId: null", "clientId: null, opportunityId: { not: null }"]) assert.ok(repository.includes(xor), `productive XOR changed: ${xor}`);
 assert.ok(!runtime.includes("ActivityTenantRepository"), "proof must not be integrated into runtime");
