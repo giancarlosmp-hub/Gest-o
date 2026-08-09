@@ -72,3 +72,6 @@ AgendaStop e Activity somente-Agenda possuem adapters e matriz isolados. O predi
 ## Piloto read-only 1.0B.2-I
 
 Apenas `GET /clients` recebeu count shadow sob gates test/preview. Isso não é backfill nem valida NULLs produtivos. Preview segue bloqueado por falta de dataset tenant certificado; produção e todos os demais acessos permanecem legados/disabled.
+
+## Evidência 1.0B.2-J
+O seed preview atribui o root Client ao tenant sintético e valida membership/owner, sem mudar nulabilidade, DDL candidato ou dados produtivos. O shadow read-only permanece uma observação; nenhuma etapa de migration/cutover foi autorizada.

@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.js";
+import { requestContextMiddleware } from "../middlewares/requestLogging.js";
 import { signAccessToken } from "../utils/jwt.js";
-import { runClientListShadowPilot, validateTenantReadPilotConfig, type TenantReadPilotEvent } from "./tenantReadPilot.js";
+import { formatTenantReadPilotMarker, runClientListShadowPilot, validateTenantReadPilotConfig, type TenantReadPilotEvent } from "./tenantReadPilot.js";
 import type { ClientTenantDelegate } from "./clientTenantRepository.js";
 import type { MembershipRecord, TenantControlPlaneReader, TenantRecord } from "./tenantContext.js";
 
@@ -40,12 +41,12 @@ const pilotOff = validateTenantReadPilotConfig({ NODE_ENV: "test", TENANCY_MODE:
 
 const events: TenantReadPilotEvent[] = [];
 const buildApp = (configuredPilot: typeof enabledA) => { const app = express();
-app.use(express.json(), authMiddleware);
+app.use(requestContextMiddleware, express.json(), authMiddleware);
 app.all("/clients", async (req, res) => {
   const legacy = clients.filter((client) => client.ownerSellerId === req.user!.id);
   try {
     await runClientListShadowPilot({ config: req.get("x-test-mode") === "disabled" ? disabled : req.get("x-test-mode") === "pilot-off" ? pilotOff : configuredPilot,
-      verifiedUser: { id: req.user!.id, role: req.user!.role }, requestId: String(req.get("x-request-id") || "synthetic"),
+      verifiedUser: { id: req.user!.id, role: req.user!.role }, requestId: req.requestId!,
       functionalWhere: { ownerSellerId: req.user!.id }, legacyCount: legacy.length, reader, clientDelegate: delegate,
       observe: (event) => events.push(event) });
     res.json(legacy);
@@ -72,6 +73,19 @@ try {
   assert.deepEqual(await a.json(), [clients[0]]); assert.deepEqual(await b.json(), [clients[1]]);
   assert.equal(events.at(-2)?.tenantId, "tenant-a"); assert.equal(events.at(-1)?.tenantId, "tenant-b");
   assert.equal(events.at(-2)?.result, "MATCH"); assert.equal(events.at(-1)?.result, "MATCH");
+  const marker = formatTenantReadPilotMarker(events.at(-2)!);
+  assert.match(marker, /^TENANT_READ_SHADOW_EVENT=\{"requestId":"req-[0-9a-f]{8}","tenantId":"tenant-a"/);
+  assert.match(marker, /"result":"MATCH"/);
+  assert.doesNotMatch(marker, /email|authorization|token|payload|client-a/i);
+
+  const untrustedId = "preview-shadow-client-controlled";
+  const correlated = await call(urlA, "user-a", "", { headers: { "x-request-id": untrustedId } });
+  const responseRequestId = correlated.headers.get("x-request-id");
+  assert.match(responseRequestId ?? "", /^req-[0-9a-f]{8}$/);
+  assert.notEqual(responseRequestId, untrustedId, "client request ID must never become authoritative");
+  assert.equal(events.at(-1)?.requestId, responseRequestId);
+  assert.match(formatTenantReadPilotMarker(events.at(-1)!), new RegExp(`^TENANT_READ_SHADOW_EVENT=\\{"requestId":"${responseRequestId}"`));
+  assert.deepEqual(await correlated.json(), [clients[0]]);
 
   for (const attempt of [
     call(urlA, "user-a", "?tenantId=tenant-b"),

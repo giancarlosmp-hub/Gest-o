@@ -39,6 +39,20 @@ export type TenantReadPilotEvent = Readonly<{
   durationMs: number;
 }>;
 
+/** Stable, single-line evidence for automation; deliberately contains only approved technical metadata. */
+export function formatTenantReadPilotMarker(event: TenantReadPilotEvent): string {
+  return `TENANT_READ_SHADOW_EVENT=${JSON.stringify({
+    requestId: event.requestId,
+    tenantId: event.tenantId,
+    contextVersion: event.contextVersion,
+    resolutionSource: event.resolutionSource,
+    legacyCount: event.legacyCount,
+    tenantScopedCount: event.tenantScopedCount,
+    result: event.result,
+    durationMs: event.durationMs,
+  })}`;
+}
+
 /** Dependencies are request-local and explicit; no HTTP tenant input or ambient context exists. */
 export async function runClientListShadowPilot(args: {
   config: TenantReadPilotConfig;

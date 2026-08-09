@@ -82,6 +82,11 @@ jobs:
       - name: Prove tenant read-only pilot isolation
         run: npm run test:tenant-read-pilot
 
+      - name: Prove tenant read pilot preview dataset
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:tenant-read-pilot-preview-seed
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

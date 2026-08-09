@@ -572,3 +572,6 @@ AgendaEvent autoriza exatamente uma fonte entre tenant direto, Client e Opportun
 ### 1.0B.2-I — primeiro adapter no runtime, sob gate
 
 A listagem autenticada de Client mantém resposta legada e pode executar somente count shadow em test/preview autorizado. Produção fixa ambos os gates desligados; demais endpoints permanecem legados. A operação e limitações estão no Sprint Brief 1.0B.2-I.
+
+### Marco 1.0B.2-J
+O preview possui contrato sintético determinístico e gate seed → validate → enable → GET `/clients` → MATCH. Isso não autoriza produção, mutations, backfill ou cutover.

@@ -54,6 +54,7 @@
     "test:tenant-activity-dual-parent:postgres": "bash scripts/smoke/tenant-activity-dual-parent-postgres.sh",
     "test:tenant-agenda-timeline": "tsx apps/api/src/tenancy/agendaTimelineTenantRepositories.test.ts && node scripts/smoke/tenant-agenda-timeline-safety.mjs",
     "test:tenant-agenda-descendants": "tsx apps/api/src/tenancy/agendaDescendantTenantRepositories.test.ts && node scripts/smoke/tenant-agenda-descendants-safety.mjs",
-    "test:tenant-read-pilot": "tsx apps/api/src/tenancy/tenantReadPilot.http.test.ts && node scripts/smoke/tenant-read-pilot-safety.mjs"
+    "test:tenant-read-pilot": "tsx apps/api/src/tenancy/tenantReadPilot.http.test.ts && node scripts/smoke/tenant-read-pilot-safety.mjs",
+    "test:tenant-read-pilot-preview-seed": "node scripts/smoke/tenant-read-pilot-preview-safety.mjs && bash scripts/smoke/tenant-read-pilot-preview-seed-postgres.sh"
   }
 }

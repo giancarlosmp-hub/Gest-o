@@ -384,3 +384,6 @@ Adapters injetáveis e desconectados provam ownership A×B para AgendaEvent e Ti
 ## Sprint 1.0B.2-I — piloto read-only
 
 `GET /clients` possui comparação shadow tenant-scoped, inerte em `TENANCY_MODE=disabled` e bloqueada no startup produtivo. A resposta segue legada. O preview permanece desligado até o dataset provar ownership/memberships. Consulte `docs/sprints/SPRINT_1_0B_2_I_TENANT_READ_ONLY_PILOT.md`.
+
+## Sprint 1.0B.2-J — dataset preview certificado
+O seed sintético agora reconcilia fail-closed um tenant default, memberships e ownership de Client; o Preview Deploy só habilita o shadow após validação e exige MATCH concorrente. Produção segue disabled. Consulte `docs/sprints/SPRINT_1_0B_2_J_PREVIEW_DATASET_CERTIFICATION.md`.
