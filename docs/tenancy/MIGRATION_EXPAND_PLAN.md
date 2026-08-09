@@ -75,3 +75,7 @@ Apenas `GET /clients` recebeu count shadow sob gates test/preview. Isso não é 
 
 ## Evidência 1.0B.2-J
 O seed preview atribui o root Client ao tenant sintético e valida membership/owner, sem mudar nulabilidade, DDL candidato ou dados produtivos. O shadow read-only permanece uma observação; nenhuma etapa de migration/cutover foi autorizada.
+
+## Observação 1.0B.2-K
+
+A janela sintética de 40 reads no preview observa somente o shadow legado de Client. Não muda schema, nulabilidade, resposta, mutation ou dados; portanto não satisfaz gates de migration/backfill/constrain. Limitações de amostra, rate limit, timeout, delay de logs e rerun permanecem registradas. Produção segue disabled/false e qualquer decisão posterior depende dos checks reais verdes e de autorização própria.

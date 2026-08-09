@@ -1,3 +1,7 @@
+# Operação 1.0B.2-K — prova sintética do preview
+
+Somente o Preview Deploy executa a janela bounded de 10 ciclos × 4 chamadas. Cada request deve ter HTTP 200/exit 0, ID interno único e exatamente um MATCH; logs são limitados por timestamps e pelos 40 IDs retornados. Atraso de log tem cinco retentativas de um segundo; rate limit/timeout falham fechados. No primeiro erro, registrar metadados técnicos, restaurar `TENANCY_MODE=disabled`/`TENANT_READ_PILOT_ENABLED=false`, recriar somente a API e falhar o deploy. Rerun preserva o volume e repete seed/certificação determinísticos sem reparo automático. Esta não é operação produtiva nem autorização de soak, mutation, backfill ou cutover. Veja [Sprint 1.0B.2-K](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).
+
 # GATE DOCUMENTAL — DESENVOLVIMENTO 1.0B.2 (08/08/2026)
 
 A decisão humana explícita aprova somente o desenvolvimento incremental do estágio EXPAND:
