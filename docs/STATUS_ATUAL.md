@@ -1,3 +1,7 @@
+# 🔵 Sprint 1.0B.2-M — planejamento condicionado ao preflight (09/08/2026)
+
+O planejador estrito aceita apenas evidência READY íntegra e vigente, liga `evidenceHash` ao `planHash` e produz exclusivamente plano determinístico `dryRunOnly=true`/`applyAuthorized=false`. Blockers, quarentena, adulteração, inventário incompatível e replay conflitante bloqueiam sem plano parcial. A prova é sintética, nenhuma produção foi acessada e READY não autoriza apply. Até checks reais verdes: `READY_FOR_1_0B_2_M_REVIEW = NO`, `PREFLIGHT_GATED_BACKFILL_PLAN = NOT_PROVEN` e `READY_FOR_BACKFILL_PLANNING = NO`. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_M_PREFLIGHT_GATED_BACKFILL_PLAN.md).
+
 # 🔵 Sprint 1.0B.2-L — preflight de prontidão dos dados (09/08/2026)
 
 Contrato read-only e sanitizado inventaria control plane e 11 roots para um futuro planejamento de backfill. NULL permanece pendência, inconsistências bloqueiam/quarentenam e nenhuma produção foi acessada. Até checks reais verdes: `READY_FOR_1_0B_2_L_REVIEW = NO`, `TENANT_DATA_READINESS_PREFLIGHT = NOT_PROVEN` e `READY_FOR_BACKFILL_PLANNING = NO`. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_L_TENANT_DATA_READINESS_PREFLIGHT.md).

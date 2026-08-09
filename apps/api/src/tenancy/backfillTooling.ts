@@ -11,7 +11,13 @@ export type BatchPlan = { firstId: string; lastId: string; cursorAfter: string |
 export type RootPlan = { root: BackfillRoot; targetTenantId: string; total: number; nullCount: number; assignedCorrectly: number; divergent: number; quarantined: number; batches: readonly BatchPlan[]; planHash: string; quarantine: readonly Quarantine[] };
 export type BackfillPlan = { runId: string; contractVersion: string; targetTenantId: string; batchSize: number; createdAt: string; state: RunState; roots: readonly RootPlan[]; aggregateHash: string };
 
-const digest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+export const backfillDigest = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
+const digest = backfillDigest;
+export function buildBoundedBatchRanges(total: number, batchSize: number): readonly { ordinal: number; size: number }[] {
+  const ranges = [];
+  for (let offset = 0; offset < total; offset += batchSize) ranges.push({ ordinal: ranges.length + 1, size: Math.min(batchSize, total - offset) });
+  return ranges;
+}
 const canonicalMapping = (ids: readonly string[], tenantId: string) => ids.map((id) => `${id}\t${tenantId}`).join("\n");
 
 export function buildBackfillPlan(input: {
