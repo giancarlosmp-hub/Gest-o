@@ -368,3 +368,7 @@ não está encerrado e nenhuma conclusão de cutover deve ser inferida desta cor
 ## Sprint 1.0B.2-A — schema expand de roots
 
 A fase EXPAND adiciona ownership opcional a 11 roots (`Client`, `AgendaEvent`, `Product`, `AppConfig`, `Goal`, `ActivityKPI`, `Sale`, `SellerTerritoryCity`, `KnowledgeDocument`, `ErpSyncRun` e `ErpSyncLock`). NULL significa registro ainda não migrado, nunca acesso global ou fallback para o tenant default. Uniques globais e runtime permanecem inalterados; backfill é obrigatoriamente separado. `TENANCY_MODE=disabled` e `READY_FOR_MULTI_TENANT_CUTOVER = NO`. No head remoto `59d1243` da PR #783, Preview Deploy e compose-smoke ficaram verdes e o harness PostgreSQL 16 terminou com `TENANCY_EXPAND_POSTGRES=PASS`. O estado continua **em PR**: não houve merge, deploy, migration produtiva ou cutover.
+
+## Sprint 1.0B.2-F — prova dual-parent de Activity
+
+A garantia composta `(opportunityId, clientId) → Opportunity(id, clientId)` foi preparada somente como prova PostgreSQL 16 descartável. O XOR produtivo permanece, o DDL não é migration e produção não foi acessada. Migration, runtime tenant-aware, backfill e cutover continuam bloqueados; veja o [Sprint Brief](sprints/SPRINT_1_0B_2_F_ACTIVITY_DUAL_PARENT_POSTGRES_PROOF.md).

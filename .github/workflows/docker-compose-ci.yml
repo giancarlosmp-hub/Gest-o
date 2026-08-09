@@ -68,6 +68,11 @@ jobs:
       - name: Prove tenant relational ownership isolation
         run: npm run test:tenant-relational-ownership
 
+      - name: Prove Activity dual-parent enforcement on PostgreSQL 16
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:tenant-activity-dual-parent:postgres
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 
