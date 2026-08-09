@@ -471,3 +471,6 @@ Executar `npm run test:tenant-read-pilot-preview-seed`. A ativação é exclusiv
 # Preflight tenant data readiness (somente ambiente descartável)
 
 Execute `npm run test:tenant-data-readiness` e, com Docker, `npm run test:tenant-data-readiness:postgres`. O segundo comando recusa `DATABASE_URL`, não publica porta e deve terminar em `TENANT_DATA_READINESS_POSTGRES=PASS`. Não aponte esse harness à produção e não interprete PASS sintético como prontidão produtiva. Rollback é reverter código/gate; não existe rollback de dados porque o diagnóstico não escreve.
+# Planejamento gated 1.0B.2-M
+
+Executar `npm run test:preflight-gated-backfill-plan` e, em host Docker isolado, `npm run test:preflight-gated-backfill-plan:postgres`. O harness recusa `DATABASE_URL` herdada e não publica porta. READY gera apenas plano `dryRunOnly`; nunca autoriza apply. BLOCKED, quarentena, evidência expirada/adulterada ou replay conflitante exigem preservar hashes e códigos sanitizados, interromper e obter nova evidência formal. Rollback remove apenas tooling/gate/documentação; não existe DML ou ledger produtivo a desfazer.

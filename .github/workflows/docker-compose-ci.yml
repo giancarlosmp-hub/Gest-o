@@ -93,6 +93,9 @@ jobs:
       - name: Prove tenant data readiness preflight on PostgreSQL 16
         run: npm run test:tenant-data-readiness:postgres
 
+      - name: Prove preflight-gated backfill planning on PostgreSQL 16
+        run: npm run test:preflight-gated-backfill-plan:postgres
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

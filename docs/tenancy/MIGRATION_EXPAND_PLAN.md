@@ -1,5 +1,9 @@
 # Plano da migration expand — Sprints 1.0B.1 e 1.0B.2
 
+## Planejamento condicionado 1.0B.2-M
+
+Somente envelope READY íntegro/vigente dos 11 roots pode gerar plano. O `planHash` inclui o `evidenceHash`; blockers, quarentena, troca/replay conflitante e relatório parcial bloqueiam sem batches. O plano é sempre `dryRunOnly=true` e `applyAuthorized=false`: READY não autoriza apply. A prova sintética não representa produção, que não foi acessada; DML e ledger produtivo não existem nesta etapa.
+
 ## Preflight 1.0B.2-L
 
 Antes de qualquer novo planejamento, o diagnóstico read-only deve avaliar o control plane e exatamente os 11 roots, contabilizar NULL/integridade e terminar verde em execução formal autorizada. `READY` significa somente prontidão para planejar; não autoriza apply. O harness sintético não descreve produção, e `tenantId NULL` nunca é global nem corrigido automaticamente.

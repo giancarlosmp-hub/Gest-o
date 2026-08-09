@@ -161,3 +161,6 @@ O gate proposto cobre 10 ciclos/40 reads sintéticos, correlação interna, isol
 # TD-TENANT-DATA-READINESS — evidência produtiva e delegate real pendentes
 
 O contrato 1.0B.2-L e o harness sintético não provam dados produtivos, escala, performance nem completude de um futuro adapter Prisma. Permanecem pendentes autorização formal, delegate read-only revisado, execução controlada, evidência por SHA e decisão humana antes de planejar; backfill produtivo e runtime continuam bloqueados.
+# TD-PREFLIGHT-GATED-PLAN — operação produtiva permanece bloqueada
+
+O registry em memória prova replay/concorrência somente no processo de teste. Antes de qualquer planejamento formal ainda são necessários storage/lock distribuído revisado, política de expiração, evidência produtiva autorizada, auditoria imutável e provas de escala. READY sintético não representa produção, e plano dry-run não autoriza apply, DML ou ledger produtivo.

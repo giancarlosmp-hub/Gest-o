@@ -26,6 +26,7 @@
     "test:tenancy-control-plane": "npm run prisma:generate && tsx src/tenancy/defaultTenant.test.ts && tsx src/scripts/prepareDefaultTenantArgs.test.ts",
     "test:tenancy-backfill": "tsx src/tenancy/backfillTooling.test.ts",
     "test:tenant-data-readiness": "tsx src/tenancy/tenantDataReadinessPreflight.test.ts",
+    "test:preflight-gated-backfill-plan": "tsx src/tenancy/preflightGatedBackfillPlan.test.ts",
     "tenancy:prepare-default": "tsx src/scripts/prepareDefaultTenant.ts",
     "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts",
     "smoke:ultrafv3-crm-sync": "tsx src/scripts/ultraFv3CrmSyncRegressionSmoke.ts",

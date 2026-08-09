@@ -582,3 +582,6 @@ O preview possui contrato sintético determinístico e gate seed → validate �
 # Adendo 1.0B.2-L — readiness não é autorização
 
 O [preflight de dados](tenancy/TENANT_DATA_READINESS_PREFLIGHT.md) acrescenta diagnóstico injetável/read-only dos 11 roots e control plane. Mesmo `READY` permite somente discutir planejamento; não autoriza backfill, runtime ou produção. Estado inicial: `TENANT_DATA_READINESS_PREFLIGHT = NOT_PROVEN` e `PRODUCTION_ACCESSED = NO`.
+# Sprint 1.0B.2-M — plano de backfill gated
+
+O contrato aditivo transforma somente evidência preflight READY válida em plano determinístico dos 11 roots. `evidenceHash`/`planHash` são inseparáveis; blockers, quarentena, expiração, replay conflitante ou envelope incompleto bloqueiam. Plano é dry-run only e não autoriza apply. A evidência executada é sintética, produção não foi acessada e runtime/cutover permanecem desabilitados.
