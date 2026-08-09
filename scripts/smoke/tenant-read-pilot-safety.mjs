@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
+const pilot = read("apps/api/src/tenancy/tenantReadPilot.ts");
+const route = read("apps/api/src/routes/crudRoutes.ts");
+const http = read("apps/api/src/tenancy/tenantReadPilot.http.test.ts");
+const production = read("docker-compose.production.yml");
+const jwt = read("apps/api/src/utils/jwt.ts");
+const workflow = read(".github/workflows/docker-compose-ci.yml");
+
+assert.match(production, /TENANCY_MODE:\s*disabled/);
+assert.match(production, /TENANT_READ_PILOT_ENABLED:\s*"false"/);
+assert.match(pilot, /if \(!isTenantReadPilotActive\(args\.config\)\) return null/);
+assert.match(pilot, /resolveTenantContext\([\s\S]*verifiedUser\.id[\s\S]*legacyUserRole: args\.verifiedUser\.role/);
+assert.doesNotMatch(pilot, /req\.(?:headers|query|body)|AsyncLocalStorage|globalThis/);
+assert.match(pilot, /new ClientTenantRepository\(args\.clientDelegate\)\.countMatching\(context/);
+assert.doesNotMatch(pilot, /\.create\(|\.update|\.delete|include:/);
+assert.match(route, /if \(!isTenantReadPilotActive\(env\.tenantReadPilot\)\) return/);
+assert.match(route, /functionalWhere: where/);
+assert.match(http, /disabled must not call tenant dependencies/);
+assert.match(http, /Promise\.all/);
+for (const proof of ["x-tenant-id", "?tenantId=tenant-b", "body: JSON.stringify"]) assert(http.includes(proof), proof);
+assert.doesNotMatch(jwt, /tenantId|membershipId|contextVersion/);
+const prior = workflow.indexOf("Prove Agenda descendants tenant ownership isolation");
+const gate = workflow.indexOf("Prove tenant read-only pilot isolation");
+const smoke = workflow.indexOf("Prove synthetic PostgreSQL 16 backup restore");
+assert(prior >= 0 && prior < gate && gate < smoke, "tenant pilot gate position");
+assert.doesNotMatch(workflow.slice(gate, smoke), /continue-on-error|\|\| true|exit 77|SKIP/);
+for (const forbidden of ["token", "email", "name", "document", "payload", "DATABASE_URL"]) assert(!pilot.includes(`${forbidden}:`), `unsafe log field ${forbidden}`);
+console.log("TENANT_READ_PILOT_STATIC_GATE=PASS");

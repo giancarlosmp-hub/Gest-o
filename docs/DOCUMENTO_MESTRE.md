@@ -568,3 +568,7 @@ Uma prova isolada recomenda unique `Opportunity(id, clientId)` e FK composta nul
 ## Decisão técnica 1.0B.2-G — Agenda e Timeline
 
 AgendaEvent autoriza exatamente uma fonte entre tenant direto, Client e Opportunity; TimelineEvent, exatamente uma entre Client e Opportunity. Múltiplos pais são negados porque o Prisma não compara fontes irmãs com segurança. Seller não é ownership e root scoped não autoriza includes. Os adapters são provas isoladas, não runtime.
+
+### 1.0B.2-I — primeiro adapter no runtime, sob gate
+
+A listagem autenticada de Client mantém resposta legada e pode executar somente count shadow em test/preview autorizado. Produção fixa ambos os gates desligados; demais endpoints permanecem legados. A operação e limitações estão no Sprint Brief 1.0B.2-I.

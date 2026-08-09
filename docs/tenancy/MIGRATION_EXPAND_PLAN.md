@@ -68,3 +68,7 @@ Agenda/Timeline agora possuem matriz e adapters somente de prova. Isso não alte
 ## Gate isolado 1.0B.2-H
 
 AgendaStop e Activity somente-Agenda possuem adapters e matriz isolados. O predicado atravessa AgendaEvent, multi-parent/NULL/órfão/cross-tenant falham fechados e includes não são expostos. Não há alteração de FK, expand/backfill, runtime ou produção; o gate deve preceder qualquer integração.
+
+## Piloto read-only 1.0B.2-I
+
+Apenas `GET /clients` recebeu count shadow sob gates test/preview. Isso não é backfill nem valida NULLs produtivos. Preview segue bloqueado por falta de dataset tenant certificado; produção e todos os demais acessos permanecem legados/disabled.

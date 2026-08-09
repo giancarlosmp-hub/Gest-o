@@ -380,3 +380,7 @@ A garantia composta `(opportunityId, clientId) → Opportunity(id, clientId)` fo
 ## Sprint 1.0B.2-G — Agenda/Timeline isolados
 
 Adapters injetáveis e desconectados provam ownership A×B para AgendaEvent e TimelineEvent com matriz XOR fail-closed, proteção por ID e includes proibidos. A PR #788 é o predecessor verde; Activity permanece XOR e seu DDL permanece candidato. Runtime, backfill, migration e cutover seguem bloqueados. Veja o [Sprint Brief](sprints/SPRINT_1_0B_2_G_AGENDA_TIMELINE_OWNERSHIP.md).
+
+## Sprint 1.0B.2-I — piloto read-only
+
+`GET /clients` possui comparação shadow tenant-scoped, inerte em `TENANCY_MODE=disabled` e bloqueada no startup produtivo. A resposta segue legada. O preview permanece desligado até o dataset provar ownership/memberships. Consulte `docs/sprints/SPRINT_1_0B_2_I_TENANT_READ_ONLY_PILOT.md`.

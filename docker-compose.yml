@@ -30,6 +30,10 @@ services:
       NODE_ENV: production
       # This stack owns a disposable PostgreSQL volume (CI/preview/local compose).
       DATABASE_SCHEMA_MODE: ephemeral-push
+      TENANCY_MODE: ${TENANCY_MODE:-disabled}
+      TENANT_READ_PILOT_ENABLED: ${TENANT_READ_PILOT_ENABLED:-false}
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-local}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
       PORT: 4000
       APP_VERSION: ${APP_VERSION:-1.0.0}
       APP_COMMIT: ${APP_COMMIT:-unknown}

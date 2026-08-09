@@ -457,3 +457,7 @@ depois de todas as verificações; qualquer `FAIL` significa instalação **não
 triagem e não autoriza ação corretiva automática. Ausência de Docker é SKIP apenas no ambiente de
 desenvolvimento/CI e nunca equivale a PASS operacional. Preserve permissões 0700 e não anexe
 credenciais, corpos de autenticação ou logs brutos a tickets.
+
+## Piloto read-only Client (1.0B.2-I)
+
+Produção: `TENANCY_MODE=disabled` e `TENANT_READ_PILOT_ENABLED=false`. O procedimento test/preview, abort e rollback está em `docs/tenancy/TENANT_READ_PILOT_OPERATION.md`; a ausência de dataset preview certificado impede ativação nesta entrega.

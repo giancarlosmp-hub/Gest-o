@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { tenantReadPilotConfig } from "../tenancy/tenantReadPilot.js";
 
 export const PRODUCTION_ENV_FILE_PATH = "/root/demetra-env/.env";
 
@@ -27,6 +28,7 @@ function toNumber(value: string | undefined, defaultValue: number) {
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: (process.env.NODE_ENV || "development") === "production",
+  tenantReadPilot: tenantReadPilotConfig,
   port: Number(process.env.PORT || 4000),
   appVersion: process.env.APP_VERSION || process.env.npm_package_version || "1.0.0",
   appCommit: cleanEnvString(
