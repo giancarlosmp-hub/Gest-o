@@ -31,15 +31,37 @@ echo CHECKPOINT=DDL_CATALOG
 "${psql[@]}" -At <<'SQL' >"$tmp/catalog"
 SELECT 'CONSTRAINT|'||conrelid::regclass||'|'||conname||'|'||pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN ('public.tenant_preflight_evidence_registry'::regclass,'public.tenant_backfill_plan_ledger'::regclass,'public.tenant_backfill_plan_event'::regclass) ORDER BY 1;
 SELECT 'TRIGGER|'||event_object_table||'|'||trigger_name FROM information_schema.triggers WHERE event_object_schema='public' ORDER BY 1;
-SELECT 'GRANT|'||table_name||'|'||grantee||'|'||privilege_type FROM information_schema.role_table_grants WHERE table_schema='public' AND table_name LIKE 'tenant_%ledger%' OR table_name='tenant_preflight_evidence_registry' ORDER BY 1;
+SELECT 'ROLE|'||rolname FROM pg_catalog.pg_roles WHERE rolname='preflight_plan_ledger_writer';
+SELECT 'GRANT|'||table_name||'|'||grantee||'|'||privilege_type FROM information_schema.table_privileges
+ WHERE table_schema = 'public'
+ AND (
+  table_name LIKE 'tenant_%ledger%'
+  OR table_name = 'tenant_preflight_evidence_registry'
+ )
+ AND grantee = 'preflight_plan_ledger_writer'
+ ORDER BY table_name,privilege_type;
 SQL
 HARNESS_STEP=DDL_CATALOG
 HARNESS_COMMAND='validate literal FOREIGN KEY catalog entry'
 grep -Fq 'FOREIGN KEY' "$tmp/catalog"
+HARNESS_STEP=DDL_CATALOG
 HARNESS_COMMAND='validate literal TRIGGER catalog entry'
 grep -Fq 'TRIGGER' "$tmp/catalog"
-HARNESS_COMMAND='validate literal preflight_plan_ledger_writer catalog entry'
-grep -Fq 'preflight_plan_ledger_writer' "$tmp/catalog"
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate exactly one writer role from pg_roles'
+[[ "$(grep -Fxc 'ROLE|preflight_plan_ledger_writer' "$tmp/catalog")" -eq 1 ]]
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate exact evidence registry writer grant'
+[[ "$(grep -Fxc 'GRANT|tenant_preflight_evidence_registry|preflight_plan_ledger_writer|SELECT' "$tmp/catalog")" -eq 1 ]]
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate exact plan ledger writer grant'
+[[ "$(grep -Fxc 'GRANT|tenant_backfill_plan_ledger|preflight_plan_ledger_writer|SELECT' "$tmp/catalog")" -eq 1 ]]
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate exact plan event writer grant'
+[[ "$(grep -Fxc 'GRANT|tenant_backfill_plan_event|preflight_plan_ledger_writer|SELECT' "$tmp/catalog")" -eq 1 ]]
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate writer grant set cardinality'
+[[ "$(grep -Fc 'GRANT|' "$tmp/catalog")" -eq 3 ]]
 HARNESS_RESULT=PASS
 echo DDL_CATALOG=PASS
 
