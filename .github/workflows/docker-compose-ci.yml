@@ -73,6 +73,9 @@ jobs:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:tenant-activity-dual-parent:postgres
 
+      - name: Prove Agenda and Timeline tenant ownership isolation
+        run: npm run test:tenant-agenda-timeline
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

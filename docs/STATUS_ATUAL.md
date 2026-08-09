@@ -372,3 +372,7 @@ A fase EXPAND adiciona ownership opcional a 11 roots (`Client`, `AgendaEvent`, `
 ## Sprint 1.0B.2-F — prova dual-parent de Activity
 
 A garantia composta `(opportunityId, clientId) → Opportunity(id, clientId)` foi preparada somente como prova PostgreSQL 16 descartável. O XOR produtivo permanece, o DDL não é migration e produção não foi acessada. Migration, runtime tenant-aware, backfill e cutover continuam bloqueados; veja o [Sprint Brief](sprints/SPRINT_1_0B_2_F_ACTIVITY_DUAL_PARENT_POSTGRES_PROOF.md).
+
+## Sprint 1.0B.2-G — Agenda/Timeline isolados
+
+Adapters injetáveis e desconectados provam ownership A×B para AgendaEvent e TimelineEvent com matriz XOR fail-closed, proteção por ID e includes proibidos. A PR #788 é o predecessor verde; Activity permanece XOR e seu DDL permanece candidato. Runtime, backfill, migration e cutover seguem bloqueados. Veja o [Sprint Brief](sprints/SPRINT_1_0B_2_G_AGENDA_TIMELINE_OWNERSHIP.md).

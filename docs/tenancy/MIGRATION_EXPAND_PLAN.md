@@ -60,3 +60,7 @@ ledger/lock e gates operacionais; este estágio não autoriza backfill.
 ## Prova de constraint Activity da 1.0B.2-F
 
 O [plano dual-parent](ACTIVITY_DUAL_PARENT_ENFORCEMENT_PLAN.md) recomenda unique composto em Opportunity e FK composta nullable em Activity. A prova usa `NOT VALID` para preservar baseline e mostrar que novos writes já são fiscalizados. Antes de migration futura são gates obrigatórios: diagnóstico real autorizado, remediação aprovada, criação/locks medidos, mismatch zero, validação da constraint, modelagem Prisma/regeneração e somente depois revisão do XOR. Nada disso ocorreu em produção.
+
+## Gate isolado 1.0B.2-G
+
+Agenda/Timeline agora possuem matriz e adapters somente de prova. Isso não altera expand/backfill: AgendaEvent.tenantId continua nullable, TimelineEvent deriva de pais, multi-parent é negado, includes/descendentes não são suportados e nenhum acesso produtivo foi migrado. O gate deve permanecer verde antes de qualquer integração futura.

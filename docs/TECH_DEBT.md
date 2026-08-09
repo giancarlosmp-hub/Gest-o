@@ -139,3 +139,7 @@ lock/autoridade operacional seguem para 1.0B.2-C e não há isolamento runtime.
 ### Progresso 1.0B.2-F
 
 A FK composta de Activity foi comprovada apenas em PostgreSQL descartável. TD-ER-004B permanece aberto: divergências históricas precisam diagnóstico/remediação, `Client.tenantId` segue nullable, o schema Prisma e runtime não receberam a relação, e a política XOR continua ativa.
+
+## TD-ER-005 — integração e descendentes de Agenda/Timeline
+
+Os adapters 1.0B.2-G não estão no runtime. AgendaStop e Activity por Agenda ainda exigem prova própria; acessos em routes, IA, automações, ERP, webhooks, health e scripts permanecem não migrados. Multi-parent segue negado e `tenantId` nullable. Resolver por fluxos, sem inferir tenant de seller ou HTTP.
