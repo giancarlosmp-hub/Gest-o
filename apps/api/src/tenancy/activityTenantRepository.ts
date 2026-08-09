@@ -5,7 +5,7 @@ export type ActivityLinks = { clientId: string | null; opportunityId: string | n
 type Row = ActivityLinks & { id: string; [key: string]: unknown };
 type Create = ActivityLinks & { [key: string]: unknown };
 type Update = { clientId?: never; opportunityId?: never; [key: string]: unknown };
-type Scope = { id?: string; AND: Array<Record<string, unknown>> };
+type Scope = { id?: string; OR: Array<Record<string, unknown>> };
 export type ActivityTenantTransaction = {
   client: { findFirst(args: { where: { id: string; tenantId: string }; select: { id: true } }): Promise<{ id: string } | null> };
   opportunity: { findFirst(args: { where: { id: string; client: { tenantId: string } }; select: { id: true; clientId: true } }): Promise<{ id: string; clientId: string } | null> };
@@ -21,11 +21,11 @@ export type ActivityTenantTransaction = {
 };
 export type ActivityTenantDelegate = { $transaction<T>(operation: (transaction: ActivityTenantTransaction) => Promise<T>): Promise<T> };
 
-// At least one parent must prove ownership; every present parent must independently prove the same tenant.
-const scope = (tenantId: string, id?: string): Scope => ({ ...(id ? { id } : {}), AND: [
-  { OR: [{ client: { tenantId } }, { opportunity: { client: { tenantId } } }] },
-  { OR: [{ clientId: null }, { client: { tenantId } }] },
-  { OR: [{ opportunityId: null }, { opportunity: { client: { tenantId } } }] },
+// Prisma cannot compare Activity.clientId with Activity.opportunity.clientId. This pilot therefore
+// authorizes exactly one ownership source (XOR), expressed entirely in the database predicate.
+const scope = (tenantId: string, id?: string): Scope => ({ ...(id ? { id } : {}), OR: [
+  { clientId: { not: null }, opportunityId: null, client: { tenantId } },
+  { clientId: null, opportunityId: { not: null }, opportunity: { client: { tenantId } } },
 ] });
 
 /** Additive relational-ownership pilot; seller/user is never treated as tenant ownership. */
@@ -33,10 +33,14 @@ export class ActivityTenantRepository {
   constructor(private readonly database: ActivityTenantDelegate) {}
 
   private async authorizeLinks(tx: ActivityTenantTransaction, tenantId: string, links: ActivityLinks): Promise<void> {
-    if (!links.clientId && !links.opportunityId) throw new TenantDataAccessError("TENANT_OWNERSHIP_MISMATCH");
+    const hasClient = typeof links.clientId === "string" && links.clientId.length > 0;
+    const hasOpportunity = typeof links.opportunityId === "string" && links.opportunityId.length > 0;
+    if (hasClient === hasOpportunity || (!hasClient && links.clientId !== null) || (!hasOpportunity && links.opportunityId !== null)) {
+      throw new TenantDataAccessError("TENANT_OWNERSHIP_MISMATCH");
+    }
     const client = links.clientId ? await tx.client.findFirst({ where: { id: links.clientId, tenantId }, select: { id: true } }) : null;
     const opportunity = links.opportunityId ? await tx.opportunity.findFirst({ where: { id: links.opportunityId, client: { tenantId } }, select: { id: true, clientId: true } }) : null;
-    if ((links.clientId && !client) || (links.opportunityId && !opportunity) || (client && opportunity && opportunity.clientId !== client.id)) {
+    if ((links.clientId && !client) || (links.opportunityId && !opportunity)) {
       throw new TenantDataAccessError("TENANT_OWNERSHIP_MISMATCH");
     }
   }

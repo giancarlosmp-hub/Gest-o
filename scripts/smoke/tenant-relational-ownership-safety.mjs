@@ -9,8 +9,9 @@ const runtime = readFileSync("apps/api/src/routes/crudRoutes.ts", "utf8");
 const sources = opportunity + activity;
 
 for (const semantic of ["AuthTenantContext", "tenantIdFromAuthContext", "updateMany", "deleteMany", "$transaction", "client: { tenantId", "TENANT_OWNERSHIP_MISMATCH"]) assert.ok(sources.includes(semantic), `missing ${semantic}`);
+for (const xorPolicy of ["hasClient === hasOpportunity", "clientId: { not: null }, opportunityId: null", "clientId: null, opportunityId: { not: null }"]) assert.ok(activity.includes(xorPolicy), `missing XOR policy: ${xorPolicy}`);
 for (const forbidden of ["req.", "request.", "AsyncLocalStorage", "from \"../lib/prisma", ".filter(", "continue-on-error", "|| true", "exit 77"]) assert.ok(!sources.includes(forbidden), `forbidden repository pattern: ${forbidden}`);
-for (const proof of ["activity-divergent", "activity-orphan", "Promise.all", "contextVersion: 99", "opportunity-b", "relink", "moveToClient", "aggregate(contextA)"]) assert.ok(tests.includes(proof), `missing proof ${proof}`);
+for (const proof of ["activity-dual-same-client", "activity-dual-divergent-same-tenant", "activity-dual-cross-tenant", "activity-orphan", "activity-null-tenant-parent", "deniedActivityIds", "findById(contextA, id)", "updateById(contextA, id", "deleteById(contextA, id", "deniedLinks", "activityRepository.create", "activityRepository.relink", "Promise.all", "contextVersion: 99", "aggregate(contextA)"]) assert.ok(tests.includes(proof), `missing proof ${proof}`);
 assert.ok(!runtime.includes("OpportunityTenantRepository") && !runtime.includes("ActivityTenantRepository"), "pilot must not be wired to controllers");
 const predecessor = workflow.indexOf("Prove tenant-scoped data access isolation");
 const relational = workflow.indexOf("Prove tenant relational ownership isolation");

@@ -1,6 +1,11 @@
 # Progresso 1.0B.2-E — ownership relacional ainda isolado
 
-Permanecem por migrar acessos de Opportunity/Activity em controllers, dashboard, agenda, IA, automações, ERP e scripts, inclusive includes, groupBy, operações por ID, cascades e merges. AgendaEvent ainda não é fonte autorizada para Activity; User nunca substitui ownership tenant. Consulte o [brief](sprints/SPRINT_1_0B_2_E_TENANT_RELATIONAL_OWNERSHIP.md).
+Permanecem por migrar acessos de Opportunity/Activity em controllers, dashboard, agenda, IA,
+automações, ERP e scripts, inclusive includes, groupBy, operações por ID, cascades e merges.
+Activity dual-parent é deliberadamente negada nesta subfase: suportá-la requer comparação e
+atomicidade comprovadas no banco, não filtragem ou mock TypeScript. AgendaEvent ainda não é fonte
+autorizada; User nunca substitui ownership tenant. Consulte o
+[brief](sprints/SPRINT_1_0B_2_E_TENANT_RELATIONAL_OWNERSHIP.md).
 
 `tenantId` nullable, backfill, constraints e RLS seguem fora de escopo. `READY_FOR_TENANT_AWARE_RUNTIME = NO`.
 
