@@ -3,7 +3,21 @@ set -Eeuo pipefail
 [[ -z "${DATABASE_URL:-}" && -z "${TEST_DATABASE_URL:-}" ]] || { echo 'Inherited database URLs are forbidden' >&2; exit 1; }
 umask 077
 tmp="$(mktemp -d)"; name="gesto-ledger-pg-$RANDOM-$$"; network="$name-net"; cleaned=false
-cleanup() { rc=$?; trap - EXIT INT TERM; docker rm -f "$name" >/dev/null 2>&1 || :; docker network rm "$network" >/dev/null 2>&1 || :; rm -rf "$tmp"; $cleaned || rc=1; exit "$rc"; }
+HARNESS_STEP=BOOTSTRAP; HARNESS_COMMAND='initialize disposable PostgreSQL harness'; HARNESS_RESULT=RUNNING
+cleanup() {
+ rc=$?; trap - EXIT INT TERM
+ if [[ $rc -ne 0 ]]; then
+  HARNESS_RESULT=FAIL
+  printf 'HARNESS_STEP=%s\nHARNESS_COMMAND=%s\nHARNESS_RESULT=%s\nEXIT_CODE=%s\n' "$HARNESS_STEP" "$HARNESS_COMMAND" "$HARNESS_RESULT" "$rc" >&2
+ fi
+ set +e
+ docker rm -f "$name" >/dev/null 2>&1
+ docker network rm "$network" >/dev/null 2>&1
+ rm -rf "$tmp"
+ set -e
+ if [[ "$cleaned" != true && $rc -eq 0 ]]; then rc=1; fi
+ exit "$rc"
+}
 trap cleanup EXIT INT TERM
 docker network create --internal "$network" >/dev/null
 docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e POSTGRES_DB=ledger postgres:16 >/dev/null
@@ -19,7 +33,15 @@ SELECT 'CONSTRAINT|'||conrelid::regclass||'|'||conname||'|'||pg_get_constraintde
 SELECT 'TRIGGER|'||event_object_table||'|'||trigger_name FROM information_schema.triggers WHERE event_object_schema='public' ORDER BY 1;
 SELECT 'GRANT|'||table_name||'|'||grantee||'|'||privilege_type FROM information_schema.role_table_grants WHERE table_schema='public' AND table_name LIKE 'tenant_%ledger%' OR table_name='tenant_preflight_evidence_registry' ORDER BY 1;
 SQL
-rg -q 'FOREIGN KEY' "$tmp/catalog"; rg -q 'TRIGGER' "$tmp/catalog"; rg -q 'preflight_plan_ledger_writer' "$tmp/catalog"
+HARNESS_STEP=DDL_CATALOG
+HARNESS_COMMAND='validate literal FOREIGN KEY catalog entry'
+grep -Fq 'FOREIGN KEY' "$tmp/catalog"
+HARNESS_COMMAND='validate literal TRIGGER catalog entry'
+grep -Fq 'TRIGGER' "$tmp/catalog"
+HARNESS_COMMAND='validate literal preflight_plan_ledger_writer catalog entry'
+grep -Fq 'preflight_plan_ledger_writer' "$tmp/catalog"
+HARNESS_RESULT=PASS
+echo DDL_CATALOG=PASS
 
 h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64})
 evcall="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-1','$h1','1.0B.2-L/v1','1.0B.2-A/roots-v1','2026-08-09T10:00Z','2030-08-10T10:00Z','READY');"
