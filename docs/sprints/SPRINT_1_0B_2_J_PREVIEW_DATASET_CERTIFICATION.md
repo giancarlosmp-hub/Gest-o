@@ -42,3 +42,6 @@ Produção permanece literalmente disabled/false. Não houve acesso produtivo, m
 
 ## Correção da prova da PR #792
 A prova não depende mais de `util.inspect`/renderização de objetos do logger. As quatro chamadas têm PID, status HTTP e exit code capturados separadamente; todas são aguardadas. Qualquer falha após ativação aciona trap de rollback para `disabled/false`, recria apenas a API preview e limita o diagnóstico a requestId, status, exit code, contagens e marcadores técnicos. Até os dois checks do novo head ficarem verdes, `READY_TO_MERGE_PR_792 = NO` e `TENANT_READ_PREVIEW_SHADOW = NOT_PROVEN`.
+
+## Correção observável do segundo Preview Deploy
+O run `31294252007` chegou a seed/dataset PASS e API saudável, mas o pipeline fail-fast de login/token encerrou antes de qualquer diagnóstico ou rollback normal. O workflow agora captura separadamente exit code, HTTP e arquivo de resposta do login, guarda a extração do token em condicional explícita e nunca imprime resposta/token. `fail_shadow_proof` identifica `login`, `token_extraction` ou `requests_or_events`, produz somente metadados técnicos e chama `rollback_preview_pilot` diretamente; o trap EXIT é apenas proteção emergencial. MATCH e MISMATCH são ambos limitados ao prefixo exclusivo do run. Até evidência verde do novo head: `READY_TO_MERGE_PR_792 = NO` e `TENANT_READ_PREVIEW_SHADOW = NOT_PROVEN`.

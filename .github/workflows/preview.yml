@@ -187,55 +187,97 @@ jobs:
               api npx tsx apps/api/prisma/validatePreviewTenantReadPilot.ts
             echo "TENANT_READ_PREVIEW_DATASET=PASS"
 
-            # Enable only after seed certification. Every later failure rolls back only the preview API.
-            LOGIN_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"; RESULT_DIR="$(mktemp -d)"
+            # Enable only after seed certification. Normal failures use fail_shadow_proof; EXIT is emergency-only.
+            LOGIN_FILE="$(mktemp)"; LOGIN_HTTP_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"; RESULT_DIR="$(mktemp -d)"
             PILOT_ACTIVATED=false
-            rollback_and_cleanup() {
-              rc="$?"
-              if [ "$rc" -ne 0 ] && [ "$PILOT_ACTIVATED" = "true" ]; then
-                echo "TENANT_READ_PREVIEW_SHADOW_DIAGNOSTIC"
-                for request in 1 2 3 4; do
-                  request_id="${PROOF_PREFIX:-preview-shadow-unavailable}-${request}"
-                  status="unavailable"; exit_code="unavailable"
-                  if [ -f "${RESULT_DIR}/${request}.status" ]; then status="$(cat "${RESULT_DIR}/${request}.status")"; fi
-                  if [ -f "${RESULT_DIR}/${request}.exit" ]; then exit_code="$(cat "${RESULT_DIR}/${request}.exit")"; fi
-                  echo "requestId=${request_id} status=${status} exitCode=${exit_code}"
-                done
-                echo "matchCount=${MATCH_COUNT:-0} mismatchCount=${MISMATCH_COUNT:-0}"
-                if [ -s "$SHADOW_LOG" ]; then
-                  awk -v prefix="${PROOF_PREFIX:-preview-shadow-unavailable}" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix)' "$SHADOW_LOG"
-                fi
-                echo "TENANT_READ_PREVIEW_ROLLBACK=START"
-                sed -i 's/^TENANCY_MODE=default-only$/TENANCY_MODE=disabled/; s/^TENANT_READ_PILOT_ENABLED=true$/TENANT_READ_PILOT_ENABLED=false/' .env
-                if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api >/dev/null; then
-                  echo "TENANT_READ_PREVIEW_ROLLBACK=API_RECREATE_FAILED"
-                else
-                  echo "TENANT_READ_PREVIEW_ROLLBACK=PASS"
-                fi
+            ROLLBACK_ATTEMPTED=false
+            MATCH_COUNT=0
+            MISMATCH_COUNT=0
+
+            rollback_preview_pilot() {
+              ROLLBACK_ATTEMPTED=true
+              sed -i 's/^TENANCY_MODE=default-only$/TENANCY_MODE=disabled/; s/^TENANT_READ_PILOT_ENABLED=true$/TENANT_READ_PILOT_ENABLED=false/' .env
+              if docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api >/dev/null 2>&1; then
+                PILOT_ACTIVATED=false
+                echo "TENANT_READ_PREVIEW_ROLLBACK=PASS"
+                return 0
               fi
-              rm -f "$LOGIN_FILE" "$SHADOW_LOG"
+              echo "TENANT_READ_PREVIEW_ROLLBACK=ERROR stage=api_recreate"
+              return 1
+            }
+
+            print_shadow_diagnostic() {
+              echo "loginStatus=${LOGIN_HTTP_STATUS:-unavailable} loginExitCode=${LOGIN_CURL_EXIT:-unavailable} tokenExitCode=${TOKEN_EXTRACTION_EXIT:-unavailable}"
+              for request in 1 2 3 4; do
+                request_id="${PROOF_PREFIX:-preview-shadow-unavailable}-${request}"
+                status="unavailable"; exit_code="unavailable"
+                if [ -f "${RESULT_DIR}/${request}.status" ]; then status="$(cat "${RESULT_DIR}/${request}.status")"; fi
+                if [ -f "${RESULT_DIR}/${request}.exit" ]; then exit_code="$(cat "${RESULT_DIR}/${request}.exit")"; fi
+                echo "requestId=${request_id} status=${status} exitCode=${exit_code}"
+              done
+              echo "MATCH_COUNT=${MATCH_COUNT:-0} MISMATCH_COUNT=${MISMATCH_COUNT:-0}"
+              if [ -s "$SHADOW_LOG" ]; then
+                awk -v prefix="${PROOF_PREFIX:-preview-shadow-unavailable}" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix)' "$SHADOW_LOG"
+              fi
+            }
+
+            fail_shadow_proof() {
+              stage="$1"
+              echo "TENANT_READ_PREVIEW_FAILURE_STAGE=${stage}"
+              print_shadow_diagnostic
+              if ! rollback_preview_pilot; then
+                echo "TENANT_READ_PREVIEW_FAILURE_STAGE=${stage}_rollback"
+              fi
+              exit 1
+            }
+
+            emergency_shadow_cleanup() {
+              rc="$?"
+              if [ "$rc" -ne 0 ] && [ "$PILOT_ACTIVATED" = "true" ] && [ "$ROLLBACK_ATTEMPTED" != "true" ]; then
+                echo "TENANT_READ_PREVIEW_FAILURE_STAGE=emergency_exit"
+                print_shadow_diagnostic
+                if ! rollback_preview_pilot; then echo "TENANT_READ_PREVIEW_ROLLBACK=ERROR stage=emergency"; fi
+              fi
+              rm -f "$LOGIN_FILE" "$LOGIN_HTTP_FILE" "$SHADOW_LOG"
               rm -rf "$RESULT_DIR"
               exit "$rc"
             }
-            trap rollback_and_cleanup EXIT
+            trap emergency_shadow_cleanup EXIT
 
             sed -i 's/^TENANCY_MODE=disabled$/TENANCY_MODE=default-only/; s/^TENANT_READ_PILOT_ENABLED=false$/TENANT_READ_PILOT_ENABLED=true/' .env
             PILOT_ACTIVATED=true
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api
+            if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api; then fail_shadow_proof activation; fi
             API_CONTAINER_ID="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -q api)"
-            test -n "$API_CONTAINER_ID"
+            if [ -z "$API_CONTAINER_ID" ]; then fail_shadow_proof activation; fi
+            API_RECREATED_HEALTHY=false
             for i in {1..60}; do
-              if [ "$(docker inspect --format='{{.State.Health.Status}}' "$API_CONTAINER_ID")" = "healthy" ]; then break; fi
-              if [ "$i" = 60 ]; then exit 1; fi
+              if [ "$(docker inspect --format='{{.State.Health.Status}}' "$API_CONTAINER_ID")" = "healthy" ]; then API_RECREATED_HEALTHY=true; break; fi
               sleep 2
             done
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api node -e \
-              'if(process.env.DEPLOYMENT_ENV!=="preview"||process.env.TENANCY_MODE!=="default-only"||process.env.TENANT_READ_PILOT_ENABLED!=="true"||process.env.DEFAULT_TENANT_ID!=="tenant-default-v1")process.exit(1)'
+            if [ "$API_RECREATED_HEALTHY" != "true" ]; then fail_shadow_proof activation_health; fi
+            if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api node -e \
+              'if(process.env.DEPLOYMENT_ENV!=="preview"||process.env.TENANCY_MODE!=="default-only"||process.env.TENANT_READ_PILOT_ENABLED!=="true"||process.env.DEFAULT_TENANT_ID!=="tenant-default-v1")process.exit(1)'; then fail_shadow_proof activation_config; fi
 
             echo "=== REAL GET /clients SHADOW PROOF ==="
-            curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}" | grep -qx 200
-            TOKEN="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1]));if(!x.accessToken)process.exit(1);process.stdout.write(x.accessToken)' "$LOGIN_FILE")"
+            if curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}" > "$LOGIN_HTTP_FILE"; then
+              LOGIN_CURL_EXIT=0
+            else
+              LOGIN_CURL_EXIT="$?"
+            fi
+            LOGIN_HTTP_STATUS="$(cat "$LOGIN_HTTP_FILE")"
+            echo "TENANT_READ_PREVIEW_LOGIN_HTTP=${LOGIN_HTTP_STATUS:-unavailable}"
+            if [ "$LOGIN_CURL_EXIT" != "0" ] || [ "$LOGIN_HTTP_STATUS" != "200" ]; then fail_shadow_proof login; fi
+
+            if TOKEN="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(typeof x.accessToken!=="string"||!x.accessToken)process.exit(1);process.stdout.write(x.accessToken)' "$LOGIN_FILE" 2>/dev/null)" && [ -n "$TOKEN" ]; then
+              TOKEN_EXTRACTION_EXIT=0
+              echo "TENANT_READ_PREVIEW_TOKEN=ACQUIRED"
+            else
+              TOKEN_EXTRACTION_EXIT="$?"
+              TOKEN=""
+              fail_shadow_proof token_extraction
+            fi
+
             SHADOW_SINCE="$(date -u +%FT%TZ)"
             PROOF_PREFIX="preview-shadow-${PR_NUMBER}-$(date +%s)-$$"
             PIDS=()
@@ -252,20 +294,23 @@ jobs:
                 printf '%s\n' "$?" > "${RESULT_DIR}/${request}.exit"
               fi
             done
+            echo "TENANT_READ_PREVIEW_REQUESTS=WAITED"
 
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs --since "$SHADOW_SINCE" api > "$SHADOW_LOG"
+            if ! docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs --since "$SHADOW_SINCE" api > "$SHADOW_LOG"; then
+              fail_shadow_proof requests_or_events
+            fi
             MATCH_COUNT="$(awk -v prefix="$PROOF_PREFIX" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
-            MISMATCH_COUNT="$(awk 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,"\"result\":\"MISMATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
+            MISMATCH_COUNT="$(awk -v prefix="$PROOF_PREFIX" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,"\"result\":\"MISMATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
             PROOF_FAILED=false
             for request in 1 2 3 4; do
               request_id="${PROOF_PREFIX}-${request}"
               status="$(cat "${RESULT_DIR}/${request}.status")"
               exit_code="$(cat "${RESULT_DIR}/${request}.exit")"
-              event_count="$(awk -v id="\"requestId\":\"${request_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,id) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
+              event_count="$(awk -v prefix="$PROOF_PREFIX" -v id="\"requestId\":\"${request_id}\"" 'index($0,"TENANT_READ_SHADOW_EVENT=") && index($0,prefix) && index($0,id) && index($0,"\"result\":\"MATCH\""){n++} END{print n+0}' "$SHADOW_LOG")"
               if [ "$status" != "200" ] || [ "$exit_code" != "0" ] || [ "$event_count" != "1" ]; then PROOF_FAILED=true; fi
             done
             if [ "$MATCH_COUNT" != "4" ] || [ "$MISMATCH_COUNT" != "0" ]; then PROOF_FAILED=true; fi
-            if [ "$PROOF_FAILED" = "true" ]; then false; fi
+            if [ "$PROOF_FAILED" = "true" ]; then fail_shadow_proof requests_or_events; fi
             echo "TENANT_READ_PREVIEW_HTTP=200,200,200,200"
             echo "TENANT_READ_PREVIEW_SHADOW=MATCH"
             PILOT_ACTIVATED=false
