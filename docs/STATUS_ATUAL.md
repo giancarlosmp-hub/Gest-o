@@ -399,3 +399,9 @@ Adapters injetáveis e desconectados provam ownership A×B para AgendaEvent e Ti
 
 ## Sprint 1.0B.2-J — dataset preview certificado
 O seed sintético agora reconcilia fail-closed um tenant default, memberships e ownership de Client; o Preview Deploy só habilita o shadow após validação e exige MATCH concorrente. Produção segue disabled. Consulte `docs/sprints/SPRINT_1_0B_2_J_PREVIEW_DATASET_CERTIFICATION.md`.
+# 🔵 Sprint 1.0B.2-N — prova PostgreSQL do registry/ledger (09/08/2026)
+
+DDL exclusivamente descartável prova o binding transacional `evidenceId → evidenceHash → planHash`,
+concorrência, crash/retomada e append-only. Não é migration nem autorização de apply/backfill.
+Até checks reais verdes: `READY_FOR_1_0B_2_N_REVIEW = NO` e
+`PREFLIGHT_PLAN_LEDGER_POSTGRES = NOT_PROVEN`. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_N_POSTGRES_EVIDENCE_PLAN_LEDGER.md).

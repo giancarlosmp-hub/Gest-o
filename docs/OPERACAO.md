@@ -474,3 +474,9 @@ Execute `npm run test:tenant-data-readiness` e, com Docker, `npm run test:tenant
 # Planejamento gated 1.0B.2-M
 
 Executar `npm run test:preflight-gated-backfill-plan` e, em host Docker isolado, `npm run test:preflight-gated-backfill-plan:postgres`. O harness recusa `DATABASE_URL` herdada e não publica porta. READY gera apenas plano `dryRunOnly`; nunca autoriza apply. BLOCKED, quarentena, evidência expirada/adulterada ou replay conflitante exigem preservar hashes e códigos sanitizados, interromper e obter nova evidência formal. Rollback remove apenas tooling/gate/documentação; não existe DML ou ledger produtivo a desfazer.
+# Prova descartável 1.0B.2-N
+
+Execute `npm run test:preflight-plan-ledger:postgres` somente em host Docker de desenvolvimento/CI,
+sem `DATABASE_URL` ou `TEST_DATABASE_URL`. O runner cria `postgres:16` sem porta, valida concorrência,
+SQLSTATE, crash, grants e catálogo, desfaz todo o DDL e exige
+`PREFLIGHT_PLAN_LEDGER_POSTGRES=PASS`. Nunca aponte esse harness para produção.

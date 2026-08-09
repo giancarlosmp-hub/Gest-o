@@ -96,6 +96,9 @@ jobs:
       - name: Prove preflight-gated backfill planning on PostgreSQL 16
         run: npm run test:preflight-gated-backfill-plan:postgres
 
+      - name: Prove preflight evidence and plan ledger on PostgreSQL 16
+        run: npm run test:preflight-plan-ledger:postgres
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 
