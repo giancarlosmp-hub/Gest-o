@@ -18,6 +18,7 @@ A Sprint entrega somente o contrato read-only sanitizado para diagnosticar contr
 
 ## Declarações
 
+`READY_TO_MERGE_PR_794 = NO` até novo GitHub Actions verde
 `READY_FOR_1_0B_2_L_REVIEW = NO` até checks reais verdes  
 `TENANT_DATA_READINESS_PREFLIGHT = NOT_PROVEN`  
 `READY_FOR_BACKFILL_PLANNING = NO` até preflight verde  
@@ -27,4 +28,3 @@ A Sprint entrega somente o contrato read-only sanitizado para diagnosticar contr
 `TENANCY_MODE_PRODUCTION = disabled`  
 `TENANT_READ_PILOT_ENABLED_PRODUCTION = false`  
 `PRODUCTION_ACCESSED = NO`
-
