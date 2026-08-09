@@ -556,3 +556,7 @@ Tokens, RBAC por `User.role`, handlers e consultas atuais permanecem inalterados
 não ganhou autoridade produtiva. A entrega não acessou produção nem executou deploy/backfill/cutover;
 `TENANCY_MODE=disabled` e os gates de multiempresa continuam fechados. Detalhes no
 [Sprint Brief](sprints/SPRINT_1_0B_2_C_TENANT_CONTEXT_AUTH_COMPATIBILITY.md).
+
+## Decisão técnica 1.0B.2-F — Activity dual-parent
+
+Uma prova isolada recomenda unique `Opportunity(id, clientId)` e FK composta nullable de Activity. Ela demonstra enforcement atômico de writes sem alterar a política XOR produtiva. `NOT VALID` permite instalação após diagnóstico, mas não valida conflitos históricos; migration e ativação runtime exigem Sprint/autorização futuras. Consulte o [plano](tenancy/ACTIVITY_DUAL_PARENT_ENFORCEMENT_PLAN.md).

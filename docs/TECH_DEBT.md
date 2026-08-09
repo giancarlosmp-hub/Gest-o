@@ -135,3 +135,7 @@ Os roots da primeira onda possuem ownership nullable, mas uniques empresariais c
 Plan/dry-run, batches, hashes, quarentena e reconciliação foram implementados com ledger mínimo em
 evidência imutável e apply apenas no harness. TD-ER-004B continua aberto: nenhuma linha real mudou;
 lock/autoridade operacional seguem para 1.0B.2-C e não há isolamento runtime.
+
+### Progresso 1.0B.2-F
+
+A FK composta de Activity foi comprovada apenas em PostgreSQL descartável. TD-ER-004B permanece aberto: divergências históricas precisam diagnóstico/remediação, `Client.tenantId` segue nullable, o schema Prisma e runtime não receberam a relação, e a política XOR continua ativa.

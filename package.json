@@ -49,6 +49,8 @@
     "test:tenancy-backfill:postgres": "bash scripts/smoke/tenancy-backfill-postgres.sh",
     "test:tenant-context-auth": "npm run test:tenant-context-auth -w @salesforce-pro/api",
     "test:tenant-data-access": "npm run test:tenant-data-access -w @salesforce-pro/api && node scripts/smoke/tenant-data-access-safety.mjs",
-    "test:tenant-relational-ownership": "npm run test:tenant-relational-ownership -w @salesforce-pro/api && node scripts/smoke/tenant-relational-ownership-safety.mjs"
+    "test:tenant-relational-ownership": "npm run test:tenant-relational-ownership -w @salesforce-pro/api && node scripts/smoke/tenant-relational-ownership-safety.mjs",
+    "test:tenant-activity-dual-parent": "node scripts/smoke/tenant-activity-dual-parent-safety.mjs",
+    "test:tenant-activity-dual-parent:postgres": "bash scripts/smoke/tenant-activity-dual-parent-postgres.sh"
   }
 }

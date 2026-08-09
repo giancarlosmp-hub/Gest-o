@@ -56,3 +56,7 @@ O mecanismo separado inventaria os 11 roots, gera batches por PK/cursor e SHA-25
 quarentena e reconcilia contagens/ownership. O ledger mínimo é evidência imutável sem PII; apply
 produtivo não existe e a única escrita usa fixtures PostgreSQL 16 descartáveis. A 1.0B.2-C revisará
 ledger/lock e gates operacionais; este estágio não autoriza backfill.
+
+## Prova de constraint Activity da 1.0B.2-F
+
+O [plano dual-parent](ACTIVITY_DUAL_PARENT_ENFORCEMENT_PLAN.md) recomenda unique composto em Opportunity e FK composta nullable em Activity. A prova usa `NOT VALID` para preservar baseline e mostrar que novos writes já são fiscalizados. Antes de migration futura são gates obrigatórios: diagnóstico real autorizado, remediação aprovada, criação/locks medidos, mismatch zero, validação da constraint, modelagem Prisma/regeneração e somente depois revisão do XOR. Nada disso ocorreu em produção.
