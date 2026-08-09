@@ -16,6 +16,7 @@ services:
       # Literal fail-closed policy: never interpolate or override this in production.
       DATABASE_SCHEMA_MODE: external
       TENANCY_MODE: disabled
+      TENANT_READ_PILOT_ENABLED: "false"
       PORT: 4000
       APP_COMMIT: "${APP_COMMIT:?APP_COMMIT is required}"
       APP_VERSION: "${APP_VERSION:?APP_VERSION is required}"

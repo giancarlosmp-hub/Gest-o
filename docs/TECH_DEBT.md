@@ -147,3 +147,7 @@ A FK composta de Activity foi comprovada apenas em PostgreSQL descartável. TD-E
 ## TD-ER-005 — integração e descendentes de Agenda/Timeline
 
 Os adapters 1.0B.2-G não estão no runtime. AgendaStop e Activity por Agenda ainda exigem prova própria; acessos em routes, IA, automações, ERP, webhooks, health e scripts permanecem não migrados. Multi-parent segue negado e `tenantId` nullable. Resolver por fluxos, sem inferir tenant de seller ou HTTP.
+
+### TD-TENANCY-READ-PILOT — certificar dataset de preview
+
+**Aberto.** O seed de preview ainda não prova `tenantId`/memberships coerentes para habilitar o shadow de Client. Manter `TENANT_READ_PILOT_ENABLED=false` fora dos testes até preparação e evidência A×B no preview isolado.

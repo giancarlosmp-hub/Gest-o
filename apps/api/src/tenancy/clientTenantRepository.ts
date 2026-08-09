@@ -4,7 +4,7 @@ import { assertTenantOwnership, rejectTenantOwnershipMutation, tenantIdFromAuthC
 type ClientRow = { id: string; tenantId: string | null; name: string; [key: string]: unknown };
 type ClientCreate = { name: string; tenantId?: string; [key: string]: unknown };
 type ClientUpdate = Partial<Omit<ClientCreate, "tenantId">> & { tenantId?: never };
-type ScopedWhere = { id?: string; tenantId: string };
+type ScopedWhere = { id?: string; tenantId: string; [key: string]: unknown };
 
 export type ClientTenantDelegate = {
   findMany(args: { where: ScopedWhere; orderBy?: { createdAt: "asc" | "desc" } }): Promise<ClientRow[]>;
@@ -12,7 +12,7 @@ export type ClientTenantDelegate = {
   create(args: { data: ClientCreate & { tenantId: string } }): Promise<ClientRow>;
   updateMany(args: { where: ScopedWhere; data: ClientUpdate }): Promise<{ count: number }>;
   deleteMany(args: { where: ScopedWhere }): Promise<{ count: number }>;
-  count(args: { where: { tenantId: string } }): Promise<number>;
+  count(args: { where: ScopedWhere }): Promise<number>;
 };
 
 /** Additive pilot only: intentionally not wired to HTTP handlers or the global Prisma singleton. */
@@ -45,5 +45,10 @@ export class ClientTenantRepository {
 
   count(context: AuthTenantContext): Promise<number> {
     return this.client.count({ where: { tenantId: tenantIdFromAuthContext(context) } });
+  }
+
+  /** Read-only shadow primitive. Functional/RBAC filters are retained and tenant always wins. */
+  countMatching(context: AuthTenantContext, functionalWhere: Readonly<Record<string, unknown>>): Promise<number> {
+    return this.client.count({ where: { ...functionalWhere, tenantId: tenantIdFromAuthContext(context) } });
   }
 }

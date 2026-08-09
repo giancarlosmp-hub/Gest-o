@@ -88,6 +88,9 @@ import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigati
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
+import { isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
+import { PrismaTenantControlPlaneReader } from "../tenancy/prismaTenantControlPlaneReader.js";
+import type { ClientTenantDelegate } from "../tenancy/clientTenantRepository.js";
 
 const router = Router();
 
@@ -4092,6 +4095,17 @@ router.get("/clients", async (req, res) => {
     (key) => req.query[key] !== undefined
   );
 
+  const runShadow = async (legacyCount: number) => {
+    if (!isTenantReadPilotActive(env.tenantReadPilot)) return;
+    const event = await runClientListShadowPilot({ config: env.tenantReadPilot,
+      verifiedUser: { id: req.user!.id, role: req.user!.role }, requestId: req.requestId || "request-id-unavailable",
+      functionalWhere: where as Record<string, unknown>, legacyCount,
+      reader: new PrismaTenantControlPlaneReader(prisma), clientDelegate: prisma.client as unknown as ClientTenantDelegate,
+      observe: (metadata) => logApiEvent(metadata.result === "MATCH" ? "INFO" : "WARN", "[tenant read pilot] client list shadow comparison", metadata),
+    });
+    if (event?.result === "MISMATCH" && env.nodeEnv === "test") throw new Error("TENANT_READ_PILOT_MISMATCH");
+  };
+
   if (!hasAdvancedQuery) {
     const data = await prisma.client.findMany({
       where,
@@ -4105,6 +4119,7 @@ router.get("/clients", async (req, res) => {
         }
       }
     });
+    await runShadow(data.length);
     return res.json(data);
   }
 
@@ -4125,6 +4140,8 @@ router.get("/clients", async (req, res) => {
     }),
     prisma.client.count({ where })
   ]);
+
+  await runShadow(total);
 
   res.json({
     items,

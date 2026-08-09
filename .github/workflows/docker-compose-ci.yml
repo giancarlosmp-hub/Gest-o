@@ -79,6 +79,9 @@ jobs:
       - name: Prove Agenda descendants tenant ownership isolation
         run: npm run test:tenant-agenda-descendants
 
+      - name: Prove tenant read-only pilot isolation
+        run: npm run test:tenant-read-pilot
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 
