@@ -461,3 +461,6 @@ credenciais, corpos de autenticação ou logs brutos a tickets.
 ## Piloto read-only Client (1.0B.2-I)
 
 Produção: `TENANCY_MODE=disabled` e `TENANT_READ_PILOT_ENABLED=false`. O procedimento test/preview, abort e rollback está em `docs/tenancy/TENANT_READ_PILOT_OPERATION.md`; a ausência de dataset preview certificado impede ativação nesta entrega.
+
+### Piloto Client no Preview (1.0B.2-J)
+Executar `npm run test:tenant-read-pilot-preview-seed`. A ativação é exclusiva do workflow preview e posterior aos checkpoints de seed/dataset. Em abort/MISMATCH, restaurar `TENANT_READ_PILOT_ENABLED=false` e `TENANCY_MODE=disabled`, recriar somente a API preview e confirmar ausência de evento shadow; nunca inspecionar payload ou acessar produção.

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { AgendaEventStatus, AgendaEventType, OpportunityStage, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
@@ -5,6 +6,8 @@ const prisma = new PrismaClient();
 
 const PREVIEW_SEED_TAG = "[preview-seed]";
 const PREVIEW_SEED_PASSWORD = "123456";
+// Synthetic-only stable identity. Runtime receives this value through DEFAULT_TENANT_ID.
+export const PREVIEW_DEFAULT_TENANT_ID = "tenant-default-v1";
 const PREVIEW_SELLERS = [
   { name: "Vendedora Preview Ana", email: "ana.preview@preview.local", region: "Sudeste" },
   { name: "Vendedor Preview Bruno", email: "bruno.preview@preview.local", region: "Sul" },
@@ -326,6 +329,32 @@ async function upsertSeller(name: string, email: string, region: string) {
   });
 }
 
+const membershipId = (userId: string) => `tm_${createHash("sha256").update(`${PREVIEW_DEFAULT_TENANT_ID}\0${userId}`).digest("hex").slice(0, 32)}`;
+
+async function reconcilePreviewControlPlane() {
+  if (process.env.DEFAULT_TENANT_ID !== PREVIEW_DEFAULT_TENANT_ID) throw new Error("PREVIEW_DEFAULT_TENANT_ID_MISMATCH");
+  const tenants = await prisma.tenant.findMany({ select: { id: true, slug: true, status: true } });
+  const existing = tenants.find((tenant) => tenant.id === PREVIEW_DEFAULT_TENANT_ID);
+  if (tenants.some((tenant) => tenant.id !== PREVIEW_DEFAULT_TENANT_ID)) throw new Error("PREVIEW_UNEXPECTED_TENANT");
+  if (existing && (existing.slug !== "default-v1" || existing.status !== "active")) throw new Error("PREVIEW_DEFAULT_TENANT_INCOMPATIBLE");
+  if (!existing) await prisma.tenant.create({ data: { id: PREVIEW_DEFAULT_TENANT_ID, slug: "default-v1", legalName: "Gest-o Compatibility Tenant", displayName: "Gest-o Default", status: "active" } });
+
+  const users = await prisma.user.findMany({ where: { isActive: true }, select: { id: true, role: true } });
+  const memberships = await prisma.tenantMembership.findMany();
+  for (const item of memberships) {
+    const user = users.find((candidate) => candidate.id === item.userId);
+    if (!user || item.tenantId !== PREVIEW_DEFAULT_TENANT_ID || item.id !== membershipId(item.userId) || item.status !== "active" || item.role !== user.role || item.revokedAt) {
+      throw new Error("PREVIEW_MEMBERSHIP_INCOMPATIBLE");
+    }
+  }
+  for (const user of users) {
+    const matches = memberships.filter((item) => item.userId === user.id);
+    if (matches.length > 1) throw new Error("PREVIEW_AMBIGUOUS_MEMBERSHIP");
+    if (!matches.length) await prisma.tenantMembership.create({ data: { id: membershipId(user.id), tenantId: PREVIEW_DEFAULT_TENANT_ID, userId: user.id, role: user.role, status: "active", version: 1, acceptedAt: new Date() } });
+  }
+  console.log("TENANT_READ_PREVIEW_SEED=PASS", { tenantId: PREVIEW_DEFAULT_TENANT_ID, users: users.length });
+}
+
 async function cleanOldPreviewSeedData(sellerIds: string[]) {
   await prisma.erpOrderSync.deleteMany({
     where: {
@@ -396,6 +425,7 @@ async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertS
     for (const [index, fixture] of colorFixtures.entries()) {
       const client = await prisma.client.create({
         data: {
+          tenantId: PREVIEW_DEFAULT_TENANT_ID,
           name: `${PREVIEW_SEED_TAG} Cliente Território ${fixture.city}`,
           city: fixture.city,
           state: fixture.state,
@@ -472,6 +502,8 @@ async function createPreviewDataset() {
     PREVIEW_SELLERS.map((seller) => upsertSeller(seller.name, seller.email, seller.region))
   );
 
+  await reconcilePreviewControlPlane();
+
   await cleanOldPreviewSeedData(sellers.map((seller) => seller.id));
 
   for (const productTemplate of PREVIEW_PRODUCTS) {
@@ -521,6 +553,7 @@ async function createPreviewDataset() {
 
     const client = await prisma.client.create({
       data: {
+        tenantId: PREVIEW_DEFAULT_TENANT_ID,
         name: seededName,
         city: clientTemplate.city,
         state: clientTemplate.state,
@@ -677,7 +710,7 @@ async function main() {
 
 main()
   .catch((error) => {
-    console.error("Falha ao executar preview seed", error);
+    console.error("Falha ao executar preview seed", { code: error instanceof Error ? error.message : "UNKNOWN" });
     process.exit(1);
   })
   .finally(async () => {

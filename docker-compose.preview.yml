@@ -15,6 +15,10 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_SCHEMA_MODE: ephemeral-push
+      DEPLOYMENT_ENV: ${DEPLOYMENT_ENV:-preview}
+      TENANCY_MODE: ${TENANCY_MODE:-disabled}
+      TENANT_READ_PILOT_ENABLED: ${TENANT_READ_PILOT_ENABLED:-false}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-}
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-postgres}@db:5432/${POSTGRES_DB:-salesforce_pro_preview}?schema=public}
       SEED_ON_BOOTSTRAP: ${SEED_ON_BOOTSTRAP:-false}
       ENABLE_SMOKE_BOOTSTRAP: ${ENABLE_SMOKE_BOOTSTRAP:-false}

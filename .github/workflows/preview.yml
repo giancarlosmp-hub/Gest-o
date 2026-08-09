@@ -55,7 +55,6 @@ jobs:
           envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,ADMIN_BOOTSTRAP_EMAIL,ADMIN_BOOTSTRAP_PASSWORD
           script: |
             set -euo pipefail
-            set -x
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
@@ -85,6 +84,10 @@ jobs:
             SEED_ON_BOOTSTRAP=false
             ENABLE_SMOKE_BOOTSTRAP=false
             ENABLE_PREVIEW_SEED=true
+            DEPLOYMENT_ENV=preview
+            TENANCY_MODE=disabled
+            TENANT_READ_PILOT_ENABLED=false
+            DEFAULT_TENANT_ID=tenant-default-v1
             FRONTEND_URL=https://pr-${PR_NUMBER}-crm.demetraagronegocios.com.br
             CORS_ALLOWED_ORIGINS=https://pr-${PR_NUMBER}-crm.demetraagronegocios.com.br,http://pr-${PR_NUMBER}.crm.demetraagronegocios.com.br,https://pr-${PR_NUMBER}.crm.demetraagronegocios.com.br
             VITE_API_URL=/api
@@ -106,13 +109,15 @@ jobs:
             export ADMIN_BOOTSTRAP_EMAIL="pr${PR_NUMBER}@preview.local"
             export ADMIN_BOOTSTRAP_PASSWORD="pr${PR_NUMBER}pr${PR_NUMBER}"
 
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans || true
+            if docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -q | grep -q .; then
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml down --remove-orphans
+            fi
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps
 
             API_HEALTHY=false
             for i in {1..60}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health" || true)
+              if ! STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${API_PORT}/health"); then STATUS=000; fi
               if [ "$STATUS" = "200" ]; then
                 echo "API healthy"
                 API_HEALTHY=true
@@ -123,13 +128,13 @@ jobs:
 
             if [ "$API_HEALTHY" != "true" ]; then
               echo "API did not become healthy in time"
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
               exit 1
             fi
 
             WEB_HEALTHY=false
             for i in {1..60}; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz" || true)
+              if ! STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}/healthz"); then STATUS=000; fi
               if [ "$STATUS" = "200" ]; then
                 echo "WEB healthy"
                 WEB_HEALTHY=true
@@ -140,21 +145,21 @@ jobs:
 
             if [ "$WEB_HEALTHY" != "true" ]; then
               echo "WEB did not become healthy in time"
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
               exit 1
             fi
 
-            PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/" || true)
-            PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/" || true)
+            if ! PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/"); then PROXY_HTTP_STATUS=000; fi
+            if ! PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/"); then PROXY_HTTPS_STATUS=000; fi
             echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
             echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
 
             if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
               echo "Reverse proxy check failed"
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200 || true
-              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200 || true
-              sudo tail -n 200 /var/log/nginx/preview_error.log || true
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
+              sudo tail -n 200 /var/log/nginx/preview_error.log
               exit 1
             fi
 
@@ -175,16 +180,46 @@ jobs:
               -e NODE_ENV=development \
               api npm run seed:preview -w @salesforce-pro/api
 
-            echo "=== LOGIN ADMIN PREVIEW ==="
-            LOGIN_RESPONSE_STATUS=$(
-              curl -sS -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" \
-              --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}"
-            )
-            if [ "${LOGIN_RESPONSE_STATUS}" != "200" ]; then
-              echo "Preview login smoke failed"
+            echo "TENANT_READ_PREVIEW_SEED=PASS"
+            echo "=== CERTIFY PREVIEW DATASET ==="
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T \
+              -e NODE_ENV=test -e DEPLOYMENT_ENV=preview -e DEFAULT_TENANT_ID=tenant-default-v1 \
+              api npx tsx apps/api/prisma/validatePreviewTenantReadPilot.ts
+            echo "TENANT_READ_PREVIEW_DATASET=PASS"
+
+            # Enable only after seed certification, then recreate only the preview API.
+            sed -i 's/^TENANCY_MODE=disabled$/TENANCY_MODE=default-only/; s/^TENANT_READ_PILOT_ENABLED=false$/TENANT_READ_PILOT_ENABLED=true/' .env
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api
+            API_CONTAINER_ID="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -q api)"
+            test -n "$API_CONTAINER_ID"
+            for i in {1..60}; do
+              if [ "$(docker inspect --format='{{.State.Health.Status}}' "$API_CONTAINER_ID")" = "healthy" ]; then break; fi
+              if [ "$i" = 60 ]; then exit 1; fi
+              sleep 2
+            done
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api node -e \
+              'if(process.env.DEPLOYMENT_ENV!=="preview"||process.env.TENANCY_MODE!=="default-only"||process.env.TENANT_READ_PILOT_ENABLED!=="true"||process.env.DEFAULT_TENANT_ID!=="tenant-default-v1")process.exit(1)'
+
+            echo "=== REAL GET /clients SHADOW PROOF ==="
+            LOGIN_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"
+            trap 'rm -f "$LOGIN_FILE" "$SHADOW_LOG"' EXIT
+            curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}" | grep -qx 200
+            TOKEN="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1]));if(!x.accessToken)process.exit(1);process.stdout.write(x.accessToken)' "$LOGIN_FILE")"
+            SHADOW_SINCE="$(date -u +%FT%TZ)"
+            for request in 1 2 3 4; do
+              (test "$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOKEN}" -H "X-Request-Id: preview-shadow-${request}" "http://127.0.0.1:${API_PORT}/clients")" = "200") &
+            done
+            wait
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs --since "$SHADOW_SINCE" api > "$SHADOW_LOG"
+            test "$(grep -c 'client list shadow comparison' "$SHADOW_LOG")" -ge 4
+            test "$(grep -c '"result":"MATCH"' "$SHADOW_LOG")" -ge 4
+            if grep -q '"result":"MISMATCH"' "$SHADOW_LOG"; then
+              sed -i 's/^TENANCY_MODE=default-only$/TENANCY_MODE=disabled/; s/^TENANT_READ_PILOT_ENABLED=true$/TENANT_READ_PILOT_ENABLED=false/' .env
+              docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api
               exit 1
             fi
+            echo "TENANT_READ_PREVIEW_SHADOW=MATCH"
 
 
 
