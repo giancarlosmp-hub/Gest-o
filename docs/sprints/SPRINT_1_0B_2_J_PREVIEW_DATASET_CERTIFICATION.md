@@ -16,7 +16,7 @@ O seed é reaplicável: Tenant, User e TenantMembership são reconciliados; fixt
 
 ## Ativação, checkpoints e prova
 
-O preview nasce com `DEPLOYMENT_ENV=preview`, `TENANCY_MODE=disabled`, `TENANT_READ_PILOT_ENABLED=false` e o ID configurado. Somente após `TENANT_READ_PREVIEW_SEED=PASS` e `TENANT_READ_PREVIEW_DATASET=PASS`, o workflow troca para `default-only`/`true` e recria a API. Quatro requests concorrentes autenticados chamam o endpoint real sem registrar token/payload. O gate exige quatro eventos sanitizados `MATCH`, nenhum `MISMATCH`, e publica `TENANT_READ_PREVIEW_SHADOW=MATCH`. A resposta continua exclusivamente legada.
+O preview nasce com `DEPLOYMENT_ENV=preview`, `TENANCY_MODE=disabled`, `TENANT_READ_PILOT_ENABLED=false` e o ID configurado. Somente após `TENANT_READ_PREVIEW_SEED=PASS` e `TENANT_READ_PREVIEW_DATASET=PASS`, o workflow troca para `default-only`/`true` e recria a API. Quatro requests concorrentes autenticados chamam o endpoint real sem registrar token/payload. O gate usa `TENANT_READ_SHADOW_EVENT=<JSON>` serializado explicitamente, exige exatamente um `MATCH` para cada um dos quatro request IDs do run, HTTP 200/exit 0 em cada processo, nenhum `MISMATCH` após o timestamp da prova, e publica `TENANT_READ_PREVIEW_SHADOW=MATCH`. A resposta continua exclusivamente legada.
 
 A prova local/CI certifica o dataset e o mecanismo. O valor MATCH do Preview Deploy real será produzido pelo workflow desta PR; não se declara execução remota antecipadamente neste documento.
 
@@ -38,3 +38,7 @@ Produção permanece literalmente disabled/false. Não houve acesso produtivo, m
 `TENANCY_MODE_PRODUCTION = disabled`  
 `TENANT_READ_PILOT_ENABLED_PRODUCTION = false`  
 `PRODUCTION_ACCESSED = NO`
+
+
+## Correção da prova da PR #792
+A prova não depende mais de `util.inspect`/renderização de objetos do logger. As quatro chamadas têm PID, status HTTP e exit code capturados separadamente; todas são aguardadas. Qualquer falha após ativação aciona trap de rollback para `disabled/false`, recria apenas a API preview e limita o diagnóstico a requestId, status, exit code, contagens e marcadores técnicos. Até os dois checks do novo head ficarem verdes, `READY_TO_MERGE_PR_792 = NO` e `TENANT_READ_PREVIEW_SHADOW = NOT_PROVEN`.

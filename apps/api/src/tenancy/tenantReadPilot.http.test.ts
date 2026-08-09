@@ -3,7 +3,7 @@ import http from "node:http";
 import express from "express";
 import { authMiddleware } from "../middlewares/auth.js";
 import { signAccessToken } from "../utils/jwt.js";
-import { runClientListShadowPilot, validateTenantReadPilotConfig, type TenantReadPilotEvent } from "./tenantReadPilot.js";
+import { formatTenantReadPilotMarker, runClientListShadowPilot, validateTenantReadPilotConfig, type TenantReadPilotEvent } from "./tenantReadPilot.js";
 import type { ClientTenantDelegate } from "./clientTenantRepository.js";
 import type { MembershipRecord, TenantControlPlaneReader, TenantRecord } from "./tenantContext.js";
 
@@ -72,6 +72,10 @@ try {
   assert.deepEqual(await a.json(), [clients[0]]); assert.deepEqual(await b.json(), [clients[1]]);
   assert.equal(events.at(-2)?.tenantId, "tenant-a"); assert.equal(events.at(-1)?.tenantId, "tenant-b");
   assert.equal(events.at(-2)?.result, "MATCH"); assert.equal(events.at(-1)?.result, "MATCH");
+  const marker = formatTenantReadPilotMarker(events.at(-2)!);
+  assert.match(marker, /^TENANT_READ_SHADOW_EVENT=\{"requestId":"synthetic","tenantId":"tenant-a"/);
+  assert.match(marker, /"result":"MATCH"/);
+  assert.doesNotMatch(marker, /email|authorization|token|payload|client-a/i);
 
   for (const attempt of [
     call(urlA, "user-a", "?tenantId=tenant-b"),
