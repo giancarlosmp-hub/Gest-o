@@ -1,3 +1,7 @@
+# 🔵 Sprint 1.0B.2-L — preflight de prontidão dos dados (09/08/2026)
+
+Contrato read-only e sanitizado inventaria control plane e 11 roots para um futuro planejamento de backfill. NULL permanece pendência, inconsistências bloqueiam/quarentenam e nenhuma produção foi acessada. Até checks reais verdes: `READY_FOR_1_0B_2_L_REVIEW = NO`, `TENANT_DATA_READINESS_PREFLIGHT = NOT_PROVEN` e `READY_FOR_BACKFILL_PLANNING = NO`. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_L_TENANT_DATA_READINESS_PREFLIGHT.md).
+
 # 🔵 Sprint 1.0B.2-K — estabilidade sintética do shadow preview (09/08/2026)
 
 A janela bounded proposta executa 10 ciclos × 4 GET `/clients`, exige 40 HTTP 200/MATCH, IDs internos únicos e zero MISMATCH, inclusive em rerun com volume reutilizado. É evidência sintética curta, não estabilidade produtiva; rollback restaura `disabled/false` e recria somente a API. Até Docker Compose CI e Preview Deploy reais verdes: `READY_FOR_1_0B_2_K_REVIEW = NO` e `TENANT_READ_PREVIEW_STABILITY = NOT_PROVEN`. Produção não foi acessada nem autorizada. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).

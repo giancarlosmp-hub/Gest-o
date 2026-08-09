@@ -468,3 +468,6 @@ Produção: `TENANCY_MODE=disabled` e `TENANT_READ_PILOT_ENABLED=false`. O proce
 
 ### Piloto Client no Preview (1.0B.2-J)
 Executar `npm run test:tenant-read-pilot-preview-seed`. A ativação é exclusiva do workflow preview e posterior aos checkpoints de seed/dataset. Em abort/MISMATCH, restaurar `TENANT_READ_PILOT_ENABLED=false` e `TENANCY_MODE=disabled`, recriar somente a API preview e confirmar ausência de evento shadow; nunca inspecionar payload ou acessar produção.
+# Preflight tenant data readiness (somente ambiente descartável)
+
+Execute `npm run test:tenant-data-readiness` e, com Docker, `npm run test:tenant-data-readiness:postgres`. O segundo comando recusa `DATABASE_URL`, não publica porta e deve terminar em `TENANT_DATA_READINESS_POSTGRES=PASS`. Não aponte esse harness à produção e não interprete PASS sintético como prontidão produtiva. Rollback é reverter código/gate; não existe rollback de dados porque o diagnóstico não escreve.
