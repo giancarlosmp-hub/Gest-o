@@ -76,6 +76,9 @@ jobs:
       - name: Prove Agenda and Timeline tenant ownership isolation
         run: npm run test:tenant-agenda-timeline
 
+      - name: Prove Agenda descendants tenant ownership isolation
+        run: npm run test:tenant-agenda-descendants
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 
