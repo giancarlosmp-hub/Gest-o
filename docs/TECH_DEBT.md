@@ -158,3 +158,6 @@ Os adapters 1.0B.2-G não estão no runtime. AgendaStop e Activity por Agenda ai
 ### Progresso 1.0B.2-K — observação bounded do shadow
 
 O gate proposto cobre 10 ciclos/40 reads sintéticos, correlação interna, isolamento de logs e rerun com volume reutilizado. TD-TENANCY-READ-PILOT permanece aberto: a prova é curta, não produtiva e ainda `NOT_PROVEN` até checks reais verdes. Rate limit, timeout, atraso/retenção de logs e estabilidade temporal produtiva seguem como dívida; não há autorização de runtime, backfill ou cutover.
+# TD-TENANT-DATA-READINESS — evidência produtiva e delegate real pendentes
+
+O contrato 1.0B.2-L e o harness sintético não provam dados produtivos, escala, performance nem completude de um futuro adapter Prisma. Permanecem pendentes autorização formal, delegate read-only revisado, execução controlada, evidência por SHA e decisão humana antes de planejar; backfill produtivo e runtime continuam bloqueados.

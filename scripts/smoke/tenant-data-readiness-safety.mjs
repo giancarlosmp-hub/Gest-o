@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const source = await readFile(new URL("../../apps/api/src/tenancy/tenantDataReadinessPreflight.ts", import.meta.url), "utf8");
+const postgresHarness = await readFile(new URL("./tenant-data-readiness-postgres.sh", import.meta.url), "utf8");
+const outputRegression = await readFile(new URL("./tenant-data-readiness-output.test.mjs", import.meta.url), "utf8");
+assert.doesNotMatch(source, /@prisma\/client|from\s+["'][^"']*prisma/i);
+assert.doesNotMatch(source, /\.\s*(create|update|upsert|delete|createMany|updateMany|deleteMany)\s*\(\s*\{|\$executeRaw|\$queryRawUnsafe/i);
+assert.doesNotMatch(source, /memberships\s*\[\s*0\s*\]/);
+assert.doesNotMatch(source, /req\.(headers|query|body)|x-tenant/i);
+for (const root of ["Client", "AgendaEvent", "Product", "AppConfig", "Goal", "ActivityKPI", "Sale", "SellerTerritoryCity", "KnowledgeDocument", "ErpSyncRun", "ErpSyncLock"]) assert.match(source, new RegExp(`"${root}"`));
+for (const field of ["contractVersion", "rootsEvaluated", "aggregateHash", "blockers", "quarantineCount", "durationMs"]) assert.match(source, new RegExp(field));
+assert.ok(postgresHarness.includes('result=$("${psql[@]}" -qAt'));
+assert.match(postgresHarness, /BEGIN TRANSACTION READ ONLY;/);
+assert.match(postgresHarness, /COMMIT;/);
+assert.match(postgresHarness, /report_line_count.*-ne 1/);
+assert.match(postgresHarness, /"\$result" != "BLOCKED_EXPECTED"/);
+for (const checkpoint of ["baseline_before", "read_only_report", "baseline_after", "final"]) assert.match(postgresHarness, new RegExp(`checkpoint ${checkpoint}`));
+assert.match(postgresHarness, /"\$before" == "\$after"/);
+assert.match(postgresHarness, /TENANT_DATA_READINESS_POSTGRES=PASS/);
+assert.doesNotMatch(postgresHarness, /\|\|\s*true|continue-on-error|\bSKIP\b|exit\s+77|\b(?:grep|tail|head)\b/);
+assert.match(outputRegression, /BEGIN\\nBLOCKED_EXPECTED\\nCOMMIT/);
+assert.match(outputRegression, /validate\(""\), false/);
+assert.match(outputRegression, /validate\("READY"\), false/);
+console.log("TENANT_DATA_READINESS_SAFETY=PASS");

@@ -1,5 +1,9 @@
 # Plano da migration expand — Sprints 1.0B.1 e 1.0B.2
 
+## Preflight 1.0B.2-L
+
+Antes de qualquer novo planejamento, o diagnóstico read-only deve avaliar o control plane e exatamente os 11 roots, contabilizar NULL/integridade e terminar verde em execução formal autorizada. `READY` significa somente prontidão para planejar; não autoriza apply. O harness sintético não descreve produção, e `tenantId NULL` nunca é global nem corrigido automaticamente.
+
 > A 1.0B foi dividida: 1.0B.1 persiste somente o control plane default-only; 1.0B.2 tratará os
 > models empresariais após os gates operacionais. Esta PR não aplica migration em produção.
 

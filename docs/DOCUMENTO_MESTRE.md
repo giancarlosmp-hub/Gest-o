@@ -579,3 +579,6 @@ A listagem autenticada de Client mantém resposta legada e pode executar somente
 
 ### Marco 1.0B.2-J
 O preview possui contrato sintético determinístico e gate seed → validate → enable → GET `/clients` → MATCH. Isso não autoriza produção, mutations, backfill ou cutover.
+# Adendo 1.0B.2-L — readiness não é autorização
+
+O [preflight de dados](tenancy/TENANT_DATA_READINESS_PREFLIGHT.md) acrescenta diagnóstico injetável/read-only dos 11 roots e control plane. Mesmo `READY` permite somente discutir planejamento; não autoriza backfill, runtime ou produção. Estado inicial: `TENANT_DATA_READINESS_PREFLIGHT = NOT_PROVEN` e `PRODUCTION_ACCESSED = NO`.
