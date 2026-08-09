@@ -65,6 +65,9 @@ jobs:
       - name: Prove tenant-scoped data access isolation
         run: npm run test:tenant-data-access
 
+      - name: Prove tenant relational ownership isolation
+        run: npm run test:tenant-relational-ownership
+
       - name: Prove synthetic PostgreSQL 16 backup restore
         run: npm run test:production-backup-restore:postgres
 

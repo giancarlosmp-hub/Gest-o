@@ -1,3 +1,14 @@
+# 🔵 Sprint 1.0B.2-E — ownership relacional tenant-scoped aditivo (08/08/2026)
+
+Opportunity e Activity possuem adapters isolados que provam ownership via Client. Activity aceita
+exatamente uma fonte (Client XOR Opportunity); dual-parent e órfã falham fechados em reads e
+mutations. Suporte dual-parent foi adiado até existir enforcement comprovado no banco. Não há
+integração ao runtime. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_E_TENANT_RELATIONAL_OWNERSHIP.md).
+
+`READY_FOR_1_0B_2_E_REVIEW = YES`; `READY_FOR_TENANT_AWARE_RUNTIME = NO`; `READY_FOR_BACKFILL_PRODUCTION = NO`; `READY_FOR_MULTI_TENANT_CUTOVER = NO`; `TENANCY_MODE = disabled`; `PRODUCTION_ACCESSED = NO`.
+
+## Predecessor preservado — Sprint 1.0B.2-D
+
 # 🔵 Sprint 1.0B.2-D — data access tenant-scoped aditivo (08/08/2026)
 
 Contrato fail-closed e piloto isolado de Client provam CRUD/count A×B com `tenantId` no predicado

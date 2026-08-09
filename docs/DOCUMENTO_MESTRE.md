@@ -1,3 +1,16 @@
+# Sprint 1.0B.2-E — ownership relacional tenant-scoped aditivo
+
+O estágio E adiciona, sem ligação ao runtime, repositories de Opportunity e Activity cujo ownership
+deriva de Client. Activity aceita somente Client XOR Opportunity. Como Prisma não compara com
+segurança `Activity.clientId` e `Activity.opportunity.clientId`, todo dual-parent é negado, mesmo se
+aparentemente convergente; suporte futuro exige enforcement comprovado no banco. Órfãos,
+cross-tenant e `tenantId=NULL` falham fechados. Inventário, matriz e rollback:
+[Sprint Brief](sprints/SPRINT_1_0B_2_E_TENANT_RELATIONAL_OWNERSHIP.md).
+
+O gate `test:tenant-relational-ownership` sucede o estágio D no CI. `READY_FOR_TENANT_AWARE_RUNTIME = NO`; `TENANCY_MODE=disabled`; não houve produção.
+
+## Predecessor preservado — Sprint 1.0B.2-D
+
 # Sprint 1.0B.2-D — data access tenant-scoped aditivo
 
 Um piloto isolado de Client prova predicados Prisma A×B; controllers, JWT, jobs, webhooks e
