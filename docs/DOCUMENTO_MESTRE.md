@@ -560,3 +560,7 @@ não ganhou autoridade produtiva. A entrega não acessou produção nem executou
 ## Decisão técnica 1.0B.2-F — Activity dual-parent
 
 Uma prova isolada recomenda unique `Opportunity(id, clientId)` e FK composta nullable de Activity. Ela demonstra enforcement atômico de writes sem alterar a política XOR produtiva. `NOT VALID` permite instalação após diagnóstico, mas não valida conflitos históricos; migration e ativação runtime exigem Sprint/autorização futuras. Consulte o [plano](tenancy/ACTIVITY_DUAL_PARENT_ENFORCEMENT_PLAN.md).
+
+## Decisão técnica 1.0B.2-G — Agenda e Timeline
+
+AgendaEvent autoriza exatamente uma fonte entre tenant direto, Client e Opportunity; TimelineEvent, exatamente uma entre Client e Opportunity. Múltiplos pais são negados porque o Prisma não compara fontes irmãs com segurança. Seller não é ownership e root scoped não autoriza includes. Os adapters são provas isoladas, não runtime.
