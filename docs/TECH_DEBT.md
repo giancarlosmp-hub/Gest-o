@@ -1,3 +1,7 @@
+# Progresso 1.0B.2-H — descendentes ainda isolados
+
+Adapters de AgendaStop e Activity somente-Agenda existem apenas como prova. Integração dos acessos legados, decisão sobre multi-parent, includes filtrados e saneamento de vínculos históricos seguem abertos. CASCADE/SET NULL continuam exigindo cuidado e não foram alterados.
+
 # Progresso 1.0B.2-E — ownership relacional ainda isolado
 
 Permanecem por migrar acessos de Opportunity/Activity em controllers, dashboard, agenda, IA,

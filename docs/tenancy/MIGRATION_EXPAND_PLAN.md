@@ -64,3 +64,7 @@ O [plano dual-parent](ACTIVITY_DUAL_PARENT_ENFORCEMENT_PLAN.md) recomenda unique
 ## Gate isolado 1.0B.2-G
 
 Agenda/Timeline agora possuem matriz e adapters somente de prova. Isso não altera expand/backfill: AgendaEvent.tenantId continua nullable, TimelineEvent deriva de pais, multi-parent é negado, includes/descendentes não são suportados e nenhum acesso produtivo foi migrado. O gate deve permanecer verde antes de qualquer integração futura.
+
+## Gate isolado 1.0B.2-H
+
+AgendaStop e Activity somente-Agenda possuem adapters e matriz isolados. O predicado atravessa AgendaEvent, multi-parent/NULL/órfão/cross-tenant falham fechados e includes não são expostos. Não há alteração de FK, expand/backfill, runtime ou produção; o gate deve preceder qualquer integração.

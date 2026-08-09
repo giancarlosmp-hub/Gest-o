@@ -1,3 +1,7 @@
+# Sprint 1.0B.2-H — descendentes de Agenda
+
+Após a PR #789 verde, AgendaStop e o canal restrito Activity somente-Agenda possuem prova isolada tenant-scoped. Multi-parent não foi liberado; adapters seguem fora do runtime, sem DDL ou produção.
+
 # Sprint 1.0B.2-E — ownership relacional tenant-scoped aditivo
 
 O estágio E adiciona, sem ligação ao runtime, repositories de Opportunity e Activity cujo ownership

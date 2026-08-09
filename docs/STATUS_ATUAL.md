@@ -1,3 +1,7 @@
+# 🔵 Sprint 1.0B.2-H — descendentes de Agenda isolados (09/08/2026)
+
+PR #789 integrada e verde. AgendaStop e Activity somente-Agenda agora têm adapters de prova fail-closed, A×B e gate CI, sem integração runtime. Multi-parent, órfãos, NULL e cross-tenant negam; FKs, produção e `TENANCY_MODE=disabled` permanecem inalterados.
+
 # 🔵 Sprint 1.0B.2-E — ownership relacional tenant-scoped aditivo (08/08/2026)
 
 Opportunity e Activity possuem adapters isolados que provam ownership via Client. Activity aceita
