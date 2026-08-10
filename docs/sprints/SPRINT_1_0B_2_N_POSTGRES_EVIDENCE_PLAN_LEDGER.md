@@ -18,10 +18,35 @@ Não houve migration produtiva, tabela/ledger em produção, backfill, DML empre
 produção, runtime tenant-aware, RLS, NOT NULL, cutover ou deploy. Rollback remove apenas os artefatos
 aditivos desta prova; no container o teardown retorna ao catálogo inicial.
 
+## Evidência verde da PR #796
+
+O head remoto comprovado `029fab54d32413d0e94308227c0ae591144b7ee7` passou no GitHub Actions:
+
+- Preview Deploy, run 31432019343: **PASS**;
+- Docker Compose CI, run 31432019733, job `compose-smoke` 93597451158: **PASS**;
+- `Prove tenancy roots expand on PostgreSQL 16`: **PASS**;
+- `Prove preflight-gated backfill planning on PostgreSQL 16`: **PASS**;
+- `Prove preflight evidence and plan ledger on PostgreSQL 16`: **PASS**;
+- builds shared/web/API, typecheck, API health e smokes gerais: **PASS**.
+
+Os steps verdes certificam a prova descartável. Não se inferem marcadores internos além dos
+preservados pela evidência do step, nem estado de produção a partir do GitHub Actions.
+
+## Lições duráveis
+
+Readiness exige sessão SQL real no database exato (`psql -X`, `ON_ERROR_STOP=1`, `SELECT 1`, exit e
+stdout exatos); `pg_isready` isolado não é autoridade. Constraints sobrepostas exigiram advisory
+transaction locks namespaced por `evidence_id` e `plan_id`, com ordem fixa: replay idêntico retorna
+`IDEMPOTENT_REPLAY` e divergência fecha em `23505`. Papel/grants são provados por
+`pg_catalog.pg_roles`/`information_schema.table_privileges` e inventário literal, não `LIKE`.
+Concorrência preserva PIDs, waits, exits e streams separados. Fixtures não se sobrepõem (`p3` é
+exclusivo de crash/rollback), e rollback do teardown precede teardown real e baseline final idêntico.
+
 ## Declarações
 
-- `READY_FOR_1_0B_2_N_REVIEW = NO` até checks reais verdes
-- `PREFLIGHT_PLAN_LEDGER_POSTGRES = NOT_PROVEN`
+- `READY_TO_MERGE_PR_796 = NO` até o commit documental repetir os checks obrigatórios
+- `READY_FOR_1_0B_2_N_REVIEW = YES`
+- `PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS`
 - `READY_FOR_LEDGER_PRODUCTION_MIGRATION = NO`
 - `READY_FOR_BACKFILL_PLANNING = YES` somente para planos sintéticos/dry-run
 - `READY_FOR_BACKFILL_PRODUCTION = NO`

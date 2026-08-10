@@ -591,3 +591,10 @@ A prova candidata persiste somente IDs, versões, hashes, estados e timestamps, 
 transacionais, grants mínimos e append-only. Resolve na prova a lacuna distribuída de B/M, sem criar
 migration ou adapter produtivo e sem autorizar backfill/apply. Consulte
 [PREFLIGHT_PLAN_LEDGER](tenancy/PREFLIGHT_PLAN_LEDGER.md).
+
+**Evidência real:** no head `029fab54d32413d0e94308227c0ae591144b7ee7` da PR #796, Preview
+Deploy 31432019343 e Docker Compose CI 31432019733/job 93597451158 passaram. O compose-smoke
+comprovou build, typecheck, API health, smokes, tenancy expand, planejamento condicionado e o step
+`Prove preflight evidence and plan ledger on PostgreSQL 16`. Assim,
+`READY_FOR_1_0B_2_N_REVIEW = YES` e `PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS`, sem converter a prova
+descartável em migration, apply, backfill ou autorização produtiva.
