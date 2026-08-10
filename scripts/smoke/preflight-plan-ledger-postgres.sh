@@ -34,9 +34,10 @@ SELECT 'TRIGGER|'||event_object_table||'|'||trigger_name FROM information_schema
 SELECT 'ROLE|'||rolname FROM pg_catalog.pg_roles WHERE rolname='preflight_plan_ledger_writer';
 SELECT 'GRANT|'||table_name||'|'||grantee||'|'||privilege_type FROM information_schema.table_privileges
  WHERE table_schema = 'public'
- AND (
-  table_name LIKE 'tenant_%ledger%'
-  OR table_name = 'tenant_preflight_evidence_registry'
+ AND table_name IN (
+  'tenant_preflight_evidence_registry',
+  'tenant_backfill_plan_ledger',
+  'tenant_backfill_plan_event'
  )
  AND grantee = 'preflight_plan_ledger_writer'
  ORDER BY table_name,privilege_type;
