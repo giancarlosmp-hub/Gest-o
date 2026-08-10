@@ -23,6 +23,25 @@ assert.match(harness, /grep -Fxc 'DROP TABLE "incident_synthetic";'/);
 assert.match(harness, /image=\$\{API_IMAGE:-gest-o-api:\$sha\}/);
 assert.match(harness, /required pinned API tooling image unavailable[\s\S]*exit 1/);
 assert.match(harness, /command -v docker[\s\S]*exit 77/);
+assert.match(harness, /POSTGRES_DB=expand/);
+const readinessCommand = /docker exec -i "\$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d expand -qAt -c 'SELECT 1;'/g;
+assert.equal((harness.match(readinessCommand) ?? []).length, 2);
+assert.match(harness, /for readiness_attempt in \{1\.\.60\}; do/);
+assert.match(harness, /readiness_exit=\$\?/);
+assert.match(harness, /wc -l < "\$tmp\/readiness\.out"/);
+assert.match(harness, /grep -Fqx '1' "\$tmp\/readiness\.out"/);
+assert.match(harness, /step postgres_readiness "wait for expand database SQL readiness"\s+HARNESS_RESULT=RUNNING/);
+const readinessLoopEnd = harness.indexOf('[[ "$expand_ready" == true ]]');
+const finalReadiness = harness.indexOf('HARNESS_COMMAND="validate final independent expand database SQL connection"');
+const readinessPass = harness.indexOf("TENANCY_EXPAND_DATABASE_READINESS=PASS");
+const urlDefinition = harness.indexOf('url="postgresql://');
+const firstTooling = harness.indexOf("run_tooling(){");
+const predecessorMaterialization = harness.indexOf("step predecessor_materialization");
+const fixturesStart = harness.indexOf("step fixtures");
+const migrationApplyStart = harness.indexOf("step migration_apply");
+assert.ok(readinessLoopEnd >= 0 && readinessLoopEnd < finalReadiness && finalReadiness < readinessPass && readinessPass < urlDefinition && readinessPass < firstTooling && readinessPass < predecessorMaterialization && readinessPass < fixturesStart && readinessPass < migrationApplyStart);
+assert.match(harness, /final_readiness_exit=\$\?[\s\S]*\[\[ \$final_readiness_exit -eq 0 \]\][\s\S]*readiness-final\.err[\s\S]*wc -l < "\$tmp\/readiness-final\.out"[\s\S]*grep -Fqx '1' "\$tmp\/readiness-final\.out"/);
+assert.doesNotMatch(harness, /pg_isready|CREATE DATABASE\s+expand|-d postgres(?:\s|$)|-d template1(?:\s|$)|docker run[^\n]*(?:\s-p\s|--publish)|\beval\b|set -x/i);
 assert.match(harness, /--diff-filter=A -- apps\/api\/prisma\/migrations\/20260808120000_tenancy_expand_roots\/migration\.sql/);
 assert.doesNotMatch(harness, /git show HEAD:apps\/api\/prisma\/schema\.prisma/);
 for (const token of ["docker_network_setup", "postgres_readiness", "predecessor_materialization", "migration_apply", "catalog_validation", "fixtures", "fk_negative_test", "unique_negative_test", "post_diff", "HARNESS_STEP=", "HARNESS_COMMAND=", "HARNESS_RESULT=FAIL", "EXIT_CODE="]) assert.ok(harness.includes(token), token);
@@ -38,3 +57,18 @@ assert.match(harness.slice(harness.indexOf('step fixtures'), migrationApply), /d
 assert.doesNotMatch(harness.slice(harness.indexOf('step fixtures'), harness.indexOf('step post_diff')), /\|\| true/);
 assert.doesNotMatch(harness, /incident_2026|incident_2025|incident_2024/);
 assert.match(harness.slice(preservationCheck), /to_regclass\('public\.incident_synthetic'\)[^]*count\(\*\) FROM public\."incident_synthetic"[^]*contype='p'/);
+
+const readinessDecision = ({ database, exitCode, stdout, stderr }) => database === "expand" && exitCode === 0 && stdout === "1\n" && stderr === "";
+assert.equal(readinessDecision({ database: "expand", exitCode: 0, stdout: "1\n", stderr: "" }), true);
+for (const rejected of [
+  { database: "expand", exitCode: 1, stdout: "1\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "0\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "1\n1\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "SELECT 1\n1\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "SELECT 1\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: " 1\n", stderr: "" },
+  { database: "postgres", exitCode: 0, stdout: "1\n", stderr: "" },
+  { database: "template1", exitCode: 0, stdout: "1\n", stderr: "" },
+  { database: "expand", exitCode: 0, stdout: "1\n", stderr: "1\n" },
+]) assert.equal(readinessDecision(rejected), false);

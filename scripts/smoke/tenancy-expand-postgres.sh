@@ -27,9 +27,34 @@ step docker_network_setup "create internal Docker network"
 docker network create --internal "$net" >/dev/null
 step postgres_start "start disposable PostgreSQL 16"
 docker run -d --rm --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=expand postgres:16 >/dev/null
-step postgres_readiness "wait for PostgreSQL readiness"
-for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres -d expand >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$pg" pg_isready -U postgres -d expand >/dev/null
+step postgres_readiness "wait for expand database SQL readiness"
+HARNESS_RESULT=RUNNING
+expand_ready=false
+for readiness_attempt in {1..60}; do
+  if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d expand -qAt -c 'SELECT 1;' > "$tmp/readiness.out" 2> "$tmp/readiness.err"; then
+    readiness_exit=0
+  else
+    readiness_exit=$?
+  fi
+  if [[ $readiness_exit -eq 0 && ! -s "$tmp/readiness.err" && $(wc -l < "$tmp/readiness.out") -eq 1 ]] && grep -Fqx '1' "$tmp/readiness.out"; then
+    expand_ready=true
+    break
+  fi
+  sleep 1
+done
+[[ "$expand_ready" == true ]]
+HARNESS_COMMAND="validate final independent expand database SQL connection"
+if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d expand -qAt -c 'SELECT 1;' > "$tmp/readiness-final.out" 2> "$tmp/readiness-final.err"; then
+  final_readiness_exit=0
+else
+  final_readiness_exit=$?
+fi
+[[ $final_readiness_exit -eq 0 ]]
+[[ ! -s "$tmp/readiness-final.err" ]]
+[[ $(wc -l < "$tmp/readiness-final.out") -eq 1 ]]
+grep -Fqx '1' "$tmp/readiness-final.out"
+HARNESS_RESULT=PASS
+echo 'TENANCY_EXPAND_DATABASE_READINESS=PASS'
 url="postgresql://postgres:test@$pg:5432/expand?schema=public"
 run_tooling(){ docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$url" "$image" "$@"; }
 step predecessor_materialization "materialize predecessor schema"
