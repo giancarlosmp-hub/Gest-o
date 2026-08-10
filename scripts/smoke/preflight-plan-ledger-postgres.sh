@@ -66,7 +66,7 @@ HARNESS_COMMAND='validate writer grant set cardinality'
 HARNESS_RESULT=PASS
 echo DDL_CATALOG=PASS
 
-h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64})
+h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64}); p3=$(printf 'e%.0s' {1..64})
 evcall="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-1','$h1','1.0B.2-L/v1','1.0B.2-A/roots-v1','2026-08-09T10:00Z','2030-08-10T10:00Z','READY');"
 run_sql() { printf '%s\n' "$1" | "${psql[@]}" -qAt >"$2" 2>"$3"; }
 safe_sqlstate() { sed -n 's/^ERROR:  \([0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]\):.*/\1/p' "$1" | head -n 1; }
@@ -154,15 +154,27 @@ HARNESS_COMMAND='validate one plan conflict with SQLSTATE 23505 and one canonica
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-race';" | "${psql[@]}" -At)" == 1 ]]
 
 HARNESS_STEP=CRASH_ROLLBACK_RESUME
-HARNESS_COMMAND='rollback synthetic evidence and plan transaction and validate absence'
+HARNESS_COMMAND='validate isolated crash rollback fixture is absent'
 HARNESS_RESULT=RUNNING
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-crash';" | "${psql[@]}" -At)" == 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_hash='$p3';" | "${psql[@]}" -At)" == 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-crash';" | "${psql[@]}" -At)" == 0 ]]
+HARNESS_STEP=CRASH_ROLLBACK_RESUME
+HARNESS_COMMAND='execute isolated crash transaction with explicit rollback'
 "${psql[@]}" <<SQL
 BEGIN; SET ROLE preflight_plan_ledger_writer;
 SELECT public.register_preflight_evidence('ev-crash','$h1','v','i','2026-08-09','2030-08-10','READY');
-SELECT public.register_preflight_plan('plan-crash','$p2','ev-crash','$h1','v','tenant-synthetic',true,false,'PLANNED'); ROLLBACK;
+SELECT public.register_preflight_plan('plan-crash','$p3','ev-crash','$h1','v','tenant-synthetic',true,false,'PLANNED'); ROLLBACK;
 SQL
+HARNESS_STEP=CRASH_ROLLBACK_RESUME
+HARNESS_COMMAND='validate crash evidence plan hash and events are absent after rollback'
 [[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-crash';" | "${psql[@]}" -At)" == 0 ]]
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-crash';" | "${psql[@]}" -At)" == 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_hash='$p3';" | "${psql[@]}" -At)" == 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_event WHERE evidence_id='ev-crash' OR plan_id='plan-crash';" | "${psql[@]}" -At)" == 0 ]]
+HARNESS_RESULT=PASS
+echo CRASH_ROLLBACK_RESUME=PASS
+echo CHECKPOINT=CRASH_ROLLBACK_RESUME
 
 HARNESS_STEP=APPEND_ONLY_NEGATIVE_PROOFS
 HARNESS_COMMAND='validate writer UPDATE and DELETE operations fail with SQLSTATE 42501'

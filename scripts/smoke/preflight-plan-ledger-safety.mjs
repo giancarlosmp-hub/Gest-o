@@ -76,7 +76,9 @@ for (const [step, command] of [
   ["CONFLICTING_EVIDENCE_CONCURRENCY", "launch and wait for conflicting evidence registrations"],
   ["IDENTICAL_PLAN_CONCURRENCY", "launch and wait for two identical plan registrations"],
   ["CONFLICTING_PLAN_CONCURRENCY", "launch and wait for conflicting plan registrations"],
-  ["CRASH_ROLLBACK_RESUME", "rollback synthetic evidence and plan transaction and validate absence"],
+  ["CRASH_ROLLBACK_RESUME", "validate isolated crash rollback fixture is absent"],
+  ["CRASH_ROLLBACK_RESUME", "execute isolated crash transaction with explicit rollback"],
+  ["CRASH_ROLLBACK_RESUME", "validate crash evidence plan hash and events are absent after rollback"],
   ["APPEND_ONLY_NEGATIVE_PROOFS", "validate writer UPDATE and DELETE operations fail with SQLSTATE 42501"],
   ["TEARDOWN_TRANSACTIONAL", "rollback candidate teardown and validate objects remain"],
   ["TEARDOWN_REAL", "remove candidate ledger objects"],
@@ -87,13 +89,36 @@ assert.match(sh, /conflict_evidence_pid_1=\$![\s\S]*conflict_evidence_pid_2=\$![
 assert.match(sh, /plan_pid_1=\$![\s\S]*plan_pid_2=\$![\s\S]*wait "\$plan_pid_1"[\s\S]*wait "\$plan_pid_2"/);
 assert.match(sh, /conflict_plan_pid_1=\$![\s\S]*conflict_plan_pid_2=\$![\s\S]*wait "\$conflict_plan_pid_1"[\s\S]*wait "\$conflict_plan_pid_2"/);
 assert.match(sh, /grep -Fc '23505'/);
+
+const p3Definition = sh.match(/p3=\$\(printf '([0-9a-f])%\.0s' \{1\.\.64\}\)/);
+assert.ok(p3Definition, "p3 must be exactly 64 repeated hexadecimal characters");
+assert.notEqual(p3Definition[1], "c", "p3 must differ from p1");
+assert.notEqual(p3Definition[1], "d", "p3 must differ from p2");
+const crashPreflightAt = sh.indexOf("HARNESS_COMMAND='validate isolated crash rollback fixture is absent'");
+const crashBeginAt = sh.indexOf("BEGIN; SET ROLE preflight_plan_ledger_writer;", crashPreflightAt);
+const crashRollbackAt = sh.indexOf("ROLLBACK;", crashBeginAt);
+const crashPostValidationAt = sh.indexOf("HARNESS_COMMAND='validate crash evidence plan hash and events are absent after rollback'");
+const crashPassAt = sh.indexOf("echo CRASH_ROLLBACK_RESUME=PASS");
+const crashCheckpointAt = sh.indexOf("echo CHECKPOINT=CRASH_ROLLBACK_RESUME");
+const appendOnlyAt = sh.indexOf("HARNESS_STEP=APPEND_ONLY_NEGATIVE_PROOFS");
+const teardownAt = sh.indexOf("HARNESS_STEP=TEARDOWN_TRANSACTIONAL");
+assert.ok(crashPreflightAt < crashBeginAt && crashBeginAt < crashRollbackAt && crashRollbackAt < crashPostValidationAt && crashPostValidationAt < crashPassAt && crashPassAt < crashCheckpointAt && crashCheckpointAt < appendOnlyAt && appendOnlyAt < teardownAt);
+const beforeCrash = sh.slice(sh.indexOf("HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY"), crashPreflightAt);
+assert.doesNotMatch(beforeCrash, /\$p3|plan-crash|ev-crash/);
+const crashBlock = sh.slice(crashPreflightAt, appendOnlyAt);
+assert.match(crashBlock, /register_preflight_plan\('plan-crash','\$p3','ev-crash'/);
+assert.doesNotMatch(crashBlock, /register_preflight_plan\('plan-crash','\$p[12]'/);
+assert.equal((crashBlock.match(/plan_hash='\$p3'/g) ?? []).length, 2, "p3 must be absent before and after rollback");
+assert.equal((crashBlock.match(/tenant_backfill_plan_ledger WHERE plan_id='plan-crash'/g) ?? []).length, 2, "plan-crash must be absent before and after rollback");
+assert.equal((crashBlock.match(/tenant_preflight_evidence_registry WHERE evidence_id='ev-crash'/g) ?? []).length, 2, "ev-crash must be absent before and after rollback");
+assert.match(crashBlock, /tenant_backfill_plan_event WHERE evidence_id='ev-crash' OR plan_id='plan-crash'/);
 assert.match(sh, /UPDATE public\.tenant_preflight_evidence_registry SET evidence_hash=/);
 assert.match(sh, /UPDATE public\.tenant_backfill_plan_ledger SET plan_hash=/);
 assert.match(sh, /UPDATE public\.tenant_backfill_plan_ledger SET apply_authorized=true/);
 assert.match(sh, /DELETE FROM public\.tenant_preflight_evidence_registry/);
 assert.match(sh, /DELETE FROM public\.tenant_backfill_plan_ledger/);
 assert.match(sh, /DELETE FROM public\.tenant_backfill_plan_event/);
-assert.match(sh, /BEGIN; SET ROLE preflight_plan_ledger_writer;[\s\S]*plan-crash[\s\S]*ROLLBACK;/);
+assert.match(sh, /BEGIN; SET ROLE preflight_plan_ledger_writer;[\s\S]*plan-crash[\s\S]*\$p3[\s\S]*ROLLBACK;/);
 assert.match(sh, /printf 'BEGIN; %s ROLLBACK;/);
 assert.match(sh, /printf '%s\\n' "\$teardown" \| "\$\{psql\[@\]\}"/);
 assert.match(sh, /cmp "\$tmp\/before" "\$tmp\/after"/);
