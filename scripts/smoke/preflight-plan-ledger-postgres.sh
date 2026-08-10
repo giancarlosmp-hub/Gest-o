@@ -66,7 +66,23 @@ HARNESS_COMMAND='validate writer grant set cardinality'
 HARNESS_RESULT=PASS
 echo DDL_CATALOG=PASS
 
-h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64}); p3=$(printf 'e%.0s' {1..64})
+HARNESS_STEP=LEDGER_IDENTITY_LOCKS
+HARNESS_COMMAND='validate namespaced transaction locks in ledger function definitions'
+HARNESS_RESULT=RUNNING
+printf "SELECT pg_catalog.pg_get_functiondef('public.register_preflight_evidence(text,text,text,text,timestamptz,timestamptz,text)'::regprocedure);" | "${psql[@]}" -qAt >"$tmp/evidence-function.def"
+printf "SELECT pg_catalog.pg_get_functiondef('public.register_preflight_plan(text,text,text,text,text,text,boolean,boolean,text)'::regprocedure);" | "${psql[@]}" -qAt >"$tmp/plan-function.def"
+grep -Fq 'pg_catalog.pg_advisory_xact_lock' "$tmp/evidence-function.def"
+grep -Fq 'pg_catalog.hashtextextended' "$tmp/evidence-function.def"
+grep -Fq 'preflight-evidence:' "$tmp/evidence-function.def"
+grep -Fq 'pg_catalog.pg_advisory_xact_lock' "$tmp/plan-function.def"
+grep -Fq 'pg_catalog.hashtextextended' "$tmp/plan-function.def"
+grep -Fq 'preflight-plan:' "$tmp/plan-function.def"
+if grep -Fq 'ON CONFLICT (evidence_id)' "$tmp/evidence-function.def"; then exit 1; fi
+if grep -Fq 'ON CONFLICT (plan_id)' "$tmp/plan-function.def"; then exit 1; fi
+HARNESS_RESULT=PASS
+echo LEDGER_IDENTITY_LOCKS=PASS
+
+h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64}); p3=$(printf 'e%.0s' {1..64}); p4=$(printf 'f%.0s' {1..64})
 evcall="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-1','$h1','1.0B.2-L/v1','1.0B.2-A/roots-v1','2026-08-09T10:00Z','2030-08-10T10:00Z','READY');"
 run_sql() { printf '%s\n' "$1" | "${psql[@]}" -qAt >"$2" 2>"$3"; }
 safe_sqlstate() { sed -n 's/^ERROR:  \([0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]\):.*/\1/p' "$1" | head -n 1; }
@@ -106,6 +122,9 @@ HARNESS_COMMAND='validate one registered and one idempotent replay result'
 [[ "$(( $(grep -Fxc 'REGISTERED' "$tmp/evidence-1.out") + $(grep -Fxc 'REGISTERED' "$tmp/evidence-2.out") ))" -eq 1 ]]
 [[ "$(( $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-1.out") + $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-2.out") ))" -eq 1 ]]
 [[ "$(( $(wc -l < "$tmp/evidence-1.out") + $(wc -l < "$tmp/evidence-2.out") ))" -eq 2 ]]
+[[ "$(cat "$tmp/evidence-1.err" "$tmp/evidence-2.err" | grep -Fc '23505')" -eq 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-1';" | "${psql[@]}" -At)" == 1 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_event WHERE evidence_id='ev-1' AND plan_id IS NULL;" | "${psql[@]}" -At)" == 2 ]]
 HARNESS_RESULT=PASS
 echo IDENTICAL_EVIDENCE_CONCURRENCY=PASS
 echo CHECKPOINT=IDENTICAL_EVIDENCE_CONCURRENCY
@@ -138,7 +157,11 @@ HARNESS_COMMAND='validate identical plan exits results and canonical row'
 [[ "$(( $(grep -Fxc 'REGISTERED' "$tmp/plan-1.out") + $(grep -Fxc 'REGISTERED' "$tmp/plan-2.out") ))" -eq 1 ]]
 [[ "$(( $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/plan-1.out") + $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/plan-2.out") ))" -eq 1 ]]
 [[ "$(( $(wc -l < "$tmp/plan-1.out") + $(wc -l < "$tmp/plan-2.out") ))" -eq 2 ]]
+[[ "$(cat "$tmp/plan-1.err" "$tmp/plan-2.err" | grep -Fc '23505')" -eq 0 ]]
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-1';" | "${psql[@]}" -At)" == 1 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_event WHERE evidence_id='ev-1' AND plan_id='plan-1';" | "${psql[@]}" -At)" == 2 ]]
+HARNESS_RESULT=PASS
+echo IDENTICAL_PLAN_CONCURRENCY=PASS
 echo CHECKPOINT=IDENTICAL_PLAN_CONCURRENCY
 
 HARNESS_STEP=CONFLICTING_PLAN_CONCURRENCY
@@ -152,6 +175,22 @@ HARNESS_COMMAND='validate one plan conflict with SQLSTATE 23505 and one canonica
 [[ $(( (conflict_plan_exit_1==0) + (conflict_plan_exit_2==0) )) -eq 1 ]]
 [[ "$(cat "$tmp/conflict-plan-1.err" "$tmp/conflict-plan-2.err" | grep -Fc '23505')" -ge 1 ]]
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-race';" | "${psql[@]}" -At)" == 1 ]]
+
+HARNESS_STEP=PLAN_HASH_GLOBAL_UNIQUE
+HARNESS_COMMAND='validate global plan hash rejects a different plan identity'
+HARNESS_RESULT=RUNNING
+global_plan_one="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-global-1','$p4','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');"
+global_plan_two="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-global-2','$p4','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');"
+run_sql "$global_plan_one" "$tmp/global-plan-1.out" "$tmp/global-plan-1.err"
+[[ "$(grep -Fxc 'REGISTERED' "$tmp/global-plan-1.out")" -eq 1 ]]
+if run_sql "$global_plan_two" "$tmp/global-plan-2.out" "$tmp/global-plan-2.err"; then global_plan_exit_2=0; else global_plan_exit_2=$?; fi
+[[ $global_plan_exit_2 -ne 0 ]]
+[[ "$(safe_sqlstate "$tmp/global-plan-2.err")" == 23505 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-global-1' AND plan_hash='$p4';" | "${psql[@]}" -At)" == 1 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-global-2';" | "${psql[@]}" -At)" == 0 ]]
+HARNESS_RESULT=PASS
+echo PLAN_HASH_GLOBAL_UNIQUE=PASS
+echo CHECKPOINT=PLAN_HASH_GLOBAL_UNIQUE
 
 HARNESS_STEP=CRASH_ROLLBACK_RESUME
 HARNESS_COMMAND='validate isolated crash rollback fixture is absent'

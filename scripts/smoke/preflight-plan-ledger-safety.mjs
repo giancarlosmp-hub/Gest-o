@@ -11,6 +11,26 @@ assert.match(sql, /CHECK \(NOT apply_authorized\)/);
 assert.match(sql, /BEFORE UPDATE OR DELETE/g);
 assert.doesNotMatch(sql, /IF (?:NOT )?EXISTS/i);
 assert.doesNotMatch(sql, /name|email|document|token|credential|connection_string|payload|report_json|plan_json/i);
+assert.match(sql, /evidence_id text PRIMARY KEY/);
+assert.match(sql, /UNIQUE \(evidence_id,evidence_hash\)/);
+assert.match(sql, /plan_id text PRIMARY KEY, plan_hash text NOT NULL UNIQUE/);
+assert.match(sql, /FOREIGN KEY \(evidence_id,evidence_hash\)/);
+const evidenceFunction = sql.slice(sql.indexOf("CREATE FUNCTION public.register_preflight_evidence"), sql.indexOf("CREATE FUNCTION public.register_preflight_plan"));
+const planFunction = sql.slice(sql.indexOf("CREATE FUNCTION public.register_preflight_plan"), sql.indexOf("REVOKE ALL ON public.tenant_preflight"));
+for (const [definition, namespace] of [[evidenceFunction, "preflight-evidence:"], [planFunction, "preflight-plan:"]]) {
+  assert.match(definition, /SECURITY DEFINER SET search_path=pg_catalog,public/);
+  assert.match(definition, /pg_catalog\.pg_advisory_xact_lock\(pg_catalog\.hashtextextended\(/);
+  assert.ok(definition.indexOf(namespace) < definition.indexOf("SELECT * INTO existing"), `${namespace} lock must precede identity lookup`);
+  assert.match(definition, /INSERT INTO public\.tenant_backfill_plan_event/);
+  assert.match(definition, /RETURN 'IDEMPOTENT_REPLAY'/);
+  assert.match(definition, /ERRCODE='23505'/);
+  assert.doesNotMatch(definition, /LOCK TABLE|pg_advisory_lock\(|\bSLEEP\b|\bRETRY\b|SERIALIZABLE/i);
+}
+for (const field of ["evidence_hash", "contract_version", "inventory_version", "generated_at", "expires_at", "result"])
+  assert.match(evidenceFunction, new RegExp(`existing\\.${field}`));
+for (const field of ["plan_hash", "evidence_id", "evidence_hash", "plan_version", "target_tenant_id", "dry_run_only", "apply_authorized", "status"])
+  assert.match(planFunction, new RegExp(`existing\\.${field}`));
+assert.doesNotMatch(sql, /ON CONFLICT \((?:evidence_id|plan_id)\)/);
 for (const required of ["postgres:16", "docker exec -i", "psql -X", "ON_ERROR_STOP=1", "PREFLIGHT_PLAN_LEDGER_POSTGRES=PASS"])
   assert.ok(sh.includes(required), `missing harness control: ${required}`);
 const executableLines = sh.split("\n").filter((line) => !/^\s*#/.test(line));
@@ -25,8 +45,9 @@ assert.match(sh, closedGrantInventory);
 assert.doesNotMatch(sh, /table_name\s+(?:NOT\s+)?LIKE|table_name\s*~|table_name\s+SIMILAR\s+TO/i);
 const catalogGeneratedAt = sh.indexOf("SQL\nHARNESS_STEP=DDL_CATALOG");
 const catalogPassAt = sh.indexOf("echo DDL_CATALOG=PASS");
+const identityLocksPassAt = sh.indexOf("echo LEDGER_IDENTITY_LOCKS=PASS");
 const concurrencyStartsAt = sh.indexOf("h1=$(printf");
-assert.ok(catalogGeneratedAt >= 0 && catalogPassAt > catalogGeneratedAt && concurrencyStartsAt > catalogPassAt, "catalog generation, validation pass and concurrency must be ordered");
+assert.ok(catalogGeneratedAt >= 0 && catalogPassAt > catalogGeneratedAt && identityLocksPassAt > catalogPassAt && concurrencyStartsAt > identityLocksPassAt, "catalog, identity locks and concurrency must be ordered");
 let previousCheck = catalogGeneratedAt;
 for (const [description, check] of [
   ["validate literal FOREIGN KEY catalog entry", `grep -Fq 'FOREIGN KEY' \"$tmp/catalog\"`],
@@ -71,11 +92,15 @@ assert.match(sh, /grep -Fxc 'REGISTERED' "\$tmp\/evidence-2\.out"/);
 assert.match(sh, /grep -Fxc 'IDEMPOTENT_REPLAY' "\$tmp\/evidence-1\.out"/);
 assert.match(sh, /grep -Fxc 'IDEMPOTENT_REPLAY' "\$tmp\/evidence-2\.out"/);
 assert.match(sh, /wc -l < "\$tmp\/evidence-1\.out"[\s\S]*wc -l < "\$tmp\/evidence-2\.out"[\s\S]*-eq 2/);
+assert.match(sh, /tenant_preflight_evidence_registry WHERE evidence_id='ev-1'/);
+assert.match(sh, /tenant_backfill_plan_event WHERE evidence_id='ev-1' AND plan_id IS NULL/);
+assert.match(sh, /evidence-1\.err" "\$tmp\/evidence-2\.err" \| grep -Fc '23505'\)" -eq 0/);
 
 for (const [step, command] of [
   ["CONFLICTING_EVIDENCE_CONCURRENCY", "launch and wait for conflicting evidence registrations"],
   ["IDENTICAL_PLAN_CONCURRENCY", "launch and wait for two identical plan registrations"],
   ["CONFLICTING_PLAN_CONCURRENCY", "launch and wait for conflicting plan registrations"],
+  ["PLAN_HASH_GLOBAL_UNIQUE", "validate global plan hash rejects a different plan identity"],
   ["CRASH_ROLLBACK_RESUME", "validate isolated crash rollback fixture is absent"],
   ["CRASH_ROLLBACK_RESUME", "execute isolated crash transaction with explicit rollback"],
   ["CRASH_ROLLBACK_RESUME", "validate crash evidence plan hash and events are absent after rollback"],
@@ -89,6 +114,16 @@ assert.match(sh, /conflict_evidence_pid_1=\$![\s\S]*conflict_evidence_pid_2=\$![
 assert.match(sh, /plan_pid_1=\$![\s\S]*plan_pid_2=\$![\s\S]*wait "\$plan_pid_1"[\s\S]*wait "\$plan_pid_2"/);
 assert.match(sh, /conflict_plan_pid_1=\$![\s\S]*conflict_plan_pid_2=\$![\s\S]*wait "\$conflict_plan_pid_1"[\s\S]*wait "\$conflict_plan_pid_2"/);
 assert.match(sh, /grep -Fc '23505'/);
+assert.match(sh, /pg_catalog\.pg_get_functiondef/);
+assert.match(sh, /LEDGER_IDENTITY_LOCKS=PASS/);
+assert.match(sh, /IDENTICAL_PLAN_CONCURRENCY=PASS/);
+assert.match(sh, /PLAN_HASH_GLOBAL_UNIQUE=PASS/);
+assert.match(sh, /plan-global-1[\s\S]*plan-global-2[\s\S]*safe_sqlstate[\s\S]*23505/);
+const conflictEvidenceAt = sh.indexOf("HARNESS_STEP=CONFLICTING_EVIDENCE_CONCURRENCY");
+const identicalPlanAt = sh.indexOf("HARNESS_STEP=IDENTICAL_PLAN_CONCURRENCY");
+const conflictingPlanAt = sh.indexOf("HARNESS_STEP=CONFLICTING_PLAN_CONCURRENCY");
+const globalUniqueAt = sh.indexOf("HARNESS_STEP=PLAN_HASH_GLOBAL_UNIQUE");
+assert.ok(evidenceCheckpointAt < conflictEvidenceAt && conflictEvidenceAt < identicalPlanAt && identicalPlanAt < conflictingPlanAt && conflictingPlanAt < globalUniqueAt);
 
 const p3Definition = sh.match(/p3=\$\(printf '([0-9a-f])%\.0s' \{1\.\.64\}\)/);
 assert.ok(p3Definition, "p3 must be exactly 64 repeated hexadecimal characters");
@@ -102,7 +137,7 @@ const crashPassAt = sh.indexOf("echo CRASH_ROLLBACK_RESUME=PASS");
 const crashCheckpointAt = sh.indexOf("echo CHECKPOINT=CRASH_ROLLBACK_RESUME");
 const appendOnlyAt = sh.indexOf("HARNESS_STEP=APPEND_ONLY_NEGATIVE_PROOFS");
 const teardownAt = sh.indexOf("HARNESS_STEP=TEARDOWN_TRANSACTIONAL");
-assert.ok(crashPreflightAt < crashBeginAt && crashBeginAt < crashRollbackAt && crashRollbackAt < crashPostValidationAt && crashPostValidationAt < crashPassAt && crashPassAt < crashCheckpointAt && crashCheckpointAt < appendOnlyAt && appendOnlyAt < teardownAt);
+assert.ok(globalUniqueAt < crashPreflightAt && crashPreflightAt < crashBeginAt && crashBeginAt < crashRollbackAt && crashRollbackAt < crashPostValidationAt && crashPostValidationAt < crashPassAt && crashPassAt < crashCheckpointAt && crashCheckpointAt < appendOnlyAt && appendOnlyAt < teardownAt);
 const beforeCrash = sh.slice(sh.indexOf("HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY"), crashPreflightAt);
 assert.doesNotMatch(beforeCrash, /\$p3|plan-crash|ev-crash/);
 const crashBlock = sh.slice(crashPreflightAt, appendOnlyAt);
