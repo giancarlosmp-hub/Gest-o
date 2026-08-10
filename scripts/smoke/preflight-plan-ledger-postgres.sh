@@ -68,33 +68,107 @@ echo DDL_CATALOG=PASS
 
 h1=$(printf 'a%.0s' {1..64}); h2=$(printf 'b%.0s' {1..64}); p1=$(printf 'c%.0s' {1..64}); p2=$(printf 'd%.0s' {1..64})
 evcall="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-1','$h1','1.0B.2-L/v1','1.0B.2-A/roots-v1','2026-08-09T10:00Z','2030-08-10T10:00Z','READY');"
-run_sql() { printf '%s\n' "$1" | "${psql[@]}" >"$2" 2>"$3"; }
-run_sql "$evcall" "$tmp/e1.out" "$tmp/e1.err" & a=$!; run_sql "$evcall" "$tmp/e2.out" "$tmp/e2.err" & b=$!
-set +e; wait "$a"; ea=$?; wait "$b"; eb=$?; set -e
-[[ $ea -eq 0 && $eb -eq 0 ]]; grep -q REGISTERED "$tmp/e1.out" "$tmp/e2.out"; grep -q IDEMPOTENT_REPLAY "$tmp/e1.out" "$tmp/e2.out"
+run_sql() { printf '%s\n' "$1" | "${psql[@]}" -qAt >"$2" 2>"$3"; }
+safe_sqlstate() { sed -n 's/^ERROR:  \([0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]\):.*/\1/p' "$1" | head -n 1; }
+report_backend_failure() {
+ local backend="$1" exit_code="$2" stderr_file="$3" state
+ state="$(safe_sqlstate "$stderr_file")"
+ printf 'IDENTICAL_EVIDENCE_BACKEND_%s_EXIT_CODE=%s\n' "$backend" "$exit_code" >&2
+ if [[ -n "$state" ]]; then printf 'IDENTICAL_EVIDENCE_BACKEND_%s_SQLSTATE=%s\n' "$backend" "$state" >&2; fi
+ printf 'IDENTICAL_EVIDENCE_BACKEND_%s_RESULT=EXECUTION_FAILED\n' "$backend" >&2
+}
+
+HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY
+HARNESS_COMMAND='launch two identical evidence registrations'
+HARNESS_RESULT=RUNNING
+run_sql "$evcall" "$tmp/evidence-1.out" "$tmp/evidence-1.err" &
+evidence_pid_1=$!
+run_sql "$evcall" "$tmp/evidence-2.out" "$tmp/evidence-2.err" &
+evidence_pid_2=$!
+HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY
+HARNESS_COMMAND='wait for both identical evidence registrations'
+if wait "$evidence_pid_1"; then evidence_exit_1=0; else evidence_exit_1=$?; fi
+if wait "$evidence_pid_2"; then evidence_exit_2=0; else evidence_exit_2=$?; fi
+printf 'IDENTICAL_EVIDENCE_EXIT_1=%s\nIDENTICAL_EVIDENCE_EXIT_2=%s\nIDENTICAL_EVIDENCE_PROCESSES=WAITED\n' "$evidence_exit_1" "$evidence_exit_2"
+HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY
+HARNESS_COMMAND='validate identical evidence process exit codes'
+if [[ $evidence_exit_1 -ne 0 || $evidence_exit_2 -ne 0 ]]; then
+ if [[ $evidence_exit_1 -ne 0 ]]; then report_backend_failure 1 "$evidence_exit_1" "$tmp/evidence-1.err"; fi
+ if [[ $evidence_exit_2 -ne 0 ]]; then report_backend_failure 2 "$evidence_exit_2" "$tmp/evidence-2.err"; fi
+ if [[ $evidence_exit_1 -ne 0 ]]; then exit "$evidence_exit_1"; else exit "$evidence_exit_2"; fi
+fi
+HARNESS_STEP=IDENTICAL_EVIDENCE_CONCURRENCY
+HARNESS_COMMAND='validate one registered and one idempotent replay result'
+[[ "$(grep -Fxc 'REGISTERED' "$tmp/evidence-1.out")" -le 1 ]]
+[[ "$(grep -Fxc 'REGISTERED' "$tmp/evidence-2.out")" -le 1 ]]
+[[ "$(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-1.out")" -le 1 ]]
+[[ "$(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-2.out")" -le 1 ]]
+[[ "$(( $(grep -Fxc 'REGISTERED' "$tmp/evidence-1.out") + $(grep -Fxc 'REGISTERED' "$tmp/evidence-2.out") ))" -eq 1 ]]
+[[ "$(( $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-1.out") + $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/evidence-2.out") ))" -eq 1 ]]
+[[ "$(( $(wc -l < "$tmp/evidence-1.out") + $(wc -l < "$tmp/evidence-2.out") ))" -eq 2 ]]
+HARNESS_RESULT=PASS
+echo IDENTICAL_EVIDENCE_CONCURRENCY=PASS
 echo CHECKPOINT=IDENTICAL_EVIDENCE_CONCURRENCY
 
+HARNESS_STEP=CONFLICTING_EVIDENCE_CONCURRENCY
+HARNESS_COMMAND='launch and wait for conflicting evidence registrations'
+HARNESS_RESULT=RUNNING
 conflict_a="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-race','$h1','v','i','2026-08-09','2030-08-10','READY');"
 conflict_b="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_evidence('ev-race','$h2','v','i','2026-08-09','2030-08-10','READY');"
-run_sql "$conflict_a" "$tmp/c1.out" "$tmp/c1.err" & a=$!; run_sql "$conflict_b" "$tmp/c2.out" "$tmp/c2.err" & b=$!
-set +e; wait "$a"; ea=$?; wait "$b"; eb=$?; set -e
-[[ $(( (ea==0) + (eb==0) )) -eq 1 ]]; cat "$tmp/c1.err" "$tmp/c2.err" | grep -q '23505'
+run_sql "$conflict_a" "$tmp/conflict-evidence-1.out" "$tmp/conflict-evidence-1.err" & conflict_evidence_pid_1=$!
+run_sql "$conflict_b" "$tmp/conflict-evidence-2.out" "$tmp/conflict-evidence-2.err" & conflict_evidence_pid_2=$!
+if wait "$conflict_evidence_pid_1"; then conflict_evidence_exit_1=0; else conflict_evidence_exit_1=$?; fi
+if wait "$conflict_evidence_pid_2"; then conflict_evidence_exit_2=0; else conflict_evidence_exit_2=$?; fi
+HARNESS_COMMAND='validate one evidence conflict with SQLSTATE 23505 and one canonical row'
+[[ $(( (conflict_evidence_exit_1==0) + (conflict_evidence_exit_2==0) )) -eq 1 ]]
+[[ "$(cat "$tmp/conflict-evidence-1.err" "$tmp/conflict-evidence-2.err" | grep -Fc '23505')" -ge 1 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-race';" | "${psql[@]}" -At)" == 1 ]]
 echo CHECKPOINT=CONFLICT_SQLSTATE_23505
 
+HARNESS_STEP=IDENTICAL_PLAN_CONCURRENCY
+HARNESS_COMMAND='launch and wait for two identical plan registrations'
+HARNESS_RESULT=RUNNING
 plancall="SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-1','$p1','ev-1','$h1','1.0B.2-M/v1','tenant-synthetic',true,false,'PLANNED');"
-run_sql "$plancall" "$tmp/p1.out" "$tmp/p1.err" & a=$!; run_sql "$plancall" "$tmp/p2.out" "$tmp/p2.err" & b=$!
-set +e; wait "$a"; ea=$?; wait "$b"; eb=$?; set -e; [[ $ea -eq 0 && $eb -eq 0 ]]
+run_sql "$plancall" "$tmp/plan-1.out" "$tmp/plan-1.err" & plan_pid_1=$!
+run_sql "$plancall" "$tmp/plan-2.out" "$tmp/plan-2.err" & plan_pid_2=$!
+if wait "$plan_pid_1"; then plan_exit_1=0; else plan_exit_1=$?; fi
+if wait "$plan_pid_2"; then plan_exit_2=0; else plan_exit_2=$?; fi
+HARNESS_COMMAND='validate identical plan exits results and canonical row'
+[[ $plan_exit_1 -eq 0 && $plan_exit_2 -eq 0 ]]
+[[ "$(( $(grep -Fxc 'REGISTERED' "$tmp/plan-1.out") + $(grep -Fxc 'REGISTERED' "$tmp/plan-2.out") ))" -eq 1 ]]
+[[ "$(( $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/plan-1.out") + $(grep -Fxc 'IDEMPOTENT_REPLAY' "$tmp/plan-2.out") ))" -eq 1 ]]
+[[ "$(( $(wc -l < "$tmp/plan-1.out") + $(wc -l < "$tmp/plan-2.out") ))" -eq 2 ]]
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-1';" | "${psql[@]}" -At)" == 1 ]]
 echo CHECKPOINT=IDENTICAL_PLAN_CONCURRENCY
 
-run_sql "SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-race','$p1','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');" "$tmp/r1.out" "$tmp/r1.err" & a=$!
-run_sql "SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-race','$p2','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');" "$tmp/r2.out" "$tmp/r2.err" & b=$!
-set +e; wait "$a"; ea=$?; wait "$b"; eb=$?; set -e; [[ $(( (ea==0) + (eb==0) )) -eq 1 ]]; cat "$tmp/r1.err" "$tmp/r2.err" | grep -q 23505
+HARNESS_STEP=CONFLICTING_PLAN_CONCURRENCY
+HARNESS_COMMAND='launch and wait for conflicting plan registrations'
+HARNESS_RESULT=RUNNING
+run_sql "SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-race','$p1','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');" "$tmp/conflict-plan-1.out" "$tmp/conflict-plan-1.err" & conflict_plan_pid_1=$!
+run_sql "SET ROLE preflight_plan_ledger_writer; SELECT public.register_preflight_plan('plan-race','$p2','ev-1','$h1','v','tenant-synthetic',true,false,'PLANNED');" "$tmp/conflict-plan-2.out" "$tmp/conflict-plan-2.err" & conflict_plan_pid_2=$!
+if wait "$conflict_plan_pid_1"; then conflict_plan_exit_1=0; else conflict_plan_exit_1=$?; fi
+if wait "$conflict_plan_pid_2"; then conflict_plan_exit_2=0; else conflict_plan_exit_2=$?; fi
+HARNESS_COMMAND='validate one plan conflict with SQLSTATE 23505 and one canonical row'
+[[ $(( (conflict_plan_exit_1==0) + (conflict_plan_exit_2==0) )) -eq 1 ]]
+[[ "$(cat "$tmp/conflict-plan-1.err" "$tmp/conflict-plan-2.err" | grep -Fc '23505')" -ge 1 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-race';" | "${psql[@]}" -At)" == 1 ]]
 
+HARNESS_STEP=CRASH_ROLLBACK_RESUME
+HARNESS_COMMAND='rollback synthetic evidence and plan transaction and validate absence'
+HARNESS_RESULT=RUNNING
 "${psql[@]}" <<SQL
 BEGIN; SET ROLE preflight_plan_ledger_writer;
 SELECT public.register_preflight_evidence('ev-crash','$h1','v','i','2026-08-09','2030-08-10','READY');
 SELECT public.register_preflight_plan('plan-crash','$p2','ev-crash','$h1','v','tenant-synthetic',true,false,'PLANNED'); ROLLBACK;
+SQL
+[[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-crash';" | "${psql[@]}" -At)" == 0 ]]
+[[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_ledger WHERE plan_id='plan-crash';" | "${psql[@]}" -At)" == 0 ]]
+
+HARNESS_STEP=APPEND_ONLY_NEGATIVE_PROOFS
+HARNESS_COMMAND='validate writer UPDATE and DELETE operations fail with SQLSTATE 42501'
+HARNESS_RESULT=RUNNING
+"${psql[@]}" <<SQL
+SET ROLE preflight_plan_ledger_writer;
 DO \$\$DECLARE s text; BEGIN
  BEGIN UPDATE public.tenant_preflight_evidence_registry SET evidence_hash='$h2' WHERE evidence_id='ev-1'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS s=RETURNED_SQLSTATE; IF s<>'42501' THEN RAISE EXCEPTION 'unexpected %',s; END IF; END;
  BEGIN DELETE FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-1'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS s=RETURNED_SQLSTATE; IF s<>'42501' THEN RAISE EXCEPTION 'unexpected %',s; END IF; END;
@@ -107,12 +181,24 @@ DO \$\$DECLARE s text; BEGIN
  BEGIN UPDATE public.tenant_backfill_plan_event SET event_type='CONFLICT_REJECTED'; EXCEPTION WHEN OTHERS THEN GET STACKED DIAGNOSTICS s=RETURNED_SQLSTATE; IF s<>'42501' THEN RAISE EXCEPTION 'unexpected %',s; END IF; END;
 END\$\$;
 SQL
-[[ "$(printf "SELECT count(*) FROM public.tenant_preflight_evidence_registry WHERE evidence_id='ev-crash';" | "${psql[@]}" -At)" == 0 ]]
 [[ "$(printf "SELECT count(*) FROM public.tenant_backfill_plan_event e LEFT JOIN public.tenant_preflight_evidence_registry r USING(evidence_id) WHERE e.evidence_id IS NOT NULL AND r.evidence_id IS NULL;" | "${psql[@]}" -At)" == 0 ]]
 echo CHECKPOINT=CRASH_RESUME_APPEND_ONLY
 
 teardown="DROP FUNCTION public.register_preflight_plan(text,text,text,text,text,text,boolean,boolean,text); DROP FUNCTION public.register_preflight_evidence(text,text,text,text,timestamptz,timestamptz,text); DROP TABLE public.tenant_backfill_plan_event; DROP TABLE public.tenant_backfill_plan_ledger; DROP TABLE public.tenant_preflight_evidence_registry; DROP FUNCTION public.reject_preflight_ledger_mutation(); DROP ROLE preflight_plan_ledger_writer;"
-printf 'BEGIN; %s ROLLBACK;\n' "$teardown" | "${psql[@]}"; printf '%s\n' "$teardown" | "${psql[@]}"
-printf '%s\n' "$catalog" | "${psql[@]}" -At >"$tmp/after"; cmp "$tmp/before" "$tmp/after"
+HARNESS_STEP=TEARDOWN_TRANSACTIONAL
+HARNESS_COMMAND='rollback candidate teardown and validate objects remain'
+HARNESS_RESULT=RUNNING
+printf 'BEGIN; %s ROLLBACK;\n' "$teardown" | "${psql[@]}"
+[[ "$(printf "SELECT count(*) FROM pg_catalog.pg_class WHERE oid IN ('public.tenant_preflight_evidence_registry'::regclass,'public.tenant_backfill_plan_ledger'::regclass,'public.tenant_backfill_plan_event'::regclass);" | "${psql[@]}" -At)" == 3 ]]
+HARNESS_STEP=TEARDOWN_REAL
+HARNESS_COMMAND='remove candidate ledger objects'
+printf '%s\n' "$teardown" | "${psql[@]}"
+HARNESS_STEP=BASELINE_COMPARISON
+HARNESS_COMMAND='compare public catalog before and after teardown'
+printf '%s\n' "$catalog" | "${psql[@]}" -At >"$tmp/after"
+cmp "$tmp/before" "$tmp/after"
 cleaned=true
+HARNESS_STEP=FINAL
+HARNESS_COMMAND='emit final PostgreSQL ledger proof result'
+HARNESS_RESULT=PASS
 echo PREFLIGHT_PLAN_LEDGER_POSTGRES=PASS
