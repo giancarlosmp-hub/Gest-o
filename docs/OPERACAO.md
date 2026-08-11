@@ -498,3 +498,39 @@ certifica o procedimento descartável, não autoriza executar o candidato fora d
   `HARNESS_COMMAND` mudam antes de cada fase para impedir diagnóstico stale.
 - Cenários usam IDs/hashes exclusivos; `p3` é reservado ao crash/rollback. O teardown é testado com
   rollback, executado realmente e seguido de comparação exata com o catálogo baseline.
+# Recuperação controlada do scheduler UltraFV3
+
+O workflow manual **ERP Production Recovery** é exclusivo para `INC_ERP_5050`. Ele não substitui o
+deploy geral. Antes de dispará-lo, mescle a PR de recuperação, execute a fase `build` do workflow
+**Deploy Production** para o mesmo SHA e confirme que a imagem `gest-o-api:<SHA>` foi preparada na
+VPS. Em **Actions → ERP Production Recovery → Run workflow**:
+
+1. selecione a branch `main` já mesclada;
+2. informe `confirm` exatamente como `RESTORE_ERP_AUTOMATIC_SYNC`;
+3. informe em `expected_main_sha` os 40 caracteres do SHA aprovado da `main`;
+4. aguarde a aprovação humana do environment `production-cutover`;
+5. acompanhe somente os checkpoints sanitizados do job.
+
+O job atualiza `/apps/gest-o` exclusivamente por fast-forward, exige igualdade do SHA e executa
+`scripts/erp-production-recovery.sh`. O script inspeciona apenas metadados dos caminhos canônico e
+legado, cria backups protegidos, altera atomicamente somente `ERP_SYNC_SCHEDULER_ENABLED`, executa os
+dois preflights e valida o Compose sem mostrá-lo. Depois preserva a imagem anterior e as identidades
+de WEB/PostgreSQL/volume, recria somente `api` com `--no-deps --no-build --force-recreate`, valida
+health, login, configuração persistida, credencial global ou de vendedor de referência, lock e
+`nextRunAt`, e aguarda de forma bounded uma execução real com `trigger=scheduler`.
+
+Interpretação operacional:
+
+- `ERP_ENV_RECOVERY_SOURCE=NOT_AVAILABLE`: abort antes de container; nenhuma credencial é criada;
+- checkpoints `=PASS`: aquela validação foi comprovada, mas o incidente só pode ser resolvido quando
+  também houver `ERP_AUTOMATIC_SYNC=PASS`, `ERP_SYNC_LOCK=RELEASED` e persistência do env;
+- `ERP_RECOVERY_ROLLBACK=STARTED/COMPLETED`: uma validação crítica falhou; env e API anteriores foram
+  restaurados, e `INC_ERP_5050` continua `INVESTIGATING`;
+- ausência do resultado final: tratar como falha/interrupção, revisar o estágio sanitizado e não
+  repetir até verificar health e a exclusão mútua do workflow.
+
+O rollback é automático para health, login, scheduler, `nextRunAt`, credencial de referência, lock,
+múltiplas APIs ou expiração da janela automática. É proibido disparar sincronização manual como
+prova, executar `down`, remover volumes, recriar WEB/PostgreSQL, rodar migrations, `prisma db push`,
+seed ou backfill. O job nunca aceita secrets como inputs nem imprime env, resposta de login ou dados
+empresariais.

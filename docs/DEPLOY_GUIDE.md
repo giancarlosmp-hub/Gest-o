@@ -426,3 +426,15 @@ Docker/PostgreSQL 16 antes de aprovar a janela.
 sequence setup ou seed/bootstrap de dados; use exclusivamente `production-schema-apply.sh`. Os
 stacks descartáveis de CI/preview declaram `ephemeral-push`, permitindo criar o schema novo e executar
 somente os seeds habilitados pelas flags de smoke. Valor ausente/inválido impede a API de iniciar.
+# Procedimento excepcional de recuperação ERP
+
+O workflow **ERP Production Recovery** é o procedimento aprovado para restaurar o gate do scheduler
+quando o acesso operacional ocorre pelos secrets SSH do GitHub Actions. Ele deve ser usado somente
+depois de seu merge em `main` e de `Deploy Production` em modo `build` preparar a imagem API do mesmo
+SHA. O operador fornece apenas a confirmação literal e `expected_main_sha`; a aprovação ocorre no
+environment `production-cutover`.
+
+Esse fluxo não amplia o cutover: preserva WEB, PostgreSQL e volumes, recria somente `api` sem build e
+faz rollback da API e do env diante de qualquer gate crítico. O deploy normal permanece inalterado.
+Consulte **ERP Production Recovery** em `docs/OPERACAO.md` para checkpoints e interpretação. A
+existência deste canal não constitui evidência de execução produtiva nem resolve `INC_ERP_5050`.

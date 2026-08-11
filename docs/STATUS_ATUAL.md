@@ -413,3 +413,24 @@ baseline. Não é migration nem autorização de apply/backfill. `READY_FOR_1_0B
 `PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS`; `READY_FOR_BACKFILL_PLANNING = YES` somente para planos
 sintéticos/dry-run. Produção e runtime permanecem bloqueados. Consulte o
 [Sprint Brief](sprints/SPRINT_1_0B_2_N_POSTGRES_EVIDENCE_PLAN_LEDGER.md).
+# Hotfix UltraFV3 — canal de recuperação produtiva (11/08/2026)
+
+A PR #797 foi mesclada no SHA `50970a5523512191625a90fc032ba502e8fd756b` e disponibilizou o
+contrato preventivo do ambiente externo. Checks de PR comprovam apenas o código versionado: a
+recuperação da VPS e a sincronização automática continuam pendentes. O workflow manual
+**ERP Production Recovery** passa a ser o canal auditável para a operação após seu próprio merge e
+após a fase de build da imagem aprovada. Ele exige aprovação de `production-cutover`, confirmação
+literal e SHA completo da `main`.
+
+Até que uma execução desse workflow termine com uma execução nova e bem-sucedida contendo
+`trigger=scheduler`, não declarar a sincronização restaurada:
+
+```text
+ERP_AUTOMATIC_SYNC = NOT_PROVEN
+ERP_SYNC_ENV_PERSISTENCE = NOT_PROVEN
+ERP_SCHEDULER_INITIALIZED = NOT_PROVEN
+ERP_NEXT_RUN_AT = NOT_PROVEN
+INC_ERP_5050 = INVESTIGATING
+PRODUCTION_ACCESSED = NO
+READY_TO_MERGE_RECOVERY_PR = NO
+```

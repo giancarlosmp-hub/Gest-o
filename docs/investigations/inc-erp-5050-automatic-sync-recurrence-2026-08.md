@@ -45,60 +45,21 @@ TENANT_READ_PILOT_ENABLED_PRODUCTION = false (evidência fornecida; não reverif
 READY_FOR_MULTI_TENANT_CUTOVER = NO
 ```
 
-## Tentativa operacional de 11/08/2026
+## Cronologia do canal de recuperação
 
-A execução solicitada após o merge da PR #797 foi interrompida no gate de acesso, antes de qualquer
-alteração produtiva. O commit local `50970a5523512191625a90fc032ba502e8fd756b` contém o merge explícito
-da PR #797, mas o checkout não possui remote, `/apps/gest-o` não existe neste ambiente, não há arquivos
-em `/root/.ssh`, o GitHub CLI não está autenticado e a consulta read-only ao repositório público foi
-bloqueada pelo proxy com HTTP 403. Não havia, portanto, um canal autorizado por meio do qual atualizar
-a `main` produtiva, inventariar a VPS ou acessar a fonte protegida do ambiente.
-
-Nenhum arquivo de ambiente foi procurado fora dos caminhos seguros documentados, nenhum segredo foi
-impresso e nenhuma operação Docker, banco de dados, migration, backfill, seed, bootstrap ou cutover foi
-executada. Em particular, a ausência local de `/root/demetra-env/.env` **não** é evidência sobre a VPS.
-
-| Item | Esperado | Observado nesta tentativa | Resultado | Evidência sanitizada |
-|---|---|---|---|---|
-| PR #797 | merge em `main` | merge presente no histórico local | PASS local | SHA `50970a5523512191625a90fc032ba502e8fd756b` |
-| SHA da API | `main` aprovada | VPS inacessível | NOT PROVEN | sem canal SSH |
-| Env externo | arquivo regular | host produtivo inacessível | NOT PROVEN | caminho local não confundido com VPS |
-| Owner/mode | `root:root`, `600` | host produtivo inacessível | NOT PROVEN | não coletado |
-| Scheduler | `true` | runtime inacessível | NOT PROVEN | não coletado |
-| Tenancy | `disabled` | runtime inacessível | NOT PROVEN | não coletado |
-| Piloto tenant | `false` | runtime inacessível | NOT PROVEN | não coletado |
-| Schema mode | `external` | runtime inacessível | NOT PROVEN | não coletado |
-| Credenciais globais | par completo ou ambas ausentes | env protegido inacessível | PENDENTE | valores não inspecionados |
-| Vendedor de referência | credencial válida | banco/ERP inacessíveis | NOT PROVEN | não coletado |
-| AppConfig | scheduler habilitado | banco inacessível | NOT PROVEN | não coletado |
-| Instâncias API | uma ou lock comprovado | Docker produtivo inacessível | NOT PROVEN | não coletado |
-| Lock ERP | sem lock órfão | banco inacessível | NOT PROVEN | não coletado |
-| Conectividade ERP | endpoint alcançável | VPS inacessível | NOT PROVEN | teste não executado |
-| Próxima execução | calculada | runtime/banco inacessíveis | NOT PROVEN | não coletado |
-| Última automática | recente e posterior ao cutover | runtime/banco inacessíveis | NOT PROVEN | não coletado |
-
-O bloqueio ocorreu antes da Fase 1 produtiva. Por isso, não houve restauração, recriação de API nem
-rollback; os checkpoints produtivos não podem ser promovidos a `PASS`. A causa técnica versionada
-continua classificada como **A + B**, mas a restauração e a prova operacional continuam pendentes.
+- **PR #797:** prevenção versionada e contrato fail-closed do env; não é prova da VPS.
+- **ERP Production Recovery:** novo canal manual, aprovado e auditável para copiar a fonte legado
+  autorizada quando necessário, habilitar o gate, recriar somente a API e coletar a prova automática.
+- **Execução produtiva:** ainda pendente. O workflow só pode ser disparado depois do merge desta PR e
+  da preparação da imagem do mesmo SHA; o incidente permanece `INVESTIGATING` até uma execução real
+  e bem-sucedida com `trigger=scheduler` e persistência do ambiente comprovada.
 
 ```text
-ERP_PRODUCTION_ENV_PREFLIGHT=NOT_PROVEN
-ERP_API_RECREATE=NOT_PROVEN
-ERP_API_HEALTH=NOT_PROVEN
-ERP_SCHEDULER_INITIALIZED=NOT_PROVEN
-ERP_NEXT_RUN_AT=NOT_PROVEN
-ERP_AUTOMATIC_TRIGGER=NOT_PROVEN
-ERP_AUTOMATIC_SYNC=NOT_PROVEN
-ERP_SYNC_LOCK=NOT_PROVEN
-ERP_SYNC_ENV_PERSISTENCE=NOT_PROVEN
-
 ERP_AUTOMATIC_SYNC = NOT_PROVEN
 ERP_SYNC_ENV_PERSISTENCE = NOT_PROVEN
 ERP_SCHEDULER_INITIALIZED = NOT_PROVEN
 ERP_NEXT_RUN_AT = NOT_PROVEN
 INC_ERP_5050 = INVESTIGATING
 PRODUCTION_ACCESSED = NO
-TENANCY_MODE_PRODUCTION = NOT_PROVEN
-TENANT_READ_PILOT_ENABLED_PRODUCTION = NOT_PROVEN
-READY_FOR_MULTI_TENANT_CUTOVER = NO
+READY_TO_MERGE_RECOVERY_PR = NO
 ```
