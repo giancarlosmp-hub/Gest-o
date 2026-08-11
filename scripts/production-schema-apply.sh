@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
-ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/production.env}"
+ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 MIGRATION="apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql"
 PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717
 log(){ printf '[production-schema-apply] %s\n' "$*"; }

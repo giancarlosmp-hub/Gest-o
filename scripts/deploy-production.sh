@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
-ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/production.env}"
+ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 log(){ printf '[deploy-production] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
@@ -14,6 +14,7 @@ export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version"
 export API_IMAGE="gest-o-api:$APP_COMMIT"
 export WEB_IMAGE="gest-o-web:$APP_COMMIT"
 
+PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
 bash scripts/production-preflight.sh
 actual_services="$("${COMPOSE[@]}" config --services | sort)"
 expected_services="$(printf 'api\nweb\n' | sort)"

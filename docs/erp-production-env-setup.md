@@ -12,6 +12,8 @@ Esse arquivo é a fonte recomendada para produção do CRM Demetra Agro Performa
 
 O arquivo `/root/demetra-env/.env` deve conter, no mínimo:
 
+O deploy oficial valida o arquivo antes do build com `scripts/erp-production-env-preflight.sh`: ele exige arquivo regular (não symlink), owner `root:root`, mode `600`, variáveis obrigatórias não vazias, gates produtivos literais e o Compose renderizado. A saída informa somente presença/validade e nunca valores, comprimentos ou hashes.
+
 ```dotenv
 ULTRAFV3_BASE_URL=https://servidor-ou-ip-do-ultrafv3
 ERP_CREDENTIAL_ENCRYPTION_KEY=troque-por-uma-chave-forte
