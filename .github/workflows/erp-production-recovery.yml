@@ -24,6 +24,8 @@ jobs:
     environment: production-cutover
     runs-on: ubuntu-latest
     steps:
+      - name: Confirmar sequência operacional aprovada
+        run: echo 'Deploy Production build -> imagem SHA -> ERP Production Recovery -> aprovação production-cutover -> prova automática -> PR documental posterior'
       - name: Restaurar e comprovar scheduler ERP na VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -51,5 +53,4 @@ jobs:
             git pull --ff-only origin main
             test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
             CONFIRM="$RECOVERY_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
-              AUTH_TEST_EMAIL="$AUTH_TEST_EMAIL" AUTH_TEST_PASSWORD="$AUTH_TEST_PASSWORD" \
               bash scripts/erp-production-recovery.sh

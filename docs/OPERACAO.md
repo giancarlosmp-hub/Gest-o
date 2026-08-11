@@ -540,3 +540,13 @@ múltiplas APIs ou expiração da janela automática. É proibido disparar sincr
 prova, executar `down`, remover volumes, recriar WEB/PostgreSQL, rodar migrations, `prisma db push`,
 seed ou backfill. O job nunca aceita secrets como inputs nem imprime env, resposta de login ou dados
 empresariais.
+
+### Interpretação do lock ERP
+
+`ErpSyncLock` usa uma linha exclusiva por escopo. A aquisição cria a linha ou assume atomicamente uma
+linha cujo `lockedUntil` já expirou; não há renovação periódica. A liberação remove a linha por
+`scope+runId` no `finally`. Assim, linha futura é lock ativo legítimo e bloqueia a recriação; linha
+expirada é `expired_recoverable`, não “órfã” automática; ausência após a execução é `free/released`.
+Crash pode deixar a linha até o TTL, quando a próxima aquisição pode recuperá-la. A prova continua
+exigindo execução `scope=automatic`, `trigger=scheduler`, sucesso posterior à recriação e estado final
+sem linha de lock.

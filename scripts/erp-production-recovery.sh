@@ -20,6 +20,7 @@ EVIDENCE_DIR="$EVIDENCE_ROOT/$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ)"
 log(){ printf '[erp-recovery] %s\n' "$*"; }
 die(){ log "FAIL_STAGE=${STAGE:-initial}: $*" >&2; return 1; }
 need(){ command -v "$1" >/dev/null 2>&1 || die "required command unavailable: $1"; }
+# FASE 0 — confirmação e checkout (somente leitura)
 [[ "${CONFIRM:-}" == RESTORE_ERP_AUTOMATIC_SYNC ]] || die 'literal confirmation is required'
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || die 'EXPECTED_SHA must be a full lowercase SHA'
 [[ "$MAX_WAIT_SECONDS" =~ ^[0-9]+$ && "$POLL_SECONDS" =~ ^[0-9]+$ ]] || die 'bounded wait settings are invalid'
@@ -36,6 +37,7 @@ valid_protected_env(){
   [[ "$(stat -c '%a' "$file")" == 600 ]] || return 1
 }
 
+# FASE 1 — descoberta e inventário integralmente read-only
 STAGE=environment_source
 if valid_protected_env "$ENV_FILE"; then
   ENV_SOURCE=canonical; SOURCE_ENV_FILE="$ENV_FILE"; CANONICAL_EXISTED=true
@@ -53,7 +55,7 @@ STAGE=protected_inputs
 : "${AUTH_TEST_PASSWORD:?AUTH_TEST_PASSWORD is required from the protected GitHub environment secret}"
 readonly AUTH_VALIDATION_EMAIL="$AUTH_TEST_EMAIL" AUTH_VALIDATION_PASSWORD="$AUTH_TEST_PASSWORD"
 unset AUTH_TEST_EMAIL AUTH_TEST_PASSWORD
-log 'ERP_AUTH_VALIDATION_INPUTS=PRESENT'
+log 'ERP_RECOVERY_AUTH_INPUT=AVAILABLE'
 
 # O env empresarial fornece apenas configuração persistente. Metadados de release são
 # reconstruídos nesta nova sessão e nunca são gravados no arquivo protegido.
@@ -66,10 +68,11 @@ unique_container(){
   local service=$1 ids count
   ids="$(docker ps --filter label=com.docker.compose.project=gest-o-production --filter label=com.docker.compose.service="$service" -q)"
   count="$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l)"
-  [[ "$count" -eq 1 ]] || die "$service instance count differs from one"
+  [[ "$count" -eq 1 ]] || { die "$service instance count differs from one"; return 1; }
   printf '%s' "$ids"
 }
-api_id="$(unique_container api)"; web_id="$(unique_container web)"
+api_id="$(unique_container api)" || exit $?
+web_id="$(unique_container web)" || exit $?
 [[ "$(docker inspect -f '{{.State.Running}}' "$api_id")" == true ]] || die 'API is not running'
 [[ "$(docker inspect -f '{{.State.Running}}' "$web_id")" == true ]] || die 'WEB is not running'
 CURRENT_WEB_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$web_id")"
@@ -84,15 +87,56 @@ docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'approved API image is 
 target_revision="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE" 2>/dev/null || true)"
 [[ "$target_revision" == "$EXPECTED_SHA" ]] || die 'approved API image revision label differs from EXPECTED_SHA'
 COMPOSE=(docker compose --env-file "$SOURCE_ENV_FILE" -f "$COMPOSE_FILE")
+"${COMPOSE[@]}" config >/dev/null
 
-# Todos os gates acima são read-only. Somente agora backups/candidatos podem ser criados.
+STAGE=readonly_inventory
+[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")" == true ]] || die 'PostgreSQL is not running'
+db_mounts_before="$(docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")"
+grep -Fq "$PRODUCTION_DB_VOLUME_EXPECTED /var/lib/postgresql/data" <<<"$db_mounts_before" || die 'approved PostgreSQL volume is not mounted'
+web_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$web_id")"
+db_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")"
+old_api_image_id="$(docker inspect -f '{{.Image}}' "$api_id")"
+old_api_commit="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$api_id" | sed -n 's/^APP_COMMIT=//p' | head -1)"
+old_api_version="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$old_api_image_id" 2>/dev/null || true)"
+old_api_built_at="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$old_api_image_id" 2>/dev/null || true)"
+[[ -n "$old_api_commit" && -n "$old_api_version" && -n "$old_api_built_at" ]] || die 'previous API rollback metadata cannot be resolved'
+ROLLBACK_API_IMAGE="gest-o-api-recovery-rollback:${old_api_image_id#sha256:}"
+ROLLBACK_APP_COMMIT="$old_api_commit"; ROLLBACK_APP_VERSION="$old_api_version"; ROLLBACK_APP_BUILT_AT="$old_api_built_at"
+runtime_sha="$(curl -fsS http://127.0.0.1:4000/health/version | jq -r '.commit // empty')"
+restart_before="$(docker inspect -f '{{.RestartCount}}' "$api_id")"
+health_before="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$api_id")"
+technical_snapshot(){
+  docker exec -i "$1" node <<'NODE'
+const {PrismaClient}=require('@prisma/client'); const p=new PrismaClient();
+(async()=>{const c=await p.appConfig.findUnique({where:{key:'erp.automaticSync.config'},select:{value:true}});
+let enabled=false;try{enabled=JSON.parse(c?.value||'{}').enabled===true}catch{}
+const locks=await p.erpSyncLock.findMany({select:{lockedUntil:true}});const now=Date.now();
+const active=locks.some(x=>x.lockedUntil.getTime()>=now),expired=locks.some(x=>x.lockedUntil.getTime()<now);
+console.log(`APP_CONFIG=${enabled?'enabled':'disabled'}`);console.log(`LOCK_STATE=${active?'active':expired?'expired_recoverable':'free'}`);
+})().finally(()=>p.$disconnect()).catch(()=>process.exit(1));
+NODE
+}
+technical_state="$(technical_snapshot "$api_id")"
+app_config="$(sed -n 's/^APP_CONFIG=//p' <<<"$technical_state")"; lock_state="$(sed -n 's/^LOCK_STATE=//p' <<<"$technical_state")"
+[[ "$app_config" == enabled ]] || die 'persisted AppConfig does not enable the scheduler'
+[[ "$lock_state" != active ]] || die 'a legitimate active ERP lock blocks API recreation'
+log "PRODUCTION_MAIN_SHA=$EXPECTED_SHA"
+log "API_RUNTIME_SHA=${runtime_sha:-not_proven}"
+log "API_CONTAINER_ID_PREFIX=${api_id:0:12}"
+log "API_IMAGE_ID_PREFIX=${old_api_image_id:7:12}"
+log "API_RESTART_COUNT=$restart_before"
+log "API_HEALTH=$health_before"
+log 'API_INSTANCE_COUNT=1'
+log "ERP_APP_CONFIG=$app_config"; log "ERP_LOCK_STATE=$lock_state"
+
+# FASE 2 — preparação reversível. Todos os gates anteriores são read-only.
 STAGE=candidate_preparation
 install -d -o root -g root -m 700 "$ENV_DIR/backups" "$EVIDENCE_DIR"
 env_backup="$ENV_DIR/backups/erp-scheduler-before-$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ).backup"
 install -o root -g root -m 600 "$SOURCE_ENV_FILE" "$env_backup"
 [[ "$ENV_SOURCE" == canonical ]] || install -o root -g root -m 600 "$LEGACY_ENV_FILE" "$ENV_DIR/backups/legacy-source-$(date -u +%Y%m%dT%H%M%SZ).backup"
 tmp_env="$(mktemp "$ENV_DIR/.env.recovery.XXXXXX")"
-cleanup(){ rm -f "${tmp_env:-}" "${preflight_output:-}" "${rendered:-}" "${technical_file:-}"; }
+cleanup(){ local rc=$?; rm -f "${tmp_env:-}" "${preflight_output:-}" "${rendered:-}" "${technical_file:-}"; return "$rc"; }
 trap cleanup EXIT
 gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$SOURCE_ENV_FILE")"
 [[ "$gate_count" -le 1 ]] || die 'duplicate scheduler gate definition'
@@ -156,65 +200,25 @@ if [[ "${ERP_RECOVERY_TEST_STOP_AFTER_COMPOSE:-false}" == true ]]; then
   exit 0
 fi
 
-STAGE=inventory
-api_count="$(docker ps --filter label=com.docker.compose.project=gest-o-production --filter label=com.docker.compose.service=api -q | wc -l)"
-[[ "$api_count" -eq 1 ]] || die 'API instance count differs from one'
-[[ "$(docker inspect -f '{{.State.Running}}' "$web_id")" == true ]] || die 'WEB is not running'
-[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")" == true ]] || die 'PostgreSQL is not running'
-db_mounts_before="$(docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")"
-grep -Fq "$PRODUCTION_DB_VOLUME_EXPECTED /var/lib/postgresql/data" <<<"$db_mounts_before" || die 'approved PostgreSQL volume is not mounted'
-web_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$web_id")"
-db_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")"
-old_api_image_id="$(docker inspect -f '{{.Image}}' "$api_id")"
-old_api_image_ref="$(docker inspect -f '{{.Config.Image}}' "$api_id")"
-old_api_commit="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$api_id" | sed -n 's/^APP_COMMIT=//p' | head -1)"
-old_api_version="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$old_api_image_id" 2>/dev/null || true)"
-old_api_built_at="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$old_api_image_id" 2>/dev/null || true)"
-[[ -n "$old_api_commit" && -n "$old_api_version" && -n "$old_api_built_at" ]] || die 'previous API rollback metadata cannot be resolved'
-ROLLBACK_API_IMAGE="gest-o-api-recovery-rollback:${old_api_image_id#sha256:}"
-ROLLBACK_APP_COMMIT="$old_api_commit"; ROLLBACK_APP_VERSION="$old_api_version"; ROLLBACK_APP_BUILT_AT="$old_api_built_at"
-runtime_sha="$(curl -fsS http://127.0.0.1:4000/health/version | jq -r '.commit // empty')"
-restart_before="$(docker inspect -f '{{.RestartCount}}' "$api_id")"
-health_before="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$api_id")"
-log "PRODUCTION_MAIN_SHA=$EXPECTED_SHA"
-log "API_RUNTIME_SHA=${runtime_sha:-not_proven}"
-log "API_CONTAINER_ID_PREFIX=${api_id:0:12}"
-log "API_IMAGE_ID_PREFIX=${old_api_image_id:7:12}"
-log "API_RESTART_COUNT=$restart_before"
-log "API_HEALTH=$health_before"
-log "API_INSTANCE_COUNT=$api_count"
-log "ERP_SCHEDULER_ENV=enabled"
-
 technical_file="$(mktemp)"
-technical_snapshot(){
-  docker exec -i "$1" node >"$technical_file" <<'NODE'
-const {PrismaClient}=require('@prisma/client'); const p=new PrismaClient();
-(async()=>{const c=await p.appConfig.findUnique({where:{key:'erp.automaticSync.config'},select:{value:true}});
-let enabled=false;try{enabled=JSON.parse(c?.value||'{}').enabled===true}catch{}
-const locks=await p.erpSyncLock.findMany({select:{lockedUntil:true}});const now=Date.now();
-const active=locks.some(x=>x.lockedUntil.getTime()>now),orphan=locks.some(x=>x.lockedUntil.getTime()<=now);
-console.log(`APP_CONFIG=${enabled?'enabled':'disabled'}`);console.log(`LOCK_STATE=${orphan?'orphan':active?'active':'free'}`);
-})().finally(()=>p.$disconnect()).catch(()=>process.exit(1));
-NODE
-}
-technical_snapshot "$api_id"
-app_config="$(sed -n 's/^APP_CONFIG=//p' "$technical_file")"; lock_state="$(sed -n 's/^LOCK_STATE=//p' "$technical_file")"
-[[ "$app_config" == enabled ]] || die 'persisted AppConfig does not enable the scheduler'
-[[ "$lock_state" != orphan ]] || die 'orphan ERP lock detected'
-log "ERP_APP_CONFIG=$app_config"; log "ERP_LOCK_STATE=$lock_state"; log 'ERP_NEXT_RUN_AT=not_proven'
+log 'ERP_SCHEDULER_ENV=enabled'; log 'ERP_NEXT_RUN_AT=not_proven'
 
+# FASE 3 — primeiro efeito persistente
 STAGE=environment_commit
 install -o root -g root -m 600 "$tmp_env" "$ENV_FILE"
+valid_protected_env "$ENV_FILE" || die 'committed environment metadata is invalid'
+[[ "$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++; if($2=="true")ok++} END{print n":"ok}' "$ENV_FILE")" == 1:1 ]] || die 'committed scheduler gate is invalid'
 docker tag "$old_api_image_id" "$ROLLBACK_API_IMAGE"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
+API_CHANGED=true
 STAGE=api_recreate
 "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate api
-API_CHANGED=true
 if [[ "${ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE:-false}" == true ]]; then
   die 'injected post-recreate failure'
 fi
 new_api_id="$("${COMPOSE[@]}" ps -q api)"
+# FASE 4 — validação imediata e prova automática bounded
 for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$new_api_id")" == healthy ]] && break; sleep 5; done
 [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$new_api_id")" == healthy ]] || die 'recreated API did not become healthy'
 [[ "$(curl -fsS http://127.0.0.1:4000/health/version | jq -r '.commit')" == "$EXPECTED_SHA" ]] || die 'API runtime SHA differs from expected SHA'
@@ -240,7 +244,7 @@ config_ok="$(sed -n 's/^CONFIG_OK=//p' "$technical_file")"; auth_mode="$(sed -n 
 [[ -n "$next_run_at" ]] || die 'nextRunAt is absent'
 recreated_at="$(date -u +%FT%TZ)"
 log 'ERP_API_RECREATE=PASS'; log 'ERP_API_HEALTH=PASS'; log 'ERP_PRODUCTION_LOGIN=PASS'
-log 'ERP_SCHEDULER_INITIALIZED=PASS'; log 'ERP_NEXT_RUN_AT=PRESENT'
+log 'ERP_PROTECTED_ENDPOINT=PASS'; log 'ERP_SCHEDULER_INITIALIZED=PASS'; log 'ERP_NEXT_RUN_AT=PRESENT'
 
 STAGE=automatic_proof
 deadline=$(( $(date +%s) + MAX_WAIT_SECONDS )); automatic_proven=false
@@ -249,13 +253,12 @@ while (( $(date +%s) < deadline )); do
 const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();
 (async()=>{const since=new Date(process.env.RECREATED_AT);const runs=await p.erpSyncRun.findMany({where:{scope:'automatic',trigger:'scheduler',startedAt:{gt:since}},orderBy:{startedAt:'desc'},select:{status:true,startedAt:true,finishedAt:true,correlationId:true,errorMessage:true,syncedCount:true,metrics:true}});
 const latest=runs[0],success=latest?.status==='success'&&latest.finishedAt&&latest.correlationId?latest:null;const concurrent=runs.filter(r=>r.status==='running').length;
-const locks=await p.erpSyncLock.findMany({select:{lockedUntil:true}});const orphan=locks.some(l=>l.lockedUntil<=new Date());
+const locks=await p.erpSyncLock.findMany({select:{lockedUntil:true}});const now=new Date(),active=locks.some(l=>l.lockedUntil>=now),expired=locks.some(l=>l.lockedUntil<now);
 const completed=Array.isArray(success?.metrics?.completedSteps)?success.metrics.completedSteps.length:0;
-console.log(`SUCCESS=${Boolean(success)}`);console.log(`DUPLICATE=${concurrent>1}`);console.log(`LOCK=${orphan?'orphan':locks.length?'active':'free'}`);if(success){console.log(`STARTED_AT=${success.startedAt.toISOString()}`);console.log(`FINISHED_AT=${success.finishedAt.toISOString()}`);console.log(`CORRELATION_ID=${success.correlationId}`);console.log(`LOCK_ACQUIRED=${success.syncedCount>0&&completed>0}`)}
+console.log(`SUCCESS=${Boolean(success)}`);console.log(`DUPLICATE=${concurrent>1}`);console.log(`LOCK=${active?'active':expired?'expired_recoverable':'free'}`);if(success){console.log(`STARTED_AT=${success.startedAt.toISOString()}`);console.log(`FINISHED_AT=${success.finishedAt.toISOString()}`);console.log(`CORRELATION_ID=${success.correlationId}`);console.log(`LOCK_ACQUIRED=${success.syncedCount>0&&completed>0}`)}
 })().finally(()=>p.$disconnect()).catch(()=>process.exit(1));
 NODE
   [[ "$(sed -n 's/^DUPLICATE=//p' "$technical_file")" == false ]] || die 'duplicate automatic scheduler executions detected'
-  [[ "$(sed -n 's/^LOCK=//p' "$technical_file")" != orphan ]] || die 'orphan lock detected during automatic proof'
   if [[ "$(sed -n 's/^SUCCESS=//p' "$technical_file")" == true ]]; then automatic_proven=true; break; fi
   sleep "$POLL_SECONDS"
 done
@@ -268,12 +271,13 @@ logs="$(docker logs --since "$recreated_at" "$new_api_id" 2>&1)"
 ! grep -Fq 'scheduler_disabled' <<<"$logs" || die 'scheduler_disabled was emitted after recreation'
 grep -Fq '[ultrafv3 scheduler] run started' <<<"$logs" || die 'scheduler start log is absent'
 grep -Fq '[ultrafv3 scheduler] run finished' <<<"$logs" || die 'scheduler finish log is absent'
-technical_snapshot "$new_api_id"; [[ "$(sed -n 's/^LOCK_STATE=//p' "$technical_file")" == free ]] || die 'ERP sync lock was not released'
+final_lock_state="$(technical_snapshot "$new_api_id")"; [[ "$(sed -n 's/^LOCK_STATE=//p' <<<"$final_lock_state")" == free ]] || die 'ERP sync lock was not released'
 API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" node >"$technical_file" <<'NODE'
 (async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const r=await fetch(process.env.API_BASE+'/erp/ultrafv3/sync/status',{headers:{authorization:`Bearer ${b.accessToken}`}});if(r.status!==200)process.exit(1);const a=(await r.json()).automaticSync||{};console.log(`NEXT_RUN_AT=${a.nextRunAt||''}`);console.log(`ACTIVE_ERROR=${Boolean(a.lastError)}`)})().catch(()=>process.exit(1));
 NODE
 [[ -n "$(sed -n 's/^NEXT_RUN_AT=//p' "$technical_file")" ]] || die 'nextRunAt was not recalculated after the automatic run'
 [[ "$(sed -n 's/^ACTIVE_ERROR=//p' "$technical_file")" == false ]] || die 'an active automatic scheduler error remains'
+# FASE 5 — persistência final (qualquer falha anterior percorre rollback)
 install -o root -g root -m 600 "$ENV_FILE" "$ENV_DIR/backups/erp-scheduler-proven-$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ).backup"
 valid_protected_env "$ENV_FILE" || die 'protected environment metadata did not persist'
 log 'ERP_AUTOMATIC_TRIGGER=scheduler'; log 'ERP_AUTOMATIC_SYNC=PASS'; log 'ERP_SYNC_LOCK=RELEASED'; log 'ERP_SYNC_ENV_PERSISTENCE=PASS'

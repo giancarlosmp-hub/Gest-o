@@ -36,9 +36,17 @@ exit 0
   executable(join(bin, "curl"), `#!/bin/sh
 printf '%s' '{"commit":"${sha}"}'
 `);
+  executable(join(bin, "date"), `#!/bin/sh
+case "$*" in (+%s) echo 1700000000;; (*) echo 2026-08-11T12:00:00Z;; esac
+`);
+  executable(join(bin, "node"), `#!/bin/sh
+if [ "$1" = -p ]; then echo 9.8.7; exit 0; fi
+cat >/dev/null
+printf '%s\n' 'INITIALIZED=true' 'ENABLED=true' 'CONFIG_OK=true' 'AUTH_MODE=global' 'NEXT_RUN_AT=2026-08-11T13:00:00Z' 'ACTIVE_ERROR=false'
+`);
   executable(join(bin, "docker"), `#!/bin/sh
 echo "$*" >>"$MOCK_COMMAND_LOG"
-if [ "$1" = ps ]; then case "$*" in (*service=web*) echo web-id;; (*service=api*) echo api-id;; esac; exit 0; fi
+if [ "$1" = ps ]; then case "$*" in (*service=web*) echo web-id;; (*service=api*) [ "$MOCK_API_COUNT" = zero ] || echo api-id;; esac; exit 0; fi
 if [ "$1" = inspect ]; then
   fmt="$3"; target="$4"
   case "$fmt" in
@@ -60,7 +68,8 @@ if [ "$1 $2" = "image inspect" ]; then
   esac; exit 0
 fi
 if [ "$1" = tag ]; then exit 0; fi
-if [ "$1" = exec ]; then printf '%s\n' 'APP_CONFIG=enabled' 'LOCK_STATE=free'; exit 0; fi
+if [ "$1" = exec ]; then case "$*" in (*RECREATED_AT*) printf '%s\n' 'SUCCESS=true' 'DUPLICATE=false' 'LOCK=free' 'STARTED_AT=2026-08-11T12:01:00Z' 'FINISHED_AT=2026-08-11T12:02:00Z' 'CORRELATION_ID=technical-correlation' 'LOCK_ACQUIRED=true';; (*) printf '%s\n' 'APP_CONFIG=enabled' 'LOCK_STATE=free';; esac; exit 0; fi
+if [ "$1" = logs ]; then printf '%s\n' '[ultrafv3 scheduler] run started' '[ultrafv3 scheduler] run finished'; exit 0; fi
 if [ "$1" = compose ]; then
   case "$*" in (*" config") exit 0;; (*" ps -q api") echo api-new;; (*" up -d --no-deps --no-build --force-recreate api") exit 0;; esac
 fi
@@ -76,6 +85,7 @@ exit 0
       AUTH_TEST_EMAIL: options.auth === false ? "" : "protected@example.invalid",
       AUTH_TEST_PASSWORD: options.auth === false ? "" : "protected-test-value",
       MOCK_TARGET_IMAGE: options.image === false ? "absent" : "present", MOCK_COMMAND_LOG: commandLog,
+      MOCK_API_COUNT: options.early ? "zero" : "one",
       ERP_RECOVERY_TEST_STOP_AFTER_COMPOSE: options.prepare ? "true" : "false",
       ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE: options.rollback ? "true" : "false",
     },
@@ -97,11 +107,30 @@ assert.notEqual(b.status, 0); assert.equal(b.after, b.before); assert.doesNotMat
 const c = scenario("c", { auth: false });
 assert.notEqual(c.status, 0); assert.equal(c.after, c.before); assert.equal(c.commands, "");
 
-assert.match(a.commands, /inspect .* web-id/); assert.doesNotMatch(a.commands, /force-recreate web/);
+const d = scenario("d", { prepare: true });
+assert.match(d.commands, /inspect .* web-id/); assert.doesNotMatch(d.commands, /(?:up|restart|stop|rm|force-recreate).*web/);
 
-const e = scenario("e", { rollback: true });
-assert.notEqual(e.status, 0); assert.equal(e.after, e.before, "rollback must restore the prior env atomically");
-assert.equal((e.commands.match(/force-recreate api/g) || []).length, 2, `API must be recreated once and rolled back once\n${e.output}\n${e.commands}`);
-assert.doesNotMatch(e.commands, /force-recreate (?:web|db)|\bdown\b|volume rm/);
+const e = scenario("e", { prepare: true });
+assert.match(e.commands, /inspect .*db-id[\s\S]*inspect .*db-id/);
+assert.doesNotMatch(e.commands, /(?:up|restart|stop|rm|force-recreate).*db-id|\bdown\b|volume rm/);
 
-console.log("ERP production recovery executable contract: PASS (A-E)");
+const f = scenario("f", { rollback: true });
+assert.notEqual(f.status, 0); assert.equal(f.after, f.before, "rollback must restore the prior env atomically");
+assert.equal((f.commands.match(/force-recreate api/g) || []).length, 2, `API must be recreated once and rolled back once\n${f.output}\n${f.commands}`);
+assert.match(f.output, /ERP_ROLLBACK_API_HEALTH=PASS/);
+assert.doesNotMatch(f.commands, /force-recreate (?:web|db)|\bdown\b|volume rm/);
+
+const g = scenario("g", { early: true });
+assert.notEqual(g.status, 0); assert.doesNotMatch(g.output, /unbound variable|ERP_RECOVERY_ROLLBACK/);
+assert.equal(g.after, g.before, "early failure must preserve the original env and exit code");
+
+const h = scenario("h");
+assert.equal(h.status, 0, h.output); assert.match(h.output, /ERP_RECOVERY_AUTH_INPUT=AVAILABLE/);
+assert.match(h.output, /ERP_PROTECTED_ENDPOINT=PASS[\s\S]*ERP_AUTOMATIC_TRIGGER=scheduler[\s\S]*ERP_SYNC_ENV_PERSISTENCE=PASS/);
+assert.equal((h.commands.match(/force-recreate api/g) || []).length, 1);
+assert.doesNotMatch(h.commands, /(?:up|restart|stop|rm|force-recreate).*(?:web|db-id)|\bdown\b|volume rm/);
+assert.match(h.commands, /inspect .*db-id[\s\S]*inspect .*db-id/, "PostgreSQL identity and mounts must be compared");
+assert.doesNotMatch(h.after, /^(?:API_IMAGE|WEB_IMAGE|APP_COMMIT|APP_VERSION|APP_BUILT_AT)=/m);
+for (const result of [a,b,c,d,e,f,g,h]) assert.doesNotMatch(result.output, /protected@example|protected-test-value/);
+
+console.log("ERP production recovery executable contract: PASS (A-H)");

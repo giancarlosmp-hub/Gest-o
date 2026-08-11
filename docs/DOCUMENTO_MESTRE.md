@@ -619,3 +619,7 @@ Todo workflow operacional independente deve reconstruir deterministicamente `APP
 `WEB_IMAGE` do único container WEB real. Credenciais de validação pertencem ao canal protegido do
 environment GitHub, não ao env empresarial. CI verde comprova esse contrato versionado, nunca a sua
 execução produtiva.
+
+O contrato histórico de deploy em duas fases não é redesenhado por esta exceção. A recuperação ERP
+permanece isolada: consome a imagem já criada pelo build oficial, recria somente a API e preserva a
+identidade da WEB, do PostgreSQL e de seus volumes.

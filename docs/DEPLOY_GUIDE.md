@@ -444,3 +444,7 @@ os deriva novamente: SHA e tag API do commit aprovado, versão do `package.json`
 sessão e imagem WEB inspecionada no container produtivo único. O timestamp derivado não afirma quando
 a imagem foi construída. O login de validação usa exclusivamente secrets do environment, sem gravá-los
 no arquivo empresarial.
+
+O workflow excepcional não executa build nem substitui as fases e evidências do deploy histórico. Ele
+somente consome a imagem pinada já preparada e mantém WEB, PostgreSQL e mounts com as identidades
+capturadas na descoberta read-only.
