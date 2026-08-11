@@ -474,3 +474,27 @@ Execute `npm run test:tenant-data-readiness` e, com Docker, `npm run test:tenant
 # Planejamento gated 1.0B.2-M
 
 Executar `npm run test:preflight-gated-backfill-plan` e, em host Docker isolado, `npm run test:preflight-gated-backfill-plan:postgres`. O harness recusa `DATABASE_URL` herdada e não publica porta. READY gera apenas plano `dryRunOnly`; nunca autoriza apply. BLOCKED, quarentena, evidência expirada/adulterada ou replay conflitante exigem preservar hashes e códigos sanitizados, interromper e obter nova evidência formal. Rollback remove apenas tooling/gate/documentação; não existe DML ou ledger produtivo a desfazer.
+# Prova descartável 1.0B.2-N
+
+Execute `npm run test:preflight-plan-ledger:postgres` somente em host Docker de desenvolvimento/CI,
+sem `DATABASE_URL` ou `TEST_DATABASE_URL`. O runner cria `postgres:16` sem porta, valida concorrência,
+SQLSTATE, crash, grants e catálogo, desfaz todo o DDL e exige
+`PREFLIGHT_PLAN_LEDGER_POSTGRES=PASS`. Nunca aponte esse harness para produção.
+
+O head remoto `029fab54d32413d0e94308227c0ae591144b7ee7` foi comprovado no Preview Deploy
+31432019343 e no Docker Compose CI 31432019733 (`compose-smoke` 93597451158), ambos PASS. Isso
+certifica o procedimento descartável, não autoriza executar o candidato fora do CI/desenvolvimento.
+
+## Controles duráveis dos harnesses
+
+- `pg_isready` não prova que o database solicitado aceita sessão: readiness autoritativa abre o
+  database exato com `psql -X`, `ON_ERROR_STOP=1`, `SELECT 1`, exit zero e stdout literal validado.
+- Constraints sobrepostas tornam `ON CONFLICT` parcial inadequado para replay concorrente. Evidência
+  e plano usam advisory transaction locks namespaced, ordem determinística, replay
+  `IDEMPOTENT_REPLAY` e conflito divergente `23505`.
+- Papel e grants são auditados respectivamente por `pg_catalog.pg_roles` e
+  `information_schema.table_privileges`, sobre inventário fechado e literal — nunca por `LIKE`.
+- Cada concorrência captura dois PIDs, waits, exit codes e stdout/stderr separados; `HARNESS_STEP` e
+  `HARNESS_COMMAND` mudam antes de cada fase para impedir diagnóstico stale.
+- Cenários usam IDs/hashes exclusivos; `p3` é reservado ao crash/rollback. O teardown é testado com
+  rollback, executado realmente e seguido de comparação exata com o catálogo baseline.

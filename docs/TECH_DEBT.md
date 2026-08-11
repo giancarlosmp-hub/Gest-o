@@ -164,3 +164,15 @@ O contrato 1.0B.2-L e o harness sintético não provam dados produtivos, escala,
 # TD-PREFLIGHT-GATED-PLAN — operação produtiva permanece bloqueada
 
 O registry em memória prova replay/concorrência somente no processo de teste. Antes de qualquer planejamento formal ainda são necessários storage/lock distribuído revisado, política de expiração, evidência produtiva autorizada, auditoria imutável e provas de escala. READY sintético não representa produção, e plano dry-run não autoriza apply, DML ou ledger produtivo.
+# Pendências após a prova 1.0B.2-N
+
+O head `029fab54d32413d0e94308227c0ae591144b7ee7` passou Preview Deploy 31432019343 e Docker
+Compose CI 31432019733/job 93597451158, incluindo o gate PostgreSQL do ledger. A prova técnica está
+verde (`PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS`); os itens abaixo são limites produtivos, não falhas
+da prova descartável.
+
+- **Ledger produtivo continua bloqueado:** DDL/migration Prisma, adapter, papéis, retenção,
+  observabilidade e operação HA não foram desenhados/aprovados.
+- **Escala não provada:** faltam volume, contenção, WAL, timeout, pool, restore e crash de host.
+- **Auditoria de rejeição:** conflito abortado não pode persistir evento na mesma transação;
+  qualquer trilha autônoma futura exige desenho próprio sem payload empresarial.

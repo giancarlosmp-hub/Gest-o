@@ -87,3 +87,14 @@ O seed preview atribui o root Client ao tenant sintético e valida membership/ow
 ## Observação 1.0B.2-K
 
 A janela sintética de 40 reads no preview observa somente o shadow legado de Client. Não muda schema, nulabilidade, resposta, mutation ou dados; portanto não satisfaz gates de migration/backfill/constrain. Limitações de amostra, rate limit, timeout, delay de logs e rerun permanecem registradas. Produção segue disabled/false e qualquer decisão posterior depende dos checks reais verdes e de autorização própria.
+# Prova de registry/ledger 1.0B.2-N
+
+O candidato PostgreSQL descartável prova binding, idempotência, concorrência e append-only, mas não
+é migration produtiva. Backfill continua limitado a plano sintético/dry-run; apply, adapter e criação
+das tabelas em produção permanecem proibidos.
+
+No head remoto `029fab54d32413d0e94308227c0ae591144b7ee7`, os steps reais de tenancy expand,
+planejamento condicionado e evidence/plan ledger passaram no Docker Compose CI 31432019733. Isso
+torna `PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS` e mantém
+`READY_FOR_BACKFILL_PLANNING = YES` somente para planos sintéticos/dry-run; não satisfaz gates de
+migration produtiva, backfill, constrain, runtime ou cutover.

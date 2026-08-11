@@ -1,15 +1,57 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-name=""; network=""
-cleanup() { set +e; [[ -z "$name" ]] || docker rm -f "$name" >/dev/null 2>&1; [[ -z "$network" ]] || docker network rm "$network" >/dev/null 2>&1; }
-trap cleanup EXIT
-[[ -z "${DATABASE_URL:-}" ]] || { printf 'Inherited DATABASE_URL is forbidden\n' >&2; exit 1; }
+name=""; network=""; tmp="$(mktemp -d)"
+HARNESS_STEP=bootstrap; HARNESS_COMMAND='initialize gated plan PostgreSQL harness'; HARNESS_RESULT=RUNNING
+cleanup() {
+ rc=$?; trap - EXIT INT TERM
+ if [[ $rc -ne 0 ]]; then
+  printf 'HARNESS_STEP=%s\nHARNESS_COMMAND=%s\nHARNESS_RESULT=FAIL\nEXIT_CODE=%s\n' "$HARNESS_STEP" "$HARNESS_COMMAND" "$rc" >&2
+ fi
+ set +e
+ if [[ -n "$name" ]]; then docker rm -f "$name" >/dev/null 2>&1; fi
+ if [[ -n "$network" ]]; then docker network rm "$network" >/dev/null 2>&1; fi
+ rm -rf "$tmp"
+ exit "$rc"
+}
+trap cleanup EXIT INT TERM
+[[ -z "${DATABASE_URL:-}" && -z "${TEST_DATABASE_URL:-}" ]] || { printf 'Inherited database URLs are forbidden\n' >&2; exit 1; }
 command -v docker >/dev/null
 name="gesto-gated-plan-pg-$RANDOM-$$"; network="$name-net"
+HARNESS_STEP=postgres_start
+HARNESS_COMMAND='start disposable postgres 16 container on internal network'
 docker network create --internal "$network" >/dev/null
 docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e POSTGRES_DB=gated_plan postgres:16 >/dev/null
-ready=false; for _ in $(seq 1 60); do docker exec "$name" pg_isready -U postgres -d gated_plan >/dev/null 2>&1 && { ready=true; break; }; sleep 1; done; [[ "$ready" == true ]]
 psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d gated_plan)
+HARNESS_STEP=database_readiness
+HARNESS_COMMAND='wait for gated_plan SQL readiness'
+readiness_ready=false
+for readiness_attempt in $(seq 1 60); do
+ if docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -qAt -U postgres -d gated_plan -c 'SELECT 1;' >"$tmp/readiness.out" 2>"$tmp/readiness.err"; then
+  readiness_exit=0
+ else
+  readiness_exit=$?
+ fi
+ if [[ $readiness_exit -eq 0 && "$(wc -l < "$tmp/readiness.out")" -eq 1 ]] && grep -Fqx '1' "$tmp/readiness.out"; then
+  readiness_ready=true
+  break
+ fi
+ sleep 1
+done
+[[ "$readiness_ready" == true ]]
+HARNESS_COMMAND='validate final independent gated_plan SQL connection'
+if docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -qAt -U postgres -d gated_plan -c 'SELECT 1;' >"$tmp/readiness-final.out" 2>"$tmp/readiness-final.err"; then
+ final_readiness_exit=0
+else
+ final_readiness_exit=$?
+fi
+[[ $final_readiness_exit -eq 0 ]]
+[[ "$(wc -l < "$tmp/readiness-final.out")" -eq 1 ]]
+grep -Fqx '1' "$tmp/readiness-final.out"
+HARNESS_RESULT=PASS
+printf 'GATED_PLAN_DATABASE_READINESS=PASS\n'
+HARNESS_STEP=fixtures
+HARNESS_COMMAND='create synthetic gated plan facts after database readiness'
+HARNESS_RESULT=RUNNING
 "${psql[@]}" >/dev/null <<'SQL'
 CREATE EXTENSION pgcrypto;
 CREATE TABLE facts(root text NOT NULL, id text NOT NULL, tenant_id text, blocked boolean NOT NULL DEFAULT false, PRIMARY KEY(root,id));
@@ -41,4 +83,7 @@ after=$(dataset_hash); [[ "$before" == "$after" ]]
 # The disposable database contains no plan/ledger relation: both outputs above exist only in process memory/stdout.
 [[ "$("${psql[@]}" -qAtc "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('backfill_plan','backfill_ledger')")" == 0 ]]
 npm run test:preflight-gated-backfill-plan
+HARNESS_STEP=final
+HARNESS_COMMAND='emit gated plan PostgreSQL proof result'
+HARNESS_RESULT=PASS
 printf 'PREFLIGHT_GATED_BACKFILL_POSTGRES=PASS\n'

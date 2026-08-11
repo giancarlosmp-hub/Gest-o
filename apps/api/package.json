@@ -27,6 +27,7 @@
     "test:tenancy-backfill": "tsx src/tenancy/backfillTooling.test.ts",
     "test:tenant-data-readiness": "tsx src/tenancy/tenantDataReadinessPreflight.test.ts",
     "test:preflight-gated-backfill-plan": "tsx src/tenancy/preflightGatedBackfillPlan.test.ts",
+    "test:preflight-plan-ledger": "tsx src/tenancy/preflightPlanLedger.test.ts",
     "tenancy:prepare-default": "tsx src/scripts/prepareDefaultTenant.ts",
     "territories:cleanup-preview": "tsx src/scripts/cleanupTerritoryCityDuplicates.ts",
     "smoke:ultrafv3-crm-sync": "tsx src/scripts/ultraFv3CrmSyncRegressionSmoke.ts",
