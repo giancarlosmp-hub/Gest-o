@@ -3,6 +3,15 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
+const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
+assert.match(deploy, /ENV_FILE="\$\{PRODUCTION_ENV_FILE:-\/root\/demetra-env\/\.env\}"/);
+assert.ok(deploy.indexOf("erp-production-env-preflight.sh") < deploy.indexOf("production-preflight.sh"));
+assert.match(compose, /ERP_SYNC_SCHEDULER_ENABLED: "\$\{ERP_SYNC_SCHEDULER_ENABLED:\?/);
+for (const policy of ["TENANCY_MODE disabled", "TENANT_READ_PILOT_ENABLED false", "DATABASE_SCHEMA_MODE external", "SEED_ON_BOOTSTRAP false", "ENABLE_PREVIEW_SEED false", "ENABLE_SMOKE_BOOTSTRAP false"]) {
+  const [name, value] = policy.split(" ");
+  assert.ok(erpEnvPreflight.includes(`require_literal ${name} ${value}`));
+}
+assert.doesNotMatch(erpEnvPreflight, /echo[^\n]*\$\{?!name|printf[^\n]*\$\{?!name/);
 assert.doesNotMatch(compose,/^\s{2}db:/m); assert.doesNotMatch(compose,/depends_on/);
 assert.match(compose,/DATABASE_URL:\s*"\$\{DATABASE_URL:\?/); assert.match(compose,/external:\s*true/); assert.match(compose,/name: gest-o_default/);
 assert.doesNotMatch(compose,/gest-o_pgdata/); assert.match(pre,/hostname do banco não autorizado/); assert.match(pre,/DATABASE_URL is required/);

@@ -43,7 +43,7 @@
 | `ULTRAFV3_USERNAME` | credencial ERP global | Opcional porque credencial por vendedor é suportada | repassada pelo env seguro |
 | `ULTRAFV3_PASSWORD` | credencial ERP global | Opcional porque credencial por vendedor é suportada | repassada pelo env seguro |
 | `ERP_CREDENTIAL_ENCRYPTION_KEY` | criptografia de credenciais ERP | Crítica; salvar/usar credenciais falha | `${VAR:?}` |
-| `ERP_SYNC_SCHEDULER_ENABLED` | gate do scheduler | Opcional | default produtivo explícito `true` |
+| `ERP_SYNC_SCHEDULER_ENABLED` | gate do scheduler | Obrigatória | deve ser literalmente `true`; ausência, vazio ou `false` bloqueia o deploy produtivo |
 | `ERP_SYNC_PRODUCTS_INTERVAL_MS` | intervalo produtos | Opcional | default `21600000` |
 | `ERP_SYNC_PARTNERS_INTERVAL_MS` | intervalo parceiros | Opcional | default `21600000` |
 | `ERP_SYNC_ORDER_STATUS_INTERVAL_MS` | intervalo status | Opcional | default `900000` |

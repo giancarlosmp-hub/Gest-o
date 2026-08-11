@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 EVIDENCE_DIR="${EVIDENCE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
-ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/production.env}"
+ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 APP_DIR="${APP_DIR:-/apps/gest-o}"
 umask 077
 log_file="$EVIDENCE_DIR/rollback-$(date -u +%Y%m%dT%H%M%SZ).log"
