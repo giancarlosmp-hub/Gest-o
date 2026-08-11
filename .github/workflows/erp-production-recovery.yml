@@ -29,12 +29,14 @@ jobs:
         env:
           RECOVERY_CONFIRM: ${{ inputs.confirm }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          AUTH_TEST_EMAIL: ${{ secrets.AUTH_TEST_EMAIL }}
+          AUTH_TEST_PASSWORD: ${{ secrets.AUTH_TEST_PASSWORD }}
         with:
           host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
-          envs: RECOVERY_CONFIRM,EXPECTED_MAIN_SHA
+          envs: RECOVERY_CONFIRM,EXPECTED_MAIN_SHA,AUTH_TEST_EMAIL,AUTH_TEST_PASSWORD
           script_stop: true
           command_timeout: 2h
           script: |
@@ -49,4 +51,5 @@ jobs:
             git pull --ff-only origin main
             test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
             CONFIRM="$RECOVERY_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+              AUTH_TEST_EMAIL="$AUTH_TEST_EMAIL" AUTH_TEST_PASSWORD="$AUTH_TEST_PASSWORD" \
               bash scripts/erp-production-recovery.sh

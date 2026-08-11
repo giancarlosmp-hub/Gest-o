@@ -422,6 +422,11 @@ recuperação da VPS e a sincronização automática continuam pendentes. O work
 após a fase de build da imagem aprovada. Ele exige aprovação de `production-cutover`, confirmação
 literal e SHA completo da `main`.
 
+O contrato revisado não presume metadados transitórios no env empresarial: a sessão de recuperação
+deriva imagens e `APP_*` do checkout/runtime e recebe credenciais de validação somente pelos secrets
+do environment protegido, falhando antes de qualquer alteração quando esses gates não estiverem
+disponíveis.
+
 Até que uma execução desse workflow termine com uma execução nova e bem-sucedida contendo
 `trigger=scheduler`, não declarar a sincronização restaurada:
 

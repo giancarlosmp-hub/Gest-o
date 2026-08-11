@@ -5,14 +5,17 @@ set -Eeuo pipefail
 # sanitizados são enviados ao log do GitHub Actions.
 umask 077
 APP_DIR="${APP_DIR:-/apps/gest-o}"
-ENV_DIR="/root/demetra-env"
-ENV_FILE="/root/demetra-env/.env"
-LEGACY_ENV_FILE="/root/demetra-env/production.env"
+# Produção usa exclusivamente /root/demetra-env/.env e a fonte legado
+# /root/demetra-env/production.env; o override existe somente para o harness isolado.
+ENV_DIR="${ERP_RECOVERY_ENV_DIR:-/root/demetra-env}"
+ENV_FILE="$ENV_DIR/.env"
+LEGACY_ENV_FILE="$ENV_DIR/production.env"
 COMPOSE_FILE="docker-compose.production.yml"
 EXPECTED_SHA="${EXPECTED_SHA:?EXPECTED_SHA is required}"
 MAX_WAIT_SECONDS="${ERP_RECOVERY_MAX_WAIT_SECONDS:-5400}"
 POLL_SECONDS="${ERP_RECOVERY_POLL_SECONDS:-30}"
-EVIDENCE_DIR="${ERP_RECOVERY_EVIDENCE_ROOT:-/var/log/gest-o/erp-recovery}/$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ)"
+EVIDENCE_ROOT="${ERP_RECOVERY_EVIDENCE_ROOT:-/var/log/gest-o/erp-recovery}"
+EVIDENCE_DIR="$EVIDENCE_ROOT/$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ)"
 
 log(){ printf '[erp-recovery] %s\n' "$*"; }
 die(){ log "FAIL_STAGE=${STAGE:-initial}: $*" >&2; return 1; }
@@ -25,7 +28,6 @@ cd "$APP_DIR"
 [[ "$(git branch --show-current)" == main ]] || die 'checkout is not main'
 [[ "$(git rev-parse HEAD)" == "$EXPECTED_SHA" ]] || die 'main SHA differs from approved SHA'
 [[ -z "$(git status --porcelain)" ]] || die 'production checkout is not clean'
-install -d -o root -g root -m 700 "$ENV_DIR" "$ENV_DIR/backups" "$EVIDENCE_DIR"
 
 valid_protected_env(){
   local file=$1
@@ -36,12 +38,9 @@ valid_protected_env(){
 
 STAGE=environment_source
 if valid_protected_env "$ENV_FILE"; then
-  ENV_SOURCE=canonical
+  ENV_SOURCE=canonical; SOURCE_ENV_FILE="$ENV_FILE"; CANONICAL_EXISTED=true
 elif [[ ! -e "$ENV_FILE" && ! -L "$ENV_FILE" ]] && valid_protected_env "$LEGACY_ENV_FILE"; then
-  source_backup="$ENV_DIR/backups/legacy-source-$(date -u +%Y%m%dT%H%M%SZ).backup"
-  install -o root -g root -m 600 "$LEGACY_ENV_FILE" "$source_backup"
-  install -o root -g root -m 600 "$LEGACY_ENV_FILE" "$ENV_FILE"
-  ENV_SOURCE=legacy_copy
+  ENV_SOURCE=legacy_copy; SOURCE_ENV_FILE="$LEGACY_ENV_FILE"; CANONICAL_EXISTED=false
 else
   log 'ERP_ENV_RECOVERY_SOURCE=NOT_AVAILABLE'
   die 'canonical and authorized legacy environment sources are unavailable or invalid'
@@ -49,27 +48,66 @@ fi
 log "ERP_ENV_SOURCE=$ENV_SOURCE"
 log 'ERP_ENV_METADATA=REGULAR_NON_SYMLINK_ROOT_ROOT_600'
 
-STAGE=scheduler_gate
-gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$ENV_FILE")"
-[[ "$gate_count" -le 1 ]] || die 'duplicate scheduler gate definition'
+STAGE=protected_inputs
+: "${AUTH_TEST_EMAIL:?AUTH_TEST_EMAIL is required from the protected GitHub environment secret}"
+: "${AUTH_TEST_PASSWORD:?AUTH_TEST_PASSWORD is required from the protected GitHub environment secret}"
+readonly AUTH_VALIDATION_EMAIL="$AUTH_TEST_EMAIL" AUTH_VALIDATION_PASSWORD="$AUTH_TEST_PASSWORD"
+unset AUTH_TEST_EMAIL AUTH_TEST_PASSWORD
+log 'ERP_AUTH_VALIDATION_INPUTS=PRESENT'
+
+# O env empresarial fornece apenas configuração persistente. Metadados de release são
+# reconstruídos nesta nova sessão e nunca são gravados no arquivo protegido.
+set -a; source "$SOURCE_ENV_FILE"; set +a
+: "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
+: "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
+
+STAGE=runtime_derivation
+unique_container(){
+  local service=$1 ids count
+  ids="$(docker ps --filter label=com.docker.compose.project=gest-o-production --filter label=com.docker.compose.service="$service" -q)"
+  count="$(printf '%s\n' "$ids" | sed '/^$/d' | wc -l)"
+  [[ "$count" -eq 1 ]] || die "$service instance count differs from one"
+  printf '%s' "$ids"
+}
+api_id="$(unique_container api)"; web_id="$(unique_container web)"
+[[ "$(docker inspect -f '{{.State.Running}}' "$api_id")" == true ]] || die 'API is not running'
+[[ "$(docker inspect -f '{{.State.Running}}' "$web_id")" == true ]] || die 'WEB is not running'
+CURRENT_WEB_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$web_id")"
+[[ -n "$CURRENT_WEB_IMAGE" && "$CURRENT_WEB_IMAGE" != *:latest ]] || die 'current WEB image is not an immutable runtime reference'
+export APP_COMMIT="$EXPECTED_SHA"
+export APP_VERSION="$(node -p "require('./package.json').version")"
+export APP_BUILT_AT="$(date -u +%FT%TZ)"
+export API_IMAGE="gest-o-api:$EXPECTED_SHA"
+export WEB_IMAGE="$CURRENT_WEB_IMAGE"
+[[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die 'derived APP_COMMIT differs from checkout'
+docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'approved API image is not available locally; build phase is required first'
+target_revision="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE" 2>/dev/null || true)"
+[[ "$target_revision" == "$EXPECTED_SHA" ]] || die 'approved API image revision label differs from EXPECTED_SHA'
+COMPOSE=(docker compose --env-file "$SOURCE_ENV_FILE" -f "$COMPOSE_FILE")
+
+# Todos os gates acima são read-only. Somente agora backups/candidatos podem ser criados.
+STAGE=candidate_preparation
+install -d -o root -g root -m 700 "$ENV_DIR/backups" "$EVIDENCE_DIR"
 env_backup="$ENV_DIR/backups/erp-scheduler-before-$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%SZ).backup"
-install -o root -g root -m 600 "$ENV_FILE" "$env_backup"
+install -o root -g root -m 600 "$SOURCE_ENV_FILE" "$env_backup"
+[[ "$ENV_SOURCE" == canonical ]] || install -o root -g root -m 600 "$LEGACY_ENV_FILE" "$ENV_DIR/backups/legacy-source-$(date -u +%Y%m%dT%H%M%SZ).backup"
 tmp_env="$(mktemp "$ENV_DIR/.env.recovery.XXXXXX")"
 cleanup(){ rm -f "${tmp_env:-}" "${preflight_output:-}" "${rendered:-}" "${technical_file:-}"; }
 trap cleanup EXIT
+gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$SOURCE_ENV_FILE")"
+[[ "$gate_count" -le 1 ]] || die 'duplicate scheduler gate definition'
 if [[ "$gate_count" -eq 1 ]]; then
-  awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$ENV_FILE" >"$tmp_env"
+  awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$SOURCE_ENV_FILE" >"$tmp_env"
 else
-  cat "$ENV_FILE" >"$tmp_env"
-  printf '\nERP_SYNC_SCHEDULER_ENABLED=true\n' >>"$tmp_env"
+  cat "$SOURCE_ENV_FILE" >"$tmp_env"; printf '\nERP_SYNC_SCHEDULER_ENABLED=true\n' >>"$tmp_env"
 fi
-chown root:root "$tmp_env"; chmod 600 "$tmp_env"
-bash -n "$tmp_env" || die 'candidate environment syntax is invalid'
+chown root:root "$tmp_env"; chmod 600 "$tmp_env"; bash -n "$tmp_env"
 [[ "$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++; if($2=="true")ok++} END{print n":"ok}' "$tmp_env")" == 1:1 ]] || die 'candidate scheduler gate is invalid'
-install -o root -g root -m 600 "$tmp_env" "$ENV_FILE"
-rm -f "$tmp_env"; tmp_env=''
 
-restore_env(){ install -o root -g root -m 600 "$env_backup" "$ENV_FILE"; }
+restore_env(){
+  if [[ "$CANONICAL_EXISTED" == true ]]; then install -o root -g root -m 600 "$env_backup" "$ENV_FILE";
+  else rm -f "$ENV_FILE"; fi
+}
 API_CHANGED=false
 rollback(){
   local failed_stage=$STAGE
@@ -78,11 +116,12 @@ rollback(){
   log "ERP_RECOVERY_ROLLBACK=STARTED stage=$failed_stage"
   restore_env
   unset ERP_SYNC_SCHEDULER_ENABLED
-  set -a; source "$ENV_FILE"; set +a
+  set -a; source "$env_backup"; set +a
   export ERP_SYNC_SCHEDULER_ENABLED="${ERP_SYNC_SCHEDULER_ENABLED:-false}"
   if [[ "$API_CHANGED" == true ]]; then
     export API_IMAGE="$ROLLBACK_API_IMAGE" WEB_IMAGE="$CURRENT_WEB_IMAGE"
     export APP_COMMIT="$ROLLBACK_APP_COMMIT" APP_VERSION="$ROLLBACK_APP_VERSION" APP_BUILT_AT="$ROLLBACK_APP_BUILT_AT"
+    COMPOSE=(docker compose --env-file "$env_backup" -f "$COMPOSE_FILE")
     "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate api
     rollback_id="$("${COMPOSE[@]}" ps -q api)"
     for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$rollback_id")" == healthy ]] && break; sleep 5; done
@@ -100,31 +139,24 @@ trap rollback ERR
 
 STAGE=preflight
 preflight_output="$(mktemp)"
-if ! PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh >"$preflight_output" 2>&1; then
-  restore_env; die 'ERP environment preflight failed; protected output omitted'
+if ! PRODUCTION_ENV_FILE="$tmp_env" ERP_ENV_EXPECTED_OWNER=root:root bash scripts/erp-production-env-preflight.sh >"$preflight_output" 2>&1; then
+  die 'ERP environment preflight failed; protected output omitted'
 fi
 for marker in 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: protected production ERP environment contract is valid; values omitted'; do
-  grep -Fq "$marker" "$preflight_output" || { restore_env; die 'ERP environment preflight omitted a required marker'; }
+  grep -Fq "$marker" "$preflight_output" || die 'ERP environment preflight omitted a required marker'
 done
 rm -f "$preflight_output"; preflight_output=''
-set -a; source "$ENV_FILE"; set +a
+set -a; source "$tmp_env"; set +a
 bash scripts/production-preflight.sh >/dev/null
-: "${API_IMAGE:?API_IMAGE must identify the approved API release}"
-: "${WEB_IMAGE:?WEB_IMAGE must identify the current WEB release}"
-: "${APP_COMMIT:?APP_COMMIT is required}"
-: "${APP_VERSION:?APP_VERSION is required}"
-: "${APP_BUILT_AT:?APP_BUILT_AT is required}"
-: "${AUTH_TEST_EMAIL:?AUTH_TEST_EMAIL must be present in the protected environment}"
-: "${AUTH_TEST_PASSWORD:?AUTH_TEST_PASSWORD must be present in the protected environment}"
-: "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
-: "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
-COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+COMPOSE=(docker compose --env-file "$tmp_env" -f "$COMPOSE_FILE")
 rendered="$(mktemp)"; "${COMPOSE[@]}" config >"$rendered"; rm -f "$rendered"; rendered=''
 log 'ERP_PRODUCTION_ENV_PREFLIGHT=PASS'
+if [[ "${ERP_RECOVERY_TEST_STOP_AFTER_COMPOSE:-false}" == true ]]; then
+  log 'ERP_RECOVERY_TEST_PREPARED=PASS'
+  exit 0
+fi
 
 STAGE=inventory
-api_id="$("${COMPOSE[@]}" ps -q api)"; web_id="$("${COMPOSE[@]}" ps -q web)"
-[[ -n "$api_id" && -n "$web_id" ]] || die 'API or WEB container is absent'
 api_count="$(docker ps --filter label=com.docker.compose.project=gest-o-production --filter label=com.docker.compose.service=api -q | wc -l)"
 [[ "$api_count" -eq 1 ]] || die 'API instance count differs from one'
 [[ "$(docker inspect -f '{{.State.Running}}' "$web_id")" == true ]] || die 'WEB is not running'
@@ -140,11 +172,7 @@ old_api_version="$(docker image inspect -f '{{index .Config.Labels "org.opencont
 old_api_built_at="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$old_api_image_id" 2>/dev/null || true)"
 [[ -n "$old_api_commit" && -n "$old_api_version" && -n "$old_api_built_at" ]] || die 'previous API rollback metadata cannot be resolved'
 ROLLBACK_API_IMAGE="gest-o-api-recovery-rollback:${old_api_image_id#sha256:}"
-docker tag "$old_api_image_id" "$ROLLBACK_API_IMAGE"
 ROLLBACK_APP_COMMIT="$old_api_commit"; ROLLBACK_APP_VERSION="$old_api_version"; ROLLBACK_APP_BUILT_AT="$old_api_built_at"
-CURRENT_WEB_IMAGE="$(docker inspect -f '{{.Config.Image}}' "$web_id")"
-target_api_image="gest-o-api:$EXPECTED_SHA"
-docker image inspect "$target_api_image" >/dev/null 2>&1 || die 'approved API image is not available locally; build phase is required first'
 runtime_sha="$(curl -fsS http://127.0.0.1:4000/health/version | jq -r '.commit // empty')"
 restart_before="$(docker inspect -f '{{.RestartCount}}' "$api_id")"
 health_before="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}not-configured{{end}}' "$api_id")"
@@ -175,11 +203,17 @@ app_config="$(sed -n 's/^APP_CONFIG=//p' "$technical_file")"; lock_state="$(sed 
 [[ "$lock_state" != orphan ]] || die 'orphan ERP lock detected'
 log "ERP_APP_CONFIG=$app_config"; log "ERP_LOCK_STATE=$lock_state"; log 'ERP_NEXT_RUN_AT=not_proven'
 
+STAGE=environment_commit
+install -o root -g root -m 600 "$tmp_env" "$ENV_FILE"
+docker tag "$old_api_image_id" "$ROLLBACK_API_IMAGE"
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+
 STAGE=api_recreate
-export API_IMAGE="$target_api_image" WEB_IMAGE="$CURRENT_WEB_IMAGE"
-export APP_COMMIT="$EXPECTED_SHA" APP_VERSION="$(node -p "require('./package.json').version")" APP_BUILT_AT="$(date -u +%FT%TZ)"
 "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate api
 API_CHANGED=true
+if [[ "${ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE:-false}" == true ]]; then
+  die 'injected post-recreate failure'
+fi
 new_api_id="$("${COMPOSE[@]}" ps -q api)"
 for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$new_api_id")" == healthy ]] && break; sleep 5; done
 [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$new_api_id")" == healthy ]] || die 'recreated API did not become healthy'
@@ -192,7 +226,7 @@ for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Healt
 curl -fsS http://127.0.0.1:4000/health >/dev/null
 
 STAGE=authenticated_validation
-API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_TEST_EMAIL" AUTH_TEST_PASSWORD="$AUTH_TEST_PASSWORD" node >"$technical_file" <<'NODE'
+API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" node >"$technical_file" <<'NODE'
 (async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});
 let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const h={authorization:`Bearer ${b.accessToken}`};
 const [me,s]=await Promise.all([fetch(process.env.API_BASE+'/auth/me',{headers:h}),fetch(process.env.API_BASE+'/erp/ultrafv3/sync/status',{headers:h})]);if(me.status!==200||s.status!==200)process.exit(1);
@@ -235,7 +269,7 @@ logs="$(docker logs --since "$recreated_at" "$new_api_id" 2>&1)"
 grep -Fq '[ultrafv3 scheduler] run started' <<<"$logs" || die 'scheduler start log is absent'
 grep -Fq '[ultrafv3 scheduler] run finished' <<<"$logs" || die 'scheduler finish log is absent'
 technical_snapshot "$new_api_id"; [[ "$(sed -n 's/^LOCK_STATE=//p' "$technical_file")" == free ]] || die 'ERP sync lock was not released'
-API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_TEST_EMAIL" AUTH_TEST_PASSWORD="$AUTH_TEST_PASSWORD" node >"$technical_file" <<'NODE'
+API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" node >"$technical_file" <<'NODE'
 (async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const r=await fetch(process.env.API_BASE+'/erp/ultrafv3/sync/status',{headers:{authorization:`Bearer ${b.accessToken}`}});if(r.status!==200)process.exit(1);const a=(await r.json()).automaticSync||{};console.log(`NEXT_RUN_AT=${a.nextRunAt||''}`);console.log(`ACTIVE_ERROR=${Boolean(a.lastError)}`)})().catch(()=>process.exit(1));
 NODE
 [[ -n "$(sed -n 's/^NEXT_RUN_AT=//p' "$technical_file")" ]] || die 'nextRunAt was not recalculated after the automatic run'

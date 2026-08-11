@@ -511,6 +511,12 @@ VPS. Em **Actions → ERP Production Recovery → Run workflow**:
 4. aguarde a aprovação humana do environment `production-cutover`;
 5. acompanhe somente os checkpoints sanitizados do job.
 
+As credenciais do login de validação são os secrets `AUTH_TEST_EMAIL` e `AUTH_TEST_PASSWORD` do
+environment `production-cutover`. Elas entram somente na memória da sessão SSH, não são inputs do
+dispatch, não pertencem a `/root/demetra-env/.env` e não são persistidas em evidências. Antes de criar
+backup, candidato ou alterar containers, o script exige essas entradas, descobre a única API/WEB em
+execução, deriva a imagem WEB real e comprova `gest-o-api:<expected_main_sha>` e sua label de revisão.
+
 O job atualiza `/apps/gest-o` exclusivamente por fast-forward, exige igualdade do SHA e executa
 `scripts/erp-production-recovery.sh`. O script inspeciona apenas metadados dos caminhos canônico e
 legado, cria backups protegidos, altera atomicamente somente `ERP_SYNC_SCHEDULER_ENABLED`, executa os

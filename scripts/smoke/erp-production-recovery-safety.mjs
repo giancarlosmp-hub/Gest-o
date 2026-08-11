@@ -16,6 +16,7 @@ for (const expected of [
   "appleboy/ssh-action@v1.2.0", "secrets.SSH_HOST || secrets.VPS_HOST",
   "secrets.SSH_USER || secrets.VPS_USER", "secrets.SSH_KEY || secrets.VPS_KEY",
   "secrets.SSH_PORT || secrets.VPS_PORT", "git pull --ff-only origin main",
+  "secrets.AUTH_TEST_EMAIL", "secrets.AUTH_TEST_PASSWORD",
 ]) assert.match(workflow, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
 const inputs = workflow.slice(workflow.indexOf("inputs:"), workflow.indexOf("permissions:"));
@@ -32,7 +33,7 @@ for (const expected of [
   "ERP_SYNC_ENV_PERSISTENCE=PASS", "ERP_SCHEDULER_INITIALIZED=PASS", "ERP_NEXT_RUN_AT=PRESENT",
 ]) assert.ok(recovery.includes(expected), `recovery contract is missing: ${expected}`);
 
-assert.ok(recovery.indexOf('install -o root -g root -m 600 "$LEGACY_ENV_FILE" "$ENV_FILE"') > -1);
+assert.ok(recovery.indexOf('install -o root -g root -m 600 "$tmp_env" "$ENV_FILE"') > -1);
 assert.doesNotMatch(recovery, /\bmv\s+[^\n]*LEGACY_ENV_FILE/, "legacy source must be preserved");
 assert.doesNotMatch(recovery, /docker\s+compose[^\n]*(?:\sdown\b|\sdown\s+-v)|docker\s+(?:system\s+prune|volume\s+rm)/);
 assert.doesNotMatch(recovery, /prisma\s+(?:migrate|db\s+push)|docker-compose\.yml/);
@@ -51,5 +52,8 @@ const script = join(temp, "remote.sh"); writeFileSync(script, extracted);
 const workflowShell = spawnSync("bash", ["-n", script], { encoding: "utf8" });
 rmSync(temp, { recursive: true, force: true });
 assert.equal(workflowShell.status, 0, workflowShell.stderr);
+
+const contract = spawnSync(process.execPath, [resolve(root, "scripts/smoke/erp-production-recovery-contract.mjs")], { encoding: "utf8" });
+assert.equal(contract.status, 0, `${contract.stdout}\n${contract.stderr}`);
 
 console.log("ERP production recovery safety: PASS");

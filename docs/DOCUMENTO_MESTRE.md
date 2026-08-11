@@ -612,3 +612,10 @@ não houver SSH direto, a recuperação deve usar um canal aprovado, auditável 
 incidente, esse canal é o workflow manual **ERP Production Recovery**, protegido pelo environment
 `production-cutover`. A existência do workflow não resolve o incidente: `INC_ERP_5050` permanece
 `INVESTIGATING` até a prova automática produtiva.
+
+Variáveis transitórias exportadas por uma sessão de deploy não constituem configuração persistente.
+Todo workflow operacional independente deve reconstruir deterministicamente `APP_COMMIT` e
+`API_IMAGE` a partir do SHA aprovado, `APP_VERSION` do checkout, `APP_BUILT_AT` da sessão corrente e
+`WEB_IMAGE` do único container WEB real. Credenciais de validação pertencem ao canal protegido do
+environment GitHub, não ao env empresarial. CI verde comprova esse contrato versionado, nunca a sua
+execução produtiva.

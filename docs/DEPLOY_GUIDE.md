@@ -438,3 +438,9 @@ Esse fluxo não amplia o cutover: preserva WEB, PostgreSQL e volumes, recria som
 faz rollback da API e do env diante de qualquer gate crítico. O deploy normal permanece inalterado.
 Consulte **ERP Production Recovery** em `docs/OPERACAO.md` para checkpoints e interpretação. A
 existência deste canal não constitui evidência de execução produtiva nem resolve `INC_ERP_5050`.
+
+Uma nova sessão SSH não herda `API_IMAGE`, `WEB_IMAGE` ou `APP_*` exportados pelo build. A recuperação
+os deriva novamente: SHA e tag API do commit aprovado, versão do `package.json`, timestamp UTC da
+sessão e imagem WEB inspecionada no container produtivo único. O timestamp derivado não afirma quando
+a imagem foi construída. O login de validação usa exclusivamente secrets do environment, sem gravá-los
+no arquivo empresarial.

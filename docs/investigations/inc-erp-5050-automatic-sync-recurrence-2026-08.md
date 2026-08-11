@@ -53,6 +53,9 @@ READY_FOR_MULTI_TENANT_CUTOVER = NO
 - **Execução produtiva:** ainda pendente. O workflow só pode ser disparado depois do merge desta PR e
   da preparação da imagem do mesmo SHA; o incidente permanece `INVESTIGATING` até uma execução real
   e bem-sucedida com `trigger=scheduler` e persistência do ambiente comprovada.
+- **Revisão pré-merge da PR #798:** remove a dependência incorreta de `API_IMAGE`, `WEB_IMAGE` e
+  `APP_*` transitórios no env e separa as credenciais de validação no canal protegido do GitHub. O
+  workflow permanece não executado e produção não foi acessada por essa correção.
 
 ```text
 ERP_AUTOMATIC_SYNC = NOT_PROVEN

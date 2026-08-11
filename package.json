@@ -24,7 +24,7 @@
     "build:api": "npm run build -w @salesforce-pro/api",
     "test:production-deploy": "node scripts/smoke/production-deploy-safety.mjs",
     "test:erp-production-env": "bash scripts/smoke/erp-production-env-preflight-safety.sh",
-    "test:erp-production-recovery": "node scripts/smoke/erp-production-recovery-safety.mjs",
+    "test:erp-production-recovery": "node scripts/smoke/erp-production-recovery-safety.mjs && node scripts/smoke/erp-production-recovery-contract.mjs",
     "test:production-schema": "node scripts/smoke/production-schema-safety.mjs",
     "test:production-backup-restore": "node scripts/smoke/production-backup-restore-safety.mjs",
     "test:production-health-validation": "node scripts/smoke/production-health-validation-safety.mjs",
