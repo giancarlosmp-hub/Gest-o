@@ -17,7 +17,7 @@ function scenario(name, options = {}) {
   writeFileSync(join(app, "package.json"), JSON.stringify({ version: "9.8.7" }));
   writeFileSync(join(app, "docker-compose.production.yml"), "services: {api: {}, web: {}}\n");
   const protectedEnv = [
-    "ERP_SYNC_SCHEDULER_ENABLED=false", "PRODUCTION_DB_CONTAINER_EXPECTED=db-id",
+    ...(options.gateMissing ? [] : ["ERP_SYNC_SCHEDULER_ENABLED=false"]), "PRODUCTION_DB_CONTAINER_EXPECTED=db-id",
     "PRODUCTION_DB_VOLUME_EXPECTED=db-volume", "DATABASE_URL=postgresql://unused",
   ].join("\n") + "\n";
   writeFileSync(join(envDir, ".env"), protectedEnv, { mode: 0o600 });
@@ -132,5 +132,9 @@ assert.doesNotMatch(h.commands, /(?:up|restart|stop|rm|force-recreate).*(?:web|d
 assert.match(h.commands, /inspect .*db-id[\s\S]*inspect .*db-id/, "PostgreSQL identity and mounts must be compared");
 assert.doesNotMatch(h.after, /^(?:API_IMAGE|WEB_IMAGE|APP_COMMIT|APP_VERSION|APP_BUILT_AT)=/m);
 for (const result of [a,b,c,d,e,f,g,h]) assert.doesNotMatch(result.output, /protected@example|protected-test-value/);
+
+const missingGate = scenario("missing-gate", { gateMissing: true });
+assert.notEqual(missingGate.status, 0); assert.equal(missingGate.after, missingGate.before);
+assert.doesNotMatch(missingGate.commands, /\btag\b|compose .* up/);
 
 console.log("ERP production recovery executable contract: PASS (A-H)");

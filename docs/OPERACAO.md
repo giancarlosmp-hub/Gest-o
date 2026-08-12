@@ -525,6 +525,9 @@ de WEB/PostgreSQL/volume, recria somente `api` com `--no-deps --no-build --force
 health, login, configuração persistida, credencial global ou de vendedor de referência, lock e
 `nextRunAt`, e aguarda de forma bounded uma execução real com `trigger=scheduler`.
 
+O gate `ERP_SYNC_SCHEDULER_ENABLED` deve existir exatamente uma vez na fonte protegida. Ausência ou
+duplicidade aborta a preparação; a recuperação não cria um contrato de env incompleto implicitamente.
+
 Interpretação operacional:
 
 - `ERP_ENV_RECOVERY_SOURCE=NOT_AVAILABLE`: abort antes de container; nenhuma credencial é criada;

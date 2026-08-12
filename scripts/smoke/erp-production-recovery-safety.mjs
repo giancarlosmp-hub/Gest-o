@@ -38,6 +38,13 @@ assert.doesNotMatch(recovery, /\bmv\s+[^\n]*LEGACY_ENV_FILE/, "legacy source mus
 assert.doesNotMatch(recovery, /docker\s+compose[^\n]*(?:\sdown\b|\sdown\s+-v)|docker\s+(?:system\s+prune|volume\s+rm)/);
 assert.doesNotMatch(recovery, /prisma\s+(?:migrate|db\s+push)|docker-compose\.yml/);
 assert.doesNotMatch(recovery, /(?:up|stop|rm)[^\n]*(?:\bweb\b|\bdb\b)/, "recovery must mutate only the API service");
+assert.doesNotMatch(recovery, /\|\|\s*true|\bset\s+-x\b|\beval\b|docker\s+(?:pull|build)|docker\s+compose[^\n]*\b(?:pull|build)\b/);
+for (const marker of ["# FASE 0", "# FASE 1", "# FASE 2", "# FASE 3", "# FASE 4", "# FASE 5"])
+  assert.ok(recovery.includes(marker), `missing ordered phase marker: ${marker}`);
+assert.ok(["# FASE 0", "# FASE 1", "# FASE 2", "# FASE 3", "# FASE 4", "# FASE 5"].every((m, i, a) => i === 0 || recovery.indexOf(a[i - 1]) < recovery.indexOf(m)));
+for (const marker of ["active", "expired_recoverable", "free", 'API_IMAGE="gest-o-api:$EXPECTED_SHA"', 'WEB_IMAGE="$CURRENT_WEB_IMAGE"'])
+  assert.ok(recovery.includes(marker), `missing runtime contract: ${marker}`);
+assert.match(recovery, /gate_count[\s\S]*-eq 1/, "scheduler gate must already exist exactly once");
 
 for (const doc of ["docs/STATUS_ATUAL.md", "docs/DOCUMENTO_MESTRE.md", "docs/OPERACAO.md", "docs/DEPLOY_GUIDE.md", "docs/investigations/inc-erp-5050-automatic-sync-recurrence-2026-08.md"])
   assert.match(read(doc), /ERP Production Recovery/, `${doc} must document the recovery channel`);

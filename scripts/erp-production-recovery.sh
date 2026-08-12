@@ -84,7 +84,9 @@ export API_IMAGE="gest-o-api:$EXPECTED_SHA"
 export WEB_IMAGE="$CURRENT_WEB_IMAGE"
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die 'derived APP_COMMIT differs from checkout'
 docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'approved API image is not available locally; build phase is required first'
-target_revision="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE" 2>/dev/null || true)"
+if ! target_revision="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$API_IMAGE" 2>/dev/null)"; then
+  die 'approved API image revision label cannot be read'
+fi
 [[ "$target_revision" == "$EXPECTED_SHA" ]] || die 'approved API image revision label differs from EXPECTED_SHA'
 COMPOSE=(docker compose --env-file "$SOURCE_ENV_FILE" -f "$COMPOSE_FILE")
 "${COMPOSE[@]}" config >/dev/null
@@ -97,8 +99,12 @@ web_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$web_id")"
 db_identity_before="$(docker inspect -f '{{.Id}}|{{.Image}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")"
 old_api_image_id="$(docker inspect -f '{{.Image}}' "$api_id")"
 old_api_commit="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$api_id" | sed -n 's/^APP_COMMIT=//p' | head -1)"
-old_api_version="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$old_api_image_id" 2>/dev/null || true)"
-old_api_built_at="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$old_api_image_id" 2>/dev/null || true)"
+if ! old_api_version="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$old_api_image_id" 2>/dev/null)"; then
+  die 'previous API version label cannot be read'
+fi
+if ! old_api_built_at="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$old_api_image_id" 2>/dev/null)"; then
+  die 'previous API creation label cannot be read'
+fi
 [[ -n "$old_api_commit" && -n "$old_api_version" && -n "$old_api_built_at" ]] || die 'previous API rollback metadata cannot be resolved'
 ROLLBACK_API_IMAGE="gest-o-api-recovery-rollback:${old_api_image_id#sha256:}"
 ROLLBACK_APP_COMMIT="$old_api_commit"; ROLLBACK_APP_VERSION="$old_api_version"; ROLLBACK_APP_BUILT_AT="$old_api_built_at"
@@ -139,12 +145,8 @@ tmp_env="$(mktemp "$ENV_DIR/.env.recovery.XXXXXX")"
 cleanup(){ local rc=$?; rm -f "${tmp_env:-}" "${preflight_output:-}" "${rendered:-}" "${technical_file:-}"; return "$rc"; }
 trap cleanup EXIT
 gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$SOURCE_ENV_FILE")"
-[[ "$gate_count" -le 1 ]] || die 'duplicate scheduler gate definition'
-if [[ "$gate_count" -eq 1 ]]; then
-  awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$SOURCE_ENV_FILE" >"$tmp_env"
-else
-  cat "$SOURCE_ENV_FILE" >"$tmp_env"; printf '\nERP_SYNC_SCHEDULER_ENABLED=true\n' >>"$tmp_env"
-fi
+[[ "$gate_count" -eq 1 ]] || die 'scheduler gate must exist exactly once before recovery'
+awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$SOURCE_ENV_FILE" >"$tmp_env"
 chown root:root "$tmp_env"; chmod 600 "$tmp_env"; bash -n "$tmp_env"
 [[ "$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++; if($2=="true")ok++} END{print n":"ok}' "$tmp_env")" == 1:1 ]] || die 'candidate scheduler gate is invalid'
 
