@@ -50,7 +50,7 @@ args=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o|-g) shift 2;;
-    *) args="$args '${1}'"; shift;;
+    *) args="$args '$1'"; shift;;
   esac
 done
 eval "exec /usr/bin/install $args"
