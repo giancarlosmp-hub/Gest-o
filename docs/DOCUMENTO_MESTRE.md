@@ -598,3 +598,28 @@ comprovou build, typecheck, API health, smokes, tenancy expand, planejamento con
 `Prove preflight evidence and plan ledger on PostgreSQL 16`. Assim,
 `READY_FOR_1_0B_2_N_REVIEW = YES` e `PREFLIGHT_PLAN_LEDGER_POSTGRES = PASS`, sem converter a prova
 descartável em migration, apply, backfill ou autorização produtiva.
+# Invariante arquitetural do ambiente ERP produtivo
+
+Configuração produtiva sensível não pode depender do checkout. O único caminho canônico é
+`/root/demetra-env/.env`, externo ao Git, com owner `root:root` e mode `600`; qualquer fonte legado
+autorizada é preservada e copiada, nunca movida. O contrato deve ser validado antes de build ou
+cutover, e o scheduler produtivo não pode ter default implícito: seu gate precisa ser literalmente
+`true` no arquivo protegido.
+
+Checks de pull request não comprovam o estado da VPS. A prova do scheduler exige uma execução real,
+posterior à recriação, persistida com `trigger=scheduler`, término bem-sucedido e lock liberado. Quando
+não houver SSH direto, a recuperação deve usar um canal aprovado, auditável e fail-closed; para este
+incidente, esse canal é o workflow manual **ERP Production Recovery**, protegido pelo environment
+`production-cutover`. A existência do workflow não resolve o incidente: `INC_ERP_5050` permanece
+`INVESTIGATING` até a prova automática produtiva.
+
+Variáveis transitórias exportadas por uma sessão de deploy não constituem configuração persistente.
+Todo workflow operacional independente deve reconstruir deterministicamente `APP_COMMIT` e
+`API_IMAGE` a partir do SHA aprovado, `APP_VERSION` do checkout, `APP_BUILT_AT` da sessão corrente e
+`WEB_IMAGE` do único container WEB real. Credenciais de validação pertencem ao canal protegido do
+environment GitHub, não ao env empresarial. CI verde comprova esse contrato versionado, nunca a sua
+execução produtiva.
+
+O contrato histórico de deploy em duas fases não é redesenhado por esta exceção. A recuperação ERP
+permanece isolada: consome a imagem já criada pelo build oficial, recria somente a API e preserva a
+identidade da WEB, do PostgreSQL e de seus volumes.

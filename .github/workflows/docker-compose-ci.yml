@@ -38,6 +38,9 @@ jobs:
       - name: Validate control-plane operational gates
         run: npm run test:tenancy-control-plane-operation
 
+      - name: Prove ERP production recovery contract
+        run: npm run test:erp-production-recovery
+
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         run: docker pull postgres:16
 

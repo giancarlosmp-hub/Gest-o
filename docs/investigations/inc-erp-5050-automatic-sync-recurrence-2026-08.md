@@ -44,3 +44,25 @@ TENANCY_MODE_PRODUCTION = disabled (evidência fornecida; não reverificada)
 TENANT_READ_PILOT_ENABLED_PRODUCTION = false (evidência fornecida; não reverificada)
 READY_FOR_MULTI_TENANT_CUTOVER = NO
 ```
+
+## Cronologia do canal de recuperação
+
+- **PR #797:** prevenção versionada e contrato fail-closed do env; não é prova da VPS.
+- **ERP Production Recovery:** novo canal manual, aprovado e auditável para copiar a fonte legado
+  autorizada quando necessário, habilitar o gate, recriar somente a API e coletar a prova automática.
+- **Execução produtiva:** ainda pendente. O workflow só pode ser disparado depois do merge desta PR e
+  da preparação da imagem do mesmo SHA; o incidente permanece `INVESTIGATING` até uma execução real
+  e bem-sucedida com `trigger=scheduler` e persistência do ambiente comprovada.
+- **Revisão pré-merge da PR #798:** remove a dependência incorreta de `API_IMAGE`, `WEB_IMAGE` e
+  `APP_*` transitórios no env e separa as credenciais de validação no canal protegido do GitHub. O
+  workflow permanece não executado e produção não foi acessada por essa correção.
+
+```text
+ERP_AUTOMATIC_SYNC = NOT_PROVEN
+ERP_SYNC_ENV_PERSISTENCE = NOT_PROVEN
+ERP_SCHEDULER_INITIALIZED = NOT_PROVEN
+ERP_NEXT_RUN_AT = NOT_PROVEN
+INC_ERP_5050 = INVESTIGATING
+PRODUCTION_ACCESSED = NO
+READY_TO_MERGE_RECOVERY_PR = NO
+```
