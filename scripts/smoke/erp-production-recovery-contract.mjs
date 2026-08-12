@@ -33,6 +33,28 @@ if [ "$1" = -n ]; then exec /bin/bash "$@"; fi
 case "$1" in (*erp-production-env-preflight.sh) printf '%s\n' 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: protected production ERP environment contract is valid; values omitted';; esac
 exit 0
 `);
+  // The production script must keep requiring root:root/600. These shims model
+  // that protected metadata inside the unprivileged, disposable CI sandbox.
+  executable(join(bin, "stat"), `#!/bin/sh
+case "$*" in
+  "-c %U:%G "*) echo root:root;;
+  "-c %a "*) echo 600;;
+  *) exec /usr/bin/stat "$@";;
+esac
+`);
+  executable(join(bin, "chown"), `#!/bin/sh
+exit 0
+`);
+  executable(join(bin, "install"), `#!/bin/sh
+args=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o|-g) shift 2;;
+    *) args="$args '${1}'"; shift;;
+  esac
+done
+eval "exec /usr/bin/install $args"
+`);
   executable(join(bin, "curl"), `#!/bin/sh
 printf '%s' '{"commit":"${sha}"}'
 `);
