@@ -664,3 +664,17 @@ overlay efêmero protegido com os sete gates seguros. A fonte fica read-only e t
 SHA-256 conferida antes/depois; conteúdo e hashes não são logados. Canônico existente permanece
 autoritativo/fail-closed, cutover permanece canonical-only e Recovery permanece inalterado. Um novo
 `phase=build` só deve ocorrer depois do merge e de todos os checks verdes.
+
+# Contrato de frescor do backup por fase (13/08/2026)
+
+`build` produz exclusivamente as imagens API/WEB enquanto os containers atuais seguem atendendo;
+ele não é cutover. O preflight recebe modo explícito e falha fechado se ausente ou inválido. Em
+ambos os modos, backup e manifesto precisam existir e o `sha256sum -c` já adotado precisa validar o
+arquivo — este é o significado real da prova de integridade, sem uma nova política de checksum.
+Apenas `build` dispensa frescor. `cutover` conserva integralmente o limite
+`PRODUCTION_BACKUP_MAX_AGE_SECONDS`, e backup antigo o bloqueia antes de efeitos mutáveis.
+
+Essa separação não muda resolver canônico/`legacy_build_only`, overlay efêmero, cutover
+canonical-only, deploy em duas fases, Prisma/migrations ou Recovery. Recovery ainda exige imagem
+aprovada e suas próprias precondições. O run `31723282307` não alterou produção; build verde não
+prova scheduler, sincronização automática, persistência do env ou próximo agendamento.

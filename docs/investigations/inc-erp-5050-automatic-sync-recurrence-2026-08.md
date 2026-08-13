@@ -108,3 +108,19 @@ cleanup e prova SHA-256 de imutabilidade da fonte. Canônico permanece autoritat
 canonical-only e Recovery inalterado. Após merge e checks verdes ainda será necessário repetir
 somente o `phase=build`. `INC_ERP_5050=INVESTIGATING`, `ERP_AUTOMATIC_SYNC=NOT_PROVEN`,
 `ERP_SYNC_ENV_PERSISTENCE=NOT_PROVEN` e `READY_FOR_1_0B_2_O=NO`.
+
+# Evidência adicional — frescor bloqueou o build no run 31723282307
+
+O run `31723282307` confirmou Git/checkout/worktree, entrada em `MODE=build`, fonte
+`legacy_build_only`, sete gates do overlay e preflights ERP, mas parou em “backup não é recente”.
+API/WEB não foram construídas; não houve env persistente, parada/recriação de containers, migration,
+seed, backfill, cutover ou Recovery. Portanto o run não alterou produção.
+
+O preflight passa a receber modo explícito. Presença e integridade pelo manifesto SHA-256 existente
+continuam obrigatórias nos dois modos; apenas a idade deixa de bloquear o build, que somente produz
+imagens e não é cutover. Backup antigo tolerado no build não autoriza cutover, cujo frescor continua
+obrigatório antes de efeitos mutáveis. Recovery permanece dependente de imagem aprovada e de suas
+precondições. Mesmo um futuro build verde não provará scheduler automático, persistência do env ou
+`nextRunAt`: `ERP_AUTOMATIC_SYNC=NOT_PROVEN`, `ERP_SYNC_ENV_PERSISTENCE=NOT_PROVEN`,
+`ERP_SCHEDULER_INITIALIZED=NOT_PROVEN`, `ERP_NEXT_RUN_AT=NOT_PROVEN`,
+`INC_ERP_5050=INVESTIGATING` e `READY_FOR_1_0B_2_O=NO`.

@@ -68,7 +68,7 @@ if [[ -n "$LEGACY_SOURCE_FILE" ]]; then
 else
   PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
 fi
-bash scripts/production-preflight.sh
+PRODUCTION_PREFLIGHT_MODE="$MODE" bash scripts/production-preflight.sh
 actual_services="$("${COMPOSE[@]}" config --services | sort)"
 expected_services="$(printf 'api\nweb\n' | sort)"
 [[ "$actual_services" == "$expected_services" ]] || die "topologia contém serviços inesperados"

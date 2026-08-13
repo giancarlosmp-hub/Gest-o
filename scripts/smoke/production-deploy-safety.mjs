@@ -20,6 +20,10 @@ assert.ok(envResolver.indexOf('validate "$CANONICAL_ENV_FILE" canonical') < envR
 assert.match(deploy, /ERP_ENV_SCHEDULER_POLICY=disabled_build_only/);
 assert.doesNotMatch(envResolver, /\b(?:cp|mv|install|sed|awk)\b/);
 assert.ok(deploy.indexOf("erp-production-env-preflight.sh") < deploy.indexOf("production-preflight.sh"));
+assert.match(deploy, /PRODUCTION_PREFLIGHT_MODE="\$MODE" bash scripts\/production-preflight\.sh/);
+assert.match(pre, /build\|cutover/);
+for (const marker of ["PRODUCTION_PREFLIGHT_MODE", "PRODUCTION_BACKUP_PRESENCE", "PRODUCTION_BACKUP_INTEGRITY", "PRODUCTION_BACKUP_FRESHNESS", "PRODUCTION_PREFLIGHT=PASS"]) assert.ok(pre.includes(marker));
+for (const reason of ["backup_missing", "backup_integrity", "backup_stale", "invalid_preflight_mode"]) assert.ok(pre.includes(reason));
 assert.match(compose, /ERP_SYNC_SCHEDULER_ENABLED: "\$\{ERP_SYNC_SCHEDULER_ENABLED:\?/);
 for (const policy of ["TENANCY_MODE disabled", "TENANT_READ_PILOT_ENABLED false", "DATABASE_SCHEMA_MODE external", "SEED_ON_BOOTSTRAP false", "ENABLE_PREVIEW_SEED false", "ENABLE_SMOKE_BOOTSTRAP false"]) {
   const [name, value] = policy.split(" ");

@@ -484,3 +484,20 @@ fonte protegida para `mktemp` mode 600, rejeita duplicidade/sintaxe malformada e
 `false`. Preflight e Compose usam essa cópia, que é apagada no EXIT; hashes e valores não são
 emitidos. O hash da fonte antes/depois deve coincidir. Canônico recebe zero overlay e segue
 autoritativo; cutover é canonical-only. Repetir apenas `phase=build`, somente após merge/checks.
+
+# Backup no build versus cutover
+
+`deploy-production.sh` deve propagar seu `MODE` como `PRODUCTION_PREFLIGHT_MODE`; somente `build` e
+`cutover` são aceitos. Backup e manifesto continuam obrigatórios e a integridade continua sendo a
+validação do manifesto existente com `sha256sum -c`. O preflight é read-only e não cria nem renova
+essa evidência.
+
+Em `build`, backup íntegro antigo é aceito e emite
+`PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY`, porque a fase apenas produz imagens sem
+interromper/recriar containers. Isso não autoriza cutover. Em `cutover`, o limite
+`PRODUCTION_BACKUP_MAX_AGE_SECONDS` permanece obrigatório e backup antigo falha antes de qualquer
+efeito. Só considerar o preflight aprovado ao receber `PRODUCTION_PREFLIGHT=PASS` após presença,
+integridade, frescor aplicável e todos os demais gates.
+
+O run `31723282307` parou antes do build e não alterou produção. Recovery não foi executado e segue
+dependente de imagem aprovada e precondições próprias. Build verde não prova scheduler automático.
