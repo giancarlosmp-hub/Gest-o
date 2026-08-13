@@ -597,3 +597,19 @@ diretório canônico, mode 600, com cleanup por trap. Ele rejeita gates duplicad
 normaliza somente a cópia, executa preflight/Compose/build com ela e comprova a imutabilidade da
 fonte por SHA-256. O cutover rejeita legado e overlay; canônico inválido nunca usa fallback. Após
 merge e checks verdes, a única retomada autorizada é repetir Deploy Production com `phase=build`.
+
+# Operação do preflight por modo
+
+Sempre invocar o preflight com exatamente `PRODUCTION_PREFLIGHT_MODE=build` ou
+`PRODUCTION_PREFLIGHT_MODE=cutover`; ausência e outros valores falham fechado. Os dois modos fazem
+as verificações read-only de checkout, PostgreSQL, rede, container, volume, disco e exigem backup e
+manifesto válidos por `sha256sum -c`. O preflight nunca cria, toca, move, renova ou remove backup.
+
+No build, exigir `PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY`; o build somente produz
+imagens, não interrompe/recria containers e não autoriza cutover. No cutover, exigir
+`PRODUCTION_BACKUP_FRESHNESS=PASS`; backup antigo falha como `backup_stale` antes de ação mutável.
+`backup_missing`, `backup_integrity` e `invalid_preflight_mode` distinguem os outros bloqueios sem
+expor valores protegidos. `PRODUCTION_PREFLIGHT=PASS` só aparece ao final de todos os gates.
+
+O run `31723282307` não mudou produção. Recovery segue separado, dependente de imagem aprovada e
+de suas precondições; build verde não comprova scheduler, sincronização, persistência ou `nextRunAt`.

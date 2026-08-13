@@ -18,7 +18,7 @@ DB_NAME=$(DATABASE_URL="$DATABASE_URL" node -e 'const u=new URL(process.env.DATA
 APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"; export APP_COMMIT
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
 # This performs backup/SHA, origin/main, expected PostgreSQL/network/volume and runtime checks.
-bash scripts/production-preflight.sh
+PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
 docker image inspect "gest-o-api:$APP_COMMIT" >/dev/null 2>&1 || die "imagem API do SHA ausente"
 MODE=validate SQL_FILE="$MIGRATION" bash scripts/production-schema-preview.sh
 
@@ -67,7 +67,7 @@ incident_counts >"$evidence/incident.before.tsv"
 [[ "$(git rev-parse HEAD)" == "$APP_COMMIT" ]] || die "HEAD mudou durante o apply"
 [[ "$(git rev-parse origin/main)" == "$APP_COMMIT" ]] || die "origin/main mudou durante o apply"
 [[ -z "$(git status --porcelain)" ]] || die "worktree mudou durante o apply"
-bash scripts/production-preflight.sh
+PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
 sha256sum -c "$evidence/migration.sha256" >/dev/null || die "migration mudou após registro do SHA256"
 admin_identity
 log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"

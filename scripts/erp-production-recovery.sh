@@ -193,7 +193,7 @@ for marker in 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: prot
 done
 rm -f "$preflight_output"; preflight_output=''
 set -a; source "$tmp_env"; set +a
-bash scripts/production-preflight.sh >/dev/null
+PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh >/dev/null
 COMPOSE=(docker compose --env-file "$tmp_env" -f "$COMPOSE_FILE")
 rendered="$(mktemp)"; "${COMPOSE[@]}" config >"$rendered"; rm -f "$rendered"; rendered=''
 log 'ERP_PRODUCTION_ENV_PREFLIGHT=PASS'

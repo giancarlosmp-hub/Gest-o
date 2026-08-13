@@ -481,3 +481,17 @@ malformada falha fechada; o SHA-256 do legado é comparado antes/depois sem ser 
 continua autoritativo e sem overlay, e cutover continua canonical-only. Após merge e checks verdes,
 deve-se repetir exclusivamente Deploy Production `phase=build`; Recovery e Sprint 1.0B.2-O seguem
 não executados.
+
+# 🔵 Preflight distinto para build e cutover — run 31723282307 (13/08/2026)
+
+O run `31723282307` chegou ao preflight em `MODE=build`, com resolver `legacy_build_only` e os sete
+gates do overlay aprovados, mas foi bloqueado apenas pela idade do backup. Ele não iniciou o build
+de API/WEB, não alterou env persistente, containers ou produção e não executou migration, seed,
+backfill, cutover ou Recovery.
+
+O deploy agora transmite explicitamente `PRODUCTION_PREFLIGHT_MODE=build|cutover`. Ambos exigem o
+arquivo de backup, seu manifesto e a validação SHA-256 já existente. Somente o build tolera idade,
+pois apenas produz imagens e não é cutover; essa tolerância jamais autoriza cutover. Cutover mantém
+presença, integridade, `PRODUCTION_BACKUP_MAX_AGE_SECONDS` e frescor obrigatórios antes de qualquer
+ação mutável. Recovery continua dependente de imagem aprovada e das próprias precondições. Um build
+verde não comprova scheduler automático, persistência do env, `nextRunAt` nem resolução do incidente.

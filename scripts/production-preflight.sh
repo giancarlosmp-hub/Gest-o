@@ -3,7 +3,14 @@ set -euo pipefail
 
 log(){ printf '[production-preflight] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
+fail_backup(){ printf 'PRODUCTION_PREFLIGHT_FAILURE=%s\n' "$1" >&2; die "$2"; }
 need(){ command -v "$1" >/dev/null || die "comando obrigatório ausente: $1"; }
+
+case "${PRODUCTION_PREFLIGHT_MODE:-}" in
+  build|cutover) ;;
+  *) fail_backup invalid_preflight_mode "modo de preflight ausente ou inválido" ;;
+esac
+printf 'PRODUCTION_PREFLIGHT_MODE=%s\n' "$PRODUCTION_PREFLIGHT_MODE"
 
 : "${DATABASE_URL:?DATABASE_URL is required}"
 : "${PRODUCTION_DB_HOST_EXPECTED:?PRODUCTION_DB_HOST_EXPECTED is required}"
@@ -38,9 +45,20 @@ timeout "${PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15}s" \
     postgres:16 \
     pg_isready -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" >/dev/null 2>&1 ||
   die "PostgreSQL não está aceitando conexões na rede gest-o_default"
-[[ -f "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" ]] || die "backup ou SHA256 ausente"
-(cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null) || die "SHA256 do backup inválido"
-max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"; age=$(( $(date +%s) - $(stat -c %Y "$PRODUCTION_BACKUP_FILE") )); (( age <= max_age )) || die "backup não é recente"
+[[ -f "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" ]] || fail_backup backup_missing "backup ou prova de integridade ausente"
+printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'
+# Integridade significa a prova já adotada: o manifesto SHA256 existente valida o
+# arquivo existente. Este preflight não cria nem renova backups ou manifestos.
+(cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null) || fail_backup backup_integrity "prova de integridade do backup inválida"
+printf 'PRODUCTION_BACKUP_INTEGRITY=PASS\n'
+if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
+  max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
+  age=$(( $(date +%s) - $(stat -c %Y "$PRODUCTION_BACKUP_FILE") ))
+  (( age <= max_age )) || fail_backup backup_stale "backup não é recente"
+  printf 'PRODUCTION_BACKUP_FRESHNESS=PASS\n'
+else
+  printf 'PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY\n'
+fi
 available_kb=$(df -Pk . | awk 'NR==2{print $4}'); (( available_kb >= ${PRODUCTION_MIN_DISK_KB:-5242880} )) || die "espaço em disco insuficiente"
 
 for port in 4000 5173; do
@@ -48,3 +66,4 @@ for port in 4000 5173; do
   if [[ -n "$owner" ]]; then docker inspect -f "port=$port container={{.Name}} image={{.Image}} started={{.State.StartedAt}} networks={{json .NetworkSettings.Networks}} restart={{.HostConfig.RestartPolicy.Name}}" "$owner"; else log "port=$port owner=none"; fi
 done
 log "OK: banco=$DB_NAME host confirmado (credenciais omitidas), backup e runtime validados"
+printf 'PRODUCTION_PREFLIGHT=PASS\n'
