@@ -651,3 +651,16 @@ agora um entrypoint fail-closed que registra fetch, switch, fast-forward, format
 worktree, presença e início do script; falhas expõem apenas estágio, comando lógico e exit code.
 `deploy-production.sh` anuncia entrada, modo e início da resolução. A política canônico/legado da
 PR #800 permanece integral e o ERP Production Recovery permanece pendente e não executado.
+# Correção operacional isolada — legacy_build_only (13/08/2026)
+
+O Deploy Production run `31720219813`, job `94515047904`, executou o SHA
+`a3f900b05cbbcc2ab9ee8bba306c4a2cea524d97`: os gates Git/checkout/worktree/entrypoint, o resolver
+`legacy_build_only` e `ERP_SYNC_SCHEDULER_ENABLED=false` passaram; o preflight bloqueou em
+`TENANCY_MODE does not match the production policy`. Nenhuma imagem, container, restauração,
+cutover ou alteração produtiva ocorreu.
+
+Para romper o ciclo build→Recovery sem promover o legado a canônico, apenas o build legado cria
+overlay efêmero protegido com os sete gates seguros. A fonte fica read-only e tem identidade
+SHA-256 conferida antes/depois; conteúdo e hashes não são logados. Canônico existente permanece
+autoritativo/fail-closed, cutover permanece canonical-only e Recovery permanece inalterado. Um novo
+`phase=build` só deve ocorrer depois do merge e de todos os checks verdes.

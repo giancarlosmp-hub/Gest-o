@@ -21,10 +21,41 @@ else
   printf 'DEPLOY_FAILURE_EXIT_CODE=%s\n' "$resolver_exit" >&2
   exit "$resolver_exit"
 fi
-COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 log(){ printf '[deploy-production] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
-cd "$APP_DIR"; set -a; source "$ENV_FILE"; set +a
+cd "$APP_DIR"
+
+LEGACY_SOURCE_FILE=""
+LEGACY_SOURCE_SHA256=""
+EFFECTIVE_ENV_FILE=""
+cleanup_legacy_overlay(){
+  local status=$?
+  if [[ -n "$LEGACY_SOURCE_FILE" ]]; then
+    if [[ "$(sha256sum "$LEGACY_SOURCE_FILE" | cut -d' ' -f1)" == "$LEGACY_SOURCE_SHA256" ]]; then
+      printf 'ERP_LEGACY_SOURCE_IMMUTABLE=PASS\n'
+    else
+      printf 'ERP_LEGACY_SOURCE_IMMUTABLE=FAIL\n' >&2
+      status=1
+    fi
+  fi
+  [[ -z "$EFFECTIVE_ENV_FILE" ]] || rm -f -- "$EFFECTIVE_ENV_FILE"
+  exit "$status"
+}
+
+if [[ "$ENV_FILE" == /root/demetra-env/production.env || ( -n "${PRODUCTION_LEGACY_ENV_FILE:-}" && "$ENV_FILE" == "$PRODUCTION_LEGACY_ENV_FILE" ) ]]; then
+  [[ "$MODE" == build ]] || die "legacy build overlay is prohibited outside MODE=build"
+  LEGACY_SOURCE_FILE=$ENV_FILE
+  LEGACY_SOURCE_SHA256=$(sha256sum "$LEGACY_SOURCE_FILE" | cut -d' ' -f1)
+  EFFECTIVE_ENV_FILE=$(mktemp "${TMPDIR:-/tmp}/gest-o-legacy-build-env.XXXXXX")
+  trap cleanup_legacy_overlay EXIT
+  # shellcheck source=scripts/legacy-build-env-overlay.sh
+  source scripts/legacy-build-env-overlay.sh
+  create_legacy_build_env_overlay "$LEGACY_SOURCE_FILE" "$EFFECTIVE_ENV_FILE" || exit 1
+  ENV_FILE=$EFFECTIVE_ENV_FILE
+fi
+
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
+set -a; source "$ENV_FILE"; set +a
 export APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
 export APP_BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -32,7 +63,7 @@ export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version"
 export API_IMAGE="gest-o-api:$APP_COMMIT"
 export WEB_IMAGE="gest-o-web:$APP_COMMIT"
 
-if [[ "$ENV_FILE" == /root/demetra-env/production.env ]]; then
+if [[ -n "$LEGACY_SOURCE_FILE" ]]; then
   ERP_ENV_SCHEDULER_POLICY=disabled_build_only PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
 else
   PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh

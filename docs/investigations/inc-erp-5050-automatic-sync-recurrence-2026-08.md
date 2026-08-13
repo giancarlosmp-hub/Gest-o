@@ -95,3 +95,16 @@ worktree/script e diagnóstico sanitizado, além de marcar entrada e resolução
 da PR #800 e sua política permanecem semanticamente inalterados. Build, cutover, recriação e ERP
 Production Recovery não ocorreram; `ERP_AUTOMATIC_SYNC` e persistência continuam `NOT_PROVEN`,
 `INC_ERP_5050 = INVESTIGATING` e `READY_FOR_1_0B_2_O = NO`.
+# Evidência adicional — bloqueio do build no run 31720219813
+
+O job `94515047904`, SHA `a3f900b05cbbcc2ab9ee8bba306c4a2cea524d97`, confirmou os gates
+Git/checkout/worktree/entrypoint, `MODE=build`, fonte `legacy_build_only` e scheduler desativado, mas
+falhou em `TENANCY_MODE does not match the production policy`. Não construiu imagens, não recriou
+containers, não executou cutover/Recovery e não modificou o env ou a produção; portanto não prova
+sincronização automática nem persistência do env.
+
+A correção limita-se a um overlay `mktemp` mode 600 durante build legado, com sete gates seguros,
+cleanup e prova SHA-256 de imutabilidade da fonte. Canônico permanece autoritativo, cutover
+canonical-only e Recovery inalterado. Após merge e checks verdes ainda será necessário repetir
+somente o `phase=build`. `INC_ERP_5050=INVESTIGATING`, `ERP_AUTOMATIC_SYNC=NOT_PROVEN`,
+`ERP_SYNC_ENV_PERSISTENCE=NOT_PROVEN` e `READY_FOR_1_0B_2_O=NO`.
