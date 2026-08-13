@@ -66,3 +66,10 @@ INC_ERP_5050 = INVESTIGATING
 PRODUCTION_ACCESSED = NO
 READY_TO_MERGE_RECOVERY_PR = NO
 ```
+
+## Reconciliação de observabilidade — 12/08/2026
+
+A evidência fornecida de sync completa é classificada exclusivamente como `manual`. A investigação
+local comprovou mascaramento de erro/ausência no frontend e lacunas de contrato da Saúde; a correção
+v2 e a matriz de fontes estão em `docs/platform-health-erp-observability.md`. Isso não executou nem
+comprovou scheduler/recovery/produção. `INC_ERP_5050` permanece `INVESTIGATING`.

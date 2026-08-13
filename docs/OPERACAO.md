@@ -1,3 +1,11 @@
+# Gate operacional — Saúde ERP v2 (12/08/2026)
+
+Antes de promover esta estabilização, execute `npm run test:platform-health-erp-observability` e os
+checks oficiais. Depois do deploy autorizado, validar por leitura autenticada: snapshot, histórico,
+scheduler, `nextRunAt` e lock liberado. Não disparar sync/recovery como health check e não converter
+manual em automática. Falha/503 deve aparecer como indisponível, nunca zero. Rollback: revert da
+entrega e publicação normal somente de API/WEB; não há ação de banco.
+
 # Operação 1.0B.2-K — prova sintética do preview
 
 Somente o Preview Deploy executa a janela bounded de 10 ciclos × 4 chamadas. Cada request deve ter HTTP 200/exit 0, ID interno único e exatamente um MATCH; logs são limitados por timestamps e pelos 40 IDs retornados. Atraso de log tem cinco retentativas de um segundo; rate limit/timeout falham fechados. No primeiro erro, registrar metadados técnicos, restaurar `TENANCY_MODE=disabled`/`TENANT_READ_PILOT_ENABLED=false`, recriar somente a API e falhar o deploy. Rerun preserva o volume e repete seed/certificação determinísticos sem reparo automático. Esta não é operação produtiva nem autorização de soak, mutation, backfill ou cutover. Veja [Sprint 1.0B.2-K](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).

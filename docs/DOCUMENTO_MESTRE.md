@@ -1,3 +1,10 @@
+# Prioridade vigente — estabilização da observabilidade ERP (12/08/2026)
+
+Antes da Sprint 1.0B.2-O, a prioridade é reconciliar `ErpSyncRun`, scheduler, API e Saúde. A sync
+manual fornecida permanece manual; automática, inicialização e `nextRunAt` não estão comprovados.
+A causa local, fontes, estados e rollback estão no [contrato técnico](platform-health-erp-observability.md).
+Produção não foi acessada; recovery não foi executado; tenancy permanece disabled.
+
 # Sprint 1.0B.2-K — observação bounded do shadow preview
 
 O contrato adiciona 40 amostras sintéticas (10 ciclos de quatro GET `/clients` concorrentes), com correlação exclusiva por IDs internos retornados, janela de logs limitada e rollback `disabled/false`. Rerun com volume reutilizado não pode contar eventos antigos nem alterar cardinalidades. A amostra curta não comprova estabilidade temporal/produtiva; rate limit, timeout e atraso de logs permanecem riscos. Sem checks reais verdes: `READY_FOR_1_0B_2_K_REVIEW = NO`, `TENANT_READ_PREVIEW_STABILITY = NOT_PROVEN`; sem produção, mutation, backfill ou cutover. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).

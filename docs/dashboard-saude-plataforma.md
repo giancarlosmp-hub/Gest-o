@@ -1,3 +1,10 @@
+# Contrato vigente v2 (12/08/2026)
+
+A Saúde diferencia `available`, `empty` e `error`; zero só é exibido após coleta válida. O snapshot
+separa qualquer execução, manual, automática e automática bem-sucedida, inclui scheduler,
+`nextRunAt`, lock, origem e correlação. A UI possui loading, erro acionável, retry, cancelamento de
+requisição obsoleta e timestamp/janela. Veja [inventário e matriz](platform-health-erp-observability.md).
+
 # Dashboard Saúde da Plataforma
 
 ## Objetivo e arquitetura
