@@ -1,3 +1,7 @@
+# Adendo — bloqueio circular do run 31707019441 (13/08/2026)
+
+O run real passou por SSH, atualização fast-forward e conferência do SHA, mas falhou no comando `MODE=build EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh`. A ausência já registrada do canônico é compatível com a guarda inicial anterior. Isso bloqueava a imagem exigida pelo ERP Production Recovery que, por sua vez, é a autoridade exclusiva para criar o canônico e mudar uma única ocorrência do gate para `true`. A correção mantém essa autoridade: build apenas pode ler o legado root:root/600 se o canônico estiver totalmente ausente, mantendo o scheduler `false`; canônico válido vence, canônico inválido bloqueia e cutover não aceita legado. Logs contêm somente o marcador da fonte, nunca conteúdo ou Compose renderizado. Nenhuma produção/restauração foi executada nesta PR; repetir o build após merge e manter Recovery e `INC_ERP_5050` pendentes.
+
 # Correção semântica da observabilidade — 13/08/2026
 
 A revisão da PR #799 remove dupla contagem: pais são somente `manual/syncAll` e

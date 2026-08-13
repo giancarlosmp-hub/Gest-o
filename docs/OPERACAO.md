@@ -1,3 +1,7 @@
+# Desbloqueio controlado do build para o ERP Production Recovery
+
+No run `31707019441`, o SSH, fast-forward e SHA passaram; a chamada inicial `MODE=build EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh` falhou de forma compatível com a ausência comprovada de `/root/demetra-env/.env`. Para **build apenas**, o resolver usa: `/root/demetra-env/.env` válido → `/root/demetra-env/production.env` válido quando o canônico está ausente → falha fechada. Não combina fontes, não contorna canônico inválido e registra somente `ERP_PRODUCTION_ENV_SOURCE=canonical|legacy_build_only`. O legado é lido sem escrita e seu `ERP_SYNC_SCHEDULER_ENABLED=false` permanece intacto. Cutover não possui fallback. Nenhuma operação produtiva foi feita nesta PR; após merge, repetir Deploy Production `phase=build` e somente então executar o workflow ERP Production Recovery aprovado, que permanece pendente.
+
 # Validação semântica da Saúde ERP — PR #799 (13/08/2026)
 
 O gate oficial executa testes comportamentais da projeção antes do guard estático. Na validação

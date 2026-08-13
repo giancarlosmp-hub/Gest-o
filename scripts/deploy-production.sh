@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
-ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
+MODE="${MODE:-build}"
+[[ -z "${PRODUCTION_ENV_FILE:-}" ]] || { printf '[deploy-production] ERRO: PRODUCTION_ENV_FILE override is prohibited; use the authorized resolver\n' >&2; exit 1; }
+ENV_FILE="$(MODE="$MODE" bash scripts/resolve-production-env.sh)"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 log(){ printf '[deploy-production] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
-[[ -f "$ENV_FILE" ]] || die "arquivo seguro de ambiente ausente: $ENV_FILE"
 cd "$APP_DIR"; set -a; source "$ENV_FILE"; set +a
 export APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
@@ -14,7 +15,11 @@ export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version"
 export API_IMAGE="gest-o-api:$APP_COMMIT"
 export WEB_IMAGE="gest-o-web:$APP_COMMIT"
 
-PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
+if [[ "$ENV_FILE" == /root/demetra-env/production.env ]]; then
+  ERP_ENV_SCHEDULER_POLICY=disabled_build_only PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
+else
+  PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
+fi
 bash scripts/production-preflight.sh
 actual_services="$("${COMPOSE[@]}" config --services | sort)"
 expected_services="$(printf 'api\nweb\n' | sort)"
@@ -23,7 +28,7 @@ log "Build começa enquanto os containers atuais permanecem atendendo"
 "${COMPOSE[@]}" build api web
 docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require('./apps/api/dist/build-info.json');if(b.commit!=='$APP_COMMIT'||!b.builtAt)process.exit(1)"
 log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
-[[ "${MODE:-build}" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
+[[ "$MODE" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
 [[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER"
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 schema_migration="apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql"

@@ -4,7 +4,14 @@ import { readFileSync } from "node:fs";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
-assert.match(deploy, /ENV_FILE="\$\{PRODUCTION_ENV_FILE:-\/root\/demetra-env\/\.env\}"/);
+const envResolver=read("scripts/resolve-production-env.sh");
+assert.match(deploy, /ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
+assert.match(envResolver, /ERP_PRODUCTION_ENV_SOURCE=canonical/);
+assert.match(envResolver, /ERP_PRODUCTION_ENV_SOURCE=legacy_build_only/);
+assert.match(envResolver, /canonical source is required for cutover/);
+assert.ok(envResolver.indexOf('validate "$CANONICAL_ENV_FILE" canonical') < envResolver.indexOf('validate "$LEGACY_ENV_FILE" legacy_build_only'));
+assert.match(deploy, /ERP_ENV_SCHEDULER_POLICY=disabled_build_only/);
+assert.doesNotMatch(envResolver, /\b(?:cp|mv|install|sed|awk)\b/);
 assert.ok(deploy.indexOf("erp-production-env-preflight.sh") < deploy.indexOf("production-preflight.sh"));
 assert.match(compose, /ERP_SYNC_SCHEDULER_ENABLED: "\$\{ERP_SYNC_SCHEDULER_ENABLED:\?/);
 for (const policy of ["TENANCY_MODE disabled", "TENANT_READ_PILOT_ENABLED false", "DATABASE_SCHEMA_MODE external", "SEED_ON_BOOTSTRAP false", "ENABLE_PREVIEW_SEED false", "ENABLE_SMOKE_BOOTSTRAP false"]) {
@@ -105,7 +112,7 @@ assert.match(deploy,/install -d -m 700/); assert.match(deploy,/chmod 600/);
 assert.match(rollback,/"\$recorded" == "\$name\|\$container_id"/); // inicia e reconfirma o ID exato
 assert.match(rollback,/\$container_id\|true/);
 assert.doesNotMatch(rollback,/compose[^\n]*(?:down|\bdb\b)/); assert.doesNotMatch(rollback,/docker\s+volume\s+rm|docker\s+compose[^\n]*(?:--volumes|\s-v(?:\s|$))/);
-for (const [name,text] of [["deploy",deploy],["rollback",rollback]]) {
+for (const [name,text] of [["deploy",deploy],["resolver",envResolver],["rollback",rollback]]) {
   assert.doesNotMatch(text,/docker\s+commit/);
   assert.doesNotMatch(text,/docker\s+(?:container\s+)?rm[^\n]*(?:histor|container_id)/);
   assert.doesNotMatch(text,/docker\s+(?:stop|rm)[^\n]*(?:postgres|PRODUCTION_DB)/i);

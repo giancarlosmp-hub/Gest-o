@@ -1,3 +1,7 @@
+# Resolução do env no build de recuperação
+
+O run `31707019441` falhou exatamente ao iniciar `scripts/deploy-production.sh`, após checkout e SHA validados, pois o arquivo canônico estava ausente. `MODE=build` agora seleciona exclusivamente um caminho técnico, sem exibir valores: canônico root:root/600 regular e não-symlink; ou, somente se o canônico não existir, o legado autorizado com os mesmos metadados; senão falha. Se o canônico existe mas é inválido, não há fallback. A fase não copia/edita env nem liga o scheduler. `MODE=cutover` continua exigindo exclusivamente `/root/demetra-env/.env`. Depois do merge, repetir `phase=build`; o ERP Production Recovery ainda deverá instalar o canônico e provar a automação. Nenhum deploy ou recovery foi executado por esta mudança.
+
 # Contrato de deploy — observabilidade ERP (12/08/2026)
 
 Esta estabilização não inclui migration, DDL, backfill, recovery ou deploy. O gate
