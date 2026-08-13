@@ -57,7 +57,7 @@
     "smoke:pr18a4-audit": "tsx src/scripts/pr18a4AuditSmoke.ts",
     "smoke:pr18a4-runtime": "node ../../scripts/smoke/pr18a4-runtime-smoke.mjs",
     "test:client-code-audit": "tsx src/services/clientCodeAuditService.test.ts",
-    "test:platform-health": "tsx src/services/platformHealthService.test.ts"
+    "test:platform-health": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/platformHealthService.test.ts && tsx src/services/platformHealthProjection.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

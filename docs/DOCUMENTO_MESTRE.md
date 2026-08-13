@@ -1,3 +1,11 @@
+# Contrato semântico vigente da Saúde ERP — PR #799 (13/08/2026)
+
+A unidade executiva é a execução-pai: `manual/syncAll` ou `scheduler/automatic`. Filhos ligados por
+`correlationId` são etapas e não participam das taxas, duração média, retries ou quantidade
+executiva. Etapa sem pai não prova sync completa. Vendedor inativo é consultável; ausência de
+vendedor e carteira são não instrumentadas no schema atual. Testes locais não são evidência de
+automação produtiva, e a 1.0B.2-O permanece bloqueada.
+
 # Prioridade vigente — estabilização da observabilidade ERP (12/08/2026)
 
 Antes da Sprint 1.0B.2-O, a prioridade é reconciliar `ErpSyncRun`, scheduler, API e Saúde. A sync

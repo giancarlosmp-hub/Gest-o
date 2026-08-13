@@ -28,15 +28,18 @@ Fluxo automático: bootstrap → `startErpSyncScheduler` → gate de ambiente + 
 valor do enum atual e não é inferida/reclassificada; o recovery aprovado busca uma execução real
 `scheduler`.
 
-O contrato v2 retorna `dataState=available|empty|error`, estados equivalentes por seção, execuções
-manual/automática separadas, scheduler, próxima execução, lock bounded, taxas nullable,
-`correlationId` e warnings distintos dos erros. Exceções da coleta respondem 503 sanitizado.
+O contrato v2 retorna `dataState=available|empty|error`. A projeção pura classifica como pai apenas
+`manual/syncAll` e `scheduler/automatic`; os demais scopes são `stage` e carregam
+`parentCorrelationId` somente quando existe pai correlacionado. Última execução, quantidade, duração,
+taxas, retries e tendências usam apenas pais concluídos, impedindo soma pai+filhos. Etapa órfã nunca
+vira evidência executiva. Scheduler, próxima execução, lock, `correlationId` e warnings permanecem
+explícitos; exceções da coleta respondem 503 sanitizado.
 
 ## Matriz indicador → fonte
 
 | Indicador | Fonte real | Query/serviço | Vazio legítimo | Erro | Evidência |
 |---|---|---|---|---|---|
-| última execução/tempo/registros/origem | `ErpSyncRun` | `findMany`, janela e `take=100` | `empty`/Sem execução | snapshot 503 | gate casos 1–4, 13–15, 20 |
+| última execução/tempo/registros/origem | pais `ErpSyncRun` | projeção pura sobre `syncAll/manual` e `automatic/scheduler` | `empty`/Sem pai | snapshot 503 | testes comportamentais 1–10 |
 | última manual | `ErpSyncRun.trigger=manual` | agregação do snapshot | Sem execução manual | snapshot 503 | casos 1, 3 |
 | última automática/sucesso | `scope=automatic`, `trigger=scheduler` | snapshot + scheduler | Não comprovado | snapshot 503 | casos 2, 3, 12 |
 | scheduler/next run | AppConfig, env e estado do scheduler | `getErpAutomaticSyncState` | Não comprovado | snapshot 503 | casos 2, 12 |
@@ -48,10 +51,13 @@ manual/automática separadas, scheduler, próxima execução, lock bounded, taxa
 | tendências | `ErpSyncRun`, `ClientCodeAudit` | janela 7/30/90 | lista vazia válida | snapshot 503 | caso 13 |
 
 `ClientCodeAudit` é alimentado por `clientCodeAuditService` quando `Client.code` realmente muda; os
-campos instrumentados de qualidade são calculados no banco, sem N+1. O schema atual torna
-`ownerSellerId` obrigatório; a consulta ainda detecta string vazia legada. Não existe campo canônico
-de carteira no model `Client`, portanto `missingPortfolio=null` declara dado não instrumentado em vez
-de inventar zero ou reutilizar indevidamente “sem vendedor”.
+campos instrumentados de qualidade são calculados no banco, sem N+1. O schema torna
+`ownerSellerId` obrigatório: `inactiveSeller` consulta `ownerSeller.isActive=false`, enquanto
+`missingSeller=null` declara “sem vendedor” não instrumentado. Não existe campo canônico de carteira,
+portanto `missingPortfolio=null`. Nenhuma dessas ausências semânticas é exibida como zero.
+
+Os 20 cenários citados são testes TypeScript comportamentais de funções puras com fixtures e
+asserções de valores. O script estático é somente um guard complementar de arquitetura/wiring.
 
 ## Operação, rollback e limites
 

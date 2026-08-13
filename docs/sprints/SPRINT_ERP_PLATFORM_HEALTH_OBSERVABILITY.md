@@ -1,3 +1,14 @@
+# Revisão corretiva — semântica executiva (13/08/2026)
+
+**Regra:** pais são exclusivamente `manual/syncAll` e `scheduler/automatic`; demais scopes são
+etapas. Agregações executivas usam somente pais e não derivam sucesso de etapa órfã.
+
+**Qualidade:** `ownerSeller.isActive=false` alimenta “Clientes com vendedor inativo”; “sem vendedor”
+é não instrumentado porque a FK é obrigatória. Zero só existe após coleta válida.
+
+**Prova:** 20 testes comportamentais executam a projeção pura, mais testes legados e guard estático.
+PASS local não comprova automação produtiva. Produção/recovery/tenancy/ledger seguem fora do escopo.
+
 # Sprint Brief — estabilização ERP e Saúde da Plataforma
 
 **Objetivo:** reconciliar telemetria manual/automática, banco, API e UX antes da 1.0B.2-O.

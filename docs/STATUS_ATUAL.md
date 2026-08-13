@@ -1,3 +1,11 @@
+# Correção semântica da Saúde ERP — revisão da PR #799 (13/08/2026)
+
+A visão executiva agora considera exclusivamente pais `manual/syncAll` e
+`scheduler/automatic`; etapas permanecem detalhadas e não entram em duração, quantidade ou taxas.
+`Clientes com vendedor inativo` consulta a relação real; `sem vendedor` é não instrumentado porque
+`ownerSellerId` é obrigatório. Os 20 cenários são testes comportamentais executáveis, complementados
+por guard estático. Checks verdes locais não comprovam scheduler produtivo. A 1.0B.2-O segue pausada.
+
 # 🔴 Estabilização ERP/Saúde anterior à 1.0B.2-O (12/08/2026)
 
 A execução ERP completa fornecida é **manual** e não prova scheduler. A Saúde mascarava falhas como

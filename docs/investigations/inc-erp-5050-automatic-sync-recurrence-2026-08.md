@@ -1,3 +1,10 @@
+# Correção semântica da observabilidade — 13/08/2026
+
+A revisão da PR #799 remove dupla contagem: pais são somente `manual/syncAll` e
+`scheduler/automatic`; demais scopes são etapas correlacionadas. Manual não satisfaz evidência
+automática. O gate agora executa 20 fixtures comportamentais reais; seu PASS comprova o contrato
+local, não scheduler/lock/execução em produção. Produção e recovery não foram acessados.
+
 # INC-ERP-5050 — recorrência da sincronização automática (11/08/2026)
 
 ## Limite da investigação

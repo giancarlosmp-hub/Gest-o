@@ -1,3 +1,11 @@
+# Validação semântica da Saúde ERP — PR #799 (13/08/2026)
+
+O gate oficial executa testes comportamentais da projeção antes do guard estático. Na validação
+read-only, conferir pais `syncAll/manual` e `automatic/scheduler`, etapas classificadas, correlação e
+ausência de soma pai+filhos. Zero exige coleta `available`; sem vendedor/carteira devem aparecer
+como não instrumentados. Checks verdes não comprovam execução automática produtiva. Não disparar
+sync ou recovery para validar esta PR.
+
 # Gate operacional — Saúde ERP v2 (12/08/2026)
 
 Antes de promover esta estabilização, execute `npm run test:platform-health-erp-observability` e os
