@@ -30,7 +30,11 @@ done
 # JWT_SECRET remains required by the production Compose contract even when the
 # access/refresh pair is present.
 require_nonempty JWT_SECRET
-require_literal ERP_SYNC_SCHEDULER_ENABLED true
+case "${ERP_ENV_SCHEDULER_POLICY:-enabled}" in
+  enabled) require_literal ERP_SYNC_SCHEDULER_ENABLED true; scheduler_marker=ENABLED ;;
+  disabled_build_only) require_literal ERP_SYNC_SCHEDULER_ENABLED false; scheduler_marker=DISABLED_BUILD_ONLY ;;
+  *) die "scheduler validation policy is invalid" ;;
+esac
 require_literal TENANCY_MODE disabled
 require_literal TENANT_READ_PILOT_ENABLED false
 require_literal DATABASE_SCHEMA_MODE external
@@ -54,8 +58,8 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config >"$rendered" || 
 for name in DATABASE_URL JWT_SECRET JWT_ACCESS_SECRET JWT_REFRESH_SECRET ULTRAFV3_BASE_URL ERP_CREDENTIAL_ENCRYPTION_KEY ERP_SYNC_SCHEDULER_ENABLED; do
   grep -Eq "^[[:space:]]+$name:" "$rendered" || die "rendered API service omits $name"
 done
-awk -F: '$1 ~ /^[[:space:]]*ERP_SYNC_SCHEDULER_ENABLED[[:space:]]*$/ { value=$2; gsub(/[[:space:]"\047]/, "", value); if (value == "true") ok=1 } END { exit !ok }' "$rendered" || die "rendered scheduler gate is not true"
+awk -F: -v expected="${ERP_SYNC_SCHEDULER_ENABLED}" '$1 ~ /^[[:space:]]*ERP_SYNC_SCHEDULER_ENABLED[[:space:]]*$/ { value=$2; gsub(/[[:space:]"\047]/, "", value); if (value == expected) ok=1 } END { exit !ok }' "$rendered" || die "rendered scheduler gate does not match policy"
 rm -f "$rendered"; trap - EXIT
 log "ERP_EXTERNAL_ENV=PRESENT"
-log "ERP_SCHEDULER_ENV=ENABLED"
+log "ERP_SCHEDULER_ENV=$scheduler_marker"
 log "PASS: protected production ERP environment contract is valid; values omitted"

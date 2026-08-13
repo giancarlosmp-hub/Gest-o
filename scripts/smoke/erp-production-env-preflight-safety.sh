@@ -6,7 +6,7 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
 cat >"$TMP/bin/docker" <<'DOCKER'
 #!/usr/bin/env bash
-cat <<'YAML'
+cat <<YAML
 services:
   api:
     environment:
@@ -16,7 +16,7 @@ services:
       JWT_REFRESH_SECRET: hidden
       ULTRAFV3_BASE_URL: hidden
       ERP_CREDENTIAL_ENCRYPTION_KEY: hidden
-      ERP_SYNC_SCHEDULER_ENABLED: "true"
+      ERP_SYNC_SCHEDULER_ENABLED: "${ERP_SYNC_SCHEDULER_ENABLED}"
 YAML
 DOCKER
 chmod +x "$TMP/bin/docker"
@@ -60,6 +60,10 @@ rm "$TMP/production.env"
 write_env
 sed -i 's/ERP_SYNC_SCHEDULER_ENABLED=true/ERP_SYNC_SCHEDULER_ENABLED=false/' "$TMP/production.env"
 ! run_preflight >"$TMP/false.out" 2>&1
+legacy_output="$(PATH="$TMP/bin:$PATH" PRODUCTION_ENV_FILE="$TMP/production.env" \
+  ERP_ENV_EXPECTED_OWNER="$(id -un):$(id -gn)" ERP_PRODUCTION_COMPOSE_FILE="$ROOT/docker-compose.production.yml" \
+  ERP_ENV_SCHEDULER_POLICY=disabled_build_only bash "$ROOT/scripts/erp-production-env-preflight.sh" 2>&1)"
+grep -q 'ERP_SCHEDULER_ENV=DISABLED_BUILD_ONLY' <<<"$legacy_output"
 write_env
 sed -i 's/JWT_REFRESH_SECRET=secret-refresh/JWT_REFRESH_SECRET=/' "$TMP/production.env"
 ! run_preflight >"$TMP/empty.out" 2>&1

@@ -1,3 +1,7 @@
+# Exceção operacional temporária e restrita ao build (13/08/2026)
+
+O run `31707019441` confirmou a circularidade: Deploy Production precisava do canônico ausente para construir `gest-o-api:<SHA>`, enquanto ERP Production Recovery precisava dessa imagem para instalar o canônico e ativar o scheduler. A resolução autorizada é read-only e determinística: canônico válido; se ausente, legado válido somente para `MODE=build`; caso contrário, falha fechada. Presença inválida do canônico proíbe fallback e as fontes nunca são combinadas. `MODE=cutover` e Recovery continuam canonical-only após a instalação controlada. Esta PR não executou produção/recovery; repetir o build depois do merge e manter Recovery pendente.
+
 # Contrato semântico vigente da Saúde ERP — PR #799 (13/08/2026)
 
 A unidade executiva é a execução-pai: `manual/syncAll` ou `scheduler/automatic`. Filhos ligados por

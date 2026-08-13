@@ -1,3 +1,7 @@
+# 🔵 Correção do bloqueio build/recovery — run 31707019441 (13/08/2026)
+
+O run `31707019441` chegou ao SHA esperado na VPS e falhou no primeiro comando do deploy, `MODE=build ... bash scripts/deploy-production.sh`, porque o canônico `/root/demetra-env/.env` estava ausente. A correção proposta resolve sem escrita na ordem **canônico válido → legado `/root/demetra-env/production.env` válido somente em build → falha fechada**. Canônico inválido nunca é contornado; cutover continua canonical-only. O build legado preserva o gate desativado; somente **ERP Production Recovery** cria atomicamente o canônico e ativa o scheduler. Nenhuma restauração ou produção foi acessada nesta PR; após merge, é necessário repetir o build, e o Recovery continua pendente.
+
 # Correção semântica da Saúde ERP — revisão da PR #799 (13/08/2026)
 
 A visão executiva agora considera exclusivamente pais `manual/syncAll` e
