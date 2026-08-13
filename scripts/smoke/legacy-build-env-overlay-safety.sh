@@ -52,3 +52,12 @@ for forbidden in 'docker compose up' 'docker stop' 'docker rm' ' down' 'prune' '
   ! grep -Fiq "$forbidden" "$ROOT/scripts/legacy-build-env-overlay.sh"
 done
 printf '%s\n' 'legacy build env overlay safety passed (A-E,K)'
+
+# The same closed primitive has an explicit recovery policy, while the build
+# wrapper can never select it.
+write_base $'ERP_SYNC_SCHEDULER_ENABLED=false\n'
+recovery="$TMP/recovery.env"; : >"$recovery"; chmod 600 "$recovery"
+source "$ROOT/scripts/production-env-reconcile.sh"
+reconcile_production_env recovery_legacy "$base" "$recovery" >"$TMP/r.out" 2>"$TMP/r.err"
+[[ "$(grep -Fxc 'ERP_SYNC_SCHEDULER_ENABLED=true' "$recovery")" -eq 1 ]]
+! grep -Fq recovery_legacy "$ROOT/scripts/legacy-build-env-overlay.sh"

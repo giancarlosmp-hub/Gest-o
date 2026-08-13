@@ -22,7 +22,7 @@ source "$ENV_FILE"
 set +a
 
 require_nonempty(){ local name=$1; [[ -n "${!name:-}" ]] || die "$name is ABSENT_OR_EMPTY"; log "$name=PRESENT"; }
-require_literal(){ local name=$1 expected=$2; [[ "${!name:-}" == "$expected" ]] || die "$name does not match the production policy"; log "$name=VALID"; }
+require_literal(){ local name=$1 expected=$2; [[ "${!name:-}" == "$expected" ]] || { printf 'ERP_ENV_PREFLIGHT_FAILURE=%s_POLICY\n' "$name" >&2; die 'production gate policy mismatch'; }; log "$name=VALID"; }
 
 for name in DATABASE_URL JWT_ACCESS_SECRET JWT_REFRESH_SECRET ULTRAFV3_BASE_URL ERP_CREDENTIAL_ENCRYPTION_KEY; do
   require_nonempty "$name"
