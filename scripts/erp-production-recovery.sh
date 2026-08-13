@@ -5,6 +5,7 @@ set -Eeuo pipefail
 # sanitizados são enviados ao log do GitHub Actions.
 umask 077
 APP_DIR="${APP_DIR:-/apps/gest-o}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Produção usa exclusivamente /root/demetra-env/.env e a fonte legado
 # /root/demetra-env/production.env; o override existe somente para o harness isolado.
 ENV_DIR="${ERP_RECOVERY_ENV_DIR:-/root/demetra-env}"
@@ -59,6 +60,9 @@ log 'ERP_RECOVERY_AUTH_INPUT=AVAILABLE'
 
 # O env empresarial fornece apenas configuração persistente. Metadados de release são
 # reconstruídos nesta nova sessão e nunca são gravados no arquivo protegido.
+# Validate syntax before trusted operator input is loaded. The closed-gate
+# duplicate validation is repeated by the candidate primitive for legacy input.
+awk '/^[[:space:]]*($|#)/{next} /^[A-Za-z_][A-Za-z0-9_]*=/{next} {exit 1}' "$SOURCE_ENV_FILE" || die 'protected environment contains a malformed line'
 set -a; source "$SOURCE_ENV_FILE"; set +a
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
 : "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
@@ -144,9 +148,17 @@ install -o root -g root -m 600 "$SOURCE_ENV_FILE" "$env_backup"
 tmp_env="$(mktemp "$ENV_DIR/.env.recovery.XXXXXX")"
 cleanup(){ local rc=$?; rm -f "${tmp_env:-}" "${preflight_output:-}" "${rendered:-}" "${technical_file:-}"; return "$rc"; }
 trap cleanup EXIT
-gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$SOURCE_ENV_FILE")"
-[[ "$gate_count" -eq 1 ]] || die 'scheduler gate must exist exactly once before recovery'
-awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$SOURCE_ENV_FILE" >"$tmp_env"
+if [[ "$ENV_SOURCE" == legacy_copy ]]; then
+  # This is the sole runtime caller authorized to request recovery_legacy, and
+  # it runs only after confirmation, SHA/image/auth checks and read-only inventory.
+  # shellcheck source=scripts/production-env-reconcile.sh
+  source "$SCRIPT_DIR/production-env-reconcile.sh"
+  reconcile_production_env recovery_legacy "$SOURCE_ENV_FILE" "$tmp_env" >/dev/null
+else
+  gate_count="$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++} END{print n+0}' "$SOURCE_ENV_FILE")"
+  [[ "$gate_count" -eq 1 ]] || die 'scheduler gate must exist exactly once before recovery'
+  awk -F= 'BEGIN{OFS="="} $1=="ERP_SYNC_SCHEDULER_ENABLED"{$0="ERP_SYNC_SCHEDULER_ENABLED=true"} {print}' "$SOURCE_ENV_FILE" >"$tmp_env"
+fi
 chown root:root "$tmp_env"; chmod 600 "$tmp_env"; bash -n "$tmp_env"
 [[ "$(awk -F= '$1=="ERP_SYNC_SCHEDULER_ENABLED"{n++; if($2=="true")ok++} END{print n":"ok}' "$tmp_env")" == 1:1 ]] || die 'candidate scheduler gate is invalid'
 
@@ -186,6 +198,8 @@ trap rollback ERR
 STAGE=preflight
 preflight_output="$(mktemp)"
 if ! PRODUCTION_ENV_FILE="$tmp_env" ERP_ENV_EXPECTED_OWNER=root:root bash scripts/erp-production-env-preflight.sh >"$preflight_output" 2>&1; then
+  failure_code="$(sed -n 's/^ERP_ENV_PREFLIGHT_FAILURE=//p' "$preflight_output" | head -1)"
+  [[ "$failure_code" =~ ^(ERP_SYNC_SCHEDULER_ENABLED|TENANCY_MODE|TENANT_READ_PILOT_ENABLED|DATABASE_SCHEMA_MODE|SEED_ON_BOOTSTRAP|ENABLE_PREVIEW_SEED|ENABLE_SMOKE_BOOTSTRAP)_POLICY$ ]] && log "ERP_RECOVERY_PREFLIGHT_FAILURE=$failure_code"
   die 'ERP environment preflight failed; protected output omitted'
 fi
 for marker in 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: protected production ERP environment contract is valid; values omitted'; do

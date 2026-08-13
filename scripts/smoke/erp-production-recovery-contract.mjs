@@ -20,7 +20,8 @@ function scenario(name, options = {}) {
     ...(options.gateMissing ? [] : ["ERP_SYNC_SCHEDULER_ENABLED=false"]), "PRODUCTION_DB_CONTAINER_EXPECTED=db-id",
     "PRODUCTION_DB_VOLUME_EXPECTED=db-volume", "DATABASE_URL=postgresql://unused",
   ].join("\n") + "\n";
-  writeFileSync(join(envDir, ".env"), protectedEnv, { mode: 0o600 });
+  const sourceName = options.canonical ? ".env" : "production.env";
+  writeFileSync(join(envDir, sourceName), protectedEnv, { mode: 0o600 });
   const commandLog = join(dir, "commands.log"); writeFileSync(commandLog, "");
 
   executable(join(bin, "git"), `#!/bin/sh
@@ -31,6 +32,11 @@ esac
   executable(join(bin, "bash"), `#!/bin/sh
 if [ "$1" = -n ]; then exec /bin/bash "$@"; fi
 case "$1" in (*erp-production-env-preflight.sh) printf '%s\n' 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: protected production ERP environment contract is valid; values omitted';; esac
+case "$1" in (*erp-production-env-preflight.sh)
+  for gate in ERP_SYNC_SCHEDULER_ENABLED=true TENANCY_MODE=disabled TENANT_READ_PILOT_ENABLED=false DATABASE_SCHEMA_MODE=external SEED_ON_BOOTSTRAP=false ENABLE_PREVIEW_SEED=false ENABLE_SMOKE_BOOTSTRAP=false; do
+    grep -Fxq "$gate" "$PRODUCTION_ENV_FILE" || exit 1
+  done;;
+esac
 exit 0
 `);
   // The production script must keep requiring root:root/600. These shims model
@@ -98,7 +104,8 @@ fi
 exit 0
 `);
 
-  const before = readFileSync(join(envDir, ".env"), "utf8");
+  const sourcePath = join(envDir, sourceName);
+  const before = readFileSync(sourcePath, "utf8");
   const result = spawnSync("/bin/bash", [recovery], {
     cwd: app, encoding: "utf8", env: {
       ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, APP_DIR: app,
@@ -112,7 +119,7 @@ exit 0
       ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE: options.rollback ? "true" : "false",
     },
   });
-  const after = readFileSync(join(envDir, ".env"), "utf8"), commands = readFileSync(commandLog, "utf8");
+  const after = readFileSync(sourcePath, "utf8"), commands = readFileSync(commandLog, "utf8");
   const output = result.stdout + result.stderr;
   rmSync(dir, { recursive: true, force: true });
   return { ...result, before, after, commands, output };
@@ -156,7 +163,10 @@ assert.doesNotMatch(h.after, /^(?:API_IMAGE|WEB_IMAGE|APP_COMMIT|APP_VERSION|APP
 for (const result of [a,b,c,d,e,f,g,h]) assert.doesNotMatch(result.output, /protected@example|protected-test-value/);
 
 const missingGate = scenario("missing-gate", { gateMissing: true });
-assert.notEqual(missingGate.status, 0); assert.equal(missingGate.after, missingGate.before);
-assert.doesNotMatch(missingGate.commands, /\btag\b|compose .* up/);
+assert.equal(missingGate.status, 0, missingGate.output); assert.equal(missingGate.after, missingGate.before);
+
+const invalidCanonical = scenario("invalid-canonical", { canonical: true, gateMissing: true });
+assert.notEqual(invalidCanonical.status, 0); assert.equal(invalidCanonical.after, invalidCanonical.before);
+assert.doesNotMatch(invalidCanonical.commands, /\btag\b|compose .* up/);
 
 console.log("ERP production recovery executable contract: PASS (A-H)");

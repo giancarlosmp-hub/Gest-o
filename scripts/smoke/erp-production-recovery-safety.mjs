@@ -8,6 +8,7 @@ const root = resolve(import.meta.dirname, "../..");
 const read = (path) => readFileSync(resolve(root, path), "utf8");
 const workflow = read(".github/workflows/erp-production-recovery.yml");
 const recovery = read("scripts/erp-production-recovery.sh");
+const reconcile = read("scripts/production-env-reconcile.sh");
 const deploy = read(".github/workflows/deploy-production.yml");
 
 for (const expected of [
@@ -26,7 +27,7 @@ for (const secretFamily of ["SSH_HOST", "VPS_HOST", "SSH_USER", "VPS_USER", "SSH
 
 for (const expected of [
   "/root/demetra-env/.env", "/root/demetra-env/production.env", "ERP_ENV_RECOVERY_SOURCE=NOT_AVAILABLE",
-  "install -o root -g root -m 600", "legacy_copy", "ERP_SYNC_SCHEDULER_ENABLED=true", "mktemp",
+  "install -o root -g root -m 600", "legacy_copy", "recovery_legacy", "mktemp",
   "bash -n", "erp-scheduler-before-", "restore_env", "ERP_RECOVERY_ROLLBACK=COMPLETED",
   "up -d --no-deps --no-build --force-recreate api", "trigger:'scheduler'", "startedAt:{gt:since}",
   "ERP_AUTOMATIC_TRIGGER=scheduler", "ERP_AUTOMATIC_SYNC=PASS", "ERP_SYNC_LOCK=RELEASED",
@@ -45,6 +46,9 @@ assert.ok(["# FASE 0", "# FASE 1", "# FASE 2", "# FASE 3", "# FASE 4", "# FASE 5
 for (const marker of ["active", "expired_recoverable", "free", 'API_IMAGE="gest-o-api:$EXPECTED_SHA"', 'WEB_IMAGE="$CURRENT_WEB_IMAGE"'])
   assert.ok(recovery.includes(marker), `missing runtime contract: ${marker}`);
 assert.match(recovery, /gate_count[\s\S]*-eq 1/, "scheduler gate must already exist exactly once");
+assert.match(reconcile, /build_legacy[\s\S]*scheduler=false/);
+assert.match(reconcile, /recovery_legacy[\s\S]*scheduler=true/);
+assert.doesNotMatch(read("scripts/deploy-production.sh"), /recovery_legacy/);
 
 for (const doc of ["docs/STATUS_ATUAL.md", "docs/DOCUMENTO_MESTRE.md", "docs/OPERACAO.md", "docs/DEPLOY_GUIDE.md", "docs/investigations/inc-erp-5050-automatic-sync-recurrence-2026-08.md"])
   assert.match(read(doc), /ERP Production Recovery/, `${doc} must document the recovery channel`);
