@@ -2,8 +2,25 @@
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
 MODE="${MODE:-build}"
+printf 'DEPLOY_SCRIPT_ENTERED=PASS\n'
+case "$MODE" in build|cutover) ;; *) printf 'DEPLOY_FAILURE_STAGE=deploy_mode\nDEPLOY_FAILURE_COMMAND=validate_deploy_mode\nDEPLOY_FAILURE_EXIT_CODE=1\n' >&2; exit 1 ;; esac
+printf 'DEPLOY_MODE=%s\n' "$MODE"
+if [[ ! "${EXPECTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'DEPLOY_FAILURE_STAGE=expected_sha_format\nDEPLOY_FAILURE_COMMAND=validate_expected_sha_format\nDEPLOY_FAILURE_EXIT_CODE=1\n' >&2
+  exit 1
+fi
+printf 'DEPLOY_EXPECTED_SHA_FORMAT=PASS\n'
 [[ -z "${PRODUCTION_ENV_FILE:-}" ]] || { printf '[deploy-production] ERRO: PRODUCTION_ENV_FILE override is prohibited; use the authorized resolver\n' >&2; exit 1; }
-ENV_FILE="$(MODE="$MODE" bash scripts/resolve-production-env.sh)"
+printf 'DEPLOY_ENV_RESOLUTION=STARTED\n'
+if ENV_FILE="$(MODE="$MODE" bash scripts/resolve-production-env.sh)"; then
+  :
+else
+  resolver_exit=$?
+  printf 'DEPLOY_FAILURE_STAGE=environment_resolution\n' >&2
+  printf 'DEPLOY_FAILURE_COMMAND=resolve_production_environment\n' >&2
+  printf 'DEPLOY_FAILURE_EXIT_CODE=%s\n' "$resolver_exit" >&2
+  exit "$resolver_exit"
+fi
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 log(){ printf '[deploy-production] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }

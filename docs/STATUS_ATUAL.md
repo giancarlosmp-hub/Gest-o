@@ -458,3 +458,12 @@ INC_ERP_5050 = INVESTIGATING
 PRODUCTION_ACCESSED = NO
 READY_TO_MERGE_RECOVERY_PR = NO
 ```
+# 🔵 Correção da falha silenciosa pré-deploy — run 31713219051 (13/08/2026)
+
+O run `31713219051` comprovou SSH, fetch, switch e fast-forward `3c068fa..443be81`, levando os 12
+arquivos da PR #800 à VPS, mas encerrou status 1 antes de qualquer marcador do deploy ou resolver.
+A auditoria do bloco remoto identifica como comando que encerrou a execução o predicado silencioso
+`test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"`; o log antigo não permite distinguir SHA divergente,
+vazio ou ilegível. Um entrypoint versionado agora valida formatos SHA-1 completos, igualdade,
+worktree e script com checkpoints e trap sanitizados antes de iniciar `build`. Não houve build,
+cutover, recriação ou Recovery; Recovery e a prova da sincronização automática continuam pendentes.

@@ -5,7 +5,14 @@ const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
 const envResolver=read("scripts/resolve-production-env.sh");
-assert.match(deploy, /ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
+const entrypoint=read("scripts/production-deploy-entrypoint.sh");
+assert.match(deploy, /if ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
+assert.match(workflow, /production-deploy-entrypoint\.sh/);
+assert.doesNotMatch(workflow, /test "\$\(git rev-parse HEAD\)"/);
+for (const marker of ["DEPLOY_GIT_FETCH", "DEPLOY_GIT_SWITCH", "DEPLOY_GIT_FAST_FORWARD", "DEPLOY_EXPECTED_SHA_FORMAT", "DEPLOY_CHECKOUT_SHA_MATCH", "DEPLOY_WORKTREE_CLEAN", "DEPLOY_SCRIPT_PRESENT", "DEPLOY_SCRIPT_STARTING"]) assert.ok(entrypoint.includes(marker));
+for (const text of [entrypoint, workflow]) {
+  assert.doesNotMatch(text, /set -x|\beval\b|\|\| true/);
+}
 assert.match(envResolver, /ERP_PRODUCTION_ENV_SOURCE=canonical/);
 assert.match(envResolver, /ERP_PRODUCTION_ENV_SOURCE=legacy_build_only/);
 assert.match(envResolver, /canonical source is required for cutover/);

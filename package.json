@@ -22,7 +22,7 @@
     "build:shared": "npm run build -w @salesforce-pro/shared",
     "build:web": "npm run build -w @salesforce-pro/web",
     "build:api": "npm run build -w @salesforce-pro/api",
-    "test:production-deploy": "node scripts/smoke/production-deploy-safety.mjs && bash scripts/smoke/production-env-resolution-safety.sh",
+    "test:production-deploy": "node scripts/smoke/production-deploy-safety.mjs && bash scripts/smoke/production-deploy-entrypoint-safety.sh && bash scripts/smoke/production-env-resolution-safety.sh",
     "test:erp-production-env": "bash scripts/smoke/erp-production-env-preflight-safety.sh",
     "test:erp-production-recovery": "node scripts/smoke/erp-production-recovery-safety.mjs && node scripts/smoke/erp-production-recovery-contract.mjs",
     "test:production-schema": "node scripts/smoke/production-schema-safety.mjs",
