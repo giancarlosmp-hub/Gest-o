@@ -29,14 +29,27 @@ jobs:
           envs: EXPECTED_SHA,DEPLOY_MODE
           script_stop: true
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
+            bootstrap_stage=bootstrap_repository_access
+            bootstrap_command=change_to_application_directory
+            bootstrap_failure() {
+              bootstrap_exit=$?
+              trap - ERR
+              printf 'DEPLOY_FAILURE_STAGE=%s\n' "$bootstrap_stage" >&2
+              printf 'DEPLOY_FAILURE_COMMAND=%s\n' "$bootstrap_command" >&2
+              printf 'DEPLOY_FAILURE_EXIT_CODE=%s\n' "$bootstrap_exit" >&2
+              exit "$bootstrap_exit"
+            }
+            trap bootstrap_failure ERR
             cd /apps/gest-o
+            bootstrap_stage=bootstrap_git_fetch
+            bootstrap_command=git_fetch_main
             git fetch origin main
+            bootstrap_stage=bootstrap_git_switch
+            bootstrap_command=git_switch_main
             git switch main
+            bootstrap_stage=bootstrap_git_fast_forward
+            bootstrap_command=git_pull_fast_forward_main
             git pull --ff-only origin main
-            test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-            if [ "$DEPLOY_MODE" = cutover ]; then
-              MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
-            else
-              MODE=build EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
-            fi
+            trap - ERR
+            APP_DIR=/apps/gest-o bash /apps/gest-o/scripts/production-deploy-entrypoint.sh

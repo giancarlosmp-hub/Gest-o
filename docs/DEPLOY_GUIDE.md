@@ -460,3 +460,13 @@ no arquivo empresarial.
 O workflow excepcional não executa build nem substitui as fases e evidências do deploy histórico. Ele
 somente consome a imagem pinada já preparada e mantém WEB, PostgreSQL e mounts com as identidades
 capturadas na descoberta read-only.
+# Checkpoints pré-deploy após o run 31713219051
+
+O fast-forward `3c068fa..443be81` terminou, mas o predicado silencioso de igualdade de SHA encerrou
+o shell antes do primeiro marcador do resolver/deploy. O workflow agora delega o checkout ao
+`scripts/production-deploy-entrypoint.sh`: ambos os SHAs devem ser hexadecimais de 40 caracteres e
+literalmente iguais, a worktree deve estar limpa e o script deve existir. Cada gate emite `PASS`;
+divergência emite somente estágio, SHA esperado/observado, resultado `FAIL`, comando lógico e exit
+code. O deploy então registra entrada/modo/formato e `DEPLOY_ENV_RESOLUTION=STARTED`; o resolver
+continua emitindo exclusivamente o marcador de fonte autorizado. O run investigado não iniciou
+build, cutover, containers ou Recovery, e não autoriza executar nenhum deles nesta correção.

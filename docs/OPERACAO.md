@@ -573,3 +573,13 @@ expirada é `expired_recoverable`, não “órfã” automática; ausência apó
 Crash pode deixar a linha até o TTL, quando a próxima aquisição pode recuperá-la. A prova continua
 exigindo execução `scope=automatic`, `trigger=scheduler`, sucesso posterior à recriação e estado final
 sem linha de lock.
+# Diagnóstico observável antes do build — run 31713219051
+
+O run fez fast-forward até `443be81e35a15e37158a93161b105c1aa81690b2` e parou no antigo
+`test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"`, antes do resolver. O log não registrou os operandos,
+logo não autoriza afirmar qual deles divergiu. Em uma futura execução autorizada, exigir na ordem
+`DEPLOY_GIT_FETCH`, `DEPLOY_GIT_SWITCH`, `DEPLOY_GIT_FAST_FORWARD`,
+`DEPLOY_EXPECTED_SHA_FORMAT`, `DEPLOY_CHECKOUT_SHA_MATCH`, `DEPLOY_WORKTREE_CLEAN`,
+`DEPLOY_SCRIPT_PRESENT` e `DEPLOY_SCRIPT_STARTING=build`. Ausência ou `FAIL` bloqueia o deploy e deve
+ser analisada pelos campos sanitizados `DEPLOY_FAILURE_*`. Esta correção não autoriza retry, cutover
+ou Recovery; nenhuma dessas operações foi executada.

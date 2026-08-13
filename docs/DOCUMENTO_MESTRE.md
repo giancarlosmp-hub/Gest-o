@@ -642,3 +642,12 @@ execução produtiva.
 O contrato histórico de deploy em duas fases não é redesenhado por esta exceção. A recuperação ERP
 permanece isolada: consome a imagem já criada pelo build oficial, recria somente a API e preserva a
 identidade da WEB, do PostgreSQL e de seus volumes.
+# Falha pré-deploy do run 31713219051 (13/08/2026)
+
+Após o fast-forward comprovado `3c068fa..443be81`, o único comando executável entre o pull e a
+entrada no deploy era a comparação silenciosa por `test`, que retornou status 1 sem registrar seus
+operandos. Portanto a PR #800 não foi reprovada pelo resolver: ele não foi iniciado. O workflow usa
+agora um entrypoint fail-closed que registra fetch, switch, fast-forward, formato/igualdade dos SHAs,
+worktree, presença e início do script; falhas expõem apenas estágio, comando lógico e exit code.
+`deploy-production.sh` anuncia entrada, modo e início da resolução. A política canônico/legado da
+PR #800 permanece integral e o ERP Production Recovery permanece pendente e não executado.

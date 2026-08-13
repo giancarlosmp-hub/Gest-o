@@ -84,3 +84,14 @@ A evidência fornecida de sync completa é classificada exclusivamente como `man
 local comprovou mascaramento de erro/ausência no frontend e lacunas de contrato da Saúde; a correção
 v2 e a matriz de fontes estão em `docs/platform-health-erp-observability.md`. Isso não executou nem
 comprovou scheduler/recovery/produção. `INC_ERP_5050` permanece `INVESTIGATING`.
+# Adendo — falha silenciosa anterior ao resolver no run 31713219051 (13/08/2026)
+
+O SSH e o fast-forward `3c068fa..443be81` passaram e os 12 arquivos da PR #800 chegaram à VPS. O
+status 1 ocorreu antes de `DEPLOY_CHECKOUT_SHA`, fonte do env, erro do resolver ou início do deploy.
+A ordem do shell torna o antigo `test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"` o comando que
+interrompeu o run; como ele não imprimia operandos, a condição subjacente não pode ser reconstruída
+do log. A correção substitui esse ponto por checkpoints explícitos, validação de SHA completo,
+worktree/script e diagnóstico sanitizado, além de marcar entrada e resolução no deploy. O resolver
+da PR #800 e sua política permanecem semanticamente inalterados. Build, cutover, recriação e ERP
+Production Recovery não ocorreram; `ERP_AUTOMATIC_SYNC` e persistência continuam `NOT_PROVEN`,
+`INC_ERP_5050 = INVESTIGATING` e `READY_FOR_1_0B_2_O = NO`.
