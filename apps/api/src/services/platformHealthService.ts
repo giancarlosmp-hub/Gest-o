@@ -1,4 +1,6 @@
 import { prisma } from "../config/prisma.js";
+import { getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
+import { projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
 
 export const PLATFORM_HEALTH_CACHE_TTL_MS = 60_000;
 export const PLATFORM_HEALTH_ROLES = new Set(["diretor", "administrador", "admin", "suporte", "ti"]);
@@ -32,7 +34,7 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   const since = new Date(Date.now() - days * 86_400_000);
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend] = await Promise.all([
-    prisma.erpSyncRun.findMany({ where: { startedAt: { gte: since } }, orderBy: { startedAt: "desc" }, take: 100, select: { id: true, scope: true, status: true, startedAt: true, finishedAt: true, durationMs: true, syncedCount: true, metrics: true, errors: true, errorMessage: true, trigger: true } }),
+    prisma.erpSyncRun.findMany({ where: { startedAt: { gte: since } }, orderBy: { startedAt: "desc" }, take: 100, select: { id: true, scope: true, status: true, startedAt: true, finishedAt: true, durationMs: true, syncedCount: true, metrics: true, errors: true, errorMessage: true, trigger: true, correlationId: true } }),
     prisma.client.count(), prisma.client.count({ where: { isArchived: true } }),
     prisma.client.count({ where: { OR: [{ cnpj: null }, { cnpj: "" }] } }),
     prisma.client.count({ where: { ownerSeller: { is: { isActive: false } } } }),
@@ -43,10 +45,8 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
     prisma.clientCodeAudit.count({ where: { createdAt: { gte: today } } }),
     prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } })
   ]);
-  const last = runs[0] ?? null;
-  const completed = runs.filter(r => r.durationMs != null);
-  const avgDuration = completed.length ? Math.round(completed.reduce((sum, r) => sum + (r.durationMs || 0), 0) / completed.length) : 0;
-  const aggregate = runs.reduce<MetricMap>((acc, run) => {
+  const runProjection = projectPlatformHealthRuns(runs);
+  const aggregate = runProjection.parentRuns.reduce<MetricMap>((acc, run) => {
     const m = run.metrics;
     const mappings: Record<string, string[]> = { partnersReceived: ["received"], partnersUpdated: ["updated"], clientsCreated: ["created"], clientsUpdated: ["updated"], ordersSynced: ["ordersSynced", "synced"], ordersError: ["ordersError", "errors"], documentConflicts: ["documentErpConflicts", "rejected_document_conflict"], fallbackNoDocument: ["identity_fallback_no_document"], codeExact: ["code_exact"], documentExact: ["document_exact"], rejectConflict: ["rejected_document_conflict"], createNoSafeMatch: ["create_no_safe_match"] };
     for (const [target, keys] of Object.entries(mappings)) acc[target] = (acc[target] || 0) + metricFrom(m, ...keys);
@@ -57,10 +57,17 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   const financialProfilesOrphaned = Number(jsonQualityRows[0]?.financial_orphans ?? 0);
   const invalidRows = await prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "Client" WHERE COALESCE("cnpj", '') <> '' AND LENGTH(REGEXP_REPLACE(COALESCE("cnpjNormalized", ''), '[^0-9]', '', 'g')) NOT IN (11, 14)`;
   const invalidDocument = Number(invalidRows[0]?.count ?? 0);
-  const quality = { totalClients, missingDocument, invalidDocument, duplicates, missingSeller, missingRegion, missingPortfolio: missingSeller, missingCity, missingState, missingPhone: Number(contactQualityRows[0]?.missing_phone ?? 0), missingEmail: Number(contactQualityRows[0]?.missing_email ?? 0), financialProfilesOrphaned, partnerTitlesInconsistent, archived };
-  const alerts = buildAlerts({ metrics: aggregate, lastSyncAt: last?.finishedAt ?? last?.startedAt ?? null, durationMs: last?.durationMs || 0, averageDurationMs: avgDuration, duplicates, partnerTitlesInconsistent, financialProfilesOrphaned, codeChangesToday: auditToday });
-  const success = runs.filter(r => r.status === "success").length;
-  return { generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { lastSync: last, averageDurationMs: avgDuration, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality, integration: { connected: Boolean(last && last.status !== "error"), lastCommunication: last?.finishedAt ?? last?.startedAt ?? null, latencyMs: last?.durationMs ?? null, averageDurationMs: avgDuration, successRate: runs.length ? success / runs.length : 0, errorRate: runs.length ? runs.filter(r => r.status === "error").length / runs.length : 0, retries: runs.filter(r => r.status === "skipped").length, recentRuns: runs.slice(0, 20) }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: completed.map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs || 0 })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "abstraction-only" } };
+  const quality = { totalClients, missingDocument, invalidDocument, duplicates, ...projectSellerQuality(missingSeller), missingRegion, missingPortfolio: null, missingCity, missingState, missingPhone: Number(contactQualityRows[0]?.missing_phone ?? 0), missingEmail: Number(contactQualityRows[0]?.missing_email ?? 0), financialProfilesOrphaned, partnerTitlesInconsistent, archived };
+  const alerts = buildAlerts({ metrics: aggregate, lastSyncAt: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, durationMs: runProjection.lastSync?.durationMs || 0, averageDurationMs: runProjection.averageDurationMs ?? 0, duplicates, partnerTitlesInconsistent, financialProfilesOrphaned, codeChangesToday: auditToday });
+  const [scheduler, locks] = await Promise.all([
+    getErpAutomaticSyncState(),
+    prisma.erpSyncLock.findMany({ orderBy: { lockedUntil: "desc" }, take: 20, select: { scope: true, runId: true, lockedUntil: true, updatedAt: true } }),
+  ]);
+  const automaticEvidence = projectAutomaticEvidence(runs, { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, locks);
+  if (!runProjection.lastSync) alerts.unshift({ id: "sync-never-observed", severity: "critical", title: "Sem execução ERP completa comprovada", detail: "Não há execução-pai concluída na janela selecionada; etapas isoladas não provam uma sincronização completa.", metric: "parentRuns", value: 0 });
+  if (!runProjection.lastAutomaticSync) alerts.unshift({ id: "scheduler-run-not-proven", severity: "warning", title: "Execução automática não comprovada", detail: "Execuções manuais e etapas isoladas não comprovam o scheduler.", metric: "schedulerParentRuns", value: 0 });
+  if (!scheduler.initialized || !scheduler.enabled) alerts.unshift({ id: "scheduler-inactive", severity: "critical", title: "Scheduler inativo ou não inicializado", detail: "Verifique os gates de ambiente e AppConfig.", metric: "schedulerInitialized", value: scheduler.initialized ? 1 : 0 });
+  return { contractVersion: "2.0", dataState: runProjection.dataState, generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { dataState: runProjection.dataState, lastSync: runProjection.lastSync, lastManualSync: runProjection.lastManualSync, lastAutomaticSync: runProjection.lastAutomaticSync, lastAutomaticSuccess: runProjection.lastAutomaticSuccess, averageDurationMs: runProjection.averageDurationMs, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality: { dataState: "available", ...quality }, integration: { dataState: runProjection.dataState, connected: automaticEvidence.automaticProven ? true : null, lastCommunication: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, latencyMs: runProjection.lastSync?.durationMs ?? null, averageDurationMs: runProjection.averageDurationMs, successRate: runProjection.successRate, errorRate: runProjection.errorRate, retries: runProjection.retries, recentRuns: runProjection.recentRuns.slice(0, 20), scheduler: { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, automaticEvidence, lock: automaticEvidence.lock }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: runProjection.parentRuns.filter(x => x.durationMs != null).map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs! })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "not_instrumented" } };
 };
 
 export async function getPlatformHealthSnapshot(days: 7 | 30 | 90, force = false) {

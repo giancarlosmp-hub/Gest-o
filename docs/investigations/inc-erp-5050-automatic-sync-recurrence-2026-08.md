@@ -1,3 +1,10 @@
+# Correção semântica da observabilidade — 13/08/2026
+
+A revisão da PR #799 remove dupla contagem: pais são somente `manual/syncAll` e
+`scheduler/automatic`; demais scopes são etapas correlacionadas. Manual não satisfaz evidência
+automática. O gate agora executa 20 fixtures comportamentais reais; seu PASS comprova o contrato
+local, não scheduler/lock/execução em produção. Produção e recovery não foram acessados.
+
 # INC-ERP-5050 — recorrência da sincronização automática (11/08/2026)
 
 ## Limite da investigação
@@ -66,3 +73,10 @@ INC_ERP_5050 = INVESTIGATING
 PRODUCTION_ACCESSED = NO
 READY_TO_MERGE_RECOVERY_PR = NO
 ```
+
+## Reconciliação de observabilidade — 12/08/2026
+
+A evidência fornecida de sync completa é classificada exclusivamente como `manual`. A investigação
+local comprovou mascaramento de erro/ausência no frontend e lacunas de contrato da Saúde; a correção
+v2 e a matriz de fontes estão em `docs/platform-health-erp-observability.md`. Isso não executou nem
+comprovou scheduler/recovery/produção. `INC_ERP_5050` permanece `INVESTIGATING`.

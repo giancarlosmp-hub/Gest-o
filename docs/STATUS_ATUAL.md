@@ -1,3 +1,18 @@
+# Correção semântica da Saúde ERP — revisão da PR #799 (13/08/2026)
+
+A visão executiva agora considera exclusivamente pais `manual/syncAll` e
+`scheduler/automatic`; etapas permanecem detalhadas e não entram em duração, quantidade ou taxas.
+`Clientes com vendedor inativo` consulta a relação real; `sem vendedor` é não instrumentado porque
+`ownerSellerId` é obrigatório. Os 20 cenários são testes comportamentais executáveis, complementados
+por guard estático. Checks verdes locais não comprovam scheduler produtivo. A 1.0B.2-O segue pausada.
+
+# 🔴 Estabilização ERP/Saúde anterior à 1.0B.2-O (12/08/2026)
+
+A execução ERP completa fornecida é **manual** e não prova scheduler. A Saúde mascarava falhas como
+zeros/ausência; o contrato v2 fail-closed, a UX explícita e o gate local estão em desenvolvimento.
+Produção/recovery não foram acessados/executados, checks remotos não foram consultados e a Sprint
+1.0B.2-O permanece pausada. Consulte [a reconciliação](platform-health-erp-observability.md).
+
 # 🔵 Sprint 1.0B.2-M — planejamento condicionado ao preflight (09/08/2026)
 
 O planejador estrito aceita apenas evidência READY íntegra e vigente, liga `evidenceHash` ao `planHash` e produz exclusivamente plano determinístico `dryRunOnly=true`/`applyAuthorized=false`. Blockers, quarentena, adulteração, inventário incompatível e replay conflitante bloqueiam sem plano parcial. A prova é sintética, nenhuma produção foi acessada e READY não autoriza apply. Até checks reais verdes: `READY_FOR_1_0B_2_M_REVIEW = NO`, `PREFLIGHT_GATED_BACKFILL_PLAN = NOT_PROVEN` e `READY_FOR_BACKFILL_PLANNING = NO`. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_M_PREFLIGHT_GATED_BACKFILL_PLAN.md).

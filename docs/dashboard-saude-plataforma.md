@@ -1,3 +1,18 @@
+# Semântica executiva v2 corrigida — PR #799 (13/08/2026)
+
+Somente `manual/syncAll` e `scheduler/automatic` são execuções-pai. A visão executiva calcula última
+execução, duração, quantidade, taxas e retries apenas nesses pais; o histórico identifica cada linha
+como `parent` ou `stage`. Etapas órfãs não viram sucesso executivo. `Clientes com vendedor inativo`
+corresponde a `ownerSeller.isActive=false`; “sem vendedor” é `null`/não instrumentado. Uma execução
+manual nunca torna “ERP conectado automaticamente” verdadeiro.
+
+# Contrato vigente v2 (12/08/2026)
+
+A Saúde diferencia `available`, `empty` e `error`; zero só é exibido após coleta válida. O snapshot
+separa qualquer execução, manual, automática e automática bem-sucedida, inclui scheduler,
+`nextRunAt`, lock, origem e correlação. A UI possui loading, erro acionável, retry, cancelamento de
+requisição obsoleta e timestamp/janela. Veja [inventário e matriz](platform-health-erp-observability.md).
+
 # Dashboard Saúde da Plataforma
 
 ## Objetivo e arquitetura

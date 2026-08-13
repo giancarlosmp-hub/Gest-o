@@ -1,3 +1,11 @@
+# Contrato de deploy — observabilidade ERP (12/08/2026)
+
+Esta estabilização não inclui migration, DDL, backfill, recovery ou deploy. O gate
+`test:platform-health-erp-observability` deve anteceder os smokes gerais no Compose CI. Em rollback,
+reverter o commit e recriar API/WEB pelo fluxo oficial, preservando banco, env e os literais
+`TENANCY_MODE=disabled` e `TENANT_READ_PILOT_ENABLED=false`. Uma execução manual nunca satisfaz o
+gate produtivo do scheduler.
+
 # AVISO CANÔNICO — SCHEMA EXTERNO EM PRODUÇÃO (07/08/2026)
 
 > O contrato vigente é `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. Bootstrap e
