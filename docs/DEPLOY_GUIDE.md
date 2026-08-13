@@ -470,3 +470,17 @@ divergência emite somente estágio, SHA esperado/observado, resultado `FAIL`, c
 code. O deploy então registra entrada/modo/formato e `DEPLOY_ENV_RESOLUTION=STARTED`; o resolver
 continua emitindo exclusivamente o marcador de fonte autorizado. O run investigado não iniciou
 build, cutover, containers ou Recovery, e não autoriza executar nenhum deles nesta correção.
+# Build recovery-safe com fonte legada
+
+Evidência: run `31720219813`, job `94515047904`, SHA
+`a3f900b05cbbcc2ab9ee8bba306c4a2cea524d97`. Fast-forward, SHA, checkout, worktree, script,
+entrypoint, `MODE=build`, resolução `legacy_build_only` e scheduler seguro passaram; o gate
+`TENANCY_MODE` falhou antes de qualquer build, container, cutover ou Recovery.
+
+Quando e somente quando o resolver seleciona `legacy_build_only` em `MODE=build`, o deploy copia a
+fonte protegida para `mktemp` mode 600, rejeita duplicidade/sintaxe malformada e reconcilia
+`ERP_SYNC_SCHEDULER_ENABLED=false`, `TENANCY_MODE=disabled`,
+`TENANT_READ_PILOT_ENABLED=false`, `DATABASE_SCHEMA_MODE=external` e os três gates de seed como
+`false`. Preflight e Compose usam essa cópia, que é apagada no EXIT; hashes e valores não são
+emitidos. O hash da fonte antes/depois deve coincidir. Canônico recebe zero overlay e segue
+autoritativo; cutover é canonical-only. Repetir apenas `phase=build`, somente após merge/checks.

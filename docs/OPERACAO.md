@@ -583,3 +583,17 @@ logo não autoriza afirmar qual deles divergiu. Em uma futura execução autoriz
 `DEPLOY_SCRIPT_PRESENT` e `DEPLOY_SCRIPT_STARTING=build`. Ausência ou `FAIL` bloqueia o deploy e deve
 ser analisada pelos campos sanitizados `DEPLOY_FAILURE_*`. Esta correção não autoriza retry, cutover
 ou Recovery; nenhuma dessas operações foi executada.
+# Run 31720219813 — procedimento de retomada do build
+
+No job `94515047904` (SHA `a3f900b05cbbcc2ab9ee8bba306c4a2cea524d97`), os checkpoints
+`DEPLOY_GIT_FAST_FORWARD`, `DEPLOY_EXPECTED_SHA_FORMAT`, `DEPLOY_CHECKOUT_SHA_MATCH`,
+`DEPLOY_WORKTREE_CLEAN`, `DEPLOY_SCRIPT_PRESENT`, entrada/`MODE=build`, resolução
+`legacy_build_only` e scheduler desativado passaram. A execução parou no preflight:
+`TENANCY_MODE does not match the production policy`. Não houve build/cutover/Recovery nem acesso ou
+mudança de produção.
+
+O deploy cria o env efetivo somente para `MODE=build + legacy_build_only`, fora do checkout e do
+diretório canônico, mode 600, com cleanup por trap. Ele rejeita gates duplicados/malformados,
+normaliza somente a cópia, executa preflight/Compose/build com ela e comprova a imutabilidade da
+fonte por SHA-256. O cutover rejeita legado e overlay; canônico inválido nunca usa fallback. Após
+merge e checks verdes, a única retomada autorizada é repetir Deploy Production com `phase=build`.

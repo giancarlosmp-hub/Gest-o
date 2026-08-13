@@ -467,3 +467,17 @@ A auditoria do bloco remoto identifica como comando que encerrou a execução o 
 vazio ou ilegível. Um entrypoint versionado agora valida formatos SHA-1 completos, igualdade,
 worktree e script com checkpoints e trap sanitizados antes de iniciar `build`. Não houve build,
 cutover, recriação ou Recovery; Recovery e a prova da sincronização automática continuam pendentes.
+# 🔵 Overlay efêmero do build legado — run 31720219813 (13/08/2026)
+
+O job `94515047904`, no SHA `a3f900b05cbbcc2ab9ee8bba306c4a2cea524d97`, passou por
+fast-forward, formato/match do SHA, worktree limpa, presença/entrada do script, `MODE=build`,
+resolver `legacy_build_only` e scheduler válido/desativado. Falhou fechado em
+`TENANCY_MODE does not match the production policy`, antes de build, recriação, cutover ou Recovery;
+produção e env produtivo não foram modificados.
+
+Somente `MODE=build + legacy_build_only` agora usa uma cópia `mktemp` mode 600, reconciliada com os
+sete gates seguros, validada pelo preflight e removida por trap. Duplicidade ou linha de gate
+malformada falha fechada; o SHA-256 do legado é comparado antes/depois sem ser emitido. O canônico
+continua autoritativo e sem overlay, e cutover continua canonical-only. Após merge e checks verdes,
+deve-se repetir exclusivamente Deploy Production `phase=build`; Recovery e Sprint 1.0B.2-O seguem
+não executados.
