@@ -16,7 +16,22 @@ for (const contract of [
   "BACKUP_FAILURE_EXIT_CODE", "PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS",
 ]) assert.ok(script.includes(contract), `missing contract: ${contract}`);
 
-assert.match(script, /inside_authorized[\s\S]*! -L/);
+assert.match(script, /future_path_in_authorized_dir[\s\S]*DUMP_PATH_CONTRACT=PASS/);
+assert.match(script, /MANIFEST_PATH_CONTRACT=PASS[\s\S]*EXISTING_PAIR_STATE=absent[\s\S]*complete_valid/);
+const orderedContracts = [
+  "STAGE=authorized_directory", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",
+  "STAGE=existing_pair_state", "STAGE=database_url_contract", "STAGE=database_container",
+  "STAGE=database_network", "STAGE=database_volume", "STAGE=database_mount",
+  "STAGE=disk_capacity", "STAGE=preparation_lock", "STAGE=dump",
+  "TMP_DIR=\"$(mktemp", "backup_validate_plain_dump", "STAGE=atomic_promotion",
+  "PRODUCTION_BACKUP_FRESHNESS=PASS", "STAGE=preflight", "PRODUCTION_BACKUP_PREPARATION=PASS",
+];
+let cursor = -1;
+for (const contract of orderedContracts) {
+  const next = script.indexOf(contract, cursor + 1);
+  assert.ok(next > cursor, `backup stage out of order or absent: ${contract}`);
+  cursor = next;
+}
 assert.match(script, /env_resolution; COMMAND=resolve_production_configuration/);
 assert.match(script, /env_metadata; COMMAND=validate_protected_configuration_metadata/);
 assert.match(script, /env_syntax; COMMAND=validate_protected_configuration_syntax/);

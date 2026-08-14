@@ -28,7 +28,22 @@ failure(){
 trap failure ERR
 need(){ command -v "$1" >/dev/null 2>&1; }
 protected_regular(){ [[ -f "$1" && ! -L "$1" && "$(stat -c %U:%G "$1")" == root:root && "$(stat -c %a "$1")" == 600 ]]; }
-inside_authorized(){ [[ "$(dirname -- "$1")" == "$AUTHORIZED_DIR" && "$(readlink -m -- "$1")" == "$AUTHORIZED_DIR/$(basename -- "$1")" ]]; }
+future_path_in_authorized_dir(){
+  local path=$1 parent base normalized
+  [[ "$path" == /* && "$path" != */../* && "$path" != */.. && "$path" != */./* && "$path" != */. ]] || return 1
+  parent="$(dirname -- "$path")"; base="$(basename -- "$path")"
+  [[ -n "$base" && "$base" != . && "$base" != .. && "$parent" == "$AUTHORIZED_DIR" ]] || return 1
+  normalized="$(readlink -m -- "$path")"
+  [[ "$normalized" == "$path" && "$normalized" == "$AUTHORIZED_DIR/$base" ]]
+}
+valid_existing_manifest(){
+  local manifest=$1 expected=$2
+  awk -v expected="$expected" '
+    NF != 2 || length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || $2 != expected { exit 1 }
+    { count++ }
+    END { exit count == 1 ? 0 : 1 }
+  ' "$manifest" >/dev/null 2>&1
+}
 valid_env_syntax(){
   awk '/^[[:space:]]*($|#)/{next} /^[A-Za-z_][A-Za-z0-9_]*=/{next} {exit 1}' "$1" >/dev/null 2>&1 &&
     bash -n "$1" >/dev/null 2>&1
@@ -72,26 +87,32 @@ checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
 STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$AUTHORIZED_DIR" == /* ]]
 [[ -e "$AUTHORIZED_DIR" && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
+[[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
 
-STAGE=backup_path_contract; COMMAND=validate_backup_path
-[[ "$PRODUCTION_BACKUP_FILE" != "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-inside_authorized "$PRODUCTION_BACKUP_FILE"
+STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
+future_path_in_authorized_dir "$PRODUCTION_BACKUP_FILE"
 [[ ! -L "$PRODUCTION_BACKUP_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_FILE" || -f "$PRODUCTION_BACKUP_FILE" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_CONTRACT=PASS
 
 STAGE=manifest_path_contract; COMMAND=validate_manifest_path
-inside_authorized "$PRODUCTION_BACKUP_SHA256_FILE"
+future_path_in_authorized_dir "$PRODUCTION_BACKUP_SHA256_FILE"
 [[ ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -f "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-checkpoint PRODUCTION_BACKUP_PATHS=PASS
+[[ "$PRODUCTION_BACKUP_FILE" != "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_CONTRACT=PASS
 
-STAGE=existing_pair_metadata; COMMAND=validate_existing_pair_metadata
-[[ ! -e "$PRODUCTION_BACKUP_FILE" || -e "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -e "$PRODUCTION_BACKUP_FILE" ]]
-[[ ! -e "$PRODUCTION_BACKUP_FILE" || "$(stat -c %U:%G "$PRODUCTION_BACKUP_FILE")" == root:root && "$(stat -c %a "$PRODUCTION_BACKUP_FILE")" == 600 ]]
-[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || "$(stat -c %U:%G "$PRODUCTION_BACKUP_SHA256_FILE")" == root:root && "$(stat -c %a "$PRODUCTION_BACKUP_SHA256_FILE")" == 600 ]]
-checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_METADATA=PASS
+STAGE=existing_pair_state; COMMAND=validate_existing_pair_state
+if [[ ! -e "$PRODUCTION_BACKUP_FILE" && ! -e "$PRODUCTION_BACKUP_SHA256_FILE" ]]; then
+  checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_STATE=absent
+else
+  protected_regular "$PRODUCTION_BACKUP_FILE"
+  protected_regular "$PRODUCTION_BACKUP_SHA256_FILE"
+  valid_existing_manifest "$PRODUCTION_BACKUP_SHA256_FILE" "$(basename "$PRODUCTION_BACKUP_FILE")"
+  (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null)
+  checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_STATE=complete_valid
+fi
 
 STAGE=database_url_contract; COMMAND=parse_database_url
 db_inventory="$(DATABASE_URL="$DATABASE_URL" node -e 'const u=new URL(process.env.DATABASE_URL); if (!u.hostname || !u.pathname.slice(1)) process.exit(1); process.stdout.write(`${u.hostname}\t${u.pathname.slice(1)}`)')"

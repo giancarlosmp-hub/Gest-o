@@ -62,15 +62,29 @@ run_case(){
 CASE_AUTH="$TMP/missing"; run_case missing-directory authorized_directory
 mv "$AUTH" "$TMP/real-auth"; ln -s "$TMP/real-auth" "$AUTH"; run_case symlink-directory authorized_directory
 rm "$AUTH"; mv "$TMP/real-auth" "$AUTH"
-CASE_MANIFEST_FILE="$AUTH/production.sql.gz"; run_case equal-paths backup_path_contract
-CASE_BACKUP_FILE="$TMP/outside.gz"; run_case outside-path backup_path_contract
-ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink backup_path_contract; rm "$AUTH/production.sql.gz"
+CASE_MANIFEST_FILE="$AUTH/production.sql.gz"; run_case equal-paths manifest_path_contract
+CASE_BACKUP_FILE="$TMP/outside.gz"; run_case outside-path dump_path_contract
+CASE_BACKUP_FILE="$AUTH/../backups/production.sql.gz"; run_case dotdot-path dump_path_contract
+ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink dump_path_contract; rm "$AUTH/production.sql.gz"
 ln -s "$TMP/target" "$AUTH/production.sql.gz.sha256"; run_case manifest-symlink manifest_path_contract; rm "$AUTH/production.sql.gz.sha256"
 touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 640 "$AUTH/production.sql.gz"
-run_case invalid-mode existing_pair_metadata; rm -f "$AUTH"/*
+run_case invalid-mode existing_pair_state; rm -f "$AUTH"/*
 touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH"/*
-chown 65534:65534 "$AUTH/production.sql.gz"; run_case invalid-owner existing_pair_metadata; rm -f "$AUTH"/*
-touch "$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"; run_case incomplete-pair existing_pair_metadata; rm -f "$AUTH"/*
+chown 65534:65534 "$AUTH/production.sql.gz"; run_case invalid-owner existing_pair_state; rm -f "$AUTH"/*
+touch "$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"; run_case dump-only existing_pair_state; rm -f "$AUTH"/*
+touch "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"; run_case manifest-only existing_pair_state; rm -f "$AUTH"/*
+
+# A future destination does not have to exist. A complete previous pair does,
+# however, have to be protected and validate its own checksum metadata.
+CASE_DATABASE_URL='not-a-url'; run_case absent-pair database_url_contract
+printf 'previous backup\n' >"$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"
+(cd "$AUTH" && sha256sum production.sql.gz >production.sql.gz.sha256); chmod 600 "$AUTH/production.sql.gz.sha256"
+CASE_DATABASE_URL='not-a-url'; run_case complete-valid-pair database_url_contract
+grep -Fq 'PRODUCTION_BACKUP_EXISTING_PAIR_STATE=complete_valid' "$TMP/complete-valid-pair.out"
+rm -f "$AUTH"/*
+printf 'previous backup\n' >"$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"
+printf '%064d  ../path-sentinel\n' 0 >"$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"
+run_case invalid-manifest-metadata existing_pair_state; rm -f "$AUTH"/*
 
 # URL and deterministic PostgreSQL topology contracts.
 CASE_DATABASE_URL='not-a-url'; run_case invalid-url database_url_contract
@@ -89,9 +103,10 @@ run_case occupied-lock preparation_lock; flock -u 8
 
 # The fully valid inventory emits every sanitized checkpoint before the mocked dump fails.
 run_case valid-inventory dump
-for marker in AUTHORIZED_DIRECTORY PATHS DATABASE_URL_CONTRACT DB_CONTAINER DB_NETWORK DB_VOLUME DB_MOUNT DISK_CAPACITY; do
+for marker in AUTHORIZED_DIRECTORY DUMP_PATH_CONTRACT MANIFEST_PATH_CONTRACT DATABASE_URL_CONTRACT DB_CONTAINER DB_NETWORK DB_VOLUME DB_MOUNT DISK_CAPACITY; do
   grep -Fq "PRODUCTION_BACKUP_${marker}=PASS" "$TMP/valid-inventory.out"
 done
+grep -Fq 'PRODUCTION_BACKUP_EXISTING_PAIR_STATE=absent' "$TMP/valid-inventory.out"
 grep -Fq 'PRODUCTION_BACKUP_LOCK=ACQUIRED' "$TMP/valid-inventory.out"
 grep -Fq 'PRODUCTION_BACKUP_SOURCE_VALIDATED=PASS' "$TMP/valid-inventory.out"
 
