@@ -28,14 +28,6 @@ failure(){
 trap failure ERR
 need(){ command -v "$1" >/dev/null 2>&1; }
 protected_regular(){ [[ -f "$1" && ! -L "$1" && "$(stat -c %U:%G "$1")" == root:root && "$(stat -c %a "$1")" == 600 ]]; }
-future_path_in_authorized_dir(){
-  local path=$1 parent base normalized
-  [[ "$path" == /* && "$path" != */../* && "$path" != */.. && "$path" != */./* && "$path" != */. ]] || return 1
-  parent="$(dirname -- "$path")"; base="$(basename -- "$path")"
-  [[ -n "$base" && "$base" != . && "$base" != .. && "$parent" == "$AUTHORIZED_DIR" ]] || return 1
-  normalized="$(readlink -m -- "$path")"
-  [[ "$normalized" == "$path" && "$normalized" == "$AUTHORIZED_DIR/$base" ]]
-}
 valid_existing_manifest(){
   local manifest=$1 expected=$2
   awk -v expected="$expected" '
@@ -91,13 +83,34 @@ STAGE=authorized_directory; COMMAND=validate_authorized_directory
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
 
 STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
-future_path_in_authorized_dir "$PRODUCTION_BACKUP_FILE"
+COMMAND=validate_dump_path_absolute
+[[ "$PRODUCTION_BACKUP_FILE" == /* ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_ABSOLUTE=PASS
+COMMAND=validate_dump_path_traversal
+[[ "$PRODUCTION_BACKUP_FILE" != */../* && "$PRODUCTION_BACKUP_FILE" != */.. && "$PRODUCTION_BACKUP_FILE" != */./* && "$PRODUCTION_BACKUP_FILE" != */. ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_TRAVERSAL=PASS
+COMMAND=validate_dump_path_normalized
+[[ "$(readlink -m -- "$PRODUCTION_BACKUP_FILE")" == "$PRODUCTION_BACKUP_FILE" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_NORMALIZED=PASS
+COMMAND=validate_dump_path_parent
+[[ "$(dirname -- "$PRODUCTION_BACKUP_FILE")" == "$AUTHORIZED_DIR" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_PARENT=PASS
+COMMAND=validate_dump_path_basename
+[[ "$(basename -- "$PRODUCTION_BACKUP_FILE")" == production.sql.gz ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_BASENAME=PASS
+COMMAND=validate_dump_path_symlink
 [[ ! -L "$PRODUCTION_BACKUP_FILE" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_SYMLINK=PASS
+COMMAND=validate_dump_path_entry_type
 [[ ! -e "$PRODUCTION_BACKUP_FILE" || -f "$PRODUCTION_BACKUP_FILE" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_ENTRY_TYPE=PASS
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_CONTRACT=PASS
 
 STAGE=manifest_path_contract; COMMAND=validate_manifest_path
-future_path_in_authorized_dir "$PRODUCTION_BACKUP_SHA256_FILE"
+[[ "$PRODUCTION_BACKUP_SHA256_FILE" == /* && "$PRODUCTION_BACKUP_SHA256_FILE" != */../* && "$PRODUCTION_BACKUP_SHA256_FILE" != */.. && "$PRODUCTION_BACKUP_SHA256_FILE" != */./* && "$PRODUCTION_BACKUP_SHA256_FILE" != */. ]]
+[[ "$(readlink -m -- "$PRODUCTION_BACKUP_SHA256_FILE")" == "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+[[ "$(dirname -- "$PRODUCTION_BACKUP_SHA256_FILE")" == "$AUTHORIZED_DIR" ]]
+[[ "$(basename -- "$PRODUCTION_BACKUP_SHA256_FILE")" == production.sql.gz.sha256 ]]
 [[ ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -f "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ "$PRODUCTION_BACKUP_FILE" != "$PRODUCTION_BACKUP_SHA256_FILE" ]]
