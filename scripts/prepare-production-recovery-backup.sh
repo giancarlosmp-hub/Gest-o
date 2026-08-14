@@ -28,14 +28,6 @@ failure(){
 trap failure ERR
 need(){ command -v "$1" >/dev/null 2>&1; }
 protected_regular(){ [[ -f "$1" && ! -L "$1" && ( "$(id -u)" != 0 || "$(stat -c %U:%G "$1")" == root:root ) && "$(stat -c %a "$1")" == 600 ]]; }
-future_path_in_authorized_dir(){
-  local path=$1 parent base normalized
-  [[ "$path" == /* && "$path" != */../* && "$path" != */.. && "$path" != */./* && "$path" != */. ]] || return 1
-  parent="$(dirname -- "$path")"; base="$(basename -- "$path")"
-  [[ -n "$base" && "$base" != . && "$base" != .. && "$parent" == "$AUTHORIZED_DIR" ]] || return 1
-  normalized="$(readlink -m -- "$path")"
-  [[ "$normalized" == "$path" && "$normalized" == "$AUTHORIZED_DIR/$base" ]]
-}
 valid_existing_manifest(){
   local manifest=$1 expected=$2
   awk -v expected="$expected" '
@@ -79,7 +71,7 @@ valid_env_syntax "$ENV_FILE"
 # Loading is read-only. Neither source is copied, reconciled, installed or promoted.
 set -a; source "$ENV_FILE"; set +a
 STAGE=required_configuration; COMMAND=validate_backup_configuration_contract
-for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED; do
+for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
   [[ -n "${!required:-}" ]]
 done
 checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
@@ -99,27 +91,36 @@ dump_base="$(basename -- "$raw_dump")"
 EXPECTED_DUMP_PATH="$AUTHORIZED_DIR/$dump_base"
 target_dump="${PRODUCTION_BACKUP_FILE:-$EXPECTED_DUMP_PATH}"
 
-STAGE=dump_path_contract; COMMAND=validate_dump_path_absolute
+COMMAND=validate_dump_path_absolute
 [[ "$target_dump" == /* ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_ABSOLUTE=PASS
 
-STAGE=dump_path_contract; COMMAND=validate_dump_path_traversal
+COMMAND=validate_dump_path_traversal
 [[ "$target_dump" != */../* && "$target_dump" != */.. && "$target_dump" != */./* && "$target_dump" != */. ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_TRAVERSAL=PASS
 
-STAGE=dump_path_contract; COMMAND=validate_dump_path_normalized
+COMMAND=validate_dump_path_normalized
 [[ "$(readlink -m -- "$target_dump")" == "$target_dump" ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_NORMALIZED=PASS
 
-STAGE=dump_path_contract; COMMAND=validate_dump_path_parent
+COMMAND=validate_dump_path_parent
 dump_parent="$(dirname -- "$target_dump")"
 [[ "$dump_parent" == "$AUTHORIZED_DIR" ]]
-[[ "$target_dump" == "$EXPECTED_DUMP_PATH" ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_PARENT=PASS
 
-STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
+COMMAND=validate_dump_path_basename
+[[ "$dump_base" == production.sql.gz ]]
+[[ "$target_dump" == "$EXPECTED_DUMP_PATH" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_BASENAME=PASS
+
+COMMAND=validate_dump_path_symlink
 [[ ! -L "$target_dump" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_SYMLINK=PASS
+
+COMMAND=validate_dump_path_entry_type
 [[ ! -e "$target_dump" || -f "$target_dump" ]]
+checkpoint PRODUCTION_BACKUP_DUMP_PATH_ENTRY_TYPE=PASS
+
 PRODUCTION_BACKUP_FILE="$target_dump"
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_CONTRACT=PASS
 
@@ -130,28 +131,37 @@ manifest_base="$(basename -- "$raw_manifest")"
 EXPECTED_MANIFEST_PATH="$AUTHORIZED_DIR/$manifest_base"
 target_manifest="${PRODUCTION_BACKUP_SHA256_FILE:-$EXPECTED_MANIFEST_PATH}"
 
-STAGE=manifest_path_contract; COMMAND=validate_manifest_path_absolute
+COMMAND=validate_manifest_path_absolute
 [[ "$target_manifest" == /* ]]
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_ABSOLUTE=PASS
 
-STAGE=manifest_path_contract; COMMAND=validate_manifest_path_traversal
+COMMAND=validate_manifest_path_traversal
 [[ "$target_manifest" != */../* && "$target_manifest" != */.. && "$target_manifest" != */./* && "$target_manifest" != */. ]]
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_TRAVERSAL=PASS
 
-STAGE=manifest_path_contract; COMMAND=validate_manifest_path_normalized
+COMMAND=validate_manifest_path_normalized
 [[ "$(readlink -m -- "$target_manifest")" == "$target_manifest" ]]
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_NORMALIZED=PASS
 
-STAGE=manifest_path_contract; COMMAND=validate_manifest_path_parent
+COMMAND=validate_manifest_path_parent
 manifest_parent="$(dirname -- "$target_manifest")"
 [[ "$manifest_parent" == "$AUTHORIZED_DIR" ]]
-[[ "$target_manifest" == "$EXPECTED_MANIFEST_PATH" ]]
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_PARENT=PASS
 
-STAGE=manifest_path_contract; COMMAND=validate_manifest_path_contract
+COMMAND=validate_manifest_path_basename
+[[ "$manifest_base" == production.sql.gz.sha256 ]]
+[[ "$target_manifest" == "$EXPECTED_MANIFEST_PATH" ]]
+checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_BASENAME=PASS
+
+COMMAND=validate_manifest_path_symlink
 [[ ! -L "$target_manifest" ]]
+checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_SYMLINK=PASS
+
+COMMAND=validate_manifest_path_entry_type
 [[ ! -e "$target_manifest" || -f "$target_manifest" ]]
 [[ "$target_manifest" != "$PRODUCTION_BACKUP_FILE" ]]
+checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_ENTRY_TYPE=PASS
+
 PRODUCTION_BACKUP_SHA256_FILE="$target_manifest"
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_CONTRACT=PASS
 
