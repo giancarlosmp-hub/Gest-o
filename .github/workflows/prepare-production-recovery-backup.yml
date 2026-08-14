@@ -37,15 +37,30 @@ jobs:
           script_stop: true
           command_timeout: 2h
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
+            BACKUP_STAGE=confirmation
+            BACKUP_COMMAND=validate_confirmation
+            report_initial_failure() {
+              rc=$?
+              trap - ERR
+              printf 'BACKUP_FAILURE_STAGE=%s\nBACKUP_FAILURE_COMMAND=%s\nBACKUP_FAILURE_EXIT_CODE=%s\n' \
+                "$BACKUP_STAGE" "$BACKUP_COMMAND" "$rc" >&2
+              exit "$rc"
+            }
+            trap report_initial_failure ERR
             test "$PREPARE_CONFIRM" = PREPARE_PRODUCTION_RECOVERY_BACKUP
+            BACKUP_STAGE=expected_sha
+            BACKUP_COMMAND=validate_expected_sha
             case "$EXPECTED_MAIN_SHA" in (*[!0-9a-f]*|'') exit 2;; esac
             test "${#EXPECTED_MAIN_SHA}" -eq 40
+            BACKUP_STAGE=checkout
+            BACKUP_COMMAND=prepare_main_checkout
             cd /apps/gest-o
             test -z "$(git status --porcelain)"
-            git fetch origin main
-            git switch main
-            git pull --ff-only origin main
+            git fetch origin main >/dev/null 2>&1
+            git switch main >/dev/null 2>&1
+            git pull --ff-only origin main >/dev/null 2>&1
             test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+            trap - ERR
             CONFIRM="$PREPARE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
               bash scripts/prepare-production-recovery-backup.sh

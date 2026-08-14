@@ -17,6 +17,11 @@ for (const contract of [
 ]) assert.ok(script.includes(contract), `missing contract: ${contract}`);
 
 assert.match(script, /inside_authorized[\s\S]*! -L/);
+assert.match(script, /env_resolution; COMMAND=resolve_production_configuration/);
+assert.match(script, /env_metadata; COMMAND=validate_protected_configuration_metadata/);
+assert.match(script, /env_syntax; COMMAND=validate_protected_configuration_syntax/);
+assert.match(script, /required_configuration; COMMAND=validate_backup_configuration_contract/);
+assert.match(script, /-e "\$CANONICAL_ENV_FILE" \|\| -L "\$CANONICAL_ENV_FILE"[\s\S]*legacy_read_only/);
 assert.match(script, /stat -c %U:%G[\s\S]*root:root/);
 assert.match(script, /stat -c %a[\s\S]*600/);
 assert.match(script, /OLD_BACKUP[\s\S]*install -o root -g root -m 600/);
@@ -29,10 +34,11 @@ assert.match(workflow, /environment: production-backup-recovery/);
 assert.match(workflow, /git pull --ff-only origin main/);
 assert.doesNotMatch(workflow, /production-cutover|erp-production-recovery/);
 
-// Scenario matrix A-O is enforced by the executable primitives and fail-closed
+// Scenario matrix A-P is enforced by the executable primitives and fail-closed
 // branches above; these labels make omissions visible during review.
 const scenarios = ["valid-pair", "dump-failure", "invalid-gzip", "undersize", "mismatched-sidecar",
   "replace-old", "mid-promotion-failure", "rollback-old-pair", "symlink", "owner-mode",
-  "outside-authorized", "concurrent", "cutover-preflight", "sentinel-redaction", "runtime-unchanged"];
-assert.equal(scenarios.length, 15);
-console.log(`Production backup recovery contract: PASS (A-O: ${scenarios.join(", ")})`);
+  "outside-authorized", "concurrent", "cutover-preflight", "sentinel-redaction", "runtime-unchanged",
+  "successful-full-flow", "atomic-pair-rollback"];
+assert.equal(scenarios.length, 17);
+console.log(`Production backup recovery contract: PASS (A-P: ${scenarios.join(", ")})`);

@@ -3,7 +3,10 @@ set -Eeuo pipefail
 umask 077
 
 APP_DIR="${APP_DIR:-/apps/gest-o}"
-ENV_FILE="${PRODUCTION_BACKUP_ENV_FILE:-/root/demetra-env/.env}"
+CANONICAL_ENV_FILE="${PRODUCTION_BACKUP_ENV_FILE:-/root/demetra-env/.env}"
+LEGACY_ENV_FILE="${PRODUCTION_BACKUP_LEGACY_ENV_FILE:-/root/demetra-env/production.env}"
+ENV_FILE=''
+ENV_SOURCE=''
 AUTHORIZED_DIR="${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}"
 STAGE=initial
 COMMAND=initial_validation
@@ -23,23 +26,48 @@ failure(){
   exit "$rc"
 }
 trap failure ERR
-need(){ command -v "$1" >/dev/null; }
+need(){ command -v "$1" >/dev/null 2>&1; }
 protected_regular(){ [[ -f "$1" && ! -L "$1" && "$(stat -c %U:%G "$1")" == root:root && "$(stat -c %a "$1")" == 600 ]]; }
 inside_authorized(){ [[ "$(dirname -- "$1")" == "$AUTHORIZED_DIR" && "$(readlink -m -- "$1")" == "$AUTHORIZED_DIR/$(basename -- "$1")" ]]; }
+valid_env_syntax(){
+  awk '/^[[:space:]]*($|#)/{next} /^[A-Za-z_][A-Za-z0-9_]*=/{next} {exit 1}' "$1" >/dev/null 2>&1 &&
+    bash -n "$1" >/dev/null 2>&1
+}
 
 checkpoint PRODUCTION_BACKUP_PREPARATION=STARTED
+STAGE=confirmation; COMMAND=validate_confirmation
 [[ "${CONFIRM:-}" == PREPARE_PRODUCTION_RECOVERY_BACKUP ]]
+STAGE=expected_sha; COMMAND=validate_expected_sha
 [[ "${EXPECTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
+STAGE=prerequisites; COMMAND=validate_required_commands
 for c in awk bash cp date docker df flock git grep gzip install mktemp mv node readlink sha256sum stat sync; do need "$c"; done
+STAGE=checkout; COMMAND=validate_main_checkout
 cd "$APP_DIR"
-[[ "$(git branch --show-current)" == main && "$(git rev-parse HEAD)" == "$EXPECTED_SHA" && -z "$(git status --porcelain)" ]]
-git show-ref --verify --quiet refs/remotes/origin/main
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]]
+[[ "$(git branch --show-current 2>/dev/null)" == main && "$(git rev-parse HEAD 2>/dev/null)" == "$EXPECTED_SHA" && -z "$(git status --porcelain 2>/dev/null)" ]]
+git show-ref --verify --quiet refs/remotes/origin/main >/dev/null 2>&1
+[[ "$(git rev-parse HEAD 2>/dev/null)" == "$(git rev-parse origin/main 2>/dev/null)" ]]
+
+# The canonical file is authoritative whenever any directory entry exists.
+# Only its complete absence authorizes the single, read-only legacy source.
+STAGE=env_resolution; COMMAND=resolve_production_configuration
+if [[ -e "$CANONICAL_ENV_FILE" || -L "$CANONICAL_ENV_FILE" ]]; then
+  ENV_FILE="$CANONICAL_ENV_FILE"; ENV_SOURCE=canonical
+elif [[ -e "$LEGACY_ENV_FILE" || -L "$LEGACY_ENV_FILE" ]]; then
+  ENV_FILE="$LEGACY_ENV_FILE"; ENV_SOURCE=legacy_read_only
+else
+  false
+fi
+STAGE=env_metadata; COMMAND=validate_protected_configuration_metadata
 protected_regular "$ENV_FILE"
-# Syntax is checked before the protected configuration is loaded; it is never printed.
-awk '/^[[:space:]]*($|#)/{next} /^[A-Za-z_][A-Za-z0-9_]*=/{next} {exit 1}' "$ENV_FILE"
+STAGE=env_syntax; COMMAND=validate_protected_configuration_syntax
+valid_env_syntax "$ENV_FILE"
+# Loading is read-only. Neither source is copied, reconciled, installed or promoted.
 set -a; source "$ENV_FILE"; set +a
-: "${DATABASE_URL:?}" "${PRODUCTION_DB_HOST_EXPECTED:?}" "${PRODUCTION_DB_CONTAINER_EXPECTED:?}" "${PRODUCTION_DB_VOLUME_EXPECTED:?}" "${PRODUCTION_BACKUP_FILE:?}" "${PRODUCTION_BACKUP_SHA256_FILE:?}"
+STAGE=required_configuration; COMMAND=validate_backup_configuration_contract
+for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
+  [[ -n "${!required:-}" ]]
+done
+checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
 
 STAGE=readonly_inventory; COMMAND=validate_inventory
 [[ "$AUTHORIZED_DIR" == /* && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
