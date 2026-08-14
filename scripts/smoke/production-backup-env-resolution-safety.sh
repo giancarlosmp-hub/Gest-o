@@ -67,8 +67,10 @@ out="$TMP/e"; run_case "$out"; assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_
 # F: wrong mode (and therefore an invalid protected file) is rejected.
 rm -f "$LEGACY"; write_env "$LEGACY"; chmod 640 "$LEGACY"; out="$TMP/f"; run_case "$out"
 assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
-write_env "$LEGACY"; chown 65534:65534 "$LEGACY"; out="$TMP/f-owner"; run_case "$out"
-assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
+if [[ "$(id -u)" -eq 0 ]]; then
+  write_env "$LEGACY"; chown 65534:65534 "$LEGACY"; out="$TMP/f-owner"; run_case "$out"
+  assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
+fi
 
 # G: malformed legacy shell syntax is rejected without exposing its path/content.
 rm -f "$LEGACY"; printf 'DATABASE_URL="unterminated\n' >"$LEGACY"; chmod 600 "$LEGACY"; out="$TMP/g"; run_case "$out"

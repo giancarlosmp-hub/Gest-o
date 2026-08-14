@@ -16,7 +16,8 @@ for (const contract of [
   "BACKUP_FAILURE_EXIT_CODE", "PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS",
 ]) assert.ok(script.includes(contract), `missing contract: ${contract}`);
 
-assert.match(script, /future_path_in_authorized_dir[\s\S]*DUMP_PATH_CONTRACT=PASS/);
+assert.match(script, /DUMP_PATH_PARENT=PASS/);
+assert.match(script, /MANIFEST_PATH_PARENT=PASS/);
 assert.match(script, /MANIFEST_PATH_CONTRACT=PASS[\s\S]*EXISTING_PAIR_STATE=absent[\s\S]*complete_valid/);
 const orderedContracts = [
   "STAGE=authorized_directory", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",

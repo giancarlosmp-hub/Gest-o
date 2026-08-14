@@ -65,12 +65,17 @@ rm "$AUTH"; mv "$TMP/real-auth" "$AUTH"
 CASE_MANIFEST_FILE="$AUTH/production.sql.gz"; run_case equal-paths manifest_path_contract
 CASE_BACKUP_FILE="$TMP/outside.gz"; run_case outside-path dump_path_contract
 CASE_BACKUP_FILE="$AUTH/../backups/production.sql.gz"; run_case dotdot-path dump_path_contract
+CASE_BACKUP_FILE="/var/backups/production.sql.gz"; run_case divergent-parent dump_path_contract
+CASE_BACKUP_FILE="$AUTH/./production.sql.gz"; run_case unnormalized-path dump_path_contract
+CASE_MANIFEST_FILE="/var/backups/production.sql.gz.sha256"; run_case divergent-manifest-parent manifest_path_contract
 ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink dump_path_contract; rm "$AUTH/production.sql.gz"
 ln -s "$TMP/target" "$AUTH/production.sql.gz.sha256"; run_case manifest-symlink manifest_path_contract; rm "$AUTH/production.sql.gz.sha256"
 touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 640 "$AUTH/production.sql.gz"
 run_case invalid-mode existing_pair_state; rm -f "$AUTH"/*
-touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH"/*
-chown 65534:65534 "$AUTH/production.sql.gz"; run_case invalid-owner existing_pair_state; rm -f "$AUTH"/*
+if [[ "$(id -u)" -eq 0 ]]; then
+  touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH"/*
+  chown 65534:65534 "$AUTH/production.sql.gz"; run_case invalid-owner existing_pair_state; rm -f "$AUTH"/*
+fi
 touch "$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"; run_case dump-only existing_pair_state; rm -f "$AUTH"/*
 touch "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"; run_case manifest-only existing_pair_state; rm -f "$AUTH"/*
 
@@ -103,7 +108,7 @@ run_case occupied-lock preparation_lock; flock -u 8
 
 # The fully valid inventory emits every sanitized checkpoint before the mocked dump fails.
 run_case valid-inventory dump
-for marker in AUTHORIZED_DIRECTORY DUMP_PATH_CONTRACT MANIFEST_PATH_CONTRACT DATABASE_URL_CONTRACT DB_CONTAINER DB_NETWORK DB_VOLUME DB_MOUNT DISK_CAPACITY; do
+for marker in AUTHORIZED_DIRECTORY DUMP_PATH_ABSOLUTE DUMP_PATH_TRAVERSAL DUMP_PATH_NORMALIZED DUMP_PATH_PARENT DUMP_PATH_CONTRACT MANIFEST_PATH_ABSOLUTE MANIFEST_PATH_TRAVERSAL MANIFEST_PATH_NORMALIZED MANIFEST_PATH_PARENT MANIFEST_PATH_CONTRACT DATABASE_URL_CONTRACT DB_CONTAINER DB_NETWORK DB_VOLUME DB_MOUNT DISK_CAPACITY; do
   grep -Fq "PRODUCTION_BACKUP_${marker}=PASS" "$TMP/valid-inventory.out"
 done
 grep -Fq 'PRODUCTION_BACKUP_EXISTING_PAIR_STATE=absent' "$TMP/valid-inventory.out"
