@@ -25,7 +25,7 @@
     "test:production-deploy": "node scripts/smoke/production-deploy-safety.mjs && bash scripts/smoke/production-preflight-mode-safety.sh && bash scripts/smoke/production-deploy-entrypoint-safety.sh && bash scripts/smoke/production-env-resolution-safety.sh && bash scripts/smoke/legacy-build-env-overlay-safety.sh",
     "test:erp-production-env": "bash scripts/smoke/erp-production-env-preflight-safety.sh",
     "test:erp-production-recovery": "node scripts/smoke/erp-production-recovery-safety.mjs && node scripts/smoke/erp-production-recovery-contract.mjs",
-    "test:production-backup-recovery": "bash scripts/smoke/production-backup-env-resolution-safety.sh && node scripts/smoke/production-backup-recovery-safety.mjs",
+    "test:production-backup-recovery": "bash scripts/smoke/production-backup-env-resolution-safety.sh && bash scripts/smoke/production-backup-inventory-safety.sh && node scripts/smoke/production-backup-recovery-safety.mjs",
     "test:production-schema": "node scripts/smoke/production-schema-safety.mjs",
     "test:production-backup-restore": "node scripts/smoke/production-backup-restore-safety.mjs",
     "test:production-health-validation": "node scripts/smoke/production-health-validation-safety.mjs",

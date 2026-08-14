@@ -69,24 +69,74 @@ for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER
 done
 checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
 
-STAGE=readonly_inventory; COMMAND=validate_inventory
-[[ "$AUTHORIZED_DIR" == /* && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
+STAGE=authorized_directory; COMMAND=validate_authorized_directory
+[[ "$AUTHORIZED_DIR" == /* ]]
+[[ -e "$AUTHORIZED_DIR" && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
+checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
+
+STAGE=backup_path_contract; COMMAND=validate_backup_path
 [[ "$PRODUCTION_BACKUP_FILE" != "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-inside_authorized "$PRODUCTION_BACKUP_FILE"; inside_authorized "$PRODUCTION_BACKUP_SHA256_FILE"
-[[ ! -L "$PRODUCTION_BACKUP_FILE" && ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+inside_authorized "$PRODUCTION_BACKUP_FILE"
+[[ ! -L "$PRODUCTION_BACKUP_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_FILE" || -f "$PRODUCTION_BACKUP_FILE" ]]
+
+STAGE=manifest_path_contract; COMMAND=validate_manifest_path
+inside_authorized "$PRODUCTION_BACKUP_SHA256_FILE"
+[[ ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -f "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+checkpoint PRODUCTION_BACKUP_PATHS=PASS
+
+STAGE=existing_pair_metadata; COMMAND=validate_existing_pair_metadata
+[[ ! -e "$PRODUCTION_BACKUP_FILE" || -e "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -e "$PRODUCTION_BACKUP_FILE" ]]
 [[ ! -e "$PRODUCTION_BACKUP_FILE" || "$(stat -c %U:%G "$PRODUCTION_BACKUP_FILE")" == root:root && "$(stat -c %a "$PRODUCTION_BACKUP_FILE")" == 600 ]]
 [[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || "$(stat -c %U:%G "$PRODUCTION_BACKUP_SHA256_FILE")" == root:root && "$(stat -c %a "$PRODUCTION_BACKUP_SHA256_FILE")" == 600 ]]
-read -r db_host db_name < <(DATABASE_URL="$DATABASE_URL" node -e 'const u=new URL(process.env.DATABASE_URL); console.log(u.hostname,u.pathname.slice(1))')
-[[ "$db_host" == "$PRODUCTION_DB_HOST_EXPECTED" && "$db_host" != db && "$db_host" != localhost && "$db_host" != 127.0.0.1 && "$db_name" == salesforce_pro ]]
-[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")" == true ]]
-docker network inspect gest-o_default >/dev/null
-docker volume inspect "$PRODUCTION_DB_VOLUME_EXPECTED" >/dev/null
-docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" | grep -Fqx "$PRODUCTION_DB_VOLUME_EXPECTED /var/lib/postgresql/data"
-(( $(df -Pk "$AUTHORIZED_DIR" | awk 'NR==2{print $4}') >= ${PRODUCTION_MIN_DISK_KB:-5242880} ))
+checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_METADATA=PASS
+
+STAGE=database_url_contract; COMMAND=parse_database_url
+db_inventory="$(DATABASE_URL="$DATABASE_URL" node -e 'const u=new URL(process.env.DATABASE_URL); if (!u.hostname || !u.pathname.slice(1)) process.exit(1); process.stdout.write(`${u.hostname}\t${u.pathname.slice(1)}`)')"
+IFS=$'\t' read -r db_host db_name <<<"$db_inventory"
+STAGE=database_url_contract; COMMAND=validate_database_url
+[[ "$db_host" == "$PRODUCTION_DB_HOST_EXPECTED" ]]
+[[ "$db_host" != db && "$db_host" != localhost && "$db_host" != 127.0.0.1 ]]
+[[ "$db_name" == salesforce_pro ]]
+unset db_inventory db_host db_name
+checkpoint PRODUCTION_BACKUP_DATABASE_URL_CONTRACT=PASS
+
+STAGE=database_container; COMMAND=validate_database_container_exists
+container_name="$(docker inspect -f '{{.Name}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)"
+[[ "$container_name" == "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]
+STAGE=database_container; COMMAND=validate_database_container_running
+[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)" == true ]]
+STAGE=database_container; COMMAND=validate_database_container_health
+container_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)"
+[[ -z "$container_health" || "$container_health" == healthy ]]
+unset container_name container_health
+checkpoint PRODUCTION_BACKUP_DB_CONTAINER=PASS
+
+STAGE=database_network; COMMAND=validate_database_network
+docker network inspect gest-o_default >/dev/null 2>&1
+checkpoint PRODUCTION_BACKUP_DB_NETWORK=PASS
+STAGE=database_volume; COMMAND=validate_database_volume
+docker volume inspect "$PRODUCTION_DB_VOLUME_EXPECTED" >/dev/null 2>&1
+checkpoint PRODUCTION_BACKUP_DB_VOLUME=PASS
+STAGE=database_mount; COMMAND=validate_database_mount
+docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null |
+  grep -Fqx "$PRODUCTION_DB_VOLUME_EXPECTED /var/lib/postgresql/data"
+checkpoint PRODUCTION_BACKUP_DB_MOUNT=PASS
+
+STAGE=disk_capacity; COMMAND=read_available_disk_capacity
+available_kb="$(df -Pk "$AUTHORIZED_DIR" | awk 'NR==2{print $4}')"
+[[ "$available_kb" =~ ^[0-9]+$ ]]
+STAGE=disk_capacity; COMMAND=validate_available_disk_capacity
+(( available_kb >= ${PRODUCTION_MIN_DISK_KB:-5242880} ))
+unset available_kb
+checkpoint PRODUCTION_BACKUP_DISK_CAPACITY=PASS
+STAGE=preparation_lock; COMMAND=open_preparation_lock
 exec 9>"$AUTHORIZED_DIR/.prepare-production-recovery-backup.lock"
+STAGE=preparation_lock; COMMAND=acquire_preparation_lock
 flock -n 9
+checkpoint PRODUCTION_BACKUP_LOCK=ACQUIRED
 checkpoint PRODUCTION_BACKUP_SOURCE_VALIDATED=PASS
 
 STAGE=dump; COMMAND=create_validated_dump
