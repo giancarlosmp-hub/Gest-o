@@ -1,0 +1,51 @@
+name: Prepare Production Recovery Backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Digite PREPARE_PRODUCTION_RECOVERY_BACKUP"
+        required: true
+        type: string
+      expected_main_sha:
+        description: "SHA completo da main aprovada"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: prepare-production-recovery-backup
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    environment: production-backup-recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Preparar evidência íntegra e recente sem executar Recovery
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PREPARE_CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          envs: PREPARE_CONFIRM,EXPECTED_MAIN_SHA
+          script_stop: true
+          command_timeout: 2h
+          script: |
+            set -euo pipefail
+            test "$PREPARE_CONFIRM" = PREPARE_PRODUCTION_RECOVERY_BACKUP
+            case "$EXPECTED_MAIN_SHA" in (*[!0-9a-f]*|'') exit 2;; esac
+            test "${#EXPECTED_MAIN_SHA}" -eq 40
+            cd /apps/gest-o
+            test -z "$(git status --porcelain)"
+            git fetch origin main
+            git switch main
+            git pull --ff-only origin main
+            test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+            CONFIRM="$PREPARE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+              bash scripts/prepare-production-recovery-backup.sh

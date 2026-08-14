@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# shellcheck source=scripts/lib/production-backup-common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/production-backup-common.sh"
+
 BACKUP_DIR="/root/backups"
 LOG_FILE="$BACKUP_DIR/backup.log"
 DB_NAME="salesforce_pro"
@@ -54,20 +57,11 @@ resolve_check_script() {
 }
 
 validate_database_health_or_reject() {
-  local check_script
-  if ! check_script="$(resolve_check_script)"; then
-    log "ERROR" "Script de checagem não encontrado: $CHECK_SCRIPT_PRIMARY nem $CHECK_SCRIPT_FALLBACK"
-    exit 1
-  fi
-
-  local shell_snapshot
-  if ! shell_snapshot="$(bash "$check_script" --format shell --strict)"; then
+  if ! BACKUP_HEALTH_CHECK_PRIMARY="$CHECK_SCRIPT_PRIMARY" BACKUP_HEALTH_CHECK_FALLBACK="$CHECK_SCRIPT_FALLBACK" backup_validate_database_health; then
     log "CRITICAL" "Backup rejeitado: banco inconsistente"
     exit 1
   fi
-
-  eval "$shell_snapshot"
-  log "INFO" "Validation counts | User=${USER_COUNT} | Client=${CLIENT_COUNT} | Opportunity=${OPPORTUNITY_COUNT} | TimelineEvent=${TIMELINE_EVENT_COUNT}"
+  log "INFO" "Validation counts passed (values omitted)."
 }
 
 mkdir -p "$BACKUP_DIR"
@@ -84,8 +78,8 @@ fi
 validate_database_health_or_reject
 
 file_size=$(stat -c%s "$BACKUP_FILE")
-if [ "$file_size" -lt "$MIN_SIZE_BYTES" ]; then
-  log "ERROR" "Backup rejected: dump too small (${file_size} bytes, expected >= ${MIN_SIZE_BYTES} bytes). File: ${BACKUP_FILE}"
+if ! PRODUCTION_BACKUP_MIN_SIZE_BYTES="$MIN_SIZE_BYTES" backup_validate_plain_dump "$BACKUP_FILE"; then
+  log "ERROR" "Backup rejected: dump failed content or minimum-size validation."
   cleanup_rejected_backup "$BACKUP_FILE"
   exit 1
 fi
@@ -96,5 +90,6 @@ if ! gzip -f "$BACKUP_FILE"; then
   exit 1
 fi
 
-log "INFO" "Backup created successfully: $COMPRESSED_FILE (${file_size} bytes before compression)."
+gzip -t "$COMPRESSED_FILE" || { cleanup_rejected_backup "$BACKUP_FILE"; exit 1; }
+log "INFO" "Backup created and validated successfully."
 rotate_backups
