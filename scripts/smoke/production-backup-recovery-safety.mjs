@@ -16,13 +16,13 @@ for (const contract of [
   "BACKUP_FAILURE_EXIT_CODE", "PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS",
 ]) assert.ok(script.includes(contract), `missing contract: ${contract}`);
 
+assert.match(script, /DUMP_PATH_PARENT=PASS/);
+assert.match(script, /MANIFEST_PATH_PARENT=PASS/);
 for (const dumpPathPredicate of [
   "validate_dump_path_absolute", "validate_dump_path_traversal", "validate_dump_path_normalized",
   "validate_dump_path_parent", "validate_dump_path_basename", "validate_dump_path_symlink",
   "validate_dump_path_entry_type",
 ]) assert.ok(script.includes(dumpPathPredicate), `missing dump path predicate: ${dumpPathPredicate}`);
-assert.match(script, /DUMP_PATH_PARENT=PASS/);
-assert.match(script, /MANIFEST_PATH_PARENT=PASS/);
 assert.match(script, /production\.sql\.gz[\s\S]*DUMP_PATH_CONTRACT=PASS/);
 assert.match(script, /MANIFEST_PATH_CONTRACT=PASS[\s\S]*EXISTING_PAIR_STATE=absent[\s\S]*complete_valid/);
 const orderedContracts = [
