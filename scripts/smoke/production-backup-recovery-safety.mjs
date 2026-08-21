@@ -21,6 +21,8 @@ for (const dumpPathPredicate of [
   "validate_dump_path_parent", "validate_dump_path_basename", "validate_dump_path_symlink",
   "validate_dump_path_entry_type",
 ]) assert.ok(script.includes(dumpPathPredicate), `missing dump path predicate: ${dumpPathPredicate}`);
+assert.match(script, /PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-/);
+assert.match(script, /HISTORICAL_BACKUP_FILE[\s\S]*production\.sql\.gz[\s\S]*PRODUCTION_BACKUP_FILE="\$AUTHORIZED_DIR\/production\.sql\.gz"/);
 assert.match(script, /production\.sql\.gz[\s\S]*DUMP_PATH_CONTRACT=PASS/);
 assert.match(script, /MANIFEST_PATH_CONTRACT=PASS[\s\S]*EXISTING_PAIR_STATE=absent[\s\S]*complete_valid/);
 const orderedContracts = [

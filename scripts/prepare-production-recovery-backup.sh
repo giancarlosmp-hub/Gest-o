@@ -7,7 +7,9 @@ CANONICAL_ENV_FILE="${PRODUCTION_BACKUP_ENV_FILE:-/root/demetra-env/.env}"
 LEGACY_ENV_FILE="${PRODUCTION_BACKUP_LEGACY_ENV_FILE:-/root/demetra-env/production.env}"
 ENV_FILE=''
 ENV_SOURCE=''
-AUTHORIZED_DIR="${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}"
+# The canonical directory input is the sole authority for promoted artifacts.
+# PRODUCTION_BACKUP_AUTHORIZED_DIR remains a CLI-compatible alias only.
+AUTHORIZED_DIR="${PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}}"
 STAGE=initial
 COMMAND=initial_validation
 TMP_DIR=''; OLD_BACKUP=''; OLD_MANIFEST=''; PROMOTION_STARTED=false; HAD_PRIOR=false
@@ -76,11 +78,31 @@ for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER
 done
 checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
 
+# Historical path settings are compatibility assertions, not destinations.  A
+# legacy pair may name another former parent, but it must be an unambiguous,
+# internally consistent pair with the only approved basenames.  Promotion is
+# always rebound to AUTHORIZED_DIR below.
+STAGE=historical_path_contract; COMMAND=validate_historical_path_contract
+HISTORICAL_BACKUP_FILE="$PRODUCTION_BACKUP_FILE"
+HISTORICAL_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_SHA256_FILE"
+for historical_path in "$HISTORICAL_BACKUP_FILE" "$HISTORICAL_BACKUP_SHA256_FILE"; do
+  [[ "$historical_path" == /* ]]
+  [[ "$historical_path" != */../* && "$historical_path" != */.. && "$historical_path" != */./* && "$historical_path" != */. ]]
+  [[ "$(dirname -- "$historical_path")/$(basename -- "$historical_path")" == "$historical_path" ]]
+done
+[[ "$(basename -- "$HISTORICAL_BACKUP_FILE")" == production.sql.gz ]]
+[[ "$(basename -- "$HISTORICAL_BACKUP_SHA256_FILE")" == production.sql.gz.sha256 ]]
+[[ "$(dirname -- "$HISTORICAL_BACKUP_FILE")" == "$(dirname -- "$HISTORICAL_BACKUP_SHA256_FILE")" ]]
+checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS
+
 STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$AUTHORIZED_DIR" == /* ]]
 [[ -e "$AUTHORIZED_DIR" && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
 [[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
+
+PRODUCTION_BACKUP_FILE="$AUTHORIZED_DIR/production.sql.gz"
+PRODUCTION_BACKUP_SHA256_FILE="$AUTHORIZED_DIR/production.sql.gz.sha256"
 
 STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
 COMMAND=validate_dump_path_absolute
