@@ -42,7 +42,7 @@ run_case(){
   local label=$1; shift; local out="$TMP/$label.out"
   : >"$TMP/docker.log"; write_env
   set +e
-  env PATH="$BIN:$PATH" APP_DIR="$APP" PRODUCTION_BACKUP_AUTHORIZED_DIR="${CASE_AUTH:-$AUTH}" \
+  env PATH="$BIN:$PATH" APP_DIR="$APP" PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="${CASE_AUTH:-$AUTH}" \
     PRODUCTION_BACKUP_ENV_FILE="$TMP/absent-canonical" PRODUCTION_BACKUP_LEGACY_ENV_FILE="$ENV_FILE" \
     PRODUCTION_MIN_DISK_KB="${CASE_MIN_DISK:-1}" MOCK_DOCKER_LOG="$TMP/docker.log" \
     MOCK_CONTAINER="${MOCK_CONTAINER:-valid}" MOCK_NETWORK="${MOCK_NETWORK:-valid}" \
@@ -62,11 +62,18 @@ run_case(){
 CASE_AUTH="$TMP/missing"; run_case missing-directory authorized_directory
 mv "$AUTH" "$TMP/real-auth"; ln -s "$TMP/real-auth" "$AUTH"; run_case symlink-directory authorized_directory
 rm "$AUTH"; mv "$TMP/real-auth" "$AUTH"
-CASE_MANIFEST_FILE="$AUTH/production.sql.gz"; run_case equal-paths manifest_path_contract
-CASE_BACKUP_FILE="$TMP/outside.gz"; run_case outside-path dump_path_contract
-CASE_BACKUP_FILE="$AUTH/../backups/production.sql.gz"; run_case dotdot-path dump_path_contract
+CASE_MANIFEST_FILE="$AUTH/production.sql.gz"; run_case equal-paths historical_path_contract
+CASE_BACKUP_FILE="$TMP/outside.gz"; run_case outside-path historical_path_contract
+CASE_BACKUP_FILE="$AUTH/../backups/production.sql.gz"; run_case dotdot-path historical_path_contract
 CASE_BACKUP_FILE=''; run_case empty-dump-path required_configuration
-CASE_BACKUP_FILE="$AUTH/unexpected.sql.gz"; run_case unexpected-dump-basename dump_path_contract
+CASE_BACKUP_FILE="$AUTH/unexpected.sql.gz"; run_case unexpected-dump-basename historical_path_contract
+# A coherent historical pair may point at an old parent, but the effective pair
+# is still checked only below in the authorized directory.
+CASE_BACKUP_FILE="$TMP/former/production.sql.gz"; CASE_MANIFEST_FILE="$TMP/former/production.sql.gz.sha256"
+CASE_DATABASE_URL='not-a-url'; run_case historical-parent-rebound database_url_contract
+grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS' "$TMP/historical-parent-rebound.out"
+grep -Fq 'PRODUCTION_BACKUP_DUMP_PATH_PARENT=PASS' "$TMP/historical-parent-rebound.out"
+grep -Fq 'PRODUCTION_BACKUP_MANIFEST_PATH_CONTRACT=PASS' "$TMP/historical-parent-rebound.out"
 ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink dump_path_contract; rm "$AUTH/production.sql.gz"
 ln -s "$TMP/target" "$AUTH/production.sql.gz.sha256"; run_case manifest-symlink manifest_path_contract; rm "$AUTH/production.sql.gz.sha256"
 touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 640 "$AUTH/production.sql.gz"
