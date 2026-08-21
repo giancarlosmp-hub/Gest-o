@@ -73,27 +73,10 @@ valid_env_syntax "$ENV_FILE"
 # Loading is read-only. Neither source is copied, reconciled, installed or promoted.
 set -a; source "$ENV_FILE"; set +a
 STAGE=required_configuration; COMMAND=validate_backup_configuration_contract
-for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
+for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED; do
   [[ -n "${!required:-}" ]]
 done
 checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
-
-# Historical path settings are compatibility assertions, not destinations.  A
-# legacy pair may name another former parent, but it must be an unambiguous,
-# internally consistent pair with the only approved basenames.  Promotion is
-# always rebound to AUTHORIZED_DIR below.
-STAGE=historical_path_contract; COMMAND=validate_historical_path_contract
-HISTORICAL_BACKUP_FILE="$PRODUCTION_BACKUP_FILE"
-HISTORICAL_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_SHA256_FILE"
-for historical_path in "$HISTORICAL_BACKUP_FILE" "$HISTORICAL_BACKUP_SHA256_FILE"; do
-  [[ "$historical_path" == /* ]]
-  [[ "$historical_path" != */../* && "$historical_path" != */.. && "$historical_path" != */./* && "$historical_path" != */. ]]
-  [[ "$(dirname -- "$historical_path")/$(basename -- "$historical_path")" == "$historical_path" ]]
-done
-[[ "$(basename -- "$HISTORICAL_BACKUP_FILE")" == production.sql.gz ]]
-[[ "$(basename -- "$HISTORICAL_BACKUP_SHA256_FILE")" == production.sql.gz.sha256 ]]
-[[ "$(dirname -- "$HISTORICAL_BACKUP_FILE")" == "$(dirname -- "$HISTORICAL_BACKUP_SHA256_FILE")" ]]
-checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS
 
 STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$AUTHORIZED_DIR" == /* ]]
@@ -101,8 +84,39 @@ STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
 
-PRODUCTION_BACKUP_FILE="$AUTHORIZED_DIR/production.sql.gz"
-PRODUCTION_BACKUP_SHA256_FILE="$AUTHORIZED_DIR/production.sql.gz.sha256"
+EFFECTIVE_BACKUP_FILE="$AUTHORIZED_DIR/production.sql.gz"
+EFFECTIVE_BACKUP_SHA256_FILE="$AUTHORIZED_DIR/production.sql.gz.sha256"
+
+# Historical path variables never select a destination. Canonical configuration
+# keeps them as strict compatibility assertions. In the read-only legacy source
+# they are deprecated hints: only syntax is checked before mandatory rebinding.
+STAGE=historical_path_contract; COMMAND=validate_historical_path_contract
+historical_path_syntax_safe(){
+  local historical_path=$1
+  [[ -n "$historical_path" && "$historical_path" == /* ]] || return 1
+  [[ "$historical_path" != *$'\n'* && "$historical_path" != *$'\r'* ]] || return 1
+  if LC_ALL=C printf '%s' "$historical_path" | grep -q '[[:cntrl:]]'; then return 1; fi
+  [[ "/$historical_path/" != */../* && "/$historical_path/" != */./* ]] || return 1
+}
+for historical_name in PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
+  if [[ -v "$historical_name" ]]; then
+    historical_path_syntax_safe "${!historical_name}"
+  fi
+done
+if [[ "$ENV_SOURCE" == canonical ]]; then
+  [[ ! -v PRODUCTION_BACKUP_FILE || "$PRODUCTION_BACKUP_FILE" == "$EFFECTIVE_BACKUP_FILE" ]]
+  [[ ! -v PRODUCTION_BACKUP_SHA256_FILE || "$PRODUCTION_BACKUP_SHA256_FILE" == "$EFFECTIVE_BACKUP_SHA256_FILE" ]]
+  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=STRICT_CANONICAL
+else
+  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_LEGACY_READ_ONLY
+fi
+checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS
+
+# Rebind after validation so neither legacy hint can be used by any inventory,
+# dump, removal, rollback, or promotion operation.
+PRODUCTION_BACKUP_FILE="$EFFECTIVE_BACKUP_FILE"
+PRODUCTION_BACKUP_SHA256_FILE="$EFFECTIVE_BACKUP_SHA256_FILE"
+unset EFFECTIVE_BACKUP_FILE EFFECTIVE_BACKUP_SHA256_FILE historical_name
 
 STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
 COMMAND=validate_dump_path_absolute
