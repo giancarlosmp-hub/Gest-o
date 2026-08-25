@@ -52,7 +52,10 @@ assert.match(script, /-e "\$CANONICAL_ENV_FILE" \|\| -L "\$CANONICAL_ENV_FILE"[\
 assert.match(script, /stat -c %U:%G[\s\S]*root:root/);
 assert.match(script, /stat -c %a[\s\S]*600/);
 assert.match(script, /OLD_BACKUP[\s\S]*install -o root -g root -m 600/);
-assert.match(script, /docker compose exec -T db pg_dump/);
+assert.match(script, /docker exec -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
+assert.match(script, /PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER/);
+assert.match(script, /PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS/);
+assert.doesNotMatch(script, /docker compose (?:exec|run|up) (?:-T )?db|docker (?:start|restart)/);
 assert.doesNotMatch(script, /docker compose (?:down|up)|down -v|docker (?:system|volume) prune|prisma migrate|seed|backfill|erp-production-recovery/);
 assert.doesNotMatch(script, /echo .*DATABASE_URL|set -x|sha256sum .*printf/);
 assert.match(common, /USER_COUNT[\s\S]*CLIENT_COUNT[\s\S]*OPPORTUNITY_COUNT[\s\S]*TIMELINE_EVENT_COUNT/);
