@@ -73,10 +73,20 @@ valid_env_syntax "$ENV_FILE"
 # Loading is read-only. Neither source is copied, reconciled, installed or promoted.
 set -a; source "$ENV_FILE"; set +a
 STAGE=required_configuration; COMMAND=validate_backup_configuration_contract
-for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_CONTAINER_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED; do
+for required in DATABASE_URL PRODUCTION_DB_HOST_EXPECTED PRODUCTION_DB_VOLUME_EXPECTED; do
   [[ -n "${!required:-}" ]]
 done
 checkpoint "PRODUCTION_BACKUP_ENV_SOURCE=$ENV_SOURCE"
+STAGE=database_container_input; COMMAND=validate_expected_container_input
+if [[ -z "${PRODUCTION_DB_CONTAINER_EXPECTED:-}" ]]; then
+  checkpoint PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_input_missing
+  false
+fi
+if [[ ! "$PRODUCTION_DB_CONTAINER_EXPECTED" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+  checkpoint PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_name_mismatch
+  false
+fi
+checkpoint PRODUCTION_BACKUP_DB_CONTAINER_INPUT=PASS
 
 STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$AUTHORIZED_DIR" == /* ]]
@@ -173,24 +183,43 @@ STAGE=database_url_contract; COMMAND=validate_database_url
 unset db_inventory db_host db_name
 checkpoint PRODUCTION_BACKUP_DATABASE_URL_CONTRACT=PASS
 
-inspect_database_container(){
-  docker inspect -f '{{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
-    "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null
-}
-validate_database_container_snapshot(){
-  local snapshot=$1 name identity running health extra
-  [[ "$snapshot" != *$'\n'* ]]
+capture_database_container_snapshot(){
+  local matches snapshot name identity running health extra
+  if ! matches="$(docker ps -aq --no-trunc --filter "name=^/${PRODUCTION_DB_CONTAINER_EXPECTED}$" 2>/dev/null)"; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  fi
+  if [[ -z "$matches" ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_missing >&2; return 1
+  fi
+  if [[ "$matches" == *$'\n'* ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_ambiguous >&2; return 1
+  fi
+  if ! snapshot="$(docker inspect -f '{{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$matches" 2>/dev/null)"; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  fi
+  if [[ "$snapshot" == *$'\n'* ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_ambiguous >&2; return 1
+  fi
   IFS=$'\t' read -r name identity running health extra <<<"$snapshot"
-  [[ -z "$extra" && "$name" == "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]
-  [[ "$identity" =~ ^[0-9a-f]{64}$ ]]
-  [[ "$running" == true ]]
-  [[ -z "$health" || "$health" == healthy ]]
+  if [[ -n "$extra" || "$name" != "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_name_mismatch >&2; return 1
+  fi
+  if [[ ! "$identity" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  fi
+  if [[ "$running" != true ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_not_running >&2; return 1
+  fi
+  if [[ -n "$health" && "$health" != healthy ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_unhealthy >&2; return 1
+  fi
+  printf '%s' "$snapshot"
 }
 STAGE=database_container; COMMAND=capture_validated_database_identity
-database_container_snapshot="$(inspect_database_container)"
-validate_database_container_snapshot "$database_container_snapshot"
+database_container_snapshot="$(capture_database_container_snapshot)"
 database_container_identity="${database_container_snapshot#*$'\t'}"
 database_container_identity="${database_container_identity%%$'\t'*}"
+checkpoint PRODUCTION_BACKUP_DB_CONTAINER_STATUS=validated
 checkpoint PRODUCTION_BACKUP_DB_CONTAINER=PASS
 
 STAGE=database_network; COMMAND=validate_database_network
@@ -225,8 +254,7 @@ TMP_DIR="$(mktemp -d "$AUTHORIZED_DIR/.recovery-backup.XXXXXX")"
 plain="$TMP_DIR/dump.sql"; candidate="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_FILE")"; manifest="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_SHA256_FILE")"
 STAGE=dump_target_revalidation; COMMAND=revalidate_validated_database_identity
 checkpoint PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER
-revalidated_database_container_snapshot="$(inspect_database_container)"
-validate_database_container_snapshot "$revalidated_database_container_snapshot"
+revalidated_database_container_snapshot="$(capture_database_container_snapshot)"
 revalidated_database_container_identity="${revalidated_database_container_snapshot#*$'\t'}"
 revalidated_database_container_identity="${revalidated_database_container_identity%%$'\t'*}"
 [[ "$revalidated_database_container_identity" == "$database_container_identity" ]]
