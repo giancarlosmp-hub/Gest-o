@@ -173,15 +173,24 @@ STAGE=database_url_contract; COMMAND=validate_database_url
 unset db_inventory db_host db_name
 checkpoint PRODUCTION_BACKUP_DATABASE_URL_CONTRACT=PASS
 
-STAGE=database_container; COMMAND=validate_database_container_exists
-container_name="$(docker inspect -f '{{.Name}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)"
-[[ "$container_name" == "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]
-STAGE=database_container; COMMAND=validate_database_container_running
-[[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)" == true ]]
-STAGE=database_container; COMMAND=validate_database_container_health
-container_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null)"
-[[ -z "$container_health" || "$container_health" == healthy ]]
-unset container_name container_health
+inspect_database_container(){
+  docker inspect -f '{{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    "$PRODUCTION_DB_CONTAINER_EXPECTED" 2>/dev/null
+}
+validate_database_container_snapshot(){
+  local snapshot=$1 name identity running health extra
+  [[ "$snapshot" != *$'\n'* ]]
+  IFS=$'\t' read -r name identity running health extra <<<"$snapshot"
+  [[ -z "$extra" && "$name" == "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]
+  [[ "$identity" =~ ^[0-9a-f]{64}$ ]]
+  [[ "$running" == true ]]
+  [[ -z "$health" || "$health" == healthy ]]
+}
+STAGE=database_container; COMMAND=capture_validated_database_identity
+database_container_snapshot="$(inspect_database_container)"
+validate_database_container_snapshot "$database_container_snapshot"
+database_container_identity="${database_container_snapshot#*$'\t'}"
+database_container_identity="${database_container_identity%%$'\t'*}"
 checkpoint PRODUCTION_BACKUP_DB_CONTAINER=PASS
 
 STAGE=database_network; COMMAND=validate_database_network
@@ -214,7 +223,16 @@ source "$APP_DIR/scripts/lib/production-backup-common.sh"
 backup_validate_database_health
 TMP_DIR="$(mktemp -d "$AUTHORIZED_DIR/.recovery-backup.XXXXXX")"
 plain="$TMP_DIR/dump.sql"; candidate="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_FILE")"; manifest="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_SHA256_FILE")"
-docker compose exec -T db pg_dump -U postgres salesforce_pro >"$plain"
+STAGE=dump_target_revalidation; COMMAND=revalidate_validated_database_identity
+checkpoint PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER
+revalidated_database_container_snapshot="$(inspect_database_container)"
+validate_database_container_snapshot "$revalidated_database_container_snapshot"
+revalidated_database_container_identity="${revalidated_database_container_snapshot#*$'\t'}"
+revalidated_database_container_identity="${revalidated_database_container_identity%%$'\t'*}"
+[[ "$revalidated_database_container_identity" == "$database_container_identity" ]]
+checkpoint PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS
+STAGE=dump; COMMAND=create_validated_dump
+docker exec -i "$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro >"$plain"
 backup_validate_database_health
 backup_validate_plain_dump "$plain"
 checkpoint PRODUCTION_BACKUP_DUMP=PASS

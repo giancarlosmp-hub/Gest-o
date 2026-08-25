@@ -15,13 +15,12 @@ cat >"$BIN/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$MOCK_DOCKER_LOG"
 case "$1 $2 ${3:-}" in
-  'inspect -f {{.Name}}') [[ "${MOCK_CONTAINER:-valid}" != absent ]] && printf '/%s\n' "$4" ;;
-  'inspect -f {{.State.Running}}') [[ "${MOCK_CONTAINER:-valid}" != absent ]] && { [[ "${MOCK_CONTAINER:-valid}" == stopped ]] && echo false || echo true; } ;;
-  'inspect -f {{if .State.Health}}{{.State.Health.Status}}{{end}}') echo "${MOCK_HEALTH:-healthy}" ;;
+  'inspect -f {{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if'*)
+    [[ "${MOCK_CONTAINER:-valid}" != absent ]] && printf '/%s\t%064d\t%s\t%s\n' "$4" 1 "$([[ "${MOCK_CONTAINER:-valid}" == stopped ]] && echo false || echo true)" "${MOCK_HEALTH:-healthy}" ;;
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf '%s %s\n' "${MOCK_MOUNT_VOLUME:-production-data}" "${MOCK_MOUNT_DEST:-/var/lib/postgresql/data}" ;;
   'network inspect gest-o_default') [[ "${MOCK_NETWORK:-valid}" == valid ]] ;;
   'volume inspect production-data') [[ "${MOCK_VOLUME:-valid}" == valid ]] ;;
-  'compose exec -T') printf '%s\n' 'PostgreSQL database dump'; return 1 ;;
+  'exec -i postgres-production') printf '%s\n' 'PostgreSQL database dump'; return 1 ;;
   *) return 1 ;;
 esac
 EOF
@@ -49,16 +48,17 @@ run_case(){
     PRODUCTION_MIN_DISK_KB="${CASE_MIN_DISK:-1}" MOCK_DOCKER_LOG="$TMP/docker.log" \
     MOCK_CONTAINER="${MOCK_CONTAINER:-valid}" MOCK_NETWORK="${MOCK_NETWORK:-valid}" \
     MOCK_VOLUME="${MOCK_VOLUME:-valid}" MOCK_MOUNT_VOLUME="${MOCK_MOUNT_VOLUME:-production-data}" \
-    MOCK_MOUNT_DEST="${MOCK_MOUNT_DEST:-/var/lib/postgresql/data}" \
+    MOCK_MOUNT_DEST="${MOCK_MOUNT_DEST:-/var/lib/postgresql/data}" MOCK_HEALTH="${MOCK_HEALTH:-healthy}" \
     CONFIRM=PREPARE_PRODUCTION_RECOVERY_BACKUP EXPECTED_SHA="$SHA" bash "$APP/scripts/prepare-production-recovery-backup.sh" >"$out" 2>&1
   CASE_RC=$?; set -e
   (( CASE_RC != 0 )) || { echo "$label unexpectedly passed" >&2; exit 1; }
   grep -Fq "BACKUP_FAILURE_STAGE=$1" "$out" || { cat "$out" >&2; exit 1; }
   ! grep -Eq 'user-sentinel|password-sentinel|database\.example\.invalid|production\.sql|/tmp/' "$out"
-  if [[ "$1" != dump ]]; then ! grep -Fq 'compose exec -T db pg_dump' "$TMP/docker.log"; fi
+  if [[ "$1" != dump ]]; then ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"; fi
   unset CASE_AUTH CASE_BACKUP_FILE CASE_MANIFEST_FILE CASE_DATABASE_URL CASE_EXPECTED_HOST CASE_MIN_DISK CASE_SOURCE
   unset CASE_OMIT_BACKUP_FILE CASE_OMIT_MANIFEST_FILE
-  unset MOCK_CONTAINER MOCK_NETWORK MOCK_VOLUME MOCK_MOUNT_VOLUME MOCK_MOUNT_DEST
+unset MOCK_CONTAINER MOCK_NETWORK MOCK_VOLUME MOCK_MOUNT_VOLUME MOCK_MOUNT_DEST
+  unset MOCK_HEALTH
 }
 
 # Directory and path contracts.
@@ -116,6 +116,7 @@ CASE_EXPECTED_HOST='other.example.invalid'; run_case divergent-host database_url
 CASE_DATABASE_URL='postgresql://u:p@database.example.invalid/other'; run_case divergent-database database_url_contract
 MOCK_CONTAINER=absent; run_case absent-container database_container
 MOCK_CONTAINER=stopped; run_case stopped-container database_container
+MOCK_HEALTH=unhealthy; run_case unhealthy-container database_container
 MOCK_NETWORK=absent; run_case absent-network database_network
 MOCK_VOLUME=absent; run_case absent-volume database_volume
 MOCK_MOUNT_DEST=/wrong; run_case divergent-mount database_mount
