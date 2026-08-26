@@ -69,6 +69,10 @@ case "$*" in (+%s) echo 1700000000;; (*) echo 2026-08-11T12:00:00Z;; esac
 `);
   executable(join(bin, "node"), `#!/bin/sh
 if [ "$1" = -p ]; then echo 9.8.7; exit 0; fi
+if [ "$MOCK_AUTH_TIMEOUT" = true ] && [ "$1" = scripts/lib/erp-authenticated-validation.mjs ]; then
+  printf '%s\n' 'FAILURE=transport_timeout' 'LAST_PASS=api_health' 'HTTP_CLASS=none'
+  exit 1
+fi
 cat >/dev/null
 printf '%s\n' 'INITIALIZED=true' 'ENABLED=true' 'CONFIG_OK=true' 'AUTH_MODE=global' 'NEXT_RUN_AT=2026-08-11T13:00:00Z' 'ACTIVE_ERROR=false'
 `);
@@ -116,6 +120,7 @@ exit 0
       AUTH_TEST_PASSWORD: options.auth === false ? "" : "protected-test-value",
       MOCK_TARGET_IMAGE: options.image === false ? "absent" : "present", MOCK_COMMAND_LOG: commandLog,
       MOCK_API_COUNT: options.early ? "zero" : "one",
+      MOCK_AUTH_TIMEOUT: options.authTimeout ? "true" : "false",
       ERP_RECOVERY_TEST_STOP_AFTER_COMPOSE: options.prepare ? "true" : "false",
       ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE: options.rollback ? "true" : "false",
     },
@@ -169,5 +174,14 @@ assert.equal(missingGate.status, 0, missingGate.output); assert.equal(missingGat
 const invalidCanonical = scenario("invalid-canonical", { canonical: true, gateMissing: true });
 assert.notEqual(invalidCanonical.status, 0); assert.equal(invalidCanonical.after, invalidCanonical.before);
 assert.doesNotMatch(invalidCanonical.commands, /\btag\b|compose .* up/);
+
+const timeout = scenario("authenticated-timeout", { authTimeout: true });
+assert.notEqual(timeout.status, 0); assert.equal(timeout.after, timeout.before);
+assert.match(timeout.output, /ERP_AUTHENTICATED_VALIDATION_FAILURE=transport_timeout/);
+assert.match(timeout.output, /ERP_AUTHENTICATED_VALIDATION_LAST_PASS=api_health/);
+assert.match(timeout.output, /ERP_AUTHENTICATED_VALIDATION_HTTP_CLASS=none/);
+assert.match(timeout.output, /ERP_RECOVERY_ROLLBACK=COMPLETED/);
+assert.equal((timeout.commands.match(/force-recreate api/g) || []).length, 2);
+assert.doesNotMatch(timeout.output, /protected@example|protected-test-value/);
 
 console.log("ERP production recovery executable contract: PASS (A-H)");
