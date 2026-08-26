@@ -5,7 +5,7 @@
 PRODUCTION_BACKUP_MIN_SIZE_BYTES="${PRODUCTION_BACKUP_MIN_SIZE_BYTES:-51200}"
 
 # Single promoted-backup contract.  The directory is the authority; path values
-# loaded from an old environment file are assertions, never selectors.
+# loaded from an environment file are hints, never selectors.
 backup_bind_canonical_pair() {
   local directory=${PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}}
   [[ "$directory" == /* && "$directory" != / && -d "$directory" && ! -L "$directory" ]] || return 1
@@ -13,6 +13,16 @@ backup_bind_canonical_pair() {
   PRODUCTION_BACKUP_CANONICAL_DIRECTORY=$directory
   PRODUCTION_BACKUP_CANONICAL_FILE="$directory/production.sql.gz"
   PRODUCTION_BACKUP_CANONICAL_SHA256_FILE="$directory/production.sql.gz.sha256"
+}
+
+# Resolve the effective pair for every production consumer. Values loaded from
+# protected (including legacy) env files are deliberately ignored as selectors:
+# they are historical hints only. Callers must not implement their own rebind.
+backup_resolve_canonical_pair() {
+  backup_bind_canonical_pair || return 1
+  PRODUCTION_BACKUP_FILE=$PRODUCTION_BACKUP_CANONICAL_FILE
+  PRODUCTION_BACKUP_SHA256_FILE=$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE
+  export PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE
 }
 
 backup_validate_canonical_pair_and_freshness() {

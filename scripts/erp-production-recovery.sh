@@ -207,13 +207,8 @@ for marker in 'ERP_EXTERNAL_ENV=PRESENT' 'ERP_SCHEDULER_ENV=ENABLED' 'PASS: prot
 done
 rm -f "$preflight_output"; preflight_output=''
 set -a; source "$tmp_env"; set +a
-# Legacy env files may carry historical artifact paths.  Recovery deliberately
-# rebinds them to the same directory-derived pair used by the preparer; the
-# preflight below independently rejects any later divergence.
-source "$SCRIPT_DIR/lib/production-backup-common.sh"
-backup_bind_canonical_pair || die 'canonical backup directory contract is invalid'
-export PRODUCTION_BACKUP_FILE="$PRODUCTION_BACKUP_CANONICAL_FILE"
-export PRODUCTION_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE"
+# production-preflight owns canonical resolution for every consumer. Legacy
+# artifact paths loaded above remain non-authoritative hints.
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh >/dev/null
 COMPOSE=(docker compose --env-file "$tmp_env" -f "$COMPOSE_FILE")
 rendered="$(mktemp)"; "${COMPOSE[@]}" config >"$rendered"; rm -f "$rendered"; rendered=''

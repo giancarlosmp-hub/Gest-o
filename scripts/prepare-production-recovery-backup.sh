@@ -94,12 +94,15 @@ STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
 
-EFFECTIVE_BACKUP_FILE="$AUTHORIZED_DIR/production.sql.gz"
-EFFECTIVE_BACKUP_SHA256_FILE="$AUTHORIZED_DIR/production.sql.gz.sha256"
+source "$APP_DIR/scripts/lib/production-backup-common.sh"
+PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$AUTHORIZED_DIR"
+backup_bind_canonical_pair
+EFFECTIVE_BACKUP_FILE="$PRODUCTION_BACKUP_CANONICAL_FILE"
+EFFECTIVE_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE"
 
-# Historical path variables never select a destination. Canonical configuration
-# keeps them as strict compatibility assertions. In the read-only legacy source
-# they are deprecated hints: only syntax is checked before mandatory rebinding.
+# Historical path variables never select a destination. In every environment
+# source they are deprecated hints: only syntax is checked before mandatory
+# rebinding to the directory-derived pair.
 STAGE=historical_path_contract; COMMAND=validate_historical_path_contract
 historical_path_syntax_safe(){
   local historical_path=$1
@@ -114,9 +117,7 @@ for historical_name in PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
   fi
 done
 if [[ "$ENV_SOURCE" == canonical ]]; then
-  [[ ! -v PRODUCTION_BACKUP_FILE || "$PRODUCTION_BACKUP_FILE" == "$EFFECTIVE_BACKUP_FILE" ]]
-  [[ ! -v PRODUCTION_BACKUP_SHA256_FILE || "$PRODUCTION_BACKUP_SHA256_FILE" == "$EFFECTIVE_BACKUP_SHA256_FILE" ]]
-  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=STRICT_CANONICAL
+  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_CANONICAL_HINTS
 else
   checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_LEGACY_READ_ONLY
 fi
@@ -124,8 +125,7 @@ checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS
 
 # Rebind after validation so neither legacy hint can be used by any inventory,
 # dump, removal, rollback, or promotion operation.
-PRODUCTION_BACKUP_FILE="$EFFECTIVE_BACKUP_FILE"
-PRODUCTION_BACKUP_SHA256_FILE="$EFFECTIVE_BACKUP_SHA256_FILE"
+backup_resolve_canonical_pair
 unset EFFECTIVE_BACKUP_FILE EFFECTIVE_BACKUP_SHA256_FILE historical_name
 
 STAGE=dump_path_contract; COMMAND=validate_dump_path_contract

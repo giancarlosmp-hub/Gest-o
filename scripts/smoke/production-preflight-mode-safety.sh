@@ -99,13 +99,23 @@ run_case cutover_fresh cutover
 grep -qx 'PRODUCTION_BACKUP_FRESHNESS=PASS' "$TMP/cutover_fresh.out"
 grep -qx 'PRODUCTION_PREFLIGHT=PASS' "$TMP/cutover_fresh.out"
 
-# F/G: contrato de modo falha fechado antes de consultar ambiente ou runtime.
+# F: the real deploy preflight boundary ignores legacy_copy artifact hints and
+# resolves the fixed pair from the authorized directory for build and Recovery.
+export PRODUCTION_BACKUP_FILE="$TMP/historical/old-dump.sql.gz"
+export PRODUCTION_BACKUP_SHA256_FILE="$TMP/historical/old-dump.sha256"
+run_case legacy_build_pair build
+grep -qx 'PRODUCTION_PREFLIGHT=PASS' "$TMP/legacy_build_pair.out"
+run_case legacy_recovery_pair cutover
+grep -qx 'PRODUCTION_BACKUP_FRESHNESS=PASS' "$TMP/legacy_recovery_pair.out"
+[[ "$PRODUCTION_BACKUP_FILE" == "$TMP/historical/old-dump.sql.gz" ]]
+
+# G/H: contrato de modo falha fechado antes de consultar ambiente ou runtime.
 if run_case missing_mode __unset; then exit 1; fi
 grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=invalid_preflight_mode' "$TMP/missing_mode.out"
 if run_case invalid_mode preview; then exit 1; fi
 grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=invalid_preflight_mode' "$TMP/invalid_mode.out"
 
-# H/I: o gate precede build/cutover e o próprio preflight não toca no runtime.
+# I/J: o gate precede build/cutover e o próprio preflight não toca no runtime.
 deploy=$(cat "$ROOT/scripts/deploy-production.sh")
 preflight_line=$(grep -n 'PRODUCTION_PREFLIGHT_MODE="$MODE" bash scripts/production-preflight.sh' <<<"$deploy" | cut -d: -f1)
 build_line=$(grep -n '"${COMPOSE\[@\]}" build api web' <<<"$deploy" | cut -d: -f1)
@@ -113,7 +123,7 @@ stop_line=$(grep -n 'docker stop "$container_id"' <<<"$deploy" | cut -d: -f1)
 (( preflight_line < build_line && build_line < stop_line ))
 if grep -Eq 'docker (stop|rm|compose .* (up|down|build))' "$COMMAND_LOG"; then exit 1; fi
 
-# J: nem credenciais, query, nem paths dos artefatos aparecem em qualquer saída.
+# K: nem credenciais, query, nem paths dos artefatos aparecem em qualquer saída.
 if grep -R -E 'sensitive-(user|password|query|backup-name)|postgresql://' "$TMP"/*.out; then exit 1; fi
 
 printf 'production preflight mode safety smoke passed\n'
