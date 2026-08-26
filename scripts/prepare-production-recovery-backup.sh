@@ -367,8 +367,8 @@ protected_regular "$PRODUCTION_BACKUP_FILE"; protected_regular "$PRODUCTION_BACK
 (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null)
 PROMOTION_STARTED=false; checkpoint PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS
 checkpoint PRODUCTION_BACKUP_PRESENCE=PASS; checkpoint PRODUCTION_BACKUP_INTEGRITY=PASS
-(( $(date +%s) - $(stat -c %Y "$PRODUCTION_BACKUP_FILE") <= ${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400} ))
-checkpoint PRODUCTION_BACKUP_FRESHNESS=PASS
+backup_validate_canonical_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
+# Shared validation above emits PRODUCTION_BACKUP_FRESHNESS=PASS.
 STAGE=preflight; COMMAND=run_readonly_cutover_preflight
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh >/dev/null
 checkpoint PRODUCTION_PREFLIGHT=PASS

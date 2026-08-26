@@ -54,8 +54,9 @@ export DATABASE_URL='postgresql://sensitive-user:sensitive-password@prod-db.exam
 export PRODUCTION_DB_HOST_EXPECTED=prod-db.example
 export PRODUCTION_DB_CONTAINER_EXPECTED=production-postgres
 export PRODUCTION_DB_VOLUME_EXPECTED=production-pgdata
-export PRODUCTION_BACKUP_FILE="$TMP/backup/sensitive-backup-name.dump"
-export PRODUCTION_BACKUP_SHA256_FILE="$TMP/backup/sensitive-backup-name.dump.sha256"
+export PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$TMP/backup"
+export PRODUCTION_BACKUP_FILE="$TMP/backup/production.sql.gz"
+export PRODUCTION_BACKUP_SHA256_FILE="$TMP/backup/production.sql.gz.sha256"
 export PRODUCTION_BACKUP_MAX_AGE_SECONDS=60
 
 make_valid_backup() {
