@@ -253,13 +253,19 @@ for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Healt
 curl -fsS http://127.0.0.1:4000/health >/dev/null
 
 STAGE=authenticated_validation
-API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" node >"$technical_file" <<'NODE'
-(async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});
-let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const h={authorization:`Bearer ${b.accessToken}`};
-const [me,s]=await Promise.all([fetch(process.env.API_BASE+'/auth/me',{headers:h}),fetch(process.env.API_BASE+'/erp/ultrafv3/sync/status',{headers:h})]);if(me.status!==200||s.status!==200)process.exit(1);
-const j=await s.json(),a=j.automaticSync||{};console.log(`INITIALIZED=${a.initialized===true}`);console.log(`ENABLED=${a.enabled===true&&a.enabledByEnv===true}`);console.log(`CONFIG_OK=${a.configurationOk===true}`);console.log(`AUTH_MODE=${a.authMode||'none'}`);console.log(`NEXT_RUN_AT=${a.nextRunAt||''}`);
-})().catch(()=>process.exit(1));
-NODE
+if ! API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" \
+  node scripts/lib/erp-authenticated-validation.mjs >"$technical_file"; then
+  failure="$(sed -n 's/^FAILURE=//p' "$technical_file" | head -1)"
+  last_pass="$(sed -n 's/^LAST_PASS=//p' "$technical_file" | head -1)"
+  http_class="$(sed -n 's/^HTTP_CLASS=//p' "$technical_file" | head -1)"
+  [[ "$failure" =~ ^(login_http|login_schema|token_contract|authenticated_identity_http|protected_endpoint_http|protected_endpoint_schema|scheduler_not_initialized|scheduler_disabled|scheduler_configuration|erp_auth_mode|next_run_at_absent|transport_timeout)$ ]] || failure=validator_internal
+  [[ "$last_pass" =~ ^(api_health|login|authenticated_identity|protected_endpoint|scheduler_initialized|scheduler_enabled|scheduler_configuration|erp_auth_mode)$ ]] || last_pass=none
+  [[ "$http_class" =~ ^([1-5]xx|none)$ ]] || http_class=none
+  log "ERP_AUTHENTICATED_VALIDATION_FAILURE=$failure"
+  log "ERP_AUTHENTICATED_VALIDATION_LAST_PASS=$last_pass"
+  log "ERP_AUTHENTICATED_VALIDATION_HTTP_CLASS=$http_class"
+  die 'authenticated validation failed; sensitive response omitted'
+fi
 initialized="$(sed -n 's/^INITIALIZED=//p' "$technical_file")"; enabled="$(sed -n 's/^ENABLED=//p' "$technical_file")"
 config_ok="$(sed -n 's/^CONFIG_OK=//p' "$technical_file")"; auth_mode="$(sed -n 's/^AUTH_MODE=//p' "$technical_file")"; next_run_at="$(sed -n 's/^NEXT_RUN_AT=//p' "$technical_file")"
 [[ "$initialized" == true && "$enabled" == true && "$config_ok" == true ]] || die 'scheduler did not initialize with a valid configuration'

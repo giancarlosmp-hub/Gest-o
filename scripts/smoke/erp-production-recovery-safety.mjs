@@ -32,6 +32,8 @@ for (const expected of [
   "up -d --no-deps --no-build --force-recreate api", "trigger:'scheduler'", "startedAt:{gt:since}",
   "ERP_AUTOMATIC_TRIGGER=scheduler", "ERP_AUTOMATIC_SYNC=PASS", "ERP_SYNC_LOCK=RELEASED",
   "ERP_SYNC_ENV_PERSISTENCE=PASS", "ERP_SCHEDULER_INITIALIZED=PASS", "ERP_NEXT_RUN_AT=PRESENT",
+  "ERP_AUTHENTICATED_VALIDATION_FAILURE=", "ERP_AUTHENTICATED_VALIDATION_LAST_PASS=",
+  "ERP_AUTHENTICATED_VALIDATION_HTTP_CLASS=", "erp-authenticated-validation.mjs",
 ]) assert.ok(recovery.includes(expected), `recovery contract is missing: ${expected}`);
 
 assert.ok(recovery.indexOf('install -o root -g root -m 600 "$tmp_env" "$ENV_FILE"') > -1);
