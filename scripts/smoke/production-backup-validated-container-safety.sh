@@ -7,10 +7,7 @@ APP="$TMP/app"; AUTH="$TMP/authorized"; BIN="$TMP/bin"; ENV_FILE="$TMP/productio
 mkdir -p "$APP/scripts/lib" "$AUTH" "$BIN"
 cp "$ROOT/scripts/prepare-production-recovery-backup.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
-cat >"$APP/scripts/check-prod-health.sh" <<'EOF'
-#!/usr/bin/env bash
-printf 'USER_COUNT=1\nCLIENT_COUNT=1\nOPPORTUNITY_COUNT=0\nTIMELINE_EVENT_COUNT=0\n'
-EOF
+cp "$ROOT/scripts/check-prod-health.sh" "$APP/scripts/"
 cat >"$APP/scripts/production-preflight.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'preflight\n' >>"$ORDER_LOG"
@@ -24,6 +21,10 @@ cat >"$BIN/docker" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$MOCK_DOCKER_LOG"
 case "$1 $2 ${3:-}" in
+  'compose exec -T')
+    printf '%s\n' 'Compose execution is forbidden in recovery backup' >&2
+    exit 99
+    ;;
   'ps -aq --no-trunc')
     [[ "${MOCK_PS_FAIL:-false}" != true ]] || exit 1
     [[ "${MOCK_STATE:-running}" != absent ]] || exit 0
@@ -53,8 +54,14 @@ case "$1 $2 ${3:-}" in
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf 'production-data /var/lib/postgresql/data\n' ;;
   'network inspect gest-o_default'|'volume inspect production-data') exit 0 ;;
   'exec -i postgres-production')
-    printf 'dump\n' >>"$ORDER_LOG"
-    printf '%s\n' '-- PostgreSQL database dump' 'CREATE TABLE validated_container (id integer);' 'COPY validated_container (id) FROM stdin;' '1' '\\.'
+    if [[ "${4:-}" == psql ]]; then
+      printf 'health\n' >>"$ORDER_LOG"
+      printf '1\n'
+    else
+      printf 'dump\n' >>"$ORDER_LOG"
+      [[ "${MOCK_PG_DUMP_EXIT:-0}" == 0 ]] || exit "$MOCK_PG_DUMP_EXIT"
+      printf '%s\n' '-- PostgreSQL database dump' 'CREATE TABLE validated_container (id integer);' 'COPY validated_container (id) FROM stdin;' '1' '\\.'
+    fi
     ;;
   *) exit 1 ;;
 esac
@@ -79,24 +86,30 @@ EOF
     INSPECT_COUNT="$TMP/inspect-count" ORDER_LOG="$TMP/order.log" MOCK_STATE="${MOCK_STATE:-running}" \
     MOCK_HEALTH="${MOCK_HEALTH:-healthy}" MOCK_REPLACE="${MOCK_REPLACE:-false}" MOCK_AMBIGUOUS="${MOCK_AMBIGUOUS:-false}" \
     MOCK_NAME_MISMATCH="${MOCK_NAME_MISMATCH:-false}" MOCK_INSPECT_FAIL="${MOCK_INSPECT_FAIL:-false}" MOCK_PS_FAIL="${MOCK_PS_FAIL:-false}" \
+    MOCK_PG_DUMP_EXIT="${MOCK_PG_DUMP_EXIT:-0}" \
     CONFIRM=PREPARE_PRODUCTION_RECOVERY_BACKUP EXPECTED_SHA="$SHA" \
     bash "$APP/scripts/prepare-production-recovery-backup.sh" >"$out" 2>&1
   rc=$?; set -e
   ! grep -Eq 'user-sentinel|password-sentinel|protected-sentinel|database\.example\.invalid|postgres-production|different-postgres|production\.sql|/tmp/|[abc]{64}' "$out"
   if [[ -n "$expected_stage" ]]; then
     (( rc != 0 )); grep -Fq "BACKUP_FAILURE_STAGE=$expected_stage" "$out"
-    ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"
+    if [[ "${EXPECT_DUMP_ATTEMPT:-false}" == true ]]; then
+      grep -Fxq 'exec -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
+    else
+      ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"
+    fi
   else
     (( rc == 0 )); grep -Fq 'PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DUMP=PASS' "$out"
     [[ -f "$AUTH/production.sql.gz" && -f "$AUTH/production.sql.gz.sha256" ]]
     (cd "$AUTH" && sha256sum -c production.sql.gz.sha256 >/dev/null)
-    [[ "$(cat "$TMP/order.log")" == $'dump\npreflight' ]]
+    [[ "$(cat "$TMP/order.log")" == $'health\nhealth\nhealth\nhealth\nhealth\nhealth\ndump\nhealth\nhealth\nhealth\nhealth\nhealth\nhealth\npreflight' ]]
     grep -Fxq 'exec -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
+    ! grep -Eq '^compose |^docker-compose ' "$TMP/docker.log"
   fi
   if [[ -n "${EXPECTED_STATUS:-}" ]]; then grep -Fq "PRODUCTION_BACKUP_DB_CONTAINER_STATUS=$EXPECTED_STATUS" "$out"; fi
-  unset MOCK_STATE MOCK_HEALTH MOCK_REPLACE MOCK_AMBIGUOUS MOCK_NAME_MISMATCH MOCK_INSPECT_FAIL MOCK_PS_FAIL OMIT_EXPECTED_INPUT EXPECTED_STATUS
+  unset MOCK_STATE MOCK_HEALTH MOCK_REPLACE MOCK_AMBIGUOUS MOCK_NAME_MISMATCH MOCK_INSPECT_FAIL MOCK_PS_FAIL MOCK_PG_DUMP_EXIT EXPECT_DUMP_ATTEMPT OMIT_EXPECTED_INPUT EXPECTED_STATUS
 }
 
 run_case happy
@@ -113,8 +126,12 @@ MOCK_INSPECT_FAIL=template EXPECTED_STATUS=template_error; run_case inspect-temp
 MOCK_INSPECT_FAIL=missing EXPECTED_STATUS=object_not_found; run_case inspect-object-missing database_container
 MOCK_INSPECT_FAIL=permission EXPECTED_STATUS=permission_denied; run_case inspect-permission database_container
 MOCK_INSPECT_FAIL=daemon EXPECTED_STATUS=daemon_unreachable; run_case inspect-daemon database_container
+MOCK_PG_DUMP_EXIT=37 EXPECT_DUMP_ATTEMPT=true; run_case pg-dump-exit dump
+grep -Fq 'BACKUP_FAILURE_EXIT_CODE=37' "$TMP/pg-dump-exit.out"
 
 ! grep -Fq 'docker compose exec -T db' "$ROOT/scripts/prepare-production-recovery-backup.sh"
+! grep -Eq "docker[ -]compose exec -T db|exec -T ['\"]?db['\"]?.*pg_dump" \
+  "$ROOT/scripts/prepare-production-recovery-backup.sh" "$ROOT/scripts/lib/production-backup-common.sh"
 ! grep -Fq '{{.Name}}{{"\t"}}' "$ROOT/scripts/prepare-production-recovery-backup.sh"
 ! grep -Eq 'docker (compose )?(up|start|restart)|docker compose run|sh -c|bash -c' "$ROOT/scripts/prepare-production-recovery-backup.sh"
 ! grep -Eqi 'recovery|cutover|migrat|seed|backfill|sync' "$TMP/docker.log"
