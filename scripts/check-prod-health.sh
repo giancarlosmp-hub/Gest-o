@@ -69,7 +69,7 @@ query_count() {
   local table_name="$1"
   if [[ -n "$DB_VALIDATED_CONTAINER" ]]; then
     [[ "$DB_VALIDATED_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || return 1
-    docker exec -i "$DB_VALIDATED_CONTAINER" psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'
+    docker exec --user postgres -i "$DB_VALIDATED_CONTAINER" psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'
     return
   fi
   ${COMPOSE_BIN} exec -T "$DB_SERVICE" psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'

@@ -53,7 +53,10 @@ assert.match(script, /-e "\$CANONICAL_ENV_FILE" \|\| -L "\$CANONICAL_ENV_FILE"[\
 assert.match(script, /stat -c %U:%G[\s\S]*root:root/);
 assert.match(script, /stat -c %a[\s\S]*600/);
 assert.match(script, /OLD_BACKUP[\s\S]*install -o root -g root -m 600/);
-assert.match(script, /docker exec -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
+assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
+assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" id -u/);
+assert.match(script, /postgres_os_user_missing[\s\S]*os_user_selection_failed/);
+assert.match(script, /peer_authentication_failed[\s\S]*psql_failed[\s\S]*pg_dump_failed/);
 assert.match(script, /backup_validate_database_health_in_validated_container "\$PRODUCTION_DB_CONTAINER_EXPECTED"/);
 assert.match(script, /PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER/);
 assert.match(script, /PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS/);
@@ -62,7 +65,8 @@ assert.doesNotMatch(script, /docker compose (?:down|up)|down -v|docker (?:system
 assert.doesNotMatch(script, /echo .*DATABASE_URL|set -x|sha256sum .*printf/);
 assert.match(common, /USER_COUNT[\s\S]*CLIENT_COUNT[\s\S]*OPPORTUNITY_COUNT[\s\S]*TIMELINE_EVENT_COUNT/);
 assert.match(common, /DB_VALIDATED_CONTAINER="\$validated_container" backup_validate_database_health/);
-assert.match(healthCheck, /docker exec -i "\$DB_VALIDATED_CONTAINER" psql -U postgres -d "\$DB_NAME"/);
+assert.match(healthCheck, /docker exec --user postgres -i "\$DB_VALIDATED_CONTAINER" psql -U postgres -d "\$DB_NAME"/);
+assert.doesNotMatch(`${script}\n${healthCheck}`, /docker exec (?:-i|--user root)[^\n]*(?:psql|pg_dump)/);
 assert.match(historical, /production-backup-common\.sh[\s\S]*backup_validate_database_health[\s\S]*backup_validate_plain_dump/);
 assert.match(workflow, /environment: production-backup-recovery/);
 assert.match(workflow, /git pull --ff-only origin main/);

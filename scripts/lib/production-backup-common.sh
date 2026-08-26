@@ -13,9 +13,18 @@ backup_resolve_health_check() {
 }
 
 backup_validate_database_health() {
-  local check snapshot
+  local check snapshot rc
   check="$(backup_resolve_health_check)" || return 1
-  snapshot="$(bash "$check" --format shell --strict)" || return 1
+  if [[ -n "${BACKUP_POSTGRES_ERROR_FILE:-}" ]]; then
+    if snapshot="$(bash "$check" --format shell --strict 2>"$BACKUP_POSTGRES_ERROR_FILE")"; then
+      :
+    else
+      rc=$?
+      return "$rc"
+    fi
+  else
+    snapshot="$(bash "$check" --format shell --strict)" || return $?
+  fi
   # check-prod-health emits only integer assignments from a closed contract.
   eval "$snapshot"
   [[ "${USER_COUNT:-0}" -gt 0 ]] || return 1

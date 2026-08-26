@@ -53,12 +53,24 @@ case "$1 $2 ${3:-}" in
     ;;
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf 'production-data /var/lib/postgresql/data\n' ;;
   'network inspect gest-o_default'|'volume inspect production-data') exit 0 ;;
-  'exec -i postgres-production')
-    if [[ "${4:-}" == psql ]]; then
+  'exec --user postgres')
+    [[ "${4:-}" == -i && "${5:-}" == postgres-production ]]
+    if [[ "${6:-}" == id ]]; then
+      case "${MOCK_OS_USER:-present}" in
+        missing) printf 'unable to find user postgres: protected-sentinel\n' >&2; exit 45 ;;
+        selection) printf 'runtime selection failed: protected-sentinel\n' >&2; exit 46 ;;
+      esac
+      printf '999\n'
+    elif [[ "${6:-}" == psql ]]; then
       printf 'health\n' >>"$ORDER_LOG"
+      case "${MOCK_PSQL_FAILURE:-none}" in
+        peer) printf 'FATAL: Peer authentication failed for user protected-sentinel\n' >&2; exit 47 ;;
+        real) printf 'query failed with protected-sentinel\n' >&2; exit 48 ;;
+      esac
       printf '1\n'
     else
       printf 'dump\n' >>"$ORDER_LOG"
+      [[ "${MOCK_PG_DUMP_PEER:-false}" != true ]] || { printf 'FATAL: Peer authentication failed for user protected-sentinel\n' >&2; exit 49; }
       [[ "${MOCK_PG_DUMP_EXIT:-0}" == 0 ]] || exit "$MOCK_PG_DUMP_EXIT"
       printf '%s\n' '-- PostgreSQL database dump' 'CREATE TABLE validated_container (id integer);' 'COPY validated_container (id) FROM stdin;' '1' '\\.'
     fi
@@ -86,7 +98,8 @@ EOF
     INSPECT_COUNT="$TMP/inspect-count" ORDER_LOG="$TMP/order.log" MOCK_STATE="${MOCK_STATE:-running}" \
     MOCK_HEALTH="${MOCK_HEALTH:-healthy}" MOCK_REPLACE="${MOCK_REPLACE:-false}" MOCK_AMBIGUOUS="${MOCK_AMBIGUOUS:-false}" \
     MOCK_NAME_MISMATCH="${MOCK_NAME_MISMATCH:-false}" MOCK_INSPECT_FAIL="${MOCK_INSPECT_FAIL:-false}" MOCK_PS_FAIL="${MOCK_PS_FAIL:-false}" \
-    MOCK_PG_DUMP_EXIT="${MOCK_PG_DUMP_EXIT:-0}" \
+    MOCK_OS_USER="${MOCK_OS_USER:-present}" MOCK_PSQL_FAILURE="${MOCK_PSQL_FAILURE:-none}" \
+    MOCK_PG_DUMP_PEER="${MOCK_PG_DUMP_PEER:-false}" MOCK_PG_DUMP_EXIT="${MOCK_PG_DUMP_EXIT:-0}" \
     CONFIRM=PREPARE_PRODUCTION_RECOVERY_BACKUP EXPECTED_SHA="$SHA" \
     bash "$APP/scripts/prepare-production-recovery-backup.sh" >"$out" 2>&1
   rc=$?; set -e
@@ -94,22 +107,25 @@ EOF
   if [[ -n "$expected_stage" ]]; then
     (( rc != 0 )); grep -Fq "BACKUP_FAILURE_STAGE=$expected_stage" "$out"
     if [[ "${EXPECT_DUMP_ATTEMPT:-false}" == true ]]; then
-      grep -Fxq 'exec -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
+      grep -Fxq 'exec --user postgres -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
     else
-      ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"
+      ! grep -Fq 'exec --user postgres -i postgres-production pg_dump' "$TMP/docker.log"
     fi
   else
     (( rc == 0 )); grep -Fq 'PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER' "$out"
+    grep -Fq 'PRODUCTION_BACKUP_DB_OS_USER=VALIDATED' "$out"
+    grep -Fq 'PRODUCTION_BACKUP_DB_HEALTH_QUERY=PASS' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DUMP=PASS' "$out"
     [[ -f "$AUTH/production.sql.gz" && -f "$AUTH/production.sql.gz.sha256" ]]
     (cd "$AUTH" && sha256sum -c production.sql.gz.sha256 >/dev/null)
     [[ "$(cat "$TMP/order.log")" == $'health\nhealth\nhealth\nhealth\nhealth\nhealth\ndump\nhealth\nhealth\nhealth\nhealth\nhealth\nhealth\npreflight' ]]
-    grep -Fxq 'exec -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
+    grep -Fxq 'exec --user postgres -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
+    ! grep -Eq '^exec -i postgres-production (psql|pg_dump)|^exec --user root ' "$TMP/docker.log"
     ! grep -Eq '^compose |^docker-compose ' "$TMP/docker.log"
   fi
   if [[ -n "${EXPECTED_STATUS:-}" ]]; then grep -Fq "PRODUCTION_BACKUP_DB_CONTAINER_STATUS=$EXPECTED_STATUS" "$out"; fi
-  unset MOCK_STATE MOCK_HEALTH MOCK_REPLACE MOCK_AMBIGUOUS MOCK_NAME_MISMATCH MOCK_INSPECT_FAIL MOCK_PS_FAIL MOCK_PG_DUMP_EXIT EXPECT_DUMP_ATTEMPT OMIT_EXPECTED_INPUT EXPECTED_STATUS
+  unset MOCK_STATE MOCK_HEALTH MOCK_REPLACE MOCK_AMBIGUOUS MOCK_NAME_MISMATCH MOCK_INSPECT_FAIL MOCK_PS_FAIL MOCK_OS_USER MOCK_PSQL_FAILURE MOCK_PG_DUMP_PEER MOCK_PG_DUMP_EXIT EXPECT_DUMP_ATTEMPT OMIT_EXPECTED_INPUT EXPECTED_STATUS
 }
 
 run_case happy
@@ -126,8 +142,19 @@ MOCK_INSPECT_FAIL=template EXPECTED_STATUS=template_error; run_case inspect-temp
 MOCK_INSPECT_FAIL=missing EXPECTED_STATUS=object_not_found; run_case inspect-object-missing database_container
 MOCK_INSPECT_FAIL=permission EXPECTED_STATUS=permission_denied; run_case inspect-permission database_container
 MOCK_INSPECT_FAIL=daemon EXPECTED_STATUS=daemon_unreachable; run_case inspect-daemon database_container
+MOCK_OS_USER=missing; run_case os-user-missing database_os_user
+grep -Fq 'PRODUCTION_BACKUP_DB_OS_USER_STATUS=postgres_os_user_missing' "$TMP/os-user-missing.out"
+MOCK_OS_USER=selection; run_case os-user-selection database_os_user
+grep -Fq 'PRODUCTION_BACKUP_DB_OS_USER_STATUS=os_user_selection_failed' "$TMP/os-user-selection.out"
+MOCK_PSQL_FAILURE=peer; run_case psql-peer dump
+grep -Fq 'PRODUCTION_BACKUP_DB_COMMAND_STATUS=peer_authentication_failed' "$TMP/psql-peer.out"
+MOCK_PSQL_FAILURE=real; run_case psql-real dump
+grep -Fq 'PRODUCTION_BACKUP_DB_COMMAND_STATUS=psql_failed' "$TMP/psql-real.out"
+MOCK_PG_DUMP_PEER=true EXPECT_DUMP_ATTEMPT=true; run_case pg-dump-peer dump
+grep -Fq 'PRODUCTION_BACKUP_DB_COMMAND_STATUS=peer_authentication_failed' "$TMP/pg-dump-peer.out"
 MOCK_PG_DUMP_EXIT=37 EXPECT_DUMP_ATTEMPT=true; run_case pg-dump-exit dump
 grep -Fq 'BACKUP_FAILURE_EXIT_CODE=37' "$TMP/pg-dump-exit.out"
+grep -Fq 'PRODUCTION_BACKUP_DB_COMMAND_STATUS=pg_dump_failed' "$TMP/pg-dump-exit.out"
 
 ! grep -Fq 'docker compose exec -T db' "$ROOT/scripts/prepare-production-recovery-backup.sh"
 ! grep -Eq "docker[ -]compose exec -T db|exec -T ['\"]?db['\"]?.*pg_dump" \

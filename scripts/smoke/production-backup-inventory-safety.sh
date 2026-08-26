@@ -21,7 +21,10 @@ case "$1 $2 ${3:-}" in
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf '%s %s\n' "${MOCK_MOUNT_VOLUME:-production-data}" "${MOCK_MOUNT_DEST:-/var/lib/postgresql/data}" ;;
   'network inspect gest-o_default') [[ "${MOCK_NETWORK:-valid}" == valid ]] ;;
   'volume inspect production-data') [[ "${MOCK_VOLUME:-valid}" == valid ]] ;;
-  'exec -i postgres-production') printf '%s\n' 'PostgreSQL database dump'; return 1 ;;
+  'exec --user postgres')
+    [[ "${4:-}" == -i && "${5:-}" == postgres-production ]]
+    [[ "${6:-}" != id ]] || { printf '999\n'; exit 0; }
+    printf '%s\n' 'PostgreSQL database dump'; return 1 ;;
   *) return 1 ;;
 esac
 EOF
@@ -55,7 +58,7 @@ run_case(){
   (( CASE_RC != 0 )) || { echo "$label unexpectedly passed" >&2; exit 1; }
   grep -Fq "BACKUP_FAILURE_STAGE=$1" "$out" || { cat "$out" >&2; exit 1; }
   ! grep -Eq 'user-sentinel|password-sentinel|database\.example\.invalid|production\.sql|/tmp/' "$out"
-  if [[ "$1" != dump ]]; then ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"; fi
+  if [[ "$1" != dump ]]; then ! grep -Fq 'exec --user postgres -i postgres-production pg_dump' "$TMP/docker.log"; fi
   unset CASE_AUTH CASE_BACKUP_FILE CASE_MANIFEST_FILE CASE_DATABASE_URL CASE_EXPECTED_HOST CASE_MIN_DISK CASE_SOURCE
   unset CASE_OMIT_BACKUP_FILE CASE_OMIT_MANIFEST_FILE
 unset MOCK_CONTAINER MOCK_NETWORK MOCK_VOLUME MOCK_MOUNT_VOLUME MOCK_MOUNT_DEST
