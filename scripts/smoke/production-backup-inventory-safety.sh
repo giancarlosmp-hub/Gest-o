@@ -16,8 +16,8 @@ cat >"$BIN/docker" <<'EOF'
 printf '%s\n' "$*" >>"$MOCK_DOCKER_LOG"
 case "$1 $2 ${3:-}" in
   'ps -aq --no-trunc') [[ "${MOCK_CONTAINER:-valid}" != absent ]] && printf '%064d\n' 1 ;;
-  'inspect -f {{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if'*)
-    printf '/postgres-production\t%064d\t%s\t%s\n' 1 "$([[ "${MOCK_CONTAINER:-valid}" == stopped ]] && echo false || echo true)" "${MOCK_HEALTH:-healthy}" ;;
+  'inspect 0000000000000000000000000000000000000000000000000000000000000001'*)
+    printf '[{"Name":"/postgres-production","Id":"%064d","State":{"Running":%s,"Health":{"Status":"%s"}}}]\n' 1 "$([[ "${MOCK_CONTAINER:-valid}" == stopped ]] && echo false || echo true)" "${MOCK_HEALTH:-healthy}" ;;
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf '%s %s\n' "${MOCK_MOUNT_VOLUME:-production-data}" "${MOCK_MOUNT_DEST:-/var/lib/postgresql/data}" ;;
   'network inspect gest-o_default') [[ "${MOCK_NETWORK:-valid}" == valid ]] ;;
   'volume inspect production-data') [[ "${MOCK_VOLUME:-valid}" == valid ]] ;;

@@ -30,15 +30,25 @@ case "$1 $2 ${3:-}" in
     printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     [[ "${MOCK_AMBIGUOUS:-false}" != true ]] || printf '%s\n' cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
     ;;
-  'inspect -f {{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if'*)
+  'inspect aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'*|'inspect cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'*)
     count=0; [[ -f "$INSPECT_COUNT" ]] && read -r count <"$INSPECT_COUNT"; count=$((count + 1)); printf '%s\n' "$count" >"$INSPECT_COUNT"
-    [[ "${MOCK_INSPECT_FAIL:-false}" != true ]] || exit 1
+    case "${MOCK_INSPECT_FAIL:-false}" in
+      template) printf 'template parsing error: protected-sentinel\n' >&2; exit 1 ;;
+      missing) printf 'Error: No such object: protected-sentinel\n' >&2; exit 1 ;;
+      permission) printf 'permission denied: protected-sentinel\n' >&2; exit 1 ;;
+      daemon) printf 'Cannot connect to the Docker daemon: protected-sentinel\n' >&2; exit 1 ;;
+      malformed) printf 'not-json protected-sentinel\n'; exit 0 ;;
+    esac
     identity="${MOCK_ID:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"
     [[ "${MOCK_REPLACE:-false}" != true || "$count" -lt 2 ]] || identity=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     running=true; [[ "${MOCK_STATE:-running}" != stopped ]] || running=false
     health="${MOCK_HEALTH:-healthy}"
     name=postgres-production; [[ "${MOCK_NAME_MISMATCH:-false}" != true ]] || name=different-postgres
-    printf '/%s\t%s\t%s\t%s\n' "$name" "$identity" "$running" "$health"
+    if [[ "$health" == none ]]; then
+      printf '[{"Name":"/%s","Id":"%s","State":{"Running":%s}}]\n' "$name" "$identity" "$running"
+    else
+      printf '[{"Name":"/%s","Id":"%s","State":{"Running":%s,"Health":{"Status":"%s"}}}]\n' "$name" "$identity" "$running" "$health"
+    fi
     ;;
   'inspect -f {{range .Mounts}}{{println .Name .Destination}}{{end}}') printf 'production-data /var/lib/postgresql/data\n' ;;
   'network inspect gest-o_default'|'volume inspect production-data') exit 0 ;;
@@ -72,7 +82,7 @@ EOF
     CONFIRM=PREPARE_PRODUCTION_RECOVERY_BACKUP EXPECTED_SHA="$SHA" \
     bash "$APP/scripts/prepare-production-recovery-backup.sh" >"$out" 2>&1
   rc=$?; set -e
-  ! grep -Eq 'user-sentinel|password-sentinel|database\.example\.invalid|production\.sql|/tmp/|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$out"
+  ! grep -Eq 'user-sentinel|password-sentinel|protected-sentinel|database\.example\.invalid|postgres-production|different-postgres|production\.sql|/tmp/|[abc]{64}' "$out"
   if [[ -n "$expected_stage" ]]; then
     (( rc != 0 )); grep -Fq "BACKUP_FAILURE_STAGE=$expected_stage" "$out"
     ! grep -Fq 'exec -i postgres-production pg_dump' "$TMP/docker.log"
@@ -90,6 +100,7 @@ EOF
 }
 
 run_case happy
+MOCK_HEALTH=none; run_case no-healthcheck
 MOCK_REPLACE=true; run_case replaced dump_target_revalidation
 OMIT_EXPECTED_INPUT=true EXPECTED_STATUS=expected_container_input_missing; run_case input-missing database_container_input
 MOCK_STATE=stopped EXPECTED_STATUS=expected_container_not_running; run_case stopped database_container
@@ -97,9 +108,14 @@ MOCK_HEALTH=unhealthy EXPECTED_STATUS=expected_container_unhealthy; run_case unh
 MOCK_STATE=absent EXPECTED_STATUS=expected_container_missing; run_case absent database_container
 MOCK_NAME_MISMATCH=true EXPECTED_STATUS=expected_container_name_mismatch; run_case mismatch database_container
 MOCK_AMBIGUOUS=true EXPECTED_STATUS=expected_container_ambiguous; run_case ambiguous database_container
-MOCK_INSPECT_FAIL=true EXPECTED_STATUS=docker_inspect_failed; run_case inspect-failed database_container
+MOCK_INSPECT_FAIL=malformed EXPECTED_STATUS=malformed_inspect_output; run_case inspect-malformed database_container
+MOCK_INSPECT_FAIL=template EXPECTED_STATUS=template_error; run_case inspect-template-error database_container
+MOCK_INSPECT_FAIL=missing EXPECTED_STATUS=object_not_found; run_case inspect-object-missing database_container
+MOCK_INSPECT_FAIL=permission EXPECTED_STATUS=permission_denied; run_case inspect-permission database_container
+MOCK_INSPECT_FAIL=daemon EXPECTED_STATUS=daemon_unreachable; run_case inspect-daemon database_container
 
 ! grep -Fq 'docker compose exec -T db' "$ROOT/scripts/prepare-production-recovery-backup.sh"
+! grep -Fq '{{.Name}}{{"\t"}}' "$ROOT/scripts/prepare-production-recovery-backup.sh"
 ! grep -Eq 'docker (compose )?(up|start|restart)|docker compose run|sh -c|bash -c' "$ROOT/scripts/prepare-production-recovery-backup.sh"
 ! grep -Eqi 'recovery|cutover|migrat|seed|backfill|sync' "$TMP/docker.log"
 printf '%s\n' 'Production backup validated external container: PASS'

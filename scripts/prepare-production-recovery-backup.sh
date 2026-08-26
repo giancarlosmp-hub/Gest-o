@@ -184,9 +184,22 @@ unset db_inventory db_host db_name
 checkpoint PRODUCTION_BACKUP_DATABASE_URL_CONTRACT=PASS
 
 capture_database_container_snapshot(){
-  local matches snapshot name identity running health extra
-  if ! matches="$(docker ps -aq --no-trunc --filter "name=^/${PRODUCTION_DB_CONTAINER_EXPECTED}$" 2>/dev/null)"; then
-    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  local matches inspect_json snapshot name identity running health extra failure_detail
+  classify_docker_inspect_failure(){
+    local detail=$1 classification=malformed_inspect_output
+    if [[ "$detail" =~ [Tt]emplate ]] || [[ "$detail" == *"can't evaluate field"* ]] || [[ "$detail" == *"function "* ]]; then
+      classification=template_error
+    elif [[ "$detail" =~ [Nn]o[[:space:]]such[[:space:]](object|container) ]] || [[ "$detail" =~ [Nn]ot[[:space:]]found ]]; then
+      classification=object_not_found
+    elif [[ "$detail" =~ [Pp]ermission[[:space:]]denied ]] || [[ "$detail" =~ [Aa]ccess[[:space:]]denied ]]; then
+      classification=permission_denied
+    elif [[ "$detail" =~ [Cc]annot[[:space:]]connect.*[Dd]ocker ]] || [[ "$detail" =~ [Dd]ocker[[:space:]]daemon ]] || [[ "$detail" =~ [Cc]onnection[[:space:]]refused ]]; then
+      classification=daemon_unreachable
+    fi
+    printf 'PRODUCTION_BACKUP_DB_CONTAINER_STATUS=%s\n' "$classification" >&2
+  }
+  if ! matches="$(docker ps -aq --no-trunc --filter "name=^/${PRODUCTION_DB_CONTAINER_EXPECTED}$" 2>&1)"; then
+    classify_docker_inspect_failure "$matches"; return 1
   fi
   if [[ -z "$matches" ]]; then
     printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_missing >&2; return 1
@@ -194,23 +207,42 @@ capture_database_container_snapshot(){
   if [[ "$matches" == *$'\n'* ]]; then
     printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_ambiguous >&2; return 1
   fi
-  if ! snapshot="$(docker inspect -f '{{.Name}}{{"\t"}}{{.Id}}{{"\t"}}{{.State.Running}}{{"\t"}}{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$matches" 2>/dev/null)"; then
-    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  # Read Docker's native JSON rather than composing fields with a Go template.
+  # The parser enforces the complete schema and emits a private, fixed-width
+  # snapshot used only for the checks below and the TOCTOU identity comparison.
+  if ! inspect_json="$(docker inspect "$matches" 2>&1)"; then
+    classify_docker_inspect_failure "$inspect_json"; return 1
   fi
-  if [[ "$snapshot" == *$'\n'* ]]; then
-    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_ambiguous >&2; return 1
+  if ! snapshot="$(INSPECT_JSON="$inspect_json" node - <<'NODE'
+const fail = () => process.exit(1);
+let inspected;
+try { inspected = JSON.parse(process.env.INSPECT_JSON); } catch { fail(); }
+if (!Array.isArray(inspected) || inspected.length !== 1) fail();
+const value = inspected[0];
+if (!value || typeof value.Name !== 'string' || typeof value.Id !== 'string' ||
+    !value.State || typeof value.State.Running !== 'boolean') fail();
+let health = 'none';
+if (value.State.Health != null) {
+  if (typeof value.State.Health !== 'object' || typeof value.State.Health.Status !== 'string') fail();
+  health = value.State.Health.Status;
+}
+if ([value.Name, value.Id, health].some(field => field.includes('\t') || field.includes('\n'))) fail();
+process.stdout.write(`${value.Name}\t${value.Id}\t${value.State.Running}\t${health}`);
+NODE
+  )"; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=malformed_inspect_output >&2; return 1
   fi
   IFS=$'\t' read -r name identity running health extra <<<"$snapshot"
   if [[ -n "$extra" || "$name" != "/$PRODUCTION_DB_CONTAINER_EXPECTED" ]]; then
     printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_name_mismatch >&2; return 1
   fi
-  if [[ ! "$identity" =~ ^[0-9a-f]{64}$ ]]; then
-    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=docker_inspect_failed >&2; return 1
+  if [[ ! "$identity" =~ ^[0-9a-f]{64}$ || ( "$health" != none && "$health" != healthy && "$health" != unhealthy && "$health" != starting ) ]]; then
+    printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=malformed_inspect_output >&2; return 1
   fi
   if [[ "$running" != true ]]; then
     printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_not_running >&2; return 1
   fi
-  if [[ -n "$health" && "$health" != healthy ]]; then
+  if [[ "$health" != none && "$health" != healthy ]]; then
     printf '%s\n' PRODUCTION_BACKUP_DB_CONTAINER_STATUS=expected_container_unhealthy >&2; return 1
   fi
   printf '%s' "$snapshot"
