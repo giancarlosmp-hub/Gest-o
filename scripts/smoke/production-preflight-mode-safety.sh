@@ -107,7 +107,7 @@ grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=invalid_preflight_mode' "$TMP/invalid_mod
 
 # H/I: o gate precede build/cutover e o próprio preflight não toca no runtime.
 deploy=$(cat "$ROOT/scripts/deploy-production.sh")
-preflight_line=$(grep -n 'PRODUCTION_PREFLIGHT_MODE="$MODE" bash scripts/production-preflight.sh' <<<"$deploy" | cut -d: -f1)
+preflight_line=$(grep -n 'PRODUCTION_PREFLIGHT_MODE="$MODE" bash "$APP_DIR/scripts/production-preflight.sh"' <<<"$deploy" | cut -d: -f1)
 build_line=$(grep -n '"${COMPOSE\[@\]}" build api web' <<<"$deploy" | cut -d: -f1)
 stop_line=$(grep -n 'docker stop "$container_id"' <<<"$deploy" | cut -d: -f1)
 (( preflight_line < build_line && build_line < stop_line ))

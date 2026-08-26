@@ -16,9 +16,18 @@ printf 'PRODUCTION_PREFLIGHT_MODE=%s\n' "$PRODUCTION_PREFLIGHT_MODE"
 : "${PRODUCTION_DB_HOST_EXPECTED:?PRODUCTION_DB_HOST_EXPECTED is required}"
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
 : "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
-: "${PRODUCTION_BACKUP_FILE:?PRODUCTION_BACKUP_FILE is required}"
-: "${PRODUCTION_BACKUP_SHA256_FILE:?PRODUCTION_BACKUP_SHA256_FILE is required}"
-source "$(dirname "${BASH_SOURCE[0]}")/lib/production-backup-common.sh"
+PREFLIGHT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Load the helper from this checkout, not from cwd or a host-global copy.  The
+# protected env has already been loaded by deploy-production at this point; its
+# historical path values are deliberately only hints and are rebound here.
+source "$PREFLIGHT_SCRIPT_DIR/lib/production-backup-common.sh"
+printf 'DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN\n'
+backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
+PRODUCTION_BACKUP_FILE="$PRODUCTION_BACKUP_CANONICAL_FILE"
+PRODUCTION_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE"
+export PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE
+printf 'PRODUCTION_BACKUP_CANONICAL_RESOLUTION=PASS\n'
+printf 'PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS\n'
 
 read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
  const u=new URL(process.env.DATABASE_URL); console.log(u.hostname, u.port||"5432", u.pathname.replace(/^\//,""))')
@@ -46,14 +55,13 @@ timeout "${PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15}s" \
     postgres:16 \
     pg_isready -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" >/dev/null 2>&1 ||
   die "PostgreSQL não está aceitando conexões na rede gest-o_default"
-backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
-[[ "$PRODUCTION_BACKUP_FILE" == "$PRODUCTION_BACKUP_CANONICAL_FILE" && "$PRODUCTION_BACKUP_SHA256_FILE" == "$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE" ]] || fail_backup backup_path_mismatch "backup difere do par canônico promovido"
 [[ -f "$PRODUCTION_BACKUP_FILE" && ! -L "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" && ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]] || fail_backup backup_missing "backup ou prova de integridade ausente"
 printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'
 # Integridade significa a prova já adotada: o manifesto SHA256 existente valida o
 # arquivo existente. Este preflight não cria nem renova backups ou manifestos.
 (cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null) || fail_backup backup_integrity "prova de integridade do backup inválida"
 printf 'PRODUCTION_BACKUP_INTEGRITY=PASS\n'
+printf 'PRODUCTION_BACKUP_CANONICAL_PAIR=VALIDATED\n'
 if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
   max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
   pair_output=''
