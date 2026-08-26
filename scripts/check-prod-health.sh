@@ -6,6 +6,7 @@ STRICT_MODE=1
 DB_NAME="${DB_NAME:-salesforce_pro}"
 DB_SERVICE="${DB_SERVICE:-db}"
 COMPOSE_BIN="${COMPOSE_BIN:-docker compose}"
+DB_VALIDATED_CONTAINER="${DB_VALIDATED_CONTAINER:-}"
 
 usage() {
   cat <<'USAGE'
@@ -66,6 +67,11 @@ to_var_name() {
 
 query_count() {
   local table_name="$1"
+  if [[ -n "$DB_VALIDATED_CONTAINER" ]]; then
+    [[ "$DB_VALIDATED_CONTAINER" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || return 1
+    docker exec -i "$DB_VALIDATED_CONTAINER" psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'
+    return
+  fi
   ${COMPOSE_BIN} exec -T "$DB_SERVICE" psql -U postgres -d "$DB_NAME" -tA -c "SELECT COUNT(*) FROM \"${table_name}\";" | tr -d '[:space:]'
 }
 

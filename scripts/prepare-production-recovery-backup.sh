@@ -281,7 +281,7 @@ checkpoint PRODUCTION_BACKUP_SOURCE_VALIDATED=PASS
 
 STAGE=dump; COMMAND=create_validated_dump
 source "$APP_DIR/scripts/lib/production-backup-common.sh"
-backup_validate_database_health
+backup_validate_database_health_in_validated_container "$PRODUCTION_DB_CONTAINER_EXPECTED"
 TMP_DIR="$(mktemp -d "$AUTHORIZED_DIR/.recovery-backup.XXXXXX")"
 plain="$TMP_DIR/dump.sql"; candidate="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_FILE")"; manifest="$TMP_DIR/$(basename "$PRODUCTION_BACKUP_SHA256_FILE")"
 STAGE=dump_target_revalidation; COMMAND=revalidate_validated_database_identity
@@ -293,7 +293,7 @@ revalidated_database_container_identity="${revalidated_database_container_identi
 checkpoint PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS
 STAGE=dump; COMMAND=create_validated_dump
 docker exec -i "$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro >"$plain"
-backup_validate_database_health
+backup_validate_database_health_in_validated_container "$PRODUCTION_DB_CONTAINER_EXPECTED"
 backup_validate_plain_dump "$plain"
 checkpoint PRODUCTION_BACKUP_DUMP=PASS
 gzip -c "$plain" >"$candidate"; rm -f "$plain"

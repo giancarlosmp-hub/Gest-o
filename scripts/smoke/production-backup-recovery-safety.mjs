@@ -7,6 +7,7 @@ const script = readFileSync(resolve(root, "scripts/prepare-production-recovery-b
 const workflow = readFileSync(resolve(root, ".github/workflows/prepare-production-recovery-backup.yml"), "utf8");
 const common = readFileSync(resolve(root, "scripts/lib/production-backup-common.sh"), "utf8");
 const historical = readFileSync(resolve(root, "backup.sh"), "utf8");
+const healthCheck = readFileSync(resolve(root, "scripts/check-prod-health.sh"), "utf8");
 
 for (const contract of [
   "PREPARE_PRODUCTION_RECOVERY_BACKUP", "EXPECTED_SHA",
@@ -53,12 +54,15 @@ assert.match(script, /stat -c %U:%G[\s\S]*root:root/);
 assert.match(script, /stat -c %a[\s\S]*600/);
 assert.match(script, /OLD_BACKUP[\s\S]*install -o root -g root -m 600/);
 assert.match(script, /docker exec -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
+assert.match(script, /backup_validate_database_health_in_validated_container "\$PRODUCTION_DB_CONTAINER_EXPECTED"/);
 assert.match(script, /PRODUCTION_BACKUP_DUMP_TARGET=VALIDATED_CONTAINER/);
 assert.match(script, /PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS/);
 assert.doesNotMatch(script, /docker compose (?:exec|run|up) (?:-T )?db|docker (?:start|restart)/);
 assert.doesNotMatch(script, /docker compose (?:down|up)|down -v|docker (?:system|volume) prune|prisma migrate|seed|backfill|erp-production-recovery/);
 assert.doesNotMatch(script, /echo .*DATABASE_URL|set -x|sha256sum .*printf/);
 assert.match(common, /USER_COUNT[\s\S]*CLIENT_COUNT[\s\S]*OPPORTUNITY_COUNT[\s\S]*TIMELINE_EVENT_COUNT/);
+assert.match(common, /DB_VALIDATED_CONTAINER="\$validated_container" backup_validate_database_health/);
+assert.match(healthCheck, /docker exec -i "\$DB_VALIDATED_CONTAINER" psql -U postgres -d "\$DB_NAME"/);
 assert.match(historical, /production-backup-common\.sh[\s\S]*backup_validate_database_health[\s\S]*backup_validate_plain_dump/);
 assert.match(workflow, /environment: production-backup-recovery/);
 assert.match(workflow, /git pull --ff-only origin main/);

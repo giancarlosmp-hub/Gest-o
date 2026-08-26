@@ -22,6 +22,16 @@ backup_validate_database_health() {
   (( ${CLIENT_COUNT:-0} + ${OPPORTUNITY_COUNT:-0} + ${TIMELINE_EVENT_COUNT:-0} > 0 ))
 }
 
+# Recovery preparation must never inherit the historical Compose-db strategy.
+# Its caller supplies the exact, already validated container name; the health
+# reader uses docker exec directly and keeps the historical backup behavior
+# unchanged when backup_validate_database_health is called without this wrapper.
+backup_validate_database_health_in_validated_container() {
+  local validated_container=$1
+  [[ "$validated_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || return 1
+  DB_VALIDATED_CONTAINER="$validated_container" backup_validate_database_health
+}
+
 backup_validate_plain_dump() {
   local file=$1 size
   [[ -f "$file" && ! -L "$file" ]] || return 1
