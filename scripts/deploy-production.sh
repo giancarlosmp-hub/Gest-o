@@ -68,7 +68,11 @@ if [[ -n "$LEGACY_SOURCE_FILE" ]]; then
 else
   PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
 fi
-PRODUCTION_PREFLIGHT_MODE="$MODE" bash scripts/production-preflight.sh
+# This is intentionally the final operation after loading the selected env:
+# production-preflight owns canonical backup rebinding so legacy hints cannot
+# overwrite the authoritative pair between resolution and validation.
+printf 'DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN\n'
+PRODUCTION_PREFLIGHT_MODE="$MODE" bash "$APP_DIR/scripts/production-preflight.sh"
 actual_services="$("${COMPOSE[@]}" config --services | sort)"
 expected_services="$(printf 'api\nweb\n' | sort)"
 [[ "$actual_services" == "$expected_services" ]] || die "topologia contém serviços inesperados"
