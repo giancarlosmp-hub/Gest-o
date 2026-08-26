@@ -12,8 +12,8 @@ function executable(path, body) { writeFileSync(path, body); chmodSync(path, 0o7
 
 function scenario(name, options = {}) {
   const dir = mkdtempSync(join(tmpdir(), `erp-recovery-${name}-`));
-  const app = join(dir, "app"), envDir = join(dir, "env"), bin = join(dir, "bin"), evidence = join(dir, "evidence");
-  mkdirSync(join(app, "scripts"), { recursive: true }); mkdirSync(envDir); mkdirSync(bin); mkdirSync(evidence);
+  const app = join(dir, "app"), envDir = join(dir, "env"), bin = join(dir, "bin"), evidence = join(dir, "evidence"), backups = join(dir, "backups");
+  mkdirSync(join(app, "scripts"), { recursive: true }); mkdirSync(envDir); mkdirSync(bin); mkdirSync(evidence); mkdirSync(backups);
   writeFileSync(join(app, "package.json"), JSON.stringify({ version: "9.8.7" }));
   writeFileSync(join(app, "docker-compose.production.yml"), "services: {api: {}, web: {}}\n");
   const protectedEnv = [
@@ -110,6 +110,7 @@ exit 0
     cwd: app, encoding: "utf8", env: {
       ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, APP_DIR: app,
       ERP_RECOVERY_ENV_DIR: envDir, ERP_RECOVERY_EVIDENCE_ROOT: evidence,
+      PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY: backups,
       CONFIRM: "RESTORE_ERP_AUTOMATIC_SYNC", EXPECTED_SHA: sha,
       AUTH_TEST_EMAIL: options.auth === false ? "" : "protected@example.invalid",
       AUTH_TEST_PASSWORD: options.auth === false ? "" : "protected-test-value",

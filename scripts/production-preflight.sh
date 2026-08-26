@@ -18,6 +18,7 @@ printf 'PRODUCTION_PREFLIGHT_MODE=%s\n' "$PRODUCTION_PREFLIGHT_MODE"
 : "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
 : "${PRODUCTION_BACKUP_FILE:?PRODUCTION_BACKUP_FILE is required}"
 : "${PRODUCTION_BACKUP_SHA256_FILE:?PRODUCTION_BACKUP_SHA256_FILE is required}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/production-backup-common.sh"
 
 read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
  const u=new URL(process.env.DATABASE_URL); console.log(u.hostname, u.port||"5432", u.pathname.replace(/^\//,""))')
@@ -45,7 +46,9 @@ timeout "${PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15}s" \
     postgres:16 \
     pg_isready -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" >/dev/null 2>&1 ||
   die "PostgreSQL não está aceitando conexões na rede gest-o_default"
-[[ -f "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" ]] || fail_backup backup_missing "backup ou prova de integridade ausente"
+backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
+[[ "$PRODUCTION_BACKUP_FILE" == "$PRODUCTION_BACKUP_CANONICAL_FILE" && "$PRODUCTION_BACKUP_SHA256_FILE" == "$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE" ]] || fail_backup backup_path_mismatch "backup difere do par canônico promovido"
+[[ -f "$PRODUCTION_BACKUP_FILE" && ! -L "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" && ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]] || fail_backup backup_missing "backup ou prova de integridade ausente"
 printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'
 # Integridade significa a prova já adotada: o manifesto SHA256 existente valida o
 # arquivo existente. Este preflight não cria nem renova backups ou manifestos.
@@ -53,9 +56,14 @@ printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'
 printf 'PRODUCTION_BACKUP_INTEGRITY=PASS\n'
 if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
   max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
-  age=$(( $(date +%s) - $(stat -c %Y "$PRODUCTION_BACKUP_FILE") ))
-  (( age <= max_age )) || fail_backup backup_stale "backup não é recente"
-  printf 'PRODUCTION_BACKUP_FRESHNESS=PASS\n'
+  pair_output=''
+  if pair_output="$(backup_validate_canonical_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "$max_age")"; then
+    :
+  else
+    rc=$?; case "$rc" in 11) reason=backup_timestamp_future;; 12) reason=backup_stale;; 2) reason=backup_path_mismatch;; 5|7) reason=backup_integrity;; 9) reason=backup_changed;; *) reason=backup_timestamp_invalid;; esac
+    fail_backup "$reason" "contrato canônico/freshness do backup inválido"
+  fi
+  printf '%s\n' "$pair_output"
 else
   printf 'PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY\n'
 fi
