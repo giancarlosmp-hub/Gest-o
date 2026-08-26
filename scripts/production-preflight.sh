@@ -16,9 +16,10 @@ printf 'PRODUCTION_PREFLIGHT_MODE=%s\n' "$PRODUCTION_PREFLIGHT_MODE"
 : "${PRODUCTION_DB_HOST_EXPECTED:?PRODUCTION_DB_HOST_EXPECTED is required}"
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
 : "${PRODUCTION_DB_VOLUME_EXPECTED:?PRODUCTION_DB_VOLUME_EXPECTED is required}"
-: "${PRODUCTION_BACKUP_FILE:?PRODUCTION_BACKUP_FILE is required}"
-: "${PRODUCTION_BACKUP_SHA256_FILE:?PRODUCTION_BACKUP_SHA256_FILE is required}"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/production-backup-common.sh"
+# Resolve here, at the shared enforcement boundary, so deploy build, cutover and
+# Recovery cannot accidentally select historical paths loaded from an env file.
+backup_resolve_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
 
 read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
  const u=new URL(process.env.DATABASE_URL); console.log(u.hostname, u.port||"5432", u.pathname.replace(/^\//,""))')
@@ -46,7 +47,6 @@ timeout "${PRODUCTION_DB_READY_TIMEOUT_SECONDS:-15}s" \
     postgres:16 \
     pg_isready -h "$DB_HOST" -p "$DB_PORT" -d "$DB_NAME" >/dev/null 2>&1 ||
   die "PostgreSQL não está aceitando conexões na rede gest-o_default"
-backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
 [[ "$PRODUCTION_BACKUP_FILE" == "$PRODUCTION_BACKUP_CANONICAL_FILE" && "$PRODUCTION_BACKUP_SHA256_FILE" == "$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE" ]] || fail_backup backup_path_mismatch "backup difere do par canônico promovido"
 [[ -f "$PRODUCTION_BACKUP_FILE" && ! -L "$PRODUCTION_BACKUP_FILE" && -f "$PRODUCTION_BACKUP_SHA256_FILE" && ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]] || fail_backup backup_missing "backup ou prova de integridade ausente"
 printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'

@@ -86,13 +86,12 @@ CASE_BACKUP_FILE=$'"/absolute/control\vpath"'; run_case historical-control-chara
 CASE_OMIT_BACKUP_FILE=true; CASE_OMIT_MANIFEST_FILE=true; CASE_DATABASE_URL='not-a-url'
 run_case historical-variables-absent database_url_contract
 
-# Canonical source remains fail-closed: present assertions must exactly match
-# the effective pair, while absent assertions are permitted and never fall back.
-CASE_SOURCE=canonical; CASE_BACKUP_FILE="$TMP/former/production.sql.gz"; run_case canonical-divergent historical_path_contract
+# Canonical source path values are also non-authoritative hints and are rebound.
+CASE_SOURCE=canonical; CASE_BACKUP_FILE="$TMP/former/production.sql.gz"; CASE_DATABASE_URL='not-a-url'; run_case canonical-divergent database_url_contract
 grep -Fq 'PRODUCTION_BACKUP_ENV_SOURCE=canonical' "$TMP/canonical-divergent.out"
 ! grep -Fq 'REBOUND_LEGACY_READ_ONLY' "$TMP/canonical-divergent.out"
 CASE_SOURCE=canonical; CASE_DATABASE_URL='not-a-url'; run_case canonical-valid database_url_contract
-grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=STRICT_CANONICAL' "$TMP/canonical-valid.out"
+grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_CANONICAL_HINTS' "$TMP/canonical-valid.out"
 ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink dump_path_contract; rm "$AUTH/production.sql.gz"
 ln -s "$TMP/target" "$AUTH/production.sql.gz.sha256"; run_case manifest-symlink manifest_path_contract; rm "$AUTH/production.sql.gz.sha256"
 touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 640 "$AUTH/production.sql.gz"

@@ -6,6 +6,11 @@ export PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$TMP/backups"
 mkdir "$PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY"
 source "$ROOT/scripts/lib/production-backup-common.sh"
 backup_bind_canonical_pair
+PRODUCTION_BACKUP_FILE=/historical/legacy.sql.gz
+PRODUCTION_BACKUP_SHA256_FILE=/historical/legacy.sql.gz.sha256
+backup_resolve_canonical_pair
+[[ "$PRODUCTION_BACKUP_FILE" == "$PRODUCTION_BACKUP_CANONICAL_FILE" ]]
+[[ "$PRODUCTION_BACKUP_SHA256_FILE" == "$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE" ]]
 printf 'safe test dump\n' >"$PRODUCTION_BACKUP_CANONICAL_FILE"
 (cd "$PRODUCTION_BACKUP_CANONICAL_DIRECTORY" && sha256sum production.sql.gz >production.sql.gz.sha256)
 
