@@ -236,6 +236,7 @@ COMPOSE=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 
 API_CHANGED=true
 STAGE=api_recreate
+proof_baseline_at="$(date -u +%FT%TZ)"
 "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate api
 if [[ "${ERP_RECOVERY_TEST_FAIL_AFTER_RECREATE:-false}" == true ]]; then
   die 'injected post-recreate failure'
@@ -283,28 +284,58 @@ config_ok="$(sed -n 's/^CONFIG_OK=//p' "$technical_file")"; auth_mode="$(sed -n 
 [[ "$initialized" == true && "$enabled" == true && "$config_ok" == true ]] || die 'scheduler did not initialize with a valid configuration'
 [[ "$auth_mode" == global || "$auth_mode" == seller_reference ]] || die 'global or decryptable seller-reference credentials were not proven'
 [[ -n "$next_run_at" ]] || die 'nextRunAt is absent'
-recreated_at="$(date -u +%FT%TZ)"
+recreated_at="$proof_baseline_at"
 log 'ERP_API_RECREATE=PASS'; log 'ERP_API_HEALTH=PASS'; log 'ERP_PRODUCTION_LOGIN=PASS'
 log 'ERP_PROTECTED_ENDPOINT=PASS'; log 'ERP_SCHEDULER_INITIALIZED=PASS'; log 'ERP_NEXT_RUN_AT=PRESENT'
 
 STAGE=automatic_proof
-deadline=$(( $(date +%s) + MAX_WAIT_SECONDS )); automatic_proven=false
+proof_started_epoch="$(date +%s)"
+temporal_evidence="$(node scripts/lib/erp-automatic-proof.mjs "$next_run_at" "$MAX_WAIT_SECONDS" "$(date -u +%FT%TZ)")"
+next_delay_class="$(sed -n 's/^NEXT_RUN_DELAY_CLASS=//p' <<<"$temporal_evidence")"
+next_within_window="$(sed -n 's/^NEXT_RUN_WITHIN_WINDOW=//p' <<<"$temporal_evidence")"
+log "ERP_AUTOMATIC_PROOF_WINDOW_SECONDS=$MAX_WAIT_SECONDS"
+log "ERP_SCHEDULER_NEXT_RUN_DELAY_CLASS=$next_delay_class"
+if [[ "$next_within_window" != true ]]; then
+  log 'ERP_AUTOMATIC_TRIGGER_OBSERVED=NO'; log 'ERP_AUTOMATIC_LOCK_ACQUIRED=NOT_OBSERVED'
+  log 'ERP_AUTOMATIC_RUN_RECORD=ABSENT'; log 'ERP_AUTOMATIC_PROOF_POLL_COUNT=0'
+  log 'ERP_AUTOMATIC_PROOF_LAST_OBSERVED=ABSENT'; log 'ERP_AUTOMATIC_PROOF_FAILURE=next_run_outside_window'
+  die 'nextRunAt is outside the bounded automatic proof window'
+fi
+deadline=$(( proof_started_epoch + MAX_WAIT_SECONDS )); automatic_proven=false; poll_count=0
+automatic_trigger_observed=NO; automatic_lock_acquired=NOT_OBSERVED; automatic_run_record=ABSENT; last_observed=ABSENT
 while (( $(date +%s) < deadline )); do
+  poll_count=$((poll_count + 1))
   docker exec -i "$new_api_id" env RECREATED_AT="$recreated_at" node >"$technical_file" <<'NODE'
 const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();
 (async()=>{const since=new Date(process.env.RECREATED_AT);const runs=await p.erpSyncRun.findMany({where:{scope:'automatic',trigger:'scheduler',startedAt:{gt:since}},orderBy:{startedAt:'desc'},select:{status:true,startedAt:true,finishedAt:true,correlationId:true,errorMessage:true,syncedCount:true,metrics:true}});
 const latest=runs[0],success=latest?.status==='success'&&latest.finishedAt&&latest.correlationId?latest:null;const concurrent=runs.filter(r=>r.status==='running').length;
 const locks=await p.erpSyncLock.findMany({select:{lockedUntil:true}});const now=new Date(),active=locks.some(l=>l.lockedUntil>=now),expired=locks.some(l=>l.lockedUntil<now);
 const completed=Array.isArray(success?.metrics?.completedSteps)?success.metrics.completedSteps.length:0;
-console.log(`SUCCESS=${Boolean(success)}`);console.log(`DUPLICATE=${concurrent>1}`);console.log(`LOCK=${active?'active':expired?'expired_recoverable':'free'}`);if(success){console.log(`STARTED_AT=${success.startedAt.toISOString()}`);console.log(`FINISHED_AT=${success.finishedAt.toISOString()}`);console.log(`CORRELATION_ID=${success.correlationId}`);console.log(`LOCK_ACQUIRED=${success.syncedCount>0&&completed>0}`)}
+const observed=latest?.status==='success'?'SUCCESS':latest?.status==='error'?'FAILED':latest?.status==='running'?'RUNNING':'ABSENT';
+console.log(`SUCCESS=${Boolean(success)}`);console.log(`TRIGGER_OBSERVED=${Boolean(latest)}`);console.log(`OBSERVED=${observed}`);console.log(`DUPLICATE=${concurrent>1}`);console.log(`LOCK=${active?'active':expired?'expired_recoverable':'free'}`);if(success){console.log(`STARTED_AT=${success.startedAt.toISOString()}`);console.log(`FINISHED_AT=${success.finishedAt.toISOString()}`);console.log(`CORRELATION_ID=${success.correlationId}`);console.log(`LOCK_ACQUIRED=${success.syncedCount>0&&completed>0}`)}
 })().finally(()=>p.$disconnect()).catch(()=>process.exit(1));
 NODE
   [[ "$(sed -n 's/^DUPLICATE=//p' "$technical_file")" == false ]] || die 'duplicate automatic scheduler executions detected'
+  last_observed="$(sed -n 's/^OBSERVED=//p' "$technical_file")"
+  automatic_run_record="$last_observed"
+  [[ "$(sed -n 's/^TRIGGER_OBSERVED=//p' "$technical_file")" == true ]] && automatic_trigger_observed=YES
   if [[ "$(sed -n 's/^SUCCESS=//p' "$technical_file")" == true ]]; then automatic_proven=true; break; fi
   sleep "$POLL_SECONDS"
 done
-[[ "$automatic_proven" == true ]] || die 'bounded window expired without a successful automatic scheduler run'
+if [[ "$automatic_proven" != true ]]; then
+  failure_category=successful_run_not_found
+  [[ "$automatic_trigger_observed" == NO ]] && failure_category=automatic_trigger_not_observed
+  [[ "$last_observed" == FAILED ]] && failure_category=automatic_run_failed
+  [[ "$last_observed" == RUNNING ]] && failure_category=automatic_run_still_running
+  [[ "$(sed -n 's/^LOCK=//p' "$technical_file")" == active ]] && failure_category=automatic_lock_blocked
+  log "ERP_AUTOMATIC_TRIGGER_OBSERVED=$automatic_trigger_observed"; log 'ERP_AUTOMATIC_LOCK_ACQUIRED=NOT_OBSERVED'
+  log "ERP_AUTOMATIC_RUN_RECORD=$automatic_run_record"; log "ERP_AUTOMATIC_PROOF_POLL_COUNT=$poll_count"
+  log "ERP_AUTOMATIC_PROOF_LAST_OBSERVED=$last_observed"; log "ERP_AUTOMATIC_PROOF_FAILURE=$failure_category"
+  die 'bounded window expired without a successful automatic scheduler run'
+fi
 [[ "$(sed -n 's/^LOCK_ACQUIRED=//p' "$technical_file")" == true ]] || die 'successful run did not prove execution through locked sync steps'
+log 'ERP_AUTOMATIC_TRIGGER_OBSERVED=YES'; log 'ERP_AUTOMATIC_LOCK_ACQUIRED=YES'; log 'ERP_AUTOMATIC_RUN_RECORD=SUCCESS'
+log "ERP_AUTOMATIC_PROOF_POLL_COUNT=$poll_count"; log 'ERP_AUTOMATIC_PROOF_LAST_OBSERVED=SUCCESS'; log 'ERP_AUTOMATIC_PROOF_FAILURE=none'
 log "ERP_AUTOMATIC_STARTED_AT=$(sed -n 's/^STARTED_AT=//p' "$technical_file")"
 log "ERP_AUTOMATIC_FINISHED_AT=$(sed -n 's/^FINISHED_AT=//p' "$technical_file")"
 log "ERP_AUTOMATIC_CORRELATION_ID=$(sed -n 's/^CORRELATION_ID=//p' "$technical_file")"
