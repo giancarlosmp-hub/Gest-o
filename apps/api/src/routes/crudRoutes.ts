@@ -9056,6 +9056,7 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
 
 
 router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), async (_req, res) => {
+  res.setHeader("X-Gestao-Canonical-Route", "erp-scheduler-status-v1");
   const automaticSync = await refreshErpAutomaticSyncConfig();
   const reasonCode = automaticSync.enabledByEnv === false
     ? "EXTERNAL_CONFIGURATION_REQUIRED:ERP_SYNC_SCHEDULER_ENABLED"
