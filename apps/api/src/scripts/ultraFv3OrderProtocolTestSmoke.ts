@@ -17,7 +17,9 @@ assert.match(routeSource, /feature_disabled/, "endpoint deve bloquear quando a f
 assert.match(routeSource, /CONFIRMAR_TESTE_ULTRAFV3/, "endpoint deve exigir confirmação explícita");
 assert.match(routeSource, /numPedidoMode:\s*z\.literal\("zero"\)/, "endpoint deve exigir numPedidoMode zero");
 
-const protocolTestSource = serviceSource.slice(serviceSource.indexOf("export async function runUltraFv3OrderProtocolTest"));
+const protocolTestStart = serviceSource.indexOf("export async function runUltraFv3OrderProtocolTest");
+const protocolTestEnd = serviceSource.indexOf("export async function syncErpOrderStatuses", protocolTestStart);
+const protocolTestSource = serviceSource.slice(protocolTestStart, protocolTestEnd);
 assert.match(serviceSource, /const PROTOCOL_TEST_MARKER = "protocol_test"/, "tentativa deve ser identificada como protocol_test");
 assert.match(protocolTestSource, /NUM_PEDIDO:\s*"0"|submittedNumPedido:\s*"0"/, "payload controlado deve enviar NUM_PEDIDO zero");
 assert.doesNotMatch(protocolTestSource, /resolveSalesmanOrderSequence/, "teste de protocolo não deve usar /salesmen para determinar NUM_PEDIDO");
@@ -28,7 +30,7 @@ assert.match(protocolTestSource, /status:\s*ErpOrderSyncStatus\.pending[\s\S]*pa
 assert.match(protocolTestSource, /\/orderStatus\?pedido=\$\{encodeURIComponent\(query\.value\)\}/, "teste deve consultar /orderStatus por identificadores controlados");
 assert.match(protocolTestSource, /erpInternalOrderId[\s\S]*displayOrderNumberCandidate:\s*null/, "PEDIDO_ID deve ser separado como ID interno e não número oficial");
 assert.match(protocolTestSource, /manualVerificationRequired:\s*true/, "relatório deve exigir conferência manual");
-assert.match(protocolTestSource, /status:\s*ErpOrderSyncStatus\.sent[\s\S]*OR:\s*\[/, "o teste deve bloquear oportunidades com pedido enviado/tentativa existente");
+assert.match(protocolTestSource, /OR:\s*\[[\s\S]*status:\s*ErpOrderSyncStatus\.sent[\s\S]*status:\s*ErpOrderSyncStatus\.pending/, "o teste deve bloquear oportunidades com pedido enviado/tentativa existente");
 
 assert.match(clientSource, /requestWithCredentialsRaw/, "client deve permitir capturar status HTTP e headers seguros sem retry");
 assert.match(loggerSource, /SENSITIVE_KEY_PATTERN[\s\S]*senha/, "logger deve redigir SENHA/password/token/authorization");

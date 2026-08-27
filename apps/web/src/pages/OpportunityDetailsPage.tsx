@@ -199,6 +199,20 @@ type ErpOrderSync = {
   createdAt: string;
   sentAt?: string | null;
   statusSyncedAt?: string | null;
+  lastStatusPayload?: {
+    outcome?: "confirmed" | "processing" | "rejected" | "unknown";
+    operation?: string;
+  } | null;
+};
+
+const getErpReconciliationLabel = (order: ErpOrderSync) => {
+  switch (order.lastStatusPayload?.outcome) {
+    case "confirmed": return "Pedido confirmado no ERP — reconciliado sem reenvio";
+    case "processing": return "Ainda processando no ERP — reenvio bloqueado";
+    case "rejected": return "Rejeitado com segurança pelo ERP";
+    case "unknown": return "Resultado desconhecido — verificar ERP; reenvio bloqueado";
+    default: return order.status === "sent" ? "Pedido confirmado no ERP" : "Resultado desconhecido — verificar ERP";
+  }
 };
 
 const stageFlow: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho"];
@@ -2232,7 +2246,10 @@ export default function OpportunityDetailsPage() {
                                     <p className="text-xs text-slate-600">
                                       Pedido ERP nº: {" "}
                                       {order.erpOrderNumber ||
-                                        "Pedido enviado, número ERP não retornado"}
+                                        "número ERP ainda não confirmado"}
+                                    </p>
+                                    <p className="mt-1 text-xs font-semibold text-slate-700">
+                                      {getErpReconciliationLabel(order)}
                                     </p>
                                   </div>
                                   {order.status === "sent" ? (
