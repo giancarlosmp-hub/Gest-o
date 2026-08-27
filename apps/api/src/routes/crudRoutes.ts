@@ -9063,7 +9063,10 @@ router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), as
   return res.status(200).json({
     automaticSync: {
       enabled: Boolean(automaticSync.enabled && automaticSync.enabledByEnv),
+      enabledByEnv: Boolean(automaticSync.enabledByEnv),
       initialized: Boolean(automaticSync.initialized),
+      configurationOk: Boolean(automaticSync.configurationOk),
+      authMode: automaticSync.authMode,
       nextRunAt: automaticSync.nextRunAt ?? null,
       lastRunAt: automaticSync.lastRunAt ?? null,
       lastSuccessAt: automaticSync.lastSuccessAt ?? null,

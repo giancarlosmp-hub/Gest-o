@@ -1,12 +1,27 @@
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const httpClass = (status) => Number.isInteger(status) ? `${Math.floor(status / 100)}xx` : "none";
+const exactHttpStatus = (status) => {
+  if (!Number.isInteger(status)) return "none";
+  return [400, 401, 403, 404, 405, 409, 422].includes(status)
+    ? String(status)
+    : status >= 400 && status < 500 ? "other_4xx" : String(status);
+};
 
 export async function validateAuthenticatedRecovery({
   baseUrl, email, password, attempts = 7, delayMs = 3000, fetchImpl = fetch,
 }) {
   let lastPass = "api_health";
   let lastHttpClass = "none";
-  const fail = (category, retryable = false) => ({ ok: false, category, lastPass, httpClass: lastHttpClass, retryable });
+  let lastHttpStatus = "none";
+  let authenticatedRole = "none";
+  const recordStatus = (status) => {
+    lastHttpClass = httpClass(status);
+    lastHttpStatus = exactHttpStatus(status);
+  };
+  const fail = (category, retryable = false) => ({
+    ok: false, category, lastPass, httpClass: lastHttpClass,
+    httpStatus: lastHttpStatus, authenticatedRole, retryable,
+  });
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -14,7 +29,7 @@ export async function validateAuthenticatedRecovery({
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      lastHttpClass = httpClass(login.status);
+      recordStatus(login.status);
       if (login.status !== 200) return fail("login_http");
       let loginBody;
       try { loginBody = await login.json(); } catch { return fail("login_schema"); }
@@ -23,12 +38,21 @@ export async function validateAuthenticatedRecovery({
 
       const headers = { authorization: `Bearer ${loginBody.accessToken}` };
       const me = await fetchImpl(`${baseUrl}/auth/me`, { headers });
-      lastHttpClass = httpClass(me.status);
+      recordStatus(me.status);
       if (me.status !== 200) return fail("authenticated_identity_http");
+      let identity;
+      try { identity = await me.json(); } catch { return fail("authenticated_identity_schema"); }
+      authenticatedRole = typeof identity?.role === "string" ? identity.role : "none";
+      if (!identity || typeof identity !== "object" || !["diretor", "gerente", "vendedor"].includes(authenticatedRole)) {
+        return fail("authenticated_identity_schema");
+      }
       lastPass = "authenticated_identity";
 
-      const status = await fetchImpl(`${baseUrl}/erp/ultrafv3/sync/status`, { headers });
-      lastHttpClass = httpClass(status.status);
+      // This is the API's dedicated, canonical scheduler-state contract. Keep the
+      // same RBAC as the operational ERP routes; the Recovery identity must be
+      // diretor or gerente rather than weakening authorization here.
+      const status = await fetchImpl(`${baseUrl}/erp/ultrafv3/scheduler/status`, { method: "GET", headers });
+      recordStatus(status.status);
       if (status.status !== 200) return fail("protected_endpoint_http");
       let body;
       try { body = await status.json(); } catch { return fail("protected_endpoint_schema"); }
@@ -46,7 +70,7 @@ export async function validateAuthenticatedRecovery({
       if (!(automatic.authMode === "global" || automatic.authMode === "seller_reference")) return fail("erp_auth_mode");
       lastPass = "erp_auth_mode";
       if (!automatic.nextRunAt) return fail("next_run_at_absent", true);
-      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, automatic };
+      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, httpStatus: lastHttpStatus, authenticatedRole, automatic };
     } catch {
       if (attempt < attempts) { await sleep(delayMs); continue; }
       return fail("transport_timeout", true);
@@ -65,11 +89,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`FAILURE=${result.category}`);
     console.log(`LAST_PASS=${result.lastPass}`);
     console.log(`HTTP_CLASS=${result.httpClass}`);
+    console.log(`HTTP_STATUS=${result.httpStatus}`);
+    console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     process.exitCode = 1;
   } else {
     const a = result.automatic;
     console.log(`LAST_PASS=${result.lastPass}`);
     console.log(`HTTP_CLASS=${result.httpClass}`);
+    console.log(`HTTP_STATUS=${result.httpStatus}`);
+    console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     console.log(`INITIALIZED=${a.initialized === true}`);
     console.log(`ENABLED=${a.enabled === true && a.enabledByEnv === true}`);
     console.log(`CONFIG_OK=${a.configurationOk === true}`);
