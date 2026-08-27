@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { validateAuthenticatedRecovery } from "../lib/erp-authenticated-validation.mjs";
 
-const response = (status, body) => ({ status, json: async () => body });
+const response = (status, body, headers = {}) => ({
+  status, json: async () => body,
+  headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+});
 const automatic = { initialized: true, enabled: true, enabledByEnv: true, configurationOk: true, authMode: "global", nextRunAt: "2026-08-26T13:00:00Z" };
 const fetchSequence = (...items) => async () => {
   const item = items.shift();
@@ -14,8 +17,11 @@ const run = (items, attempts = 1) => validateAuthenticatedRecovery({
 });
 const identity = (role = "diretor") => response(200, { id: "user-id", role });
 
-let result = await run([response(200, { accessToken: "secret-token" }), identity(), response(200, { automaticSync: automatic })]);
+let result = await run([response(200, { accessToken: "secret-token" }), identity(), response(200, { automaticSync: automatic }, { "x-gestao-response-origin": "api" })]);
 assert.equal(result.ok, true); assert.equal(result.lastPass, "next_run_at");
+assert.equal(result.httpOrigin, "api");
+result = await run([response(200, { accessToken: "secret-token" }), identity(), response(429, {}, { server: "nginx" })]);
+assert.equal(result.httpOrigin, "reverse_proxy");
 
 result = await run([response(401, {})]);
 assert.deepEqual({ category: result.category, lastPass: result.lastPass, httpClass: result.httpClass }, { category: "login_http", lastPass: "api_health", httpClass: "4xx" });
@@ -24,7 +30,11 @@ result = await run([response(200, { accessToken: "secret-token" }), response(403
 result = await run([response(200, { accessToken: "secret-token" }), identity(), response(404, {})]); assert.equal(result.category, "protected_endpoint_http"); assert.equal(result.httpStatus, "404");
 for (const status of [400, 401, 403, 405, 409, 422, 429]) {
   result = await run([response(200, { accessToken: "secret-token" }), identity(), response(status, {})]);
-  assert.equal(result.httpStatus, status === 429 ? "other_4xx" : String(status));
+  assert.equal(result.httpStatus, String(status));
+}
+for (let status = 400; status < 500; status += 1) {
+  result = await run([response(200, { accessToken: "secret-token" }), identity(), response(status, {})]);
+  assert.equal(result.httpStatus, String(status));
 }
 result = await run([response(200, { accessToken: "secret-token" }), identity(), response(200, {})]); assert.equal(result.category, "protected_endpoint_schema");
 

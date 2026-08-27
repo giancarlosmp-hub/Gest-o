@@ -77,6 +77,12 @@ app.use(
   })
 );
 app.use(requestContextMiddleware);
+// A value-only provenance marker lets operational probes distinguish this API
+// from an intermediary without logging request URLs, credentials, or bodies.
+app.use((_req, res, next) => {
+  res.setHeader("X-Gestao-Response-Origin", "api");
+  next();
+});
 app.use((req, res, next) => {
   const match = isErpOrderRequest(req) ? req.path.match(/^\/(?:api\/)?opportunities\/([^/]+)\/(?:erp\/)?orders\/?$/) : null;
   if (!match) return next();

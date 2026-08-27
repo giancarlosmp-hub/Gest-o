@@ -12,6 +12,9 @@ const createRateLimiter = (name: string, productionLimit: number, developmentLim
     limit: isProduction ? productionLimit : developmentLimit,
     standardHeaders: true,
     legacyHeaders: false,
+    // Authenticated traffic is limited per identity. In particular, internal
+    // probes using loopback must not inherit an exhausted shared proxy/IP bucket.
+    keyGenerator: (req) => req.user?.id ? `user:${req.user.id}` : (req.ip ?? "unknown"),
     handler: (req, res) => {
       const details = req.rateLimit;
       const userId = req.user?.id ?? "anonymous";

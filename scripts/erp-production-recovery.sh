@@ -262,13 +262,16 @@ if ! API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUT
   [[ "$last_pass" =~ ^(api_health|login|authenticated_identity|protected_endpoint|scheduler_initialized|scheduler_enabled|scheduler_configuration|erp_auth_mode)$ ]] || last_pass=none
   [[ "$http_class" =~ ^([1-5]xx|none)$ ]] || http_class=none
   http_status="$(sed -n 's/^HTTP_STATUS=//p' "$technical_file" | head -1)"
+  http_origin="$(sed -n 's/^HTTP_ORIGIN=//p' "$technical_file" | head -1)"
   authenticated_role="$(sed -n 's/^AUTHENTICATED_ROLE=//p' "$technical_file" | head -1)"
-  [[ "$http_status" =~ ^(400|401|403|404|405|409|422|other_4xx|[1-5][0-9][0-9]|none)$ ]] || http_status=none
+  [[ "$http_status" =~ ^([1-5][0-9][0-9]|none)$ ]] || http_status=none
+  [[ "$http_origin" =~ ^(api|reverse_proxy|unknown)$ ]] || http_origin=unknown
   [[ "$authenticated_role" =~ ^(diretor|gerente|vendedor|none)$ ]] || authenticated_role=none
   log "ERP_AUTHENTICATED_VALIDATION_FAILURE=$failure"
   log "ERP_AUTHENTICATED_VALIDATION_LAST_PASS=$last_pass"
   log "ERP_AUTHENTICATED_VALIDATION_HTTP_CLASS=$http_class"
   log "ERP_AUTHENTICATED_VALIDATION_HTTP_STATUS=$http_status"
+  log "ERP_AUTHENTICATED_VALIDATION_HTTP_ORIGIN=$http_origin"
   log "ERP_AUTHENTICATED_ROLE=$authenticated_role"
   die 'authenticated validation failed; sensitive response omitted'
 fi

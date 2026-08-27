@@ -2,9 +2,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const httpClass = (status) => Number.isInteger(status) ? `${Math.floor(status / 100)}xx` : "none";
 const exactHttpStatus = (status) => {
   if (!Number.isInteger(status)) return "none";
-  return [400, 401, 403, 404, 405, 409, 422].includes(status)
-    ? String(status)
-    : status >= 400 && status < 500 ? "other_4xx" : String(status);
+  return String(status);
+};
+const responseOrigin = (response) => {
+  const get = response?.headers?.get?.bind(response.headers);
+  if (!get) return "unknown";
+  if (get("x-gestao-response-origin") === "api") return "api";
+  const server = get("server")?.toLowerCase?.() ?? "";
+  return get("cf-ray") || /cloudflare|nginx/.test(server) ? "reverse_proxy" : "unknown";
 };
 
 export async function validateAuthenticatedRecovery({
@@ -14,13 +19,14 @@ export async function validateAuthenticatedRecovery({
   let lastHttpClass = "none";
   let lastHttpStatus = "none";
   let authenticatedRole = "none";
+  let httpOrigin = "unknown";
   const recordStatus = (status) => {
     lastHttpClass = httpClass(status);
     lastHttpStatus = exactHttpStatus(status);
   };
   const fail = (category, retryable = false) => ({
     ok: false, category, lastPass, httpClass: lastHttpClass,
-    httpStatus: lastHttpStatus, authenticatedRole, retryable,
+    httpStatus: lastHttpStatus, httpOrigin, authenticatedRole, retryable,
   });
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -52,6 +58,7 @@ export async function validateAuthenticatedRecovery({
       // same RBAC as the operational ERP routes; the Recovery identity must be
       // diretor or gerente rather than weakening authorization here.
       const status = await fetchImpl(`${baseUrl}/erp/ultrafv3/scheduler/status`, { method: "GET", headers });
+      httpOrigin = responseOrigin(status);
       recordStatus(status.status);
       if (status.status !== 200) return fail("protected_endpoint_http");
       let body;
@@ -70,7 +77,7 @@ export async function validateAuthenticatedRecovery({
       if (!(automatic.authMode === "global" || automatic.authMode === "seller_reference")) return fail("erp_auth_mode");
       lastPass = "erp_auth_mode";
       if (!automatic.nextRunAt) return fail("next_run_at_absent", true);
-      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, httpStatus: lastHttpStatus, authenticatedRole, automatic };
+      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, httpStatus: lastHttpStatus, httpOrigin, authenticatedRole, automatic };
     } catch {
       if (attempt < attempts) { await sleep(delayMs); continue; }
       return fail("transport_timeout", true);
@@ -90,6 +97,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`LAST_PASS=${result.lastPass}`);
     console.log(`HTTP_CLASS=${result.httpClass}`);
     console.log(`HTTP_STATUS=${result.httpStatus}`);
+    console.log(`HTTP_ORIGIN=${result.httpOrigin}`);
     console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     process.exitCode = 1;
   } else {
@@ -97,6 +105,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`LAST_PASS=${result.lastPass}`);
     console.log(`HTTP_CLASS=${result.httpClass}`);
     console.log(`HTTP_STATUS=${result.httpStatus}`);
+    console.log(`HTTP_ORIGIN=${result.httpOrigin}`);
     console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     console.log(`INITIALIZED=${a.initialized === true}`);
     console.log(`ENABLED=${a.enabled === true && a.enabledByEnv === true}`);
