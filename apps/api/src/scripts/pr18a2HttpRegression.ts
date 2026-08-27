@@ -23,7 +23,8 @@ setModel("sellerTerritoryCity", { findMany: async () => [] });
 setModel("opportunity", { findMany: async () => [], count: async () => 0 });
 setModel("activity", { aggregate: async () => ({ _max: { date: null } }), count: async () => 0 });
 setModel("erpSyncRun", { findFirst: async () => null });
-setModel("appConfig", { findUnique: async () => ({ value: JSON.stringify({ enabled: false }) }), upsert: async () => ({}) });
+let appConfigReads = 0;
+setModel("appConfig", { findUnique: async () => { appConfigReads += 1; return new Promise(() => {}); }, upsert: async () => ({}) });
 
 const server = app.listen(0);
 await once(server, "listening");
@@ -66,12 +67,17 @@ try {
   const invalid = await get("/api/ai/agenda-intelligence/day?date=2026-07-23&sellerId=invalid-seller", auth);
   assert.equal(invalid.status, 403);
 
+  const schedulerStartedAt = Date.now();
   const scheduler = await get("/api/erp/ultrafv3/scheduler/status", auth);
   assert.equal(scheduler.status, 200);
+  assert(Date.now() - schedulerStartedAt < 1_000, "status deve responder sem aguardar banco, lock ou bootstrap");
+  assert.equal(appConfigReads, 0, "status canônico deve ler apenas estado runtime");
   assert.equal(scheduler.headers.get("x-gestao-response-origin"), "api");
   assert.equal(scheduler.headers.get("x-gestao-canonical-route"), "erp-scheduler-status-v1");
   const schedulerBody = await scheduler.json() as any;
   assert.deepEqual(Object.keys(schedulerBody.automaticSync).sort(), ["authMode", "configurationOk", "enabled", "enabledByEnv", "initialized", "lastRunAt", "lastSuccessAt", "nextRunAt", "reasonCode", "status"].sort());
+  assert.equal(schedulerBody.automaticSync.initialized, false);
+  assert.equal(schedulerBody.automaticSync.nextRunAt, null);
   assert.equal((await get("/api/erp/ultrafv3/scheduler/status")).status, 401);
   assert.equal((await get("/api/erp/ultrafv3/scheduler/status", { Authorization: "Bearer invalid" })).status, 401);
   assert.equal((await get("/api/erp/ultrafv3/scheduler/status", { Authorization: `Bearer ${sellerToken}` })).status, 403);

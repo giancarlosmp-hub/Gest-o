@@ -29,6 +29,8 @@ assert.match(scheduler, /saveAutomaticSyncPersistedConfig\(\{ enabled: false \}\
 assert.match(bootstrap, /startErpSyncScheduler/, "Bootstrap de produção deve inicializar scheduler explicitamente");
 assert.match(bootstrap, /BOOTSTRAP_SMOKE_EXIT/, "Bootstrap deve ter saída controlada para smoke sem prender servidor");
 assert.match(routes, /\/erp\/ultrafv3\/scheduler\/status/, "Backend deve expor status real do scheduler");
+assert.match(routes, /getErpAutomaticSyncRuntimeStatus/, "Status canônico deve usar projeção runtime somente leitura");
+assert.doesNotMatch(routes.match(/router\.get\("\/erp\/ultrafv3\/scheduler\/status"[\s\S]*?\n\}\);/)?.[0] ?? "", /refreshErpAutomaticSyncConfig/, "Status canônico não deve executar refresh mutável");
 assert.match(routes, /\/erp-sync\/automatic\/run-now/, "Backend deve expor run-now restrito para testar scheduler");
 assert.match(panel, /lastRealSchedulerSuccessRecent/, "UI deve diferenciar sucesso scheduler real recente de histórico antigo");
 assert.doesNotMatch(panel, /Executada com sucesso[\s\S]*Próxima execução prevista[\s\S]*statusLabel \|\|/, "UI não deve inferir sucesso visual sem estado real do backend");

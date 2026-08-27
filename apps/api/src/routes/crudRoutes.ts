@@ -83,7 +83,7 @@ import { getCommercialInsights, invalidateCommercialInsightsCache } from "../ser
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
-import { refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
+import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
@@ -9056,11 +9056,21 @@ router.get("/erp/ultrafv3/sync/status", authorize("diretor", "gerente"), async (
 
 
 router.get("/erp/ultrafv3/scheduler/status", authorize("diretor", "gerente"), async (_req, res) => {
+  const startedAt = Date.now();
   res.setHeader("X-Gestao-Canonical-Route", "erp-scheduler-status-v1");
-  const automaticSync = await refreshErpAutomaticSyncConfig();
+  logApiEvent("INFO", "[erp scheduler status] route reached", {
+    checkpoint: "ERP_SCHEDULER_STATUS_ROUTE_REACHED=YES",
+  });
+  const automaticSync = getErpAutomaticSyncRuntimeStatus();
   const reasonCode = automaticSync.enabledByEnv === false
     ? "EXTERNAL_CONFIGURATION_REQUIRED:ERP_SYNC_SCHEDULER_ENABLED"
     : automaticSync.lastSkippedReason || (automaticSync.configurationOk ? "READY" : "CONFIGURATION_ERROR");
+  const elapsedMs = Date.now() - startedAt;
+  const elapsedClass = elapsedMs < 5_000 ? "under_5s" : elapsedMs < 15_000 ? "5_to_15s" : elapsedMs < 30_000 ? "15_to_30s" : "over_30s";
+  logApiEvent("INFO", "[erp scheduler status] read-only response", {
+    timeoutCheckpoint: "ERP_SCHEDULER_STATUS_TIMEOUT_STAGE=unknown",
+    elapsedCheckpoint: `ERP_SCHEDULER_STATUS_ELAPSED_CLASS=${elapsedClass}`,
+  });
   return res.status(200).json({
     automaticSync: {
       enabled: Boolean(automaticSync.enabled && automaticSync.enabledByEnv),
