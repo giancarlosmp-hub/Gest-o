@@ -69,6 +69,7 @@ case "$*" in (+%s) echo 1700000000;; (*) echo 2026-08-11T12:00:00Z;; esac
 `);
   executable(join(bin, "node"), `#!/bin/sh
 if [ "$1" = -p ]; then echo 9.8.7; exit 0; fi
+case "$1" in (*erp-automatic-proof.mjs) printf '%s\n' 'NEXT_RUN_DELAY_CLASS=30_to_90m' 'NEXT_RUN_WITHIN_WINDOW=true'; exit 0;; esac
 if [ "$MOCK_AUTH_TIMEOUT" = true ] && [ "$1" = scripts/lib/erp-authenticated-validation.mjs ]; then
   printf '%s\n' 'FAILURE=transport_timeout' 'LAST_PASS=api_health' 'HTTP_CLASS=none'
   exit 1
@@ -100,7 +101,7 @@ if [ "$1 $2" = "image inspect" ]; then
   esac; exit 0
 fi
 if [ "$1" = tag ]; then exit 0; fi
-if [ "$1" = exec ]; then case "$*" in (*RECREATED_AT*) printf '%s\n' 'SUCCESS=true' 'DUPLICATE=false' 'LOCK=free' 'STARTED_AT=2026-08-11T12:01:00Z' 'FINISHED_AT=2026-08-11T12:02:00Z' 'CORRELATION_ID=technical-correlation' 'LOCK_ACQUIRED=true';; (*) printf '%s\n' 'APP_CONFIG=enabled' 'LOCK_STATE=free';; esac; exit 0; fi
+if [ "$1" = exec ]; then case "$*" in (*RECREATED_AT*) printf '%s\n' 'SUCCESS=true' 'TRIGGER_OBSERVED=true' 'OBSERVED=SUCCESS' 'DUPLICATE=false' 'LOCK=free' 'STARTED_AT=2026-08-11T12:01:00Z' 'FINISHED_AT=2026-08-11T12:02:00Z' 'CORRELATION_ID=technical-correlation' 'LOCK_ACQUIRED=true';; (*) printf '%s\n' 'APP_CONFIG=enabled' 'LOCK_STATE=free';; esac; exit 0; fi
 if [ "$1" = logs ]; then printf '%s\n' '[ultrafv3 scheduler] run started' '[ultrafv3 scheduler] run finished'; exit 0; fi
 if [ "$1" = compose ]; then
   case "$*" in (*" config") exit 0;; (*" ps -q api") echo api-new;; (*" up -d --no-deps --no-build --force-recreate api") exit 0;; esac
