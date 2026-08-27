@@ -20,13 +20,14 @@ export async function validateAuthenticatedRecovery({
   let lastHttpStatus = "none";
   let authenticatedRole = "none";
   let httpOrigin = "unknown";
+  let routeReached = "NO";
   const recordStatus = (status) => {
     lastHttpClass = httpClass(status);
     lastHttpStatus = exactHttpStatus(status);
   };
   const fail = (category, retryable = false) => ({
     ok: false, category, lastPass, httpClass: lastHttpClass,
-    httpStatus: lastHttpStatus, httpOrigin, authenticatedRole, retryable,
+    httpStatus: lastHttpStatus, httpOrigin, routeReached, authenticatedRole, retryable,
   });
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -59,6 +60,7 @@ export async function validateAuthenticatedRecovery({
       // diretor or gerente rather than weakening authorization here.
       const status = await fetchImpl(`${baseUrl}/erp/ultrafv3/scheduler/status`, { method: "GET", headers });
       httpOrigin = responseOrigin(status);
+      routeReached = status.headers?.get?.("x-gestao-canonical-route") === "erp-scheduler-status-v1" ? "YES" : "NO";
       recordStatus(status.status);
       if (status.status !== 200) return fail("protected_endpoint_http");
       let body;
@@ -77,7 +79,7 @@ export async function validateAuthenticatedRecovery({
       if (!(automatic.authMode === "global" || automatic.authMode === "seller_reference")) return fail("erp_auth_mode");
       lastPass = "erp_auth_mode";
       if (!automatic.nextRunAt) return fail("next_run_at_absent", true);
-      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, httpStatus: lastHttpStatus, httpOrigin, authenticatedRole, automatic };
+      return { ok: true, lastPass: "next_run_at", httpClass: lastHttpClass, httpStatus: lastHttpStatus, httpOrigin, routeReached, authenticatedRole, automatic };
     } catch {
       if (attempt < attempts) { await sleep(delayMs); continue; }
       return fail("transport_timeout", true);
@@ -98,6 +100,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`HTTP_CLASS=${result.httpClass}`);
     console.log(`HTTP_STATUS=${result.httpStatus}`);
     console.log(`HTTP_ORIGIN=${result.httpOrigin}`);
+    console.log(`ROUTE_REACHED=${result.routeReached}`);
     console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     process.exitCode = 1;
   } else {
@@ -106,6 +109,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`HTTP_CLASS=${result.httpClass}`);
     console.log(`HTTP_STATUS=${result.httpStatus}`);
     console.log(`HTTP_ORIGIN=${result.httpOrigin}`);
+    console.log(`ROUTE_REACHED=${result.routeReached}`);
     console.log(`AUTHENTICATED_ROLE=${result.authenticatedRole}`);
     console.log(`INITIALIZED=${a.initialized === true}`);
     console.log(`ENABLED=${a.enabled === true && a.enabledByEnv === true}`);

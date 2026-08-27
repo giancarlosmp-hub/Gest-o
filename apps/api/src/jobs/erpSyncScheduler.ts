@@ -718,6 +718,41 @@ export async function refreshErpAutomaticSyncConfig() {
   return getErpAutomaticSyncState();
 }
 
+/**
+ * Read-only, in-memory projection used by the canonical operational probe.
+ *
+ * In particular, do not replace this with getErpAutomaticSyncState(): that
+ * dashboard projection reads AppConfig, users and ErpSyncRun. During bootstrap
+ * those reads may be queued behind database work, while a status probe must be
+ * able to report `initialized=false` without waiting for bootstrap to finish.
+ */
+export function getErpAutomaticSyncRuntimeStatus() {
+  const diagnostics = ultraFv3Client.getDiagnostics();
+  const initialized = automaticSchedulerInitialized;
+  const configurationOk = initialized && lastSchedulerAuthMode !== "none";
+  const enabled = initialized && persistedAutomaticSyncEnabled;
+
+  return {
+    enabled,
+    enabledByEnv: env.erpSyncSchedulerEnabled,
+    initialized,
+    configurationOk,
+    authMode: initialized ? lastSchedulerAuthMode : ("none" as const),
+    nextRunAt: initialized ? nextAutomaticRunAt?.toISOString() ?? null : null,
+    lastRunAt: lastAutomaticRunAt?.toISOString() ?? null,
+    lastSuccessAt: lastAutomaticSuccessAt?.toISOString() ?? null,
+    panelStatus: !initialized || !enabled || !env.erpSyncSchedulerEnabled || !configurationOk
+      ? ("disabled" as const)
+      : automaticSyncRunning
+        ? ("running" as const)
+        : isInsideAutomaticSyncWindow(new Date())
+          ? ("scheduled" as const)
+          : ("outside_window" as const),
+    lastSkippedReason: initialized ? lastAutomaticSkippedReason : null,
+    missingConfig: diagnostics.missingConfig,
+  };
+}
+
 export async function getErpAutomaticSyncState(): Promise<AutomaticSyncState> {
   const { latestFinished, latestSuccess, latestAttempt } =
     await loadLatestAutomaticRunSummary();
