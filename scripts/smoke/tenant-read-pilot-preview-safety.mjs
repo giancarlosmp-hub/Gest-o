@@ -6,6 +6,7 @@ const production = readFileSync("docker-compose.production.yml", "utf8");
 const pilot = readFileSync("apps/api/src/tenancy/tenantReadPilot.ts", "utf8");
 const routes = readFileSync("apps/api/src/routes/crudRoutes.ts", "utf8");
 const requestContext = readFileSync("apps/api/src/middlewares/requestLogging.ts", "utf8");
+const postgresHarness = readFileSync("scripts/smoke/tenant-read-pilot-preview-seed-postgres.sh", "utf8");
 const seed = preview.indexOf("=== PREVIEW SEED ===");
 const validate = preview.indexOf("=== CERTIFY PREVIEW DATASET ===");
 const enable = preview.indexOf("Enable only after seed certification");
@@ -39,4 +40,11 @@ assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);
 assert.match(preview, /TENANCY_MODE=disabled/);
 assert.match(production, /TENANCY_MODE:\s*(?:"disabled"|disabled)/);
 assert.match(production, /TENANT_READ_PILOT_ENABLED:\s*"false"/);
+for (const marker of ["TENANT_PREVIEW_SEED_FAILURE_STAGE=", "TENANT_PREVIEW_SEED_FAILURE_COMMAND=", "TENANT_PREVIEW_SEED_FAILURE_EXIT_CODE="]) {
+  assert.ok(postgresHarness.includes(marker), `PostgreSQL harness must emit ${marker}`);
+}
+assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
+for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
+  assert.ok(postgresHarness.includes(`set_failure_context ${stage} `), `missing PostgreSQL failure stage ${stage}`);
+}
 console.log("tenant read pilot preview workflow safety: PASS");
