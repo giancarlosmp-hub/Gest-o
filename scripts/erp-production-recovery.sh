@@ -258,12 +258,18 @@ if ! API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUT
   failure="$(sed -n 's/^FAILURE=//p' "$technical_file" | head -1)"
   last_pass="$(sed -n 's/^LAST_PASS=//p' "$technical_file" | head -1)"
   http_class="$(sed -n 's/^HTTP_CLASS=//p' "$technical_file" | head -1)"
-  [[ "$failure" =~ ^(login_http|login_schema|token_contract|authenticated_identity_http|protected_endpoint_http|protected_endpoint_schema|scheduler_not_initialized|scheduler_disabled|scheduler_configuration|erp_auth_mode|next_run_at_absent|transport_timeout)$ ]] || failure=validator_internal
+  [[ "$failure" =~ ^(login_http|login_schema|token_contract|authenticated_identity_http|authenticated_identity_schema|protected_endpoint_http|protected_endpoint_schema|scheduler_not_initialized|scheduler_disabled|scheduler_configuration|erp_auth_mode|next_run_at_absent|transport_timeout)$ ]] || failure=validator_internal
   [[ "$last_pass" =~ ^(api_health|login|authenticated_identity|protected_endpoint|scheduler_initialized|scheduler_enabled|scheduler_configuration|erp_auth_mode)$ ]] || last_pass=none
   [[ "$http_class" =~ ^([1-5]xx|none)$ ]] || http_class=none
+  http_status="$(sed -n 's/^HTTP_STATUS=//p' "$technical_file" | head -1)"
+  authenticated_role="$(sed -n 's/^AUTHENTICATED_ROLE=//p' "$technical_file" | head -1)"
+  [[ "$http_status" =~ ^(400|401|403|404|405|409|422|other_4xx|[1-5][0-9][0-9]|none)$ ]] || http_status=none
+  [[ "$authenticated_role" =~ ^(diretor|gerente|vendedor|none)$ ]] || authenticated_role=none
   log "ERP_AUTHENTICATED_VALIDATION_FAILURE=$failure"
   log "ERP_AUTHENTICATED_VALIDATION_LAST_PASS=$last_pass"
   log "ERP_AUTHENTICATED_VALIDATION_HTTP_CLASS=$http_class"
+  log "ERP_AUTHENTICATED_VALIDATION_HTTP_STATUS=$http_status"
+  log "ERP_AUTHENTICATED_ROLE=$authenticated_role"
   die 'authenticated validation failed; sensitive response omitted'
 fi
 initialized="$(sed -n 's/^INITIALIZED=//p' "$technical_file")"; enabled="$(sed -n 's/^ENABLED=//p' "$technical_file")"
@@ -302,7 +308,7 @@ grep -Fq '[ultrafv3 scheduler] run started' <<<"$logs" || die 'scheduler start l
 grep -Fq '[ultrafv3 scheduler] run finished' <<<"$logs" || die 'scheduler finish log is absent'
 final_lock_state="$(technical_snapshot "$new_api_id")"; [[ "$(sed -n 's/^LOCK_STATE=//p' <<<"$final_lock_state")" == free ]] || die 'ERP sync lock was not released'
 API_BASE=http://127.0.0.1:4000 AUTH_TEST_EMAIL="$AUTH_VALIDATION_EMAIL" AUTH_TEST_PASSWORD="$AUTH_VALIDATION_PASSWORD" node >"$technical_file" <<'NODE'
-(async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const r=await fetch(process.env.API_BASE+'/erp/ultrafv3/sync/status',{headers:{authorization:`Bearer ${b.accessToken}`}});if(r.status!==200)process.exit(1);const a=(await r.json()).automaticSync||{};console.log(`NEXT_RUN_AT=${a.nextRunAt||''}`);console.log(`ACTIVE_ERROR=${Boolean(a.lastError)}`)})().catch(()=>process.exit(1));
+(async()=>{const login=await fetch(process.env.API_BASE+'/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:process.env.AUTH_TEST_EMAIL,password:process.env.AUTH_TEST_PASSWORD})});let b={};try{b=await login.json()}catch{};if(login.status!==200||!b.accessToken)process.exit(1);const r=await fetch(process.env.API_BASE+'/erp/ultrafv3/scheduler/status',{headers:{authorization:`Bearer ${b.accessToken}`}});if(r.status!==200)process.exit(1);const a=(await r.json()).automaticSync||{};console.log(`NEXT_RUN_AT=${a.nextRunAt||''}`);console.log(`ACTIVE_ERROR=${Boolean(a.reasonCode&&a.reasonCode!=='READY')}`)})().catch(()=>process.exit(1));
 NODE
 [[ -n "$(sed -n 's/^NEXT_RUN_AT=//p' "$technical_file")" ]] || die 'nextRunAt was not recalculated after the automatic run'
 [[ "$(sed -n 's/^ACTIVE_ERROR=//p' "$technical_file")" == false ]] || die 'an active automatic scheduler error remains'

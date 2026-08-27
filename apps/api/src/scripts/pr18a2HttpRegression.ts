@@ -31,6 +31,7 @@ const address = server.address();
 assert(address && typeof address === "object");
 const baseUrl = `http://127.0.0.1:${address.port}`;
 const directorToken = signAccessToken({ id: "director-1", email: "director@example.test", role: "diretor" });
+const sellerToken = signAccessToken({ id: "seller-1", email: "seller@example.test", role: "vendedor" });
 const auth = { Authorization: `Bearer ${directorToken}` };
 const get = (path: string, headers?: Record<string, string>) => fetch(`${baseUrl}${path}`, { headers });
 
@@ -39,7 +40,7 @@ try {
     const res = await get(path);
     assert.equal(res.status, 200, `${path} sem auth deve retornar 200`);
     const body = await res.json() as Record<string, unknown>;
-    assert.deepEqual(Object.keys(body).sort(), ["builtAt", "commit", "environment", "status", "version"].sort());
+    assert.deepEqual(Object.keys(body).sort(), ["builtAt", "commit", "status", "version"].sort());
     for (const forbidden of ["database", "hostname", "token", "secret", "path", "container"]) assert(!(forbidden in body));
   }
 
@@ -67,7 +68,12 @@ try {
   const scheduler = await get("/api/erp/ultrafv3/scheduler/status", auth);
   assert.equal(scheduler.status, 200);
   const schedulerBody = await scheduler.json() as any;
-  assert.deepEqual(Object.keys(schedulerBody.automaticSync).sort(), ["enabled", "initialized", "lastRunAt", "lastSuccessAt", "nextRunAt", "reasonCode", "status"].sort());
+  assert.deepEqual(Object.keys(schedulerBody.automaticSync).sort(), ["authMode", "configurationOk", "enabled", "enabledByEnv", "initialized", "lastRunAt", "lastSuccessAt", "nextRunAt", "reasonCode", "status"].sort());
+  assert.equal((await get("/api/erp/ultrafv3/scheduler/status")).status, 401);
+  assert.equal((await get("/api/erp/ultrafv3/scheduler/status", { Authorization: "Bearer invalid" })).status, 401);
+  assert.equal((await get("/api/erp/ultrafv3/scheduler/status", { Authorization: `Bearer ${sellerToken}` })).status, 403);
+  assert.equal((await get("/api/erp/ultrafv3/scheduler/status-obsolete", auth)).status, 404);
+  assert.equal((await fetch(`${baseUrl}/api/erp/ultrafv3/scheduler/status`, { method: "POST", headers: auth })).status, 404);
 
   console.log("PR18A.2 mounted HTTP regression passed");
 } finally {
