@@ -53,32 +53,14 @@ docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absen
 psql_admin(){ docker exec --user postgres -i "$PRODUCTION_DB_CONTAINER_EXPECTED" psql -X -v ON_ERROR_STOP=1 -d "$PRODUCTION_DB_NAME_EXPECTED" "$@"; }
 [[ $(psql_admin -Atc "SELECT current_database()||E'\\t'||current_user") == $'salesforce_pro\tpostgres' ]] || die 'database/admin identity mismatch'
 diagnose_connection(){
-  psql_admin -AtF $'\t' <<'SQL'
-BEGIN TRANSACTION READ ONLY;
-SELECT 'CONNECTED_DATABASE_CLASS', CASE WHEN current_database()='salesforce_pro' THEN 'EXPECTED_ALLOWLISTED' ELSE 'UNEXPECTED' END;
-SELECT 'CONNECTED_USER_CLASS', CASE WHEN current_user='postgres' THEN 'EXPECTED_ADMIN' ELSE 'UNEXPECTED' END;
-SELECT 'CONNECTED_SCHEMA_CLASS', CASE WHEN current_schema()='public' THEN 'PUBLIC' WHEN current_schema() IS NULL THEN 'NONE' ELSE 'OTHER' END;
-SELECT 'SEARCH_PATH_CLASS', CASE WHEN current_schemas(false)[1]='public' THEN 'PUBLIC_FIRST' WHEN 'public'=ANY(current_schemas(false)) THEN 'PUBLIC_INCLUDED' ELSE 'PUBLIC_EXCLUDED' END
-FROM (SELECT current_setting('search_path')) observed_search_path;
-SELECT 'POSTGRESQL_SERVER_VERSION', current_setting('server_version');
-SELECT 'PRISMA_LEDGER_LOCATION', CASE
- WHEN to_regclass('public."_prisma_migrations"') IS NOT NULL THEN 'PUBLIC'
- WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname='_prisma_migrations' AND c.relkind IN ('r','p') AND n.nspname<>'public') THEN 'OTHER_SCHEMA_REDACTED'
- ELSE 'ABSENT' END;
-SELECT 'PRISMA_LEDGER_SCHEMA_COUNT', count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname='_prisma_migrations' AND c.relkind IN ('r','p');
-SELECT 'PRISMA_LEDGER_VISIBILITY', CASE
- WHEN to_regclass('public."_prisma_migrations"') IS NULL THEN 'NOT_APPLICABLE'
- WHEN has_table_privilege(current_user, 'public."_prisma_migrations"', 'SELECT') THEN 'VISIBLE'
- ELSE 'PERMISSION_DENIED' END;
-COMMIT;
-SQL
+  psql_admin -qAtF $'\t' -f - <scripts/sql/pr827-connection-diagnostics.sql
 }
 diagnostics=$(diagnose_connection) || die 'sanitized read-only connection diagnostics failed'
 printf '%s\n' "$diagnostics"
 ledger_location=$(awk -F $'\t' '$1=="PRISMA_LEDGER_LOCATION"{print $2}' <<<"$diagnostics")
-predecessor_catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-predecessor-catalog.sql)
+predecessor_catalog=$(psql_admin -qAtF $'\t' -f - <scripts/pr827-predecessor-catalog.sql)
 printf '%s\n' "$predecessor_catalog"
-catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-schema-catalog.sql)
+catalog=$(psql_admin -qAtF $'\t' -f - <scripts/pr827-schema-catalog.sql)
 catalog_file=$(mktemp); printf '%s\n' "$catalog" | sed '/^$/d' >"$catalog_file"
 catalog_lines=$(wc -l <"$catalog_file")
 if [[ "$catalog_lines" -eq 0 ]]; then printf '%s\n' 'PR827_CATALOG_STATE=ABSENT';
@@ -87,12 +69,7 @@ else printf '%s\n' 'PR827_CATALOG_STATE=PARTIAL_OR_DIVERGENT'; fi
 [[ "$ledger_location" == PUBLIC ]] || die 'Prisma ledger is not public and visible; legacy history requires separate audited handling'
 ledger(){
   local migration_name=$1
-  psql_admin -AtF $'\t' --set=migration_name="$migration_name" <<'SQL'
-SELECT checksum, finished_at IS NOT NULL AND rolled_back_at IS NULL
-FROM "_prisma_migrations"
-WHERE migration_name = :'migration_name'
-ORDER BY started_at;
-SQL
+  psql_admin -qAtF $'\t' --set=migration_name="$migration_name" -f - <scripts/sql/pr827-ledger-query.sql
 }
 pred=$(ledger "$predecessor"); [[ "$pred" == "$predecessor_checksum"$'\ttrue' ]] || die 'predecessor absent, duplicated, unfinished, or checksum mismatch'
 current=$(ledger "$MIGRATION_ID")
@@ -118,7 +95,7 @@ SQL
   } | psql_admin -f - >/dev/null
 fi
 [[ $(ledger "$MIGRATION_ID") == "$checksum"$'\ttrue' ]] || die 'ledger postcondition failed'
-psql_admin -AtF $'\t' -f scripts/pr827-schema-catalog.sql >"$catalog_file"
+psql_admin -qAtF $'\t' -f - <scripts/pr827-schema-catalog.sql >"$catalog_file"
 node scripts/pr827-schema-catalog-validate.mjs "$catalog_file" >/dev/null || die 'catalog postcondition failed'
 tmp=$(mktemp -d)
 docker run --rm --pull=never --network container:"$PRODUCTION_DB_CONTAINER_EXPECTED" -e DATABASE_URL "$API_IMAGE" ./node_modules/.bin/prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$tmp/post.sql"

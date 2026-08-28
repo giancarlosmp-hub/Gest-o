@@ -47,3 +47,6 @@ Toda rotina administrativa futura deverá utilizar este padrão. Novos scripts n
 `POSTGRES_USER` nem `POSTGRES_PASSWORD` para backups administrativos locais. A execução depende da
 presença do usuário local `postgres`, do acesso peer e das ferramentas PostgreSQL no container; uma
 falha na validação deve abortar antes da criação do dump.
+# Adendo PR827 — quarta lição (2026-08-28)
+
+SQL diagnóstico não pode ser homologado apenas estaticamente. Depois da falha `current_schemas(false)[1]` (run `33206303362`, job `98968114798`), a sintaxe foi corrigida para `(current_schemas(false))[1]` e todo SQL read-only do preview ganhou execução obrigatória em PostgreSQL 16 descartável pelo check `test:pr827-preview:postgres`. Isso não habilita apply nem autoriza operação produtiva.
