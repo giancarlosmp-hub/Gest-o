@@ -17,6 +17,12 @@ assert.equal(new Set(statements).size, statements.length);
 console.log("tenancy expand migration safety passed");
 
 const harness = fs.readFileSync("scripts/smoke/tenancy-expand-postgres.sh", "utf8");
+const manualResolutionMigration = "apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql";
+const manualResolutionSql = fs.readFileSync(manualResolutionMigration, "utf8");
+assert.match(manualResolutionSql, /ErpOrderManualResolutionTerminalState/);
+assert.match(manualResolutionSql, /"statusCheckedAt" TIMESTAMP\(3\) NOT NULL/);
+assert.match(manualResolutionSql, /"statusCheckCorrelationId" TEXT NOT NULL/);
+assert.match(manualResolutionSql, /ErpOrderManualResolution_erpOrderSyncId_key/);
 assert.doesNotMatch(harness, /docker image inspect node:20|\bnode:20\b/);
 assert.doesNotMatch(harness, /\brg\b/);
 assert.match(harness, /grep -Fxc 'DROP TABLE "incident_synthetic";'/);
@@ -45,6 +51,10 @@ assert.doesNotMatch(harness, /pg_isready|CREATE DATABASE\s+expand|-d postgres(?:
 assert.match(harness, /--diff-filter=A -- apps\/api\/prisma\/migrations\/20260808120000_tenancy_expand_roots\/migration\.sql/);
 assert.doesNotMatch(harness, /git show HEAD:apps\/api\/prisma\/schema\.prisma/);
 for (const token of ["docker_network_setup", "postgres_readiness", "predecessor_materialization", "migration_apply", "catalog_validation", "fixtures", "fk_negative_test", "unique_negative_test", "post_diff", "HARNESS_STEP=", "HARNESS_COMMAND=", "HARNESS_RESULT=FAIL", "EXIT_CODE="]) assert.ok(harness.includes(token), token);
+assert.match(harness, /20260827190000_add_erp_order_manual_resolution\/migration\.sql/);
+assert.match(harness, /ERP manual resolution migration unexpectedly applied twice/);
+assert.match(harness, /POST_DIFF_STRUCTURAL_BEGIN[\s\S]*post-diff\.managed\.sql[\s\S]*POST_DIFF_STRUCTURAL_END/);
+assert.doesNotMatch(harness.slice(harness.indexOf("step post_diff")), /\|\| true|continue-on-error/);
 console.log("tenancy expand harness contract passed");
 
 const createIncident = harness.indexOf('CREATE TABLE public."incident_synthetic"');

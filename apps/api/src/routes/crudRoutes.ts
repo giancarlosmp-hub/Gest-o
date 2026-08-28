@@ -85,6 +85,7 @@ import { planningIntelligenceService } from "../services/planningIntelligenceSer
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
+import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -7685,19 +7686,28 @@ router.get("/opportunities/:id/erp/orders", async (req, res) => {
   const opportunity = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req) }, select: { id: true } });
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
-  const orders = await prisma.erpOrderSync.findMany({
+  const [orders, orderTimelineEvents] = await Promise.all([prisma.erpOrderSync.findMany({
     where: { opportunityId: req.params.id },
+    include: { manualResolution: true, supersedesErpOrderSync: { select: { id: true, pedidoIdImportacao: true } } },
     orderBy: [
       { status: "desc" },
       { sentAt: "desc" },
       { createdAt: "desc" }
     ]
+  }), prisma.timelineEvent.findMany({
+    where: { opportunityId: req.params.id, description: { contains: "correlationId=" } },
+    select: { description: true },
+    orderBy: { createdAt: "desc" },
+  })]);
+  const withManualReviewCorrelation = orders.map((order) => {
+    const evidence = orderTimelineEvents.find((event) => event.description.includes(order.pedidoIdImportacao));
+    const originalCorrelationId = evidence?.description.match(/correlationId=([0-9a-f-]{36})/i)?.[1] ?? null;
+    return { ...order, manualReviewCorrelationId: originalCorrelationId };
   });
-  const sentOrders = orders.filter((order) => order.status === ErpOrderSyncStatus.sent);
 
   return res.status(200).json({
-    items: sentOrders.length ? sentOrders : orders,
-    hiddenSupersededErrorCount: sentOrders.length ? orders.filter((order) => order.status !== ErpOrderSyncStatus.sent).length : 0,
+    items: withManualReviewCorrelation,
+    hiddenSupersededErrorCount: 0,
   });
 });
 
@@ -7760,14 +7770,58 @@ router.post("/opportunities/:id/erp/orders/status", async (req, res) => {
 
   try {
     const result = await syncErpOrderStatuses(req.params.id);
-    const orders = await prisma.erpOrderSync.findMany({ where: { opportunityId: req.params.id }, orderBy: [{ createdAt: "desc" }] });
-    return res.status(200).json({ ...result, items: orders });
+    const [orders, orderTimelineEvents] = await Promise.all([
+      prisma.erpOrderSync.findMany({ where: { opportunityId: req.params.id }, include: { manualResolution: true, supersedesErpOrderSync: { select: { id: true, pedidoIdImportacao: true } } }, orderBy: [{ createdAt: "desc" }] }),
+      prisma.timelineEvent.findMany({ where: { opportunityId: req.params.id, description: { contains: "correlationId=" } }, select: { description: true }, orderBy: { createdAt: "desc" } }),
+    ]);
+    const items = orders.map((order) => {
+      const evidence = orderTimelineEvents.find((event) => event.description.includes(order.pedidoIdImportacao));
+      return { ...order, manualReviewCorrelationId: evidence?.description.match(/correlationId=([0-9a-f-]{36})/i)?.[1] ?? null };
+    });
+    return res.status(200).json({ ...result, items });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     logApiEvent("ERROR", "[erp order status route] opportunity status sync failed", { opportunityId: req.params.id, error: details });
     return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({ message: "Falha ao consultar /orderStatus no UltraFV3.", details });
   }
 });
+
+const erpManualResolutionSchema = z.object({
+  checkedNotFound: z.literal(true),
+  expectedImportIdSuffix: z.string().trim().length(8),
+  justification: z.string().trim().min(10).max(240),
+  confirmedConsequence: z.literal(true),
+  confirmationPhrase: z.literal(MANUAL_RESOLUTION_CONFIRMATION_PHRASE),
+  originalCorrelationId: z.string().uuid(),
+});
+
+router.post(
+  "/opportunities/:id/erp/orders/:orderId/manual-resolution",
+  authorize("diretor"),
+  validateBody(erpManualResolutionSchema),
+  async (req, res) => {
+    try {
+      const result = await resolveAmbiguousErpOrderManually({
+        opportunityId: req.params.id,
+        erpOrderSyncId: req.params.orderId,
+        actor: { id: req.user!.id, role: req.user!.role },
+        input: req.body,
+      });
+      return res.status(result.idempotent ? 200 : 201).json({
+        category: result.resolution.category,
+        terminalState: result.resolution.terminalState,
+        erpOrderSyncId: result.resolution.erpOrderSyncId,
+        opportunityId: result.resolution.opportunityId,
+        createdAt: result.resolution.createdAt,
+        statusCheckedAt: result.resolution.statusCheckedAt,
+        idempotent: result.idempotent,
+      });
+    } catch (error) {
+      const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+      return res.status(status).json({ message: error instanceof Error ? error.message : "Falha ao registrar revisão manual ERP." });
+    }
+  },
+);
 
 router.post("/opportunities", validateBody(opportunitySchema), async (req, res) => {
   if (!assertProbability(req.body.probability)) return res.status(400).json({ message: "probability deve estar entre 0 e 100" });

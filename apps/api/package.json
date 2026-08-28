@@ -40,6 +40,8 @@
     "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts",
     "smoke:date-only": "tsx src/scripts/dateOnlySmoke.ts",
     "smoke:ultrafv3-order-flow": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/scripts/ultraFv3OrderFlowMockSmoke.ts",
+    "test:erp-order-reconciliation": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderReconciliation.test.ts",
+    "test:erp-order-manual-resolution": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderManualResolution.test.ts",
     "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts",
     "smoke:ultrafv3-order-protocol-test": "tsx src/scripts/ultraFv3OrderProtocolTestSmoke.ts",
     "erp:investigate-orders": "tsx src/scripts/erpOrderSyncUltraFv3Investigation.ts",

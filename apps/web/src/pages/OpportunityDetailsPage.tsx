@@ -16,6 +16,7 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
+import { useAuth } from "../context/AuthContext";
 import {
   getErpOrderReadiness,
   isErpOrderSyncResendable,
@@ -199,6 +200,24 @@ type ErpOrderSync = {
   createdAt: string;
   sentAt?: string | null;
   statusSyncedAt?: string | null;
+  lastStatusPayload?: {
+    outcome?: "confirmed" | "processing" | "rejected" | "unknown";
+    operation?: string;
+  } | null;
+  manualResolution?: { category: "manual_verified_not_found"; terminalState: "manually_resolved_not_found"; createdAt: string; statusCheckedAt: string } | null;
+  supersedesErpOrderSync?: { id: string; pedidoIdImportacao: string } | null;
+  manualReviewCorrelationId?: string | null;
+};
+
+const getErpReconciliationLabel = (order: ErpOrderSync) => {
+  if (order.manualResolution?.terminalState === "manually_resolved_not_found") return "Resolvido manualmente como não encontrado — decisão humana, não rejeição do ERP";
+  switch (order.lastStatusPayload?.outcome) {
+    case "confirmed": return "Pedido confirmado no ERP — reconciliado sem reenvio";
+    case "processing": return "Ainda processando no ERP — reenvio bloqueado";
+    case "rejected": return "Rejeitado com segurança pelo ERP";
+    case "unknown": return "Resultado desconhecido — verificar ERP; reenvio bloqueado";
+    default: return order.status === "sent" ? "Pedido confirmado no ERP" : "Resultado desconhecido — verificar ERP";
+  }
 };
 
 const stageFlow: Stage[] = ["prospeccao", "negociacao", "proposta", "ganho"];
@@ -643,6 +662,7 @@ function SearchableSelect({
 }
 
 export default function OpportunityDetailsPage() {
+  const { user } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -687,6 +707,13 @@ export default function OpportunityDetailsPage() {
   const [downloadingErpOrderPdfId, setDownloadingErpOrderPdfId] = useState<
     string | null
   >(null);
+  const [manualResolutionOrderId, setManualResolutionOrderId] = useState<string | null>(null);
+  const [manualResolutionSuffix, setManualResolutionSuffix] = useState("");
+  const [manualResolutionJustification, setManualResolutionJustification] = useState("");
+  const [manualResolutionChecked, setManualResolutionChecked] = useState(false);
+  const [manualResolutionConsequence, setManualResolutionConsequence] = useState(false);
+  const [manualResolutionPhrase, setManualResolutionPhrase] = useState("");
+  const [savingManualResolution, setSavingManualResolution] = useState(false);
 
   const load = async () => {
     if (!id) return;
@@ -765,7 +792,8 @@ export default function OpportunityDetailsPage() {
   const opportunityClientLocation = [opportunityClientSummary.city, opportunityClientSummary.state].filter(Boolean).join("/") || "-";
   const opportunitySellerName = item?.ownerSeller?.name || item?.owner || "-";
   const successfulErpOrder = erpOrders.find(isSuccessfulErpOrderSync) || null;
-  const resendableErpOrder = erpOrders.find(isErpOrderSyncResendable) || null;
+  const unresolvedAmbiguousErpOrder = erpOrders.find((order) => (order.status === "error" || order.status === "pending") && !order.manualResolution) || null;
+  const resendableErpOrder = erpOrders.find((order) => isErpOrderSyncResendable(order) && Boolean(order.manualResolution || order.orderStatus === "cancelado")) || null;
   const isErpOrderResend = Boolean(resendableErpOrder && !successfulErpOrder);
   const itemsWithMissingErp = opportunityItems.filter(
     (opportunityItem) => !opportunityItem.erpProductCode?.trim(),
@@ -802,10 +830,13 @@ export default function OpportunityDetailsPage() {
   const canSubmitErpOrder =
     erpOrderSubmitReadiness.ready &&
     Boolean(erpOrderForm.expectedDeliveryDate) &&
-    !successfulErpOrder;
+    !successfulErpOrder &&
+    !unresolvedAmbiguousErpOrder;
   const erpOrderDisabledReason = erpOrderReadiness.firstReason;
   const erpOrderSubmitDisabledReason = successfulErpOrder
     ? `Pedido ERP já enviado com sucesso (${successfulErpOrder.erpOrderNumber || successfulErpOrder.numPedido || successfulErpOrder.pedidoIdImportacao}). Reenvio bloqueado para evitar duplicidade.`
+    : unresolvedAmbiguousErpOrder
+      ? "Pedido ERP indisponível: tentativa anterior com resultado ambíguo; use Atualizar status ou solicite revisão manual de um diretor."
     : erpOrderSubmitReadiness.firstReason;
 
   const setErpOrderField = (
@@ -1032,6 +1063,34 @@ export default function OpportunityDetailsPage() {
       );
     } finally {
       setSyncingErpOrderStatus(false);
+    }
+  };
+
+  const onRegisterManualResolution = async (order: ErpOrderSync) => {
+    if (!item || user?.role !== "diretor" || !order.manualReviewCorrelationId) return;
+    setSavingManualResolution(true);
+    try {
+      await api.post(`/opportunities/${item.id}/erp/orders/${order.id}/manual-resolution`, {
+        checkedNotFound: manualResolutionChecked,
+        expectedImportIdSuffix: manualResolutionSuffix,
+        justification: manualResolutionJustification,
+        confirmedConsequence: manualResolutionConsequence,
+        confirmationPhrase: manualResolutionPhrase,
+        originalCorrelationId: order.manualReviewCorrelationId,
+      });
+      const response = await api.get(`/opportunities/${item.id}/erp/orders`);
+      setErpOrders(Array.isArray(response.data?.items) ? response.data.items : []);
+      setManualResolutionOrderId(null);
+      setManualResolutionSuffix("");
+      setManualResolutionJustification("");
+      setManualResolutionChecked(false);
+      setManualResolutionConsequence(false);
+      setManualResolutionPhrase("");
+      toast.success("Verificação manual registrada; a tentativa original foi preservada");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível registrar a verificação manual"));
+    } finally {
+      setSavingManualResolution(false);
     }
   };
 
@@ -2232,8 +2291,17 @@ export default function OpportunityDetailsPage() {
                                     <p className="text-xs text-slate-600">
                                       Pedido ERP nº: {" "}
                                       {order.erpOrderNumber ||
-                                        "Pedido enviado, número ERP não retornado"}
+                                        "número ERP ainda não confirmado"}
                                     </p>
+                                    <p className="mt-1 text-xs font-semibold text-slate-700">
+                                      {getErpReconciliationLabel(order)}
+                                    </p>
+                                    {order.supersedesErpOrderSync ? (
+                                      <p className="mt-1 break-all text-xs text-slate-500">Nova tentativa controlada vinculada a: {order.supersedesErpOrderSync.pedidoIdImportacao}</p>
+                                    ) : null}
+                                    {order.manualResolution ? (
+                                      <p className="mt-1 text-xs font-semibold text-amber-700">Revisão humana autorizada registrada — tentativa original preservada.</p>
+                                    ) : null}
                                   </div>
                                   {order.status === "sent" ? (
                                     <button
@@ -2252,6 +2320,25 @@ export default function OpportunityDetailsPage() {
                                     </button>
                                   ) : null}
                                 </div>
+                                {user?.role === "diretor" && !order.manualResolution && order.status === "error" && (!order.lastStatusPayload?.outcome || order.lastStatusPayload.outcome === "unknown") && order.manualReviewCorrelationId ? (
+                                  <div className="mt-3 border-t border-slate-100 pt-3">
+                                    {manualResolutionOrderId !== order.id ? (
+                                      <button type="button" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-900" onClick={() => setManualResolutionOrderId(order.id)}>
+                                        Confirmar conferência no ERP e liberar nova tentativa
+                                      </button>
+                                    ) : (
+                                      <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                                        <p className="rounded-lg border border-red-300 bg-red-50 p-2 font-bold text-red-900">Use somente após conferir no UltraFV3 que o pedido não existe. Uma confirmação incorreta pode gerar pedido duplicado.</p>
+                                        <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionChecked} onChange={(event) => setManualResolutionChecked(event.target.checked)} /><span>Consultei o UltraFV3 pelo cliente, data, valor e identificador de importação e confirmo que o pedido não foi encontrado.</span></label>
+                                        <label className="block font-semibold">Últimos 8 caracteres do pedidoIdImportacao<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionSuffix} maxLength={8} onChange={(event) => setManualResolutionSuffix(event.target.value)} /></label>
+                                        <label className="block font-semibold">Justificativa curta, sem dados sensíveis<textarea className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-normal" value={manualResolutionJustification} minLength={10} maxLength={240} onChange={(event) => setManualResolutionJustification(event.target.value)} /></label>
+                                        <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionConsequence} onChange={(event) => setManualResolutionConsequence(event.target.checked)} /><span>Esta ação não apaga a tentativa anterior. Ela registra uma decisão operacional e permitirá nova tentativa controlada.</span></label>
+                                        <label className="block font-semibold">Digite exatamente: CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionPhrase} onChange={(event) => setManualResolutionPhrase(event.target.value)} /></label>
+                                        <div className="flex gap-2"><button type="button" className="rounded-lg bg-amber-800 px-3 py-1.5 font-bold text-white disabled:opacity-50" disabled={savingManualResolution || !manualResolutionChecked || !manualResolutionConsequence || manualResolutionSuffix.length !== 8 || manualResolutionJustification.trim().length < 10 || manualResolutionPhrase !== "CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP"} onClick={() => void onRegisterManualResolution(order)}>{savingManualResolution ? "Consultando status e registrando..." : "Confirmar conferência e liberar"}</button><button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-bold" onClick={() => setManualResolutionOrderId(null)}>Cancelar</button></div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
                               </div>
                             ))}
                           </div>
