@@ -49,6 +49,10 @@ assert.match(operationPostgres, /attempt_one_files=\(metadata\.tsv dry-run-resul
 assert.match(operationPostgres, /attempt_two_files=\(metadata\.tsv result\.tsv apply\.tsv reconciliation\.tsv\)/);
 assert.doesNotMatch(operationPostgres.match(/attempt_two_files=\([^\n]+/)?.[0] || "", /dry-run-result\.tsv/);
 for (const token of ['IDEMPOTENT_AGGREGATE_HASH_MATCH=PASS', 'SECOND_TENANT_COUNT=', 'SECOND_MEMBERSHIP_COUNT=', 'SECOND_USER_COUNT=', 'TENANCY_CONTROL_PLANE_OPERATION_POSTGRES=PASS']) assert.ok(operationPostgres.includes(token), token);
+for (const token of ['postgres_diagnostics', 'docker logs --timestamps', 'exit_code={{.State.ExitCode}}', 'health={{if .State.Health}}', 'attached={{with index .NetworkSettings.Networks', 'ports={{json .NetworkSettings.Ports}}', 'auth_probe=tcp-password', 'PGPASSWORD=test', '-h 127.0.0.1', "SELECT current_database(), current_user;", "grep -Fqx 'gesto|postgres'", 'for readiness_attempt in {1..60}']) assert.ok(operationPostgres.includes(token), token);
+assert.ok(operationPostgres.indexOf('if (( rc != 0 )); then postgres_diagnostics; fi') < operationPostgres.indexOf('if ! cleanup; then'));
+assert.doesNotMatch(operationPostgres, /docker run[^\n]*--rm[^\n]*postgres:16/);
+assert.doesNotMatch(operationPostgres, /\|\|\s*(?:true|:)/);
 assert.doesNotMatch(prepare + operationPostgres, /chmod\s+(?:777|666|644)\b|umask\s+000\b/);
 assert.doesNotMatch(operationPostgres, /rm\s+-f\s+[^\n]*result\.tsv/);
 assert.match(prepare, /run_runner\(\)\{ docker run[^\n]*--user "\$operator_uid:\$operator_gid"[\s\S]*-v "\$evidence:\/evidence"/);
