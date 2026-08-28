@@ -204,12 +204,13 @@ type ErpOrderSync = {
     outcome?: "confirmed" | "processing" | "rejected" | "unknown";
     operation?: string;
   } | null;
-  manualResolution?: { category: "manual_verified_not_found"; createdAt: string } | null;
+  manualResolution?: { category: "manual_verified_not_found"; terminalState: "manually_resolved_not_found"; createdAt: string; statusCheckedAt: string } | null;
   supersedesErpOrderSync?: { id: string; pedidoIdImportacao: string } | null;
   manualReviewCorrelationId?: string | null;
 };
 
 const getErpReconciliationLabel = (order: ErpOrderSync) => {
+  if (order.manualResolution?.terminalState === "manually_resolved_not_found") return "Resolvido manualmente como não encontrado — decisão humana, não rejeição do ERP";
   switch (order.lastStatusPayload?.outcome) {
     case "confirmed": return "Pedido confirmado no ERP — reconciliado sem reenvio";
     case "processing": return "Ainda processando no ERP — reenvio bloqueado";
@@ -711,6 +712,7 @@ export default function OpportunityDetailsPage() {
   const [manualResolutionJustification, setManualResolutionJustification] = useState("");
   const [manualResolutionChecked, setManualResolutionChecked] = useState(false);
   const [manualResolutionConsequence, setManualResolutionConsequence] = useState(false);
+  const [manualResolutionPhrase, setManualResolutionPhrase] = useState("");
   const [savingManualResolution, setSavingManualResolution] = useState(false);
 
   const load = async () => {
@@ -1073,6 +1075,7 @@ export default function OpportunityDetailsPage() {
         expectedImportIdSuffix: manualResolutionSuffix,
         justification: manualResolutionJustification,
         confirmedConsequence: manualResolutionConsequence,
+        confirmationPhrase: manualResolutionPhrase,
         originalCorrelationId: order.manualReviewCorrelationId,
       });
       const response = await api.get(`/opportunities/${item.id}/erp/orders`);
@@ -1082,6 +1085,7 @@ export default function OpportunityDetailsPage() {
       setManualResolutionJustification("");
       setManualResolutionChecked(false);
       setManualResolutionConsequence(false);
+      setManualResolutionPhrase("");
       toast.success("Verificação manual registrada; a tentativa original foi preservada");
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível registrar a verificação manual"));
@@ -2316,19 +2320,21 @@ export default function OpportunityDetailsPage() {
                                     </button>
                                   ) : null}
                                 </div>
-                                {user?.role === "diretor" && !order.manualResolution && order.status === "error" && order.manualReviewCorrelationId ? (
+                                {user?.role === "diretor" && !order.manualResolution && order.status === "error" && (!order.lastStatusPayload?.outcome || order.lastStatusPayload.outcome === "unknown") && order.manualReviewCorrelationId ? (
                                   <div className="mt-3 border-t border-slate-100 pt-3">
                                     {manualResolutionOrderId !== order.id ? (
                                       <button type="button" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-900" onClick={() => setManualResolutionOrderId(order.id)}>
-                                        Registrar verificação manual no ERP
+                                        Confirmar conferência no ERP e liberar nova tentativa
                                       </button>
                                     ) : (
                                       <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                                        <p className="rounded-lg border border-red-300 bg-red-50 p-2 font-bold text-red-900">Use somente após conferir no UltraFV3 que o pedido não existe. Uma confirmação incorreta pode gerar pedido duplicado.</p>
                                         <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionChecked} onChange={(event) => setManualResolutionChecked(event.target.checked)} /><span>Consultei o UltraFV3 pelo cliente, data, valor e identificador de importação e confirmo que o pedido não foi encontrado.</span></label>
                                         <label className="block font-semibold">Últimos 8 caracteres do pedidoIdImportacao<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionSuffix} maxLength={8} onChange={(event) => setManualResolutionSuffix(event.target.value)} /></label>
                                         <label className="block font-semibold">Justificativa curta, sem dados sensíveis<textarea className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-normal" value={manualResolutionJustification} minLength={10} maxLength={240} onChange={(event) => setManualResolutionJustification(event.target.value)} /></label>
                                         <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionConsequence} onChange={(event) => setManualResolutionConsequence(event.target.checked)} /><span>Esta ação não apaga a tentativa anterior. Ela registra uma decisão operacional e permitirá nova tentativa controlada.</span></label>
-                                        <div className="flex gap-2"><button type="button" className="rounded-lg bg-amber-800 px-3 py-1.5 font-bold text-white disabled:opacity-50" disabled={savingManualResolution || !manualResolutionChecked || !manualResolutionConsequence || manualResolutionSuffix.length !== 8 || manualResolutionJustification.trim().length < 10} onClick={() => void onRegisterManualResolution(order)}>{savingManualResolution ? "Registrando..." : "Confirmar revisão manual"}</button><button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-bold" onClick={() => setManualResolutionOrderId(null)}>Cancelar</button></div>
+                                        <label className="block font-semibold">Digite exatamente: CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionPhrase} onChange={(event) => setManualResolutionPhrase(event.target.value)} /></label>
+                                        <div className="flex gap-2"><button type="button" className="rounded-lg bg-amber-800 px-3 py-1.5 font-bold text-white disabled:opacity-50" disabled={savingManualResolution || !manualResolutionChecked || !manualResolutionConsequence || manualResolutionSuffix.length !== 8 || manualResolutionJustification.trim().length < 10 || manualResolutionPhrase !== "CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP"} onClick={() => void onRegisterManualResolution(order)}>{savingManualResolution ? "Consultando status e registrando..." : "Confirmar conferência e liberar"}</button><button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-bold" onClick={() => setManualResolutionOrderId(null)}>Cancelar</button></div>
                                       </div>
                                     )}
                                   </div>

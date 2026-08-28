@@ -604,6 +604,10 @@ enum ErpOrderManualResolutionCategory {
   manual_verified_not_found
 }
 
+enum ErpOrderManualResolutionTerminalState {
+  manually_resolved_not_found
+}
+
 model ErpOrderSync {
   id                 String                     @id @default(cuid())
   opportunityId      String
@@ -645,9 +649,12 @@ model ErpOrderManualResolution {
   resolvedBy                 User         @relation(fields: [resolvedById], references: [id], onDelete: Restrict)
   resolvedRole               Role
   category                   ErpOrderManualResolutionCategory
+  terminalState              ErpOrderManualResolutionTerminalState
   justification              String
   originalPedidoIdImportacao String
   originalCorrelationId      String
+  statusCheckedAt            DateTime
+  statusCheckCorrelationId   String
   createdAt                  DateTime     @default(now())
 
   @@index([opportunityId, createdAt])

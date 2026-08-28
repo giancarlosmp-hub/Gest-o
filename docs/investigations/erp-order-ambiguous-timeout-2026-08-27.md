@@ -42,9 +42,17 @@ O contrato observado de `/orderStatus?pedido=...` não documenta garantia formal
 
 Em 27/08/2026, foi fornecida evidência operacional de que um diretor pesquisou diretamente no UltraFV3 a tentativa `6f5edc8a-55a7-4502-a816-a8b94b8e67c2`, usando os atributos comerciais e o identificador de importação, e não encontrou o pedido. Isso é uma decisão humana autorizada (`manual_verified_not_found`), **não** uma garantia autoritativa da API UltraFV3. Nenhum nome de cliente, credencial, token ou payload foi registrado.
 
-Quando a reconciliação automática continuar inconclusiva, somente um usuário autenticado com role `diretor` pode usar **Registrar verificação manual no ERP**. A operação exige duas confirmações, o sufixo de oito caracteres do identificador, o `correlationId` já presente na timeline e uma justificativa sanitizada. O projeto não possui mecanismo de reautenticação recente; por isso não foi criado um requisito fictício além da autenticação e autorização existentes.
+Quando a reconciliação automática continuar inconclusiva, somente um usuário autenticado com role `diretor` pode usar **Confirmar conferência no ERP e liberar nova tentativa**. A operação exige duas confirmações, o sufixo de oito caracteres do identificador, a frase exata `CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP`, o `correlationId` já presente na timeline e uma justificativa sanitizada. O projeto não possui mecanismo de reautenticação recente; por isso não foi criado um requisito fictício além da autenticação e autorização existentes.
 
-A resolução é uma linha imutável separada e não altera nem apaga a tentativa original. Ela é criada na mesma transação da timeline, sob advisory lock da oportunidade, tem unicidade por tentativa e preserva ator, role comprovada, instante, categoria, justificativa e identificadores originais.
+A resolução é uma linha imutável separada e não altera nem apaga a tentativa original. Sob o advisory lock, o backend executa uma nova consulta `GET /orderStatus` pela chave original e só aceita a decisão se a resposta fresca continuar `unknown`. A resolução é criada na mesma transação da timeline, tem unicidade por tentativa e preserva ator, role comprovada, instante, categoria, estado terminal projetado `manually_resolved_not_found`, justificativa, identificadores originais e evidência temporal da consulta fresca. Esse estado representa decisão humana e nunca é exibido como `rejected`.
+
+Procedimento operacional:
+
+1. Tentar primeiro **Atualizar status** e confirmar que o resultado segue desconhecido.
+2. Um diretor confere diretamente no UltraFV3 e abre a ação excepcional.
+3. Ler o alerta de risco de duplicidade, marcar as duas confirmações, informar o sufixo, motivo e frase exata.
+4. Ao confirmar, o backend — não o navegador — repete imediatamente a consulta. Resultado encontrado, processando, rejeitado ou consulta com erro bloqueiam a resolução; somente uma resposta válida ainda `unknown` cria o evento append-only.
+5. Depois da resolução, o vendedor pode iniciar uma tentativa controlada. O fluxo adquire novamente o lock, faz outro preflight e cria uma nova tentativa vinculada, sem alterar a anterior.
 
 O contrato disponível não prova que `PEDIDO_ID_IMPORTACAO` seja uma chave idempotente real no UltraFV3. Portanto, a tentativa controlada usa uma nova chave e aponta `supersedesErpOrderSyncId` para a tentativa original. Imediatamente antes de criar a nova tentativa e liberar o único `POST /orders`, o backend repete `GET /orderStatus` pela chave original sob o mesmo lock:
 

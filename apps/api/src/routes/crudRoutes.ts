@@ -85,7 +85,7 @@ import { planningIntelligenceService } from "../services/planningIntelligenceSer
 import { agendaIntelligenceService } from "../services/agendaIntelligenceService.js";
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
-import { resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
+import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
@@ -7791,6 +7791,7 @@ const erpManualResolutionSchema = z.object({
   expectedImportIdSuffix: z.string().trim().length(8),
   justification: z.string().trim().min(10).max(240),
   confirmedConsequence: z.literal(true),
+  confirmationPhrase: z.literal(MANUAL_RESOLUTION_CONFIRMATION_PHRASE),
   originalCorrelationId: z.string().uuid(),
 });
 
@@ -7808,9 +7809,11 @@ router.post(
       });
       return res.status(result.idempotent ? 200 : 201).json({
         category: result.resolution.category,
+        terminalState: result.resolution.terminalState,
         erpOrderSyncId: result.resolution.erpOrderSyncId,
         opportunityId: result.resolution.opportunityId,
         createdAt: result.resolution.createdAt,
+        statusCheckedAt: result.resolution.statusCheckedAt,
         idempotent: result.idempotent,
       });
     } catch (error) {
