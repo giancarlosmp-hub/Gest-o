@@ -2,9 +2,16 @@
 set -Eeuo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); cd "$ROOT"
 docker image inspect postgres:16 >/dev/null 2>&1 || { echo 'SKIP: postgres:16 unavailable locally' >&2; exit 77; }
-name="pr827-preview-pg16-${RANDOM}-$$"; tmp=$(mktemp -d)
-cleanup(){ docker rm -f "$name" >/dev/null 2>&1 || :; rm -rf "$tmp"; }; trap cleanup EXIT
-docker run -d --pull=never --name "$name" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=salesforce_pro postgres:16 >/dev/null
+name="pr827-preview-pg16-${RANDOM}-$$"; network="${name}-net"; tmp=$(mktemp -d)
+cleanup(){
+  local rc=$?
+  if docker container inspect "$name" >/dev/null 2>&1; then docker rm -f "$name" >/dev/null 2>&1 || rc=1; fi
+  if docker network inspect "$network" >/dev/null 2>&1; then docker network rm "$network" >/dev/null 2>&1 || rc=1; fi
+  rm -rf "$tmp" || rc=1
+  return "$rc"
+}; trap cleanup EXIT
+docker network create --internal "$network" >/dev/null
+docker run -d --pull=never --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=salesforce_pro postgres:16 >/dev/null
 for _ in {1..60}; do docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null 2>&1 && break; sleep 1; done
 docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null
 psql(){ docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
@@ -52,12 +59,25 @@ sql_file scripts/pr827-schema-catalog.sql >"$tmp/pr-complete"; node scripts/pr82
 echo 'POSTGRESQL_16_PR827_STATES=COMPLETE,PARTIAL,ABSENT'
 
 reset
-if sql_file scripts/sql/pr827-read-only-write-rejection.sql >"$tmp/write.out" 2>"$tmp/write.err"; then echo 'read-only write unexpectedly succeeded' >&2; exit 1; fi
-grep -Fq 'cannot execute CREATE TABLE in a read-only transaction' "$tmp/write.err"; test "$(psql -Atc "SELECT to_regclass('public.pr827_forbidden_write') IS NULL")" = t
+readonly_rc=0
+if sql_file scripts/sql/pr827-read-only-write-rejection.sql >"$tmp/write.out" 2>"$tmp/write.err"; then
+  echo 'read-only write unexpectedly succeeded' >&2
+  exit 1
+else
+  readonly_rc=$?
+fi
+if (( readonly_rc == 0 )); then echo 'read-only rejection returned an invalid zero status' >&2; exit 1; fi
+if ! grep -Eq '^psql:<stdin>:[0-9]+: ERROR:  25006: cannot execute CREATE TABLE in a read-only transaction$' "$tmp/write.err"; then
+  printf 'unexpected read-only probe failure (psql exit %d)\n' "$readonly_rc" >&2
+  cat "$tmp/write.err" >&2
+  exit "$readonly_rc"
+fi
+test "$(psql -Atc "SELECT to_regclass('public.pr827_forbidden_write') IS NULL")" = t
 echo 'READ_ONLY_ENFORCEMENT=PASS'
 
 # Execute the exact parameterized ledger SQL used by the runner, including checksum/state projection.
 psql -c 'CREATE TABLE public."_prisma_migrations" (checksum text, finished_at timestamptz, rolled_back_at timestamptz, migration_name text, started_at timestamptz); INSERT INTO public."_prisma_migrations" VALUES ($$synthetic_checksum$$,now(),NULL,$$synthetic_migration$$,now());' >/dev/null
-ledger=$(psql -AtF $'\t' --set=migration_name=synthetic_migration -f - <scripts/sql/pr827-ledger-query.sql); test "$ledger" = $'synthetic_checksum\ttrue'
+ledger=$(psql -AtF $'\t' --set=migration_name=synthetic_migration -f - <scripts/sql/pr827-ledger-query.sql); test "$ledger" = $'synthetic_checksum\tt'
 echo 'ALL_PREVIEW_SQL_EXECUTED_ON_POSTGRESQL_16=PASS'
 echo 'PREVIEW_WRITES=NONE'
+echo 'PR827_PREVIEW_POSTGRES_RESULT=PASS'

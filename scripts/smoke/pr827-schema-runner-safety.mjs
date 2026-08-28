@@ -32,6 +32,10 @@ assert.ok(runner.indexOf("cat \"$migration\"") < runner.indexOf('INSERT INTO "_p
 assert.ok(runner.indexOf("[[ \"$ledger_location\" == PUBLIC ]]") < runner.indexOf("pred=$(ledger"), "missing/non-public ledger must fail closed before ledger lookup");
 assert.doesNotMatch(diagnostics + read("scripts/pr827-predecessor-catalog.sql") + read("scripts/pr827-schema-catalog.sql"), /\b(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
 assert.match(read(".github/workflows/docker-compose-ci.yml"),/npm run test:pr827-preview:postgres/);
+const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
+for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
+assert.match(rejectionSql,/\\set VERBOSITY verbose/);
+assert.doesNotMatch(postgresHarness,/\|\|\s*(?:true|:)|continue-on-error/);
 const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.match(workflow,/options: \[preview, apply\]/); assert.match(workflow,/production-schema/);
 assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
 assert.match(workflow,/PRODUCTION_ENV_SOURCE="\$resolved_env_source" PRODUCTION_ENV_FILE="\$resolved_env_file"/);
