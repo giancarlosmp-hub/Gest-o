@@ -43,8 +43,9 @@ jobs:
             MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
               PRODUCTION_ENV_SOURCE="$resolved_env_source" PRODUCTION_ENV_FILE="$resolved_env_file" \
               MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution \
-              API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_SCHEMA_MODE=external \
+              DATABASE_SCHEMA_MODE=external SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
               PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
               PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
+              ${{ inputs.mode == 'apply' && format('API_IMAGE=gest-o-api:{0}', github.sha) || '' }} \
               BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
               bash scripts/pr827-schema-runner.sh

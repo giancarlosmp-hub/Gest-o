@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+const dir=mkdtempSync(join(tmpdir(),"pr827-diff-")), input=join(dir,"in.sql"), output=join(dir,"out.sql");
+writeFileSync(input,'ALTER TABLE public."KnowledgeDocument" ADD COLUMN "tenantId" text;\n');
+execFileSync(process.execPath,["scripts/pr827-post-diff-filter.mjs",input,output]);
+assert.equal(readFileSync(output,"utf8"),"");
+writeFileSync(input,'ALTER TABLE public."ErpOrderSync" ADD COLUMN "supersedesErpOrderSyncId" text;\n');
+execFileSync(process.execPath,["scripts/pr827-post-diff-filter.mjs",input,output]);
+assert.match(readFileSync(output,"utf8"),/supersedesErpOrderSyncId/);
+console.log("PR827 managed post-diff filter passed");

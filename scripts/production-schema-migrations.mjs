@@ -31,9 +31,10 @@ export const migrations = Object.freeze({
     id: "20260827190000_add_erp_order_manual_resolution",
     path: "apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql",
     sha256: "61b4443a685471ea0425613d97da35a06cedf677d77c26807ce7ff27ccdb5b9e",
-    predecessor: Object.freeze({
-      lastMigration: "20260808120000_tenancy_expand_roots",
-      sha256: "90b25a912cd48ae03eb662355ebff271e9a84e63bc11b75f9ec0b41d2669d996"
+    productionBaseline: Object.freeze({
+      lastMigration: "20260731150000_safe_production_schema_transition",
+      path: "apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql",
+      sha256: "66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506"
     }),
     objects: Object.freeze({
       enums: ["ErpOrderManualResolutionCategory", "ErpOrderManualResolutionTerminalState"],
@@ -42,7 +43,7 @@ export const migrations = Object.freeze({
       indexes: ["ErpOrderManualResolution_erpOrderSyncId_key", "ErpOrderManualResolution_opportunityId_createdAt_idx", "ErpOrderManualResolution_resolvedById_createdAt_idx", "ErpOrderSync_supersedesErpOrderSyncId_idx"],
       foreignKeys: ["ErpOrderSync_supersedesErpOrderSyncId_fkey", "ErpOrderManualResolution_erpOrderSyncId_fkey", "ErpOrderManualResolution_opportunityId_fkey", "ErpOrderManualResolution_resolvedById_fkey"]
     }),
-    postconditions: Object.freeze(["ledger-finalized", "catalog-exact", "managed-diff-empty", "old-api-compatible"]),
+    postconditions: Object.freeze(["legacy-history-finalized", "catalog-exact", "managed-diff-empty", "old-api-compatible"]),
     evidenceVersion: 1
   })
 });
