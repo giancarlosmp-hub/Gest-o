@@ -37,3 +37,18 @@ Duplicidade seria possível se a oportunidade fosse liberada com base apenas em 
 6. `unknown`: revisar no ERP com dupla confirmação. Ausência/timeout não libera envio.
 
 O contrato observado de `/orderStatus?pedido=...` não documenta garantia formal de busca por chave nem semântica autoritativa de “não encontrado”. Por isso o fluxo considera encontro exato autoritativo, mas nunca converte resultado vazio em prova de não criação.
+
+## Evidência operacional posterior e resolução manual
+
+Em 27/08/2026, foi fornecida evidência operacional de que um diretor pesquisou diretamente no UltraFV3 a tentativa `6f5edc8a-55a7-4502-a816-a8b94b8e67c2`, usando os atributos comerciais e o identificador de importação, e não encontrou o pedido. Isso é uma decisão humana autorizada (`manual_verified_not_found`), **não** uma garantia autoritativa da API UltraFV3. Nenhum nome de cliente, credencial, token ou payload foi registrado.
+
+Quando a reconciliação automática continuar inconclusiva, somente um usuário autenticado com role `diretor` pode usar **Registrar verificação manual no ERP**. A operação exige duas confirmações, o sufixo de oito caracteres do identificador, o `correlationId` já presente na timeline e uma justificativa sanitizada. O projeto não possui mecanismo de reautenticação recente; por isso não foi criado um requisito fictício além da autenticação e autorização existentes.
+
+A resolução é uma linha imutável separada e não altera nem apaga a tentativa original. Ela é criada na mesma transação da timeline, sob advisory lock da oportunidade, tem unicidade por tentativa e preserva ator, role comprovada, instante, categoria, justificativa e identificadores originais.
+
+O contrato disponível não prova que `PEDIDO_ID_IMPORTACAO` seja uma chave idempotente real no UltraFV3. Portanto, a tentativa controlada usa uma nova chave e aponta `supersedesErpOrderSyncId` para a tentativa original. Imediatamente antes de criar a nova tentativa e liberar o único `POST /orders`, o backend repete `GET /orderStatus` pela chave original sob o mesmo lock:
+
+- se houver confirmação/processamento vinculado, registra a interrupção na timeline e não executa o POST;
+- se continuar vazio, inconclusivo ou indisponível, a decisão manual permite exatamente uma nova tentativa;
+- cliques concorrentes encontram a nova tentativa `pending` e são bloqueados antes do POST;
+- a reconciliação automática ignora a tentativa manualmente resolvida, preservando sua imutabilidade, mas continua preferencial para todas as tentativas não resolvidas.

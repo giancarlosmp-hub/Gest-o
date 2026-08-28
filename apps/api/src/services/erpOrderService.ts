@@ -1426,7 +1426,7 @@ async function createErpOrderFromOpportunityUnsafe(
     };
   }
 
-  const { sync, numPedido, payload } = await prisma.$transaction(async (tx) => {
+  const transactionResult = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ERP_ORDER_ADVISORY_LOCK_NAMESPACE}::integer, hashtext(${opportunity.id})::integer)`;
 
     const existingSuccessfulSync = await tx.erpOrderSync.findFirst({
@@ -1456,10 +1456,11 @@ async function createErpOrderFromOpportunityUnsafe(
         opportunityId: opportunity.id,
         status: { in: [ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
       },
+      include: { manualResolution: true },
       orderBy: [{ createdAt: "desc" }],
     });
 
-    if (uncertainSync && isUncertainErpOrderFailure(uncertainSync)) {
+    if (uncertainSync && isUncertainErpOrderFailure(uncertainSync) && !uncertainSync.manualResolution) {
       throw Object.assign(
         new Error(
           "Há uma tentativa de pedido ERP com resultado desconhecido/timeout. Reenvio bloqueado para evitar duplicidade; confira o UltraFV3 antes de nova tentativa.",
@@ -1473,6 +1474,46 @@ async function createErpOrderFromOpportunityUnsafe(
       );
     }
 
+    let supersedesErpOrderSyncId: string | null = null;
+    let manualRetryPreflight: Record<string, unknown> | null = null;
+    if (uncertainSync?.manualResolution) {
+      supersedesErpOrderSyncId = uncertainSync.id;
+      const preflightCorrelationId = randomUUID();
+      let preflightResponse: unknown = null;
+      let preflightClassification: ReturnType<typeof classifyUltraFv3OrderLookup> = { outcome: "unknown", matched: false, erpOrderNumber: null, orderStatus: null };
+      try {
+        preflightResponse = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(
+          `/orderStatus?pedido=${encodeURIComponent(uncertainSync.pedidoIdImportacao)}`,
+          sellerCredentials,
+          preflightCorrelationId,
+        );
+        preflightClassification = classifyUltraFv3OrderLookup(preflightResponse, uncertainSync);
+      } catch (error) {
+        preflightResponse = { lookupFailed: true, message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error) };
+      }
+      manualRetryPreflight = {
+        operation: "manual-resolution-retry-preflight",
+        originalErpOrderSyncId: uncertainSync.id,
+        originalPedidoIdImportacao: uncertainSync.pedidoIdImportacao,
+        outcome: preflightClassification.outcome,
+        matched: preflightClassification.matched,
+        correlationId: preflightCorrelationId,
+        checkedAt: new Date().toISOString(),
+        response: sanitizeErpOrderPayload(preflightResponse),
+      };
+      if (preflightClassification.outcome === "confirmed" || preflightClassification.outcome === "processing") {
+        await tx.timelineEvent.create({
+          data: {
+            type: "status",
+            description: `Novo envio ERP cancelado pelo preflight somente leitura: o pedido original apareceu no UltraFV3. pedidoIdImportacao=${uncertainSync.pedidoIdImportacao}; sem novo POST /orders.`,
+            opportunityId: opportunity.id,
+            ownerSellerId: opportunity.ownerSeller.id,
+          },
+        });
+        return { blockedByPreflight: true as const, pedidoIdImportacao: uncertainSync.pedidoIdImportacao, classification: preflightClassification };
+      }
+    }
+
     const numPedido = String(await reserveNextErpOrderNumber(tx));
     const payload = buildOrderPayload(numPedido);
     const sync = await tx.erpOrderSync.create({
@@ -1483,10 +1524,21 @@ async function createErpOrderFromOpportunityUnsafe(
         numPedido,
         status: ErpOrderSyncStatus.pending,
         payloadSent: toJson(payload),
+        supersedesErpOrderSyncId,
+        ...(manualRetryPreflight ? { erpResponse: toJson(manualRetryPreflight) } : {}),
       },
     });
-    return { sync, numPedido, payload };
+    return { blockedByPreflight: false as const, sync, numPedido, payload };
   });
+
+  if (transactionResult.blockedByPreflight) {
+    throw Object.assign(new Error("Novo envio cancelado: o preflight encontrou o pedido original no UltraFV3; nenhuma duplicidade foi criada."), {
+      status: 409,
+      pedidoIdImportacao: transactionResult.pedidoIdImportacao,
+      reconciliationOutcome: transactionResult.classification.outcome,
+    });
+  }
+  const { sync, numPedido, payload } = transactionResult;
 
   logApiEvent("INFO", "[erp order] final validated UltraFV3 /orders payload", {
     ...operationContext,
@@ -2043,13 +2095,14 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
       status: { in: [ErpOrderSyncStatus.sent, ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
       ...(opportunityId ? { opportunityId } : {}),
     },
-    include: { seller: { select: { erpLoginUsername: true, erpLoginPasswordEncrypted: true } } },
+    include: { seller: { select: { erpLoginUsername: true, erpLoginPasswordEncrypted: true } }, manualResolution: true },
     orderBy: [{ createdAt: "desc" }],
   });
 
   let syncedCount = 0;
   let errorCount = 0;
   for (const order of orders) {
+    if (order.manualResolution) continue;
     const correlationId = randomUUID();
     let query = order.pedidoIdImportacao;
     try {

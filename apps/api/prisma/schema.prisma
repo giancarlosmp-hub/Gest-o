@@ -103,6 +103,7 @@ model User {
   contacts                   Contact[]
   opportunities              Opportunity[]
   erpOrderSyncs              ErpOrderSync[]
+  erpOrderManualResolutions  ErpOrderManualResolution[]
   opportunityChangeLogs      OpportunityChangeLog[]
   activities                 Activity[]
   timelineEvents             TimelineEvent[]
@@ -359,6 +360,7 @@ model Opportunity {
   changeLogs           OpportunityChangeLog[]
   items                OpportunityItem[]
   erpOrderSyncs        ErpOrderSync[]
+  erpOrderManualResolutions ErpOrderManualResolution[]
   createdAt            DateTime               @default(now())
 }
 
@@ -598,6 +600,10 @@ enum ErpOrderFulfillmentStatus {
   entregue
 }
 
+enum ErpOrderManualResolutionCategory {
+  manual_verified_not_found
+}
+
 model ErpOrderSync {
   id                 String                     @id @default(cuid())
   opportunityId      String
@@ -617,11 +623,35 @@ model ErpOrderSync {
   statusSyncedAt     DateTime?
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
+  supersedesErpOrderSyncId String?
+  supersedesErpOrderSync   ErpOrderSync?         @relation("ErpOrderRetryChain", fields: [supersedesErpOrderSyncId], references: [id], onDelete: Restrict)
+  retryAttempts            ErpOrderSync[]        @relation("ErpOrderRetryChain")
+  manualResolution         ErpOrderManualResolution?
 
   @@index([opportunityId, createdAt])
   @@index([status])
   @@index([orderStatus])
   @@index([numPedido])
+  @@index([supersedesErpOrderSyncId])
+}
+
+model ErpOrderManualResolution {
+  id                         String       @id @default(cuid())
+  erpOrderSyncId             String       @unique
+  erpOrderSync               ErpOrderSync @relation(fields: [erpOrderSyncId], references: [id], onDelete: Restrict)
+  opportunityId              String
+  opportunity                Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  resolvedById               String
+  resolvedBy                 User         @relation(fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedRole               Role
+  category                   ErpOrderManualResolutionCategory
+  justification              String
+  originalPedidoIdImportacao String
+  originalCorrelationId      String
+  createdAt                  DateTime     @default(now())
+
+  @@index([opportunityId, createdAt])
+  @@index([resolvedById, createdAt])
 }
 
 enum ErpSyncRunStatus {
