@@ -10,6 +10,17 @@ const runner=read("scripts/pr827-schema-runner.sh"), registry=read("scripts/prod
 for(const token of ["20260827190000_add_erp_order_manual_resolution","APPLY_PR827_SCHEMA","_prisma_migrations","checksum","finished_at","rolled_back_at","catalog present without ledger","post-diff is not empty","PR827_MIGRATION_IDEMPOTENCY=PASS","PR827_ENV_METADATA=VALID","PR827_DATABASE_URL_CONTRACT=PASS","PR827_ENV_IMMUTABLE=PASS"]) assert.match(runner,new RegExp(token));
 assert.match(registry,/20260808120000_tenancy_expand_roots/);
 assert.doesNotMatch(runner,/db push|migrate reset|migrate dev|migrate deploy/);
+const allowlistGate=runner.indexOf("== \"$MIGRATION_ID\" ]] || die 'migration is not allowlisted'");
+const ledgerDefinition=runner.indexOf("ledger(){");
+assert.ok(allowlistGate >= 0 && allowlistGate < ledgerDefinition,"the exact migration allowlist must run before any ledger query");
+const ledgerBlock=runner.slice(ledgerDefinition,runner.indexOf("pred=$(ledger",ledgerDefinition));
+assert.match(ledgerBlock,/--set=migration_name="\$migration_name" <<'SQL'/);
+assert.match(ledgerBlock,/WHERE migration_name = :'migration_name'/);
+assert.doesNotMatch(ledgerBlock,/\s-c(?:\s|$)/,"psql -c does not perform psql variable interpolation");
+assert.doesNotMatch(ledgerBlock,/WHERE migration_name\s*=\s*["']?\$\{/,"the migration name must not be interpolated by the shell into SQL");
+const previewExit=runner.indexOf('[[ "$MODE" == preview ]] && exit 0');
+for(const write of ['INSERT INTO "_prisma_migrations"','cat "$migration"']) assert.ok(previewExit < runner.indexOf(write),`${write} must remain unreachable in preview`);
+assert.ok(runner.indexOf("[[ ${CONFIRM:-} == \"$CONFIRMATION\" ]]") > previewExit,"apply confirmation must guard writes");
 assert.ok(runner.indexOf("cat \"$migration\"") < runner.indexOf('INSERT INTO "_prisma_migrations"'),"DDL and ledger must share the ordered transaction");
 const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.match(workflow,/options: \[preview, apply\]/); assert.match(workflow,/production-schema/);
 assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
