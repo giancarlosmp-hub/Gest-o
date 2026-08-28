@@ -33,6 +33,26 @@ for (const field of ["plan_hash", "evidence_id", "evidence_hash", "plan_version"
 assert.doesNotMatch(sql, /ON CONFLICT \((?:evidence_id|plan_id)\)/);
 for (const required of ["postgres:16", "docker exec -i", "psql -X", "ON_ERROR_STOP=1", "PREFLIGHT_PLAN_LEDGER_POSTGRES=PASS"])
   assert.ok(sh.includes(required), `missing harness control: ${required}`);
+for (const checkpoint of ["postgres_started", "postgres_ready_admin", "database_created", "database_connection_validated", "schema_applied", "ledger_validated"])
+  assert.ok(sh.includes(`HARNESS_CHECKPOINT=${checkpoint}`), `missing harness checkpoint: ${checkpoint}`);
+const startedAt = sh.indexOf("HARNESS_CHECKPOINT=postgres_started");
+const adminReadyAt = sh.indexOf("HARNESS_CHECKPOINT=postgres_ready_admin");
+const databaseCreatedAt = sh.indexOf("HARNESS_CHECKPOINT=database_created");
+const databaseValidatedAt = sh.indexOf("HARNESS_CHECKPOINT=database_connection_validated");
+const schemaAppliedAt = sh.indexOf("HARNESS_CHECKPOINT=schema_applied");
+const ledgerValidatedAt = sh.indexOf("HARNESS_CHECKPOINT=ledger_validated");
+assert.ok(startedAt < adminReadyAt && adminReadyAt < databaseCreatedAt && databaseCreatedAt < databaseValidatedAt && databaseValidatedAt < schemaAppliedAt && schemaAppliedAt < ledgerValidatedAt);
+assert.match(sh, /admin_database=postgres; target_database=ledger/);
+assert.match(sh, /POSTGRES_DB="\$admin_database"/);
+assert.match(sh, /test "\$\(cat \/proc\/1\/comm\)" = postgres/);
+assert.match(sh, /pg_isready -U postgres -d "\$admin_database"/);
+assert.match(sh, /admin_psql=\(docker exec -i "\$name" psql[^\n]+-d "\$admin_database"\)/);
+assert.match(sh, /printf 'CREATE DATABASE %s;\\n' "\$target_database" \| "\$\{admin_psql\[@\]\}"/);
+assert.match(sh, /psql=\(docker exec -i "\$name" psql[^\n]+-d "\$target_database"\)/);
+assert.ok(sh.indexOf("admin_psql=(") < sh.indexOf("CREATE DATABASE") && sh.indexOf("CREATE DATABASE") < sh.indexOf("\npsql=("), "administrative connection and database creation must precede the target connection");
+assert.doesNotMatch(sh, /-d ledger|POSTGRES_DB=ledger/, "bootstrap must not rely on a literal implicit ledger database");
+assert.match(sh, /name="gesto-ledger-pg-\$RANDOM-\$\$"; network="\$name-net"/);
+assert.match(sh, /docker rm -f "\$name"[\s\S]*docker network rm "\$network"/);
 const executableLines = sh.split("\n").filter((line) => !/^\s*#/.test(line));
 assert.ok(!executableLines.some((line) => /(^|[;&|]\s*|\$\(|`|\bcommand\s+)(rg)(?=\s|$)/.test(line)), "harness must not execute ripgrep");
 assert.ok(!executableLines.some((line) => /(^|[;&|]\s*|\$\(|`|\bcommand\s+)(jq)(?=\s|$)/.test(line)), "harness path must not execute jq");
