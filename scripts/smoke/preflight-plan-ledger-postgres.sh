@@ -3,6 +3,7 @@ set -Eeuo pipefail
 [[ -z "${DATABASE_URL:-}" && -z "${TEST_DATABASE_URL:-}" ]] || { echo 'Inherited database URLs are forbidden' >&2; exit 1; }
 umask 077
 tmp="$(mktemp -d)"; name="gesto-ledger-pg-$RANDOM-$$"; network="$name-net"; cleaned=false
+admin_database=postgres; target_database=ledger
 HARNESS_STEP=BOOTSTRAP; HARNESS_COMMAND='initialize disposable PostgreSQL harness'; HARNESS_RESULT=RUNNING
 cleanup() {
  rc=$?; trap - EXIT INT TERM
@@ -20,13 +21,32 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 docker network create --internal "$network" >/dev/null
-docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e POSTGRES_DB=ledger postgres:16 >/dev/null
-for _ in $(seq 1 60); do if docker exec "$name" pg_isready -U postgres -d ledger >/dev/null 2>&1; then break; fi; sleep 1; done
-docker exec "$name" pg_isready -U postgres -d ledger >/dev/null
-psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d ledger)
+docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e POSTGRES_DB="$admin_database" postgres:16 >/dev/null
+echo HARNESS_CHECKPOINT=postgres_started
+HARNESS_STEP=BOOTSTRAP_ADMIN_READINESS
+HARNESS_COMMAND='wait for explicit PostgreSQL administrative database readiness'
+for _ in $(seq 1 60); do
+ if docker exec "$name" sh -c 'test "$(cat /proc/1/comm)" = postgres' >/dev/null 2>&1 \
+  && docker exec "$name" pg_isready -U postgres -d "$admin_database" >/dev/null 2>&1; then break; fi
+ sleep 1
+done
+docker exec "$name" sh -c 'test "$(cat /proc/1/comm)" = postgres'
+docker exec "$name" pg_isready -U postgres -d "$admin_database" >/dev/null
+echo HARNESS_CHECKPOINT=postgres_ready_admin
+admin_psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d "$admin_database")
+HARNESS_STEP=DATABASE_CREATE
+HARNESS_COMMAND='create isolated ledger database through explicit administrative connection'
+printf 'CREATE DATABASE %s;\n' "$target_database" | "${admin_psql[@]}" >/dev/null
+echo HARNESS_CHECKPOINT=database_created
+HARNESS_STEP=DATABASE_CONNECTION
+HARNESS_COMMAND='validate explicit connection to created ledger database'
+psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -v VERBOSITY=verbose -U postgres -d "$target_database")
+[[ "$(printf 'SELECT current_database();\n' | "${psql[@]}" -qAt)" == "$target_database" ]]
+echo HARNESS_CHECKPOINT=database_connection_validated
 catalog="SELECT c.relkind,n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' ORDER BY 1,2,3;"
 printf '%s\n' "$catalog" | "${psql[@]}" -At >"$tmp/before"
 "${psql[@]}" < scripts/smoke/sql/preflight-plan-ledger-candidate.sql
+echo HARNESS_CHECKPOINT=schema_applied
 echo CHECKPOINT=DDL_CATALOG
 "${psql[@]}" -At <<'SQL' >"$tmp/catalog"
 SELECT 'CONSTRAINT|'||conrelid::regclass||'|'||conname||'|'||pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid IN ('public.tenant_preflight_evidence_registry'::regclass,'public.tenant_backfill_plan_ledger'::regclass,'public.tenant_backfill_plan_event'::regclass) ORDER BY 1;
@@ -248,6 +268,7 @@ HARNESS_STEP=BASELINE_COMPARISON
 HARNESS_COMMAND='compare public catalog before and after teardown'
 printf '%s\n' "$catalog" | "${psql[@]}" -At >"$tmp/after"
 cmp "$tmp/before" "$tmp/after"
+echo HARNESS_CHECKPOINT=ledger_validated
 cleaned=true
 HARNESS_STEP=FINAL
 HARNESS_COMMAND='emit final PostgreSQL ledger proof result'
