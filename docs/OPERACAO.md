@@ -783,3 +783,6 @@ Proposta documental, não implementada: um orquestrador recebe o SHA de `main` v
 valida uma prova de build existente ou dispara uma única build, prepara backup canônico
 e então chama preview. Somente a transição para apply usa environment com aprovação
 humana e confirmação literal. Falha em qualquer artefato/SHA encerra o fluxo.
+# Gate PR827 PostgreSQL 16
+
+Antes de considerar a correção diagnóstica pronta, o Docker Compose CI deve executar com sucesso `npm run test:pr827-preview:postgres`. SKIP 77 é tolerado somente em ambiente local sem a imagem; não é aceite remoto. Não executar preview produtivo, apply, migration, backup, deploy, Recovery ou cutover nesta correção.

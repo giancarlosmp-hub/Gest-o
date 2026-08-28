@@ -44,6 +44,9 @@ jobs:
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         run: docker pull postgres:16
 
+      - name: Execute every PR827 preview diagnostic on PostgreSQL 16
+        run: npm run test:pr827-preview:postgres
+
       - name: Build SHA-pinned API image for control-plane harness
         run: docker build --pull=false --build-arg APP_COMMIT="$GITHUB_SHA" --build-arg APP_VERSION=ci --build-arg APP_BUILT_AT="$(date -u +%FT%TZ)" -t "gest-o-api:$GITHUB_SHA" -f apps/api/Dockerfile .
 

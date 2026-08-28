@@ -659,3 +659,6 @@ uma precondição auditável proposta, não um ledger Prisma. O apply PR827 perm
 bloqueado até decisão operacional separada. Não execute `resolve`, DDL/DML, preview
 produtivo ou build a partir desta alteração. Consulte as
 [lições consolidadas](investigations/production-schema-pr827-lessons-learned.md).
+# Bloqueio de deploy — correção PR827
+
+O check remoto PostgreSQL 16 `test:pr827-preview:postgres` é obrigatório após a correção de `(current_schemas(false))[1]`. Até check verde, merge e `main` verde, `READY_TO_RERUN_PREVIEW=NO`; `READY_TO_APPLY_PR827=NO` permanece invariável. Este patch não cria ledger/baseline e não aplica migration.

@@ -1,3 +1,4 @@
+BEGIN TRANSACTION READ ONLY;
 SELECT kind, name, detail FROM (
  SELECT 'enum' kind, t.typname name, string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) detail
  FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid JOIN pg_namespace n ON n.oid=t.typnamespace
@@ -7,3 +8,4 @@ SELECT kind, name, detail FROM (
  UNION ALL SELECT 'index', indexname, indexdef FROM pg_indexes WHERE schemaname='public' AND indexname IN ('ErpOrderManualResolution_erpOrderSyncId_key','ErpOrderManualResolution_opportunityId_createdAt_idx','ErpOrderManualResolution_resolvedById_createdAt_idx','ErpOrderSync_supersedesErpOrderSyncId_idx')
  UNION ALL SELECT 'fk', conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE contype='f' AND conname IN ('ErpOrderSync_supersedesErpOrderSyncId_fkey','ErpOrderManualResolution_erpOrderSyncId_fkey','ErpOrderManualResolution_opportunityId_fkey','ErpOrderManualResolution_resolvedById_fkey')
 ) objects ORDER BY kind,name;
+COMMIT;

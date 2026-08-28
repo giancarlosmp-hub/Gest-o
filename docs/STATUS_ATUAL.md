@@ -659,3 +659,6 @@ apply inalcançável. Veja as [lições consolidadas](investigations/production-
 `PREVIEW_WRITES=NONE`, `MIGRATION_APPLIED=NO`, `PRODUCTION_MODIFIED=NO`,
 `READY_TO_RERUN_PREVIEW=NO` até correção mesclada e main verde e
 `READY_TO_APPLY_PR827=NO`.
+# Correção diagnóstica PR827 (2026-08-28)
+
+O run `33206303362` / job `98968114798` falhou sem escrita por sintaxe inválida em `current_schemas(false)[1]`. A correção usa `(current_schemas(false))[1]` e adiciona regressão executável PostgreSQL 16 no Docker Compose CI. Apply e novo preview produtivo continuam proibidos; a prontidão permanece **NO** até o check remoto verde, merge e `main` verde.
