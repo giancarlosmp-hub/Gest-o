@@ -43,3 +43,24 @@ Até a PR corretiva ter checks remotos verdes, ela não está pronta para merge.
 Até a correção estar mesclada e `main` verde, o preview não deve ser reexecutado.
 Esta correção não autoriza apply, migration, deploy, cutover, Recovery, seed,
 backfill ou qualquer alteração na VPS.
+
+## Follow-up: parametrização do ledger (run 33199668348)
+
+O preview seguinte, run **33199668348**, job **98945662977**, comprovou os
+gates `PR827_ENV_SOURCE=legacy_copy`, `PR827_ENV_METADATA=VALID`,
+`PR827_DATABASE_URL_CONTRACT=PASS` e `PR827_ENV_IMMUTABLE=PASS`. Em seguida,
+ele parou com erro de sintaxe próximo de `:` ao consultar o ledger: a chamada
+usava `psql -c` com `migration_name=:'migration'`, modo no qual o marcador não
+foi substituído pelo cliente e chegou literal ao PostgreSQL.
+
+A consulta agora é fornecida pela entrada padrão em heredoc literal e o valor é
+passado separadamente por `--set=migration_name=...`; assim o `psql` processa
+`:'migration_name'` antes de enviar a instrução. A allowlist exata
+`20260827190000_add_erp_order_manual_resolution` continua sendo verificada antes
+da primeira consulta. Não há `eval` nem interpolação shell do valor no SQL.
+
+O erro ocorreu antes de qualquer escrita. A migration permaneceu não aplicada e
+a produção não foi modificada. Preview continua limitado a ledger, catálogo e
+diff estrutural; apply continua bloqueado por confirmação literal, aprovação e
+backup. `READY_TO_MERGE_PR827_PSQL_FIX=NO` até checks remotos verdes e
+`READY_TO_RERUN_PREVIEW=NO` até merge e `main` verde.

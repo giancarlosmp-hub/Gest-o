@@ -51,7 +51,15 @@ docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absen
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'image/SHA mismatch'
 psql_admin(){ docker exec --user postgres -i "$PRODUCTION_DB_CONTAINER_EXPECTED" psql -X -v ON_ERROR_STOP=1 -d "$PRODUCTION_DB_NAME_EXPECTED" "$@"; }
 [[ $(psql_admin -Atc "SELECT current_database()||E'\\t'||current_user") == $'salesforce_pro\tpostgres' ]] || die 'database/admin identity mismatch'
-ledger(){ psql_admin -AtF $'\t' -v migration="$1" -c "SELECT checksum, finished_at IS NOT NULL AND rolled_back_at IS NULL FROM \"_prisma_migrations\" WHERE migration_name=:'migration' ORDER BY started_at"; }
+ledger(){
+  local migration_name=$1
+  psql_admin -AtF $'\t' --set=migration_name="$migration_name" <<'SQL'
+SELECT checksum, finished_at IS NOT NULL AND rolled_back_at IS NULL
+FROM "_prisma_migrations"
+WHERE migration_name = :'migration_name'
+ORDER BY started_at;
+SQL
+}
 pred=$(ledger "$predecessor"); [[ "$pred" == "$predecessor_checksum"$'\ttrue' ]] || die 'predecessor absent, duplicated, unfinished, or checksum mismatch'
 current=$(ledger "$MIGRATION_ID")
 catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-schema-catalog.sql)
