@@ -7,9 +7,13 @@ const sql=read("apps/api/prisma/migrations/20260827190000_add_erp_order_manual_r
 assert.equal(createHash("sha256").update(sql).digest("hex"),"61b4443a685471ea0425613d97da35a06cedf677d77c26807ce7ff27ccdb5b9e");
 assert.doesNotMatch(sql,/^\s*(DROP|TRUNCATE|UPDATE|DELETE|INSERT|MERGE)\b/im); assert.doesNotMatch(sql,/ALTER TABLE "ErpOrderSync" ADD COLUMN[^;]*NOT NULL/i);
 const runner=read("scripts/pr827-schema-runner.sh"), registry=read("scripts/production-schema-migrations.mjs");
-for(const token of ["20260827190000_add_erp_order_manual_resolution","APPLY_PR827_SCHEMA","_prisma_migrations","checksum","finished_at","rolled_back_at","catalog present without ledger","post-diff is not empty","PR827_MIGRATION_IDEMPOTENCY=PASS"]) assert.match(runner,new RegExp(token));
+for(const token of ["20260827190000_add_erp_order_manual_resolution","APPLY_PR827_SCHEMA","_prisma_migrations","checksum","finished_at","rolled_back_at","catalog present without ledger","post-diff is not empty","PR827_MIGRATION_IDEMPOTENCY=PASS","PR827_ENV_METADATA=VALID","PR827_DATABASE_URL_CONTRACT=PASS","PR827_ENV_IMMUTABLE=PASS"]) assert.match(runner,new RegExp(token));
 assert.match(registry,/20260808120000_tenancy_expand_roots/);
 assert.doesNotMatch(runner,/db push|migrate reset|migrate dev|migrate deploy/);
 assert.ok(runner.indexOf("cat \"$migration\"") < runner.indexOf('INSERT INTO "_prisma_migrations"'),"DDL and ledger must share the ordered transaction");
 const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.match(workflow,/options: \[preview, apply\]/); assert.match(workflow,/production-schema/);
+assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
+assert.match(workflow,/PRODUCTION_ENV_SOURCE="\$resolved_env_source" PRODUCTION_ENV_FILE="\$resolved_env_file"/);
+assert.doesNotMatch(workflow,/PRODUCTION_ENV_FILE=\/root\//);
+assert.ok(workflow.indexOf("resolve-production-env.sh") < workflow.indexOf("pr827-schema-runner.sh"));
 console.log("PR827 schema runner safety passed");
