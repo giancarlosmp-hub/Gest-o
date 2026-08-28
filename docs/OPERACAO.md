@@ -753,3 +753,11 @@ O diagnóstico sanitizado executado na VPS, com o mesmo usuário do workflow, co
 A correção remove esse template da inspeção de identidade: `docker inspect <identidade-em-memória>` fornece o JSON nativo, validado como array unitário por parser estrito antes de extrair nome, ID completo, `State.Running` e health. Ausência/nulo de `State.Health` é a única aceitação de container sem healthcheck; healthcheck presente exige `healthy`. Falhas são classificadas, sem stderr bruto, como `template_error`, `object_not_found`, `permission_denied`, `daemon_unreachable` ou `malformed_inspect_output`. Permanecem inalterados nome exato e cardinalidade unitária, identidade completa somente em memória, revalidação TOCTOU imediatamente antes de `docker exec -i "$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump ...`, redaction e todos os gates posteriores.
 
 Esta correção e suas regressões são locais. Nenhum workflow produtivo, backup, promoção produtiva, Recovery, cutover, migration, seed, backfill, sincronização, alteração de env protegido ou recriação de container foi executado; produção não foi acessada. `READY_TO_MERGE_DATABASE_INSPECT_TEMPLATE_FIX=NO`; `PRODUCTION_BACKUP_PREPARATION=NOT_PROVEN`; `ERP_PRODUCTION_RECOVERY_WORKFLOW=NOT_EXECUTED`; `ERP_AUTOMATIC_SYNC=NOT_PROVEN`; `INC_ERP_5050=INVESTIGATING`; `READY_FOR_1_0B_2_O=NO`; `PRODUCTION_ACCESSED=NO`.
+# Operação futura do schema da PR #827
+
+1. Com `main` congelada e checks verdes, execute o workflow **Production Schema PR827** em `preview`; não informe confirmação.
+2. Exija os cinco gates `PR827_SCHEMA_*`/`PR827_MIGRATION_*` de preflight, predecessor, checksum, ledger e catálogo.
+3. Somente após aprovação humana e backup canônico fresco, execute `apply` digitando `APPLY_PR827_SCHEMA` no environment protegido.
+4. Exija os seis gates pós-apply, inclusive ledger, catálogo, diff vazio, compatibilidade antiga e idempotência. Não prossiga ao cutover em qualquer divergência.
+
+O runner aceita somente `20260827190000_add_erp_order_manual_resolution`, uma migration por execução. Se já aplicada corretamente, não reaplica SQL. Nunca usar `prisma db push`, `migrate dev`, `migrate reset`, seed ou backfill. Em falha após aplicação, reverta apenas API/WEB; não remova o schema expandido nem altere o ledger. Estes são comandos para uma janela futura, não foram executados nesta tarefa.

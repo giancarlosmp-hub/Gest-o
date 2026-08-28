@@ -1,5 +1,12 @@
 # Plano operacional pós-merge da PR #827
 
+## Adendo — runner habilitado no código (não executado)
+
+A causa raiz era o caminho produtivo legado fixado em `20260731150000_safe_production_schema_transition`, enquanto o registro allowlisted terminava no control plane e não conhecia a migration da PR #827. O novo workflow chama `preview/apply` para uma única migration explícita, `20260827190000_add_erp_order_manual_resolution`, cujo predecessor obrigatório é `20260808120000_tenancy_expand_roots`. Os checksums esperados são, respectivamente, `61b4443a685471ea0425613d97da35a06cedf677d77c26807ce7ff27ccdb5b9e` e `90b25a912cd48ae03eb662355ebff271e9a84e63bc11b75f9ec0b41d2669d996`.
+
+Call graph anterior: `Deploy Production(build) → production-deploy-entrypoint → build` (sem schema); o apply documental separado apontava diretamente para a migration de julho, executava `psql` e criava apenas evidência local, sem ledger Prisma. Call graph novo: `Production Schema PR827 → preview/aprovação+confirmação → pr827-schema-runner → SQL allowlisted → transação DDL+_prisma_migrations → catálogo exato → post-diff vazio`. Ledger aplicado com catálogo incompleto, catálogo sem ledger/parcial, predecessor ausente, checksum divergente, alvo incorreto e diff residual são falhas fechadas. Aplicado válido é idempotente. A migration continua expand: não remove objetos, não altera dados, não exige backfill, adiciona somente coluna nullable à tabela existente e é compatível com rollback da API. Nenhuma produção foi executada; a decisão permanece `SAFE_TO_DEPLOY=NO` até merge do runner e main pós-merge verde.
+
+
 Data da análise: 2026-08-28. Este documento é somente um plano. Nenhum acesso à
 produção, deploy, migration, Recovery, seed, backfill ou sincronização foi executado.
 
@@ -12,7 +19,7 @@ MIGRATION_CLASSIFICATION = EXPAND_COMPATIBLE, ADDITIVE, NULLABLE_ON_EXISTING_TAB
 OLD_API_COMPATIBLE_WITH_NEW_SCHEMA = YES
 BACKUP_REQUIRED = YES, canonical, íntegro e fresh no preflight de schema/cutover
 BUILD_WORKFLOW = GitHub Actions / Deploy Production / phase=build / SHA exato acima
-SCHEMA_WORKFLOW = BLOQUEADO: não há workflow/runner oficial que aplique 20260827190000 e registre seu ledger Prisma
+SCHEMA_WORKFLOW = IMPLEMENTADO_NESTA_PR, NÃO EXECUTADO: Production Schema PR827 aplica somente 20260827190000 e registra ledger Prisma atomicamente
 CUTOVER_WORKFLOW = GitHub Actions / Deploy Production / phase=cutover / SHA exato acima / environment production-cutover
 SCHEDULER_PR_IMPACT = NOT_PROVEN; confirmar PR aberta e rebase antes da janela, sem executar ERP Production Recovery
 SAFE_TO_DEPLOY = NO
@@ -182,4 +189,3 @@ Motivos: ausência de runner oficial para a nova migration/ledger, gate de cutov
 fixo na migration anterior e estado remoto da PR do scheduler não comprovado. Depois de
 remover os três bloqueadores e repetir todos os gates no novo SHA, a decisão pode ser
 reavaliada; ela não muda automaticamente para `YES` por este plano.
-

@@ -1,0 +1,45 @@
+name: Production Schema PR827
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview é read-only; apply exige environment e confirmação"
+        required: true
+        type: choice
+        options: [preview, apply]
+      confirm:
+        description: "Para apply, digite APPLY_PR827_SCHEMA"
+        required: false
+        type: string
+permissions: { contents: read }
+concurrency: { group: production-schema, cancel-in-progress: false }
+jobs:
+  schema:
+    environment: ${{ inputs.mode == 'apply' && 'production-schema' || 'production-schema-preview' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Executar runner allowlisted no checkout produtivo
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          SCHEMA_MODE: ${{ inputs.mode }}
+          SCHEMA_CONFIRM: ${{ inputs.confirm }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          envs: EXPECTED_SHA,SCHEMA_MODE,SCHEMA_CONFIRM
+          script_stop: true
+          script: |
+            set -Eeuo pipefail
+            test "$SCHEMA_MODE" = preview || test "$SCHEMA_CONFIRM" = APPLY_PR827_SCHEMA
+            cd /apps/gest-o
+            git fetch origin main && git switch main && git pull --ff-only origin main
+            MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+              MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution \
+              API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_SCHEMA_MODE=external \
+              PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
+              PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
+              BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
+              bash scripts/pr827-schema-runner.sh

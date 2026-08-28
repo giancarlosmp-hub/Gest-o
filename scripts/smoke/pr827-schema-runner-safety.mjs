@@ -1,0 +1,15 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+const root=resolve(import.meta.dirname,"../.."); const read=p=>readFileSync(resolve(root,p),"utf8");
+const sql=read("apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql");
+assert.equal(createHash("sha256").update(sql).digest("hex"),"61b4443a685471ea0425613d97da35a06cedf677d77c26807ce7ff27ccdb5b9e");
+assert.doesNotMatch(sql,/^\s*(DROP|TRUNCATE|UPDATE|DELETE|INSERT|MERGE)\b/im); assert.doesNotMatch(sql,/ALTER TABLE "ErpOrderSync" ADD COLUMN[^;]*NOT NULL/i);
+const runner=read("scripts/pr827-schema-runner.sh"), registry=read("scripts/production-schema-migrations.mjs");
+for(const token of ["20260827190000_add_erp_order_manual_resolution","APPLY_PR827_SCHEMA","_prisma_migrations","checksum","finished_at","rolled_back_at","catalog present without ledger","post-diff is not empty","PR827_MIGRATION_IDEMPOTENCY=PASS"]) assert.match(runner,new RegExp(token));
+assert.match(registry,/20260808120000_tenancy_expand_roots/);
+assert.doesNotMatch(runner,/db push|migrate reset|migrate dev|migrate deploy/);
+assert.ok(runner.indexOf("cat \"$migration\"") < runner.indexOf('INSERT INTO "_prisma_migrations"'),"DDL and ledger must share the ordered transaction");
+const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.match(workflow,/options: \[preview, apply\]/); assert.match(workflow,/production-schema/);
+console.log("PR827 schema runner safety passed");
