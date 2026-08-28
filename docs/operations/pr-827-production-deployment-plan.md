@@ -189,3 +189,21 @@ Motivos: ausência de runner oficial para a nova migration/ledger, gate de cutov
 fixo na migration anterior e estado remoto da PR do scheduler não comprovado. Depois de
 remover os três bloqueadores e repetir todos os gates no novo SHA, a decisão pode ser
 reavaliada; ela não muda automaticamente para `YES` por este plano.
+
+## Adendo — diagnóstico do ledger, sem execução
+
+Run `33204493337`, job `98961963978`: o alvo allowlisted foi alcançado, mas
+`_prisma_migrations` não estava resolvível. A causa do runner é uma premissa incompatível
+com o legado documentado (`db push` e apply SQL com `applied.tsv`); localização física e
+visibilidade ainda exigem a nova sondagem. O apply permanece bloqueado e a ordem anterior
+não deve ser executada.
+
+Não há deploy automático: `Deploy Production` é `workflow_dispatch`. CI de push em main
+não prova que a imagem produtiva foi construída. Quando houver prova verde, ainda válida,
+do mesmo SHA e mesmos gates, repetir build é duplicação e deve ser evitado. Proposta não
+implementada: `main/CI verde -> consumir ou produzir uma única prova de build -> backup
+canônico -> preview read-only -> aprovação humana -> apply`. O orquestrador deve fixar SHA
+e checksums e falhar fechado em artefato ausente/divergente.
+
+`SAFE_TO_DEPLOY=NO`; `READY_TO_RERUN_PREVIEW=NO` até merge e main verde;
+`READY_TO_APPLY_PR827=NO`.

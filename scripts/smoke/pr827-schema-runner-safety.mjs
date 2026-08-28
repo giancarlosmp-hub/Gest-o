@@ -8,6 +8,8 @@ assert.equal(createHash("sha256").update(sql).digest("hex"),"61b4443a685471ea042
 assert.doesNotMatch(sql,/^\s*(DROP|TRUNCATE|UPDATE|DELETE|INSERT|MERGE)\b/im); assert.doesNotMatch(sql,/ALTER TABLE "ErpOrderSync" ADD COLUMN[^;]*NOT NULL/i);
 const runner=read("scripts/pr827-schema-runner.sh"), registry=read("scripts/production-schema-migrations.mjs");
 for(const token of ["20260827190000_add_erp_order_manual_resolution","APPLY_PR827_SCHEMA","_prisma_migrations","checksum","finished_at","rolled_back_at","catalog present without ledger","post-diff is not empty","PR827_MIGRATION_IDEMPOTENCY=PASS","PR827_ENV_METADATA=VALID","PR827_DATABASE_URL_CONTRACT=PASS","PR827_ENV_IMMUTABLE=PASS"]) assert.match(runner,new RegExp(token));
+for (const token of ["BEGIN TRANSACTION READ ONLY", "current_database()", "current_user", "current_schema()", "current_setting\\('search_path'\\)", "server_version", "to_regclass\\('public.\"_prisma_migrations\"'\\)", "PRISMA_LEDGER_LOCATION", "PRISMA_LEDGER_VISIBILITY", "PREDECESSOR_CATALOG_STATE", "PR827_CATALOG_STATE"])
+  assert.match(runner + read("scripts/pr827-predecessor-catalog.sql"), new RegExp(token));
 assert.match(registry,/20260808120000_tenancy_expand_roots/);
 assert.doesNotMatch(runner,/db push|migrate reset|migrate dev|migrate deploy/);
 const allowlistGate=runner.indexOf("== \"$MIGRATION_ID\" ]] || die 'migration is not allowlisted'");
@@ -21,7 +23,10 @@ assert.doesNotMatch(ledgerBlock,/WHERE migration_name\s*=\s*["']?\$\{/,"the migr
 const previewExit=runner.indexOf('[[ "$MODE" == preview ]] && exit 0');
 for(const write of ['INSERT INTO "_prisma_migrations"','cat "$migration"']) assert.ok(previewExit < runner.indexOf(write),`${write} must remain unreachable in preview`);
 assert.ok(runner.indexOf("[[ ${CONFIRM:-} == \"$CONFIRMATION\" ]]") > previewExit,"apply confirmation must guard writes");
+assert.ok(runner.indexOf("[[ \"$MODE\" == preview ]]") < runner.indexOf("diagnose_connection(){"), "apply must remain disabled before any database diagnostics");
 assert.ok(runner.indexOf("cat \"$migration\"") < runner.indexOf('INSERT INTO "_prisma_migrations"'),"DDL and ledger must share the ordered transaction");
+assert.ok(runner.indexOf("[[ \"$ledger_location\" == PUBLIC ]]") < runner.indexOf("pred=$(ledger"), "missing/non-public ledger must fail closed before ledger lookup");
+assert.doesNotMatch(runner.slice(runner.indexOf("diagnose_connection(){"), runner.indexOf("ledger(){")), /\b(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
 const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.match(workflow,/options: \[preview, apply\]/); assert.match(workflow,/production-schema/);
 assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
 assert.match(workflow,/PRODUCTION_ENV_SOURCE="\$resolved_env_source" PRODUCTION_ENV_FILE="\$resolved_env_file"/);

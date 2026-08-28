@@ -761,3 +761,25 @@ Esta correção e suas regressões são locais. Nenhum workflow produtivo, backu
 4. Exija os seis gates pós-apply, inclusive ledger, catálogo, diff vazio, compatibilidade antiga e idempotência. Não prossiga ao cutover em qualquer divergência.
 
 O runner aceita somente `20260827190000_add_erp_order_manual_resolution`, uma migration por execução. Se já aplicada corretamente, não reaplica SQL. Nunca usar `prisma db push`, `migrate dev`, `migrate reset`, seed ou backfill. Em falha após aplicação, reverta apenas API/WEB; não remova o schema expandido nem altere o ledger. Estes são comandos para uma janela futura, não foram executados nesta tarefa.
+
+## Diagnóstico read-only do ledger PR827
+
+Não tente criar `_prisma_migrations`, usar `migrate resolve` nem alterar `search_path`.
+O modo `preview` do workflow PR827 consulta somente o banco allowlisted e publica
+classes, nunca URL/host/porta/credenciais ou nomes de schemas não allowlisted. Exija os
+marcadores `CONNECTED_DATABASE_CLASS`, `CONNECTED_SCHEMA_CLASS`, `SEARCH_PATH_CLASS`,
+`PRISMA_LEDGER_LOCATION`, `PRISMA_LEDGER_VISIBILITY`, `PREDECESSOR_CATALOG_STATE` e
+`PR827_CATALOG_STATE`. `ABSENT`, `OTHER_SCHEMA_REDACTED`, `PERMISSION_DENIED`,
+`PARTIAL` ou divergência são bloqueio, não sucesso.
+
+O Deploy Production não ocorre automaticamente após merge: seu único trigger é
+`workflow_dispatch`. Apenas CI/preview associados a `push`/PR são automáticos. Não
+repita manualmente `phase=build` se já existir uma execução verde do mesmo SHA e os
+mesmos gates com imagens OCI pinadas ainda presentes; valide e reutilize essa evidência.
+No estado desta investigação, não foi possível consultar runs de Deploy autenticados,
+logo build do SHA atual não está comprovado.
+
+Proposta documental, não implementada: um orquestrador recebe o SHA de `main` verde,
+valida uma prova de build existente ou dispara uma única build, prepara backup canônico
+e então chama preview. Somente a transição para apply usa environment com aprovação
+humana e confirmação literal. Falha em qualquer artefato/SHA encerra o fluxo.

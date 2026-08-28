@@ -640,3 +640,22 @@ Esta correção e suas regressões são locais. Nenhum workflow produtivo, backu
 # Runner de schema da PR #827 (2026-08-28)
 
 O runner produtivo agora possui contrato explícito para `20260827190000_add_erp_order_manual_resolution`, após `20260808120000_tenancy_expand_roots`, com SHA-256 `61b4443a685471ea0425613d97da35a06cedf677d77c26807ce7ff27ccdb5b9e`. Preview é read-only; apply exige `APPLY_PR827_SCHEMA`, environment protegido, backup aprovado, identidade `salesforce_pro/postgres`, SHA/imagem pinados e worktree limpa. Ledger e catálogo são avaliados em conjunto: estado completo é idempotente; checksum divergente, predecessor inválido, ausência parcial ou catálogo sem ledger falham fechados. DDL e entrada finalizada em `_prisma_migrations` compartilham uma transação; catálogo exato e diff Prisma vazio são pós-condições. Nenhuma execução produtiva ocorreu. `READY_TO_MERGE_PR827_SCHEMA_RUNNER=NO` até checks remotos verdes e `SAFE_TO_DEPLOY_PR827=NO` até merge e main pós-merge verde.
+
+# Production Schema PR827 — ledger ausente (run 33204493337)
+
+O run `33204493337` (job `98961963978`) aprovou fonte `legacy_copy`, metadata,
+cardinalidade de `DATABASE_URL` e imutabilidade, e então falhou em
+`relation "_prisma_migrations" does not exist`. Como o runner já tinha validado
+`current_database/current_user` contra `salesforce_pro/postgres`, A e H ficam
+classificados como alvo PostgreSQL allowlisted; a mensagem isolada não distingue B,
+C, D, E, F ou G. O conflito causal comprovado no código é que o runner passou a exigir
+ledger Prisma onde a operação histórica documenta `db push` e SQL manual com
+`applied.tsv`, sem baseline Prisma confiável.
+
+A correção não cria nem adota ledger: acrescenta sondagem sanitizada, transacional e
+read-only de schema/search path/versão/localização/visibilidade, catálogo predecessor e
+catálogo PR827. Ledger ausente ou fora de `public` bloqueia antes do lookup e mantém
+apply inalcançável. Veja as [lições consolidadas](investigations/production-schema-pr827-lessons-learned.md).
+`PREVIEW_WRITES=NONE`, `MIGRATION_APPLIED=NO`, `PRODUCTION_MODIFIED=NO`,
+`READY_TO_RERUN_PREVIEW=NO` até correção mesclada e main verde e
+`READY_TO_APPLY_PR827=NO`.

@@ -64,3 +64,24 @@ a produção não foi modificada. Preview continua limitado a ledger, catálogo 
 diff estrutural; apply continua bloqueado por confirmação literal, aprovação e
 backup. `READY_TO_MERGE_PR827_PSQL_FIX=NO` até checks remotos verdes e
 `READY_TO_RERUN_PREVIEW=NO` até merge e `main` verde.
+
+## Follow-up: ledger ausente (run 33204493337)
+
+O run `33204493337`, job `98961963978`, confirmou novamente `legacy_copy`, metadata,
+contrato da URL e imutabilidade e parou em `relation "_prisma_migrations" does not
+exist`, antes de escrita. O gate de identidade imediatamente anterior comprova a classe
+`salesforce_pro/postgres`; não prova schema/search path nem ausência global da tabela.
+
+A–H: A e H são rejeitadas pela identidade allowlisted e pelo servidor PostgreSQL que
+respondeu; B, C, E, F e G permanecem não distinguíveis pela evidência antiga; D é
+fortemente sustentada e é a incompatibilidade contratual comprovada pelos documentos e
+scripts (`db push` + SQL manual/`applied.tsv`, sem ledger confiável). A nova sondagem
+read-only produzirá as classes faltantes sem revelar nomes fora da allowlist. Ela também
+prova o predecessor pelos 11 conjuntos coluna nullable/índice/FK e `Tenant`, e classifica
+os objetos PR827 como ausentes, completos ou parciais/divergentes.
+
+O contrato legado proposto não fabrica história: checksum versionado, catálogo exato e
+evidência histórica auditada podem satisfazer uma precondição estrutural, mas não tornam
+a migration “registrada no Prisma”. O runner continua falhando se o ledger não for
+`public` e visível, e apply continua bloqueado. Veja as
+[lições consolidadas](production-schema-pr827-lessons-learned.md).
