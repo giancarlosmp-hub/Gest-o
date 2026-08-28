@@ -34,6 +34,7 @@ set -a; source "$ENV_FILE"; set +a
 : "${DATABASE_URL:?DATABASE_URL is required}"
 printf '%s\n' "PR827_ENV_SOURCE=$PRODUCTION_ENV_SOURCE" 'PR827_ENV_METADATA=VALID' 'PR827_DATABASE_URL_CONTRACT=PASS'
 [[ "$MODE" == preview || "$MODE" == apply ]] || die 'MODE must be preview or apply'
+[[ "$MODE" == preview ]] || die 'apply is disabled pending an audited legacy-history decision'
 [[ ${MIGRATION_ID_REQUESTED:-$MIGRATION_ID} == "$MIGRATION_ID" ]] || die 'migration is not allowlisted'
 : "${EXPECTED_SHA:?EXPECTED_SHA is required}"; : "${API_IMAGE:?API_IMAGE is required}"
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"
@@ -51,6 +52,39 @@ docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absen
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'image/SHA mismatch'
 psql_admin(){ docker exec --user postgres -i "$PRODUCTION_DB_CONTAINER_EXPECTED" psql -X -v ON_ERROR_STOP=1 -d "$PRODUCTION_DB_NAME_EXPECTED" "$@"; }
 [[ $(psql_admin -Atc "SELECT current_database()||E'\\t'||current_user") == $'salesforce_pro\tpostgres' ]] || die 'database/admin identity mismatch'
+diagnose_connection(){
+  psql_admin -AtF $'\t' <<'SQL'
+BEGIN TRANSACTION READ ONLY;
+SELECT 'CONNECTED_DATABASE_CLASS', CASE WHEN current_database()='salesforce_pro' THEN 'EXPECTED_ALLOWLISTED' ELSE 'UNEXPECTED' END;
+SELECT 'CONNECTED_USER_CLASS', CASE WHEN current_user='postgres' THEN 'EXPECTED_ADMIN' ELSE 'UNEXPECTED' END;
+SELECT 'CONNECTED_SCHEMA_CLASS', CASE WHEN current_schema()='public' THEN 'PUBLIC' WHEN current_schema() IS NULL THEN 'NONE' ELSE 'OTHER' END;
+SELECT 'SEARCH_PATH_CLASS', CASE WHEN current_schemas(false)[1]='public' THEN 'PUBLIC_FIRST' WHEN 'public'=ANY(current_schemas(false)) THEN 'PUBLIC_INCLUDED' ELSE 'PUBLIC_EXCLUDED' END
+FROM (SELECT current_setting('search_path')) observed_search_path;
+SELECT 'POSTGRESQL_SERVER_VERSION', current_setting('server_version');
+SELECT 'PRISMA_LEDGER_LOCATION', CASE
+ WHEN to_regclass('public."_prisma_migrations"') IS NOT NULL THEN 'PUBLIC'
+ WHEN EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname='_prisma_migrations' AND c.relkind IN ('r','p') AND n.nspname<>'public') THEN 'OTHER_SCHEMA_REDACTED'
+ ELSE 'ABSENT' END;
+SELECT 'PRISMA_LEDGER_SCHEMA_COUNT', count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relname='_prisma_migrations' AND c.relkind IN ('r','p');
+SELECT 'PRISMA_LEDGER_VISIBILITY', CASE
+ WHEN to_regclass('public."_prisma_migrations"') IS NULL THEN 'NOT_APPLICABLE'
+ WHEN has_table_privilege(current_user, 'public."_prisma_migrations"', 'SELECT') THEN 'VISIBLE'
+ ELSE 'PERMISSION_DENIED' END;
+COMMIT;
+SQL
+}
+diagnostics=$(diagnose_connection) || die 'sanitized read-only connection diagnostics failed'
+printf '%s\n' "$diagnostics"
+ledger_location=$(awk -F $'\t' '$1=="PRISMA_LEDGER_LOCATION"{print $2}' <<<"$diagnostics")
+predecessor_catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-predecessor-catalog.sql)
+printf '%s\n' "$predecessor_catalog"
+catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-schema-catalog.sql)
+catalog_file=$(mktemp); printf '%s\n' "$catalog" | sed '/^$/d' >"$catalog_file"
+catalog_lines=$(wc -l <"$catalog_file")
+if [[ "$catalog_lines" -eq 0 ]]; then printf '%s\n' 'PR827_CATALOG_STATE=ABSENT';
+elif node scripts/pr827-schema-catalog-validate.mjs "$catalog_file" >/dev/null 2>&1; then printf '%s\n' 'PR827_CATALOG_STATE=COMPLETE';
+else printf '%s\n' 'PR827_CATALOG_STATE=PARTIAL_OR_DIVERGENT'; fi
+[[ "$ledger_location" == PUBLIC ]] || die 'Prisma ledger is not public and visible; legacy history requires separate audited handling'
 ledger(){
   local migration_name=$1
   psql_admin -AtF $'\t' --set=migration_name="$migration_name" <<'SQL'
@@ -62,9 +96,6 @@ SQL
 }
 pred=$(ledger "$predecessor"); [[ "$pred" == "$predecessor_checksum"$'\ttrue' ]] || die 'predecessor absent, duplicated, unfinished, or checksum mismatch'
 current=$(ledger "$MIGRATION_ID")
-catalog=$(psql_admin -AtF $'\t' -f scripts/pr827-schema-catalog.sql)
-catalog_file=$(mktemp); printf '%s\n' "$catalog" | sed '/^$/d' >"$catalog_file"
-catalog_lines=$(wc -l <"$catalog_file")
 if [[ -n "$current" ]]; then
   [[ "$current" == "$checksum"$'\ttrue' ]] || die 'migration ledger checksum/state mismatch'
   node scripts/pr827-schema-catalog-validate.mjs "$catalog_file" >/dev/null || die 'ledger applied but catalog incomplete/divergent'

@@ -821,3 +821,18 @@ Esta correção e suas regressões são locais. Nenhum workflow produtivo, backu
 # Contrato operacional — schema PR #827
 
 `Production Schema PR827` é a única automação autorizada para esta expansão. Ela seleciona uma única migration allowlisted (não todas as pendentes), preserva a anterior no registro, valida o predecessor imediato e os dois checksums, e separa `preview` de `apply`. O apply requer aprovação do environment, confirmação literal, backup fresco e identidade/SHA/imagem exatos. A migration e o ledger Prisma são gravados atomicamente; uma execução repetida apenas certifica ledger, catálogo e post-diff. Divergências são incidente e não autorizam `db push`, reset, restore automático ou cutover. Rollback é somente da API/WEB: o schema expandido permanece por ser compatível com a API anterior. Nenhuma ação produtiva foi executada nesta alteração.
+
+## Decisão PR827: legado sem presunção de ledger (28/08/2026)
+
+A evidência `33204493337/98961963978` demonstrou que a consulta não resolveu
+`_prisma_migrations` no contexto corrente. O alvo já havia passado a identidade
+allowlisted, mas ainda faltam as classes sanitizadas de schema, search path, localização
+e visibilidade para separar ausência global, outro schema e permissão. O contrato
+histórico do sistema usa `prisma db push` e a transição SQL controlada usa evidência
+`applied.tsv`; portanto nenhum desses fatos pode ser promovido a uma linha Prisma.
+
+O runner agora apenas observa em transações read-only. Se confirmar
+`LEGACY_NO_PRISMA_LEDGER`, a alternativa proposta exige checksum Git, catálogo exato do
+predecessor e evidência histórica auditável, mas continua falhando antes do apply. Uma
+adoção futura do ledger é decisão separada. Histórico dos três incidentes e regressões:
+[lições do rollout](investigations/production-schema-pr827-lessons-learned.md).

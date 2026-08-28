@@ -644,3 +644,18 @@ Esta correção e suas regressões são locais. Nenhum workflow produtivo, backu
 # Gate de schema da PR #827
 
 Antes do `Deploy Production phase=cutover`, o workflow manual **Production Schema PR827** deve estar mesclado no SHA aprovado. Rode primeiro `mode=preview`; `mode=apply` requer o environment `production-schema` e a frase `APPLY_PR827_SCHEMA`. O runner verifica alvo, SHA, imagem, modo externo, backup, predecessor `20260808120000_tenancy_expand_roots`, checksums, ledger e catálogo. Ele nunca descobre/aplica automaticamente todas as migrations pendentes. DDL e registro Prisma são atômicos e o sucesso exige catálogo exato e `prisma migrate diff` vazio. Um estado já aplicado e íntegro retorna sucesso sem DDL. Checksum, ledger ou catálogo divergentes bloqueiam deploy e exigem investigação, não reparo improvisado.
+
+## PR827 e ausência do ledger Prisma
+
+O erro do run `33204493337` não autoriza baseline. A conexão alcançou a classe esperada
+de database/admin, mas a consulta não qualificada prova apenas ausência de relação
+visível no contexto. O preview corrigido consulta `to_regclass` em `public`, enumera
+internamente ocorrências (publica apenas contagem e `OTHER_SCHEMA_REDACTED`), classifica
+schema/search path/permissão e inventaria predecessor/PR827 sob transação read-only.
+Nenhuma classificação desfavorável é convertida em sucesso.
+
+Para legado confirmado sem ledger, catálogo + checksum + `applied.tsv` histórico são
+uma precondição auditável proposta, não um ledger Prisma. O apply PR827 permanece
+bloqueado até decisão operacional separada. Não execute `resolve`, DDL/DML, preview
+produtivo ou build a partir desta alteração. Consulte as
+[lições consolidadas](investigations/production-schema-pr827-lessons-learned.md).
