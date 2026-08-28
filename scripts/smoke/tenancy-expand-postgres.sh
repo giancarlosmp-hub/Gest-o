@@ -80,9 +80,11 @@ roots=(KnowledgeDocument Client AgendaEvent Goal ActivityKPI Sale SellerTerritor
 for table in "${roots[@]}"; do docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM public.\"$table\"" > "$tmp/$table.before"; done
 incident_before=$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')
 test "$incident_before" = 1
-step migration_apply "apply tenancy expand migration exactly once"
+step migration_apply "apply tenancy expand and unmerged ERP manual resolution migrations exactly once"
 docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null 2>&1; then echo 'migration unexpectedly applied twice' >&2; exit 1; fi
+docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
+if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null 2>&1; then echo 'ERP manual resolution migration unexpectedly applied twice' >&2; exit 1; fi
 step catalog_validation "validate nullable columns indexes foreign keys and row counts"
 for table in "${roots[@]}"; do
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='$table' AND column_name='tenantId'")" = YES
@@ -91,6 +93,11 @@ for table in "${roots[@]}"; do
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname='${table}_tenantId_idx'")" = 1
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conname='${table}_tenantId_fkey' AND confdeltype='a'")" = 1
 done
+test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderManualResolution' AND column_name IN ('id','erpOrderSyncId','opportunityId','resolvedById','resolvedRole','category','terminalState','justification','originalPedidoIdImportacao','originalCorrelationId','statusCheckedAt','statusCheckCorrelationId','createdAt')")" = 13
+test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conrelid='public.\"ErpOrderManualResolution\"'::regclass AND contype='f' AND confdeltype='r' AND confupdtype='c'")" = 3
+test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conname='ErpOrderSync_supersedesErpOrderSyncId_fkey' AND confdeltype='r' AND confupdtype='c'")" = 1
+test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('ErpOrderManualResolution_erpOrderSyncId_key','ErpOrderManualResolution_opportunityId_createdAt_idx','ErpOrderManualResolution_resolvedById_createdAt_idx','ErpOrderSync_supersedesErpOrderSyncId_idx')")" = 4
+test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid=enumtypid WHERE typname='ErpOrderManualResolutionTerminalState'")" = manually_resolved_not_found
 HARNESS_COMMAND="verify synthetic incident preservation after migration"
 test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT to_regclass('public.incident_synthetic') IS NOT NULL")" = t
 test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')" = "$incident_before"
@@ -101,13 +108,27 @@ step fk_negative_test "prove valid ownership and reject unknown tenant foreign k
 docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"AppConfig\" (id,key,value,\"createdAt\",\"updatedAt\") VALUES ('legacy','legacy-key','value',now(),now())" >/dev/null
 docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"Tenant\" (id,slug,\"legalName\",\"displayName\",status,\"createdAt\",\"updatedAt\") VALUES ('synthetic-tenant','synthetic','Synthetic','Synthetic','active',now(),now()); UPDATE \"Product\" SET \"tenantId\"='synthetic-tenant' WHERE id='product'" >/dev/null
 if docker exec "$pg" psql -U postgres -d expand -c "UPDATE \"AppConfig\" SET \"tenantId\"='missing' WHERE id='cfg'" >/dev/null 2>&1; then echo 'unknown tenant accepted' >&2; exit 1; fi
+if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"ErpOrderManualResolution\" (id,\"erpOrderSyncId\",\"opportunityId\",\"resolvedById\",\"resolvedRole\",category,\"terminalState\",justification,\"originalPedidoIdImportacao\",\"originalCorrelationId\",\"statusCheckedAt\",\"statusCheckCorrelationId\",\"createdAt\") VALUES ('invalid-resolution','missing-attempt','missing-opportunity','missing-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check',now())" >/dev/null 2>&1; then echo 'unknown ERP resolution ownership accepted' >&2; exit 1; fi
 step unique_negative_test "prove existing global unique remains enforced"
 # Existing global unique constraints still reject duplicates.
 if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"AppConfig\" (id,key,value,\"createdAt\",\"updatedAt\") VALUES ('duplicate','synthetic-key','value',now(),now())" >/dev/null 2>&1; then echo 'global unique changed' >&2; exit 1; fi
+docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
+INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VALUES ('erp-user','Synthetic','synthetic@example.invalid','synthetic','diretor',true,now());
+INSERT INTO "Client" (id,name,city,state,region,"ownerSellerId","createdAt") VALUES ('erp-client','Synthetic','Synthetic','ST','Synthetic','erp-user',now());
+INSERT INTO "Opportunity" (id,title,value,stage,"proposalDate","followUpDate","expectedCloseDate","clientId","ownerSellerId","createdAt") VALUES ('erp-opportunity','Synthetic',1,'ganho',now(),now(),now(),'erp-client','erp-user',now());
+INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",status,"payloadSent","createdAt","updatedAt") VALUES ('erp-attempt','erp-opportunity','erp-user','synthetic-import','error','{}',now(),now());
+INSERT INTO "ErpOrderManualResolution" (id,"erpOrderSyncId","opportunityId","resolvedById","resolvedRole",category,"terminalState",justification,"originalPedidoIdImportacao","originalCorrelationId","statusCheckedAt","statusCheckCorrelationId","createdAt") VALUES ('erp-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check',now());
+SQL
+if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"ErpOrderManualResolution\" (id,\"erpOrderSyncId\",\"opportunityId\",\"resolvedById\",\"resolvedRole\",category,\"terminalState\",justification,\"originalPedidoIdImportacao\",\"originalCorrelationId\",\"statusCheckedAt\",\"statusCheckCorrelationId\",\"createdAt\") VALUES ('duplicate-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check-2',now())" >/dev/null 2>&1; then echo 'duplicate ERP manual resolution accepted' >&2; exit 1; fi
 step post_diff "validate final schema diff"
 run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --script > "$tmp/post-diff.raw.sql"
 # The sole raw diff is the deliberately unmanaged forensic fixture; stripping that exact block yields an empty managed diff.
 sed '/-- DropTable/,/DROP TABLE "incident_synthetic";/d' "$tmp/post-diff.raw.sql" | sed '/^[[:space:]]*$/d' > "$tmp/post-diff.managed.sql"
 test "$(grep -Fxc 'DROP TABLE "incident_synthetic";' "$tmp/post-diff.raw.sql")" = 1
-test ! -s "$tmp/post-diff.managed.sql"
+if [[ -s "$tmp/post-diff.managed.sql" ]]; then
+  printf '%s\n' 'POST_DIFF_STRUCTURAL_BEGIN' >&2
+  cat "$tmp/post-diff.managed.sql" >&2
+  printf '%s\n' 'POST_DIFF_STRUCTURAL_END' >&2
+  exit 1
+fi
 echo 'TENANCY_EXPAND_POSTGRES=PASS'

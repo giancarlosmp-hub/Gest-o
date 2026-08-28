@@ -60,3 +60,11 @@ O contrato disponível não prova que `PEDIDO_ID_IMPORTACAO` seja uma chave idem
 - se continuar vazio, inconclusivo ou indisponível, a decisão manual permite exatamente uma nova tentativa;
 - cliques concorrentes encontram a nova tentativa `pending` e são bloqueados antes do POST;
 - a reconciliação automática ignora a tentativa manualmente resolvida, preservando sua imutabilidade, mas continua preferencial para todas as tentativas não resolvidas.
+
+## Correção do `post_diff` da PR 827
+
+O run remoto `33165165632`/job `98828715750` chegou ao `post_diff`, mas o harness materializava o predecessor e aplicava apenas `20260808120000_tenancy_expand_roots`. As migrations ainda não mescladas da resolução ERP não eram executadas antes da comparação com o `schema.prisma` atual. O diff estrutural anterior pedia exatamente os dois enums, a coluna `ErpOrderSync.supersedesErpOrderSyncId`, a tabela `ErpOrderManualResolution`, seus quatro índices e suas quatro FKs — isto é, todos os objetos da resolução manual.
+
+Como as duas migrations pertenciam exclusivamente a esta PR ainda não mesclada, elas foram consolidadas intencionalmente em `20260827190000_add_erp_order_manual_resolution`: a tabela já nasce com `terminalState`, `statusCheckedAt` e `statusCheckCorrelationId`, sem defaults transitórios de backfill. Nenhuma migration histórica da main foi alterada e o `schema.prisma` não precisou ser relaxado.
+
+O harness agora aplica a migration consolidada uma única vez após a expand, comprova que reaplicá-la falha, valida catálogo/enums/índices/FKs, executa casos negativos de FK e unicidade e só então exige `post_diff` vazio. Em nova falha, o bloco `POST_DIFF_STRUCTURAL_BEGIN/END` imprime exclusivamente o DDL gerado e gerenciado; nenhum dado de fixture ou operacional é emitido.
