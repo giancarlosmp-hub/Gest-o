@@ -24,10 +24,40 @@ HOST_UID="$(id -u)"; HOST_GID="$(id -g)"
 printf 'HOST_IDENTITY\tuid=%s\tgid=%s\n' "$HOST_UID" "$HOST_GID" >&2
 step temporary_directory "create private temporary directory"
 id="$$-$RANDOM"; net="gesto-op-net-$id"; ref="gesto-op-ref-$id"; path="gesto-op-path-$id"; tmp=$(mktemp -d); catalog_file="$tmp/catalog.tsv"; control_schema="$tmp/control-plane.prisma"
-cleanup(){ docker rm -f "$ref" "$path" >/dev/null 2>&1||true; docker network rm "$net" >/dev/null 2>&1||true; rm -rf "$tmp"; }
+postgres_diagnostics(){
+  local c inspect_rc logs_rc
+  for c in "$ref" "$path"; do
+    printf '===== POSTGRES DIAGNOSTICS container=%s =====\n' "$c" >&2
+    set +e
+    docker inspect --format 'status={{.State.Status}} running={{.State.Running}} exit_code={{.State.ExitCode}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} network='"$net"' attached={{with index .NetworkSettings.Networks "'"$net"'"}}{{.NetworkID}}{{else}}missing{{end}} ports={{json .NetworkSettings.Ports}}' "$c" >&2
+    inspect_rc=$?
+    docker logs --timestamps "$c" >&2
+    logs_rc=$?
+    set -e
+    printf 'POSTGRES_DIAGNOSTICS_RESULT container=%s inspect_exit=%s logs_exit=%s auth_probe=tcp-password database=gesto port=5432\n' "$c" "$inspect_rc" "$logs_rc" >&2
+  done
+}
+cleanup(){
+  local cleanup_rc=0 c
+  set +e
+  for c in "$ref" "$path"; do
+    docker rm -f "$c" >/dev/null 2>&1
+    (( $? == 0 )) || cleanup_rc=1
+  done
+  docker network rm "$net" >/dev/null 2>&1
+  (( $? == 0 )) || cleanup_rc=1
+  rm -rf "$tmp"
+  (( $? == 0 )) || cleanup_rc=1
+  set -e
+  return "$cleanup_rc"
+}
 finish(){
   local rc=$?
-  cleanup
+  if (( rc != 0 )); then postgres_diagnostics; fi
+  if ! cleanup; then
+    printf 'HARNESS_CLEANUP=FAIL\n' >&2
+    (( rc != 0 )) || rc=1
+  fi
   if (( rc != 0 && HARNESS_REPORTED == 0 )); then
     printf 'HARNESS_STEP=%s\nHARNESS_COMMAND=%s\nHARNESS_RESULT=FAIL\nEXIT_CODE=%s\n' "$HARNESS_STEP" "$HARNESS_COMMAND" "$rc" >&2
   fi
@@ -37,9 +67,25 @@ trap finish EXIT
 step docker_network "create internal Docker network"
 docker network create --internal "$net" >/dev/null
 step postgres_containers "start disposable PostgreSQL 16 containers"
-for c in "$ref" "$path"; do docker run -d --rm --pull=never --name "$c" --network "$net" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gesto postgres:16 >/dev/null; done
-step postgres_readiness "wait for disposable PostgreSQL readiness"
-for c in "$ref" "$path"; do for _ in {1..60}; do docker exec "$c" pg_isready -U postgres -d gesto >/dev/null 2>&1&&break;sleep 1;done; docker exec "$c" pg_isready -U postgres -d gesto >/dev/null; done
+for c in "$ref" "$path"; do docker run -d --pull=never --name "$c" --network "$net" -e POSTGRES_PASSWORD=test -e POSTGRES_DB=gesto postgres:16 >/dev/null; done
+step postgres_readiness "wait for authenticated disposable PostgreSQL SQL readiness"
+for c in "$ref" "$path"; do
+  ready=false
+  for readiness_attempt in {1..60}; do
+    if ! [[ $(docker inspect --format '{{.State.Running}}' "$c") == true ]]; then break; fi
+    if docker exec -e PGPASSWORD=test "$c" psql -X -h 127.0.0.1 -p 5432 -U postgres -d gesto -v ON_ERROR_STOP=1 -qAt -c 'SELECT 1;' >"$tmp/$c.readiness.out" 2>"$tmp/$c.readiness.err" &&
+      [[ ! -s "$tmp/$c.readiness.err" ]] && grep -Fqx '1' "$tmp/$c.readiness.out"; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$ready" == true ]]
+  HARNESS_COMMAND="validate final authenticated SQL connection for $c"
+  docker exec -e PGPASSWORD=test "$c" psql -X -h 127.0.0.1 -p 5432 -U postgres -d gesto -v ON_ERROR_STOP=1 -qAt -c 'SELECT current_database(), current_user;' >"$tmp/$c.readiness-final.out" 2>"$tmp/$c.readiness-final.err"
+  [[ ! -s "$tmp/$c.readiness-final.err" ]]
+  grep -Fqx 'gesto|postgres' "$tmp/$c.readiness-final.out"
+done
 refurl="postgresql://postgres:test@$ref:5432/gesto?schema=public"; pathurl="postgresql://postgres:test@$path:5432/gesto?schema=public"
 run_api(){ local url=$1; shift; docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$@"; }
 # Both schemas are registry-validated historical snapshots. The current datamodel may contain later expands.
