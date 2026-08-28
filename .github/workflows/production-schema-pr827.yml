@@ -36,7 +36,12 @@ jobs:
             test "$SCHEMA_MODE" = preview || test "$SCHEMA_CONFIRM" = APPLY_PR827_SCHEMA
             cd /apps/gest-o
             git fetch origin main && git switch main && git pull --ff-only origin main
+            resolved_env="$(MODE=build PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true \
+              PRODUCTION_ENV_RESOLVER_OUTPUT=record bash scripts/resolve-production-env.sh)"
+            IFS=$'\t' read -r resolved_env_source resolved_env_file extra <<<"$resolved_env"
+            test -n "$resolved_env_source" && test -n "$resolved_env_file" && test -z "${extra:-}"
             MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+              PRODUCTION_ENV_SOURCE="$resolved_env_source" PRODUCTION_ENV_FILE="$resolved_env_file" \
               MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution \
               API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_SCHEMA_MODE=external \
               PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
