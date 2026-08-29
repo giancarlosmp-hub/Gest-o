@@ -68,7 +68,9 @@ CREATE TABLE public."Opportunity" (id text PRIMARY KEY);
 CREATE TABLE public."User" (id text PRIMARY KEY);
 SQL
 sql_file scripts/pr827-baseline-catalog.sql >"$tmp/baseline-valid"; assert_line "$tmp/baseline-valid" $'PR827_BASELINE_CATALOG_STATE\tVALID'
-psql -c 'ALTER TABLE public."User" ALTER COLUMN id DROP NOT NULL' >/dev/null
+erp_order_sync_pk=$(psql -Atc "SELECT c.conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname='ErpOrderSync' AND c.contype='p'")
+[[ "$erp_order_sync_pk" == ErpOrderSync_pkey ]]
+psql -c 'ALTER TABLE public."ErpOrderSync" DROP CONSTRAINT "ErpOrderSync_pkey"' >/dev/null
 sql_file scripts/pr827-baseline-catalog.sql >"$tmp/baseline-invalid"; assert_line "$tmp/baseline-invalid" $'PR827_BASELINE_CATALOG_STATE\tINVALID'
 echo 'POSTGRESQL_16_REAL_BASELINE=VALID,INVALID'
 
