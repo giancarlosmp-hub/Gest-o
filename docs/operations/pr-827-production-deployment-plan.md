@@ -1,3 +1,5 @@
+> **Correção pela evidência 33213116026/98990686108:** afirmações antigas que exigiam `_prisma_migrations` ou `20260808120000_tenancy_expand_roots` estão superadas. O contrato oficial é `applied.tsv`; baseline real `20260731150000_safe_production_schema_transition`. Preview não exige imagem. Apply continua bloqueado até confirmação, backup, SHA/imagem e checks PostgreSQL 16 verdes; não cria ledger Prisma.
+
 # Plano operacional pós-merge da PR #827
 
 ## Adendo — runner habilitado no código (não executado)

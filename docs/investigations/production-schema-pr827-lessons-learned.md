@@ -1,5 +1,11 @@
 # Production Schema PR827 — lições consolidadas do rollout
 
+## Evidência conclusiva do legado — run 33213116026 / job 98990686108
+
+O diagnóstico read-only comprovou database, usuário administrativo, schema e `search_path` esperados em PostgreSQL 16.14, e distinguiu ausência global de `_prisma_migrations` de invisibilidade. Os catálogos de tenancy e PR827 estavam ausentes e nenhuma escrita ocorreu. A causa raiz foi impor um ledger Prisma e o predecessor de tenancy escolhido pela ordem dos diretórios, embora produção use bundles `applied.tsv` da transição SQL de julho.
+
+O contrato corrigido trata `20260731150000_safe_production_schema_transition` como baseline real e valida `ErpOrderSync.id`, `Opportunity.id`, `User.id` e `Role`. O SQL PR827 não referencia Tenant nem `tenantId`. Preview dispensa imagem e não escreve. Apply mantém confirmação, SHA, backup, imagem, transação, publicação atômica, catálogo exato, diff vazio e idempotência.
+
 Data de consolidação: 2026-08-28. Este registro não é autorização operacional.
 
 | Falha observada | Causa | Correção | Regressão obrigatória |
