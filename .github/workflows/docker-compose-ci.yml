@@ -15,19 +15,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-
-      - name: Pin npm and record checkout lockfile
+      - name: Record checkout lockfile
         run: |
-          npm install --global npm@11.4.2
-          test "$(node --version)" = v20.19.5
-          test "$(npm --version)" = 11.4.2
           lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)
-          echo "NODE_VERSION=$(node --version)"
-          echo "NPM_VERSION=$(npm --version)"
           if [[ -n $(git status --porcelain=v1 -- package-lock.json) ]]; then
             echo "LOCKFILE_STATE_AFTER_CHECKOUT=MODIFIED"
             echo "FIRST_DIRTY_STEP=checkout"
@@ -37,6 +27,28 @@ jobs:
           echo "LOCKFILE_STATE_AFTER_CHECKOUT=CLEAN"
           echo "LOCKFILE_HASH_AFTER_CHECKOUT=$lock_hash"
           echo "PR827_LOCKFILE_BASELINE_SHA256=$lock_hash" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Pin and verify Node/npm
+        run: |
+          npm install --global npm@11.4.2
+          test "$(node --version)" = v20.19.5
+          test "$(npm --version)" = 11.4.2
+          lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo "NODE_VERSION=$(node --version)"
+          echo "NPM_VERSION=$(npm --version)"
+          if [[ "$lock_hash" != "$PR827_LOCKFILE_BASELINE_SHA256" ]] || [[ -n $(git status --porcelain=v1 -- package-lock.json) ]]; then
+            echo "LOCKFILE_STATE_AFTER_TOOLCHAIN_SETUP=MODIFIED"
+            echo "FIRST_DIRTY_STEP=toolchain_setup"
+            echo "LOCKFILE_HASH_AFTER_TOOLCHAIN_SETUP=$lock_hash"
+            exit 1
+          fi
+          echo "LOCKFILE_STATE_AFTER_TOOLCHAIN_SETUP=CLEAN"
+          echo "LOCKFILE_HASH_AFTER_TOOLCHAIN_SETUP=$lock_hash"
 
       - name: Install dependencies
         run: |

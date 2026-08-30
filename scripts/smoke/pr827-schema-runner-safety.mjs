@@ -28,9 +28,10 @@ assert.ok(runner.indexOf('Prisma ledger must remain absent') < runner.indexOf('R
 assert.doesNotMatch(diagnostics + read("scripts/pr827-predecessor-catalog.sql") + read("scripts/pr827-schema-catalog.sql"), /\b(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
 const composeCi=read(".github/workflows/docker-compose-ci.yml");
 assert.match(composeCi,/npm run test:pr827-preview:postgres/);
-for (const token of ["node-version-file: .nvmrc", "npm install --global npm@11.4.2", "npm ci", "LOCKFILE_STATE_AFTER_CHECKOUT=CLEAN", "LOCKFILE_STATE_AFTER_DEPENDENCY_INSTALL=CLEAN", "LOCKFILE_STATE_BEFORE_PR827_HARNESS=CLEAN"])
+for (const token of ["Record checkout lockfile", "node-version-file: .nvmrc", "npm install --global npm@11.4.2", "npm ci", "LOCKFILE_STATE_AFTER_CHECKOUT=CLEAN", "LOCKFILE_STATE_AFTER_TOOLCHAIN_SETUP=CLEAN", "LOCKFILE_STATE_AFTER_DEPENDENCY_INSTALL=CLEAN", "LOCKFILE_STATE_BEFORE_PR827_HARNESS=CLEAN"])
   assert.match(composeCi,new RegExp(token));
 assert.doesNotMatch(composeCi,/run: npm install\s*$/m);
+assert.ok(composeCi.indexOf("Record checkout lockfile") < composeCi.indexOf("Setup Node.js"),"checkout lockfile must be classified before toolchain setup");
 const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
