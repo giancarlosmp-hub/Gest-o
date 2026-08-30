@@ -26,13 +26,19 @@ assert.ok(runner.indexOf('cat "$migration"') < runner.indexOf("echo 'COMMIT;'"),
 assert.match(runner,/coproc PR827_TX/); assert.match(runner,/echo 'ROLLBACK;'/); assert.match(runner,/os\.fsync/);
 assert.ok(runner.indexOf('Prisma ledger must remain absent') < runner.indexOf('READY_TO_APPLY'), "ledger absence must be verified before readiness");
 assert.doesNotMatch(diagnostics + read("scripts/pr827-predecessor-catalog.sql") + read("scripts/pr827-schema-catalog.sql"), /\b(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|TRUNCATE)\b/i);
-assert.match(read(".github/workflows/docker-compose-ci.yml"),/npm run test:pr827-preview:postgres/);
+const composeCi=read(".github/workflows/docker-compose-ci.yml");
+assert.match(composeCi,/npm run test:pr827-preview:postgres/);
+for (const token of ["node-version-file: .nvmrc", "npm install --global npm@11.4.2", "npm ci", "LOCKFILE_STATE_AFTER_CHECKOUT=CLEAN", "LOCKFILE_STATE_AFTER_DEPENDENCY_INSTALL=CLEAN", "LOCKFILE_STATE_BEFORE_PR827_HARNESS=CLEAN"])
+  assert.match(composeCi,new RegExp(token));
+assert.doesNotMatch(composeCi,/run: npm install\s*$/m);
 const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
 for (const harness of [postgresHarness, applyHarness]) {
   for (const token of ["HARNESS_TEMP_ROOT", "TMPDIR=/tmp mktemp -d", "git status --porcelain=v1", "HARNESS_WORKTREE_%s=PASS"])
     assert.match(harness, new RegExp(token.replace(/[?$]/g,"\\$&")));
+  for (const classification of ["UNTRACKED", "TRACKED_MODIFIED", "TRACKED_ADDED", "TRACKED_DELETED"])
+    assert.match(harness,new RegExp(classification));
   assert.doesNotMatch(harness,/git (?:clean|reset|stash|update-index|checkout --|update-ref)/);
 }
 assert.match(rejectionSql,/\\set VERBOSITY verbose/);

@@ -23,11 +23,21 @@ reset(){ psql -c 'DROP SCHEMA IF EXISTS other CASCADE; DROP SCHEMA public CASCAD
 diagnose(){ local path=$1 out=$2; docker exec -e PGOPTIONS="-c search_path=$path" -i "$name" psql -X -qAtF $'\t' -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro -f - <scripts/sql/pr827-connection-diagnostics.sql >"$out"; }
 assert_line(){ grep -Fqx "$2" "$1" || { echo "missing sanitized classification: $2" >&2; exit 1; }; }
 assert_clean_worktree(){
-  local phase=$1 status line
+  local phase=$1 status line code path_class
   status=$(git status --porcelain=v1 --untracked-files=all)
   if [[ -n $status ]]; then
     printf 'HARNESS_WORKTREE_%s=FAIL\n' "$phase" >&3
-    while IFS= read -r line; do printf 'HARNESS_DIRTY_PATH_CLASS=%s PATH=%s\n' "${line:0:2}" "${line:3}" >&3; done <<<"$status"
+    while IFS= read -r line; do
+      code=${line:0:2}
+      case "$code" in
+        '??') path_class=UNTRACKED ;;
+        ' M'|'M '|'MM') path_class=TRACKED_MODIFIED ;;
+        ' A'|'A ') path_class=TRACKED_ADDED ;;
+        ' D'|'D ') path_class=TRACKED_DELETED ;;
+        *) path_class=TRACKED_OTHER ;;
+      esac
+      printf 'HARNESS_DIRTY_PATH_CLASS=%s PATH=%s\n' "$path_class" "${line:3}" >&3
+    done <<<"$status"
     return 1
   fi
   printf 'HARNESS_WORKTREE_%s=PASS\n' "$phase" >&3

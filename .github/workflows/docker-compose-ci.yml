@@ -18,10 +18,38 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
+
+      - name: Pin npm and record checkout lockfile
+        run: |
+          npm install --global npm@11.4.2
+          test "$(node --version)" = v20.19.5
+          test "$(npm --version)" = 11.4.2
+          lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)
+          echo "NODE_VERSION=$(node --version)"
+          echo "NPM_VERSION=$(npm --version)"
+          if [[ -n $(git status --porcelain=v1 -- package-lock.json) ]]; then
+            echo "LOCKFILE_STATE_AFTER_CHECKOUT=MODIFIED"
+            echo "FIRST_DIRTY_STEP=checkout"
+            echo "LOCKFILE_HASH_AFTER_CHECKOUT=$lock_hash"
+            exit 1
+          fi
+          echo "LOCKFILE_STATE_AFTER_CHECKOUT=CLEAN"
+          echo "LOCKFILE_HASH_AFTER_CHECKOUT=$lock_hash"
+          echo "PR827_LOCKFILE_BASELINE_SHA256=$lock_hash" >> "$GITHUB_ENV"
 
       - name: Install dependencies
-        run: npm install
+        run: |
+          npm ci
+          lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)
+          if [[ "$lock_hash" != "$PR827_LOCKFILE_BASELINE_SHA256" ]] || [[ -n $(git status --porcelain=v1 -- package-lock.json) ]]; then
+            echo "LOCKFILE_STATE_AFTER_DEPENDENCY_INSTALL=MODIFIED"
+            echo "FIRST_DIRTY_STEP=dependency_install"
+            echo "LOCKFILE_HASH_AFTER_DEPENDENCY_INSTALL=$lock_hash"
+            exit 1
+          fi
+          echo "LOCKFILE_STATE_AFTER_DEPENDENCY_INSTALL=CLEAN"
+          echo "LOCKFILE_HASH_AFTER_DEPENDENCY_INSTALL=$lock_hash"
 
       - name: Build workspace @salesforce-pro/shared
         run: npm run build -w @salesforce-pro/shared
@@ -45,7 +73,17 @@ jobs:
         run: docker pull postgres:16
 
       - name: Execute every PR827 preview diagnostic on PostgreSQL 16
-        run: npm run test:pr827-preview:postgres
+        run: |
+          lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)
+          if [[ "$lock_hash" != "$PR827_LOCKFILE_BASELINE_SHA256" ]] || [[ -n $(git status --porcelain=v1 -- package-lock.json) ]]; then
+            echo "LOCKFILE_STATE_BEFORE_PR827_HARNESS=MODIFIED"
+            echo "FIRST_DIRTY_STEP=pre_harness_build_or_test"
+            echo "LOCKFILE_HASH_BEFORE_PR827_HARNESS=$lock_hash"
+            exit 1
+          fi
+          echo "LOCKFILE_STATE_BEFORE_PR827_HARNESS=CLEAN"
+          echo "LOCKFILE_HASH_BEFORE_PR827_HARNESS=$lock_hash"
+          npm run test:pr827-preview:postgres
 
       - name: Prove PR827 legacy apply atomically on PostgreSQL 16
         run: npm run test:pr827-apply:postgres
