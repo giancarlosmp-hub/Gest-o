@@ -81,6 +81,9 @@ jobs:
       - name: Prove ERP production recovery contract
         run: npm run test:erp-production-recovery
 
+      - name: Prove concurrent preview run isolation
+        run: npm run test:preview-isolation
+
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         run: docker pull postgres:16
 

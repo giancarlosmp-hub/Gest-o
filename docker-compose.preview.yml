@@ -2,6 +2,12 @@ name: ${COMPOSE_PROJECT_NAME}
 
 services:
   db:
+    labels: &preview_labels
+      com.gesto.preview: "true"
+      com.gesto.preview.pr: ${PREVIEW_OWNER_PR:?PREVIEW_OWNER_PR is required}
+      com.gesto.preview.run-id: ${PREVIEW_OWNER_RUN_ID:?PREVIEW_OWNER_RUN_ID is required}
+      com.gesto.preview.run-attempt: ${PREVIEW_OWNER_RUN_ATTEMPT:?PREVIEW_OWNER_RUN_ATTEMPT is required}
+      com.gesto.preview.workflow: ${PREVIEW_OWNER_WORKFLOW:?PREVIEW_OWNER_WORKFLOW is required}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -12,6 +18,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-salesforce_pro_preview}"]
 
   api:
+    labels: *preview_labels
     environment:
       NODE_ENV: production
       DATABASE_SCHEMA_MODE: ephemeral-push
@@ -29,6 +36,14 @@ services:
       ADMIN_BOOTSTRAP_ROLE: ${ADMIN_BOOTSTRAP_ROLE:-}
       ADMIN_BOOTSTRAP_REGION: ${ADMIN_BOOTSTRAP_REGION:-}
 
+  web:
+    labels: *preview_labels
+
 volumes:
   postgres_data:
     name: ${POSTGRES_VOLUME_NAME}
+    labels: *preview_labels
+
+networks:
+  default:
+    labels: *preview_labels

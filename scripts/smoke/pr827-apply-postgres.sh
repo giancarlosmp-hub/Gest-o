@@ -13,7 +13,15 @@ for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres -d salesforce_pro 
 docker exec "$pg" pg_isready -U postgres -d salesforce_pro >/dev/null
 psql(){ docker exec -i "$pg" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
 reset_db(){ psql -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public; CREATE TYPE public."Role" AS ENUM ('\''diretor'\''); CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY); CREATE TABLE public."Opportunity" (id text PRIMARY KEY); CREATE TABLE public."User" (id text PRIMARY KEY);' >/dev/null; }
-assert_clean_worktree(){ local phase=$1 status line code path_class; status=$(git status --porcelain=v1 --untracked-files=all); if [[ -n $status ]]; then printf 'HARNESS_WORKTREE_%s=FAIL\n' "$phase" >&3; while IFS= read -r line; do code=${line:0:2}; case "$code" in '??') path_class=UNTRACKED ;; ' M'|'M '|'MM') path_class=TRACKED_MODIFIED ;; ' A'|'A ') path_class=TRACKED_ADDED ;; ' D'|'D ') path_class=TRACKED_DELETED ;; *) path_class=TRACKED_OTHER ;; esac; printf 'HARNESS_DIRTY_PATH_CLASS=%s PATH=%s\n' "$path_class" "${line:3}" >&3; done <<<"$status"; return 1; fi; printf 'HARNESS_WORKTREE_%s=PASS\n' "$phase" >&3; }
+assert_clean_worktree(){ local phase=$1 status line code path_class primary_status; primary_status=$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all); status=$(git -C "$HARNESS_EXECUTION_CHECKOUT" status --porcelain=v1 --untracked-files=all); [[ -z $primary_status ]] || status="${status}${status:+$'\n'}${primary_status}"; if [[ -n $status ]]; then printf 'HARNESS_WORKTREE_%s=FAIL\n' "$phase" >&3; while IFS= read -r line; do code=${line:0:2}; case "$code" in '??') path_class=UNTRACKED ;; ' M'|'M '|'MM') path_class=TRACKED_MODIFIED ;; ' A'|'A ') path_class=TRACKED_ADDED ;; ' D'|'D ') path_class=TRACKED_DELETED ;; *) path_class=TRACKED_OTHER ;; esac; printf 'HARNESS_DIRTY_PATH_CLASS=%s PATH=%s\n' "$path_class" "${line:3}" >&3; done <<<"$status"; return 1; fi; printf 'HARNESS_WORKTREE_%s=PASS\n' "$phase" >&3; }
+expected_main_sha=$head; HARNESS_EXECUTION_CHECKOUT="$HARNESS_TEMP_ROOT/checkout"
+primary_origin_main_before=ABSENT; if git -C "$ROOT" show-ref --verify --quiet refs/remotes/origin/main; then primary_origin_main_before=$(git -C "$ROOT" rev-parse refs/remotes/origin/main); fi
+git clone --quiet --no-hardlinks "$ROOT" "$HARNESS_EXECUTION_CHECKOUT"
+git -C "$HARNESS_EXECUTION_CHECKOUT" switch --detach "$head" >/dev/null
+git -C "$HARNESS_EXECUTION_CHECKOUT" update-ref refs/remotes/origin/main "$expected_main_sha"
+harness_head=$(git -C "$HARNESS_EXECUTION_CHECKOUT" rev-parse HEAD); harness_origin_main=$(git -C "$HARNESS_EXECUTION_CHECKOUT" rev-parse refs/remotes/origin/main)
+[[ $harness_head == "$head" && $expected_main_sha == "$head" && $harness_origin_main == "$head" ]]
+printf 'HARNESS_HEAD_SHA=%s\nHARNESS_EXPECTED_MAIN_SHA=%s\nHARNESS_ORIGIN_MAIN_SHA=%s\n' "$harness_head" "$expected_main_sha" "$harness_origin_main"
 owner=$(id -un):$(id -gn); history="$HARNESS_TEMP_ROOT/history"; env_file="$HARNESS_TEMP_ROOT/env"; backup="$HARNESS_TEMP_ROOT/backup-result"
 baseline_sha=$(git rev-list HEAD -- apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql | while read -r c; do [[ $(git show "$c:apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql" | sha256sum | cut -d' ' -f1) == 66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506 ]] && { echo "$c"; break; }; done)
 mkdir -m 700 "$history"; printf 'DATABASE_URL=postgresql://redacted.invalid/salesforce_pro\n' >"$env_file"; printf 'PASS\n' >"$backup"; chmod 600 "$env_file" "$backup"
@@ -39,7 +47,7 @@ run_apply(){
  if MODE=apply CONFIRM=APPLY_PR827_SCHEMA EXPECTED_SHA="$head" API_IMAGE="pr827-diff:$head" BACKUP_RESULT_FILE="$backup" \
   MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution PRODUCTION_ENV_SOURCE=legacy_copy PRODUCTION_ENV_FILE="$env_file" \
   ERP_ENV_EXPECTED_OWNER="$owner" APPLIED_TSV_EXPECTED_OWNER="$owner" SCHEMA_EVIDENCE_DIR="$history" DATABASE_SCHEMA_MODE=external \
-  PRODUCTION_DB_CONTAINER_EXPECTED="$pg" PRODUCTION_DB_NAME_EXPECTED=salesforce_pro bash scripts/pr827-schema-runner.sh; then rc=0; else rc=$?; fi
+  PRODUCTION_DB_CONTAINER_EXPECTED="$pg" PRODUCTION_DB_NAME_EXPECTED=salesforce_pro bash "$HARNESS_EXECUTION_CHECKOUT/scripts/pr827-schema-runner.sh"; then rc=0; else rc=$?; fi
  assert_clean_worktree AFTER; return "$rc"
 }
 reset_db; make_baseline; run_apply >"$HARNESS_TEMP_ROOT/apply.out"; grep -Fxq PR827_MIGRATION_APPLY=PASS "$HARNESS_TEMP_ROOT/apply.out"; test -f "$history/$head/applied.tsv"; test "$(psql -Atc "SELECT to_regclass('public.\"ErpOrderManualResolution\"') IS NOT NULL")" = t
@@ -52,3 +60,6 @@ reset_db; make_baseline; ( while [[ ! -d "$history/.pr827-$head.tmp" ]]; do slee
 if run_apply >"$HARNESS_TEMP_ROOT/ddl-fail" 2>&1; then exit 1; fi; wait "$racer"; test ! -e "$history/$head/applied.tsv"; test "$(psql -Atc "SELECT to_regclass('public.\"ErpOrderManualResolution\"') IS NULL")" = t; echo 'DDL_FAILURE_WITHOUT_HISTORY=PASS'
 echo 'PR827_APPLY_POSTGRES_RESULT=PASS'
 assert_clean_worktree AFTER
+primary_origin_main_after=ABSENT; if git -C "$ROOT" show-ref --verify --quiet refs/remotes/origin/main; then primary_origin_main_after=$(git -C "$ROOT" rev-parse refs/remotes/origin/main); fi
+[[ $primary_origin_main_after == "$primary_origin_main_before" ]]
+echo 'PRIMARY_CHECKOUT_REFS_MODIFIED=NO'

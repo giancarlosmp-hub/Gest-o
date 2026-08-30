@@ -2,44 +2,69 @@ name: Preview Cleanup
 
 on:
   pull_request:
-    types:
-      - closed
+    types: [closed]
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   cleanup-preview:
     runs-on: ubuntu-latest
     steps:
-      - name: Cleanup preview stack on VPS
+      - name: Cleanup completed preview runs on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER
+          envs: PR_NUMBER,GITHUB_REPOSITORY,GITHUB_TOKEN
           script: |
             set -euo pipefail
-            set -x
+            projects_file="$(mktemp)"
+            trap 'rm -f "$projects_file"' EXIT
+            docker ps -a --filter "label=com.gesto.preview=true" --filter "label=com.gesto.preview.pr=${PR_NUMBER}" --format '{{.Label "com.docker.compose.project"}}' >> "$projects_file"
+            docker network ls --filter "label=com.gesto.preview=true" --filter "label=com.gesto.preview.pr=${PR_NUMBER}" --format '{{.Label "com.docker.compose.project"}}' >> "$projects_file"
+            docker volume ls --filter "label=com.gesto.preview=true" --filter "label=com.gesto.preview.pr=${PR_NUMBER}" --format '{{.Label "com.docker.compose.project"}}' >> "$projects_file"
+            sort -u "$projects_file" -o "$projects_file"
 
-            PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}"
-            PREVIEW_PROJECT="gesto-pr-${PR_NUMBER}"
-            PREVIEW_VOLUME="gest-o_pgdata_pr_${PR_NUMBER}"
+            while IFS= read -r project; do
+              [ -n "$project" ] || continue
+              case "$project" in "gesto-pr-${PR_NUMBER}-"*) ;; *) echo 'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT'; exit 1;; esac
+              owner_id="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" | head -n 1)"
+              if [ -n "$owner_id" ]; then
+                owner_pr="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.pr" }}' "$owner_id")"
+                owner_run="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.run-id" }}' "$owner_id")"
+                owner_workflow="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.workflow" }}' "$owner_id")"
+              else
+                network_id="$(docker network ls -q --filter "label=com.docker.compose.project=${project}" | head -n 1)"
+                [ -n "$network_id" ]
+                owner_pr="$(docker network inspect -f '{{ index .Labels "com.gesto.preview.pr" }}' "$network_id")"
+                owner_run="$(docker network inspect -f '{{ index .Labels "com.gesto.preview.run-id" }}' "$network_id")"
+                owner_workflow="$(docker network inspect -f '{{ index .Labels "com.gesto.preview.workflow" }}' "$network_id")"
+              fi
+              [ "$owner_pr" = "$PR_NUMBER" ]
+              [ "$owner_workflow" = Preview-Deploy ]
+              run_status="$(curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${owner_run}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(typeof x.status!=="string")process.exit(1);process.stdout.write(x.status)})')"
+              [ "$run_status" = completed ]
+              preview_dir="/var/www/preview/pr-${PR_NUMBER}/${project}"
+              if [ -f "$preview_dir/docker-compose.yml" ] && [ -f "$preview_dir/docker-compose.preview.yml" ]; then
+                (cd "$preview_dir" && docker compose -p "$project" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans)
+              else
+                while IFS= read -r id; do [ -z "$id" ] || docker rm -f "$id"; done < <(docker ps -aq --filter "label=com.docker.compose.project=${project}")
+                while IFS= read -r id; do [ -z "$id" ] || docker network rm "$id"; done < <(docker network ls -q --filter "label=com.docker.compose.project=${project}")
+                while IFS= read -r id; do [ -z "$id" ] || docker volume rm "$id"; done < <(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
+              fi
+              rm -rf "$preview_dir"
+              echo "PREVIEW_ORPHAN_CLEANUP=PASS project=${project}"
+            done < "$projects_file"
 
-            if [ ! -d "$PREVIEW_DIR" ]; then
-              echo "Preview directory not found, nothing to cleanup."
-              docker volume rm "${PREVIEW_VOLUME}" || true
-              exit 0
-            fi
-
-            cd "$PREVIEW_DIR"
-            docker compose -p "${PREVIEW_PROJECT}" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans || true
-            cd /
-            rm -rf "$PREVIEW_DIR"
-
-            docker volume rm "${PREVIEW_VOLUME}" || true
+            sudo rm -f "/etc/nginx/sites-enabled/crm-preview-pr-${PR_NUMBER}" "/etc/nginx/sites-available/crm-preview-pr-${PR_NUMBER}"
+            sudo nginx -t
+            sudo systemctl reload nginx

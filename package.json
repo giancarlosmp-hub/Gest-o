@@ -73,6 +73,7 @@
     "test:preflight-gated-backfill-plan": "npm run test:preflight-gated-backfill-plan -w @salesforce-pro/api && node scripts/smoke/preflight-gated-backfill-plan-safety.mjs",
     "test:preflight-gated-backfill-plan:postgres": "bash scripts/smoke/preflight-gated-backfill-plan-postgres.sh",
     "test:preflight-plan-ledger": "tsx apps/api/src/tenancy/preflightPlanLedger.test.ts && node scripts/smoke/preflight-plan-ledger-safety.mjs",
-    "test:preflight-plan-ledger:postgres": "bash scripts/smoke/preflight-plan-ledger-postgres.sh"
+    "test:preflight-plan-ledger:postgres": "bash scripts/smoke/preflight-plan-ledger-postgres.sh",
+    "test:preview-isolation": "node scripts/smoke/preview-run-isolation-safety.mjs"
   }
 }

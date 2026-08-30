@@ -36,11 +36,13 @@ const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejection
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
 for (const harness of [postgresHarness, applyHarness]) {
-  for (const token of ["HARNESS_TEMP_ROOT", "TMPDIR=/tmp mktemp -d", "git status --porcelain=v1", "HARNESS_WORKTREE_%s=PASS"])
+  for (const token of ["HARNESS_TEMP_ROOT", "TMPDIR=/tmp mktemp -d", "status --porcelain=v1", "HARNESS_WORKTREE_%s=PASS"])
     assert.match(harness, new RegExp(token.replace(/[?$]/g,"\\$&")));
   for (const classification of ["UNTRACKED", "TRACKED_MODIFIED", "TRACKED_ADDED", "TRACKED_DELETED"])
     assert.match(harness,new RegExp(classification));
-  assert.doesNotMatch(harness,/git (?:clean|reset|stash|update-index|checkout --|update-ref)/);
+  for (const token of ["HARNESS_EXECUTION_CHECKOUT", "git clone --quiet --no-hardlinks", 'git -C "$HARNESS_EXECUTION_CHECKOUT" update-ref refs/remotes/origin/main', "HARNESS_HEAD_SHA", "HARNESS_EXPECTED_MAIN_SHA", "HARNESS_ORIGIN_MAIN_SHA", "PRIMARY_CHECKOUT_REFS_MODIFIED=NO"])
+    assert.match(harness,new RegExp(token.replace(/[?$]/g,"\\$&")));
+  assert.doesNotMatch(harness,/git (?:clean|reset|stash|update-index|checkout --)|(?:^|[;&]\s*)git update-ref/m);
 }
 assert.match(rejectionSql,/\\set VERBOSITY verbose/);
 assert.doesNotMatch(postgresHarness,/\|\|\s*(?:true|:)|continue-on-error/);
