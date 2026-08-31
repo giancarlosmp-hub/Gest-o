@@ -52,29 +52,20 @@ echo LEGACY_HISTORY_VALUES_ALLOWED=700_OWNER_PRIVATE,750_GROUP_TRAVERSE,755_PROT
 echo "LEGACY_HISTORY_VALUE_RECEIVED=$history_mode_class"
 [[ $history_mode_class != UNKNOWN ]] || { echo LEGACY_HISTORY_REJECTION_STAGE=history_root_metadata; die 'legacy history mode is invalid'; }
 echo LEGACY_HISTORY_REJECTION_STAGE=NONE
-validate_record(){
- local f=$1 wanted=$2 wanted_sum=$3 d ts sha path extra recorded recorded_path
- [[ -f $f && ! -L $f && $(stat -c '%U:%G' "$f") == "${APPLIED_TSV_EXPECTED_OWNER:-root:root}" && $(stat -c '%a' "$f") == 600 && $(wc -l <"$f") -eq 1 ]] || return 1
- IFS=$'\t' read -r ts sha path extra <"$f" || return 1
- [[ $ts =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ && $sha =~ ^[0-9a-f]{40}$ && $path == "$wanted" && -z ${extra:-} ]] || return 1
- git cat-file -e "$sha^{commit}" 2>/dev/null || return 1
- d=${f%/*}; [[ ${d##*/} == "$sha" && -d $d && ! -L $d && $(stat -c '%U:%G' "$d") == "${APPLIED_TSV_EXPECTED_OWNER:-root:root}" && $(stat -c '%a' "$d") == 700 ]] || return 1
- [[ -f $d/migration.sha256 && ! -L $d/migration.sha256 && $(stat -c '%U:%G' "$d/migration.sha256") == "${APPLIED_TSV_EXPECTED_OWNER:-root:root}" && $(stat -c '%a' "$d/migration.sha256") == 600 && $(wc -l <"$d/migration.sha256") -eq 1 ]] || return 1
- read -r recorded recorded_path extra <"$d/migration.sha256"
- [[ $recorded == "$wanted_sum" && $recorded_path == "$wanted" && -z ${extra:-} ]] || return 1
- [[ $(git show "$sha:$wanted" | sha256sum | cut -d' ' -f1) == "$wanted_sum" ]] || return 1
-}
+source scripts/lib/pr827-legacy-history.sh
 baseline_count=0; current_count=0; current_invalid=0; baseline_file=''
 while IFS= read -r -d '' f; do
  record_path=$(awk -F $'\t' 'NR==1{print $3}' "$f" 2>/dev/null || :)
  case "$record_path" in
-  "$baseline_path") validate_record "$f" "$baseline_path" "$baseline_checksum" || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; die 'legacy baseline history is malformed or checksum-divergent'; }; baseline_file=$f; baseline_count=$((baseline_count+1)) ;;
-  "apps/api/prisma/migrations/$MIGRATION_ID/migration.sql") current_count=$((current_count+1)); validate_record "$f" "$record_path" "$checksum" || current_invalid=1 ;;
-  *) echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; die 'legacy history format or migration is not allowlisted' ;;
+  "$baseline_path") pr827_validate_record "$f" "$baseline_path" "$baseline_checksum" || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; echo "HISTORY_DIVERGENCE_CATEGORY=$history_failure"; die 'legacy baseline history is malformed or checksum-divergent'; }; baseline_file=$f; baseline_count=$((baseline_count+1)) ;;
+  "apps/api/prisma/migrations/$MIGRATION_ID/migration.sql") current_count=$((current_count+1)); pr827_validate_record "$f" "$record_path" "$checksum" || current_invalid=1 ;;
+  *) echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; echo HISTORY_DIVERGENCE_CATEGORY=MIGRATION_PATH_INVALID; die 'legacy history format or migration is not allowlisted' ;;
  esac
 done < <(find "$history" -mindepth 2 -maxdepth 2 -name applied.tsv -print0)
-(( baseline_count == 1 )) || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; die 'legacy production baseline is absent or divergent'; }
-(( current_count <= 1 )) || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; die 'legacy history is divergent'; }
+(( baseline_count == 1 )) || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; (( baseline_count == 0 )) && echo HISTORY_DIVERGENCE_CATEGORY=BUNDLE_ABSENT || echo HISTORY_DIVERGENCE_CATEGORY=BUNDLE_AMBIGUOUS; die 'legacy production baseline is absent or divergent'; }
+(( current_count <= 1 )) || { echo PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT; echo HISTORY_DIVERGENCE_CATEGORY=BUNDLE_AMBIGUOUS; die 'legacy history is divergent'; }
+echo "PR827_HISTORICAL_FORMAT_VERSION=$history_format"
+echo HISTORY_DIVERGENCE_CATEGORY=NONE
 history_state=ABSENT
 if (( current_count == 1 && current_invalid == 0 )); then history_state=APPLIED_VALID
 elif (( current_count == 1 )); then history_state=APPLIED_INVALID
@@ -90,7 +81,7 @@ if [[ ! -s $catalog_file ]]; then catalog_state=ABSENT; elif node scripts/pr827-
 echo "PR827_CATALOG_STATE=$catalog_state"
 if [[ $history_state == APPLIED_VALID && $catalog_state == COMPLETE ]]; then echo PR827_SCHEMA_PREFLIGHT=PASS; [[ $MODE == preview ]] && exit 0; idempotent=1
 elif [[ $history_state == ABSENT && $catalog_state == ABSENT ]]; then echo READY_TO_APPLY; echo PR827_SCHEMA_PREFLIGHT=PASS; [[ $MODE == preview ]] && exit 0; idempotent=0
-else die 'history/catalog state is divergent'; fi
+else echo HISTORY_DIVERGENCE_CATEGORY=HISTORY_CATALOG_DIVERGENCE; die 'history/catalog state is divergent'; fi
 
 [[ ${CONFIRM:-} == $CONFIRMATION ]] || die "CONFIRM=$CONFIRMATION required"
 : "${API_IMAGE:?API_IMAGE is required}"; docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absent'
@@ -102,7 +93,7 @@ if (( idempotent == 0 )); then
  [[ $(sha256sum "$ENV_FILE" | cut -d' ' -f1) == "$env_hash_before" ]] || die 'environment changed before apply'
  [[ $(git rev-parse HEAD) == "$EXPECTED_SHA" && $(git rev-parse origin/main) == "$EXPECTED_SHA" && -z $(git status --porcelain) ]] || die 'SHA/worktree changed before apply'
  [[ $(sha256sum "$migration" | cut -d' ' -f1) == "$checksum" ]] || die 'migration checksum changed before apply'
- validate_record "$baseline_file" "$baseline_path" "$baseline_checksum" || die 'legacy baseline history changed before apply'
+ pr827_validate_record "$baseline_file" "$baseline_path" "$baseline_checksum" || die 'legacy baseline history changed before apply'
  [[ $(psql_admin -Atc "SELECT current_database()||E'\\t'||current_user") == $'salesforce_pro\tpostgres' ]] || die 'database/admin identity changed before apply'
  [[ $(psql_admin -qAtF $'\t' -f - <scripts/sql/pr827-connection-diagnostics.sql | awk -F$'\t' '$1=="PRISMA_LEDGER_LOCATION"{print $2}') == ABSENT ]] || die 'Prisma ledger appeared before apply'
  [[ $(psql_admin -qAtF $'\t' -f - <scripts/pr827-baseline-catalog.sql) == $'PR827_BASELINE_CATALOG_STATE\tVALID' ]] || die 'baseline changed before apply'

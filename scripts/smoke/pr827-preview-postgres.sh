@@ -4,17 +4,17 @@ exec 3>&2
 ROOT=$(cd "$(dirname "$0")/../.." && pwd); cd "$ROOT"
 docker image inspect postgres:16 >/dev/null 2>&1 || { echo 'SKIP: postgres:16 unavailable locally' >&2; exit 77; }
 name="pr827-preview-pg16-${RANDOM}-$$"; network="${name}-net"; HARNESS_TEMP_ROOT=$(TMPDIR=/tmp mktemp -d)
+HARNESS_CONTAINER_CREATED=0; HARNESS_NETWORK_CREATED=0; HARNESS_IMAGE_CREATED=0; HARNESS_TEMP_CREATED=1
 case "$(realpath "$HARNESS_TEMP_ROOT")/" in "$(realpath "$ROOT")/"*) echo 'HARNESS_TEMP_ROOT_INSIDE_CHECKOUT=FAIL' >&2; exit 1;; esac
 echo 'HARNESS_TEMP_ROOT=EXTERNAL_MKTEMP'
-cleanup(){
-  local rc=$?
-  if docker container inspect "$name" >/dev/null 2>&1; then if ! docker rm -f "$name" >/dev/null 2>&1; then rc=1; fi; fi
-  if docker network inspect "$network" >/dev/null 2>&1; then if ! docker network rm "$network" >/dev/null 2>&1; then rc=1; fi; fi
-  if ! rm -rf "$HARNESS_TEMP_ROOT"; then rc=1; fi
-  return "$rc"
-}; trap cleanup EXIT
+source scripts/lib/pr827-preview-harness-cleanup.sh
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'pr827_preview_harness_cleanup "$?"' EXIT
 docker network create --internal "$network" >/dev/null
+HARNESS_NETWORK_CREATED=1
 docker run -d --pull=never --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=salesforce_pro postgres:16 >/dev/null
+HARNESS_CONTAINER_CREATED=1
 for _ in {1..60}; do docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null 2>&1 && break; sleep 1; done
 docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null
 psql(){ docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
@@ -172,3 +172,4 @@ assert_clean_worktree AFTER
 primary_origin_main_after=ABSENT; if git -C "$ROOT" show-ref --verify --quiet refs/remotes/origin/main; then primary_origin_main_after=$(git -C "$ROOT" rev-parse refs/remotes/origin/main); fi
 [[ $primary_origin_main_after == "$primary_origin_main_before" ]]
 echo 'PRIMARY_CHECKOUT_REFS_MODIFIED=NO'
+exit 0

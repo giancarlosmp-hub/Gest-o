@@ -98,7 +98,12 @@ jobs:
           fi
           echo "LOCKFILE_STATE_BEFORE_PR827_HARNESS=CLEAN"
           echo "LOCKFILE_HASH_BEFORE_PR827_HARNESS=$lock_hash"
-          npm run test:pr827-preview:postgres
+          npm_rc=0
+          if npm run test:pr827-preview:postgres; then npm_rc=0
+          else npm_rc=$?; fi
+          echo "NPM_LIFECYCLE_RC=$npm_rc"
+          echo "WORKFLOW_COMMAND_RC=$npm_rc"
+          exit "$npm_rc"
 
       - name: Prove PR827 legacy apply atomically on PostgreSQL 16
         run: npm run test:pr827-apply:postgres
