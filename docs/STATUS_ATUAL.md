@@ -696,8 +696,10 @@ produção. Preview/apply PostgreSQL 16 remotos e merge continuam pendentes na P
 
 ## PR827 — causa externa ao cleanup (run 33442417298)
 
-O cleanup e o processo direto do preview passaram com RC 0. O exit 1 vinha do comando seguinte no
-script npm: `pr827-legacy-history.sh` tentava executar `chown nobody:nogroup` no runner CI não-root.
-A regressão de owner agora usa a variável de owner esperado, preservando a rejeição sem operação
-privilegiada. Um processo pai mede o RC direto; o workflow mede npm e o comando do step. Apply e
-merge permanecem bloqueados até esses três RCs serem zero no CI da PR #839.
+O cleanup e o processo direto do preview passaram com RC 0; a medição isolou
+`LEGACY_HISTORY_SUBPROCESS_RC=1`. O cenário exato era `V1_VALID`: a fixture pertencia ao usuário
+não-root do CI, enquanto a ausência de override fazia o validador usar corretamente o default
+produtivo `root:root`, retornando `BUNDLE_METADATA_INVALID`. O harness agora exporta o owner real
+somente para fixtures, isola/restaura o override do cenário incompatível e publica RC/classe por
+cenário. O pai exige RC zero, um único marcador final e nenhuma falha. Apply e merge permanecem
+bloqueados até npm/workflow serem zero no CI da PR #839.

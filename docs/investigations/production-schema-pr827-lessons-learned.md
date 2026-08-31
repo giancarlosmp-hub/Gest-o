@@ -111,18 +111,21 @@ permanece pendente até os checks da PR #839 executarem preview e apply PostgreS
 
 O run/job `33442417298`/`99653533522` fechou definitivamente o cleanup: publicou
 `HARNESS_OPERATION_RC=0`, `HARNESS_CLEANUP_FINAL_STATE=PASS`, `HARNESS_FINAL_RC=0` e
-`PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS`. O processo pai, porém, não executava somente esse
-arquivo. O call graph real era workflow → `npm run test:pr827-preview:postgres` →
-`bash pr827-preview-postgres.sh && bash pr827-legacy-history.sh`. O comando que devolvia 1 era o
-segundo subprocesso: a regressão de owner chamava `chown nobody:nogroup` no runner GitHub não-root.
-O shell encerrava o harness legado em 1 antes de seus marcadores, o operador `&&` propagava 1 pelo
-npm lifecycle e o step terminava em 1. Portanto o cleanup e a terminação do preview não eram mais a
-causa.
+`PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS`. A medição pai posterior comprovou
+`DIRECT_HARNESS_PROCESS_RC=0`, mas `LEGACY_HISTORY_SUBPROCESS_RC=1`. A reprodução com usuário
+não-root identificou o primeiro cenário exato: `LEGACY_FAILED_SCENARIO=V1_VALID`,
+`LEGACY_FAILED_STAGE=VALIDATION`, esperado `RC_0_CLASS_NONE`, observado
+`RC_1_CLASS_BUNDLE_METADATA_INVALID`.
 
-A regressão mantém exatamente o mesmo gate de owner, mas injeta uma classe esperada impossível de
-coincidir em `APPLIED_TSV_EXPECTED_OWNER`, sem tentar alterar ownership no filesystem. Um wrapper
-pai agora executa o arquivo real de preview, captura seu status efetivo, exige exatamente um marcador
-final PASS quando o status é zero e mede separadamente o subprocesso do histórico. O workflow mede
-o status efetivo do npm como `NPM_LIFECYCLE_RC` e o reutiliza, sem mascaramento, como
-`WORKFLOW_COMMAND_RC`. Falha em qualquer camada continua não zero. O resultado remoto pós-fix ainda
-depende dos checks da PR #839; apply permanece bloqueado até o step de preview ficar verde.
+A causa não era mais o `chown`, já removido: o harness criava fixtures pertencentes ao usuário do
+runner, mas deixava `APPLIED_TSV_EXPECTED_OWNER` ausente. O validador corretamente aplicava seu
+default produtivo `root:root`, rejeitando já o V1 válido no CI não-root. A correção exporta somente
+no processo de teste a classe real da fixture. O cenário `OWNER_INCOMPATIBLE` substitui esse valor
+em fronteira explícita, espera RC 1/`BUNDLE_METADATA_INVALID`, restaura o valor e é seguido por novo
+V1 válido que prova ausência de vazamento.
+
+Todos os cenários agora publicam nome, RC esperado/observado e resultado sanitizados. O processo pai
+exige RC zero, exatamente um `LEGACY_HISTORY_HARNESS_FINAL_RESULT=PASS` e nenhuma ocorrência de
+`LEGACY_SCENARIO_RESULT=FAIL`. O workflow continua medindo npm e o comando do step sem mascaramento.
+O resultado remoto pós-fix ainda depende dos checks da PR #839; apply permanece bloqueado até o
+step de preview ficar verde.

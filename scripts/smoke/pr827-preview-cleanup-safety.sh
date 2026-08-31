@@ -52,3 +52,8 @@ grep -Fq 'NPM_LIFECYCLE_RC=' .github/workflows/docker-compose-ci.yml
 grep -Fq 'WORKFLOW_COMMAND_RC=' .github/workflows/docker-compose-ci.yml
 ! grep -Fq 'chown nobody:nogroup' scripts/smoke/pr827-legacy-history.sh
 printf 'PREVIEW_PARENT_PROCESS_CALL_GRAPH=PASS\n'
+grep -Fq 'LEGACY_HISTORY_HARNESS_FINAL_RESULT=PASS' scripts/smoke/pr827-preview-process.sh
+grep -Fq 'LEGACY_SCENARIO_RESULT=FAIL' scripts/smoke/pr827-preview-process.sh
+grep -Fq 'export APPLIED_TSV_EXPECTED_OWNER=$fixture_owner' scripts/smoke/pr827-legacy-history.sh
+grep -Fq 'scenario V1_VALID_AFTER_OWNER_OVERRIDE 0 NONE' scripts/smoke/pr827-legacy-history.sh
+printf 'LEGACY_PARENT_MARKER_CONTRACT=PASS\n'
