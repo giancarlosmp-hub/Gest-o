@@ -30,7 +30,6 @@ jobs:
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || '22022' }}
           envs: EXPECTED_SHA,SCHEMA_MODE,SCHEMA_CONFIRM
-          script_stop: true
           script: |
             set -Eeuo pipefail
             test "$SCHEMA_MODE" = preview || test "$SCHEMA_CONFIRM" = APPLY_PR827_SCHEMA
