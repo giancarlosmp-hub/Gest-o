@@ -40,7 +40,13 @@ jobs:
               PRODUCTION_ENV_RESOLVER_OUTPUT=record bash scripts/resolve-production-env.sh)"
             IFS=$'\t' read -r resolved_env_source resolved_env_file extra <<<"$resolved_env"
             test -n "$resolved_env_source" && test -n "$resolved_env_file" && test -z "${extra:-}"
+            case "$resolved_env_source" in
+              legacy_copy) erp_env_source=legacy_build_only ;;
+              canonical) erp_env_source=canonical ;;
+              *) echo 'PR827_ENV_SOURCE_CLASSIFICATION=REJECTED'; exit 1 ;;
+            esac
             MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+              ERP_PRODUCTION_ENV_SOURCE="$erp_env_source" \
               PRODUCTION_ENV_SOURCE="$resolved_env_source" PRODUCTION_ENV_FILE="$resolved_env_file" \
               MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution \
               DATABASE_SCHEMA_MODE=external SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \

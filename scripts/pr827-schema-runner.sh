@@ -7,8 +7,13 @@ die(){ printf '[pr827-schema] ERROR %s\n' "$*" >&2; exit 1; }
 MODE=${MODE:-preview}; [[ $MODE == preview || $MODE == apply ]] || die 'MODE must be preview or apply'
 : "${PRODUCTION_ENV_FILE:?validated PRODUCTION_ENV_FILE is required}"
 : "${PRODUCTION_ENV_SOURCE:?validated PRODUCTION_ENV_SOURCE is required}"
+: "${ERP_PRODUCTION_ENV_SOURCE:?validated ERP_PRODUCTION_ENV_SOURCE is required}"
 ENV_FILE=$PRODUCTION_ENV_FILE
 [[ $PRODUCTION_ENV_SOURCE == legacy_copy || $PRODUCTION_ENV_SOURCE == canonical ]] || die 'environment source is invalid'
+case "$ERP_PRODUCTION_ENV_SOURCE:$PRODUCTION_ENV_SOURCE" in
+ legacy_build_only:legacy_copy|canonical:canonical) ;;
+ *) echo PR827_ENV_SOURCE_CLASSIFICATION=REJECTED; die 'environment source classification is inconsistent' ;;
+esac
 [[ -f $ENV_FILE && ! -L $ENV_FILE ]] || die 'production environment is not a regular non-symlink file'
 [[ $(stat -c '%U:%G' "$ENV_FILE") == "${ERP_ENV_EXPECTED_OWNER:-root:root}" ]] || die 'production environment owner is invalid'
 [[ $(stat -c '%a' "$ENV_FILE") == "${ERP_ENV_EXPECTED_MODE:-600}" ]] || die 'production environment mode is invalid'
@@ -18,7 +23,7 @@ awk '/^[[:space:]]*($|#)/{next} /^[A-Za-z_][A-Za-z0-9_]*=/{next} {exit 1}' "$ENV
 [[ $(awk -F= '$1=="DATABASE_URL"{n++} END{print n+0}' "$ENV_FILE") -eq 1 ]] || die 'DATABASE_URL contract cardinality is invalid'
 set -a; source "$ENV_FILE"; set +a
 : "${DATABASE_URL:?DATABASE_URL is required}"
-echo "PR827_ENV_SOURCE=$PRODUCTION_ENV_SOURCE"; echo PR827_ENV_METADATA=VALID; echo PR827_DATABASE_URL_CONTRACT=PASS
+echo "ERP_PRODUCTION_ENV_SOURCE=$ERP_PRODUCTION_ENV_SOURCE"; echo "PR827_ENV_SOURCE=$PRODUCTION_ENV_SOURCE"; echo PR827_ENV_SOURCE_CLASSIFICATION=VALID; echo PR827_ENV_METADATA=VALID; echo PR827_DATABASE_URL_CONTRACT=PASS
 : "${EXPECTED_SHA:?EXPECTED_SHA is required}"
 : "${PRODUCTION_DB_CONTAINER_EXPECTED:?PRODUCTION_DB_CONTAINER_EXPECTED is required}"; : "${PRODUCTION_DB_NAME_EXPECTED:?PRODUCTION_DB_NAME_EXPECTED is required}"
 : "${SCHEMA_EVIDENCE_DIR:?SCHEMA_EVIDENCE_DIR is required}"
@@ -35,7 +40,18 @@ baseline_checksum=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).pr
 # The legacy ledger is a protected directory of immutable, one-row evidence bundles.
 history=$SCHEMA_EVIDENCE_DIR; [[ -d $history && ! -L $history ]] || die 'legacy history location is invalid'
 [[ $(stat -c '%U:%G' "$history") == "${APPLIED_TSV_EXPECTED_OWNER:-root:root}" ]] || die 'legacy history owner is invalid'
-[[ $(stat -c '%a' "$history") =~ ^(700|750)$ ]] || die 'legacy history mode is invalid'
+history_mode=$(stat -c '%a' "$history")
+case "$history_mode" in
+ 700) history_mode_class=OWNER_PRIVATE ;;
+ 750) history_mode_class=GROUP_TRAVERSE ;;
+ 755) history_mode_class=PROTECTED_BUNDLE_ROOT ;;
+ *) history_mode_class=UNKNOWN ;;
+esac
+echo LEGACY_HISTORY_VARIABLE=SCHEMA_EVIDENCE_DIR_MODE
+echo LEGACY_HISTORY_VALUES_ALLOWED=700_OWNER_PRIVATE,750_GROUP_TRAVERSE,755_PROTECTED_BUNDLE_ROOT
+echo "LEGACY_HISTORY_VALUE_RECEIVED=$history_mode_class"
+[[ $history_mode_class != UNKNOWN ]] || { echo LEGACY_HISTORY_REJECTION_STAGE=history_root_metadata; die 'legacy history mode is invalid'; }
+echo LEGACY_HISTORY_REJECTION_STAGE=NONE
 validate_record(){
  local f=$1 wanted=$2 wanted_sum=$3 d ts sha path extra recorded recorded_path
  [[ -f $f && ! -L $f && $(stat -c '%U:%G' "$f") == "${APPLIED_TSV_EXPECTED_OWNER:-root:root}" && $(stat -c '%a' "$f") == 600 && $(wc -l <"$f") -eq 1 ]] || return 1

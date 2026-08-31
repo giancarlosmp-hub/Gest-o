@@ -1,12 +1,23 @@
 import { prisma } from "../config/prisma.js";
 import { getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
 import { projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
+import { readFile } from "node:fs/promises";
 
 export const PLATFORM_HEALTH_CACHE_TTL_MS = 60_000;
 export const PLATFORM_HEALTH_ROLES = new Set(["diretor", "administrador", "admin", "suporte", "ti"]);
 
 export type Severity = "healthy" | "warning" | "critical";
 type MetricMap = Record<string, number>;
+
+const readUltraFv3Reachability = async () => {
+  try {
+    const raw = JSON.parse(await readFile("/var/run/gest-o/ultrafv3-reachability.json", "utf8"));
+    if (!["available", "unavailable"].includes(raw.status) || !["ok", "auth", "timeout", "connect", "5xx"].includes(raw.reason)) throw new Error("invalid state");
+    return { dataState: "available", status: raw.status, reason: raw.reason, endpointClass: "ultrafv3_read_only", durationMs: Number.isFinite(raw.durationMs) ? raw.durationMs : null, checkedAt: typeof raw.checkedAt === "string" ? raw.checkedAt : null };
+  } catch {
+    return { dataState: "empty", status: "unknown", reason: null, endpointClass: "ultrafv3_read_only", durationMs: null, checkedAt: null };
+  }
+};
 
 const numberValue = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
 export const metricFrom = (metrics: unknown, ...keys: string[]) => {
@@ -59,15 +70,17 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   const invalidDocument = Number(invalidRows[0]?.count ?? 0);
   const quality = { totalClients, missingDocument, invalidDocument, duplicates, ...projectSellerQuality(missingSeller), missingRegion, missingPortfolio: null, missingCity, missingState, missingPhone: Number(contactQualityRows[0]?.missing_phone ?? 0), missingEmail: Number(contactQualityRows[0]?.missing_email ?? 0), financialProfilesOrphaned, partnerTitlesInconsistent, archived };
   const alerts = buildAlerts({ metrics: aggregate, lastSyncAt: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, durationMs: runProjection.lastSync?.durationMs || 0, averageDurationMs: runProjection.averageDurationMs ?? 0, duplicates, partnerTitlesInconsistent, financialProfilesOrphaned, codeChangesToday: auditToday });
-  const [scheduler, locks] = await Promise.all([
+  const [scheduler, locks, reachability] = await Promise.all([
     getErpAutomaticSyncState(),
     prisma.erpSyncLock.findMany({ orderBy: { lockedUntil: "desc" }, take: 20, select: { scope: true, runId: true, lockedUntil: true, updatedAt: true } }),
+    readUltraFv3Reachability(),
   ]);
   const automaticEvidence = projectAutomaticEvidence(runs, { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, locks);
   if (!runProjection.lastSync) alerts.unshift({ id: "sync-never-observed", severity: "critical", title: "Sem execução ERP completa comprovada", detail: "Não há execução-pai concluída na janela selecionada; etapas isoladas não provam uma sincronização completa.", metric: "parentRuns", value: 0 });
   if (!runProjection.lastAutomaticSync) alerts.unshift({ id: "scheduler-run-not-proven", severity: "warning", title: "Execução automática não comprovada", detail: "Execuções manuais e etapas isoladas não comprovam o scheduler.", metric: "schedulerParentRuns", value: 0 });
   if (!scheduler.initialized || !scheduler.enabled) alerts.unshift({ id: "scheduler-inactive", severity: "critical", title: "Scheduler inativo ou não inicializado", detail: "Verifique os gates de ambiente e AppConfig.", metric: "schedulerInitialized", value: scheduler.initialized ? 1 : 0 });
-  return { contractVersion: "2.0", dataState: runProjection.dataState, generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { dataState: runProjection.dataState, lastSync: runProjection.lastSync, lastManualSync: runProjection.lastManualSync, lastAutomaticSync: runProjection.lastAutomaticSync, lastAutomaticSuccess: runProjection.lastAutomaticSuccess, averageDurationMs: runProjection.averageDurationMs, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality: { dataState: "available", ...quality }, integration: { dataState: runProjection.dataState, connected: automaticEvidence.automaticProven ? true : null, lastCommunication: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, latencyMs: runProjection.lastSync?.durationMs ?? null, averageDurationMs: runProjection.averageDurationMs, successRate: runProjection.successRate, errorRate: runProjection.errorRate, retries: runProjection.retries, recentRuns: runProjection.recentRuns.slice(0, 20), scheduler: { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, automaticEvidence, lock: automaticEvidence.lock }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: runProjection.parentRuns.filter(x => x.durationMs != null).map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs! })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "not_instrumented" } };
+  if (reachability.status === "unavailable") alerts.unshift({ id: "ultrafv3-unavailable", severity: "critical", title: "UltraFV3 indisponível", detail: "Verifique servidor Windows, Tailscale e UltraFV3Rest. A recuperação não reenvia pedidos.", metric: "erpReachability", value: 0 });
+  return { contractVersion: "2.0", dataState: runProjection.dataState, generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { dataState: runProjection.dataState, lastSync: runProjection.lastSync, lastManualSync: runProjection.lastManualSync, lastAutomaticSync: runProjection.lastAutomaticSync, lastAutomaticSuccess: runProjection.lastAutomaticSuccess, averageDurationMs: runProjection.averageDurationMs, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality: { dataState: "available", ...quality }, integration: { dataState: runProjection.dataState, reachability, connected: automaticEvidence.automaticProven ? true : null, lastCommunication: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, latencyMs: runProjection.lastSync?.durationMs ?? null, averageDurationMs: runProjection.averageDurationMs, successRate: runProjection.successRate, errorRate: runProjection.errorRate, retries: runProjection.retries, recentRuns: runProjection.recentRuns.slice(0, 20), scheduler: { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, automaticEvidence, lock: automaticEvidence.lock }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: runProjection.parentRuns.filter(x => x.durationMs != null).map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs! })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "not_instrumented" } };
 };
 
 export async function getPlatformHealthSnapshot(days: 7 | 30 | 90, force = false) {
