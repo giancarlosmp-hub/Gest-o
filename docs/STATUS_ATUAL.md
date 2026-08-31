@@ -684,3 +684,12 @@ e coincidentes. O leitor agora reconhece somente esses dois formatos exatos e ma
 validações fail-closed; nenhuma evidência ou produção foi modificada. Detalhes sanitizados estão em
 `docs/investigations/production-schema-pr827-lessons-learned.md`. Preview/apply permanecem bloqueados
 até merge, main e novo preview verdes; `READY_TO_APPLY_PR827=NO`.
+
+## PR827 — exit do harness após preview PASS (run 33441163558)
+
+A operação e as refs já haviam passado; o status 1 veio do `EXIT trap` antigo, que retornou o `rc`
+alterado por uma remoção obrigatória sem publicar qual recurso falhou. O cleanup agora preserva o
+status operacional, classifica recursos não criados/já ausentes, comprova remoções e só publica
+`PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS` após cleanup integral. A correção não toca no runner ou em
+produção. Preview/apply PostgreSQL 16 remotos e merge continuam pendentes na PR #839;
+`READY_TO_APPLY_PR827=NO`.

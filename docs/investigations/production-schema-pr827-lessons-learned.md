@@ -81,3 +81,28 @@ Resultado: `ROOT_CAUSE_HISTORY_DIVERGENT=V1_METADATA_REJECTED_BY_V2_ONLY_READER`
 `RUN_EVIDENCE=33427243014`; `JOB_EVIDENCE=99603693137`.
 `READY_TO_MERGE_HISTORY_FIX=NO` até checks remotos verdes;
 `READY_TO_RERUN_SCHEMA_PREVIEW=NO` até merge e main verde; `READY_TO_APPLY_PR827=NO`.
+
+## Exit 1 posterior ao preview aprovado — run 33441163558
+
+O run/job `33441163558`/`99649450951` imprimiu todas as provas operacionais, inclusive
+`PRIMARY_CHECKOUT_REFS_MODIFIED=NO`, e somente então terminou com status 1. Assim, o comando
+posterior ao último marcador era exclusivamente o `EXIT trap cleanup`. O handler antigo iniciava
+com o status do último comando, mas substituía esse status por 1 quando qualquer remoção falhava e
+encerrava com `return "$rc"`; todos os stderr de Docker estavam redirecionados. A evidência antiga
+prova `EXIT_TRAP_RETURNED_1_AFTER_OPERATION_PASS`, mas não permite inventar se a remoção que mudou
+`rc` foi container ou network. A ausência dessa classificação era o defeito diagnóstico do cleanup.
+Não foi comparação de refs, comando negativo esperado nem ausência de sucesso operacional: esses
+pontos precederam seus marcadores PASS.
+
+O harness agora registra criação individual de container, network, imagem e diretório temporário.
+O `EXIT` captura o status original antes de qualquer cleanup; recursos não criados são
+`NOT_CREATED`, recursos já ausentes são `ALREADY_ABSENT`, e recursos removidos precisam de uma
+segunda inspeção que comprove ausência. Falha operacional preserva seu código original. Operação
+aprovada com cleanup reprovado termina em 1 e informa a classe exata. Somente operação e cleanup
+aprovados imprimem `PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS` e terminam explicitamente em zero.
+Signals INT/TERM entram no mesmo contrato com 130/143. Não há `|| true`, `|| :`, prune ou
+`continue-on-error`.
+
+A correção é exclusivamente do encerramento do harness PostgreSQL 16. Runner produtivo, parser,
+baseline, checksums, migration, catálogo e produção não foram alterados. O resultado remoto pós-fix
+permanece pendente até os checks da PR #839 executarem preview e apply PostgreSQL 16.
