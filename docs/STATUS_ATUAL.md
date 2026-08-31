@@ -674,3 +674,13 @@ A causa operacional comprovada da indisponibilidade foi o peer Windows “servid
 Antes de simulação/envio, `GET /salesmen` funciona como preflight read-only limitado a 10 s. Falha de timeout/conexão/autenticação bloqueia antes de qualquer `ErpOrderSync` e apresenta: “UltraFV3 indisponível. Verifique se o servidor, Tailscale e UltraFV3Rest estão conectados antes de tentar novamente.” Logs registram somente `correlationId`, classe `ERP_REACHABILITY`, classe de endpoint, duração e razão `timeout|connect|auth|5xx`. `scripts/diagnose-ultrafv3-reachability.sh` faz diagnóstico periódico GET-only, publica estado sanitizado para Saúde da Plataforma e retorna falha para o alertador; recuperação jamais chama `POST /orders`. No Windows, `scripts/windows/Ensure-UltraFV3Connectivity.ps1` configura o serviço Tailscale como Automatic, verifica conexão e inicia UltraFV3Rest apenas se parado, de forma idempotente e sem dados de rede no log. Instalação/execução remota não faz parte desta entrega.
 
 Alternativas documentadas, não implementadas: manter Tailscale com autostart/watchdog é a recomendação atual; Cloudflare Tunnel autenticado e WireGuard site-to-site são alternativas futuras; IP público fixo/porta exposta não é recomendado sem reverse proxy, TLS, firewall, autenticação forte e allowlist.
+
+## PR827 — diagnóstico HISTORY_DIVERGENT (run 33427243014)
+
+A causa exata é `BUNDLE_METADATA_INVALID`: o produtor oficial
+`production-schema-apply.sh` publicou o formato V1 root-owned `755/644/644`, enquanto o leitor
+aceitava apenas o V2 `700/600/600`. Commit, path, blob Git, sidecar e checksum esperado são válidos
+e coincidentes. O leitor agora reconhece somente esses dois formatos exatos e mantém todas as
+validações fail-closed; nenhuma evidência ou produção foi modificada. Detalhes sanitizados estão em
+`docs/investigations/production-schema-pr827-lessons-learned.md`. Preview/apply permanecem bloqueados
+até merge, main e novo preview verdes; `READY_TO_APPLY_PR827=NO`.

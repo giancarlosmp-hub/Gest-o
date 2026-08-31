@@ -34,3 +34,50 @@ A causa operacional comprovada da indisponibilidade foi o peer Windows “servid
 Antes de simulação/envio, `GET /salesmen` funciona como preflight read-only limitado a 10 s. Falha de timeout/conexão/autenticação bloqueia antes de qualquer `ErpOrderSync` e apresenta: “UltraFV3 indisponível. Verifique se o servidor, Tailscale e UltraFV3Rest estão conectados antes de tentar novamente.” Logs registram somente `correlationId`, classe `ERP_REACHABILITY`, classe de endpoint, duração e razão `timeout|connect|auth|5xx`. `scripts/diagnose-ultrafv3-reachability.sh` faz diagnóstico periódico GET-only, publica estado sanitizado para Saúde da Plataforma e retorna falha para o alertador; recuperação jamais chama `POST /orders`. No Windows, `scripts/windows/Ensure-UltraFV3Connectivity.ps1` configura o serviço Tailscale como Automatic, verifica conexão e inicia UltraFV3Rest apenas se parado, de forma idempotente e sem dados de rede no log. Instalação/execução remota não faz parte desta entrega.
 
 Alternativas documentadas, não implementadas: manter Tailscale com autostart/watchdog é a recomendação atual; Cloudflare Tunnel autenticado e WireGuard site-to-site são alternativas futuras; IP público fixo/porta exposta não é recomendado sem reverse proxy, TLS, firewall, autenticação forte e allowlist.
+
+## HISTORY_DIVERGENT do baseline — run 33427243014 (31/08/2026)
+
+A inspeção read-only sanitizada do bundle e a reconstrução do produtor identificaram o primeiro
+predicado incompatível: `BUNDLE_METADATA_INVALID`. O bundle único é evidência oficial do
+`scripts/production-schema-apply.sh`: o produtor V1 criava o diretório com `mkdir -p` e os dois
+arquivos por `tee`/redirecionamento sob o umask administrativo oficial, resultando nas classes
+exatas `755_ROOT_OWNED_READ_ONLY` para o bundle e `644_ROOT_OWNED_READ_ONLY` para
+`applied.tsv`/`migration.sha256`. O leitor novo aceitava exclusivamente o formato atômico V2
+`700/600/600`. Portanto, ele rejeitava a metadata antes de comparar os checksums, embora nenhum
+usuário não administrativo pudesse modificar a evidência.
+
+O bundle encontrado tem cardinalidade um, diretório e arquivos regulares (nenhum symlink), owner
+administrativo, uma linha e três campos TSV, timestamp UTC canônico, commit hexadecimal completo
+existente, path allowlisted e migration presente nesse commit. O sidecar tem uma linha no formato
+estrito `sha256sum`; seu SHA-256, o blob Git e o esperado versionado são
+`66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506`. Os três coincidem.
+Os demais artefatos do diretório são os arquivos de diagnóstico que o próprio produtor V1 publica;
+não há arquivo inesperado capaz de ampliar a allowlist. O catálogo PostgreSQL não foi alcançado
+nesse run, portanto seu estado para esta evidência é `NOT_EVALUATED`.
+
+A correção versiona dois formatos, sem fallback: `PRODUCTION_SCHEMA_APPLY_V1` aceita somente o trio
+root-owned `755/644/644`; `PR827_ATOMIC_V2` aceita somente `700/600/600`. Ambos continuam exigindo
+regular file, ausência de symlink, cardinalidade, timestamp real, SHA de commit completo, commit
+existente, diretório nomeado pelo commit, path exato, blob existente, sidecar estrito e igualdade
+Git/sidecar/esperado. Falhas agora expõem somente a primeira categoria sanitizada. Nada no leitor
+cria, completa ou altera evidência e preview permanece sem escrita.
+
+Resultado: `ROOT_CAUSE_HISTORY_DIVERGENT=V1_METADATA_REJECTED_BY_V2_ONLY_READER`;
+`HISTORY_DIVERGENCE_CATEGORY=BUNDLE_METADATA_INVALID`;
+`HISTORICAL_PRODUCER=scripts/production-schema-apply.sh`;
+`HISTORICAL_FORMAT_VERSION=PRODUCTION_SCHEMA_APPLY_V1`;
+`CURRENT_READER_CONTRACT=VERSIONED_STRICT_V1_OR_V2`;
+`BASELINE_BUNDLE_CARDINALITY=1`;
+`BASELINE_BUNDLE_METADATA=REGULAR_NON_SYMLINK_ROOT_OWNED_755_V1`;
+`APPLIED_TSV_LINE_COUNT=1`; `APPLIED_TSV_FIELD_COUNT=3`;
+`TIMESTAMP_CLASS=UTC_CANONICAL`; `COMMIT_SHA_CLASS=HEX40`; `COMMIT_EXISTS=YES`;
+`MIGRATION_PATH_CLASS=ALLOWLISTED`; `MIGRATION_EXISTS_AT_COMMIT=YES`;
+`SIDECAR_STATE=REGULAR_NON_SYMLINK_ROOT_OWNED_644_SHA256SUM_V1`;
+`GIT_BLOB_SHA256=66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506`;
+`SIDECAR_SHA256_CLASS=HEX64`; `EXPECTED_SHA256=66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506`;
+`CHECKSUM_GIT_MATCH=YES`; `CHECKSUM_SIDECAR_MATCH=YES`;
+`CATALOG_BASELINE_STATE=NOT_EVALUATED`; `FIX_CLASS=READER_COMPATIBILITY`;
+`PREVIEW_WRITES=NONE`; `MIGRATION_APPLIED=NO`; `PRODUCTION_MODIFIED=NO`; `ORDER_RESENT=NO`;
+`RUN_EVIDENCE=33427243014`; `JOB_EVIDENCE=99603693137`.
+`READY_TO_MERGE_HISTORY_FIX=NO` até checks remotos verdes;
+`READY_TO_RERUN_SCHEMA_PREVIEW=NO` até merge e main verde; `READY_TO_APPLY_PR827=NO`.
