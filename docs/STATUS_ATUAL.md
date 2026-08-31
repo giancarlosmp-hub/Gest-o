@@ -693,3 +693,11 @@ status operacional, classifica recursos não criados/já ausentes, comprova remo
 `PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS` após cleanup integral. A correção não toca no runner ou em
 produção. Preview/apply PostgreSQL 16 remotos e merge continuam pendentes na PR #839;
 `READY_TO_APPLY_PR827=NO`.
+
+## PR827 — causa externa ao cleanup (run 33442417298)
+
+O cleanup e o processo direto do preview passaram com RC 0. O exit 1 vinha do comando seguinte no
+script npm: `pr827-legacy-history.sh` tentava executar `chown nobody:nogroup` no runner CI não-root.
+A regressão de owner agora usa a variável de owner esperado, preservando a rejeição sem operação
+privilegiada. Um processo pai mede o RC direto; o workflow mede npm e o comando do step. Apply e
+merge permanecem bloqueados até esses três RCs serem zero no CI da PR #839.

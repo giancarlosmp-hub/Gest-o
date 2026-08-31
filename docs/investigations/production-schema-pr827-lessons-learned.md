@@ -106,3 +106,23 @@ Signals INT/TERM entram no mesmo contrato com 130/143. Não há `|| true`, `|| :
 A correção é exclusivamente do encerramento do harness PostgreSQL 16. Runner produtivo, parser,
 baseline, checksums, migration, catálogo e produção não foram alterados. O resultado remoto pós-fix
 permanece pendente até os checks da PR #839 executarem preview e apply PostgreSQL 16.
+
+## Camada externa posterior ao marcador final — run 33442417298
+
+O run/job `33442417298`/`99653533522` fechou definitivamente o cleanup: publicou
+`HARNESS_OPERATION_RC=0`, `HARNESS_CLEANUP_FINAL_STATE=PASS`, `HARNESS_FINAL_RC=0` e
+`PR827_PREVIEW_HARNESS_FINAL_RESULT=PASS`. O processo pai, porém, não executava somente esse
+arquivo. O call graph real era workflow → `npm run test:pr827-preview:postgres` →
+`bash pr827-preview-postgres.sh && bash pr827-legacy-history.sh`. O comando que devolvia 1 era o
+segundo subprocesso: a regressão de owner chamava `chown nobody:nogroup` no runner GitHub não-root.
+O shell encerrava o harness legado em 1 antes de seus marcadores, o operador `&&` propagava 1 pelo
+npm lifecycle e o step terminava em 1. Portanto o cleanup e a terminação do preview não eram mais a
+causa.
+
+A regressão mantém exatamente o mesmo gate de owner, mas injeta uma classe esperada impossível de
+coincidir em `APPLIED_TSV_EXPECTED_OWNER`, sem tentar alterar ownership no filesystem. Um wrapper
+pai agora executa o arquivo real de preview, captura seu status efetivo, exige exatamente um marcador
+final PASS quando o status é zero e mede separadamente o subprocesso do histórico. O workflow mede
+o status efetivo do npm como `NPM_LIFECYCLE_RC` e o reutiliza, sem mascaramento, como
+`WORKFLOW_COMMAND_RC`. Falha em qualquer camada continua não zero. O resultado remoto pós-fix ainda
+depende dos checks da PR #839; apply permanece bloqueado até o step de preview ficar verde.

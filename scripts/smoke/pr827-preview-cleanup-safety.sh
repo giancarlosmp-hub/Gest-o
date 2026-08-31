@@ -46,3 +46,9 @@ for path in sys.argv[1:]:
     assert not any(token in text for token in forbidden), f'forbidden masking token in {path}'
 PY
 printf 'PREVIEW_CLEANUP_EXIT_CONTRACT=PASS\n'
+grep -Fq 'bash scripts/smoke/pr827-preview-postgres.sh' scripts/smoke/pr827-preview-process.sh
+grep -Fq 'DIRECT_HARNESS_PROCESS_RC=' scripts/smoke/pr827-preview-process.sh
+grep -Fq 'NPM_LIFECYCLE_RC=' .github/workflows/docker-compose-ci.yml
+grep -Fq 'WORKFLOW_COMMAND_RC=' .github/workflows/docker-compose-ci.yml
+! grep -Fq 'chown nobody:nogroup' scripts/smoke/pr827-legacy-history.sh
+printf 'PREVIEW_PARENT_PROCESS_CALL_GRAPH=PASS\n'

@@ -28,7 +28,7 @@ make_record; sed -i 's/^./0/' "$t/history/$commit/migration.sha256"; expect CHEC
 make_record; printf '0%s  %s\n' "${sum:1}" "$p" >"$t/history/$commit/migration.sha256"; expect CHECKSUM_GIT_MISMATCH "$p" "0${sum:1}"
 make_record; expect EXPECTED_CHECKSUM_MISMATCH "$p" "0${sum:1}"
 make_record; chmod 777 "$t/history/$commit"; expect BUNDLE_METADATA_INVALID
-make_record; chown nobody:nogroup "$t/history/$commit/applied.tsv"; expect BUNDLE_METADATA_INVALID
+make_record; APPLIED_TSV_EXPECTED_OWNER=owner_class_that_cannot_match expect BUNDLE_METADATA_INVALID
 make_record; mv "$t/history/$commit/applied.tsv" "$t/history/$commit/real"; ln -s real "$t/history/$commit/applied.tsv"; expect APPLIED_TSV_FORMAT_INVALID
 # Cardinality and catalog divergence are classified by the caller; keep their fail-closed tokens executable/static.
 grep -Fq 'HISTORY_DIVERGENCE_CATEGORY=BUNDLE_AMBIGUOUS' scripts/pr827-schema-runner.sh

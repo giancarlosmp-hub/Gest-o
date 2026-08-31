@@ -52,7 +52,7 @@
     "crm:audit-erp-client:prod": "npm run crm:audit-erp-client:prod -w @salesforce-pro/api",
     "crm:repair-erp-client": "npm run crm:repair-erp-client -w @salesforce-pro/api",
     "test:production-schema:postgres": "bash scripts/smoke/production-schema-postgres.sh",
-    "test:pr827-preview:postgres": "bash scripts/smoke/pr827-preview-postgres.sh && bash scripts/smoke/pr827-legacy-history.sh",
+    "test:pr827-preview:postgres": "bash scripts/smoke/pr827-preview-process.sh",
     "test:pr827-apply:postgres": "bash scripts/smoke/pr827-apply-postgres.sh",
     "test:tenancy-expand": "node scripts/smoke/tenancy-expand-safety.mjs",
     "test:tenancy-expand:postgres": "bash scripts/smoke/tenancy-expand-postgres.sh",
