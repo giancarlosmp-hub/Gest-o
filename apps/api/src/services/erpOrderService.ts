@@ -1707,7 +1707,21 @@ export async function createErpOrderFromOpportunity(
     const status = error instanceof UltraFv3IntegrationError
       ? error.status ?? (error.code === "timeout" ? 504 : error.code === "unavailable" || error.code === "missing_credentials" ? 503 : 502)
       : typeof source.status === "number" ? source.status : 502;
-    const message = sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error);
+    const reachabilityFailure = error instanceof UltraFv3IntegrationError
+      && ["timeout", "unavailable", "auth_failed"].includes(error.code);
+    const message = reachabilityFailure
+      ? "UltraFV3 indisponível. Verifique se o servidor, Tailscale e UltraFV3Rest estão conectados antes de tentar novamente."
+      : sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error);
+    if (reachabilityFailure) {
+      const reason = error.code === "timeout" ? "timeout" : error.code === "auth_failed" ? "auth" : "connect";
+      logApiEvent("WARN", "[ERP_REACHABILITY] preflight failed", {
+        correlationId,
+        class: "ERP_REACHABILITY",
+        endpointClass: "ultrafv3_read_only",
+        durationMs: SALESMEN_ORDER_SEQUENCE_TIMEOUT_MS,
+        reason,
+      });
+    }
     logApiEvent(status >= 500 ? "ERROR" : "WARN", "[erp order] generation flow failed", {
       opportunityId: opportunity.id,
       correlationId,
@@ -1716,7 +1730,7 @@ export async function createErpOrderFromOpportunity(
       error: message,
     });
     if (error instanceof Error) {
-      Object.assign(error, { status, correlationId });
+      Object.assign(error, { status, correlationId, message });
       throw error;
     }
     throw Object.assign(new Error(message || "Falha ao gerar pedido ERP."), { status, correlationId });

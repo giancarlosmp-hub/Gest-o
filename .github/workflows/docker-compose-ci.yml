@@ -212,7 +212,9 @@ jobs:
         run: node scripts/smoke/api-endpoints-smoke.mjs
 
       - name: Prove ERP platform health observability
-        run: npm run test:platform-health-erp-observability
+        run: |
+          npm run test:platform-health-erp-observability
+          node scripts/smoke/ultrafv3-reachability-safety.mjs
 
       - name: Smoke test auth login
         run: |

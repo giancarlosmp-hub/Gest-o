@@ -13,6 +13,7 @@ resolve(){
 }
 runner(){
   MODE="${1:-preview}" ERP_ENV_EXPECTED_OWNER="$OWNER" PRODUCTION_ENV_SOURCE="${2:-legacy_copy}" \
+    ERP_PRODUCTION_ENV_SOURCE="${4:-legacy_build_only}" \
     PRODUCTION_ENV_FILE="$3" bash "$ROOT/scripts/pr827-schema-runner.sh"
 }
 expect_fail(){ if "$@" >"$TMP/out" 2>&1; then echo 'expected failure' >&2; exit 1; fi; }
@@ -29,6 +30,8 @@ record=$(resolve 2>"$TMP/resolve.err")
 before=$(sha256sum "$LEGACY")
 expect_fail runner preview legacy_copy "$LEGACY"
 grep -Fxq 'PR827_ENV_SOURCE=legacy_copy' "$TMP/out"
+grep -Fxq 'ERP_PRODUCTION_ENV_SOURCE=legacy_build_only' "$TMP/out"
+grep -Fxq 'PR827_ENV_SOURCE_CLASSIFICATION=VALID' "$TMP/out"
 grep -Fxq 'PR827_ENV_METADATA=VALID' "$TMP/out"
 grep -Fxq 'PR827_DATABASE_URL_CONTRACT=PASS' "$TMP/out"
 grep -Fxq 'PR827_ENV_IMMUTABLE=PASS' "$TMP/out"

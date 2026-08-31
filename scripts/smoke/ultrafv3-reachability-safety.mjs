@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const probe=readFileSync("scripts/diagnose-ultrafv3-reachability.sh","utf8");
+const windows=readFileSync("scripts/windows/Ensure-UltraFV3Connectivity.ps1","utf8");
+const order=readFileSync("apps/api/src/services/erpOrderService.ts","utf8");
+assert.match(probe,/--request GET/); assert.doesNotMatch(probe,/POST \/orders|--request POST/);
+assert.match(probe,/timeout\|connect\|auth\|5xx|28:\*\) reason=timeout/);
+assert.match(windows,/StartupType Automatic/); assert.match(windows,/if \(-not \$rest\)/);
+assert.match(order,/\[ERP_REACHABILITY\] preflight failed/);
+assert.match(order,/UltraFV3 indisponível\. Verifique se o servidor, Tailscale e UltraFV3Rest estão conectados antes de tentar novamente\./);
+console.log("UltraFV3 reachability safety passed");
