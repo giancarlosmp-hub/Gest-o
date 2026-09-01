@@ -33,10 +33,10 @@ jobs:
             set -Eeuo pipefail
             cd /apps/gest-o; git fetch origin main; git switch main; git pull --ff-only origin main
             MODE=preview EXPECTED_SHA="$EXPECTED_SHA" MIGRATION_ID_REQUESTED=20260808120000_tenancy_expand_roots \
-              API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_URL="$DATABASE_URL" DATABASE_SCHEMA_MODE=external \
+              API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_SCHEMA_MODE=external \
               RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
               PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
-              bash scripts/tenancy-expand-roots-runner.sh
+              bash scripts/run-production-tenancy-expand-roots.sh
   apply:
     if: inputs.mode == 'apply'
     environment: production-schema
@@ -58,7 +58,8 @@ jobs:
             cd /apps/gest-o; git fetch origin main; git switch main; git pull --ff-only origin main
             MODE=apply GITHUB_ENVIRONMENT=production-schema CONFIRM="$CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
               MIGRATION_ID_REQUESTED=20260808120000_tenancy_expand_roots API_IMAGE="gest-o-api:$EXPECTED_SHA" \
-              DATABASE_URL="$DATABASE_URL" DATABASE_SCHEMA_MODE=external RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled \
+              DATABASE_SCHEMA_MODE=external RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled \
               SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
               PRODUCTION_DB_NAME_EXPECTED=salesforce_pro BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
-              PREFLIGHT_RESULT_FILE=/var/log/gest-o/preflight/latest/result.tsv bash scripts/tenancy-expand-roots-runner.sh
+              PREFLIGHT_RESULT_FILE=/var/log/gest-o/preflight/latest/result.tsv \
+              bash scripts/run-production-tenancy-expand-roots.sh

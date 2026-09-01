@@ -17,10 +17,21 @@ backup_bind_canonical_pair() {
 
 backup_validate_canonical_pair_and_freshness() {
   local supplied_file=$1 supplied_manifest=$2 max_age=$3
-  local before after timestamp now age expected
   backup_bind_canonical_pair || return 1
   [[ "$supplied_file" == "$PRODUCTION_BACKUP_CANONICAL_FILE" &&
      "$supplied_manifest" == "$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE" ]] || return 2
+  backup_validate_pair_and_freshness "$supplied_file" "$supplied_manifest" "$max_age"
+}
+
+# Validate an immutable bundle directly below the same authorized directory.
+# The canonical fixed-name wrapper above remains strict for its existing callers.
+backup_validate_pair_and_freshness() {
+  local supplied_file=$1 supplied_manifest=$2 max_age=$3
+  local before after timestamp now age expected directory
+  backup_bind_canonical_pair || return 1
+  directory=$PRODUCTION_BACKUP_CANONICAL_DIRECTORY
+  [[ "$(dirname -- "$supplied_file")" == "$directory" &&
+     "$supplied_manifest" == "$supplied_file.sha256" ]] || return 2
   [[ "$max_age" =~ ^[0-9]+$ && "$max_age" -gt 0 ]] || return 3
   [[ -f "$supplied_file" && ! -L "$supplied_file" && -f "$supplied_manifest" && ! -L "$supplied_manifest" ]] || return 4
   expected=$(basename -- "$supplied_file")

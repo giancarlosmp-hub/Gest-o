@@ -7,6 +7,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP" /var/log/gest-o/backup' EXIT
 APP="$TMP/app"; AUTH="$TMP/authorized"; BIN="$TMP/bin"; ENV_FILE="$TMP/production.env"
 mkdir -p "$APP/scripts/lib" "$AUTH" "$BIN"
 cp "$ROOT/scripts/prepare-production-recovery-backup.sh" "$APP/scripts/"
+cp "$ROOT/scripts/resolve-production-env.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
 cp "$ROOT/scripts/lib/pr827-backup-proof.sh" "$APP/scripts/lib/"
 cp "$ROOT/scripts/check-prod-health.sh" "$APP/scripts/"
@@ -95,7 +96,7 @@ EOF
   chmod 600 "$ENV_FILE"
   set +e
   env PATH="$BIN:$PATH" APP_DIR="$APP" PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$AUTH" \
-    PRODUCTION_BACKUP_ENV_FILE="$TMP/absent" PRODUCTION_BACKUP_LEGACY_ENV_FILE="$ENV_FILE" \
+    PRODUCTION_BACKUP_ENV_FILE="$ENV_FILE" PRODUCTION_BACKUP_LEGACY_ENV_FILE="$TMP/absent" \
     PRODUCTION_MIN_DISK_KB=1 PRODUCTION_BACKUP_MIN_SIZE_BYTES=1 MOCK_DOCKER_LOG="$TMP/docker.log" \
     INSPECT_COUNT="$TMP/inspect-count" ORDER_LOG="$TMP/order.log" MOCK_STATE="${MOCK_STATE:-running}" \
     MOCK_HEALTH="${MOCK_HEALTH:-healthy}" MOCK_REPLACE="${MOCK_REPLACE:-false}" MOCK_AMBIGUOUS="${MOCK_AMBIGUOUS:-false}" \
@@ -119,8 +120,9 @@ EOF
     grep -Fq 'PRODUCTION_BACKUP_DB_HEALTH_QUERY=PASS' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DB_IDENTITY_REVALIDATED=PASS' "$out"
     grep -Fq 'PRODUCTION_BACKUP_DUMP=PASS' "$out"
-    [[ -f "$AUTH/production.sql.gz" && -f "$AUTH/production.sql.gz.sha256" ]]
-    (cd "$AUTH" && sha256sum -c production.sql.gz.sha256 >/dev/null)
+    dump_file="$(find "$AUTH" -maxdepth 1 -type f -name 'production-*.sql.gz')"
+    [[ -n "$dump_file" && -f "$dump_file.sha256" ]]
+    (cd "$AUTH" && sha256sum -c "$(basename "$dump_file.sha256")" >/dev/null)
     [[ "$(cat "$TMP/order.log")" == $'health\nhealth\nhealth\nhealth\nhealth\nhealth\ndump\nhealth\nhealth\nhealth\nhealth\nhealth\nhealth\npreflight' ]]
     grep -Fxq 'exec --user postgres -i postgres-production pg_dump -U postgres -d salesforce_pro' "$TMP/docker.log"
     ! grep -Eq '^exec -i postgres-production (psql|pg_dump)|^exec --user root ' "$TMP/docker.log"

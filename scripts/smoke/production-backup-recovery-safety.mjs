@@ -8,6 +8,7 @@ const workflow = readFileSync(resolve(root, ".github/workflows/prepare-productio
 const common = readFileSync(resolve(root, "scripts/lib/production-backup-common.sh"), "utf8");
 const historical = readFileSync(resolve(root, "backup.sh"), "utf8");
 const healthCheck = readFileSync(resolve(root, "scripts/check-prod-health.sh"), "utf8");
+const resolver = readFileSync(resolve(root, "scripts/resolve-production-env.sh"), "utf8");
 
 for (const contract of [
   "PREPARE_PRODUCTION_RECOVERY_BACKUP", "EXPECTED_SHA",
@@ -24,16 +25,15 @@ for (const dumpPathPredicate of [
 ]) assert.ok(script.includes(dumpPathPredicate), `missing dump path predicate: ${dumpPathPredicate}`);
 assert.match(script, /PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-/);
 assert.match(script, /PRODUCTION_BACKUP_AUTHORIZED_DIR:-\/root\/backups/);
-assert.match(script, /EFFECTIVE_BACKUP_FILE="\$AUTHORIZED_DIR\/production\.sql\.gz"/);
-assert.match(script, /EFFECTIVE_BACKUP_SHA256_FILE="\$AUTHORIZED_DIR\/production\.sql\.gz\.sha256"/);
-assert.match(script, /ENV_SOURCE" == canonical[\s\S]*STRICT_CANONICAL[\s\S]*REBOUND_LEGACY_READ_ONLY/);
+assert.match(script, /PRODUCTION_BACKUP_FILE="\$AUTHORIZED_DIR\/production-\$bundle_id\.sql\.gz"/);
+assert.match(script, /PRODUCTION_BACKUP_SHA256_FILE="\$PRODUCTION_BACKUP_FILE\.sha256"/);
+assert.match(script, /MODE=cutover PRODUCTION_ENV_RESOLVER_OUTPUT=record/);
 assert.match(script, /historical_path_syntax_safe[\s\S]*\[:cntrl:\][\s\S]*\.\.\//);
-assert.match(script, /PRODUCTION_BACKUP_FILE="\$EFFECTIVE_BACKUP_FILE"[\s\S]*PRODUCTION_BACKUP_SHA256_FILE="\$EFFECTIVE_BACKUP_SHA256_FILE"/);
-assert.match(script, /production\.sql\.gz[\s\S]*DUMP_PATH_CONTRACT=PASS/);
-assert.match(script, /MANIFEST_PATH_CONTRACT=PASS[\s\S]*EXISTING_PAIR_STATE=absent[\s\S]*complete_valid/);
+assert.match(script, /production-\$bundle_id\.sql\.gz[\s\S]*DUMP_PATH_CONTRACT=PASS/);
+assert.match(script, /HISTORICAL_PAIR_STATE=absent[\s\S]*HISTORICAL_PAIR_STATE=incomplete[\s\S]*HISTORICAL_PAIR_STATE=complete_valid/);
 const orderedContracts = [
-  "STAGE=authorized_directory", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",
-  "STAGE=existing_pair_state", "STAGE=database_url_contract", "STAGE=database_container",
+  "STAGE=authorized_directory", "STAGE=historical_path_contract", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",
+  "STAGE=database_url_contract", "STAGE=database_container",
   "STAGE=database_network", "STAGE=database_volume", "STAGE=database_mount",
   "STAGE=disk_capacity", "STAGE=preparation_lock", "STAGE=dump",
   "TMP_DIR=\"$(mktemp", "backup_validate_plain_dump", "STAGE=atomic_promotion",
@@ -46,13 +46,12 @@ for (const contract of orderedContracts) {
   cursor = next;
 }
 assert.match(script, /env_resolution; COMMAND=resolve_production_configuration/);
-assert.match(script, /env_metadata; COMMAND=validate_protected_configuration_metadata/);
 assert.match(script, /env_syntax; COMMAND=validate_protected_configuration_syntax/);
 assert.match(script, /required_configuration; COMMAND=validate_backup_configuration_contract/);
-assert.match(script, /-e "\$CANONICAL_ENV_FILE" \|\| -L "\$CANONICAL_ENV_FILE"[\s\S]*legacy_read_only/);
-assert.match(script, /stat -c %U:%G[\s\S]*root:root/);
-assert.match(script, /stat -c %a[\s\S]*600/);
-assert.match(script, /OLD_BACKUP[\s\S]*install -o root -g root -m 600/);
+assert.match(resolver, /canonical source is required for cutover/);
+assert.match(resolver, /stat -c '%U:%G'/);
+assert.match(resolver, /stat -c '%a'/);
+assert.doesNotMatch(script, /OLD_BACKUP|mv -f .*HISTORICAL_BACKUP/);
 assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
 assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" id -u/);
 assert.match(script, /postgres_os_user_missing[\s\S]*os_user_selection_failed/);

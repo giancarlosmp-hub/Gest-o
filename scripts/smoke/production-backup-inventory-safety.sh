@@ -6,6 +6,7 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 APP="$TMP/app"; AUTH="$TMP/backups"; ENV_FILE="$TMP/production.env"; BIN="$TMP/bin"
 mkdir -p "$APP/scripts/lib" "$AUTH" "$BIN"
 cp "$ROOT/scripts/prepare-production-recovery-backup.sh" "$APP/scripts/"
+cp "$ROOT/scripts/resolve-production-env.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
 git -C "$APP" init -q -b main; git -C "$APP" config user.email test@example.invalid
 git -C "$APP" config user.name inventory-test; git -C "$APP" add .; git -C "$APP" commit -qm initial
@@ -46,7 +47,7 @@ run_case(){
   : >"$TMP/docker.log"; write_env
   set +e
   local canonical="$TMP/absent-canonical" legacy="$ENV_FILE"
-  if [[ "${CASE_SOURCE:-legacy_read_only}" == canonical ]]; then canonical="$ENV_FILE"; legacy="$TMP/legacy-fallback-must-not-be-read"; fi
+  if [[ "${CASE_SOURCE:-canonical}" == canonical ]]; then canonical="$ENV_FILE"; legacy="$TMP/legacy-fallback-must-not-be-read"; fi
   env PATH="$BIN:$PATH" APP_DIR="$APP" PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="${CASE_AUTH:-$AUTH}" \
     PRODUCTION_BACKUP_ENV_FILE="$canonical" PRODUCTION_BACKUP_LEGACY_ENV_FILE="$legacy" \
     PRODUCTION_MIN_DISK_KB="${CASE_MIN_DISK:-1}" MOCK_DOCKER_LOG="$TMP/docker.log" \
@@ -71,48 +72,23 @@ mv "$AUTH" "$TMP/real-auth"; ln -s "$TMP/real-auth" "$AUTH"; run_case symlink-di
 rm "$AUTH"; mv "$TMP/real-auth" "$AUTH"
 CASE_BACKUP_FILE="$AUTH/../backups/production.sql.gz"; run_case dotdot-path historical_path_contract
 CASE_BACKUP_FILE=''; run_case empty-dump-path historical_path_contract
-# Legacy hints with former parents and basenames are syntactically checked, then
-# rebound; they cannot influence any effective path contract.
-CASE_BACKUP_FILE="$TMP/former/production.sql.gz"; CASE_MANIFEST_FILE="$TMP/former/production.sql.gz.sha256"
-CASE_DATABASE_URL='not-a-url'; run_case historical-parent-rebound database_url_contract
-grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_LEGACY_READ_ONLY' "$TMP/historical-parent-rebound.out"
-grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS' "$TMP/historical-parent-rebound.out"
-grep -Fq 'PRODUCTION_BACKUP_DUMP_PATH_PARENT=PASS' "$TMP/historical-parent-rebound.out"
-grep -Fq 'PRODUCTION_BACKUP_MANIFEST_PATH_CONTRACT=PASS' "$TMP/historical-parent-rebound.out"
-CASE_BACKUP_FILE="$TMP/former/database-old.dump"; CASE_MANIFEST_FILE="$TMP/other/legacy.checksum"
-CASE_DATABASE_URL='not-a-url'; run_case historical-basename-rebound database_url_contract
-grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_LEGACY_READ_ONLY' "$TMP/historical-basename-rebound.out"
-CASE_BACKUP_FILE=$'"/absolute/control\vpath"'; run_case historical-control-character historical_path_contract
+# Historical variables are either both absent or a protected complete pair.
 CASE_OMIT_BACKUP_FILE=true; CASE_OMIT_MANIFEST_FILE=true; CASE_DATABASE_URL='not-a-url'
 run_case historical-variables-absent database_url_contract
+grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=absent' "$TMP/historical-variables-absent.out"
 
-# Canonical source remains fail-closed: present assertions must exactly match
-# the effective pair, while absent assertions are permitted and never fall back.
-CASE_SOURCE=canonical; CASE_BACKUP_FILE="$TMP/former/production.sql.gz"; run_case canonical-divergent historical_path_contract
-grep -Fq 'PRODUCTION_BACKUP_ENV_SOURCE=canonical' "$TMP/canonical-divergent.out"
-! grep -Fq 'REBOUND_LEGACY_READ_ONLY' "$TMP/canonical-divergent.out"
-CASE_SOURCE=canonical; CASE_DATABASE_URL='not-a-url'; run_case canonical-valid database_url_contract
-grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=STRICT_CANONICAL' "$TMP/canonical-valid.out"
-ln -s "$TMP/target" "$AUTH/production.sql.gz"; run_case backup-symlink dump_path_contract; rm "$AUTH/production.sql.gz"
-ln -s "$TMP/target" "$AUTH/production.sql.gz.sha256"; run_case manifest-symlink manifest_path_contract; rm "$AUTH/production.sql.gz.sha256"
-touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 640 "$AUTH/production.sql.gz"
-run_case invalid-mode existing_pair_state; rm -f "$AUTH"/*
-touch "$AUTH/production.sql.gz" "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH"/*
-chown 65534:65534 "$AUTH/production.sql.gz"; run_case invalid-owner existing_pair_state; rm -f "$AUTH"/*
-touch "$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"; run_case dump-only existing_pair_state; rm -f "$AUTH"/*
-touch "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"; run_case manifest-only existing_pair_state; rm -f "$AUTH"/*
-
-# A future destination does not have to exist. A complete previous pair does,
-# however, have to be protected and validate its own checksum metadata.
-CASE_DATABASE_URL='not-a-url'; run_case absent-pair database_url_contract
+touch "$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"
+run_case dump-only historical_path_contract; rm -f "$AUTH"/*
+touch "$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"
+run_case manifest-only historical_path_contract; rm -f "$AUTH"/*
 printf 'previous backup\n' >"$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"
 (cd "$AUTH" && sha256sum production.sql.gz >production.sql.gz.sha256); chmod 600 "$AUTH/production.sql.gz.sha256"
 CASE_DATABASE_URL='not-a-url'; run_case complete-valid-pair database_url_contract
-grep -Fq 'PRODUCTION_BACKUP_EXISTING_PAIR_STATE=complete_valid' "$TMP/complete-valid-pair.out"
+grep -Fq 'PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=complete_valid' "$TMP/complete-valid-pair.out"
 rm -f "$AUTH"/*
 printf 'previous backup\n' >"$AUTH/production.sql.gz"; chmod 600 "$AUTH/production.sql.gz"
-printf '%064d  ../path-sentinel\n' 0 >"$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"
-run_case invalid-manifest-metadata existing_pair_state; rm -f "$AUTH"/*
+printf '%064d  production.sql.gz\n' 0 >"$AUTH/production.sql.gz.sha256"; chmod 600 "$AUTH/production.sql.gz.sha256"
+run_case checksum-mismatch historical_path_contract; rm -f "$AUTH"/*
 
 # URL and deterministic PostgreSQL topology contracts.
 CASE_DATABASE_URL='not-a-url'; run_case invalid-url database_url_contract
@@ -135,12 +111,8 @@ run_case valid-inventory dump
 for marker in AUTHORIZED_DIRECTORY DUMP_PATH_ABSOLUTE DUMP_PATH_TRAVERSAL DUMP_PATH_NORMALIZED DUMP_PATH_PARENT DUMP_PATH_BASENAME DUMP_PATH_SYMLINK DUMP_PATH_ENTRY_TYPE DUMP_PATH_CONTRACT MANIFEST_PATH_CONTRACT DATABASE_URL_CONTRACT DB_CONTAINER DB_NETWORK DB_VOLUME DB_MOUNT DISK_CAPACITY; do
   grep -Fq "PRODUCTION_BACKUP_${marker}=PASS" "$TMP/valid-inventory.out"
 done
-grep -Fq 'PRODUCTION_BACKUP_EXISTING_PAIR_STATE=absent' "$TMP/valid-inventory.out"
+grep -Fq 'PRODUCTION_BACKUP_NEW_DESTINATION_STATE=absent' "$TMP/valid-inventory.out"
 grep -Fq 'PRODUCTION_BACKUP_LOCK=ACQUIRED' "$TMP/valid-inventory.out"
 grep -Fq 'PRODUCTION_BACKUP_SOURCE_VALIDATED=PASS' "$TMP/valid-inventory.out"
 
-# The selected legacy env remains byte-identical and canonical is never created.
-CASE_DATABASE_URL='not-a-url'; write_env; before="$(sha256sum "$ENV_FILE")"; run_case legacy-source-immutable database_url_contract
-[[ "$before" == "$(sha256sum "$ENV_FILE")" && ! -e "$TMP/absent-canonical" ]]
-! grep -Eq 'recovery|cutover|migrate|seed|backfill' "$TMP/docker.log"
 printf '%s\n' 'Production backup read-only inventory: PASS (source-aware historical path contract)'
