@@ -1,0 +1,35 @@
+name: Prepare Canonical Production Environment
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Digite PREPARE_CANONICAL_PRODUCTION_ENV"
+        required: true
+        type: string
+permissions: { contents: read }
+concurrency:
+  group: prepare-canonical-production-environment
+  cancel-in-progress: false
+jobs:
+  prepare:
+    environment: production-cutover
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar e promover a configuração protegida na VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          PREPARE_CONFIRM: ${{ inputs.confirm }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          envs: PREPARE_CONFIRM
+          script_stop: true
+          script: |
+            set -euo pipefail
+            test "$PREPARE_CONFIRM" = PREPARE_CANONICAL_PRODUCTION_ENV
+            cd /apps/gest-o
+            test -z "$(git status --porcelain)"
+            git fetch origin main && git switch main && git pull --ff-only origin main
+            CONFIRM="$PREPARE_CONFIRM" bash scripts/prepare-canonical-production-env.sh

@@ -759,6 +759,22 @@ A correção remove esse template da inspeção de identidade: `docker inspect <
 Esta correção e suas regressões são locais. Nenhum workflow produtivo, backup, promoção produtiva, Recovery, cutover, migration, seed, backfill, sincronização, alteração de env protegido ou recriação de container foi executado; produção não foi acessada. `READY_TO_MERGE_DATABASE_INSPECT_TEMPLATE_FIX=NO`; `PRODUCTION_BACKUP_PREPARATION=NOT_PROVEN`; `ERP_PRODUCTION_RECOVERY_WORKFLOW=NOT_EXECUTED`; `ERP_AUTOMATIC_SYNC=NOT_PROVEN`; `INC_ERP_5050=INVESTIGATING`; `READY_FOR_1_0B_2_O=NO`; `PRODUCTION_ACCESSED=NO`.
 # Operação futura do schema da PR #827
 
+## Preparação canônica do environment após a PR827
+
+A falha do cutover em `environment_resolution` ocorre porque a VPS possui somente a fonte
+legada protegida, classificada como `legacy_build_only`; o resolvedor permite essa fonte no
+`build`, onde um overlay temporário desativa efeitos, mas exige a fonte canônica no `cutover`.
+O caminho canônico autorizado é `/root/demetra-env/.env`; ambos os arquivos devem ser regulares,
+sem symlink, `root:root` e modo `600`.
+
+Após merge e `main` verde, execute **Prepare Canonical Production Environment**, no environment
+protegido `production-cutover`, informando exatamente `PREPARE_CANONICAL_PRODUCTION_ENV`. O fluxo
+valida sintaxe, nomes únicos, presença/formato sanitizado das chaves de banco, autenticação, ERP,
+JWT e gates fechados; copia os bytes sem alterar valores, faz `fsync` e `rename` atômico e confirma
+a imutabilidade do legado. Não copie `.env` manualmente. Aceite somente os sete marcadores finais,
+de `PRODUCTION_ENV_SOURCE=canonical` até `READY_FOR_CUTOVER=YES`. Depois disso, valide a execução;
+o cutover continua sendo um workflow separado e **não deve ser disparado sem nova confirmação**.
+
 1. Com `main` congelada e checks verdes, execute o workflow **Production Schema PR827** em `preview`; não informe confirmação.
 2. Exija os cinco gates `PR827_SCHEMA_*`/`PR827_MIGRATION_*` de preflight, predecessor, checksum, ledger e catálogo.
 3. Somente após aprovação humana e backup canônico fresco, execute `apply` digitando `APPLY_PR827_SCHEMA` no environment protegido.

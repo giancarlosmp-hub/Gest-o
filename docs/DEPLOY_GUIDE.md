@@ -1,5 +1,19 @@
 # Gate de schema PR827 (legado)
 
+## Gate de origem canônica do cutover
+
+`Deploy Production` com `phase=build` pode resolver `/root/demetra-env/production.env` como
+`legacy_build_only`, usando apenas um overlay efêmero e mantendo o legado byte a byte imutável.
+`phase=cutover` nunca aceita essa classe: requer `/root/demetra-env/.env`, regular, não-symlink,
+`root:root`, modo `600` e com o contrato produtivo válido.
+
+Se o canônico estiver ausente, use exclusivamente o workflow manual **Prepare Canonical
+Production Environment** e a confirmação `PREPARE_CANONICAL_PRODUCTION_ENV`. A promoção preserva
+valores e o arquivo legado de rollback, compara o conjunto de nomes de chaves, valida somente
+presença e formatos sanitizados e publica por temporário + `fsync` + rename. Não há cutover nesse
+workflow. Somente considere uma tentativa separada depois de `READY_FOR_CUTOVER=YES`; canônico
+ausente ou inválido permanece bloqueio.
+
 Para mudanças exclusivamente no runner: `merge → CI/main verde → preview`; imagem API e backup não são gates do preview read-only. Permanecem obrigatórios no apply/cutover, junto do SHA idêntico, aprovação e `APPLY_PR827_SCHEMA`. O runner usa o histórico protegido `applied.tsv`, valida a transição de julho como baseline e não cria `_prisma_migrations` nem exige `tenancy_expand_roots`.
 
 > **INC-ERP-5050 — expiração da prova automática (run `33085223211`, job `98562960884`).** O Recovery aprovou backup/preflight, cutover, recriação e saúde da API, login, autorização, endpoint protegido, inicialização do scheduler e presença de `nextRunAt`. A janela bounded de `automatic_proof` expirou após 90 minutos; o rollback fail-closed foi concluído com `ERP_ROLLBACK_API_HEALTH=PASS`, restaurando a API anterior saudável. A evidência disponível não distingue ausência de trigger de uma execução `FAILED`/`RUNNING`, porque a consulta anterior só promovia `SUCCESS` e descartava o estado observado. Também capturava o baseline depois do cutover e não verificava matematicamente se `nextRunAt` cabia nos 5.400 segundos. Portanto a causa comprovada é uma lacuna do contrato de prova; A–H permanecem não atribuíveis sem os novos marcadores sanitizados, e não se deve repetir o Recovery antes desse diagnóstico. `ERP_AUTOMATIC_SYNC=NOT_PROVEN`, `INC_ERP_5050=INVESTIGATING`, `READY_TO_MERGE_AUTOMATIC_PROOF_FIX=NO` até checks remotos verdes e `READY_FOR_1_0B_2_O=NO`.
