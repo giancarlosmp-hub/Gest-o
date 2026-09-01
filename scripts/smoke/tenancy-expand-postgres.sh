@@ -91,6 +91,8 @@ docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/pr
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null 2>&1; then echo 'ERP manual resolution migration unexpectedly applied twice' >&2; exit 1; fi
 step catalog_validation "validate nullable columns indexes foreign keys and row counts"
 docker exec -i "$pg" psql -X -U postgres -d expand -qAtF $'\t' <scripts/tenancy-expand-roots-catalog.sql >"$tmp/expand-catalog.tsv"
+# Sanitized structural evidence only: no row values, URLs, or credentials.
+awk -F $'\t' '$1=="fk" && $2=="KnowledgeDocument_tenantId_fkey" {print "POSTGRES_FK_OBSERVED\t" $3}' "$tmp/expand-catalog.tsv"
 node scripts/tenancy-expand-roots-catalog-validate.mjs "$tmp/expand-catalog.tsv"
 for table in "${roots[@]}"; do
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='$table' AND column_name='tenantId'")" = YES

@@ -11,12 +11,30 @@ WITH roots(table_name) AS (VALUES
  WHERE i.schemaname='public' AND i.indexname=r.table_name||'_tenantId_idx'
  UNION ALL
  SELECT 'fk', con.conname,
-   format('%s.tenantId->%s.id|delete=%s|update=%s|validated=%s',src.relname,dst.relname,
-     CASE con.confdeltype WHEN 'a' THEN 'NO ACTION' ELSE con.confdeltype::text END,
-     CASE con.confupdtype WHEN 'a' THEN 'NO ACTION' ELSE con.confupdtype::text END,con.convalidated)
+   format('source=%s;source_columns=%s;target=%s;target_columns=%s;delete=%s;update=%s;validated=%s',
+     src.relname, src_cols.names, dst.relname, dst_cols.names,
+     CASE con.confdeltype
+       WHEN 'a'::"char" THEN 'NO_ACTION' WHEN 'r'::"char" THEN 'RESTRICT'
+       WHEN 'c'::"char" THEN 'CASCADE' WHEN 'n'::"char" THEN 'SET_NULL'
+       WHEN 'd'::"char" THEN 'SET_DEFAULT' ELSE 'UNKNOWN('||con.confdeltype::text||')' END,
+     CASE con.confupdtype
+       WHEN 'a'::"char" THEN 'NO_ACTION' WHEN 'r'::"char" THEN 'RESTRICT'
+       WHEN 'c'::"char" THEN 'CASCADE' WHEN 'n'::"char" THEN 'SET_NULL'
+       WHEN 'd'::"char" THEN 'SET_DEFAULT' ELSE 'UNKNOWN('||con.confupdtype::text||')' END,
+     CASE WHEN con.convalidated THEN 'TRUE' ELSE 'FALSE' END)
  FROM pg_constraint con JOIN pg_class src ON src.oid=con.conrelid
  JOIN pg_namespace ns ON ns.oid=src.relnamespace JOIN roots r ON r.table_name=src.relname
  JOIN pg_class dst ON dst.oid=con.confrelid
+ CROSS JOIN LATERAL (
+   SELECT string_agg(att.attname, ',' ORDER BY key.ordinality) names
+   FROM unnest(con.conkey) WITH ORDINALITY key(attnum, ordinality)
+   JOIN pg_attribute att ON att.attrelid=con.conrelid AND att.attnum=key.attnum
+ ) src_cols
+ CROSS JOIN LATERAL (
+   SELECT string_agg(att.attname, ',' ORDER BY key.ordinality) names
+   FROM unnest(con.confkey) WITH ORDINALITY key(attnum, ordinality)
+   JOIN pg_attribute att ON att.attrelid=con.confrelid AND att.attnum=key.attnum
+ ) dst_cols
  WHERE ns.nspname='public' AND con.contype='f' AND con.conname=r.table_name||'_tenantId_fkey'
 )
 SELECT kind,object,detail FROM inventory ORDER BY kind,object;
