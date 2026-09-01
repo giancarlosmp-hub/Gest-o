@@ -11,6 +11,7 @@ mkdir -p "$APP/scripts/lib" "$AUTH"
 mkdir -p "$TMP/bin"
 printf '#!/usr/bin/env bash\nexit 1\n' >"$TMP/bin/docker"; chmod +x "$TMP/bin/docker"
 cp "$SCRIPT" "$APP/scripts/prepare-production-recovery-backup.sh"
+cp "$ROOT/scripts/resolve-production-env.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/production-backup-common.sh"
 git -C "$APP" init -q -b main
 git -C "$APP" config user.email test@example.invalid
@@ -47,9 +48,9 @@ assert_redacted(){ ! grep -Eq 'backup-sentinel|password-sentinel|database\.examp
 write_env "$CANONICAL"; write_env "$LEGACY"; out="$TMP/a"; run_case "$out"
 assert_contains "$out" 'PRODUCTION_BACKUP_ENV_SOURCE=canonical'; assert_redacted "$out"
 
-# B/K/L: an absent canonical selects the immutable, read-only legacy source.
+# B: production backup rejects legacy even when it is otherwise valid.
 rm -f "$CANONICAL"; before="$(sha256sum "$LEGACY")"; out="$TMP/b"; run_case "$out"
-assert_contains "$out" 'PRODUCTION_BACKUP_ENV_SOURCE=legacy_read_only'
+assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_resolution'
 [[ "$before" == "$(sha256sum "$LEGACY")" && ! -e "$CANONICAL" ]]; assert_redacted "$out"
 
 # C: a present but invalid canonical is authoritative and cannot fall back.
@@ -60,22 +61,22 @@ assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_syntax'; ! grep -Fq 'PRODUCTION
 rm -f "$CANONICAL" "$LEGACY"; out="$TMP/d"; run_case "$out"
 assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_resolution'; assert_redacted "$out"
 
-# E: a legacy symlink is selected as an entry but rejected by metadata validation.
-write_env "$CANONICAL"; mv "$CANONICAL" "$TMP/target"; ln -s "$TMP/target" "$LEGACY"; rm -f "$CANONICAL"
-out="$TMP/e"; run_case "$out"; assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
+# E: a canonical symlink fails closed in the shared resolver.
+write_env "$CANONICAL"; mv "$CANONICAL" "$TMP/target"; rm -f "$LEGACY"; ln -s "$TMP/target" "$CANONICAL"
+out="$TMP/e"; run_case "$out"; assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_resolution'; assert_redacted "$out"
 
 # F: wrong mode (and therefore an invalid protected file) is rejected.
-rm -f "$LEGACY"; write_env "$LEGACY"; chmod 640 "$LEGACY"; out="$TMP/f"; run_case "$out"
-assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
-write_env "$LEGACY"; chown 65534:65534 "$LEGACY"; out="$TMP/f-owner"; run_case "$out"
-assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_metadata'; assert_redacted "$out"
+rm -f "$CANONICAL"; write_env "$CANONICAL"; chmod 640 "$CANONICAL"; out="$TMP/f"; run_case "$out"
+assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_resolution'; assert_redacted "$out"
+write_env "$CANONICAL"; chown 65534:65534 "$CANONICAL"; out="$TMP/f-owner"; run_case "$out"
+assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_resolution'; assert_redacted "$out"
 
 # G: malformed legacy shell syntax is rejected without exposing its path/content.
-rm -f "$LEGACY"; printf 'DATABASE_URL="unterminated\n' >"$LEGACY"; chmod 600 "$LEGACY"; out="$TMP/g"; run_case "$out"
+rm -f "$CANONICAL"; printf 'DATABASE_URL="unterminated\n' >"$CANONICAL"; chmod 600 "$CANONICAL"; out="$TMP/g"; run_case "$out"
 assert_contains "$out" 'BACKUP_FAILURE_STAGE=env_syntax'; assert_redacted "$out"
 
 # H: required configuration failure has only sanitized logical diagnostics.
-printf 'DATABASE_URL=x\n' >"$LEGACY"; chmod 600 "$LEGACY"; out="$TMP/h"; run_case "$out"
+printf 'DATABASE_URL=x\n' >"$CANONICAL"; chmod 600 "$CANONICAL"; out="$TMP/h"; run_case "$out"
 assert_contains "$out" 'BACKUP_FAILURE_STAGE=required_configuration'
 assert_contains "$out" 'BACKUP_FAILURE_COMMAND=validate_backup_configuration_contract'; assert_redacted "$out"
 
@@ -85,7 +86,7 @@ APP_DIR="$APP" CONFIRM=PREPARE_PRODUCTION_RECOVERY_BACKUP EXPECTED_SHA=bad bash 
 set -e; (( rc != 0 )); assert_contains "$out" 'BACKUP_FAILURE_STAGE=expected_sha'; assert_redacted "$out"
 
 # J: a dirty worktree is attributed to checkout and never reaches env resolution.
-write_env "$LEGACY"; touch "$APP/dirty"; out="$TMP/j"; run_case "$out"
+write_env "$CANONICAL"; touch "$APP/dirty"; out="$TMP/j"; run_case "$out"
 assert_contains "$out" 'BACKUP_FAILURE_STAGE=checkout'; ! grep -Fq 'PRODUCTION_BACKUP_ENV_SOURCE=' "$out"; assert_redacted "$out"
 rm -f "$APP/dirty"
 

@@ -12,16 +12,14 @@ ENV_SOURCE=''
 AUTHORIZED_DIR="${PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}}"
 STAGE=initial
 COMMAND=initial_validation
-TMP_DIR=''; OLD_BACKUP=''; OLD_MANIFEST=''; PROMOTION_STARTED=false; HAD_PRIOR=false
+TMP_DIR=''; PROMOTION_STARTED=false
 
 checkpoint(){ printf '%s\n' "$1"; }
 failure(){
   local rc=$?
   trap - ERR
   if [[ "$PROMOTION_STARTED" == true ]]; then
-    [[ -n "$OLD_BACKUP" && -f "$OLD_BACKUP" ]] && install -o root -g root -m 600 "$OLD_BACKUP" "$PRODUCTION_BACKUP_FILE"
-    [[ -n "$OLD_MANIFEST" && -f "$OLD_MANIFEST" ]] && install -o root -g root -m 600 "$OLD_MANIFEST" "$PRODUCTION_BACKUP_SHA256_FILE"
-    if [[ "$HAD_PRIOR" == false ]]; then rm -f -- "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE"; fi
+    rm -f -- "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE"
   fi
   [[ -n "$TMP_DIR" ]] && rm -rf -- "$TMP_DIR"
   printf 'BACKUP_FAILURE_STAGE=%s\nBACKUP_FAILURE_COMMAND=%s\nBACKUP_FAILURE_EXIT_CODE=%s\n' "$STAGE" "$COMMAND" "$rc" >&2
@@ -56,18 +54,14 @@ cd "$APP_DIR"
 git show-ref --verify --quiet refs/remotes/origin/main >/dev/null 2>&1
 [[ "$(git rev-parse HEAD 2>/dev/null)" == "$(git rev-parse origin/main 2>/dev/null)" ]]
 
-# The canonical file is authoritative whenever any directory entry exists.
-# Only its complete absence authorizes the single, read-only legacy source.
 STAGE=env_resolution; COMMAND=resolve_production_configuration
-if [[ -e "$CANONICAL_ENV_FILE" || -L "$CANONICAL_ENV_FILE" ]]; then
-  ENV_FILE="$CANONICAL_ENV_FILE"; ENV_SOURCE=canonical
-elif [[ -e "$LEGACY_ENV_FILE" || -L "$LEGACY_ENV_FILE" ]]; then
-  ENV_FILE="$LEGACY_ENV_FILE"; ENV_SOURCE=legacy_read_only
-else
-  false
-fi
-STAGE=env_metadata; COMMAND=validate_protected_configuration_metadata
-protected_regular "$ENV_FILE"
+env_record="$(MODE=cutover PRODUCTION_ENV_RESOLVER_OUTPUT=record \
+  PRODUCTION_CANONICAL_ENV_FILE="$CANONICAL_ENV_FILE" \
+  PRODUCTION_LEGACY_ENV_FILE="$LEGACY_ENV_FILE" \
+  bash "$APP_DIR/scripts/resolve-production-env.sh")"
+IFS=$'\t' read -r ENV_SOURCE ENV_FILE env_record_extra <<<"$env_record"
+[[ "$ENV_SOURCE" == canonical && -n "$ENV_FILE" && -z "$env_record_extra" ]]
+unset env_record env_record_extra
 STAGE=env_syntax; COMMAND=validate_protected_configuration_syntax
 valid_env_syntax "$ENV_FILE"
 # Loading is read-only. Neither source is copied, reconciled, installed or promoted.
@@ -94,12 +88,8 @@ STAGE=authorized_directory; COMMAND=validate_authorized_directory
 [[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
 checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
 
-EFFECTIVE_BACKUP_FILE="$AUTHORIZED_DIR/production.sql.gz"
-EFFECTIVE_BACKUP_SHA256_FILE="$AUTHORIZED_DIR/production.sql.gz.sha256"
-
-# Historical path variables never select a destination. Canonical configuration
-# keeps them as strict compatibility assertions. In the read-only legacy source
-# they are deprecated hints: only syntax is checked before mandatory rebinding.
+# The canonical variables describe only the previous bundle.  They must never
+# be rebound into the destination of this run.
 STAGE=historical_path_contract; COMMAND=validate_historical_path_contract
 historical_path_syntax_safe(){
   local historical_path=$1
@@ -108,25 +98,45 @@ historical_path_syntax_safe(){
   if LC_ALL=C printf '%s' "$historical_path" | grep -q '[[:cntrl:]]'; then return 1; fi
   [[ "/$historical_path/" != */../* && "/$historical_path/" != */./* ]] || return 1
 }
-for historical_name in PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE; do
-  if [[ -v "$historical_name" ]]; then
-    historical_path_syntax_safe "${!historical_name}"
-  fi
-done
-if [[ "$ENV_SOURCE" == canonical ]]; then
-  [[ ! -v PRODUCTION_BACKUP_FILE || "$PRODUCTION_BACKUP_FILE" == "$EFFECTIVE_BACKUP_FILE" ]]
-  [[ ! -v PRODUCTION_BACKUP_SHA256_FILE || "$PRODUCTION_BACKUP_SHA256_FILE" == "$EFFECTIVE_BACKUP_SHA256_FILE" ]]
-  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=STRICT_CANONICAL
+historical_dump_set=false; historical_manifest_set=false
+[[ -v PRODUCTION_BACKUP_FILE ]] && historical_dump_set=true
+[[ -v PRODUCTION_BACKUP_SHA256_FILE ]] && historical_manifest_set=true
+if [[ "$historical_dump_set" != "$historical_manifest_set" ]]; then
+  checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=incomplete >&2
+  false
+elif [[ "$historical_dump_set" == false ]]; then
+  checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=absent
 else
-  checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_POLICY=REBOUND_LEGACY_READ_ONLY
+  HISTORICAL_BACKUP_FILE=$PRODUCTION_BACKUP_FILE
+  HISTORICAL_BACKUP_SHA256_FILE=$PRODUCTION_BACKUP_SHA256_FILE
+  historical_path_syntax_safe "$HISTORICAL_BACKUP_FILE"
+  historical_path_syntax_safe "$HISTORICAL_BACKUP_SHA256_FILE"
+  [[ "$(readlink -m -- "$HISTORICAL_BACKUP_FILE")" == "$HISTORICAL_BACKUP_FILE" ]]
+  [[ "$(readlink -m -- "$HISTORICAL_BACKUP_SHA256_FILE")" == "$HISTORICAL_BACKUP_SHA256_FILE" ]]
+  [[ "$(dirname -- "$HISTORICAL_BACKUP_FILE")" == "$AUTHORIZED_DIR" ]]
+  [[ "$(dirname -- "$HISTORICAL_BACKUP_SHA256_FILE")" == "$AUTHORIZED_DIR" ]]
+  [[ "$HISTORICAL_BACKUP_FILE" != "$HISTORICAL_BACKUP_SHA256_FILE" ]]
+  if [[ ! -e "$HISTORICAL_BACKUP_FILE" && ! -e "$HISTORICAL_BACKUP_SHA256_FILE" ]]; then
+    checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=absent
+  elif [[ ! -e "$HISTORICAL_BACKUP_FILE" || ! -e "$HISTORICAL_BACKUP_SHA256_FILE" ]]; then
+    checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=incomplete >&2
+    false
+  else
+    protected_regular "$HISTORICAL_BACKUP_FILE"
+    protected_regular "$HISTORICAL_BACKUP_SHA256_FILE"
+    valid_existing_manifest "$HISTORICAL_BACKUP_SHA256_FILE" "$(basename "$HISTORICAL_BACKUP_FILE")"
+    (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$HISTORICAL_BACKUP_SHA256_FILE")" >/dev/null)
+    checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=complete_valid
+  fi
 fi
 checkpoint PRODUCTION_BACKUP_HISTORICAL_PATH_CONTRACT=PASS
 
-# Rebind after validation so neither legacy hint can be used by any inventory,
-# dump, removal, rollback, or promotion operation.
-PRODUCTION_BACKUP_FILE="$EFFECTIVE_BACKUP_FILE"
-PRODUCTION_BACKUP_SHA256_FILE="$EFFECTIVE_BACKUP_SHA256_FILE"
-unset EFFECTIVE_BACKUP_FILE EFFECTIVE_BACKUP_SHA256_FILE historical_name
+# Generate a fresh immutable bundle name.  Holding the directory lock later
+# closes the remaining TOCTOU window before anything is written.
+bundle_id="$EXPECTED_SHA-$(date -u +%Y%m%dT%H%M%S)-$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+PRODUCTION_BACKUP_FILE="$AUTHORIZED_DIR/production-$bundle_id.sql.gz"
+PRODUCTION_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_FILE.sha256"
+unset bundle_id historical_dump_set historical_manifest_set
 
 STAGE=dump_path_contract; COMMAND=validate_dump_path_contract
 COMMAND=validate_dump_path_absolute
@@ -142,13 +152,13 @@ COMMAND=validate_dump_path_parent
 [[ "$(dirname -- "$PRODUCTION_BACKUP_FILE")" == "$AUTHORIZED_DIR" ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_PARENT=PASS
 COMMAND=validate_dump_path_basename
-[[ "$(basename -- "$PRODUCTION_BACKUP_FILE")" == production.sql.gz ]]
+[[ "$(basename -- "$PRODUCTION_BACKUP_FILE")" =~ ^production-[0-9a-f]{40}-[0-9]{8}T[0-9]{6}-[0-9a-f]{16}\.sql\.gz$ ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_BASENAME=PASS
 COMMAND=validate_dump_path_symlink
 [[ ! -L "$PRODUCTION_BACKUP_FILE" ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_SYMLINK=PASS
 COMMAND=validate_dump_path_entry_type
-[[ ! -e "$PRODUCTION_BACKUP_FILE" || -f "$PRODUCTION_BACKUP_FILE" ]]
+[[ ! -e "$PRODUCTION_BACKUP_FILE" ]]
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_ENTRY_TYPE=PASS
 checkpoint PRODUCTION_BACKUP_DUMP_PATH_CONTRACT=PASS
 
@@ -156,22 +166,13 @@ STAGE=manifest_path_contract; COMMAND=validate_manifest_path
 [[ "$PRODUCTION_BACKUP_SHA256_FILE" == /* && "$PRODUCTION_BACKUP_SHA256_FILE" != */../* && "$PRODUCTION_BACKUP_SHA256_FILE" != */.. && "$PRODUCTION_BACKUP_SHA256_FILE" != */./* && "$PRODUCTION_BACKUP_SHA256_FILE" != */. ]]
 [[ "$(readlink -m -- "$PRODUCTION_BACKUP_SHA256_FILE")" == "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ "$(dirname -- "$PRODUCTION_BACKUP_SHA256_FILE")" == "$AUTHORIZED_DIR" ]]
-[[ "$(basename -- "$PRODUCTION_BACKUP_SHA256_FILE")" == production.sql.gz.sha256 ]]
+[[ "$PRODUCTION_BACKUP_SHA256_FILE" == "$PRODUCTION_BACKUP_FILE.sha256" ]]
 [[ ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -f "$PRODUCTION_BACKUP_SHA256_FILE" ]]
+[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 [[ "$PRODUCTION_BACKUP_FILE" != "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 checkpoint PRODUCTION_BACKUP_MANIFEST_PATH_CONTRACT=PASS
 
-STAGE=existing_pair_state; COMMAND=validate_existing_pair_state
-if [[ ! -e "$PRODUCTION_BACKUP_FILE" && ! -e "$PRODUCTION_BACKUP_SHA256_FILE" ]]; then
-  checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_STATE=absent
-else
-  protected_regular "$PRODUCTION_BACKUP_FILE"
-  protected_regular "$PRODUCTION_BACKUP_SHA256_FILE"
-  valid_existing_manifest "$PRODUCTION_BACKUP_SHA256_FILE" "$(basename "$PRODUCTION_BACKUP_FILE")"
-  (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null)
-  checkpoint PRODUCTION_BACKUP_EXISTING_PAIR_STATE=complete_valid
-fi
+checkpoint PRODUCTION_BACKUP_NEW_DESTINATION_STATE=absent
 
 STAGE=database_url_contract; COMMAND=parse_database_url
 db_inventory="$(DATABASE_URL="$DATABASE_URL" node -e 'const u=new URL(process.env.DATABASE_URL); if (!u.hostname || !u.pathname.slice(1)) process.exit(1); process.stdout.write(`${u.hostname}\t${u.pathname.slice(1)}`)')"
@@ -277,6 +278,12 @@ exec 9>"$AUTHORIZED_DIR/.prepare-production-recovery-backup.lock"
 STAGE=preparation_lock; COMMAND=acquire_preparation_lock
 flock -n 9
 checkpoint PRODUCTION_BACKUP_LOCK=ACQUIRED
+STAGE=destination_collision; COMMAND=revalidate_new_destination_absent
+if [[ -e "$PRODUCTION_BACKUP_FILE" || -L "$PRODUCTION_BACKUP_FILE" ||
+      -e "$PRODUCTION_BACKUP_SHA256_FILE" || -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]; then
+  checkpoint PRODUCTION_BACKUP_NEW_DESTINATION_STATE=collision >&2
+  false
+fi
 checkpoint PRODUCTION_BACKUP_SOURCE_VALIDATED=PASS
 
 STAGE=dump; COMMAND=prepare_validated_dump
@@ -354,9 +361,8 @@ chmod 600 "$candidate"
 chmod 600 "$manifest"; checkpoint PRODUCTION_BACKUP_MANIFEST=PASS
 
 STAGE=atomic_promotion; COMMAND=promote_consistent_pair
-[[ ! -e "$PRODUCTION_BACKUP_FILE" || -f "$PRODUCTION_BACKUP_SHA256_FILE" ]]
-[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" || -f "$PRODUCTION_BACKUP_FILE" ]]
-if [[ -f "$PRODUCTION_BACKUP_FILE" ]]; then HAD_PRIOR=true; OLD_BACKUP="$TMP_DIR/old.backup"; cp -p "$PRODUCTION_BACKUP_FILE" "$OLD_BACKUP"; OLD_MANIFEST="$TMP_DIR/old.manifest"; cp -p "$PRODUCTION_BACKUP_SHA256_FILE" "$OLD_MANIFEST"; fi
+[[ ! -e "$PRODUCTION_BACKUP_FILE" && ! -L "$PRODUCTION_BACKUP_FILE" ]]
+[[ ! -e "$PRODUCTION_BACKUP_SHA256_FILE" && ! -L "$PRODUCTION_BACKUP_SHA256_FILE" ]]
 PROMOTION_STARTED=true
 mv -f "$candidate" "$PRODUCTION_BACKUP_FILE"
 sync -f "$PRODUCTION_BACKUP_FILE"
@@ -367,7 +373,7 @@ protected_regular "$PRODUCTION_BACKUP_FILE"; protected_regular "$PRODUCTION_BACK
 (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null)
 PROMOTION_STARTED=false; checkpoint PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS
 checkpoint PRODUCTION_BACKUP_PRESENCE=PASS; checkpoint PRODUCTION_BACKUP_INTEGRITY=PASS
-backup_validate_canonical_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
+backup_validate_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
 # Shared validation above emits PRODUCTION_BACKUP_FRESHNESS=PASS.
 STAGE=pr827_proof_publication; COMMAND=publish_and_revalidate_pr827_backup_proof
 source "$APP_DIR/scripts/lib/pr827-backup-proof.sh"
