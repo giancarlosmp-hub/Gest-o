@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
-const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
+const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), schemaEvidence=read("scripts/schema-evidence-validation.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
 const envResolver=read("scripts/resolve-production-env.sh");
 const entrypoint=read("scripts/production-deploy-entrypoint.sh");
@@ -60,31 +60,38 @@ for (const services of [["api", "web", "db"], ["api", "web", "worker"], ["api"],
 assert.ok(deploy.indexOf('build api web') < deploy.indexOf('docker stop')); assert.match(deploy,/CONFIRM.*PRODUCTION_CUTOVER/); assert.match(deploy,/trap rollback ERR/);
 assert.ok(deploy.includes("tr -cd '[:alnum:]._ -'")); assert.ok(!deploy.includes("tr -cd '[:alnum:]._- '"));
 assert.match(deploy,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
-assert.match(deploy,/git show "\$evidence_commit:\$schema_migration" \| sha256sum/);
-assert.match(deploy,/post-apply-diff\.sql" && ! -s "\$evidence_dir\/post-apply-diff\.sql/);
+assert.match(schemaEvidence,/git show "\$evidence_commit:\$evidence_migration" \| sha256sum/);
+assert.match(schemaEvidence,/SCHEMA_MIGRATION_PR827/);
+assert.match(schemaEvidence,/schema_protected_file "\$evidence_dir\/post-apply-diff\.sql"/);
+assert.match(schemaEvidence,/! -e "\$evidence_dir\/post-apply-diff\.sql"/);
 assert.match(deploy,/schema-diff-filter\.mjs "\$schema_validation_tmp\/raw\.sql" "\$schema_validation_tmp\/managed\.sql" post/);
 assert.match(deploy,/\[\[ ! -s "\$schema_validation_tmp\/managed\.sql" \]\]/);
 const allowlistCase = deploy.match(/is_schema_evidence_operational_path\(\)\{[\s\S]*?\n\}/)?.[0] ?? "";
 assert.ok(allowlistCase, "função da allowlist operacional ausente");
 const operationalAllowlist = [
-  "scripts/deploy-production.sh",
-  "scripts/production-rollback.sh",
-  "scripts/smoke/production-deploy-safety.mjs",
+  ".github/workflows/prepare-canonical-production-env.yml",
   "docs/DEPLOY_GUIDE.md",
+  "docs/DOCUMENTO_MESTRE.md",
   "docs/OPERACAO.md",
   "docs/STATUS_ATUAL.md",
-  "docs/DOCUMENTO_MESTRE.md",
   "docs/investigations/production-schema-transition-july-2026.md",
+  "package.json",
+  "scripts/deploy-production.sh",
+  "scripts/prepare-canonical-production-env.sh",
+  "scripts/production-rollback.sh",
+  "scripts/schema-evidence-validation.sh",
+  "scripts/smoke/prepare-canonical-production-env-safety.sh",
+  "scripts/smoke/production-deploy-safety.mjs",
+  "scripts/smoke/schema-evidence-validation.sh",
 ];
 const casePaths = (allowlistCase.match(/^    (.+)\) return 0 ;;$/m)?.[1] ?? "").split("|");
-assert.deepEqual(casePaths, operationalAllowlist, "allowlist deve conter somente os oito caminhos exatos");
+assert.deepEqual(casePaths, operationalAllowlist, "allowlist deve conter somente os caminhos operacionais exatos");
 for (const path of operationalAllowlist) assert.ok(casePaths.includes(path), `allowlist rejeitou ${path}`);
 for (const path of [
   "apps/api/src/app.ts",
   "apps/web/src/App.tsx",
   "apps/api/prisma/schema.prisma",
   "apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql",
-  "package.json",
   "docker-compose.production.yml",
   ".github/workflows/deploy-production.yml",
 ]) assert.ok(!casePaths.includes(path), `allowlist aceitou caminho proibido: ${path}`);
