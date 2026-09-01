@@ -6,6 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20260808120000_tenancy_expand_roots": Object.freeze({
+    id: "20260808120000_tenancy_expand_roots",
+    path: "apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql",
+    sha256: "90b25a912cd48ae03eb662355ebff271e9a84e63bc11b75f9ec0b41d2669d996",
+    introCommit: "4cd0c0d4ac80d06bbb5b932ad46deb4702fbc18b",
+    predecessor: "20260802120000_tenancy_control_plane",
+    objects: Object.freeze({
+      columns: ["KnowledgeDocument.tenantId", "Client.tenantId", "AgendaEvent.tenantId", "Goal.tenantId", "ActivityKPI.tenantId", "Sale.tenantId", "SellerTerritoryCity.tenantId", "AppConfig.tenantId", "Product.tenantId", "ErpSyncRun.tenantId", "ErpSyncLock.tenantId"],
+      indexes: ["KnowledgeDocument_tenantId_idx", "Client_tenantId_idx", "AgendaEvent_tenantId_idx", "Goal_tenantId_idx", "ActivityKPI_tenantId_idx", "Sale_tenantId_idx", "SellerTerritoryCity_tenantId_idx", "AppConfig_tenantId_idx", "Product_tenantId_idx", "ErpSyncRun_tenantId_idx", "ErpSyncLock_tenantId_idx"],
+      foreignKeys: ["KnowledgeDocument_tenantId_fkey", "Client_tenantId_fkey", "AgendaEvent_tenantId_fkey", "Goal_tenantId_fkey", "ActivityKPI_tenantId_fkey", "Sale_tenantId_fkey", "SellerTerritoryCity_tenantId_fkey", "AppConfig_tenantId_fkey", "Product_tenantId_fkey", "ErpSyncRun_tenantId_fkey", "ErpSyncLock_tenantId_fkey"]
+    }),
+    postconditions: Object.freeze(["catalog-exact", "all-columns-nullable", "no-business-row-changes", "tenancy-mode-disabled", "managed-diff-empty", "pr827-preserved", "prisma-ledger-absent", "incident-objects-preserved"]),
+    evidenceVersion: 1
+  }),
   "20260802120000_tenancy_control_plane": Object.freeze({
     id: "20260802120000_tenancy_control_plane",
     path: "apps/api/prisma/migrations/20260802120000_tenancy_control_plane/migration.sql",
