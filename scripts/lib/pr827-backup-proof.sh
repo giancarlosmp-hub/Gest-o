@@ -4,29 +4,43 @@
 PR827_BACKUP_PROOF_FORMAT=1
 PR827_BACKUP_RESULT_FILE_DEFAULT=/var/log/gest-o/backup/latest/result.tsv
 
+pr827_backup_proof_contract() {
+  PR827_BACKUP_PROOF_CONTRACT_ROOT=${PR827_BACKUP_PROOF_ROOT:-/var/log/gest-o/backup}
+  PR827_BACKUP_PROOF_CONTRACT_OWNER=${PR827_BACKUP_PROOF_EXPECTED_OWNER:-root:root}
+  [[ "$PR827_BACKUP_PROOF_CONTRACT_ROOT" == /* && "$PR827_BACKUP_PROOF_CONTRACT_ROOT" != / &&
+     ! "$PR827_BACKUP_PROOF_CONTRACT_ROOT" =~ /\.\.?(/|$) ]] || return 1
+  [[ "$PR827_BACKUP_PROOF_CONTRACT_OWNER" =~ ^[A-Za-z_][A-Za-z0-9_-]*:[A-Za-z_][A-Za-z0-9_-]*$ ]] || return 1
+}
+
 pr827_backup_proof_validate() {
   local result_file=$1 expected_sha=$2 max_age=$3
-  local latest root dump manifest owner now age before after
+  local latest root dump manifest now age before after
   local format='' status='' database='' sha='' created='' digest='' bundle_id=''
 
-  [[ "$result_file" == "$PR827_BACKUP_RESULT_FILE_DEFAULT" ]] || return 1
+  pr827_backup_proof_contract || return 1
+  [[ "$result_file" == "$PR827_BACKUP_PROOF_CONTRACT_ROOT/latest/result.tsv" ]] || return 1
   [[ "$expected_sha" =~ ^[0-9a-f]{40}$ && "$max_age" =~ ^[0-9]+$ && "$max_age" -gt 0 ]] || return 1
   latest=${result_file%/result.tsv}; root=${latest%/latest}
-  [[ "$root" == /var/log/gest-o/backup && "$latest" == "$root/latest" ]] || return 1
+  [[ "$root" == "$PR827_BACKUP_PROOF_CONTRACT_ROOT" && "$latest" == "$root/latest" ]] || return 1
 
   # Every component controlled by this contract is a real directory/file.  A
   # symlink at any level must not redirect the privileged apply reader.
   local component
-  for component in /var /var/log /var/log/gest-o "$root" "$latest"; do
+  for component in "$root" "$latest"; do
     [[ -d "$component" && ! -L "$component" ]] || return 1
   done
-  [[ "$(stat -c '%U:%G:%a' "$root")" == root:root:700 ]] || return 1
-  [[ "$(stat -c '%U:%G:%a' "$latest")" == root:root:700 ]] || return 1
+  if [[ "$root" == /var/log/gest-o/backup ]]; then
+    for component in /var /var/log /var/log/gest-o; do
+      [[ -d "$component" && ! -L "$component" ]] || return 1
+    done
+  fi
+  [[ "$(stat -c '%U:%G:%a' "$root")" == "$PR827_BACKUP_PROOF_CONTRACT_OWNER:700" ]] || return 1
+  [[ "$(stat -c '%U:%G:%a' "$latest")" == "$PR827_BACKUP_PROOF_CONTRACT_OWNER:700" ]] || return 1
 
   dump="$latest/dump.sql.gz"; manifest="$latest/dump.sql.gz.sha256"
   for component in "$dump" "$manifest" "$result_file"; do
     [[ -f "$component" && ! -L "$component" && -s "$component" ]] || return 1
-    [[ "$(stat -c '%U:%G:%a' "$component")" == root:root:600 ]] || return 1
+    [[ "$(stat -c '%U:%G:%a' "$component")" == "$PR827_BACKUP_PROOF_CONTRACT_OWNER:600" ]] || return 1
   done
 
   while IFS=$'\t' read -r key value extra; do
@@ -57,21 +71,23 @@ pr827_backup_proof_validate() {
 pr827_backup_proof_publish() {
   local source_dump=$1 expected_sha=$2 result_file=$3 max_age=$4
   local latest root stage previous created digest bundle_id published=false
-  [[ "$result_file" == "$PR827_BACKUP_RESULT_FILE_DEFAULT" ]] || return 1
+  pr827_backup_proof_contract || return 1
+  [[ "$result_file" == "$PR827_BACKUP_PROOF_CONTRACT_ROOT/latest/result.tsv" ]] || return 1
   latest=${result_file%/result.tsv}; root=${latest%/latest}
-  install -d -o root -g root -m 700 /var/log/gest-o "$root"
-  [[ ! -L /var/log/gest-o && ! -L "$root" ]] || return 1
-  [[ "$(stat -c '%U:%G:%a' "$root")" == root:root:700 ]] || return 1
+  local expected_user=${PR827_BACKUP_PROOF_CONTRACT_OWNER%%:*} expected_group=${PR827_BACKUP_PROOF_CONTRACT_OWNER#*:}
+  install -d -o "$expected_user" -g "$expected_group" -m 700 "$root"
+  [[ ! -L "$root" ]] || return 1
+  [[ "$(stat -c '%U:%G:%a' "$root")" == "$PR827_BACKUP_PROOF_CONTRACT_OWNER:700" ]] || return 1
   stage=$(mktemp -d "$root/.latest.XXXXXXXX"); previous="$root/.previous.$$"
   cleanup_proof_stage() { [[ "$published" == true ]] || rm -rf -- "$stage"; rm -rf -- "$previous"; }
   trap cleanup_proof_stage RETURN
-  install -o root -g root -m 600 "$source_dump" "$stage/dump.sql.gz"
+  install -o "$expected_user" -g "$expected_group" -m 600 "$source_dump" "$stage/dump.sql.gz"
   digest=$(sha256sum "$stage/dump.sql.gz" | awk '{print $1}')
   printf '%s  dump.sql.gz\n' "$digest" >"$stage/dump.sql.gz.sha256"
   created=$(date +%s); bundle_id="$expected_sha-$created"
   printf 'FORMAT\t%s\nSTATUS\tPASS\nDATABASE\tsalesforce_pro\nSHA\t%s\nCREATED_AT_EPOCH\t%s\nDUMP_SHA256\t%s\nBUNDLE_ID\t%s\n' \
     "$PR827_BACKUP_PROOF_FORMAT" "$expected_sha" "$created" "$digest" "$bundle_id" >"$stage/result.tsv"
-  chown root:root "$stage" "$stage"/*; chmod 700 "$stage"; chmod 600 "$stage"/*
+  chown "$PR827_BACKUP_PROOF_CONTRACT_OWNER" "$stage" "$stage"/*; chmod 700 "$stage"; chmod 600 "$stage"/*
   python3 - "$stage" <<'PY'
 import os, sys
 for name in ('dump.sql.gz', 'dump.sql.gz.sha256', 'result.tsv'):

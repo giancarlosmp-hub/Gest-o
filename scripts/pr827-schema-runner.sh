@@ -88,6 +88,19 @@ else echo HISTORY_DIVERGENCE_CATEGORY=HISTORY_CATALOG_DIVERGENCE; die 'history/c
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'image/SHA mismatch'
 : "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"
 source scripts/lib/pr827-backup-proof.sh
+# The production contract remains fixed. The only override is a disposable
+# checkout rooted below /tmp, used by this repository's PostgreSQL harness.
+if [[ -n ${PR827_BACKUP_FIXTURE_ROOT:-} ]]; then
+ fixture_real=$(realpath "$PR827_BACKUP_FIXTURE_ROOT")
+ runner_real=$(realpath "$root")
+ [[ "$fixture_real" == /tmp/* && "$runner_real" == "$fixture_real/checkout" && "$BACKUP_RESULT_FILE" == "$fixture_real/backup/latest/result.tsv" ]] || die 'protected backup fixture boundary is invalid'
+ export PR827_BACKUP_PROOF_ROOT="$fixture_real/backup"
+ fixture_owner=${PR827_BACKUP_FIXTURE_EXPECTED_OWNER:-$(id -un):$(id -gn)}
+ [[ "$fixture_owner" =~ ^[A-Za-z_][A-Za-z0-9_-]*:[A-Za-z_][A-Za-z0-9_-]*$ ]] || die 'protected backup fixture owner is invalid'
+ export PR827_BACKUP_PROOF_EXPECTED_OWNER="$fixture_owner"
+else
+ unset PR827_BACKUP_PROOF_ROOT PR827_BACKUP_PROOF_EXPECTED_OWNER
+fi
 pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-3600}" || die 'protected backup proof required'
 if (( idempotent == 0 )); then
  # Revalidate the mutable catalog and history immediately before granting write authority.

@@ -22,9 +22,17 @@ git -C "$HARNESS_EXECUTION_CHECKOUT" update-ref refs/remotes/origin/main "$expec
 harness_head=$(git -C "$HARNESS_EXECUTION_CHECKOUT" rev-parse HEAD); harness_origin_main=$(git -C "$HARNESS_EXECUTION_CHECKOUT" rev-parse refs/remotes/origin/main)
 [[ $harness_head == "$head" && $expected_main_sha == "$head" && $harness_origin_main == "$head" ]]
 printf 'HARNESS_HEAD_SHA=%s\nHARNESS_EXPECTED_MAIN_SHA=%s\nHARNESS_ORIGIN_MAIN_SHA=%s\n' "$harness_head" "$expected_main_sha" "$harness_origin_main"
-owner=$(id -un):$(id -gn); history="$HARNESS_TEMP_ROOT/history"; env_file="$HARNESS_TEMP_ROOT/env"; backup="$HARNESS_TEMP_ROOT/backup-result"
+owner=$(id -un):$(id -gn); fixture_expected_owner=$owner; history="$HARNESS_TEMP_ROOT/history"; env_file="$HARNESS_TEMP_ROOT/env"; backup_root="$HARNESS_TEMP_ROOT/backup"; backup="$backup_root/latest/result.tsv"
 baseline_sha=$(git rev-list HEAD -- apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql | while read -r c; do [[ $(git show "$c:apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql" | sha256sum | cut -d' ' -f1) == 66efa6f797840a19731c15e264b8e5398f3e44179da8a35795c247b53baa5506 ]] && { echo "$c"; break; }; done)
-mkdir -m 700 "$history"; printf 'DATABASE_URL=postgresql://redacted.invalid/salesforce_pro\n' >"$env_file"; printf 'PASS\n' >"$backup"; chmod 600 "$env_file" "$backup"
+mkdir -m 700 "$history"; printf 'DATABASE_URL=postgresql://redacted.invalid/salesforce_pro\n' >"$env_file"; chmod 600 "$env_file"
+source "$HARNESS_EXECUTION_CHECKOUT/scripts/lib/pr827-backup-proof.sh"
+export PR827_BACKUP_PROOF_ROOT="$backup_root" PR827_BACKUP_PROOF_EXPECTED_OWNER="$owner"
+printf '%s\nCREATE TABLE synthetic_backup_fixture(id integer);\n' 'PostgreSQL database dump' >"$HARNESS_TEMP_ROOT/synthetic-backup.sql"
+gzip -c "$HARNESS_TEMP_ROOT/synthetic-backup.sql" >"$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz"
+publish_backup_fixture(){ pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600; pr827_backup_proof_validate "$backup" "$head" 3600; }
+publish_backup_fixture
+echo BACKUP_FIXTURE_CONTRACT=PASS
+echo BACKUP_FIXTURE_FINAL_VALIDATION=PASS
 mkdir -p "$HARNESS_TEMP_ROOT/image/node_modules/.bin"; cat >"$HARNESS_TEMP_ROOT/image/node_modules/.bin/prisma" <<'SH'
 #!/bin/sh
 exit 0
@@ -45,19 +53,45 @@ make_baseline(){
 run_apply(){
  local rc; assert_clean_worktree BEFORE
  if MODE=apply CONFIRM=APPLY_PR827_SCHEMA EXPECTED_SHA="$head" API_IMAGE="pr827-diff:$head" BACKUP_RESULT_FILE="$backup" \
+  PR827_BACKUP_FIXTURE_ROOT="$HARNESS_TEMP_ROOT" PR827_BACKUP_FIXTURE_EXPECTED_OWNER="$fixture_expected_owner" \
   MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution PRODUCTION_ENV_SOURCE=legacy_copy PRODUCTION_ENV_FILE="$env_file" \
   ERP_ENV_EXPECTED_OWNER="$owner" APPLIED_TSV_EXPECTED_OWNER="$owner" SCHEMA_EVIDENCE_DIR="$history" DATABASE_SCHEMA_MODE=external \
  PRODUCTION_DB_CONTAINER_EXPECTED="$pg" PRODUCTION_DB_NAME_EXPECTED=salesforce_pro ERP_PRODUCTION_ENV_SOURCE=legacy_build_only bash "$HARNESS_EXECUTION_CHECKOUT/scripts/pr827-schema-runner.sh"; then rc=0; else rc=$?; fi
  assert_clean_worktree AFTER; return "$rc"
 }
+assert_backup_rejected(){
+ local label=$1 rc
+ set +e
+ run_apply >"$HARNESS_TEMP_ROOT/backup-negative-$label.out" 2>&1
+ rc=$?
+ set -e
+ (( rc != 0 ))
+ grep -Fq '[pr827-schema] ERROR protected backup proof required' "$HARNESS_TEMP_ROOT/backup-negative-$label.out"
+ publish_backup_fixture
+}
+rm "$backup"; assert_backup_rejected absent
+rm "$backup_root/latest/dump.sql.gz"; assert_backup_rejected dump_absent
+printf 'tampered\n' >>"$backup_root/latest/dump.sql.gz"; assert_backup_rejected checksum_divergent
+rm "$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_absent
+printf 'invalid manifest\n' >"$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_invalid
+sed -i "s/^CREATED_AT_EPOCH.*/CREATED_AT_EPOCH\t$(( $(date +%s) - 7200 ))/" "$backup"; assert_backup_rejected timestamp_expired
+sed -i 's/^SHA.*/SHA\t0000000000000000000000000000000000000000/' "$backup"; assert_backup_rejected sha_mismatch
+sed -i 's/^DATABASE.*/DATABASE\tother_database/' "$backup"; assert_backup_rejected database_mismatch
+chmod 644 "$backup"; assert_backup_rejected mode_invalid
+if [[ $owner == root:root ]]; then fixture_expected_owner=nobody:nogroup; else fixture_expected_owner=root:root; fi
+assert_backup_rejected owner_invalid; fixture_expected_owner=$owner
+mv "$backup" "$HARNESS_TEMP_ROOT/real-result.tsv"; ln -s "$HARNESS_TEMP_ROOT/real-result.tsv" "$backup"; assert_backup_rejected symlink
+echo BACKUP_NEGATIVE_CASES=PASS
 reset_db; make_baseline; run_apply >"$HARNESS_TEMP_ROOT/apply.out"; grep -Fxq PR827_MIGRATION_APPLY=PASS "$HARNESS_TEMP_ROOT/apply.out"; test -f "$history/$head/applied.tsv"; test "$(psql -Atc "SELECT to_regclass('public.\"ErpOrderManualResolution\"') IS NOT NULL")" = t
-run_apply >"$HARNESS_TEMP_ROOT/idempotent.out"; grep -Fxq PR827_MIGRATION_IDEMPOTENCY=PASS "$HARNESS_TEMP_ROOT/idempotent.out"; echo 'REAL_RUNNER_APPLY_AND_IDEMPOTENCY=PASS'
+run_apply >"$HARNESS_TEMP_ROOT/idempotent.out"; grep -Fxq PR827_MIGRATION_IDEMPOTENCY=PASS "$HARNESS_TEMP_ROOT/idempotent.out"; echo 'REAL_RUNNER_APPLY_AND_IDEMPOTENCY=PASS'; echo APPLY_IDEMPOTENCY=PASS
 
 reset_db; make_baseline; ( while [[ ! -d "$history/.pr827-$head.tmp" ]]; do sleep .01; done; : >"$history/$head" ) & racer=$!
 if run_apply >"$HARNESS_TEMP_ROOT/register-fail" 2>&1; then exit 1; fi; wait "$racer"; test "$(psql -Atc "SELECT to_regclass('public.\"ErpOrderManualResolution\"') IS NULL")" = t; test ! -e "$history/$head/applied.tsv"; echo 'REGISTER_FAILURE_ROLLS_BACK_DDL=PASS'
 
 reset_db; make_baseline; ( while [[ ! -d "$history/.pr827-$head.tmp" ]]; do sleep .01; done; psql -c 'CREATE TYPE public."ErpOrderManualResolutionCategory" AS ENUM ('\''manual_verified_not_found'\'')' >/dev/null ) & racer=$!
 if run_apply >"$HARNESS_TEMP_ROOT/ddl-fail" 2>&1; then exit 1; fi; wait "$racer"; test ! -e "$history/$head/applied.tsv"; test "$(psql -Atc "SELECT to_regclass('public.\"ErpOrderManualResolution\"') IS NULL")" = t; echo 'DDL_FAILURE_WITHOUT_HISTORY=PASS'
+echo APPLY_ROLLBACK_CASES=PASS
+test "$(psql -Atc "SELECT to_regclass('public.\"_prisma_migrations\"') IS NULL")" = t; echo PRISMA_LEDGER_CREATED=NO
 echo 'PR827_APPLY_POSTGRES_RESULT=PASS'
 assert_clean_worktree AFTER
 primary_origin_main_after=ABSENT; if git -C "$ROOT" show-ref --verify --quiet refs/remotes/origin/main; then primary_origin_main_after=$(git -C "$ROOT" rev-parse refs/remotes/origin/main); fi

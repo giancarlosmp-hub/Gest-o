@@ -35,6 +35,12 @@ assert.ok(composeCi.indexOf("Record checkout lockfile") < composeCi.indexOf("Set
 const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
+for (const token of ["pr827_backup_proof_publish", "pr827_backup_proof_validate", "BACKUP_FIXTURE_CONTRACT=PASS", "BACKUP_FIXTURE_FINAL_VALIDATION=PASS", "BACKUP_NEGATIVE_CASES=PASS", "APPLY_IDEMPOTENCY=PASS", "APPLY_ROLLBACK_CASES=PASS", "PRISMA_LEDGER_CREATED=NO", "PR827_APPLY_POSTGRES_RESULT=PASS"])
+  assert.match(applyHarness, new RegExp(token));
+for (const negative of ["absent", "dump_absent", "checksum_divergent", "manifest_absent", "manifest_invalid", "timestamp_expired", "sha_mismatch", "database_mismatch", "mode_invalid", "owner_invalid", "symlink"])
+  assert.match(applyHarness, new RegExp(negative));
+assert.doesNotMatch(applyHarness, /printf ['"]PASS/);
+assert.doesNotMatch(applyHarness, /\|\|\s*(?:true|:)/);
 for (const harness of [postgresHarness, applyHarness]) {
   for (const token of ["HARNESS_TEMP_ROOT", "TMPDIR=/tmp mktemp -d", "status --porcelain=v1", "HARNESS_WORKTREE_%s=PASS"])
     assert.match(harness, new RegExp(token.replace(/[?$]/g,"\\$&")));
