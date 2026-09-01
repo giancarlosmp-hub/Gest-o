@@ -29,9 +29,33 @@ validate_contract(){
   for name in "${required[@]}"; do
     awk -F= -v key="$name" '$1==key && length(substr($0,index($0,"=")+1))>0{ok=1} END{exit !ok}' "$file" || die 'a required key is absent or empty'
   done
-  # Format checks expose only a classification on failure.
-  awk -F= '$1=="DATABASE_URL"{v=substr($0,index($0,"=")+1); ok=(v ~ /^postgres(ql)?:\/\//)} END{exit !ok}' "$file" || die 'DATABASE_URL format is invalid'
-  awk -F= '$1=="ULTRAFV3_BASE_URL"{v=substr($0,index($0,"=")+1); ok=(v ~ /^https?:\/\//)} END{exit !ok}' "$file" || die 'ERP URL format is invalid'
+  # Inspect a dotenv value through an unquoted view without changing the file.
+  # A leading quote requires a matching trailing quote; a lone trailing quote is
+  # invalid. The protected value itself is never emitted.
+  awk -F= '
+    function dotenv_value_has_prefix(v, prefix, first, last) {
+      first=substr(v,1,1); last=substr(v,length(v),1)
+      if (first == "\047" || first == "\042") {
+        if (length(v) <= 2 || last != first) return 0
+        v=substr(v,2,length(v)-2)
+      } else if (last == "\047" || last == "\042") return 0
+      return v ~ prefix
+    }
+    $1=="DATABASE_URL" {v=substr($0,index($0,"=")+1); ok=dotenv_value_has_prefix(v,"^postgres(ql)?://")}
+    END {exit !ok}
+  ' "$file" || die 'DATABASE_URL format is invalid'
+  awk -F= '
+    function dotenv_value_has_prefix(v, prefix, first, last) {
+      first=substr(v,1,1); last=substr(v,length(v),1)
+      if (first == "\047" || first == "\042") {
+        if (length(v) <= 2 || last != first) return 0
+        v=substr(v,2,length(v)-2)
+      } else if (last == "\047" || last == "\042") return 0
+      return v ~ prefix
+    }
+    $1=="ULTRAFV3_BASE_URL" {v=substr($0,index($0,"=")+1); ok=dotenv_value_has_prefix(v,"^https?://")}
+    END {exit !ok}
+  ' "$file" || die 'ERP URL format is invalid'
   for required in ERP_SYNC_SCHEDULER_ENABLED=true TENANCY_MODE=disabled TENANT_READ_PILOT_ENABLED=false DATABASE_SCHEMA_MODE=external SEED_ON_BOOTSTRAP=false ENABLE_PREVIEW_SEED=false ENABLE_SMOKE_BOOTSTRAP=false; do
     name=${required%%=*}; awk -F= -v key="$name" -v wanted="${required#*=}" '$1==key && substr($0,index($0,"=")+1)==wanted{ok=1} END{exit !ok}' "$file" || die 'a closed production gate has an invalid policy'
   done
