@@ -49,7 +49,7 @@ STAGE=confirmation; COMMAND=validate_confirmation
 STAGE=expected_sha; COMMAND=validate_expected_sha
 [[ "${EXPECTED_SHA:-}" =~ ^[0-9a-f]{40}$ ]]
 STAGE=prerequisites; COMMAND=validate_required_commands
-for c in awk bash cp date docker df flock git grep gzip install mktemp mv node readlink sha256sum stat sync; do need "$c"; done
+for c in awk bash chown cp date docker df flock git grep gzip install mktemp mv node python3 readlink sha256sum stat sync; do need "$c"; done
 STAGE=checkout; COMMAND=validate_main_checkout
 cd "$APP_DIR"
 [[ "$(git branch --show-current 2>/dev/null)" == main && "$(git rev-parse HEAD 2>/dev/null)" == "$EXPECTED_SHA" && -z "$(git status --porcelain 2>/dev/null)" ]]
@@ -369,6 +369,13 @@ PROMOTION_STARTED=false; checkpoint PRODUCTION_BACKUP_ATOMIC_PROMOTION=PASS
 checkpoint PRODUCTION_BACKUP_PRESENCE=PASS; checkpoint PRODUCTION_BACKUP_INTEGRITY=PASS
 backup_validate_canonical_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
 # Shared validation above emits PRODUCTION_BACKUP_FRESHNESS=PASS.
+STAGE=pr827_proof_publication; COMMAND=publish_and_revalidate_pr827_backup_proof
+source "$APP_DIR/scripts/lib/pr827-backup-proof.sh"
+BACKUP_RESULT_FILE="${BACKUP_RESULT_FILE:-$PR827_BACKUP_RESULT_FILE_DEFAULT}"
+pr827_backup_proof_publish "$PRODUCTION_BACKUP_FILE" "$EXPECTED_SHA" "$BACKUP_RESULT_FILE" "${BACKUP_MAX_AGE_SECONDS:-3600}"
+pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-3600}"
+checkpoint PRODUCTION_BACKUP_PR827_PROOF=PASS
+checkpoint PRODUCTION_BACKUP_FINAL_FILESYSTEM_VALIDATION=PASS
 STAGE=preflight; COMMAND=run_readonly_cutover_preflight
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh >/dev/null
 checkpoint PRODUCTION_PREFLIGHT=PASS

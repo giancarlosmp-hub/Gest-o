@@ -4,6 +4,14 @@ root=$(cd "$(dirname "$0")/.." && pwd); cd "$root"
 readonly MIGRATION_ID=20260827190000_add_erp_order_manual_resolution
 readonly CONFIRMATION=APPLY_PR827_SCHEMA
 die(){ printf '[pr827-schema] ERROR %s\n' "$*" >&2; exit 1; }
+source scripts/lib/pr827-backup-proof.sh
+if [[ ${1:-} == --validate-backup-override ]]; then
+ : "${PR827_BACKUP_FIXTURE_ROOT:?PR827_BACKUP_FIXTURE_ROOT is required}"
+ : "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"
+ pr827_backup_fixture_authorize "$PR827_BACKUP_FIXTURE_ROOT" "$root" "$BACKUP_RESULT_FILE" || die 'protected backup fixture boundary is invalid'
+ echo BACKUP_OVERRIDE_AUTHORIZATION=PASS
+ exit 0
+fi
 MODE=${MODE:-preview}; [[ $MODE == preview || $MODE == apply ]] || die 'MODE must be preview or apply'
 : "${PRODUCTION_ENV_FILE:?validated PRODUCTION_ENV_FILE is required}"
 : "${PRODUCTION_ENV_SOURCE:?validated PRODUCTION_ENV_SOURCE is required}"
@@ -86,8 +94,28 @@ else echo HISTORY_DIVERGENCE_CATEGORY=HISTORY_CATALOG_DIVERGENCE; die 'history/c
 [[ ${CONFIRM:-} == $CONFIRMATION ]] || die "CONFIRM=$CONFIRMATION required"
 : "${API_IMAGE:?API_IMAGE is required}"; docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absent'
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'image/SHA mismatch'
-: "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"; [[ -f $BACKUP_RESULT_FILE && ! -L $BACKUP_RESULT_FILE && $(stat -c '%a' "$BACKUP_RESULT_FILE") == 600 ]] || die 'protected backup proof required'; grep -Fqx PASS "$BACKUP_RESULT_FILE" || die 'recent integral approved backup required'
-backup_age=$(($(date +%s)-$(stat -c %Y "$BACKUP_RESULT_FILE"))); (( backup_age >= 0 && backup_age <= ${BACKUP_MAX_AGE_SECONDS:-3600} )) || die 'approved backup proof is stale'
+: "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"
+# The production contract remains fixed. The only override is a disposable
+# checkout rooted below /tmp, used by this repository's PostgreSQL harness.
+if [[ -n ${PR827_BACKUP_FIXTURE_ROOT:-} ]]; then
+ echo BACKUP_OVERRIDE_REQUESTED=YES
+ fixture_real=$(realpath "$PR827_BACKUP_FIXTURE_ROOT")
+ runner_real=$(realpath "$root")
+ pr827_backup_fixture_authorize "$fixture_real" "$runner_real" "$BACKUP_RESULT_FILE" || die 'protected backup fixture boundary is invalid'
+ echo BACKUP_OVERRIDE_HARNESS_ROOT_CLASS=EXTERNAL_TMP
+ echo BACKUP_OVERRIDE_CHECKOUT_CLASS=EXPECTED_DISPOSABLE_CHECKOUT
+ echo BACKUP_OVERRIDE_RESULT_CLASS=EXPECTED_DISPOSABLE_BACKUP_RESULT
+ export PR827_BACKUP_PROOF_ROOT="$fixture_real/backup"
+ fixture_owner=${PR827_BACKUP_FIXTURE_EXPECTED_OWNER:-$(id -un):$(id -gn)}
+ [[ "$fixture_owner" =~ ^[A-Za-z_][A-Za-z0-9_-]*:[A-Za-z_][A-Za-z0-9_-]*$ ]] || die 'protected backup fixture owner is invalid'
+ export PR827_BACKUP_PROOF_EXPECTED_OWNER="$fixture_owner"
+ echo BACKUP_OVERRIDE_AUTHORIZATION=PASS
+else
+ unset PR827_BACKUP_PROOF_ROOT PR827_BACKUP_PROOF_EXPECTED_OWNER
+ echo BACKUP_OVERRIDE_REQUESTED=NO
+ echo BACKUP_OVERRIDE_AUTHORIZATION=PRODUCTION_DEFAULTS
+fi
+pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-3600}" || die 'protected backup proof required'
 if (( idempotent == 0 )); then
  # Revalidate the mutable catalog and history immediately before granting write authority.
  [[ $(sha256sum "$ENV_FILE" | cut -d' ' -f1) == "$env_hash_before" ]] || die 'environment changed before apply'

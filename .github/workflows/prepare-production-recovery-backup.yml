@@ -63,4 +63,5 @@ jobs:
             test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
             trap - ERR
             CONFIRM="$PREPARE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+              BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
               bash scripts/prepare-production-recovery-backup.sh

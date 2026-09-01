@@ -35,6 +35,16 @@ assert.ok(composeCi.indexOf("Record checkout lockfile") < composeCi.indexOf("Set
 const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
+for (const token of ["pr827_backup_proof_publish", "pr827_backup_proof_validate", "BACKUP_FIXTURE_CONTRACT=PASS", "BACKUP_FIXTURE_FINAL_VALIDATION=PASS", "BACKUP_NEGATIVE_CASES=PASS", "APPLY_IDEMPOTENCY=PASS", "APPLY_ROLLBACK_CASES=PASS", "PRISMA_LEDGER_CREATED=NO", "PR827_APPLY_POSTGRES_RESULT=PASS"])
+  assert.match(applyHarness, new RegExp(token));
+for (const negative of ["absent", "dump_absent", "checksum_divergent", "manifest_absent", "manifest_invalid", "timestamp_expired", "sha_mismatch", "database_mismatch", "mode_invalid", "owner_invalid", "symlink"])
+  assert.match(applyHarness, new RegExp(negative));
+for (const stage of ["BACKUP_FIXTURE_PUBLISH", "BACKUP_FIXTURE_VALIDATE", "RUNNER_OVERRIDE_AUTHORIZATION", "RUNNER_INITIAL_APPLY", "CATALOG_VALIDATION", "IDEMPOTENT_APPLY", "ROLLBACK_PUBLICATION_FAILURE", "DDL_FAILURE_WITHOUT_HISTORY"])
+  assert.match(applyHarness, new RegExp(stage));
+for (const marker of ["APPLY_STAGE_RC", "APPLY_STAGE_RESULT", "APPLY_HARNESS_OPERATION_RC", "APPLY_HARNESS_CLEANUP_RC", "APPLY_HARNESS_FINAL_RC"])
+  assert.match(applyHarness, new RegExp(marker));
+assert.doesNotMatch(applyHarness, /printf ['"]PASS/);
+assert.doesNotMatch(applyHarness, /\|\|\s*(?:true|:)/);
 for (const harness of [postgresHarness, applyHarness]) {
   for (const token of ["HARNESS_TEMP_ROOT", "TMPDIR=/tmp mktemp -d", "status --porcelain=v1", "HARNESS_WORKTREE_%s=PASS"])
     assert.match(harness, new RegExp(token.replace(/[?$]/g,"\\$&")));
@@ -53,6 +63,9 @@ assert.match(runner,/pr827-post-diff-filter\.mjs/);
 assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
 assert.match(workflow,/PRODUCTION_ENV_SOURCE="\$resolved_env_source" PRODUCTION_ENV_FILE="\$resolved_env_file"/);
 assert.match(workflow,/SCHEMA_EVIDENCE_DIR=\/var\/log\/gest-o\/schema/);
+assert.match(workflow,/BACKUP_RESULT_FILE=\/var\/log\/gest-o\/backup\/latest\/result\.tsv/);
+assert.match(runner,/pr827_backup_proof_validate "\$BACKUP_RESULT_FILE" "\$EXPECTED_SHA"/);
+assert.doesNotMatch(runner,/grep -Fqx PASS "\$BACKUP_RESULT_FILE"/);
 assert.doesNotMatch(workflow,/MIGRATION_ID_REQUESTED[^\n]+API_IMAGE/);
 assert.doesNotMatch(workflow,/PRODUCTION_ENV_FILE=\/root\//);
 assert.ok(workflow.indexOf("resolve-production-env.sh") < workflow.indexOf("pr827-schema-runner.sh"));
