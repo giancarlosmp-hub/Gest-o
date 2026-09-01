@@ -1,5 +1,22 @@
 # Deploy de produção
 
+## Bloqueio operacional: tenancy expand roots
+
+Em 1 de setembro de 2026, `20260808120000_tenancy_expand_roots` **ainda não foi
+aplicada em produção**. A migration agora possui operação manual exclusiva em
+`.github/workflows/production-tenancy-expand-roots.yml`: primeiro `preview`
+read-only; depois, somente com evidência verde, backup e aprovação do environment
+`production-schema`, `apply` com a confirmação `APPLY_TENANCY_EXPAND_ROOTS`.
+
+O escopo é apenas expand-only: onze colunas nullable, índices e foreign keys.
+Backfill, tenant padrão, membership, read pilot e qualquer mudança de
+`TENANCY_MODE=disabled` não estão autorizados. Isso não ativa multi-tenancy e não
+deve ser combinado com o apply PR827, que já está aplicado e deve ser preservado.
+
+O cutover da aplicação continua bloqueado antes de `docker stop` até que o
+preview produtivo, o apply administrativo e o post-diff produtivo estejam verdes.
+Merge deste código, isoladamente, não autoriza o cutover nem execução em produção.
+
 Este repositório possui um workflow seguro para atualizar a produção em `/apps/gest-o` após alterações entrarem na branch `main`.
 
 ## Diagnóstico do fluxo atual

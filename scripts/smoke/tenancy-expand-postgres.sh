@@ -80,12 +80,18 @@ roots=(KnowledgeDocument Client AgendaEvent Goal ActivityKPI Sale SellerTerritor
 for table in "${roots[@]}"; do docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM public.\"$table\"" > "$tmp/$table.before"; done
 incident_before=$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')
 test "$incident_before" = 1
-step migration_apply "apply tenancy expand and unmerged ERP manual resolution migrations exactly once"
+step atomic_failure "prove an intermediate failure rolls the entire expansion back"
+{ echo BEGIN; sed '1a SELECT 1/0;' apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql; echo COMMIT; } >"$tmp/failing.sql"
+if docker exec -i "$pg" psql -X -U postgres -d expand -v ON_ERROR_STOP=1 <"$tmp/failing.sql" >/dev/null 2>&1; then echo 'injected migration failure unexpectedly succeeded' >&2; exit 1; fi
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name='tenantId' AND table_name IN ('KnowledgeDocument','Client','AgendaEvent','Goal','ActivityKPI','Sale','SellerTerritoryCity','AppConfig','Product','ErpSyncRun','ErpSyncLock')")" = 0
+step migration_apply "apply tenancy expand and preserve applied ERP manual resolution exactly once"
 docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null 2>&1; then echo 'migration unexpectedly applied twice' >&2; exit 1; fi
 docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null 2>&1; then echo 'ERP manual resolution migration unexpectedly applied twice' >&2; exit 1; fi
 step catalog_validation "validate nullable columns indexes foreign keys and row counts"
+docker exec -i "$pg" psql -X -U postgres -d expand -qAtF $'\t' <scripts/tenancy-expand-roots-catalog.sql >"$tmp/expand-catalog.tsv"
+node scripts/tenancy-expand-roots-catalog-validate.mjs "$tmp/expand-catalog.tsv"
 for table in "${roots[@]}"; do
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='$table' AND column_name='tenantId'")" = YES
   test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM \"$table\" WHERE \"tenantId\" IS NOT NULL")" = 0
@@ -98,6 +104,9 @@ test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM 
 test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_constraint WHERE conname='ErpOrderSync_supersedesErpOrderSyncId_fkey' AND confdeltype='r' AND confupdtype='c'")" = 1
 test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('ErpOrderManualResolution_erpOrderSyncId_key','ErpOrderManualResolution_opportunityId_createdAt_idx','ErpOrderManualResolution_resolvedById_createdAt_idx','ErpOrderSync_supersedesErpOrderSyncId_idx')")" = 4
 test "$(docker exec "$pg" psql -U postgres -d expand -Atc "SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid=enumtypid WHERE typname='ErpOrderManualResolutionTerminalState'")" = manually_resolved_not_found
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT to_regclass('public._prisma_migrations') IS NULL")" = t
+test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT count(*) FROM \"Tenant\"")" = 0
+test "${TENANCY_MODE:-disabled}" = disabled
 HARNESS_COMMAND="verify synthetic incident preservation after migration"
 test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc "SELECT to_regclass('public.incident_synthetic') IS NOT NULL")" = t
 test "$(docker exec "$pg" psql -X -U postgres -d expand -Atc 'SELECT count(*) FROM public."incident_synthetic"')" = "$incident_before"

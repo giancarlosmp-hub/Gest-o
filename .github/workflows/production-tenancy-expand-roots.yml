@@ -1,0 +1,64 @@
+name: Production tenancy expand roots
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview é somente leitura; apply executa apenas expand roots"
+        required: true
+        type: choice
+        options: [preview, apply]
+      confirm:
+        description: "Para apply digite APPLY_TENANCY_EXPAND_ROOTS"
+        required: false
+        type: string
+permissions: { contents: read }
+concurrency: { group: production-schema, cancel-in-progress: false }
+jobs:
+  preview:
+    if: inputs.mode == 'preview'
+    environment: production-schema-preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preview remoto read-only
+        uses: appleboy/ssh-action@v1.2.0
+        env: { EXPECTED_SHA: "${{ github.sha }}" }
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          envs: EXPECTED_SHA
+          script: |
+            set -Eeuo pipefail
+            cd /apps/gest-o; git fetch origin main; git switch main; git pull --ff-only origin main
+            MODE=preview EXPECTED_SHA="$EXPECTED_SHA" MIGRATION_ID_REQUESTED=20260808120000_tenancy_expand_roots \
+              API_IMAGE="gest-o-api:$EXPECTED_SHA" DATABASE_URL="$DATABASE_URL" DATABASE_SCHEMA_MODE=external \
+              RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
+              PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
+              bash scripts/tenancy-expand-roots-runner.sh
+  apply:
+    if: inputs.mode == 'apply'
+    environment: production-schema
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar confirmação dedicada
+        run: test '${{ inputs.confirm }}' = APPLY_TENANCY_EXPAND_ROOTS
+      - name: Apply remoto allowlisted
+        uses: appleboy/ssh-action@v1.2.0
+        env: { EXPECTED_SHA: "${{ github.sha }}", CONFIRM: "${{ inputs.confirm }}" }
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || '22022' }}
+          envs: EXPECTED_SHA,CONFIRM
+          script: |
+            set -Eeuo pipefail
+            cd /apps/gest-o; git fetch origin main; git switch main; git pull --ff-only origin main
+            MODE=apply GITHUB_ENVIRONMENT=production-schema CONFIRM="$CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+              MIGRATION_ID_REQUESTED=20260808120000_tenancy_expand_roots API_IMAGE="gest-o-api:$EXPECTED_SHA" \
+              DATABASE_URL="$DATABASE_URL" DATABASE_SCHEMA_MODE=external RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled \
+              SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
+              PRODUCTION_DB_NAME_EXPECTED=salesforce_pro BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
+              PREFLIGHT_RESULT_FILE=/var/log/gest-o/preflight/latest/result.tsv bash scripts/tenancy-expand-roots-runner.sh
