@@ -10,6 +10,7 @@ ENV_SOURCE=''
 # The canonical directory input is the sole authority for promoted artifacts.
 # PRODUCTION_BACKUP_AUTHORIZED_DIR remains a CLI-compatible alias only.
 AUTHORIZED_DIR="${PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-${PRODUCTION_BACKUP_AUTHORIZED_DIR:-/root/backups}}"
+HISTORICAL_AUTHORIZED_DIR="${PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY:-/var/backups/gest-o/automatic}"
 STAGE=initial
 COMMAND=initial_validation
 TMP_DIR=''; PROMOTION_STARTED=false
@@ -82,11 +83,33 @@ if [[ ! "$PRODUCTION_DB_CONTAINER_EXPECTED" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; 
 fi
 checkpoint PRODUCTION_BACKUP_DB_CONTAINER_INPUT=PASS
 
-STAGE=authorized_directory; COMMAND=validate_authorized_directory
+STAGE=new_authorized_directory; COMMAND=validate_new_authorized_directory
 [[ "$AUTHORIZED_DIR" == /* ]]
 [[ -e "$AUTHORIZED_DIR" && -d "$AUTHORIZED_DIR" && ! -L "$AUTHORIZED_DIR" ]]
 [[ "$(readlink -m -- "$AUTHORIZED_DIR")" == "$AUTHORIZED_DIR" && "$AUTHORIZED_DIR" != / ]]
-checkpoint PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=PASS
+checkpoint PRODUCTION_BACKUP_NEW_AUTHORIZED_DIRECTORY=PASS
+
+directory_has_no_symlink_components(){
+  local component=$1
+  while :; do
+    [[ ! -L "$component" ]] || return 1
+    [[ "$component" == / ]] && break
+    component="$(dirname -- "$component")"
+  done
+}
+
+# This root is operational policy, independent of paths asserted by the
+# canonical environment.  An override is accepted only through the dedicated
+# variable above and is held to the same protected production contract.
+STAGE=historical_authorized_directory; COMMAND=validate_historical_authorized_directory
+[[ "$HISTORICAL_AUTHORIZED_DIR" == /* && "$HISTORICAL_AUTHORIZED_DIR" != / ]]
+[[ "$(readlink -m -- "$HISTORICAL_AUTHORIZED_DIR")" == "$HISTORICAL_AUTHORIZED_DIR" ]]
+[[ -d "$HISTORICAL_AUTHORIZED_DIR" && ! -L "$HISTORICAL_AUTHORIZED_DIR" ]]
+directory_has_no_symlink_components "$HISTORICAL_AUTHORIZED_DIR"
+[[ "$(stat -c %a -- "$HISTORICAL_AUTHORIZED_DIR")" == 700 ]]
+[[ "$(stat -c %U:%G -- "$HISTORICAL_AUTHORIZED_DIR")" == root:root ]]
+[[ "$HISTORICAL_AUTHORIZED_DIR" != "$AUTHORIZED_DIR" ]]
+checkpoint PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY=PASS
 
 # The canonical variables describe only the previous bundle.  They must never
 # be rebound into the destination of this run.
@@ -113,9 +136,10 @@ else
   historical_path_syntax_safe "$HISTORICAL_BACKUP_SHA256_FILE"
   [[ "$(readlink -m -- "$HISTORICAL_BACKUP_FILE")" == "$HISTORICAL_BACKUP_FILE" ]]
   [[ "$(readlink -m -- "$HISTORICAL_BACKUP_SHA256_FILE")" == "$HISTORICAL_BACKUP_SHA256_FILE" ]]
-  [[ "$(dirname -- "$HISTORICAL_BACKUP_FILE")" == "$AUTHORIZED_DIR" ]]
-  [[ "$(dirname -- "$HISTORICAL_BACKUP_SHA256_FILE")" == "$AUTHORIZED_DIR" ]]
+  [[ "$(dirname -- "$HISTORICAL_BACKUP_FILE")" == "$HISTORICAL_AUTHORIZED_DIR" ]]
+  [[ "$(dirname -- "$HISTORICAL_BACKUP_SHA256_FILE")" == "$HISTORICAL_AUTHORIZED_DIR" ]]
   [[ "$HISTORICAL_BACKUP_FILE" != "$HISTORICAL_BACKUP_SHA256_FILE" ]]
+  [[ "$HISTORICAL_BACKUP_SHA256_FILE" == "$HISTORICAL_BACKUP_FILE.sha256" ]]
   if [[ ! -e "$HISTORICAL_BACKUP_FILE" && ! -e "$HISTORICAL_BACKUP_SHA256_FILE" ]]; then
     checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=absent
   elif [[ ! -e "$HISTORICAL_BACKUP_FILE" || ! -e "$HISTORICAL_BACKUP_SHA256_FILE" ]]; then
@@ -125,7 +149,7 @@ else
     protected_regular "$HISTORICAL_BACKUP_FILE"
     protected_regular "$HISTORICAL_BACKUP_SHA256_FILE"
     valid_existing_manifest "$HISTORICAL_BACKUP_SHA256_FILE" "$(basename "$HISTORICAL_BACKUP_FILE")"
-    (cd "$AUTHORIZED_DIR" && sha256sum -c "$(basename "$HISTORICAL_BACKUP_SHA256_FILE")" >/dev/null)
+    (cd "$HISTORICAL_AUTHORIZED_DIR" && sha256sum -c "$(basename "$HISTORICAL_BACKUP_SHA256_FILE")" >/dev/null)
     checkpoint PRODUCTION_BACKUP_HISTORICAL_PAIR_STATE=complete_valid
   fi
 fi
