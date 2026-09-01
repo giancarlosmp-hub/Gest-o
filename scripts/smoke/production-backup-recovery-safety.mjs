@@ -25,6 +25,7 @@ for (const dumpPathPredicate of [
 ]) assert.ok(script.includes(dumpPathPredicate), `missing dump path predicate: ${dumpPathPredicate}`);
 assert.match(script, /PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY:-/);
 assert.match(script, /PRODUCTION_BACKUP_AUTHORIZED_DIR:-\/root\/backups/);
+assert.match(script, /PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY:-\/var\/backups\/gest-o\/automatic/);
 assert.match(script, /PRODUCTION_BACKUP_FILE="\$AUTHORIZED_DIR\/production-\$bundle_id\.sql\.gz"/);
 assert.match(script, /PRODUCTION_BACKUP_SHA256_FILE="\$PRODUCTION_BACKUP_FILE\.sha256"/);
 assert.match(script, /MODE=cutover PRODUCTION_ENV_RESOLVER_OUTPUT=record/);
@@ -32,7 +33,7 @@ assert.match(script, /historical_path_syntax_safe[\s\S]*\[:cntrl:\][\s\S]*\.\.\/
 assert.match(script, /production-\$bundle_id\.sql\.gz[\s\S]*DUMP_PATH_CONTRACT=PASS/);
 assert.match(script, /HISTORICAL_PAIR_STATE=absent[\s\S]*HISTORICAL_PAIR_STATE=incomplete[\s\S]*HISTORICAL_PAIR_STATE=complete_valid/);
 const orderedContracts = [
-  "STAGE=authorized_directory", "STAGE=historical_path_contract", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",
+  "STAGE=new_authorized_directory", "STAGE=historical_authorized_directory", "STAGE=historical_path_contract", "STAGE=dump_path_contract", "STAGE=manifest_path_contract",
   "STAGE=database_url_contract", "STAGE=database_container",
   "STAGE=database_network", "STAGE=database_volume", "STAGE=database_mount",
   "STAGE=disk_capacity", "STAGE=preparation_lock", "STAGE=dump",
@@ -52,6 +53,10 @@ assert.match(resolver, /canonical source is required for cutover/);
 assert.match(resolver, /stat -c '%U:%G'/);
 assert.match(resolver, /stat -c '%a'/);
 assert.doesNotMatch(script, /OLD_BACKUP|mv -f .*HISTORICAL_BACKUP/);
+assert.match(script, /PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY=PASS/);
+assert.match(script, /PRODUCTION_BACKUP_NEW_AUTHORIZED_DIRECTORY=PASS/);
+assert.match(workflow, /PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY=\/var\/backups\/gest-o\/automatic/);
+assert.match(workflow, /PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=\/root\/backups/);
 assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" pg_dump -U postgres -d salesforce_pro/);
 assert.match(script, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED" id -u/);
 assert.match(script, /postgres_os_user_missing[\s\S]*os_user_selection_failed/);

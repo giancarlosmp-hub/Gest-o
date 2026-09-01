@@ -65,5 +65,7 @@ jobs:
             CONFIRM="$PREPARE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
               PRODUCTION_CANONICAL_ENV_FILE=/root/demetra-env/.env \
               PRODUCTION_LEGACY_ENV_FILE=/root/demetra-env/production.env \
+              PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY=/var/backups/gest-o/automatic \
+              PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY=/root/backups \
               BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
               bash scripts/prepare-production-recovery-backup.sh
