@@ -12,6 +12,15 @@ pr827_backup_proof_contract() {
   [[ "$PR827_BACKUP_PROOF_CONTRACT_OWNER" =~ ^[A-Za-z_][A-Za-z0-9_-]*:[A-Za-z_][A-Za-z0-9_-]*$ ]] || return 1
 }
 
+pr827_backup_fixture_authorize() {
+  local fixture_real runner_real result_file=$3
+  fixture_real=$(realpath "$1") || return 1
+  runner_real=$(realpath "$2") || return 1
+  [[ "$fixture_real" == /tmp/* ]] || return 1
+  [[ "$runner_real" == "$fixture_real/checkout" ]] || return 1
+  [[ "$result_file" == "$fixture_real/backup/latest/result.tsv" ]] || return 1
+}
+
 pr827_backup_proof_validate() {
   local result_file=$1 expected_sha=$2 max_age=$3
   local latest root dump manifest now age before after
