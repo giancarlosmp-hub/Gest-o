@@ -86,8 +86,9 @@ else echo HISTORY_DIVERGENCE_CATEGORY=HISTORY_CATALOG_DIVERGENCE; die 'history/c
 [[ ${CONFIRM:-} == $CONFIRMATION ]] || die "CONFIRM=$CONFIRMATION required"
 : "${API_IMAGE:?API_IMAGE is required}"; docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die 'pinned API image absent'
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE") == "$EXPECTED_SHA" ]] || die 'image/SHA mismatch'
-: "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"; [[ -f $BACKUP_RESULT_FILE && ! -L $BACKUP_RESULT_FILE && $(stat -c '%a' "$BACKUP_RESULT_FILE") == 600 ]] || die 'protected backup proof required'; grep -Fqx PASS "$BACKUP_RESULT_FILE" || die 'recent integral approved backup required'
-backup_age=$(($(date +%s)-$(stat -c %Y "$BACKUP_RESULT_FILE"))); (( backup_age >= 0 && backup_age <= ${BACKUP_MAX_AGE_SECONDS:-3600} )) || die 'approved backup proof is stale'
+: "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE is required}"
+source scripts/lib/pr827-backup-proof.sh
+pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-3600}" || die 'protected backup proof required'
 if (( idempotent == 0 )); then
  # Revalidate the mutable catalog and history immediately before granting write authority.
  [[ $(sha256sum "$ENV_FILE" | cut -d' ' -f1) == "$env_hash_before" ]] || die 'environment changed before apply'

@@ -703,3 +703,8 @@ produtivo `root:root`, retornando `BUNDLE_METADATA_INVALID`. O harness agora exp
 somente para fixtures, isola/restaura o override do cenário incompatível e publica RC/classe por
 cenário. O pai exige RC zero, um único marcador final e nenhuma falha. Apply e merge permanecem
 bloqueados até npm/workflow serem zero no CI da PR #839.
+## PR827 — prova canônica do backup produtivo (01/09/2026)
+
+O run `33448965235` declarou promoção/par/freshness do backup de Recovery sob a raiz autorizada histórica (default `/root/backups`), mas esse call graph nunca gerava `result.tsv` nem publicava `/var/log/gest-o/backup`. O apply consumia exclusivamente `/var/log/gest-o/backup/latest/result.tsv`; por isso bloqueou corretamente antes de escrita. A correção mantém o par de Recovery e acrescenta um bundle PR827 versionado (`FORMAT=1`) em `latest`, com `dump.sql.gz`, manifesto e `result.tsv`, todos `root:root`, arquivos `600` e diretórios `700`. O bundle traz `salesforce_pro`, SHA aprovado, epoch, checksum e identificador `<sha>-<epoch>`; arquivos e diretório recebem `fsync` antes do rename. Produtor e apply usam o mesmo parser fail-closed após a publicação final. Ausência, symlink, tipo, owner, mode, tamanho, checksum, manifesto, banco, SHA ou freshness inválidos impedem PASS. Cleanup remove somente staging/anterior e preserva o aprovado.
+
+Nenhuma migration, escrita de schema, deploy, cutover ou reenvio de pedido foi executado. `READY_TO_MERGE_BACKUP_FIX=NO` até checks remotos verdes; `READY_TO_PREPARE_NEW_BACKUP=NO` até merge e main verde; `READY_TO_RETRY_APPLY=NO` até nova prova protegida e recente validada.

@@ -680,3 +680,6 @@ Alternativas documentadas, não implementadas: manter Tailscale com autostart/wa
 ### Gate de conectividade UltraFV3
 
 Antes de qualquer simulação ou envio, exigir estado `available` recente do probe GET-only. Estado `unknown`/`unavailable` bloqueia o operador; recuperação do peer não dispara sincronização nem `POST /orders`. O alerta da Saúde da Plataforma é operacional e nunca é mecanismo de retry.
+## Gate de backup do PR827
+
+Deploy e apply não fazem parte da preparação da prova. Depois do merge/main verde, o workflow dedicado publica atomicamente o bundle protegido v1 em `/var/log/gest-o/backup/latest`; somente seus `result.tsv`, dump e manifesto, revalidados no filesystem final pelo parser também usado no apply, podem satisfazer o gate. Arquivo ausente, resultado legado ou cópia manual nunca é aceito. Não repetir apply até existir nova prova recente para o mesmo SHA aprovado.

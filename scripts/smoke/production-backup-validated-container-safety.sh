@@ -2,11 +2,13 @@
 set -Eeuo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP" /var/log/gest-o/backup' EXIT
+[[ ! -e /var/log/gest-o/backup && ! -L /var/log/gest-o/backup ]]
 APP="$TMP/app"; AUTH="$TMP/authorized"; BIN="$TMP/bin"; ENV_FILE="$TMP/production.env"
 mkdir -p "$APP/scripts/lib" "$AUTH" "$BIN"
 cp "$ROOT/scripts/prepare-production-recovery-backup.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
+cp "$ROOT/scripts/lib/pr827-backup-proof.sh" "$APP/scripts/lib/"
 cp "$ROOT/scripts/check-prod-health.sh" "$APP/scripts/"
 cat >"$APP/scripts/production-preflight.sh" <<'EOF'
 #!/usr/bin/env bash
