@@ -7,7 +7,7 @@ SHA=443be81e35a15e37158a93161b105c1aa81690b2
 mkdir -p "$APP/scripts/lib" "$BIN" "$AUTH" "$HIST"
 cp "$ROOT/scripts/production-deploy-entrypoint.sh" "$ROOT/scripts/deploy-production.sh" \
   "$ROOT/scripts/production-preflight.sh" "$APP/scripts/"
-cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
+cp "$ROOT/scripts/lib/production-backup-common.sh" "$ROOT/scripts/lib/production-preflight-proof.sh" "$APP/scripts/lib/"
 printf '{"version":"1.0.0"}\n' >"$APP/package.json"
 
 cat >"$APP/scripts/resolve-production-env.sh" <<EOF

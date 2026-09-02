@@ -24,4 +24,8 @@ set +a
 [[ ${DATABASE_URL+x} == x && -n "$DATABASE_URL" ]]
 
 # DATABASE_URL exists only in this authorized remote process and its children.
+if [[ ${RUN_PRODUCTION_PREFLIGHT:-false} == true ]]; then
+  [[ ${MODE:-} == apply ]]
+  PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
+fi
 exec bash scripts/tenancy-expand-roots-runner.sh
