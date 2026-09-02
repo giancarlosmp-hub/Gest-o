@@ -712,3 +712,16 @@ Nenhuma migration, escrita de schema, deploy, cutover ou reenvio de pedido foi e
 O primeiro CI da PR #840 falhou corretamente no apply PostgreSQL 16: o harness ainda criava apenas um arquivo `PASS`, que deixou de satisfazer o contrato protegido. O harness agora publica sua fixture inteira fora dos checkouts por meio do publisher compartilhado, com root/owner sintéticos autorizados somente quando o próprio runner está no clone descartável correspondente sob `/tmp`. Casos negativos cobrem ausência, dump, checksum, manifesto, freshness, SHA, banco, mode, owner e symlink; todos exigem RC não zero e a classe sanitizada `protected backup proof required`. Produção continua presa ao root e owner canônicos. `READY_TO_MERGE_PR840=NO` até o CI remoto PostgreSQL 16 ficar verde.
 
 A segunda execução remota comprovou publicação e validação da fixture, mas encerrou com RC 1 na primeira chamada ao runner. A causa no call graph era determinística: os casos negativos de backup eram executados antes de `reset_db; make_baseline`; portanto o runner parava antes do gate de backup com `PR827_LEGACY_HISTORY_STATE=HISTORY_DIVERGENT` / `HISTORY_DIVERGENCE_CATEGORY=BUNDLE_ABSENT`, e a asserção que exigia `protected backup proof required` falhava. O baseline sintético agora é preparado antes dos negativos. Fronteiras, RCs, resultados, autorização do override e EXIT/cleanup possuem marcadores sanitizados; falhas expõem apenas linhas allowlisted. A regressão executa o runner real e rejeita checkout principal, root fora de `/tmp` e result fora do root, preservando defaults produtivos.
+
+## Production tenancy expand roots — contrato do preflight (02/09/2026)
+
+O apply no SHA `f7a42a89be3734f11d6d923f99ebc23b7c83eae8` parou antes de DDL porque o workflow apontava para
+`/var/log/gest-o/preflight/latest/result.tsv`, mas o preflight apenas imprimia marcadores em stdout
+e nunca publicava o bundle. Além disso, o runner tinha uma chamada `stat` com o nome literal da
+variável e uma checagem rasa por `grep`. A correção centraliza produtor e consumidor em um contrato
+atômico, estrito e protegido e executa o preflight real `cutover` imediatamente antes do apply para
+o próprio `github.sha`. Backup protegido e preview de mesmo SHA/checksum não foram relaxados;
+`TENANCY_MODE=disabled` e `DATABASE_SCHEMA_MODE=external` continuam fechados. Produção não foi
+acessada ou modificada e nenhuma migration/deploy/cutover/recovery foi executada nesta entrega.
+`READY_TO_MERGE=NO` e `READY_TO_RETRY_TENANCY_APPLY=NO` até a PR e todos os checks, inclusive os de
+PostgreSQL 16, ficarem verdes e a correção ser mesclada em `main`.

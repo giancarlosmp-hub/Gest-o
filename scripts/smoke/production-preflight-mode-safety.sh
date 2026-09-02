@@ -58,6 +58,10 @@ export PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$TMP/backup"
 export PRODUCTION_BACKUP_FILE="$TMP/backup/production.sql.gz"
 export PRODUCTION_BACKUP_SHA256_FILE="$TMP/backup/production.sql.gz.sha256"
 export PRODUCTION_BACKUP_MAX_AGE_SECONDS=60
+export EXPECTED_SHA=1111111111111111111111111111111111111111
+export PREFLIGHT_RESULT_FILE="$TMP/preflight/latest/result.tsv"
+export PRODUCTION_PREFLIGHT_PROOF_ROOT="$TMP/preflight"
+export PRODUCTION_PREFLIGHT_PROOF_EXPECTED_OWNER="$(id -un):$(id -gn)"
 
 make_valid_backup() {
   printf 'valid backup payload\n' >"$PRODUCTION_BACKUP_FILE"
@@ -98,6 +102,10 @@ make_valid_backup
 run_case cutover_fresh cutover
 grep -qx 'PRODUCTION_BACKUP_FRESHNESS=PASS' "$TMP/cutover_fresh.out"
 grep -qx 'PRODUCTION_PREFLIGHT=PASS' "$TMP/cutover_fresh.out"
+grep -qx 'PRODUCTION_PREFLIGHT_PROOF=PASS' "$TMP/cutover_fresh.out"
+source "$ROOT/scripts/lib/production-preflight-proof.sh"
+production_preflight_proof_validate "$PREFLIGHT_RESULT_FILE" "$EXPECTED_SHA" salesforce_pro \
+  "$PRODUCTION_DB_CONTAINER_EXPECTED" "$PRODUCTION_DB_VOLUME_EXPECTED" 900
 
 # F/G: contrato de modo falha fechado antes de consultar ambiente ou runtime.
 if run_case missing_mode __unset; then exit 1; fi

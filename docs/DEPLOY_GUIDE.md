@@ -697,3 +697,20 @@ Antes de qualquer simulação ou envio, exigir estado `available` recente do pro
 ## Gate de backup do PR827
 
 Deploy e apply não fazem parte da preparação da prova. Depois do merge/main verde, o workflow dedicado publica atomicamente o bundle protegido v1 em `/var/log/gest-o/backup/latest`; somente seus `result.tsv`, dump e manifesto, revalidados no filesystem final pelo parser também usado no apply, podem satisfazer o gate. Arquivo ausente, resultado legado ou cópia manual nunca é aceito. Não repetir apply até existir nova prova recente para o mesmo SHA aprovado.
+
+## Prova protegida do production preflight para expand roots (02/09/2026)
+
+O apply de `tenancy_expand_roots` exige que o preflight real rode em modo `cutover`, no checkout
+limpo e alinhado com `origin/main`, imediatamente antes do runner. Somente após validar source
+canônico, allowlists de banco/container/rede/volume, backup canônico com checksum e freshness e
+espaço em disco, o preflight publica `/var/log/gest-o/preflight/latest/result.tsv`. O contrato
+compartilhado usa bundle `FORMAT=1`, SHA exato do workflow, modo, identidades do alvo, epoch e
+`BUNDLE_ID`; diretórios são `root:root` 700 e o arquivo é 600.
+
+A publicação cria staging no mesmo filesystem, faz `fsync` do arquivo e diretório, e troca `latest`
+por rename, preservando/restaurando o bundle anterior se a validação final falhar. O consumidor
+rejeita ausência, symlink em componentes do path, tipo/owner/mode divergente, formato incompleto,
+duplicado ou extra, `STATUS` não-PASS, SHA/alvo/modo divergente, timestamp futuro/stale e bundle
+parcial. Um arquivo manual com `PASS` não satisfaz o parser. A prova protegida e recente do backup,
+o preview do mesmo SHA/checksum, `TENANCY_MODE=disabled` e `DATABASE_SCHEMA_MODE=external`
+permanecem gates independentes e inalterados.

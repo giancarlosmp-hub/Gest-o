@@ -53,8 +53,10 @@ write_file "$bundle/preview-result.tsv" $'result\tPASS\nstate\t'"$state"$'\nsha\
 : "${BACKUP_RESULT_FILE:?BACKUP_RESULT_FILE required}"; : "${PREFLIGHT_RESULT_FILE:?PREFLIGHT_RESULT_FILE required}"
 source scripts/lib/pr827-backup-proof.sh
 pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-3600}" || die 'recent protected backup proof invalid'
-[[ -f $PREFLIGHT_RESULT_FILE && ! -L $PREFLIGHT_RESULT_FILE && $(stat -c %a "$PREFLIGHT_RESULT_FILE") == 600 ]] || die 'protected preflight result invalid'
-grep -q $'^result\tPASS$' "$PREFLIGHT_RESULT_FILE" || die 'production preflight PASS required'
+source scripts/lib/production-preflight-proof.sh
+production_preflight_proof_validate "$PREFLIGHT_RESULT_FILE" "$EXPECTED_SHA" "$PRODUCTION_DB_NAME_EXPECTED" \
+  "$PRODUCTION_DB_CONTAINER_EXPECTED" "${PRODUCTION_DB_VOLUME_EXPECTED:?volume allowlist is required}" \
+  "${PREFLIGHT_MAX_AGE_SECONDS:-900}" || die 'protected preflight result invalid'
 [[ $(awk -F$'\t' '$1=="sha"{print $2}' "$bundle/preview-result.tsv") == "$EXPECTED_SHA" ]] || die 'same-SHA preview required'
 [[ $(awk -F$'\t' '$1=="checksum"{print $2}' "$bundle/preview-result.tsv") == "$checksum" ]] || die 'preview checksum mismatch'
 if [[ $state == ABSENT_COMPATIBLE ]]; then

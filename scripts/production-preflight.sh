@@ -21,6 +21,7 @@ PREFLIGHT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # protected env has already been loaded by deploy-production at this point; its
 # historical path values are deliberately only hints and are rebound here.
 source "$PREFLIGHT_SCRIPT_DIR/lib/production-backup-common.sh"
+source "$PREFLIGHT_SCRIPT_DIR/lib/production-preflight-proof.sh"
 printf 'DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN\n'
 backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
 PRODUCTION_BACKUP_FILE="$PRODUCTION_BACKUP_CANONICAL_FILE"
@@ -35,7 +36,7 @@ read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
 [[ "$DB_HOST" != db && "$DB_HOST" != localhost && "$DB_HOST" != 127.0.0.1 ]] || die "hostname de banco proibido"
 [[ "$DB_NAME" == salesforce_pro ]] || die "database não autorizado"
 
-for command in git docker node sha256sum df timeout; do need "$command"; done
+for command in git docker node sha256sum df timeout python3 sync install mktemp stat chown chmod mv date; do need "$command"; done
 
 [[ -z "$(git status --porcelain)" ]] || die "worktree não está limpa"
 [[ "$(git branch --show-current)" == main ]] || die "branch ativa não é main"
@@ -82,4 +83,12 @@ for port in 4000 5173; do
   if [[ -n "$owner" ]]; then docker inspect -f "port=$port container={{.Name}} image={{.Image}} started={{.State.StartedAt}} networks={{json .NetworkSettings.Networks}} restart={{.HostConfig.RestartPolicy.Name}}" "$owner"; else log "port=$port owner=none"; fi
 done
 log "OK: banco=$DB_NAME host confirmado (credenciais omitidas), backup e runtime validados"
+if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
+  : "${EXPECTED_SHA:?EXPECTED_SHA is required to publish cutover preflight proof}"
+  PREFLIGHT_RESULT_FILE=${PREFLIGHT_RESULT_FILE:-$PRODUCTION_PREFLIGHT_PROOF_RESULT_DEFAULT}
+  production_preflight_proof_publish "$PREFLIGHT_RESULT_FILE" "$EXPECTED_SHA" "$DB_NAME" \
+    "$PRODUCTION_DB_CONTAINER_EXPECTED" "$PRODUCTION_DB_VOLUME_EXPECTED" \
+    "${PREFLIGHT_MAX_AGE_SECONDS:-900}" || die "falha ao publicar prova protegida do preflight"
+  printf 'PRODUCTION_PREFLIGHT_PROOF=PASS\n'
+fi
 printf 'PRODUCTION_PREFLIGHT=PASS\n'

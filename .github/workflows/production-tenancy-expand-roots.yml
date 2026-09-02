@@ -60,6 +60,7 @@ jobs:
               MIGRATION_ID_REQUESTED=20260808120000_tenancy_expand_roots API_IMAGE="gest-o-api:$EXPECTED_SHA" \
               DATABASE_SCHEMA_MODE=external RUNTIME_TENANCY_MODE=disabled TENANCY_MODE=disabled \
               SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
-              PRODUCTION_DB_NAME_EXPECTED=salesforce_pro BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
+              PRODUCTION_DB_NAME_EXPECTED=salesforce_pro RUN_PRODUCTION_PREFLIGHT=true \
+              BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
               PREFLIGHT_RESULT_FILE=/var/log/gest-o/preflight/latest/result.tsv \
               bash scripts/run-production-tenancy-expand-roots.sh
