@@ -73,4 +73,7 @@ chmod 600 "$bundle/post-apply-diff.sql"; node scripts/schema-diff-filter.mjs "$b
 [[ $(psql_admin -Atc "SELECT to_regclass('public._prisma_migrations') IS NULL") == t ]] || die 'Prisma ledger was created'
 write_file "$bundle/result.tsv.tmp" $'result\tPASS\nstate\t'"$([[ $state == ALREADY_APPLIED ]] && echo ALREADY_APPLIED || echo APPLIED_ONCE)"$'\ntenancy_mode\tdisabled\nbusiness_rows_modified\tNO\n'
 mv "$bundle/result.tsv.tmp" "$bundle/result.tsv"
+# Reuse the cutover reader as the final publication contract check.
+source scripts/schema-evidence-validation.sh
+validate_tenancy_expand_roots_evidence "$bundle" "$EXPECTED_SHA" "$evidence_root" || die 'published evidence bundle failed shared validation'
 echo TENANCY_EXPAND_ROOTS_APPLY=PASS
