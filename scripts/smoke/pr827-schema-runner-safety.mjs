@@ -46,6 +46,8 @@ for (const stage of ["BACKUP_FIXTURE_PUBLISH", "BACKUP_FIXTURE_VALIDATE", "RUNNE
   assert.match(applyHarness, new RegExp(stage));
 for (const marker of ["APPLY_STAGE_RC", "APPLY_STAGE_RESULT", "APPLY_HARNESS_OPERATION_RC", "APPLY_HARNESS_CLEANUP_RC", "APPLY_HARNESS_FINAL_RC"])
   assert.match(applyHarness, new RegExp(marker));
+for (const marker of ["BACKUP_FIXTURE_OPERATION_STAGE", "BACKUP_FIXTURE_OPERATION_COMMAND", "BACKUP_FIXTURE_OPERATION_STATUS", "BACKUP_FIXTURE_OPERATION_RC", "fixture_generation"])
+  assert.match(applyHarness, new RegExp(marker));
 assert.doesNotMatch(applyHarness, /printf ['"]PASS/);
 assert.doesNotMatch(applyHarness, /\|\|\s*(?:true|:)/);
 for (const harness of [postgresHarness, applyHarness]) {
