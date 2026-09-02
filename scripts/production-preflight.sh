@@ -21,13 +21,18 @@ PREFLIGHT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # protected env has already been loaded by deploy-production at this point; its
 # historical path values are deliberately only hints and are rebound here.
 source "$PREFLIGHT_SCRIPT_DIR/lib/production-backup-common.sh"
+source "$PREFLIGHT_SCRIPT_DIR/lib/pr827-backup-proof.sh"
 source "$PREFLIGHT_SCRIPT_DIR/lib/production-preflight-proof.sh"
 printf 'DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN\n'
-backup_bind_canonical_pair || fail_backup backup_path_contract "diretório canônico de backup inválido"
-PRODUCTION_BACKUP_FILE="$PRODUCTION_BACKUP_CANONICAL_FILE"
-PRODUCTION_BACKUP_SHA256_FILE="$PRODUCTION_BACKUP_CANONICAL_SHA256_FILE"
+: "${EXPECTED_SHA:?EXPECTED_SHA is required for authoritative backup resolution}"
+BACKUP_RESULT_FILE=${BACKUP_RESULT_FILE:-$PR827_BACKUP_RESULT_FILE_DEFAULT}
+if ! pr827_backup_proof_validate "$BACKUP_RESULT_FILE" "$EXPECTED_SHA" "${BACKUP_MAX_AGE_SECONDS:-${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}}"; then
+  fail_backup backup_proof_invalid "prova protegida autoritativa do backup inválida"
+fi
+PRODUCTION_BACKUP_FILE=$PR827_BACKUP_RESOLVED_DUMP
+PRODUCTION_BACKUP_SHA256_FILE=$PR827_BACKUP_RESOLVED_MANIFEST
 export PRODUCTION_BACKUP_FILE PRODUCTION_BACKUP_SHA256_FILE
-printf 'PRODUCTION_BACKUP_CANONICAL_RESOLUTION=PASS\n'
+printf 'PRODUCTION_BACKUP_AUTHORITATIVE_RESOLUTION=PASS\n'
 printf 'PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS\n'
 
 read -r DB_HOST DB_PORT DB_NAME < <(DATABASE_URL="$DATABASE_URL" node -e '
@@ -62,17 +67,12 @@ printf 'PRODUCTION_BACKUP_PRESENCE=PASS\n'
 # arquivo existente. Este preflight não cria nem renova backups ou manifestos.
 (cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum -c "$(basename "$PRODUCTION_BACKUP_SHA256_FILE")" >/dev/null) || fail_backup backup_integrity "prova de integridade do backup inválida"
 printf 'PRODUCTION_BACKUP_INTEGRITY=PASS\n'
-printf 'PRODUCTION_BACKUP_CANONICAL_PAIR=VALIDATED\n'
+printf 'PRODUCTION_BACKUP_AUTHORITATIVE_PAIR=VALIDATED\n'
 if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
   max_age="${PRODUCTION_BACKUP_MAX_AGE_SECONDS:-86400}"
-  pair_output=''
-  if pair_output="$(backup_validate_canonical_pair_and_freshness "$PRODUCTION_BACKUP_FILE" "$PRODUCTION_BACKUP_SHA256_FILE" "$max_age")"; then
-    :
-  else
-    rc=$?; case "$rc" in 11) reason=backup_timestamp_future;; 12) reason=backup_stale;; 2) reason=backup_path_mismatch;; 5|7) reason=backup_integrity;; 9) reason=backup_changed;; *) reason=backup_timestamp_invalid;; esac
-    fail_backup "$reason" "contrato canônico/freshness do backup inválido"
-  fi
-  printf '%s\n' "$pair_output"
+  backup_age=$(( $(date +%s) - PR827_BACKUP_RESOLVED_CREATED_AT_EPOCH ))
+  (( backup_age >= 0 && backup_age <= max_age )) || fail_backup backup_stale "freshness protegida do backup inválida"
+  printf 'PRODUCTION_BACKUP_TIMESTAMP_SOURCE=PROTECTED_BUNDLE\nPRODUCTION_BACKUP_AGE_SECONDS=%s\nPRODUCTION_BACKUP_MAX_AGE_SECONDS=%s\nPRODUCTION_BACKUP_FRESHNESS=PASS\n' "$backup_age" "$max_age"
 else
   printf 'PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY\n'
 fi
@@ -84,7 +84,6 @@ for port in 4000 5173; do
 done
 log "OK: banco=$DB_NAME host confirmado (credenciais omitidas), backup e runtime validados"
 if [[ "$PRODUCTION_PREFLIGHT_MODE" == cutover ]]; then
-  : "${EXPECTED_SHA:?EXPECTED_SHA is required to publish cutover preflight proof}"
   PREFLIGHT_RESULT_FILE=${PREFLIGHT_RESULT_FILE:-$PRODUCTION_PREFLIGHT_PROOF_RESULT_DEFAULT}
   production_preflight_proof_publish "$PREFLIGHT_RESULT_FILE" "$EXPECTED_SHA" "$DB_NAME" \
     "$PRODUCTION_DB_CONTAINER_EXPECTED" "$PRODUCTION_DB_VOLUME_EXPECTED" \

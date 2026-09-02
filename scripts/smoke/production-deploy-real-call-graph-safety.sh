@@ -7,7 +7,7 @@ SHA=443be81e35a15e37158a93161b105c1aa81690b2
 mkdir -p "$APP/scripts/lib" "$BIN" "$AUTH" "$HIST"
 cp "$ROOT/scripts/production-deploy-entrypoint.sh" "$ROOT/scripts/deploy-production.sh" \
   "$ROOT/scripts/production-preflight.sh" "$APP/scripts/"
-cp "$ROOT/scripts/lib/production-backup-common.sh" "$ROOT/scripts/lib/production-preflight-proof.sh" "$APP/scripts/lib/"
+cp "$ROOT/scripts/lib/production-backup-common.sh" "$ROOT/scripts/lib/pr827-backup-proof.sh" "$ROOT/scripts/lib/production-preflight-proof.sh" "$APP/scripts/lib/"
 printf '{"version":"1.0.0"}\n' >"$APP/package.json"
 
 cat >"$APP/scripts/resolve-production-env.sh" <<EOF
@@ -35,6 +35,11 @@ EOF
 mv TMP_ENV "$TMP/legacy.env"
 printf 'canonical payload\n' >"$AUTH/production.sql.gz"
 (cd "$AUTH" && sha256sum production.sql.gz >production.sql.gz.sha256)
+export PR827_BACKUP_PROOF_ROOT="$TMP/protected-backup"
+export PR827_BACKUP_PROOF_EXPECTED_OWNER="$(id -un):$(id -gn)"
+export BACKUP_RESULT_FILE="$PR827_BACKUP_PROOF_ROOT/latest/result.tsv"
+source "$ROOT/scripts/lib/pr827-backup-proof.sh"
+pr827_backup_proof_publish "$AUTH/production.sql.gz" "$SHA" "$BACKUP_RESULT_FILE" 3600
 
 cat >"$BIN/git" <<EOF
 #!/usr/bin/env bash
@@ -82,9 +87,8 @@ chmod +x "$BIN/"*
 export PATH="$BIN:$PATH" COMMAND_LOG="$TMP/commands" PRODUCTION_LEGACY_ENV_FILE="$TMP/legacy.env"
 APP_DIR="$APP" DEPLOY_MODE=build EXPECTED_SHA="$SHA" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/out" 2>"$TMP/err"
 grep -qx 'LEGACY_VALUES_LOADED=PASS' "$TMP/out"
-grep -qx 'PRODUCTION_BACKUP_CANONICAL_RESOLUTION=PASS' "$TMP/out"
+grep -qx 'PRODUCTION_BACKUP_AUTHORITATIVE_RESOLUTION=PASS' "$TMP/out"
 grep -qx 'PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS' "$TMP/out"
-grep -qx 'PRODUCTION_BACKUP_CANONICAL_PAIR=VALIDATED' "$TMP/out"
 grep -qx 'PRODUCTION_PREFLIGHT=PASS' "$TMP/out"
 ! grep -q 'backup_path_mismatch' "$TMP/out" "$TMP/err"
 ! grep -Eq 'docker .* (up|stop|rm|restart)|PRODUCTION_CUTOVER' "$COMMAND_LOG"

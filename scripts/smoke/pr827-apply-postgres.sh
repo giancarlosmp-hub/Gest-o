@@ -40,7 +40,39 @@ source "$HARNESS_EXECUTION_CHECKOUT/scripts/lib/pr827-backup-proof.sh"
 export PR827_BACKUP_PROOF_ROOT="$backup_root" PR827_BACKUP_PROOF_EXPECTED_OWNER="$owner"
 printf '%s\nCREATE TABLE synthetic_backup_fixture(id integer);\n' 'PostgreSQL database dump' >"$HARNESS_TEMP_ROOT/synthetic-backup.sql"
 gzip -c "$HARNESS_TEMP_ROOT/synthetic-backup.sql" >"$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz"
-publish_backup_fixture(){ pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600; pr827_backup_proof_validate "$backup" "$head" 3600; }
+fixture_generation=0
+publish_backup_fixture(){
+ fixture_generation=$((fixture_generation + 1))
+ printf '%s\nCREATE TABLE synthetic_backup_fixture(id integer);\n-- fixture generation %s\n' 'PostgreSQL database dump' "$fixture_generation" >"$HARNESS_TEMP_ROOT/synthetic-backup.sql" || return $?
+ gzip -c "$HARNESS_TEMP_ROOT/synthetic-backup.sql" >"$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" || return $?
+ pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600 || return $?
+ pr827_backup_proof_validate "$backup" "$head" 3600 || return $?
+}
+run_fixture_operation(){
+ local stage=$1 command=$2 rc; shift 2
+ printf 'BACKUP_FIXTURE_OPERATION_STAGE=%s\nBACKUP_FIXTURE_OPERATION_COMMAND=%s\nBACKUP_FIXTURE_OPERATION_STATUS=STARTED\n' "$stage" "$command" >&3
+ set +e
+ "$@"
+ rc=$?
+ set -e
+ if (( rc != 0 )); then
+  printf 'BACKUP_FIXTURE_OPERATION_STAGE=%s\nBACKUP_FIXTURE_OPERATION_COMMAND=%s\nBACKUP_FIXTURE_OPERATION_STATUS=FAIL\nBACKUP_FIXTURE_OPERATION_RC=%s\n' "$stage" "$command" "$rc" >&3
+  return "$rc"
+ fi
+ printf 'BACKUP_FIXTURE_OPERATION_STAGE=%s\nBACKUP_FIXTURE_OPERATION_COMMAND=%s\nBACKUP_FIXTURE_OPERATION_STATUS=PASS\nBACKUP_FIXTURE_OPERATION_RC=0\n' "$stage" "$command" >&3
+}
+resolve_backup_fixture_paths(){
+ pr827_backup_proof_validate "$backup" "$head" 3600
+ fixture_dump=$PR827_BACKUP_RESOLVED_DUMP
+ fixture_manifest=$PR827_BACKUP_RESOLVED_MANIFEST
+ fixture_bundle=$PR827_BACKUP_RESOLVED_BUNDLE_ID
+ [[ -e "$fixture_dump" && -f "$fixture_dump" && ! -L "$fixture_dump" ]]
+ fixture_dump_real=$(realpath "$fixture_dump")
+ fixture_bundle_root=$(realpath "$backup_root/bundles/$fixture_bundle")
+ case "$fixture_dump_real" in "$HARNESS_TEMP_ROOT"/*) ;; *) return 1;; esac
+ [[ "$fixture_dump_real" == "$fixture_bundle_root/dump.sql.gz" ]]
+ [[ "$fixture_manifest" == "$fixture_bundle_root/dump.sql.gz.sha256" ]]
+}
 if pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600; then actual_rc=0; else actual_rc=$?; fi
 emit_stage BACKUP_FIXTURE_PUBLISH "$actual_rc"; (( actual_rc == 0 ))
 echo BACKUP_FIXTURE_CONTRACT=PASS
@@ -95,24 +127,28 @@ assert_backup_rejected(){
   echo APPLY_EXPECTED_ERROR_ABSENT=protected_backup_proof_required >&3
   return 1
  fi
- publish_backup_fixture
+ run_fixture_operation "RESTORE_${label^^}" publish_backup_fixture publish_backup_fixture
 }
 # Backup-negative runner calls must start from the same valid baseline as the
 # real apply. Previously they failed at legacy-history validation before ever
 # reaching the deliberately damaged backup proof.
 reset_db; make_baseline
 rm "$backup"; assert_backup_rejected absent
-rm "$backup_root/latest/dump.sql.gz"; assert_backup_rejected dump_absent
-printf 'tampered\n' >>"$backup_root/latest/dump.sql.gz"; assert_backup_rejected checksum_divergent
-rm "$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_absent
-printf 'invalid manifest\n' >"$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_invalid
-sed -i "s/^CREATED_AT_EPOCH.*/CREATED_AT_EPOCH\t$(( $(date +%s) - 7200 ))/" "$backup"; assert_backup_rejected timestamp_expired
-sed -i 's/^SHA.*/SHA\t0000000000000000000000000000000000000000/' "$backup"; assert_backup_rejected sha_mismatch
-sed -i 's/^DATABASE.*/DATABASE\tother_database/' "$backup"; assert_backup_rejected database_mismatch
-chmod 644 "$backup"; assert_backup_rejected mode_invalid
-if [[ $owner == root:root ]]; then fixture_expected_owner=nobody:nogroup; else fixture_expected_owner=root:root; fi
-assert_backup_rejected owner_invalid; fixture_expected_owner=$owner
-mv "$backup" "$HARNESS_TEMP_ROOT/real-result.tsv"; ln -s "$HARNESS_TEMP_ROOT/real-result.tsv" "$backup"; assert_backup_rejected symlink
+resolve_backup_fixture_paths; rm "$fixture_dump"; assert_backup_rejected dump_absent
+resolve_backup_fixture_paths; printf 'tampered\n' >>"$fixture_dump"; assert_backup_rejected checksum_divergent
+resolve_backup_fixture_paths; rm "$fixture_manifest"; assert_backup_rejected manifest_absent
+resolve_backup_fixture_paths; printf 'invalid manifest\n' >"$fixture_manifest"; assert_backup_rejected manifest_invalid
+run_fixture_operation PREPARE_TIMESTAMP_EXPIRED sed_created_at sed -i "s/^CREATED_AT_EPOCH.*/CREATED_AT_EPOCH\t$(( $(date +%s) - 7200 ))/" "$backup"; assert_backup_rejected timestamp_expired
+run_fixture_operation PREPARE_SHA_MISMATCH sed_sha sed -i 's/^SHA.*/SHA\t0000000000000000000000000000000000000000/' "$backup"; assert_backup_rejected sha_mismatch
+run_fixture_operation PREPARE_DATABASE_MISMATCH sed_database sed -i 's/^DATABASE.*/DATABASE\tother_database/' "$backup"; assert_backup_rejected database_mismatch
+run_fixture_operation PREPARE_MODE_INVALID chmod_result chmod 644 "$backup"; assert_backup_rejected mode_invalid
+select_invalid_owner(){ if [[ $owner == root:root ]]; then fixture_expected_owner=nobody:nogroup; else fixture_expected_owner=root:root; fi; }
+run_fixture_operation PREPARE_OWNER_INVALID select_invalid_owner select_invalid_owner
+assert_backup_rejected owner_invalid
+restore_expected_owner(){ fixture_expected_owner=$owner; }
+run_fixture_operation RESTORE_EXPECTED_OWNER restore_expected_owner restore_expected_owner
+prepare_result_symlink(){ mv "$backup" "$HARNESS_TEMP_ROOT/real-result.tsv" && ln -s "$HARNESS_TEMP_ROOT/real-result.tsv" "$backup"; }
+run_fixture_operation PREPARE_SYMLINK prepare_result_symlink prepare_result_symlink; assert_backup_rejected symlink
 echo BACKUP_NEGATIVE_CASES=PASS
 reset_db; make_baseline
 if run_apply >"$HARNESS_TEMP_ROOT/apply.out" 2>&1; then actual_rc=0; else actual_rc=$?; fi

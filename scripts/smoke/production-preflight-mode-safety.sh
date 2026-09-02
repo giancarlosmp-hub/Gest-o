@@ -57,6 +57,9 @@ export PRODUCTION_DB_VOLUME_EXPECTED=production-pgdata
 export PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$TMP/backup"
 export PRODUCTION_BACKUP_FILE="$TMP/backup/production.sql.gz"
 export PRODUCTION_BACKUP_SHA256_FILE="$TMP/backup/production.sql.gz.sha256"
+export PR827_BACKUP_PROOF_ROOT="$TMP/protected-backup"
+export PR827_BACKUP_PROOF_EXPECTED_OWNER="$(id -un):$(id -gn)"
+export BACKUP_RESULT_FILE="$PR827_BACKUP_PROOF_ROOT/latest/result.tsv"
 export PRODUCTION_BACKUP_MAX_AGE_SECONDS=60
 export EXPECTED_SHA=1111111111111111111111111111111111111111
 export PREFLIGHT_RESULT_FILE="$TMP/preflight/latest/result.tsv"
@@ -66,6 +69,9 @@ export PRODUCTION_PREFLIGHT_PROOF_EXPECTED_OWNER="$(id -un):$(id -gn)"
 make_valid_backup() {
   printf 'valid backup payload\n' >"$PRODUCTION_BACKUP_FILE"
   (cd "$(dirname "$PRODUCTION_BACKUP_FILE")" && sha256sum "$(basename "$PRODUCTION_BACKUP_FILE")" >"$(basename "$PRODUCTION_BACKUP_SHA256_FILE")")
+  rm -rf "$PR827_BACKUP_PROOF_ROOT"
+  source "$ROOT/scripts/lib/pr827-backup-proof.sh"
+  pr827_backup_proof_publish "$PRODUCTION_BACKUP_FILE" "$EXPECTED_SHA" "$BACKUP_RESULT_FILE" 3600
 }
 run_case() {
   local name=$1 mode=${2-__unset}; shift 2 || true
@@ -87,17 +93,18 @@ grep -qx 'PRODUCTION_BACKUP_FRESHNESS=NOT_REQUIRED_BUILD_ONLY' "$TMP/build_stale
 grep -qx 'PRODUCTION_PREFLIGHT=PASS' "$TMP/build_stale.out"
 
 # B/C: ausência e corrupção falham com diagnóstico sanitizado.
-rm -f "$PRODUCTION_BACKUP_FILE"
+rm -f "$PR827_BACKUP_RESOLVED_DUMP"
 if run_case build_missing build; then exit 1; fi
-grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_missing' "$TMP/build_missing.out"
-make_valid_backup; printf 'corruption\n' >>"$PRODUCTION_BACKUP_FILE"
+grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_proof_invalid' "$TMP/build_missing.out"
+make_valid_backup; printf 'corruption\n' >>"$PR827_BACKUP_RESOLVED_DUMP"
 if run_case build_invalid build; then exit 1; fi
-grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_integrity' "$TMP/build_invalid.out"
+grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_proof_invalid' "$TMP/build_invalid.out"
 
 # D/E: cutover mantém frescor obrigatório.
-make_valid_backup; touch -d '2 days ago' "$PRODUCTION_BACKUP_FILE"
+make_valid_backup
+sed -i "s/^CREATED_AT_EPOCH.*/CREATED_AT_EPOCH\t$(( $(date +%s) - 172800 ))/" "$BACKUP_RESULT_FILE"
 if run_case cutover_stale cutover; then exit 1; fi
-grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_stale' "$TMP/cutover_stale.out"
+grep -qx 'PRODUCTION_PREFLIGHT_FAILURE=backup_proof_invalid' "$TMP/cutover_stale.out"
 make_valid_backup
 run_case cutover_fresh cutover
 grep -qx 'PRODUCTION_BACKUP_FRESHNESS=PASS' "$TMP/cutover_fresh.out"
