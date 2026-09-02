@@ -21,11 +21,11 @@ assert.match(deploy, /ERP_ENV_SCHEDULER_POLICY=disabled_build_only/);
 assert.doesNotMatch(envResolver, /\b(?:cp|mv|install|sed|awk)\b/);
 assert.ok(deploy.indexOf("erp-production-env-preflight.sh") < deploy.indexOf("production-preflight.sh"));
 assert.match(deploy, /PRODUCTION_PREFLIGHT_MODE="\$MODE" bash "\$APP_DIR\/scripts\/production-preflight\.sh"/);
-for (const marker of ["DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN", "PRODUCTION_BACKUP_CANONICAL_RESOLUTION=PASS", "PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS", "PRODUCTION_BACKUP_CANONICAL_PAIR=VALIDATED"]) assert.ok(`${deploy}\n${pre}`.includes(marker));
+for (const marker of ["DEPLOY_PREFLIGHT_SCRIPT_SOURCE=CHECKOUT_MAIN", "PRODUCTION_BACKUP_AUTHORITATIVE_RESOLUTION=PASS", "PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS", "pr827_backup_proof_validate"]) assert.ok(`${deploy}\n${pre}`.includes(marker));
 assert.match(pre, /PREFLIGHT_SCRIPT_DIR=.*pwd -P/);
 assert.match(pre, /build\|cutover/);
 for (const marker of ["PRODUCTION_PREFLIGHT_MODE", "PRODUCTION_BACKUP_PRESENCE", "PRODUCTION_BACKUP_INTEGRITY", "PRODUCTION_BACKUP_FRESHNESS", "PRODUCTION_PREFLIGHT=PASS"]) assert.ok(pre.includes(marker));
-for (const reason of ["backup_missing", "backup_integrity", "backup_stale", "invalid_preflight_mode"]) assert.ok(pre.includes(reason));
+for (const reason of ["backup_proof_invalid", "backup_integrity", "backup_stale", "invalid_preflight_mode"]) assert.ok(pre.includes(reason));
 assert.match(compose, /ERP_SYNC_SCHEDULER_ENABLED: "\$\{ERP_SYNC_SCHEDULER_ENABLED:\?/);
 for (const policy of ["TENANCY_MODE disabled", "TENANT_READ_PILOT_ENABLED false", "DATABASE_SCHEMA_MODE external", "SEED_ON_BOOTSTRAP false", "ENABLE_PREVIEW_SEED false", "ENABLE_SMOKE_BOOTSTRAP false"]) {
   const [name, value] = policy.split(" ");
