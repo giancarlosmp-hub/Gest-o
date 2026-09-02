@@ -39,6 +39,9 @@ for (const token of ["pr827_backup_proof_publish", "pr827_backup_proof_validate"
   assert.match(applyHarness, new RegExp(token));
 for (const negative of ["absent", "dump_absent", "checksum_divergent", "manifest_absent", "manifest_invalid", "timestamp_expired", "sha_mismatch", "database_mismatch", "mode_invalid", "owner_invalid", "symlink"])
   assert.match(applyHarness, new RegExp(negative));
+for (const token of ["resolve_backup_fixture_paths", "PR827_BACKUP_RESOLVED_DUMP", "PR827_BACKUP_RESOLVED_MANIFEST", "PR827_BACKUP_RESOLVED_BUNDLE_ID", "fixture_bundle_root", "HARNESS_TEMP_ROOT"])
+  assert.match(applyHarness, new RegExp(token));
+assert.doesNotMatch(applyHarness, /backup_root\/latest\/dump\.sql\.gz/);
 for (const stage of ["BACKUP_FIXTURE_PUBLISH", "BACKUP_FIXTURE_VALIDATE", "RUNNER_OVERRIDE_AUTHORIZATION", "RUNNER_INITIAL_APPLY", "CATALOG_VALIDATION", "IDEMPOTENT_APPLY", "ROLLBACK_PUBLICATION_FAILURE", "DDL_FAILURE_WITHOUT_HISTORY"])
   assert.match(applyHarness, new RegExp(stage));
 for (const marker of ["APPLY_STAGE_RC", "APPLY_STAGE_RESULT", "APPLY_HARNESS_OPERATION_RC", "APPLY_HARNESS_CLEANUP_RC", "APPLY_HARNESS_FINAL_RC"])

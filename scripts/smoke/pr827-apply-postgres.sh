@@ -41,6 +41,18 @@ export PR827_BACKUP_PROOF_ROOT="$backup_root" PR827_BACKUP_PROOF_EXPECTED_OWNER=
 printf '%s\nCREATE TABLE synthetic_backup_fixture(id integer);\n' 'PostgreSQL database dump' >"$HARNESS_TEMP_ROOT/synthetic-backup.sql"
 gzip -c "$HARNESS_TEMP_ROOT/synthetic-backup.sql" >"$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz"
 publish_backup_fixture(){ pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600; pr827_backup_proof_validate "$backup" "$head" 3600; }
+resolve_backup_fixture_paths(){
+ pr827_backup_proof_validate "$backup" "$head" 3600
+ fixture_dump=$PR827_BACKUP_RESOLVED_DUMP
+ fixture_manifest=$PR827_BACKUP_RESOLVED_MANIFEST
+ fixture_bundle=$PR827_BACKUP_RESOLVED_BUNDLE_ID
+ [[ -e "$fixture_dump" && -f "$fixture_dump" && ! -L "$fixture_dump" ]]
+ fixture_dump_real=$(realpath "$fixture_dump")
+ fixture_bundle_root=$(realpath "$backup_root/bundles/$fixture_bundle")
+ case "$fixture_dump_real" in "$HARNESS_TEMP_ROOT"/*) ;; *) return 1;; esac
+ [[ "$fixture_dump_real" == "$fixture_bundle_root/dump.sql.gz" ]]
+ [[ "$fixture_manifest" == "$fixture_bundle_root/dump.sql.gz.sha256" ]]
+}
 if pr827_backup_proof_publish "$HARNESS_TEMP_ROOT/synthetic-backup.sql.gz" "$head" "$backup" 3600; then actual_rc=0; else actual_rc=$?; fi
 emit_stage BACKUP_FIXTURE_PUBLISH "$actual_rc"; (( actual_rc == 0 ))
 echo BACKUP_FIXTURE_CONTRACT=PASS
@@ -102,10 +114,10 @@ assert_backup_rejected(){
 # reaching the deliberately damaged backup proof.
 reset_db; make_baseline
 rm "$backup"; assert_backup_rejected absent
-rm "$backup_root/latest/dump.sql.gz"; assert_backup_rejected dump_absent
-printf 'tampered\n' >>"$backup_root/latest/dump.sql.gz"; assert_backup_rejected checksum_divergent
-rm "$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_absent
-printf 'invalid manifest\n' >"$backup_root/latest/dump.sql.gz.sha256"; assert_backup_rejected manifest_invalid
+resolve_backup_fixture_paths; rm "$fixture_dump"; assert_backup_rejected dump_absent
+resolve_backup_fixture_paths; printf 'tampered\n' >>"$fixture_dump"; assert_backup_rejected checksum_divergent
+resolve_backup_fixture_paths; rm "$fixture_manifest"; assert_backup_rejected manifest_absent
+resolve_backup_fixture_paths; printf 'invalid manifest\n' >"$fixture_manifest"; assert_backup_rejected manifest_invalid
 sed -i "s/^CREATED_AT_EPOCH.*/CREATED_AT_EPOCH\t$(( $(date +%s) - 7200 ))/" "$backup"; assert_backup_rejected timestamp_expired
 sed -i 's/^SHA.*/SHA\t0000000000000000000000000000000000000000/' "$backup"; assert_backup_rejected sha_mismatch
 sed -i 's/^DATABASE.*/DATABASE\tother_database/' "$backup"; assert_backup_rejected database_mismatch
