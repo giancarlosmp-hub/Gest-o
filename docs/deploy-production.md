@@ -2,8 +2,9 @@
 
 ## Bloqueio operacional: tenancy expand roots
 
-Em 1 de setembro de 2026, `20260808120000_tenancy_expand_roots` **ainda não foi
-aplicada em produção**. A migration agora possui operação manual exclusiva em
+Em 1 de setembro de 2026, `20260808120000_tenancy_expand_roots` ainda não havia
+sido aplicada; em 2 de setembro o apply foi confirmado verde e publicou o bundle
+protegido descrito abaixo. A migration possui operação manual exclusiva em
 `.github/workflows/production-tenancy-expand-roots.yml`: primeiro `preview`
 read-only; depois, somente com evidência verde, backup e aprovação do environment
 `production-schema`, `apply` com a confirmação `APPLY_TENANCY_EXPAND_ROOTS`.
@@ -88,3 +89,13 @@ docker compose ps
 ```
 
 Se `HEAD` for diferente de `origin/main`, a produção está em commit antigo. Se houver alterações rastreadas em `git status --short`, resolva ou faça backup antes de tentar novo deploy, porque o workflow não força reset.
+> **Atualização de 2 de setembro de 2026 — bundle tenancy expand roots.** O gate de
+> cutover reconhece explicitamente o bundle protegido
+> `<SCHEMA_EVIDENCE_DIR>/<APP_COMMIT>/migrations/20260808120000_tenancy_expand_roots`.
+> O contrato compartilhado valida a árvore sem symlinks, owner/modes, allowlist exata,
+> metadata, checksum contra registro/checkout/commit, resultado, catálogo e o diff
+> gerenciado com `schema-diff-filter.mjs`. O SQL bruto pode conter apenas diferenças
+> históricas removidas pelo filtro; seu tamanho não é um gate. `applied.tsv` continua
+> sendo validado sem alteração para os fluxos legados. Depois da evidência, o deploy
+> ainda executa o Prisma diff ao vivo com a imagem pinada e `DATABASE_URL` protegido,
+> antes de parar containers.

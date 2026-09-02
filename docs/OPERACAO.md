@@ -831,3 +831,9 @@ No Windows, revisar os paths e criar uma tarefa **SYSTEM**, no boot, para PowerS
 ## Prova de backup exigida pelo apply PR827
 
 Dispare **Prepare Production Recovery Backup** somente após merge e `main` verde, com confirmação e SHA completo aprovados. O workflow deve terminar com `PRODUCTION_BACKUP_PR827_PROOF=PASS` e `PRODUCTION_BACKUP_FINAL_FILESYSTEM_VALIDATION=PASS`. O único contrato aceito é `/var/log/gest-o/backup/latest/result.tsv`, dentro do bundle v1 que contém também `dump.sql.gz` e `dump.sql.gz.sha256`. Não crie o resultado manualmente, não copie resultados antigos e não use evidências de `schema`, `tenancy` ou `control-plane`. O apply continua proibido até que uma execução nova publique e releia com o parser compartilhado uma prova íntegra, protegida, do SHA aprovado, banco `salesforce_pro` e dentro da janela de freshness.
+> **Cutover após tenancy expand roots (02/09/2026).** Não criar ou sintetizar
+> `applied.tsv`. Para a migration `20260808120000_tenancy_expand_roots`, o deploy lê o
+> bundle completo sob o SHA, aplica o validador compartilhado fail-closed e filtra
+> `post-apply-diff.sql`; o raw não precisa ser vazio. A evidência aprovada apenas libera
+> a revalidação Prisma ao vivo com a imagem do `APP_COMMIT`. Diff gerenciado não vazio
+> bloqueia antes de qualquer interrupção. O leitor legado de `applied.tsv` permanece.

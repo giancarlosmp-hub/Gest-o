@@ -62,6 +62,9 @@ assert.ok(deploy.includes("tr -cd '[:alnum:]._ -'")); assert.ok(!deploy.includes
 assert.match(deploy,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
 assert.match(schemaEvidence,/git show "\$evidence_commit:\$evidence_migration" \| sha256sum/);
 assert.match(schemaEvidence,/SCHEMA_MIGRATION_PR827/);
+for (const token of ["validate_tenancy_expand_roots_evidence", "metadata.tsv", "catalog-after.tsv", "business_rows_modified", "schema-diff-filter.mjs"]) assert.ok(schemaEvidence.includes(token));
+assert.match(deploy,/validate_tenancy_expand_roots_evidence "\$tenancy_bundle" "\$APP_COMMIT" "\$schema_evidence_root"/);
+assert.ok(deploy.indexOf("validate_tenancy_expand_roots_evidence") < deploy.indexOf("docker stop"));
 assert.match(schemaEvidence,/schema_protected_file "\$evidence_dir\/post-apply-diff\.sql"/);
 assert.match(schemaEvidence,/! -e "\$evidence_dir\/post-apply-diff\.sql"/);
 assert.match(deploy,/schema-diff-filter\.mjs "\$schema_validation_tmp\/raw\.sql" "\$schema_validation_tmp\/managed\.sql" post/);

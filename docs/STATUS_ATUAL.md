@@ -725,3 +725,14 @@ o próprio `github.sha`. Backup protegido e preview de mesmo SHA/checksum não f
 acessada ou modificada e nenhuma migration/deploy/cutover/recovery foi executada nesta entrega.
 `READY_TO_MERGE=NO` e `READY_TO_RETRY_TENANCY_APPLY=NO` até a PR e todos os checks, inclusive os de
 PostgreSQL 16, ficarem verdes e a correção ser mesclada em `main`.
+> **02/09/2026 — correção pronta para revisão, sem operação produtiva.** A causa do
+> bloqueio era o deploy procurar somente `<SHA>/applied.tsv`, embora o apply de
+> `20260808120000_tenancy_expand_roots` publique um bundle completo em
+> `<SHA>/migrations/<migration_id>`. O deploy agora reconhece esse contrato sem
+> converter evidência, valida todos os seus artefatos com o mesmo leitor usado pelo
+> runner, aceita raw post-diff não vazio somente quando o filtro gerenciado fica vazio
+> e preserva a revalidação Prisma ao vivo antes do cutover. Gate legado, backup,
+> preflight, SHA/imagem, build-info, rollback, tenancy disabled, schema external e
+> ausência de ledger permanecem. Produção não foi acessada ou modificada; cutover não
+> foi executado. `READY_TO_MERGE=NO` até checks remotos verdes e
+> `READY_TO_RETRY_CUTOVER=NO` até merge/main verde e autorização operacional.

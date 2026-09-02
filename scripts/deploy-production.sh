@@ -94,7 +94,11 @@ is_schema_evidence_operational_path(){
 }
 
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
-if [[ -s "$schema_evidence" ]] && validate_schema_evidence "$schema_evidence" && [[ "$SCHEMA_EVIDENCE_COMMIT" == "$APP_COMMIT" ]]; then
+tenancy_bundle="$schema_evidence_root/$APP_COMMIT/migrations/$TENANCY_EXPAND_ROOTS_ID"
+if validate_tenancy_expand_roots_evidence "$tenancy_bundle" "$APP_COMMIT" "$schema_evidence_root"; then
+  schema_evidence="$tenancy_bundle/result.tsv"
+  log "bundle protegido tenancy expand roots validado para o SHA atual"
+elif [[ -s "$schema_evidence" ]] && validate_schema_evidence "$schema_evidence" && [[ "$SCHEMA_EVIDENCE_COMMIT" == "$APP_COMMIT" ]]; then
   log "evidência de schema validada para o SHA atual"
 else
   schema_evidence=""
