@@ -1,3 +1,7 @@
+## Deploy de produção: evidência equivalente de schema (03/09/2026)
+
+`Deploy Production` tem modos `build` (preflight/imagens, sem parar containers) e `cutover` (environment aprovado e troca controlada). Para o bundle protegido de `tenancy expand roots`, o cutover agora procura primeiro o SHA atual e depois bundles históricos completos; um histórico só é reutilizado se passar owner/mode/symlink/allowlist de arquivos, metadata, migration ID, checksums, result, catálogo e filtro do post-diff e se `apps/api/prisma` não mudou entre os SHAs. O Prisma diff ao vivo permanece obrigatório. Aplicação, frontend e documentação não demandam nova migration. Não execute schema/Recovery por tentativa nem fabrique evidência. Sequência, gates, pós-checks e rollback estão em `DOCUMENTO_MESTRE.md`.
+
 ## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
 
 O deploy produtivo está saudável no SHA `72edf598933dc3f8f38d16473d054b422da34b8a` (merge da PR #849). A PR #850 está mesclada na `main` no SHA `e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`, mas esse SHA ainda não foi comprovado em produção; a divergência conhecida é, portanto, a PR #850. O pedido ERP **900135** foi enviado com sucesso por ação manual. Esse fato comprova o caminho manual e a disponibilidade do ERP naquele envio, mas **não** comprova inicialização, disparo ou sucesso da sincronização automática.

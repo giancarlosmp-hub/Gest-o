@@ -1,3 +1,7 @@
+## Gate de evidência do cutover no SHA 16dba36 (03/09/2026)
+
+O build de `16dba36aa04a33fdc488601f56d293a37b266318` passou sem cutover; a tentativa posterior de cutover parou antes de containers com “nenhuma evidência equivalente de schema foi validada”. O consumidor aceitava bundle `tenancy expand roots` apenas em `<APP_COMMIT>/...`, mas seu fallback de equivalência percorria somente `applied.tsv`. A correção aplica ao bundle completo o mesmo princípio, exigindo validação integral contra o SHA produtor e igualdade Git de toda `apps/api/prisma`; depois ainda exige diff Prisma managed ao vivo vazio. Nenhuma migration, banco, Recovery ou cutover foi executado nesta alteração. O SHA e inventário exatos da VPS permanecem dependentes da coleta read-only operacional; não devem ser inferidos dos arquivos locais. Consulte o procedimento autoritativo em `DOCUMENTO_MESTRE.md`.
+
 ## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
 
 O deploy produtivo está saudável no SHA `72edf598933dc3f8f38d16473d054b422da34b8a` (merge da PR #849). A PR #850 está mesclada na `main` no SHA `e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`, mas esse SHA ainda não foi comprovado em produção; a divergência conhecida é, portanto, a PR #850. O pedido ERP **900135** foi enviado com sucesso por ação manual. Esse fato comprova o caminho manual e a disponibilidade do ERP naquele envio, mas **não** comprova inicialização, disparo ou sucesso da sincronização automática.

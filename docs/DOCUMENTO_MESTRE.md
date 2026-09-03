@@ -1,3 +1,37 @@
+# Como implantar o Gest-o em produção
+
+Esta seção é o procedimento autoritativo. **Merge em `main` não implanta produção automaticamente**: o CI do merge apenas valida a alteração. O operador deve usar **Actions → Deploy Production**.
+
+## Sequência controlada
+
+1. Confirme que todos os checks da `main` estão verdes e registre o SHA completo.
+2. Execute **Prepare Production Recovery Backup**, com o SHA confirmado, e exija a prova protegida verde. Isso prepara backup; não é Recovery.
+3. Execute **Deploy Production** com `phase=build`. Esse modo roda preflight/build e constrói as imagens enquanto os containers atuais continuam atendendo; a mensagem “Fase build/preflight concluída; cutover não executado” significa exatamente que produção **não** foi implantada.
+4. Confira o SHA, o build-info e o resultado do build.
+5. Execute **Deploy Production** com `phase=cutover`, aprove o environment `production-cutover` e aguarde a conclusão. Esse modo faz a troca controlada somente depois de todos os gates.
+6. Valide API (`/health` e `/health/version`), WEB, conectividade read-only do banco e o SHA efetivamente servido.
+
+## Gates e resposta correta
+
+| Bloqueio | Significado | Resposta segura |
+|---|---|---|
+| `backup_proof_invalid` | bundle de backup ausente, vencido, divergente ou inválido | executar **Prepare Production Recovery Backup** para o mesmo SHA; nunca criar/copiar a prova |
+| evidência de schema ausente/inválida | nenhum bundle completo ou `applied.tsv` legado íntegro e Prisma-equivalente foi aceito | interromper; inventariar read-only `/var/log/gest-o/schema`, classificar o diff Git e corrigir produtor/consumidor se comprovado |
+| Prisma diff gerenciado | banco e `schema.prisma` divergem em objetos gerenciados | interromper e elaborar plano de schema específico; não tentar workflows de schema |
+| health check | candidato não ficou saudável | preservar evidência e executar o rollback versionado do deploy; não executar Recovery por reflexo |
+| divergência de SHA | checkout, imagem, main aprovada ou runtime não representam o mesmo commit | interromper, reconciliar Git/imagem e repetir desde build |
+
+**Nunca executar por tentativa:** **ERP Production Recovery**, **Prepare Canonical Production Environment**, **Production Schema PR827** ou **Production tenancy expand roots**. Recovery só é permitido em incidente formal, com autorização explícita. Workflows de schema podem alterar schema; o apply de tenancy é idempotente quando o catálogo já está exato, mas continua sendo uma operação de schema e não serve para “renovar” evidência.
+
+Nunca copie, crie ou edite manualmente evidências protegidas. O bundle `tenancy expand roots` válido pode ser reutilizado entre SHAs somente quando o contrato completo valida e `apps/api/prisma` é Git-equivalente; o cutover ainda refaz o Prisma diff ao vivo. Mudanças de aplicação, frontend ou documentação, isoladamente, não exigem reaplicar migration nem alterar dados empresariais.
+
+## Pós-deploy e rollback
+
+- confirme API e WEB healthy, SHA servido igual ao aprovado, uma instância por serviço, restart count estável, banco/container/volume allowlisted e rotas públicas essenciais;
+- preserve os artefatos de `/var/log/gest-o/deploy/<SHA>`;
+- se a troca já começou e qualquer gate posterior falhar, use apenas o rollback versionado/persistido pelo deploy e confirme a saúde e o SHA restaurado;
+- não restaure banco sem incidente de perda/corrupção formalmente comprovado e autorizado.
+
 ## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
 
 O deploy produtivo está saudável no SHA `72edf598933dc3f8f38d16473d054b422da34b8a` (merge da PR #849). A PR #850 está mesclada na `main` no SHA `e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`, mas esse SHA ainda não foi comprovado em produção; a divergência conhecida é, portanto, a PR #850. O pedido ERP **900135** foi enviado com sucesso por ação manual. Esse fato comprova o caminho manual e a disponibilidade do ERP naquele envio, mas **não** comprova inicialização, disparo ou sucesso da sincronização automática.

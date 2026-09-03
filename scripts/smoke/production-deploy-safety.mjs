@@ -6,6 +6,9 @@ const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
 const envResolver=read("scripts/resolve-production-env.sh");
 const entrypoint=read("scripts/production-deploy-entrypoint.sh");
+assert.match(deploy, /schema_evidence_root"\/\*\/migrations\/"\$TENANCY_EXPAND_ROOTS_ID"/);
+assert.match(deploy, /validate_tenancy_expand_roots_evidence "\$candidate" "\$candidate_commit"/);
+assert.match(deploy, /git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
 assert.match(deploy, /if ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
 assert.match(workflow, /production-deploy-entrypoint\.sh/);
 assert.doesNotMatch(workflow, /test "\$\(git rev-parse HEAD\)"/);

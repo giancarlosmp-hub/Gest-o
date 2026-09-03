@@ -1,3 +1,7 @@
+## Procedimento canônico de produção (03/09/2026)
+
+Merge e CI verde não implantam produção. Use, nesta ordem: checks verdes da `main`; **Prepare Production Recovery Backup**; **Deploy Production / build**; conferência de SHA e resultado; **Deploy Production / cutover**; aprovação de `production-cutover`; validação de API, WEB, banco read-only e SHA. Build verde significa somente imagens/preflight. `backup_proof_invalid`, prova de schema, Prisma diff, health e SHA são gates fail-closed. Recovery e os workflows **Prepare Canonical Production Environment**, **Production Schema PR827** e **Production tenancy expand roots** nunca são tentativas de desbloqueio. Veja a seção autoritativa “Como implantar o Gest-o em produção” em `DOCUMENTO_MESTRE.md`.
+
 ## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
 
 O deploy produtivo está saudável no SHA `72edf598933dc3f8f38d16473d054b422da34b8a` (merge da PR #849). A PR #850 está mesclada na `main` no SHA `e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`, mas esse SHA ainda não foi comprovado em produção; a divergência conhecida é, portanto, a PR #850. O pedido ERP **900135** foi enviado com sucesso por ação manual. Esse fato comprova o caminho manual e a disponibilidade do ERP naquele envio, mas **não** comprova inicialização, disparo ou sucesso da sincronização automática.

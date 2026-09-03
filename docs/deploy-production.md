@@ -1,3 +1,7 @@
+## Runbook vigente (03/09/2026)
+
+O workflow é exclusivamente manual em **Actions → Deploy Production**. `phase=build` executa preflight e build sem parar containers; `phase=cutover` exige aprovação do environment e só então pode trocar API/WEB. A ordem obrigatória é checks da main → Prepare Production Recovery Backup → build → conferir SHA → cutover/aprovação → validar API, WEB, banco e SHA. Merge/CI e build verde não significam deploy. Não use Recovery, canonical environment ou workflow de schema por tentativa. Não copie/crie evidência. Consulte `DOCUMENTO_MESTRE.md` para gates, resposta operacional, pós-checks e rollback.
+
 # Deploy de produção
 
 ## Bloqueio operacional: tenancy expand roots
@@ -31,10 +35,8 @@ Este repositório possui um workflow seguro para atualizar a produção em `/app
 
 Arquivo: `.github/workflows/deploy-production.yml`.
 
-Gatilhos:
-
-- `push` na branch `main`, para deploy automático após merge.
-- `workflow_dispatch`, para deploy manual. No acionamento manual, informe `production` no campo de confirmação.
+Gatilho: somente `workflow_dispatch`, com escolha explícita de `build` ou
+`cutover`. Não existe deploy automático em `push` para `main`.
 
 Secrets aceitos pelo workflow:
 
@@ -54,16 +56,12 @@ git pull --ff-only origin main
 bash scripts/deploy-production.sh
 ```
 
-O script `scripts/deploy-production.sh` executa, por padrão:
+O entrypoint confere SHA e worktree; o script executa preflight e build. Apenas
+quando `phase=cutover`, depois da aprovação e dos gates, ele troca API/WEB:
 
 ```bash
 cd /apps/gest-o
-git fetch origin main
-git checkout main
-git pull --ff-only origin main
-docker compose build api web
-docker compose up -d api web
-docker compose ps
+APP_DIR=/apps/gest-o bash scripts/production-deploy-entrypoint.sh
 ```
 
 ## Segurança operacional
