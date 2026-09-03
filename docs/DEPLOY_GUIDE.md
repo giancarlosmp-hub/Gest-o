@@ -1,3 +1,11 @@
+## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
+
+O deploy produtivo está saudável no SHA `72edf598933dc3f8f38d16473d054b422da34b8a` (merge da PR #849). A PR #850 está mesclada na `main` no SHA `e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`, mas esse SHA ainda não foi comprovado em produção; a divergência conhecida é, portanto, a PR #850. O pedido ERP **900135** foi enviado com sucesso por ação manual. Esse fato comprova o caminho manual e a disponibilidade do ERP naquele envio, mas **não** comprova inicialização, disparo ou sucesso da sincronização automática.
+
+A instrumentação `erp-automatic-proof` da PR #826 permanece no call graph real do workflow Recovery e seus testes continuam presentes. Ainda assim, nenhuma evidência operacional posterior fornecida comprova simultaneamente `trigger=scheduler`, execução-pai `scope=automatic` com resultado `SUCCESS`, lock liberado, scheduler inicializado, `nextRunAt` e reachability recente. Não repetir Recovery para investigar: executar primeiro o procedimento GET-only documentado em `docs/investigations/inc-erp-5050-automatic-sync-recurrence-2026-08.md`. Até que todos os predicados sejam observados na mesma coleta: `ERP_AUTOMATIC_SYNC=NOT_PROVEN`, `INC_ERP_5050=INVESTIGATING`, `RECOVERY_REQUIRED=NO` (não demonstrado necessário), `READY_FOR_NEXT_SPRINT=NO`.
+
+As PRs antigas #820 e #818 foram superadas, respectivamente, pelas correções mescladas #821 e #819; a #810 foi reconciliada e superada pela #811. Essa avaliação não altera nem encerra automaticamente essas PRs.
+
 # Gate de schema PR827 (legado)
 
 ## Gate de origem canônica do cutover
