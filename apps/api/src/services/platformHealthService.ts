@@ -2,12 +2,13 @@ import { prisma } from "../config/prisma.js";
 import { getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
 import { projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
 import { readFile } from "node:fs/promises";
+import { PLATFORM_HEALTH_CONTRACT_VERSION, platformHealthSnapshotSchema } from "@salesforce-pro/shared";
 
 export const PLATFORM_HEALTH_CACHE_TTL_MS = 60_000;
-export const PLATFORM_HEALTH_ROLES = new Set(["diretor", "administrador", "admin", "suporte", "ti"]);
+export const PLATFORM_HEALTH_ROLES = new Set(["diretor", "gerente"]);
 
 export type Severity = "healthy" | "warning" | "critical";
-type MetricMap = Record<string, number>;
+type MetricMap = Record<string, number | null>;
 
 const readUltraFv3Reachability = async () => {
   try {
@@ -19,18 +20,18 @@ const readUltraFv3Reachability = async () => {
   }
 };
 
-const numberValue = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const numberValue = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
 export const metricFrom = (metrics: unknown, ...keys: string[]) => {
-  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) return 0;
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) return null;
   const source = metrics as Record<string, unknown>;
   for (const key of keys) if (key in source) return numberValue(source[key]);
-  return 0;
+  return null;
 };
 
 export const buildAlerts = (input: { metrics: MetricMap; lastSyncAt: Date | null; durationMs: number; averageDurationMs: number; duplicates: number; partnerTitlesInconsistent: number; financialProfilesOrphaned: number; codeChangesToday: number }, now = new Date()) => {
   const alerts: Array<{ id: string; severity: Severity; title: string; detail: string; metric: string; value: number }> = [];
   const add = (id: string, severity: Severity, title: string, detail: string, metric: string, value: number) => alerts.push({ id, severity, title, detail, metric, value });
-  if (input.metrics.documentConflicts > 0) add("document-conflicts", "critical", "Conflitos documentais", "Existem correspondências ERP rejeitadas por conflito documental.", "documentConflicts", input.metrics.documentConflicts);
+  if ((input.metrics.documentConflicts ?? 0) > 0) add("document-conflicts", "critical", "Conflitos documentais", "Existem correspondências ERP rejeitadas por conflito documental.", "documentConflicts", input.metrics.documentConflicts!);
   if (input.codeChangesToday > 20) add("code-changes", "warning", "Alterações de Client.code acima do limite", "Mais de 20 alterações foram auditadas hoje.", "codeChangesToday", input.codeChangesToday);
   if (!input.lastSyncAt || now.getTime() - input.lastSyncAt.getTime() > 2 * 60 * 60 * 1000) add("sync-stopped", "critical", "Sincronização parada", "Nenhuma comunicação ERP concluída nas últimas duas horas.", "minutesSinceSync", input.lastSyncAt ? Math.floor((now.getTime() - input.lastSyncAt.getTime()) / 60_000) : -1);
   if (input.averageDurationMs > 0 && input.durationMs > input.averageDurationMs * 1.5) add("slow-sync", "warning", "Sincronização acima do tempo esperado", "A última execução excedeu em 50% o tempo médio.", "durationMs", input.durationMs);
@@ -57,12 +58,16 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
     prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } })
   ]);
   const runProjection = projectPlatformHealthRuns(runs);
+  const metricKeys = ["partnersReceived", "partnersUpdated", "clientsCreated", "clientsUpdated", "ordersSynced", "ordersError", "documentConflicts", "fallbackNoDocument", "codeExact", "documentExact", "rejectConflict", "createNoSafeMatch"];
   const aggregate = runProjection.parentRuns.reduce<MetricMap>((acc, run) => {
     const m = run.metrics;
     const mappings: Record<string, string[]> = { partnersReceived: ["received"], partnersUpdated: ["updated"], clientsCreated: ["created"], clientsUpdated: ["updated"], ordersSynced: ["ordersSynced", "synced"], ordersError: ["ordersError", "errors"], documentConflicts: ["documentErpConflicts", "rejected_document_conflict"], fallbackNoDocument: ["identity_fallback_no_document"], codeExact: ["code_exact"], documentExact: ["document_exact"], rejectConflict: ["rejected_document_conflict"], createNoSafeMatch: ["create_no_safe_match"] };
-    for (const [target, keys] of Object.entries(mappings)) acc[target] = (acc[target] || 0) + metricFrom(m, ...keys);
+    for (const [target, keys] of Object.entries(mappings)) {
+      const value = metricFrom(m, ...keys);
+      if (value !== null) acc[target] = (acc[target] ?? 0) + value;
+    }
     return acc;
-  }, {});
+  }, Object.fromEntries(metricKeys.map(key => [key, null])));
   const duplicates = Number(duplicateRows[0]?.count ?? 0);
   const partnerTitlesInconsistent = Number(jsonQualityRows[0]?.partner_titles ?? 0);
   const financialProfilesOrphaned = Number(jsonQualityRows[0]?.financial_orphans ?? 0);
@@ -80,10 +85,13 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   if (!runProjection.lastAutomaticSync) alerts.unshift({ id: "scheduler-run-not-proven", severity: "warning", title: "Execução automática não comprovada", detail: "Execuções manuais e etapas isoladas não comprovam o scheduler.", metric: "schedulerParentRuns", value: 0 });
   if (!scheduler.initialized || !scheduler.enabled) alerts.unshift({ id: "scheduler-inactive", severity: "critical", title: "Scheduler inativo ou não inicializado", detail: "Verifique os gates de ambiente e AppConfig.", metric: "schedulerInitialized", value: scheduler.initialized ? 1 : 0 });
   if (reachability.status === "unavailable") alerts.unshift({ id: "ultrafv3-unavailable", severity: "critical", title: "UltraFV3 indisponível", detail: "Verifique servidor Windows, Tailscale e UltraFV3Rest. A recuperação não reenvia pedidos.", metric: "erpReachability", value: 0 });
-  return { contractVersion: "2.0", dataState: runProjection.dataState, generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { dataState: runProjection.dataState, lastSync: runProjection.lastSync, lastManualSync: runProjection.lastManualSync, lastAutomaticSync: runProjection.lastAutomaticSync, lastAutomaticSuccess: runProjection.lastAutomaticSuccess, averageDurationMs: runProjection.averageDurationMs, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality: { dataState: "available", ...quality }, integration: { dataState: runProjection.dataState, reachability, connected: automaticEvidence.automaticProven ? true : null, lastCommunication: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, latencyMs: runProjection.lastSync?.durationMs ?? null, averageDurationMs: runProjection.averageDurationMs, successRate: runProjection.successRate, errorRate: runProjection.errorRate, retries: runProjection.retries, recentRuns: runProjection.recentRuns.slice(0, 20), scheduler: { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, automaticEvidence, lock: automaticEvidence.lock }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: runProjection.parentRuns.filter(x => x.durationMs != null).map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs! })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "not_instrumented" } };
+  const safeRun = (run: typeof runProjection.lastSync) => run ? ({ runKind: run.runKind, scope: run.scope, trigger: run.trigger, status: run.status, startedAt: run.startedAt.toISOString(), finishedAt: run.finishedAt?.toISOString() ?? null, durationMs: run.durationMs, syncedCount: run.syncedCount }) : null;
+  const safeLock = { state: automaticEvidence.lock.state, lock: automaticEvidence.lock.lock ? { scope: automaticEvidence.lock.lock.scope, lockedUntil: automaticEvidence.lock.lock.lockedUntil.toISOString(), updatedAt: automaticEvidence.lock.lock.updatedAt.toISOString() } : null };
+  const dataState = runProjection.dataState === "available" && Object.values(aggregate).some(value => value === null) ? "partial" : runProjection.dataState;
+  return { contractVersion: PLATFORM_HEALTH_CONTRACT_VERSION, dataState, generatedAt: new Date().toISOString(), cacheTtlSeconds: PLATFORM_HEALTH_CACHE_TTL_MS / 1000, periodDays: days, overview: { dataState, lastSync: safeRun(runProjection.lastSync), lastManualSync: safeRun(runProjection.lastManualSync), lastAutomaticSync: safeRun(runProjection.lastAutomaticSync), lastAutomaticSuccess: safeRun(runProjection.lastAutomaticSuccess), averageDurationMs: runProjection.averageDurationMs, metrics: { ...aggregate, clientCodeChanges: auditToday } }, quality: { dataState: "available", ...quality }, integration: { dataState, reachability, connected: automaticEvidence.automaticProven ? true : null, latencyMs: runProjection.lastSync?.durationMs ?? null, averageDurationMs: runProjection.averageDurationMs, successRate: runProjection.successRate, errorRate: runProjection.errorRate, retries: runProjection.retries, recentRuns: runProjection.recentRuns.slice(0, 20).map(run => safeRun(run)!), scheduler: { initialized: scheduler.initialized, enabled: scheduler.enabled, enabledByEnv: scheduler.enabledByEnv, nextRunAt: scheduler.nextRunAt, status: scheduler.panelStatus, lastRunAt: scheduler.lastRealSchedulerRunAt, lastSuccessAt: scheduler.lastRealSchedulerSuccessAt }, automaticEvidence: { schedulerState: automaticEvidence.schedulerState, automaticRunState: automaticEvidence.automaticRunState, automaticProven: automaticEvidence.automaticProven, lock: safeLock }, lock: safeLock }, trends: { clientCodeChanges: auditTrend.map(x => ({ date: x.createdAt.toISOString().slice(0, 10), value: x._count._all })), syncDuration: runProjection.parentRuns.filter(x => x.durationMs != null).map(x => ({ date: x.startedAt.toISOString().slice(0, 10), value: x.durationMs! })).reverse() }, alerts, notifications: { providers: ["slack", "teams", "email", "webhook"], status: "not_instrumented" as const } };
 };
 
 export async function getPlatformHealthSnapshot(days: 7 | 30 | 90, force = false) {
-  if (!force && cache && cache.expiresAt > Date.now() && cache.data.periodDays === days) return { ...cache.data, cacheHit: true };
-  const data = await querySnapshot(days); cache = { data, expiresAt: Date.now() + PLATFORM_HEALTH_CACHE_TTL_MS }; return { ...data, cacheHit: false };
+  if (!force && cache && cache.expiresAt > Date.now() && cache.data.periodDays === days) return platformHealthSnapshotSchema.parse({ ...cache.data, cacheHit: true });
+  const data = await querySnapshot(days); cache = { data, expiresAt: Date.now() + PLATFORM_HEALTH_CACHE_TTL_MS }; return platformHealthSnapshotSchema.parse({ ...data, cacheHit: false });
 }

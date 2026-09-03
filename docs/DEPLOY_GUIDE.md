@@ -722,3 +722,7 @@ duplicado ou extra, `STATUS` não-PASS, SHA/alvo/modo divergente, timestamp futu
 parcial. Um arquivo manual com `PASS` não satisfaz o parser. A prova protegida e recente do backup,
 o preview do mesmo SHA/checksum, `TENANCY_MODE=disabled` e `DATABASE_SCHEMA_MODE=external`
 permanecem gates independentes e inalterados.
+
+## Gate pós-deploy — Saúde da Plataforma
+
+A release que contém o contrato v3 deve publicar API e WEB do mesmo SHA. Verifique que `/api/platform-health/snapshot?days=7` não recebe HTML do fallback SPA, atravessa o proxy com Bearer e retorna JSON v3; valide 401/403 e a ausência de ids, correlações, erros brutos, IPs e credenciais. A PR #850 deve ser comprovada visualmente de forma separada. Rollback é a reversão do commit e republicação conjunta de API/WEB; não há migration ou mudança de dados.

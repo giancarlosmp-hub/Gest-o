@@ -103,7 +103,7 @@ export function projectAutomaticEvidence(runs: PlatformHealthRun[], scheduler: S
 
 export const projectAuditDataState = (total: number) => total > 0 ? "available" as const : "empty" as const;
 export const projectSellerQuality = (inactiveSeller: number) => ({ inactiveSeller, missingSeller: null });
-export const platformHealthCollectionError = () => ({ contractVersion: "2.0", dataState: "error" as const, code: "PLATFORM_HEALTH_COLLECTION_FAILED", message: "Não foi possível coletar a Saúde da Plataforma." });
+export const platformHealthCollectionError = () => ({ contractVersion: "3.0", dataState: "error" as const, code: "PLATFORM_HEALTH_COLLECTION_FAILED", message: "Não foi possível coletar a Saúde da Plataforma." });
 export async function collectPlatformHealthHttp<T>(collector: () => Promise<T>) {
   try {
     return { status: 200 as const, body: await collector() };

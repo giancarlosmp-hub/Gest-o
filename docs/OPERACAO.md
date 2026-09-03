@@ -845,3 +845,7 @@ Dispare **Prepare Production Recovery Backup** somente após merge e `main` verd
 > `post-apply-diff.sql`; o raw não precisa ser vazio. A evidência aprovada apenas libera
 > a revalidação Prisma ao vivo com a imagem do `APP_COMMIT`. Diff gerenciado não vazio
 > bloqueia antes de qualquer interrupção. O leitor legado de `applied.tsv` permanece.
+
+## Validação da Saúde da Plataforma v3
+
+Depois do deploy (nunca como substituto dos gates de deploy), faça GET autenticado em `/api/platform-health/snapshot?days=7`, exigindo HTTP 200, origem API, JSON e `contractVersion=3.0`. Sem token deve retornar 401; vendedor, 403. Diretor e gerente devem receber apenas dados sanitizados. Confirme `null` como “Não instrumentado”, zero como zero, estado parcial, horário da última atualização e retry. Não use Recovery, sync manual ou pedido ERP para esta validação.

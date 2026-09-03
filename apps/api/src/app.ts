@@ -265,7 +265,9 @@ app.use("/", crudRoutes);
 
 // Compatibilidade retroativa para ambientes que passaram a consumir a API com prefixo /api.
 app.use("/api/dashboard", dashboardRoutes);
-app.use("/api/platform-health", platformHealthRoutes);
+// `/api` is preserved by the container proxy, but the unprefixed alias keeps
+// compatibility with the host reverse proxy that historically stripped it.
+app.use(["/platform-health", "/api/platform-health"], platformHealthRoutes);
 app.use("/api", ultraFv3Routes);
 app.use("/api", clientLookupRoutes);
 app.use("/api", crudRoutes);

@@ -1,5 +1,62 @@
 import { z } from "zod";
 
+/** The browser-facing route. Reverse proxies may forward it with or without
+ * `/api`; the API registers both forms, but callers must only use this value. */
+export const PLATFORM_HEALTH_API_PATH = "/platform-health" as const;
+export const PLATFORM_HEALTH_CONTRACT_VERSION = "3.0" as const;
+
+const nullableMetricSchema = z.number().finite().nonnegative().nullable();
+const dataStateSchema = z.enum(["available", "empty", "partial"]);
+const safeRunSchema = z.object({
+  runKind: z.enum(["parent", "stage"]),
+  scope: z.string(),
+  trigger: z.enum(["manual", "scheduler"]),
+  status: z.enum(["running", "success", "error", "skipped"]),
+  startedAt: z.string().datetime(),
+  finishedAt: z.string().datetime().nullable(),
+  durationMs: nullableMetricSchema,
+  syncedCount: nullableMetricSchema,
+}).strict();
+
+/** Strict at the security boundary and permissive only for named metric maps,
+ * whose keys evolve independently as ERP instrumentation is added. */
+export const platformHealthSnapshotSchema = z.object({
+  contractVersion: z.literal(PLATFORM_HEALTH_CONTRACT_VERSION),
+  dataState: dataStateSchema,
+  generatedAt: z.string().datetime(),
+  cacheTtlSeconds: z.number().int().positive(),
+  periodDays: z.union([z.literal(7), z.literal(30), z.literal(90)]),
+  cacheHit: z.boolean(),
+  overview: z.object({
+    dataState: dataStateSchema,
+    lastSync: safeRunSchema.nullable(),
+    lastManualSync: safeRunSchema.nullable(),
+    lastAutomaticSync: safeRunSchema.nullable(),
+    lastAutomaticSuccess: safeRunSchema.nullable(),
+    averageDurationMs: nullableMetricSchema,
+    metrics: z.record(nullableMetricSchema),
+  }).strict(),
+  quality: z.object({ dataState: dataStateSchema }).catchall(nullableMetricSchema),
+  integration: z.object({
+    dataState: dataStateSchema,
+    connected: z.boolean().nullable(),
+    latencyMs: nullableMetricSchema,
+    averageDurationMs: nullableMetricSchema,
+    successRate: z.number().min(0).max(1).nullable(),
+    errorRate: z.number().min(0).max(1).nullable(),
+    retries: nullableMetricSchema,
+    recentRuns: z.array(safeRunSchema),
+    scheduler: z.object({ initialized: z.boolean(), enabled: z.boolean(), enabledByEnv: z.boolean(), nextRunAt: z.string().datetime().nullable(), status: z.string(), lastRunAt: z.string().datetime().nullable(), lastSuccessAt: z.string().datetime().nullable() }).strict(),
+    reachability: z.object({ dataState: z.enum(["available", "empty"]), status: z.enum(["available", "unavailable", "unknown"]), reason: z.enum(["ok", "auth", "timeout", "connect", "5xx"]).nullable(), endpointClass: z.literal("ultrafv3_read_only"), durationMs: nullableMetricSchema, checkedAt: z.string().datetime().nullable() }).strict(),
+    automaticEvidence: z.object({ schedulerState: z.enum(["not_initialized", "disabled", "enabled"]), automaticRunState: z.string(), automaticProven: z.boolean(), lock: z.object({ state: z.enum(["active", "expired_recoverable", "free"]), lock: z.object({ scope: z.string(), lockedUntil: z.string().datetime(), updatedAt: z.string().datetime() }).strict().nullable() }).strict() }).strict(),
+    lock: z.object({ state: z.enum(["active", "expired_recoverable", "free"]), lock: z.object({ scope: z.string(), lockedUntil: z.string().datetime(), updatedAt: z.string().datetime() }).strict().nullable() }).strict(),
+  }).strict(),
+  trends: z.object({ clientCodeChanges: z.array(z.object({ date: z.string(), value: z.number().nonnegative() }).strict()), syncDuration: z.array(z.object({ date: z.string(), value: z.number().nonnegative() }).strict()) }).strict(),
+  alerts: z.array(z.object({ id: z.string(), severity: z.enum(["healthy", "warning", "critical"]), title: z.string(), detail: z.string(), metric: z.string(), value: z.number() }).strict()),
+  notifications: z.object({ providers: z.array(z.string()), status: z.literal("not_instrumented") }).strict(),
+}).strict();
+export type PlatformHealthSnapshot = z.infer<typeof platformHealthSnapshotSchema>;
+
 const INVALID_ROLE_MESSAGE = "Papel inválido. Use diretor, gerente ou vendedor.";
 const roleValues = ["diretor", "gerente", "vendedor"] as const;
 
