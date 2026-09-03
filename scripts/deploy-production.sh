@@ -102,7 +102,24 @@ elif [[ -s "$schema_evidence" ]] && validate_schema_evidence "$schema_evidence" 
   log "evidência de schema validada para o SHA atual"
 else
   schema_evidence=""
+  # A tenancy bundle is immutable evidence of database state, not a build
+  # artifact.  The previous implementation only looked for a bundle under the
+  # current application SHA, while the legacy applied.tsv path already had an
+  # equivalence fallback. Reuse is safe only when the complete bundle validates
+  # against its own commit and the entire Prisma tree is byte-equivalent.
+  for candidate in "$schema_evidence_root"/*/migrations/"$TENANCY_EXPAND_ROOTS_ID"; do
+    if [[ -d "$candidate" && ! -L "$candidate" ]]; then
+      candidate_commit=${candidate#"$schema_evidence_root"/}; candidate_commit=${candidate_commit%%/*}
+      if validate_tenancy_expand_roots_evidence "$candidate" "$candidate_commit" "$schema_evidence_root" && \
+         git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT" -- apps/api/prisma; then
+        schema_evidence="$candidate/result.tsv"
+        log "bundle protegido tenancy expand roots de SHA Prisma-equivalente validado"
+        break
+      fi
+    fi
+  done
   for candidate in "$schema_evidence_root"/*/applied.tsv; do
+    [[ -z "$schema_evidence" ]] || break
     if [[ -f "$candidate" && ! -L "$candidate" ]] && validate_schema_evidence "$candidate" && git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT" -- apps/api/prisma; then
       changed_paths=$(git diff --name-only "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT")
       blocked_paths=""
