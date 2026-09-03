@@ -756,3 +756,7 @@ PostgreSQL 16, ficarem verdes e a correção ser mesclada em `main`.
 > ausência de ledger permanecem. Produção não foi acessada ou modificada; cutover não
 > foi executado. `READY_TO_MERGE=NO` até checks remotos verdes e
 > `READY_TO_RETRY_CUTOVER=NO` até merge/main verde e autorização operacional.
+
+## Saúde da Plataforma — correção local, ainda não implantada (03/09/2026)
+
+A causa histórica foi reconciliada sem acesso produtivo: o proxy do WEB removia `/api`, mas o Express registrava Saúde apenas com esse prefixo; em desenvolvimento o cliente também chamava a forma sem prefixo. Métricas ausentes eram ainda convertidas silenciosamente em zero. A correção local unifica o endpoint público, tolera o proxy legado, valida o contrato v3, preserva zero e representa ausência por `null`, além de remover identificadores e erros sensíveis. INC-ERP-5050 permanece RESOLVED e não houve Recovery ou sincronização. Detalhes em `docs/investigations/platform-health-historical-unavailability-2026-09.md`. `READY_TO_DEPLOY=NO` até merge, checks remotos e validação pós-deploy.

@@ -41,7 +41,7 @@ const scheduler = (overrides: Partial<SchedulerEvidence> = {}): SchedulerEvidenc
 // 17
  test("ausência de lock é free", () => assert.equal(projectLockState([],at(13)).state,"free"));
 // 18
- test("falha de coleta produz contrato de erro sanitizado para 503", async () => assert.deepEqual(await collectPlatformHealthHttp(async()=>{throw new Error("database secret detail")}),{status:503,body:{contractVersion:"2.0",dataState:"error",code:"PLATFORM_HEALTH_COLLECTION_FAILED",message:"Não foi possível coletar a Saúde da Plataforma."}}));
+ test("falha de coleta produz contrato de erro sanitizado para 503", async () => assert.deepEqual(await collectPlatformHealthHttp(async()=>{throw new Error("database secret detail")}),{status:503,body:{contractVersion:"3.0",dataState:"error",code:"PLATFORM_HEALTH_COLLECTION_FAILED",message:"Não foi possível coletar a Saúde da Plataforma."}}));
 // 19
  test("auditoria vazia é empty explícito, não erro", () => { assert.equal(projectAuditDataState(0),"empty"); assert.equal(projectAuditDataState(1),"available"); });
 // 20

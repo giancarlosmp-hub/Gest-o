@@ -75,6 +75,7 @@
     "test:preflight-gated-backfill-plan:postgres": "bash scripts/smoke/preflight-gated-backfill-plan-postgres.sh",
     "test:preflight-plan-ledger": "tsx apps/api/src/tenancy/preflightPlanLedger.test.ts && node scripts/smoke/preflight-plan-ledger-safety.mjs",
     "test:preflight-plan-ledger:postgres": "bash scripts/smoke/preflight-plan-ledger-postgres.sh",
-    "test:preview-isolation": "node scripts/smoke/preview-run-isolation-safety.mjs"
+    "test:preview-isolation": "node scripts/smoke/preview-run-isolation-safety.mjs",
+    "test:platform-health-routing": "node scripts/smoke/platform-health-routing-contract.mjs"
   }
 }

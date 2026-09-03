@@ -4,23 +4,13 @@ import type { AxiosRequestConfig, AxiosResponse } from "axios";
 
 type RetryableAxiosRequestConfig = AxiosRequestConfig & { _retry?: boolean };
 
-const resolveApiBaseUrl = () => {
+export const resolveApiBaseUrl = () => {
   const configuredBaseUrl = (import.meta.env.VITE_API_URL || "").trim();
   if (configuredBaseUrl) {
     const normalizedConfiguredBaseUrl = configuredBaseUrl.replace(/\/+$/, "");
-    if (!import.meta.env.DEV) {
-      console.info(`Using production API base URL: ${normalizedConfiguredBaseUrl}`);
-    }
     return normalizedConfiguredBaseUrl;
   }
-
-  if (import.meta.env.DEV) {
-    return "http://localhost:4000";
-  }
-
-  const productionFallbackBaseUrl = "/api";
-  console.info(`Using production API base URL: ${productionFallbackBaseUrl}`);
-  return productionFallbackBaseUrl;
+  return "/api";
 };
 
 const apiTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS || 15_000);
