@@ -20,8 +20,18 @@ assert.match(harness, /psql -X/);
 assert.match(harness, /ON_ERROR_STOP=1/);
 assert.match(harness, /TENANCY_BACKFILL_TOOLING_POSTGRES=PASS/);
 assert.doesNotMatch(harness, /\beval\b|\|\| true/);
+for (const resource of ["container_name", "network_name", "volume_name"])
+  assert.match(harness, new RegExp(`${resource}=.*execution_id`), `${resource} must be unique to each execution`);
+assert.match(harness, /--network "\$network_name"/);
+assert.match(harness, /--mount "source=\$volume_name,target=\/var\/lib\/postgresql\/data"/);
+assert.match(harness, /POSTGRES_DB=\$HARNESS_DATABASE/);
+assert.match(harness, /pg_isready -U postgres -d "\$HARNESS_DATABASE"/);
+assert.match(harness, /SELECT current_database\(\) = 'backfill'/);
+assert.ok(harness.indexOf("test \"$current_database\" = t") < harness.indexOf("step fixture_and_ledger"), "real backfill connection must pass before fixtures");
+assert.match(harness, /HARNESS_CONTAINER=%s[\\n\s\S]*HARNESS_DATABASE=%s/);
+assert.doesNotMatch(harness, /docker (?:rm|volume rm|network rm)[^\n]*(?:gesto-backfill[^"$]|\$\{?execution_seed)/, "cleanup must address only derived resource names");
 
-const ledgerInsertStart = harness.indexOf('docker exec -i "$name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -v run_id="$run_id" -v approved_hash="$plan_hash"');
+const ledgerInsertStart = harness.indexOf('docker exec -i "$container_name" psql -X -U postgres -d backfill -v ON_ERROR_STOP=1 -v run_id="$run_id" -v approved_hash="$plan_hash"');
 const negativeGateStart = harness.indexOf("step negative_gates", ledgerInsertStart);
 assert.ok(ledgerInsertStart >= 0 && negativeGateStart > ledgerInsertStart, "ledger INSERT must use the guarded stdin transport before negative gates");
 const ledgerBlock = harness.slice(ledgerInsertStart, negativeGateStart);
@@ -43,7 +53,7 @@ const idempotencyBlock = harness.slice(resumeStart, reconciliationStart);
 assert.match(idempotencyBlock, /eligible_before_reapply[\s\S]*test "\$eligible_before_reapply" = 0/);
 assert.match(idempotencyBlock, /quarantine_before_reapply[\s\S]*test "\$quarantine_before_reapply" = 11/);
 assert.match(idempotencyBlock, /cross_tenant_before_reapply[\s\S]*test "\$cross_tenant_before_reapply" = 0/);
-assert.match(idempotencyBlock, /reapply_count=\$\(docker exec "\$name" psql -X[\s\S]*-At -v ON_ERROR_STOP=1 -c/);
+assert.match(idempotencyBlock, /reapply_count=\$\(docker exec "\$container_name" psql -X[\s\S]*-At -v ON_ERROR_STOP=1 -c/);
 assert.match(idempotencyBlock, /WITH batch AS[\s\S]*tenant_id IS NULL AND NOT invalid_reference[\s\S]*ORDER BY root,id[\s\S]*LIMIT 5[\s\S]*updated AS \([\s\S]*UPDATE root_rows[\s\S]*tenant_id IS NULL[\s\S]*RETURNING 1[\s\S]*SELECT count\(\*\) FROM updated/);
 assert.match(idempotencyBlock, /test "\$reapply_count" = 0/);
 assert.match(idempotencyBlock, /SELECT count\(\*\) FROM root_rows'\)" = "\$before"[\s\S]*tenant_id IS NULL AND NOT invalid_reference'\)" = 0[\s\S]*invalid_reference AND tenant_id IS NULL'\)" = 11/);

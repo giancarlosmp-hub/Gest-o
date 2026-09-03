@@ -14,8 +14,10 @@ import {
 } from "../lib/formatters";
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
+import { canConfirmErpManualResolution } from "../lib/erpManualResolution";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
+import AccessibleCheckbox from "../components/AccessibleCheckbox";
 import { useAuth } from "../context/AuthContext";
 import {
   getErpOrderReadiness,
@@ -1830,24 +1832,23 @@ export default function OpportunityDetailsPage() {
                           Este campo popula OBS_PEDIDO no pedido ERP. Não envia observações por item nesta etapa.
                         </span>
                       </label>
-                      <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
-                        <input
-                          type="checkbox"
-                          className="mt-0.5 h-5 w-5 shrink-0 rounded border-amber-300 accent-amber-600"
-                          checked={erpOrderForm.simulateOnly}
-                          onChange={(event) =>
+                      <AccessibleCheckbox
+                        id="erp-order-simulation"
+                        className="mt-3 text-xs text-amber-900"
+                        checked={erpOrderForm.simulateOnly}
+                        onChange={(checked) =>
                             setErpOrderForm((current) => ({
                               ...current,
-                              simulateOnly: event.target.checked,
+                              simulateOnly: checked,
                             }))
-                          }
-                        />
+                        }
+                      >
                         <span>
                           <strong>Simulação ERP:</strong> validar payload,
                           vínculos, parâmetros, preço e estoque sem enviar
                           pedido real ao UltraFV3.
                         </span>
-                      </label>
+                      </AccessibleCheckbox>
                     </section>
 
                     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -2329,12 +2330,13 @@ export default function OpportunityDetailsPage() {
                                     ) : (
                                       <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
                                         <p className="rounded-lg border border-red-300 bg-red-50 p-2 font-bold text-red-900">Use somente após conferir no UltraFV3 que o pedido não existe. Uma confirmação incorreta pode gerar pedido duplicado.</p>
-                                        <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionChecked} onChange={(event) => setManualResolutionChecked(event.target.checked)} /><span>Consultei o UltraFV3 pelo cliente, data, valor e identificador de importação e confirmo que o pedido não foi encontrado.</span></label>
+                                        <AccessibleCheckbox id={`manual-resolution-reviewed-${order.id}`} checked={manualResolutionChecked} onChange={setManualResolutionChecked}><span>Consultei o UltraFV3 pelo cliente, data, valor e identificador de importação e confirmo que o pedido não foi encontrado.</span></AccessibleCheckbox>
                                         <label className="block font-semibold">Últimos 8 caracteres do pedidoIdImportacao<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionSuffix} maxLength={8} onChange={(event) => setManualResolutionSuffix(event.target.value)} /></label>
                                         <label className="block font-semibold">Justificativa curta, sem dados sensíveis<textarea className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-normal" value={manualResolutionJustification} minLength={10} maxLength={240} onChange={(event) => setManualResolutionJustification(event.target.value)} /></label>
-                                        <label className="flex items-start gap-2"><input type="checkbox" checked={manualResolutionConsequence} onChange={(event) => setManualResolutionConsequence(event.target.checked)} /><span>Esta ação não apaga a tentativa anterior. Ela registra uma decisão operacional e permitirá nova tentativa controlada.</span></label>
+                                        <AccessibleCheckbox id={`manual-resolution-consequence-${order.id}`} checked={manualResolutionConsequence} onChange={setManualResolutionConsequence}><span>Esta ação não apaga a tentativa anterior. Ela registra uma decisão operacional e permitirá nova tentativa controlada.</span></AccessibleCheckbox>
+                                        <p className={`font-bold ${manualResolutionChecked && manualResolutionConsequence ? "text-brand-800" : "text-amber-900"}`} role="status">{manualResolutionChecked && manualResolutionConsequence ? "✓ Confirmações obrigatórias concluídas." : "Pendente: marque as duas confirmações obrigatórias para liberar a ação."}</p>
                                         <label className="block font-semibold">Digite exatamente: CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP<input className="mt-1 w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono" value={manualResolutionPhrase} onChange={(event) => setManualResolutionPhrase(event.target.value)} /></label>
-                                        <div className="flex gap-2"><button type="button" className="rounded-lg bg-amber-800 px-3 py-1.5 font-bold text-white disabled:opacity-50" disabled={savingManualResolution || !manualResolutionChecked || !manualResolutionConsequence || manualResolutionSuffix.length !== 8 || manualResolutionJustification.trim().length < 10 || manualResolutionPhrase !== "CONFIRMEI QUE O PEDIDO NÃO EXISTE NO ERP"} onClick={() => void onRegisterManualResolution(order)}>{savingManualResolution ? "Consultando status e registrando..." : "Confirmar conferência e liberar"}</button><button type="button" className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 font-bold" onClick={() => setManualResolutionOrderId(null)}>Cancelar</button></div>
+                                        <div className="flex flex-col gap-2 sm:flex-row"><button type="button" className="min-h-11 rounded-lg border border-amber-900 bg-amber-800 px-3 py-2 font-bold text-white shadow-sm transition hover:bg-amber-900 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-amber-300 disabled:cursor-not-allowed disabled:border-slate-400 disabled:bg-slate-300 disabled:text-slate-600 disabled:shadow-none" disabled={savingManualResolution || !canConfirmErpManualResolution({ checked: manualResolutionChecked, consequenceAccepted: manualResolutionConsequence, importIdSuffix: manualResolutionSuffix, justification: manualResolutionJustification, confirmationPhrase: manualResolutionPhrase })} onClick={() => void onRegisterManualResolution(order)}>{savingManualResolution ? "Consultando status e registrando..." : "Confirmar conferência e liberar"}</button><button type="button" className="min-h-11 rounded-lg border border-amber-300 bg-white px-3 py-2 font-bold" onClick={() => setManualResolutionOrderId(null)}>Cancelar</button></div>
                                       </div>
                                     )}
                                   </div>
