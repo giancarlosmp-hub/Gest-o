@@ -1,3 +1,73 @@
+# Retomada read-only de INC-ERP-5050 — 03/09/2026
+
+## Estado confrontado
+
+- `MAIN_SHA=e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020`: merge local da PR #850 sobre a PR #849.
+- `PRODUCTION_SHA=72edf598933dc3f8f38d16473d054b422da34b8a`: deploy produtivo saudável informado, correspondente ao merge da PR #849.
+- `MAIN_PRODUCTION_DIVERGENCE=PR_850_NOT_PROVEN_IN_PRODUCTION`.
+- O pedido ERP **900135** foi enviado com sucesso pelo fluxo **manual**. Pedido manual enviado não equivale a execução-pai automática: somente um `ErpSyncRun` com `scope=automatic`, `trigger=scheduler`, término e `status=success` pode provar o scheduler.
+- A PR #826 está presente. O call graph vigente é workflow `ERP Production Recovery` → `scripts/erp-production-recovery.sh` → `node scripts/lib/erp-automatic-proof.mjs` (validação temporal) → polling read-only de `ErpSyncRun`/`ErpSyncLock`. O polling preserva `SUCCESS`, `FAILED`, `RUNNING` ou `ABSENT`, início/término e exige lock final livre. Não recriar essa instrumentação.
+- A PR #850 está mesclada, mas ainda não foi comprovada em produção. As PRs #820, #818 e #810 estão superadas por #821, #819 e #811, respectivamente; não as encerrar automaticamente.
+
+## Diagnóstico obrigatório antes de Recovery (somente leitura)
+
+Execute a partir de uma estação administrativa autorizada. Não imprima comandos com valores expandidos (`set -x` deve estar desligado), não persista resposta bruta e não envie a saída bruta para logs. `API_BASE` e `AUTH_CONFIG` são valores protegidos, provisionados fora do histórico do shell. `AUTH_CONFIG` deve ser um arquivo temporário modo `600` contendo apenas o header Bearer já obtido pelo canal aprovado e deve ser destruído ao final. Os dois requests abaixo são exclusivamente GET; **não** usar `POST /orders`, `run-now`, sincronização manual ou Recovery.
+
+```bash
+set +x
+test "$(stat -c %a "$AUTH_CONFIG")" = 600
+scheduler_json="$(curl --silent --show-error --fail --max-time 15 \
+  --config "$AUTH_CONFIG" "$API_BASE/erp/ultrafv3/scheduler/status")"
+health_json="$(curl --silent --show-error --fail --max-time 30 \
+  --config "$AUTH_CONFIG" "$API_BASE/platform-health/snapshot?days=7&refresh=true")"
+
+printf '%s\n' "$scheduler_json" | jq -e '
+  .automaticSync |
+  {enabled, enabledByEnv, initialized, configurationOk, nextRunAt, status, reasonCode}
+'
+printf '%s\n' "$health_json" | jq -e '
+  .integration |
+  {scheduler: (.scheduler | {initialized, enabled, enabledByEnv, nextRunAt, status}),
+   lastAutomaticRun: ((.recentRuns | map(select(.runKind == "parent" and .scope == "automatic" and .trigger == "scheduler")) | first // null) |
+     if . == null then null else {scope, trigger, status, startedAt, finishedAt} end),
+   lock: (.lock | {state, lockedUntil: (.lock.lockedUntil // null), updatedAt: (.lock.updatedAt // null)}),
+   reachability: (.reachability | {status, reason, checkedAt, durationMs})}
+'
+unset scheduler_json health_json
+rm -f -- "$AUTH_CONFIG"
+```
+
+A projeção `enabledByEnv` é a leitura sanitizada do gate efetivo `ERP_SYNC_SCHEDULER_ENABLED`; não leia nem registre o arquivo de ambiente. A resposta do scheduler comprova `initialized`, `enabled`, `enabledByEnv`, `configurationOk` e `nextRunAt`. A Saúde da Plataforma consulta `ErpSyncRun` e `ErpSyncLock` por leitura e acrescenta `trigger`, status, horários e reachability recente. Classifique apenas o primeiro pai automático retornado: `success→SUCCESS`, `error→FAILED`, `running→RUNNING`; ausência→`ABSENT`. `skipped` não satisfaz o critério e deve permanecer `INVESTIGATING`, com o lock reportado exatamente como `active`, `expired_recoverable` ou `free`. Não publique `id`, `correlationId`, `runId`, erros brutos ou a resposta integral.
+
+## Regra de decisão
+
+Declare `INC_ERP_5050=RESOLVED` somente se a mesma coleta comprovar: `enabled=true`, `enabledByEnv=true`, `initialized=true`, `configurationOk=true`, `nextRunAt` não nulo, último pai automático `trigger=scheduler`/`status=success` com `startedAt` e `finishedAt`, `lock.state=free` e `reachability.status=available` com `checkedAt` recente. Nesse caso, `RECOVERY_REQUIRED=NO`.
+
+Se qualquer campo faltar ou divergir, copie somente os marcadores sanitizados, mantenha `INC_ERP_5050=INVESTIGATING` e registre como causa exata o primeiro predicado observado que falhou. `RECOVERY_REQUIRED` continua `NO` enquanto o estado atual puder ser comprovado; somente uma falha operacional explicitamente coberta pelo runbook e aprovada humanamente pode mudar essa decisão. A ausência de acesso à produção nesta análise significa que os valores atuais permanecem `NOT_PROVEN`, não `FAIL`.
+
+## Estado desta análise
+
+```text
+ROOT_CAUSE=PRODUCTION_AUTOMATIC_STATE_NOT_OBSERVED_AFTER_PR826
+MAIN_SHA=e83b0a451b9175b24bf96cd2a7fe4f61b8b4b020
+PRODUCTION_SHA=72edf598933dc3f8f38d16473d054b422da34b8a
+MAIN_PRODUCTION_DIVERGENCE=PR_850_NOT_PROVEN_IN_PRODUCTION
+PR826_PRESENT=YES
+SCHEDULER_ENABLED=NOT_PROVEN
+SCHEDULER_INITIALIZED=NOT_PROVEN
+NEXT_RUN_AT=NOT_PROVEN
+LAST_AUTOMATIC_RUN=ABSENT_FROM_PROVIDED_EVIDENCE
+AUTOMATIC_RUN_RESULT=NOT_PROVEN
+LOCK_STATE=NOT_PROVEN
+ULTRAFV3_REACHABILITY=NOT_PROVEN_RECENTLY
+RECOVERY_REQUIRED=NO
+PRODUCTION_ACCESSED=NO
+PRODUCTION_MODIFIED=NO
+INC_ERP_5050=INVESTIGATING
+READY_FOR_NEXT_SPRINT=NO
+NEXT_ACTION=RUN_THE_TWO_AUTHENTICATED_GET_ONLY_PROBES_AND_APPLY_THE_DECISION_RULE
+```
+
 > **INC-ERP-5050 — expiração da prova automática (run `33085223211`, job `98562960884`).** O Recovery aprovou backup/preflight, cutover, recriação e saúde da API, login, autorização, endpoint protegido, inicialização do scheduler e presença de `nextRunAt`. A janela bounded de `automatic_proof` expirou após 90 minutos; o rollback fail-closed foi concluído com `ERP_ROLLBACK_API_HEALTH=PASS`, restaurando a API anterior saudável. A evidência disponível não distingue ausência de trigger de uma execução `FAILED`/`RUNNING`, porque a consulta anterior só promovia `SUCCESS` e descartava o estado observado. Também capturava o baseline depois do cutover e não verificava matematicamente se `nextRunAt` cabia nos 5.400 segundos. Portanto a causa comprovada é uma lacuna do contrato de prova; A–H permanecem não atribuíveis sem os novos marcadores sanitizados, e não se deve repetir o Recovery antes desse diagnóstico. `ERP_AUTOMATIC_SYNC=NOT_PROVEN`, `INC_ERP_5050=INVESTIGATING`, `READY_TO_MERGE_AUTOMATIC_PROOF_FIX=NO` até checks remotos verdes e `READY_FOR_1_0B_2_O=NO`.
 
 > **INC_ERP_5050 — diagnóstico do HTTP 408 (run 33077238988 / job 98534543031, 2026-08-27).** A correção do falso HTTP 429 foi comprovada: autenticação, token, identidade e RBAC passaram com role `diretor`, e o request alcançou a API. A nova imagem e a `main` usaram o SHA `957615d1da32fdaa9bcdc6cff9c07047947ec190`. A API emitiu HTTP **408** no timeout global de **15 s** porque o endpoint canônico de status chamava `refreshErpAutomaticSyncConfig()`, que fazia refresh mutável e aguardava leituras do PostgreSQL (`AppConfig`, possível usuário de referência e histórico `ErpSyncRun`) durante a inicialização concorrente do scheduler. O header marcador da rota era definido antes dessa espera; portanto `ERP_SCHEDULER_STATUS_ROUTE_REACHED=YES`, `ERP_SCHEDULER_STATUS_TIMEOUT_STAGE=database` e `ERP_SCHEDULER_STATUS_ELAPSED_CLASS=15_to_30s`. O callback de `res.setTimeout` respondeu enquanto a Promise do handler continuava aguardando o banco. Não há chamada UltraFV3 nem lock explícito nesse caminho, e o cliente não impunha timeout próprio; o limite observado era exclusivamente o da API.
