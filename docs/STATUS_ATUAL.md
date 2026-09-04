@@ -764,3 +764,26 @@ PostgreSQL 16, ficarem verdes e a correção ser mesclada em `main`.
 ## Saúde da Plataforma — correção local, ainda não implantada (03/09/2026)
 
 A causa histórica foi reconciliada sem acesso produtivo: o proxy do WEB removia `/api`, mas o Express registrava Saúde apenas com esse prefixo; em desenvolvimento o cliente também chamava a forma sem prefixo. Métricas ausentes eram ainda convertidas silenciosamente em zero. A correção local unifica o endpoint público, tolera o proxy legado, valida o contrato v3, preserva zero e representa ausência por `null`, além de remover identificadores e erros sensíveis. INC-ERP-5050 permanece RESOLVED e não houve Recovery ou sincronização. Detalhes em `docs/investigations/platform-health-historical-unavailability-2026-09.md`. `READY_TO_DEPLOY=NO` até merge, checks remotos e validação pós-deploy.
+## Auditoria estática UltraFV3: contatos e financeiro (04/09/2026)
+
+No checkout `58c7778` (PR #853), o fluxo `/partners` persiste `Client`, mas não mapeia telefone/e-mail,
+não consulta coleção de contatos e não cria `Contact`. A presença do telefone no payload, contudo,
+não foi comprovada: o pacote não estava no workspace e produção/ERP não foram acessados. Por isso a
+importação e qualquer migration foram adiadas. A comparação financeira com tablet desatualizado não
+é temporalmente válida: divergência, causa do zero e reparo permanecem `NOT_PROVEN`; nenhuma correção
+financeira foi feita. Foi corrigida apenas a exposição potencial comprovada de PII nas amostras de
+diagnóstico do sync. Matriz, evidências faltantes e decisão estão na
+[investigação sanitizada](investigations/ultrafv3-client-financial-contact-mapping-2026-09.md).
+
+## Arquitetura autoritativa consolidada (04/09/2026)
+
+A referência técnica vigente passa a ser `docs/ARQUITETURA.md`, indexada pelo Documento Mestre; o
+contrato UltraFV3 autoritativo é `docs/erp-ultrafv3-integration-technical.md`. A arquitetura
+versionada comprova SPA React/Vite, Nginx, API Express/JWT/RBAC, PostgreSQL/Prisma, schedulers no
+processo API, Compose, Actions, preview e deploy manual. Cloudflare no tráfego atual, implementação
+interna UltraFv3Rest/Firebird, SLA/RPO/RTO e estado produtivo corrente permanecem não comprovados. Um
+relatório estático sanitizado externo comprova Windows x64/Node.js incorporado e configuração de
+servidor/banco no conector, além de componentes Firebird no Gestao; não comprova a ligação direta.
+UltraFV3 segue parcial por falta de DTO rigoroso, contatos/proveniência e temporalidade financeira.
+Próxima ação segura: executar o gate documental e obter somente schemas/timestamps sanitizados por
+canal aprovado; não executar anexos, sync, Recovery, migration ou reparo.

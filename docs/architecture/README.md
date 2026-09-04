@@ -1,5 +1,6 @@
 # Arquitetura
 
-Este diretório conterá documentos arquiteturais do projeto, incluindo visões, componentes, limites, integrações e demais referências técnicas de longo prazo.
-
-O conteúdo deverá permanecer alinhado ao [Documento Mestre](../DOCUMENTO_MESTRE.md), que funcionará como ponto de entrada para a documentação.
+A referência técnica detalhada e autoritativa é [`docs/ARQUITETURA.md`](../ARQUITETURA.md). O
+[`DOCUMENTO_MESTRE.md`](../DOCUMENTO_MESTRE.md) permanece o índice e a autoridade executiva e
+operacional. ADRs registram decisões específicas; investigações registram evidência histórica e não
+substituem essas duas fontes.

@@ -13,6 +13,7 @@ import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type E
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
+import { sanitizeUltraFv3PayloadForLog } from "./ultraFv3PayloadSanitization.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -422,37 +423,7 @@ const toArray = (payload: unknown): unknown[] => {
   return [];
 };
 
-const sanitizePayloadForLog = (value: unknown, depth = 0): unknown => {
-  if (value === null || value === undefined) return value;
-  if (depth > 3) return "[max-depth]";
-  if (Array.isArray(value))
-    return value
-      .slice(0, 3)
-      .map((item) => sanitizePayloadForLog(item, depth + 1));
-  if (typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const entries = Object.entries(record)
-      .slice(0, 15)
-      .map(([key, raw]) => {
-        const lower = key.toLowerCase();
-        if (/(token|password|authorization|senha)/i.test(lower))
-          return [key, "***"] as const;
-        if (/(cnpj|cpf|cgc)/i.test(lower) && typeof raw === "string") {
-          const digits = raw.replace(/\D/g, "");
-          const masked =
-            digits.length > 4
-              ? `${"*".repeat(Math.max(digits.length - 4, 0))}${digits.slice(-4)}`
-              : "***";
-          return [key, masked] as const;
-        }
-        return [key, sanitizePayloadForLog(raw, depth + 1)] as const;
-      });
-    return Object.fromEntries(entries);
-  }
-  if (typeof value === "string")
-    return value.length > 160 ? `${value.slice(0, 160)}...` : value;
-  return value;
-};
+const sanitizePayloadForLog = sanitizeUltraFv3PayloadForLog;
 
 const getCandidateCounts = (body: unknown) => {
   if (!body || typeof body !== "object")
