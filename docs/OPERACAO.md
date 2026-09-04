@@ -853,3 +853,12 @@ Dispare **Prepare Production Recovery Backup** somente após merge e `main` verd
 ## Validação da Saúde da Plataforma v3
 
 Depois do deploy (nunca como substituto dos gates de deploy), faça GET autenticado em `/api/platform-health/snapshot?days=7`, exigindo HTTP 200, origem API, JSON e `contractVersion=3.0`. Sem token deve retornar 401; vendedor, 403. Diretor e gerente devem receber apenas dados sanitizados. Confirme `null` como “Não instrumentado”, zero como zero, estado parcial, horário da última atualização e retry. Não use Recovery, sync manual ou pedido ERP para esta validação.
+## Diagnóstico seguro de contatos/financeiro UltraFV3 (04/09/2026)
+
+Não compare estado financeiro do tablet sem alinhar seu último refresh manual ao último
+`ErpSyncRun` automático bem-sucedido e ao timestamp do snapshot ERP. Não execute sync, Recovery ou
+pedido para obter prova. Colete apenas metadados GET/read-only sanitizados: nomes/tipos de campos,
+cardinalidades, enums e timestamps; nunca valores ou corpo bruto. Telefone/e-mail de parceiro e
+coleção de contatos são fontes distintas. Até existir contrato confirmado, não criar, apagar ou
+deduplicar `Contact` automaticamente. O procedimento e a regra de decisão financeira estão na
+[auditoria de setembro](investigations/ultrafv3-client-financial-contact-mapping-2026-09.md).

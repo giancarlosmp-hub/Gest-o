@@ -901,3 +901,63 @@ Esta correção não autoriza migration, apply ou deploy. `READY_TO_MERGE_BACKUP
 ## Contrato Saúde da Plataforma v3
 
 O endpoint autoritativo do navegador é `/api/platform-health`; snapshot e auditoria exigem Bearer e papel diretor ou gerente. O contrato `3.0` distingue `available`, `empty`, `partial` e erro HTTP sanitizado; somente números presentes podem ser zero. O frontend valida a resposta antes de renderizar e descarta snapshot anterior quando uma atualização falha. Proxies devem preservar `/api`; a API mantém temporariamente o alias sem prefixo para o proxy externo legado. Consulte `docs/investigations/platform-health-historical-unavailability-2026-09.md`.
+# Contrato oficial sanitizado UltraFV3 → Gest-o (04/09/2026)
+
+`UltraFv3Rest` é a ponte HTTP entre o ERP e o Gest-o. O fluxo comprovado é ERP/serviço → cliente HTTP
+autenticado → extração tolerante de arrays → normalização por aliases → serviços de sincronização →
+Prisma (`Client`, JSON financeiro e caches `AppConfig`) → API CRM → telas. Rotas conhecidas, somente
+por nome: `/auth/login`, `/partners`, `/products`, `/prices`, `/priceVariations`, `/salesmen`,
+`/payment-methods`/`/paymentMethods`, `/receiving-conditions`/`/receivingConditions`,
+`/price-tables`/`/priceTables`, `/operations`, `/branches`, `/financialProfiles` e `/partnerTitles`.
+
+Parceiro é a empresa/cadastro ERP; `Contact` é pessoa ou canal de contato CRM. Não misturar telefone
+cadastral, pessoa, vendedor ou endereço. Hoje o mapeamento de parceiro não cria contatos. Uma futura
+projeção exige origem `UltraFV3`, tipo empresarial, telefone normalizado, chave idempotente, remoção
+explícita e precedência manual; edição manual nunca pode ser sobrescrita. Perfil financeiro é um
+snapshot agregado opaco; títulos são lançamentos individuais opacos. Um não substitui o outro.
+
+Faixa vermelha no tablet significa alerta de títulos vencidos no snapshot local; verde significa sem
+esse alerta/liberado naquele snapshot, sujeito ao contrato real. Como o tablet é manual e estava
+desatualizado, cor e CRM não comprovam divergência atual. Zero só significa zero quando a fonte
+presente e válida o declara; ausente/inválido/parcial deve ser `null` ou “não instrumentado”, nunca
+inferido. O runtime ainda não cumpre essa política em todo o financeiro e nenhuma correção foi feita
+sem payload temporalmente comparável.
+
+Segurança: nunca versionar pacote, binário, VBS, logs, config, `.aws.env`, URL privada, credencial ou
+dado empresarial. Diagnóstico é GET/read-only, agregado, sanitizado, sem corpo bruto, e deve registrar
+instante da fonte e da recepção. Nunca executar o pacote nem usar seus segredos. Validação requer
+contratos sintéticos, idempotência, falha de endpoint/payload e PostgreSQL 16; pós-deploy exige SHA,
+health, auth e ausência de PII nos logs sem disparar sync. Rollback é revert/redeploy da aplicação;
+sem migration, restore ou reparo. A matriz autoritativa, campos não instrumentados e classificação de
+cada evidência estão em
+[`docs/investigations/ultrafv3-client-financial-contact-mapping-2026-09.md`](investigations/ultrafv3-client-financial-contact-mapping-2026-09.md).
+
+# Visão geral e arquitetura do Gest-o
+
+**Status:** seção executiva autoritativa. **Revisão:** 04/09/2026. **Baseline revisada:**
+`58c7778bfa427ea84b52a2ff5d8230b0d60e0637` (checkout disponível; não comprova produção atual).
+**Responsável lógico:** Engenharia e Operações Gest-o.
+
+O Gest-o é o CRM comercial para clientes, contatos, oportunidades, agenda, atividades, metas e
+pedidos integrados. A arquitetura vigente é uma SPA React/Vite servida por Nginx, API Node/Express
+com JWT/RBAC e schedulers no processo, PostgreSQL/Prisma e integrações externas mediadas somente pela
+API. UltraFV3 é a ponte HTTP com o ERP; consulta CNPJ, WhatsApp e IA são integrações configuráveis ou
+gated. Docker Compose e GitHub Actions sustentam desenvolvimento, CI, preview e deploy produtivo
+manual com backup, gates, cutover e rollback.
+
+A fonte técnica detalhada e autoritativa é [`docs/ARQUITETURA.md`](ARQUITETURA.md); o contrato
+específico autoritativo do ERP é
+[`docs/erp-ultrafv3-integration-technical.md`](erp-ultrafv3-integration-technical.md). ADRs registram
+decisões; `OPERACAO.md` e `DEPLOY_GUIDE.md` registram procedimentos; investigações são somente
+evidência histórica. Produção usa tenancy desabilitada e o estado real de deploy/scheduler sempre
+exige evidência operacional por SHA, nunca inferência documental.
+
+Um relatório estático sanitizado externo comprovou o conector como executável Windows x64 com Node.js
+incorporado e configuração própria de servidor/banco, e o ERP Gestao como baseado em componentes
+Firebird. Não comprova acesso direto do conector ao Firebird, payloads, tabelas, colunas ou semântica
+financeira. Esta tarefa não abriu nem executou anexos; os artefatos brutos permanecem proibidos no Git.
+
+**Regra permanente:** toda alteração que modifique componentes, integrações, contratos, persistência,
+autenticação, infraestrutura, deploy, observabilidade ou fluxos críticos deve atualizar, na mesma PR,
+o documento arquitetural autoritativo e o Documento Mestre quando houver impacto executivo ou
+operacional.
