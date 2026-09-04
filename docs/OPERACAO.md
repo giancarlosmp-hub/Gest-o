@@ -1,3 +1,7 @@
+## Auditoria de confiabilidade da Saúde da Plataforma (03/09/2026)
+
+A auditoria estática do contrato 3.0 confirmou `Contact` como fonte de telefone/e-mail e corrigiu valores compostos somente por espaços; confirmou que vendedor inativo e cliente arquivado usam predicados independentes; e corrigiu o rótulo enganoso de “FinancialProfiles órfãos”, pois o schema possui JSONs opcionais em `Client`, não entidades relacionais. Métricas ERP sem chave numérica inequívoca permanecem `null`. Nenhum dado, migration, ERP ou produção foi acessado/modificado. Dicionário, limites e um único diagnóstico agregado read-only estão em `investigations/platform-health-metric-reliability-2026-09.md`.
+
 ## Deploy de produção: evidência equivalente de schema (03/09/2026)
 
 `Deploy Production` tem modos `build` (preflight/imagens, sem parar containers) e `cutover` (environment aprovado e troca controlada). Para o bundle protegido de `tenancy expand roots`, o cutover agora procura primeiro o SHA atual e depois bundles históricos completos; um histórico só é reutilizado se passar owner/mode/symlink/allowlist de arquivos, metadata, migration ID, checksums, result, catálogo e filtro do post-diff e se `apps/api/prisma` não mudou entre os SHAs. O Prisma diff ao vivo permanece obrigatório. Aplicação, frontend e documentação não demandam nova migration. Não execute schema/Recovery por tentativa nem fabrique evidência. Sequência, gates, pós-checks e rollback estão em `DOCUMENTO_MESTRE.md`.

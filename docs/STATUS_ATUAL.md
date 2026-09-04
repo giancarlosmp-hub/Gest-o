@@ -1,3 +1,7 @@
+## Auditoria de confiabilidade da Saúde da Plataforma (03/09/2026)
+
+A auditoria estática do contrato 3.0 confirmou `Contact` como fonte de telefone/e-mail e corrigiu valores compostos somente por espaços; confirmou que vendedor inativo e cliente arquivado usam predicados independentes; e corrigiu o rótulo enganoso de “FinancialProfiles órfãos”, pois o schema possui JSONs opcionais em `Client`, não entidades relacionais. Métricas ERP sem chave numérica inequívoca permanecem `null`. Nenhum dado, migration, ERP ou produção foi acessado/modificado. Dicionário, limites e um único diagnóstico agregado read-only estão em `investigations/platform-health-metric-reliability-2026-09.md`.
+
 ## Gate de evidência do cutover no SHA 16dba36 (03/09/2026)
 
 O build de `16dba36aa04a33fdc488601f56d293a37b266318` passou sem cutover; a tentativa posterior de cutover parou antes de containers com “nenhuma evidência equivalente de schema foi validada”. O consumidor aceitava bundle `tenancy expand roots` apenas em `<APP_COMMIT>/...`, mas seu fallback de equivalência percorria somente `applied.tsv`. A correção aplica ao bundle completo o mesmo princípio, exigindo validação integral contra o SHA produtor e igualdade Git de toda `apps/api/prisma`; depois ainda exige diff Prisma managed ao vivo vazio. Nenhuma migration, banco, Recovery ou cutover foi executado nesta alteração. O SHA e inventário exatos da VPS permanecem dependentes da coleta read-only operacional; não devem ser inferidos dos arquivos locais. Consulte o procedimento autoritativo em `DOCUMENTO_MESTRE.md`.

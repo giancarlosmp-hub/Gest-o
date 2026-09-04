@@ -28,6 +28,10 @@ export const metricFrom = (metrics: unknown, ...keys: string[]) => {
   return null;
 };
 
+// Contact is the only persisted CRM source for client phone/e-mail in the current
+// schema. Whitespace-only imported values are absence, not contact evidence.
+export const CLIENT_CONTACT_QUALITY_SQL = `SELECT COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND BTRIM(ct.phone) <> ''))::bigint AS missing_phone, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND BTRIM(ct.email) <> ''))::bigint AS missing_email FROM "Client" c`;
+
 export const buildAlerts = (input: { metrics: MetricMap; lastSyncAt: Date | null; durationMs: number; averageDurationMs: number; duplicates: number; partnerTitlesInconsistent: number; financialProfilesOrphaned: number; codeChangesToday: number }, now = new Date()) => {
   const alerts: Array<{ id: string; severity: Severity; title: string; detail: string; metric: string; value: number }> = [];
   const add = (id: string, severity: Severity, title: string, detail: string, metric: string, value: number) => alerts.push({ id, severity, title, detail, metric, value });
@@ -37,7 +41,7 @@ export const buildAlerts = (input: { metrics: MetricMap; lastSyncAt: Date | null
   if (input.averageDurationMs > 0 && input.durationMs > input.averageDurationMs * 1.5) add("slow-sync", "warning", "Sincronização acima do tempo esperado", "A última execução excedeu em 50% o tempo médio.", "durationMs", input.durationMs);
   if (input.duplicates > 0) add("duplicates", "warning", "Clientes duplicados encontrados", "Revise os documentos repetidos na qualidade dos dados.", "duplicates", input.duplicates);
   if (input.partnerTitlesInconsistent > 0) add("partner-titles", "warning", "PartnerTitles inconsistentes", "Há estruturas de títulos ausentes ou inválidas.", "partnerTitlesInconsistent", input.partnerTitlesInconsistent);
-  if (input.financialProfilesOrphaned > 0) add("financial-profiles", "warning", "FinancialProfiles órfãos", "Há perfis financeiros sem títulos associados.", "financialProfilesOrphaned", input.financialProfilesOrphaned);
+  if (input.financialProfilesOrphaned > 0) add("financial-profiles", "warning", "Clientes com perfil financeiro sem títulos", "Há clientes cujo JSON de perfil financeiro existe, mas o JSON de títulos não foi coletado.", "financialProfilesOrphaned", input.financialProfilesOrphaned);
   return alerts;
 };
 
@@ -52,7 +56,7 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
     prisma.client.count({ where: { ownerSeller: { is: { isActive: false } } } }),
     prisma.client.count({ where: { region: "" } }), prisma.client.count({ where: { city: "" } }), prisma.client.count({ where: { state: "" } }),
     prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COALESCE(SUM(c - 1), 0)::bigint AS count FROM (SELECT COUNT(*) c FROM "Client" WHERE "cnpjNormalized" IS NOT NULL AND "cnpjNormalized" <> '' GROUP BY "cnpjNormalized" HAVING COUNT(*) > 1) d`,
-    prisma.$queryRaw<Array<{ missing_phone: bigint; missing_email: bigint }>>`SELECT COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND COALESCE(ct.phone, '') <> ''))::bigint AS missing_phone, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND COALESCE(ct.email, '') <> ''))::bigint AS missing_email FROM "Client" c`,
+    prisma.$queryRawUnsafe<Array<{ missing_phone: bigint; missing_email: bigint }>>(CLIENT_CONTACT_QUALITY_SQL),
     prisma.$queryRaw<Array<{ partner_titles: bigint; financial_orphans: bigint }>>`SELECT COUNT(*) FILTER (WHERE "partnerTitles" IS NOT NULL AND jsonb_typeof("partnerTitles") NOT IN ('array', 'object'))::bigint AS partner_titles, COUNT(*) FILTER (WHERE "financialProfile" IS NOT NULL AND "partnerTitles" IS NULL)::bigint AS financial_orphans FROM "Client"`,
     prisma.clientCodeAudit.count({ where: { createdAt: { gte: today } } }),
     prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } })
