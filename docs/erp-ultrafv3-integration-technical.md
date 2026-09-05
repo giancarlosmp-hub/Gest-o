@@ -194,3 +194,12 @@ STATIC_FINDINGS_MUST_BE_SANITIZED
 CONFIGURATION_VALUES_MUST_NOT_BE_DOCUMENTED
 LOG_PAYLOADS_MUST_NOT_BE_REPRODUCED
 ```
+
+## Projeção de pedidos no CRM (2026-09-04)
+
+O contrato comprovado é `POST /orders` e `GET /orderStatus`. `PEDIDO_ID_IMPORTACAO` é a chave idempotente, `PEDIDO_ID` é armazenado separadamente em `erpOrderId` e `NUM_PEDIDO` em `erpOrderNumber`. A resposta parcial é tolerada: quantidades ausentes são apresentadas como zero e o texto operacional desconhecido é preservado em `operationalStatusRaw`, sem promovê-lo a enum interno. Não há contrato comprovado para ligar `NUM_NOTA`, `NOTA_ID` ou `CHNFE` ao pedido; a API retorna NFe como não instrumentada.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.

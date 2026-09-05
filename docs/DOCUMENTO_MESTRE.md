@@ -965,3 +965,12 @@ financeira. Esta tarefa não abriu nem executou anexos; os artefatos brutos perm
 autenticação, infraestrutura, deploy, observabilidade ou fluxos críticos deve atualizar, na mesma PR,
 o documento arquitetural autoritativo e o Documento Mestre quando houver impacto executivo ou
 operacional.
+
+## Módulo Pedidos — visão operacional UltraFV3 (2026-09-04)
+
+A rota `/pedidos` é uma projeção do registro canônico `ErpOrderSync` já criado pelo fluxo oportunidade ganha → `POST /orders`; ela não cria pedidos. A identidade idempotente continua sendo `PEDIDO_ID_IMPORTACAO` (`pedidoIdImportacao`, único), enquanto `erpOrderId` persiste `PEDIDO_ID` e `erpOrderNumber` persiste `NUM_PEDIDO` quando retornados. O status comercial da oportunidade, o status de sincronização e a situação operacional permanecem separados. A listagem e o detalhe são isolados pelo tenant do cliente da oportunidade e, para vendedor, também por `ownerSellerId`.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
