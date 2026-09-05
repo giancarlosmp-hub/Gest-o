@@ -126,6 +126,7 @@ const emptyContactForm: ContactFormState = {
 };
 
 type DetailsTab = "timeline" | "contacts";
+type ClientOrderSummary = { count: number; totalValue: number };
 
 const brDateFormatter = new Intl.DateTimeFormat("pt-BR");
 const brlCurrencyFormatter = new Intl.NumberFormat("pt-BR", {
@@ -173,6 +174,7 @@ export default function ClientDetailsPage() {
   const [removingContactId, setRemovingContactId] = useState<string | null>(null);
   const [suggestion, setSuggestion] = useState<ClientSuggestion>(null);
   const [loadingSuggestion, setLoadingSuggestion] = useState(false);
+  const [orderSummary, setOrderSummary] = useState<ClientOrderSummary>({ count: 0, totalValue: 0 });
 
   const fetchSuggestion = useCallback(async (clientId: string) => {
     setSuggestion(null);
@@ -283,6 +285,7 @@ export default function ClientDetailsPage() {
   useEffect(() => {
     if (!id) return;
     void fetchSuggestion(id);
+    api.get("/orders", { params: { clientId: id, pageSize: 1 } }).then(({ data }) => setOrderSummary({ count: Number(data?.summary?.count || 0), totalValue: Number(data?.summary?.totalValue || 0) })).catch(() => setOrderSummary({ count: 0, totalValue: 0 }));
   }, [id, fetchSuggestion]);
 
   const loadMoreEvents = async () => {
@@ -446,6 +449,11 @@ export default function ClientDetailsPage() {
       </div>
 
       <ClientAutoSummaryCard clientId={id} />
+
+      <section className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center">
+        <div><p className="text-sm font-semibold text-slate-900">Pedidos do cliente</p><p className="mt-1 text-sm text-slate-500">{orderSummary.count} pedido(s) · {formatCurrency(orderSummary.totalValue)}</p></div>
+        <button type="button" onClick={() => navigate(`/pedidos?clientId=${encodeURIComponent(id || "")}`)} className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800">Ver pedidos</button>
+      </section>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <h3 className="mb-3 text-lg font-semibold">Resumo comercial</h3>

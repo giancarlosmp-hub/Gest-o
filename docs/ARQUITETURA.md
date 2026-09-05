@@ -276,3 +276,12 @@ não DDL relacional. Os artefatos brutos não são fonte documental e nunca deve
 autenticação, infraestrutura, deploy, observabilidade ou fluxos críticos deve atualizar, na mesma PR,
 o documento arquitetural autoritativo e o Documento Mestre quando houver impacto executivo ou
 operacional.
+
+## Pedidos: projeção, identidade e call graph
+
+`OpportunitiesPage` confirma o ganho e chama o endpoint existente da oportunidade; `crudRoutes` carrega oportunidade/cliente/vendedor/itens; `erpOrderService.createErpOrderFromOpportunity` adquire advisory lock, bloqueia envio duplicado, cria `ErpOrderSync` pendente e chama `POST /orders`. A aba `OrdersPage` lê exclusivamente `GET /orders` e `GET /orders/:id`, que projetam o mesmo registro, sem endpoint de criação concorrente. `ErpOrderStatusHistory` registra transições append-only. O escopo é obtido da associação ativa do usuário e validado através de `Opportunity -> Client.tenantId`; parâmetros do navegador nunca definem tenant e `sellerId` é ignorado para vendedores.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.

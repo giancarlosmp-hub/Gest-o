@@ -14,6 +14,7 @@ permissions:
 jobs:
   deploy-preview:
     runs-on: ubuntu-latest
+    environment: preview
     env:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PR_BRANCH: ${{ github.event.pull_request.head.ref }}
@@ -26,13 +27,14 @@ jobs:
       PREVIEW_OWNER_RUN_ID: ${{ github.run_id }}
       PREVIEW_OWNER_RUN_ATTEMPT: ${{ github.run_attempt }}
       PREVIEW_OWNER_WORKFLOW: Preview-Deploy
+      EXPECTED_PREVIEW_SHA: ${{ github.sha }}
       COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
       POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
       POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
       API_PORT: 0
       WEB_PORT: 0
       ADMIN_BOOTSTRAP_EMAIL: pr${{ github.event.pull_request.number }}@preview.local
-      ADMIN_BOOTSTRAP_PASSWORD: pr${{ github.event.pull_request.number }}pr${{ github.event.pull_request.number }}
+      ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.PREVIEW_AUTH_PASSWORD }}
 
     steps:
       - name: Deploy preview on VPS
@@ -47,22 +49,32 @@ jobs:
           PREVIEW_OWNER_RUN_ID: ${{ github.run_id }}
           PREVIEW_OWNER_RUN_ATTEMPT: ${{ github.run_attempt }}
           PREVIEW_OWNER_WORKFLOW: Preview-Deploy
+          EXPECTED_PREVIEW_SHA: ${{ github.sha }}
           COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
           POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           API_PORT: 0
           WEB_PORT: 0
           ADMIN_BOOTSTRAP_EMAIL: pr${{ github.event.pull_request.number }}@preview.local
-          ADMIN_BOOTSTRAP_PASSWORD: pr${{ github.event.pull_request.number }}pr${{ github.event.pull_request.number }}
+          ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.PREVIEW_AUTH_PASSWORD }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,ADMIN_BOOTSTRAP_EMAIL,ADMIN_BOOTSTRAP_PASSWORD,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW
+          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,ADMIN_BOOTSTRAP_EMAIL,ADMIN_BOOTSTRAP_PASSWORD,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA
           script: |
             set -euo pipefail
+
+            [ -n "${ADMIN_BOOTSTRAP_EMAIL:-}" ] && [ -n "${ADMIN_BOOTSTRAP_PASSWORD:-}" ] || {
+              echo "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING"
+              exit 1
+            }
+            [[ "$ADMIN_BOOTSTRAP_EMAIL" == *@* && ${#ADMIN_BOOTSTRAP_EMAIL} -le 160 && ${#ADMIN_BOOTSTRAP_PASSWORD} -ge 16 && ${#ADMIN_BOOTSTRAP_PASSWORD} -le 160 && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\n'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\n'* && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\r'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\r'* ]] || {
+              echo "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT"
+              exit 1
+            }
 
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}/${COMPOSE_PROJECT_NAME}"
             PREVIEW_HOST_TLS="pr-${PR_NUMBER}-crm.demetraagronegocios.com.br"
@@ -76,17 +88,20 @@ jobs:
             cd "$PREVIEW_DIR"
 
             git clone --depth 1 --branch "${PR_BRANCH}" "https://github.com/${GITHUB_REPOSITORY}.git" .
-            git checkout "${PR_BRANCH}"
+            git fetch --depth 1 origin "pull/${PR_NUMBER}/merge"
+            git checkout --detach "$EXPECTED_PREVIEW_SHA"
+            [ "$(git rev-parse HEAD)" = "$EXPECTED_PREVIEW_SHA" ]
 
             cat > .env <<ENVFILE
             COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME}
             POSTGRES_DB=${POSTGRES_DB}
             POSTGRES_VOLUME_NAME=${POSTGRES_VOLUME_NAME}
             DATABASE_SCHEMA_MODE=ephemeral-push
+            APP_COMMIT=${EXPECTED_PREVIEW_SHA}
+            APP_VERSION=preview-pr-${PR_NUMBER}
+            APP_BUILT_AT=${PREVIEW_OWNER_RUN_ID}
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
-            ADMIN_BOOTSTRAP_EMAIL=pr${PR_NUMBER}@preview.local
-            ADMIN_BOOTSTRAP_PASSWORD=pr${PR_NUMBER}pr${PR_NUMBER}
             ADMIN_BOOTSTRAP_ROLE=diretor
             ADMIN_BOOTSTRAP_REGION=Nacional
             SEED_ON_BOOTSTRAP=false
@@ -108,8 +123,8 @@ jobs:
             export POSTGRES_VOLUME_NAME
             export API_PORT=0
             export WEB_PORT=0
-            export ADMIN_BOOTSTRAP_EMAIL="pr${PR_NUMBER}@preview.local"
-            export ADMIN_BOOTSTRAP_PASSWORD="pr${PR_NUMBER}pr${PR_NUMBER}"
+            export ADMIN_BOOTSTRAP_EMAIL
+            export ADMIN_BOOTSTRAP_PASSWORD
 
             validate_current_run_ownership() {
               ids="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -aq)"
@@ -201,6 +216,14 @@ jobs:
               exit 1
             fi
 
+            API_DEPLOYED_SHA="$(curl -fsS "http://127.0.0.1:${API_PORT}/health/version" | node -e 'let x="";process.stdin.on("data",d=>x+=d).on("end",()=>{const v=JSON.parse(x);if(typeof v.commit!=="string")process.exit(1);process.stdout.write(v.commit)})')"
+            WEB_DEPLOYED_SHA="$(curl -fsS "http://127.0.0.1:${WEB_PORT}/build-info.json" | node -e 'let x="";process.stdin.on("data",d=>x+=d).on("end",()=>{const v=JSON.parse(x);if(typeof v.commit!=="string")process.exit(1);process.stdout.write(v.commit)})')"
+            if [ "$API_DEPLOYED_SHA" != "$EXPECTED_PREVIEW_SHA" ] || [ "$WEB_DEPLOYED_SHA" != "$EXPECTED_PREVIEW_SHA" ]; then
+              echo "PREVIEW_SHA_MATCH=NO"
+              exit 1
+            fi
+            echo "PREVIEW_SHA_MATCH=YES"
+
             if ! PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/"); then PROXY_HTTP_STATUS=000; fi
             if ! PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/"); then PROXY_HTTPS_STATUS=000; fi
             echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
@@ -229,6 +252,7 @@ jobs:
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T \
               -e ENABLE_PREVIEW_SEED=true \
               -e NODE_ENV=development \
+              -e PREVIEW_SEED_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD}" \
               api npm run seed:preview -w @salesforce-pro/api
 
             echo "TENANT_READ_PREVIEW_SEED=PASS"
@@ -458,4 +482,4 @@ jobs:
             Preview URL (HTTPS): ${{ env.PREVIEW_URL }}
             Preview URL (HTTP fallback): ${{ env.PREVIEW_URL_HTTP }}
             Banco do preview é isolado e populado com dados fictícios via ENABLE_PREVIEW_SEED=true.
-            Use as credenciais do canal seguro; elas não são publicadas em comentários ou logs.
+            Acesso sintético: usuário pr${{ github.event.pull_request.number }}@preview.local e senha PREVIEW_AUTH_PASSWORD do GitHub Environment `preview`. Obtenha a senha com o proprietário pelo gerenciador privado; ela não é publicada aqui.

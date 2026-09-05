@@ -140,6 +140,7 @@ model Tenant {
   knowledgeDocuments KnowledgeDocument[]   @relation("TenantKnowledgeDocuments")
   erpSyncRuns        ErpSyncRun[]          @relation("TenantErpSyncRuns")
   erpSyncLocks       ErpSyncLock[]         @relation("TenantErpSyncLocks")
+  erpOrders          ErpOrderSync[]        @relation("TenantErpOrders")
 }
 
 model TenantMembership {
@@ -361,6 +362,7 @@ model Opportunity {
   items                OpportunityItem[]
   erpOrderSyncs        ErpOrderSync[]
   erpOrderManualResolutions ErpOrderManualResolution[]
+  erpOrderStatusHistory ErpOrderStatusHistory[]
   createdAt            DateTime               @default(now())
 }
 
@@ -600,6 +602,26 @@ enum ErpOrderFulfillmentStatus {
   entregue
 }
 
+enum ErpOperationalOrderStatus {
+  DIGITADO
+  ACEITO
+  EXPEDINDO
+  FATURAR
+  PARCIAL
+  FINALIZADO
+  CANCELADO
+  SUSPENSO
+  UNKNOWN
+}
+
+enum ErpRequestAuthorizationStatus {
+  NONE_OR_NOT_APPLICABLE
+  PARTIALLY_AUTHORIZED
+  NONE_AUTHORIZED
+  ALL_AUTHORIZED
+  UNKNOWN
+}
+
 enum ErpOrderManualResolutionCategory {
   manual_verified_not_found
 }
@@ -609,6 +631,8 @@ enum ErpOrderManualResolutionTerminalState {
 }
 
 model ErpOrderSync {
+  tenantId           String
+  tenant             Tenant                       @relation("TenantErpOrders", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id                 String                     @id @default(cuid())
   opportunityId      String
   opportunity        Opportunity                @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
@@ -617,6 +641,10 @@ model ErpOrderSync {
   pedidoIdImportacao String                     @unique
   numPedido          String?
   erpOrderNumber     String?
+  erpOrderId         String?
+  operationalStatusRaw String?
+  operationalOrderStatus ErpOperationalOrderStatus @default(UNKNOWN)
+  requestAuthorizationStatus ErpRequestAuthorizationStatus @default(UNKNOWN)
   status             ErpOrderSyncStatus         @default(pending)
   orderStatus        ErpOrderFulfillmentStatus?
   payloadSent        Json
@@ -631,12 +659,32 @@ model ErpOrderSync {
   supersedesErpOrderSync   ErpOrderSync?         @relation("ErpOrderRetryChain", fields: [supersedesErpOrderSyncId], references: [id], onDelete: Restrict)
   retryAttempts            ErpOrderSync[]        @relation("ErpOrderRetryChain")
   manualResolution         ErpOrderManualResolution?
+  statusHistory            ErpOrderStatusHistory[]
 
   @@index([opportunityId, createdAt])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, sellerId, createdAt])
   @@index([status])
   @@index([orderStatus])
   @@index([numPedido])
   @@index([supersedesErpOrderSyncId])
+}
+
+model ErpOrderStatusHistory {
+  id                   String                    @id @default(cuid())
+  erpOrderSyncId       String
+  erpOrderSync         ErpOrderSync              @relation(fields: [erpOrderSyncId], references: [id], onDelete: Cascade)
+  opportunityId        String
+  opportunity          Opportunity               @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  syncStatus           ErpOrderSyncStatus
+  orderStatus          ErpOrderFulfillmentStatus?
+  operationalStatusRaw String?
+  source               String
+  errorMessage         String?
+  occurredAt           DateTime                  @default(now())
+
+  @@index([erpOrderSyncId, occurredAt])
+  @@index([opportunityId, occurredAt])
 }
 
 model ErpOrderManualResolution {

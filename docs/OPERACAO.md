@@ -866,3 +866,26 @@ cardinalidades, enums e timestamps; nunca valores ou corpo bruto. Telefone/e-mai
 coleção de contatos são fontes distintas. Até existir contrato confirmado, não criar, apagar ou
 deduplicar `Contact` automaticamente. O procedimento e a regra de decisão financeira estão na
 [auditoria de setembro](investigations/ultrafv3-client-financial-contact-mapping-2026-09.md).
+
+## Operação e rollback — Pedidos
+
+- A listagem não consulta o ERP no navegador; usa somente dados persistidos e sanitizados da API.
+- Falhas de `/orderStatus` mantêm o pedido e acrescentam histórico sanitizado; não reabrem nem apagam a oportunidade ganha.
+- Monitorar `ErpOrderSync.status`, `statusSyncedAt` e `ErpOrderStatusHistory.source`, sem registrar payload integral ou PII.
+- Aplicar a migration `20260904120000_orders_operational_view` pelo fluxo de schema homologado, nunca manualmente em produção.
+- Rollback funcional: remover a rota/menu da interface e manter as colunas/tabela aditivas; não apagar histórico durante rollback.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
+
+## PR #856 — prova da migration Pedidos e acesso ao preview (05/09/2026)
+
+O gate histórico de tenancy termina no boundary da versão completa de `20260827190000_add_erp_order_manual_resolution`; banco sob teste e banco de referência recebem exatamente as mesmas migrations até esse ponto e o diff ocorre entre os dois catálogos reais. Não selecionar schema pela simples criação do diretório da migration e não comparar banco parcial com schema atual ou anterior demais. Execute `npm run test:tenancy-expand:postgres` para a prova histórica e, separadamente, `npm run test:orders-migration:postgres` para banco novo e upgrade completo até Pedidos. Nenhum diff é ignorado. Se o segundo teste reportar `orders tenant backfill unresolved_count=N`, interrompa a implantação e corrija ownership por procedimento separado e autorizado; o erro nunca lista IDs ou dados comerciais. Rollback operacional é manter a versão anterior antes do apply: a migration é atômica e uma falha reverte todo o bloco. Depois de commit bem-sucedido, rollback de dados exige migration corretiva revisada, nunca `DROP`, edição de ledger ou reversão manual.
+
+Para acesso humano ao preview, o proprietário do repositório configura secrets exclusivamente sintéticos em **GitHub → Settings → Environments → preview → Environment secrets** com os nomes `PREVIEW_AUTH_EMAIL` e `PREVIEW_AUTH_PASSWORD`. Os valores não podem ser de produção, não aparecem em comentário/artifact/log e devem ser compartilhados por gerenciador de senhas ou canal privado corporativo. Ausência de qualquer secret faz o deploy falhar fechado com marcador sem valor. O padrão antigo derivado do número da PR foi removido e deve ser rotacionado.
+
+## PR #856 — baseline histórico e prova de SHA do preview (05/09/2026)
+
+Não executar `prisma migrate deploy` em banco vazio como prova de instalação nova: a cadeia versionada começa com alteração de `Goal`, criada pelo baseline histórico externo. O contrato descartável suportado é `prisma db push` para instalação nova; para validar Pedidos, materializar o schema imediatamente anterior com `db push` e aplicar a migration de Pedidos transacionalmente. O CI gera `PREVIEW_SEED_PASSWORD` aleatória apenas em memória e destrói container/rede ao sair. O deploy usa email `pr<PR>@preview.local` e apenas `PREVIEW_AUTH_PASSWORD` do Environment `preview`; o valor antigo previsível deve permanecer inválido. Não aceitar preview saudável sem `PREVIEW_SHA_MATCH=YES` para API e WEB.
