@@ -26,12 +26,11 @@ cp "$tmp/previous.prisma" "$tmp/previous/schema.prisma"
 find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904120000_orders_operational_view -print0 | while IFS= read -r -d '' migration; do cp -R "$migration" "$tmp/previous/migrations/"; done
 
 echo 'ORDERS_MIGRATION_STEP=fresh_sequence'
-run_tooling fresh ./node_modules/.bin/prisma migrate deploy --schema /app/apps/api/prisma/schema.prisma >/dev/null
-run_tooling fresh ./node_modules/.bin/prisma migrate deploy --schema /app/apps/api/prisma/schema.prisma >/dev/null
+run_tooling fresh ./node_modules/.bin/prisma db push --schema /app/apps/api/prisma/schema.prisma --skip-generate >/dev/null
 run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code >"$tmp/fresh.diff"
 [[ ! -s "$tmp/fresh.diff" ]]
 
-for db in upgrade invalid; do run_tooling "$db" ./node_modules/.bin/prisma migrate deploy --schema /work/previous/schema.prisma >/dev/null; done
+for db in upgrade invalid; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
 fixture_sql='INSERT INTO "Tenant" (id,slug,"legalName","displayName",status,"createdAt","updatedAt") VALUES ('"'"'tenant-a'"'"','"'"'tenant-a'"'"','"'"'Synthetic A'"'"','"'"'Synthetic A'"'"','"'"'active'"'"',now(),now()),('"'"'tenant-b'"'"','"'"'tenant-b'"'"','"'"'Synthetic B'"'"','"'"'Synthetic B'"'"','"'"'active'"'"',now(),now());
 INSERT INTO "User" (id,name,email,"passwordHash",role,"isActive","createdAt") VALUES ('"'"'seller-a'"'"','"'"'Synthetic A'"'"','"'"'a@example.invalid'"'"','"'"'x'"'"','"'"'vendedor'"'"',true,now()),('"'"'seller-b'"'"','"'"'Synthetic B'"'"','"'"'b@example.invalid'"'"','"'"'x'"'"','"'"'vendedor'"'"',true,now());
 INSERT INTO "Client" (id,"tenantId",name,city,state,region,"ownerSellerId","createdAt") VALUES ('"'"'client-a'"'"','"'"'tenant-a'"'"','"'"'Synthetic A'"'"','"'"'City'"'"','"'"'ST'"'"','"'"'Region'"'"','"'"'seller-a'"'"',now()),('"'"'client-b'"'"','"'"'tenant-b'"'"','"'"'Synthetic B'"'"','"'"'City'"'"','"'"'ST'"'"','"'"'Region'"'"','"'"'seller-b'"'"',now());
@@ -40,11 +39,11 @@ INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",s
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade >/dev/null
 
 echo 'ORDERS_MIGRATION_STEP=upgrade_from_previous'
-run_tooling upgrade ./node_modules/.bin/prisma migrate deploy --schema /app/apps/api/prisma/schema.prisma >/dev/null
+docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql >/dev/null
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderSync" WHERE "tenantId" IS NULL') == 0 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderStatusHistory" WHERE source='"'"'migration-backfill'"'"'') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(DISTINCT "erpOrderSyncId") FROM "ErpOrderStatusHistory" WHERE source='"'"'migration-backfill'"'"'') == 3 ]]
-run_tooling upgrade ./node_modules/.bin/prisma migrate deploy --schema /app/apps/api/prisma/schema.prisma >/dev/null
+if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql >/dev/null 2>&1; then echo 'orders migration unexpectedly applied twice as raw DDL' >&2; exit 1; fi
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderStatusHistory" WHERE source='"'"'migration-backfill'"'"'') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderSync"') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('ErpOrderSync_tenantId_fkey','ErpOrderStatusHistory_erpOrderSyncId_fkey','ErpOrderStatusHistory_opportunityId_fkey')") == 3 ]]

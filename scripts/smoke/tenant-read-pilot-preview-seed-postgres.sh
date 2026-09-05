@@ -17,12 +17,18 @@ report_failure() {
 on_error() { local code=$?; report_failure "$code"; exit "$code"; }
 trap on_error ERR
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "SKIP: docker unavailable"
+  exit 77
+fi
+
 name="gesto-preview-seed-${RANDOM}-$$"
 network="${name}-net"
 image="${API_IMAGE:-gest-o-preview-seed:local}"
 tenant_id="tenant-default-v1"
 db="gesto_preview_certification"
-cleanup() { docker rm -f "$name" >/dev/null 2>&1 || :; docker network rm "$network" >/dev/null 2>&1 || :; }
+preview_seed_password=$(head -c 48 /dev/urandom | base64 | tr -d '\n')
+cleanup() { preview_seed_password=; unset preview_seed_password; docker rm -f "$name" >/dev/null 2>&1 || :; docker network rm "$network" >/dev/null 2>&1 || :; }
 trap cleanup EXIT
 unset DATABASE_URL
 
@@ -47,7 +53,7 @@ fi
 set_failure_context database_readiness verify_postgres_ready
 docker exec "$name" pg_isready -U postgres -d "$db" >/dev/null
 url="postgresql://postgres:preview_ephemeral@${name}:5432/${db}?schema=public"
-run_api() { docker run --rm --network "$network" -e DATABASE_URL="$url" -e NODE_ENV=test -e DEPLOYMENT_ENV=preview -e ENABLE_PREVIEW_SEED=true -e DEFAULT_TENANT_ID="$tenant_id" --entrypoint sh "$image" -c "$1"; }
+run_api() { docker run --rm --network "$network" -e DATABASE_URL="$url" -e NODE_ENV=test -e DEPLOYMENT_ENV=preview -e ENABLE_PREVIEW_SEED=true -e DEFAULT_TENANT_ID="$tenant_id" -e PREVIEW_SEED_PASSWORD="$preview_seed_password" --entrypoint sh "$image" -c "$1"; }
 
 echo "checkpoint: schema"
 set_failure_context schema apply_prisma_schema

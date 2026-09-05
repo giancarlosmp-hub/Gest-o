@@ -37,12 +37,15 @@ assert.match(preview, /TENANCY_MODE=default-only\$\/TENANCY_MODE=disabled[\s\S]*
 for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!preview.includes(forbidden), `forbidden preview bypass: ${forbidden}`);
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
 assert.match(preview, /environment:\s*preview/);
-assert.match(preview, /secrets\.PREVIEW_AUTH_EMAIL/);
 assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
+assert.match(preview, /ADMIN_BOOTSTRAP_EMAIL: pr\$\{\{ github\.event\.pull_request\.number \}\}@preview\.local/);
 assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*pr\$\{\{/);
 const previewEnvFile = preview.match(/cat > \.env <<ENVFILE([\s\S]*?)ENVFILE/)?.[1] || "";
 assert.doesNotMatch(previewEnvFile, /ADMIN_BOOTSTRAP_(?:EMAIL|PASSWORD)=/, "preview secrets must not be persisted in the generated .env file");
 assert.match(preview, /#ADMIN_BOOTSTRAP_PASSWORD\} -ge 16/);
+assert.match(preview, /EXPECTED_PREVIEW_SHA: \$\{\{ github\.sha \}\}/);
+assert.match(preview, /git fetch --depth 1 origin "pull\/\$\{PR_NUMBER\}\/merge"/);
+assert.match(preview, /API_DEPLOYED_SHA=[\s\S]*WEB_DEPLOYED_SHA=[\s\S]*PREVIEW_SHA_MATCH=YES/);
 assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);
 assert.match(preview, /TENANCY_MODE=disabled/);
 assert.match(production, /TENANCY_MODE:\s*(?:"disabled"|disabled)/);
@@ -50,6 +53,9 @@ assert.match(production, /TENANT_READ_PILOT_ENABLED:\s*"false"/);
 for (const marker of ["TENANT_PREVIEW_SEED_FAILURE_STAGE=", "TENANT_PREVIEW_SEED_FAILURE_COMMAND=", "TENANT_PREVIEW_SEED_FAILURE_EXIT_CODE="]) {
   assert.ok(postgresHarness.includes(marker), `PostgreSQL harness must emit ${marker}`);
 }
+assert.match(postgresHarness, /preview_seed_password=\$\(head -c 48 \/dev\/urandom \| base64/);
+assert.match(postgresHarness, /-e PREVIEW_SEED_PASSWORD="\$preview_seed_password"/);
+assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
   assert.ok(postgresHarness.includes(`set_failure_context ${stage} `), `missing PostgreSQL failure stage ${stage}`);
