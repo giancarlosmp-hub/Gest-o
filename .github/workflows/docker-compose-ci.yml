@@ -121,11 +121,6 @@ jobs:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:tenancy-expand:postgres
 
-      - name: Prove Orders migration on PostgreSQL 16
-        env:
-          API_IMAGE: gest-o-api:${{ github.sha }}
-        run: npm run test:orders-migration:postgres
-
       - name: Prove tenancy backfill tooling on PostgreSQL 16
         env:
           API_IMAGE: gest-o-api:${{ github.sha }}
@@ -249,3 +244,31 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  orders-migration-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Pin npm
+        run: npm install --global npm@11.4.2
+
+      - name: Cache PostgreSQL 16 image
+        run: docker pull postgres:16
+
+      - name: Build SHA-pinned API tooling image
+        run: docker build --pull=false --build-arg APP_COMMIT="$GITHUB_SHA" --build-arg APP_VERSION=ci --build-arg APP_BUILT_AT="$(date -u +%FT%TZ)" -t "gest-o-api:$GITHUB_SHA" -f apps/api/Dockerfile .
+
+      - name: Prove Orders migration on PostgreSQL 16
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:orders-migration:postgres

@@ -23,9 +23,6 @@ mapfile -t intro_commits < <(git log --all --format=%H --diff-filter=A -- apps/a
 [[ ${#intro_commits[@]} == 1 ]]
 predecessor_commit=$(git rev-parse "${intro_commits[0]}^")
 git show "$predecessor_commit:apps/api/prisma/schema.prisma" > "$tmp/predecessor.prisma"
-manual_intro_commit=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql)
-[[ -n "$manual_intro_commit" && "$manual_intro_commit" != *$'\n'* ]]
-git show "$manual_intro_commit:apps/api/prisma/schema.prisma" > "$tmp/tenancy-boundary.prisma"
 step docker_network_setup "create internal Docker network"
 docker network create --internal "$net" >/dev/null
 step postgres_start "start disposable PostgreSQL 16"
@@ -59,9 +56,13 @@ grep -Fqx '1' "$tmp/readiness-final.out"
 HARNESS_RESULT=PASS
 echo 'TENANCY_EXPAND_DATABASE_READINESS=PASS'
 url="postgresql://postgres:test@$pg:5432/expand?schema=public"
+docker exec -i "$pg" createdb -U postgres expand_reference
+reference_url="postgresql://postgres:test@$pg:5432/expand_reference?schema=public"
 run_tooling(){ docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$url" "$image" "$@"; }
+run_reference_tooling(){ docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$reference_url" "$image" "$@"; }
 step predecessor_materialization "materialize predecessor schema"
 run_tooling ./node_modules/.bin/prisma db push --schema /work/predecessor.prisma --skip-generate >/dev/null
+run_reference_tooling ./node_modules/.bin/prisma db push --schema /work/predecessor.prisma --skip-generate >/dev/null
 step fixtures "create synthetic incident fixture before all fixture reads"
 docker exec -i "$pg" psql -X -U postgres -d expand -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 CREATE TABLE public."incident_synthetic" (id integer PRIMARY KEY);
@@ -92,6 +93,8 @@ docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/pr
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null 2>&1; then echo 'migration unexpectedly applied twice' >&2; exit 1; fi
 docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
 if docker exec -i "$pg" psql -U postgres -d expand -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null 2>&1; then echo 'ERP manual resolution migration unexpectedly applied twice' >&2; exit 1; fi
+docker exec -i "$pg" psql -U postgres -d expand_reference -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260808120000_tenancy_expand_roots/migration.sql >/dev/null
+docker exec -i "$pg" psql -U postgres -d expand_reference -v ON_ERROR_STOP=1 < apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
 step catalog_validation "validate nullable columns indexes foreign keys and row counts"
 docker exec -i "$pg" psql -X -U postgres -d expand -qAtF $'\t' <scripts/tenancy-expand-roots-catalog.sql >"$tmp/expand-catalog.tsv"
 # Sanitized structural evidence only: no row values, URLs, or credentials.
@@ -134,8 +137,8 @@ INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",s
 INSERT INTO "ErpOrderManualResolution" (id,"erpOrderSyncId","opportunityId","resolvedById","resolvedRole",category,"terminalState",justification,"originalPedidoIdImportacao","originalCorrelationId","statusCheckedAt","statusCheckCorrelationId","createdAt") VALUES ('erp-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check',now());
 SQL
 if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"ErpOrderManualResolution\" (id,\"erpOrderSyncId\",\"opportunityId\",\"resolvedById\",\"resolvedRole\",category,\"terminalState\",justification,\"originalPedidoIdImportacao\",\"originalCorrelationId\",\"statusCheckedAt\",\"statusCheckCorrelationId\",\"createdAt\") VALUES ('duplicate-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check-2',now())" >/dev/null 2>&1; then echo 'duplicate ERP manual resolution accepted' >&2; exit 1; fi
-step post_diff "validate historical tenancy boundary schema diff"
-run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /work/tenancy-boundary.prisma --script > "$tmp/post-diff.raw.sql"
+step post_diff "compare tested and reference databases at identical migration boundary"
+run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-url "$reference_url" --script > "$tmp/post-diff.raw.sql"
 # The sole raw diff is the deliberately unmanaged forensic fixture; stripping that exact block yields an empty managed diff.
 sed '/-- DropTable/,/DROP TABLE "incident_synthetic";/d' "$tmp/post-diff.raw.sql" | sed '/^[[:space:]]*$/d' > "$tmp/post-diff.managed.sql"
 test "$(grep -Fxc 'DROP TABLE "incident_synthetic";' "$tmp/post-diff.raw.sql")" = 1

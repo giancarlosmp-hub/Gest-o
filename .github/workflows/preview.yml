@@ -69,7 +69,7 @@ jobs:
               echo "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING"
               exit 1
             }
-            [[ "$ADMIN_BOOTSTRAP_EMAIL" =~ ^[A-Za-z0-9._+@-]{3,160}$ && "$ADMIN_BOOTSTRAP_PASSWORD" =~ ^[A-Za-z0-9._+@-]{16,160}$ ]] || {
+            [[ "$ADMIN_BOOTSTRAP_EMAIL" == *@* && ${#ADMIN_BOOTSTRAP_EMAIL} -le 160 && ${#ADMIN_BOOTSTRAP_PASSWORD} -ge 16 && ${#ADMIN_BOOTSTRAP_PASSWORD} -le 160 && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\n'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\n'* && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\r'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\r'* ]] || {
               echo "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT"
               exit 1
             }
@@ -95,8 +95,6 @@ jobs:
             DATABASE_SCHEMA_MODE=ephemeral-push
             ADMIN_BOOTSTRAP_ENABLED=true
             ADMIN_BOOTSTRAP_NAME=Admin Preview PR ${PR_NUMBER}
-            ADMIN_BOOTSTRAP_EMAIL=${ADMIN_BOOTSTRAP_EMAIL}
-            ADMIN_BOOTSTRAP_PASSWORD=${ADMIN_BOOTSTRAP_PASSWORD}
             ADMIN_BOOTSTRAP_ROLE=diretor
             ADMIN_BOOTSTRAP_REGION=Nacional
             SEED_ON_BOOTSTRAP=false
