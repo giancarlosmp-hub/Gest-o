@@ -1164,6 +1164,10 @@ async function createErpOrderFromOpportunityUnsafe(
   rawParams: OrderParameterCodes,
   correlationId: string,
 ) {
+  if (!opportunity.client.tenantId) {
+    throw Object.assign(new Error("Tenant do cliente não comprovado; criação do pedido ERP bloqueada."), { status: 409 });
+  }
+  const tenantId = opportunity.client.tenantId;
   const routeStageStartedAt = Date.now();
   const params = normalizeErpOrderParameterCodes(rawParams);
   const parameterDiagnostics = getErpOrderParameterDiagnostics(rawParams);
@@ -1538,7 +1542,7 @@ async function createErpOrderFromOpportunityUnsafe(
     const payload = buildOrderPayload(numPedido);
     const sync = await tx.erpOrderSync.create({
       data: {
-        tenantId: opportunity.client.tenantId ?? null,
+        tenantId,
         opportunityId: opportunity.id,
         sellerId: opportunity.ownerSeller.id,
         pedidoIdImportacao,
@@ -1995,6 +1999,7 @@ export async function runUltraFv3OrderProtocolTest(
   rawParams: OrderParameterCodes,
   options: { correlationId?: string } = {},
 ) {
+  if (!opportunity.client.tenantId) throw Object.assign(new Error("Tenant do cliente não comprovado; teste de protocolo bloqueado."), { status: 409 });
   assertErpRuntimeConfigForOrderSubmission();
   const correlationId = options.correlationId || randomUUID();
   const pedidoIdImportacao = randomUUID();
@@ -2028,6 +2033,7 @@ export async function runUltraFv3OrderProtocolTest(
   await ultraFv3Client.authenticateWithCredentials(sellerCredentials);
   const sync = await prisma.erpOrderSync.create({
     data: {
+      tenantId: opportunity.client.tenantId,
       opportunityId: opportunity.id,
       sellerId: opportunity.ownerSeller.id,
       pedidoIdImportacao,

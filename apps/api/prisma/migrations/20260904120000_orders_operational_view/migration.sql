@@ -1,3 +1,5 @@
+BEGIN;
+
 ALTER TABLE "ErpOrderSync"
   ADD COLUMN "tenantId" TEXT,
   ADD COLUMN "erpOrderId" TEXT,
@@ -16,6 +18,17 @@ FROM "Opportunity" AS opportunities
 JOIN "Client" AS clients ON clients."id" = opportunities."clientId"
 WHERE opportunities."id" = orders."opportunityId"
   AND orders."tenantId" IS NULL;
+
+DO $$
+DECLARE unresolved_count bigint;
+BEGIN
+  SELECT count(*) INTO unresolved_count FROM "ErpOrderSync" WHERE "tenantId" IS NULL;
+  IF unresolved_count > 0 THEN
+    RAISE EXCEPTION 'orders tenant backfill unresolved_count=%', unresolved_count;
+  END IF;
+END $$;
+
+ALTER TABLE "ErpOrderSync" ALTER COLUMN "tenantId" SET NOT NULL;
 
 ALTER TABLE "ErpOrderSync"
   ADD CONSTRAINT "ErpOrderSync_tenantId_fkey"
@@ -45,3 +58,5 @@ CREATE INDEX "ErpOrderStatusHistory_opportunityId_occurredAt_idx" ON "ErpOrderSt
 INSERT INTO "ErpOrderStatusHistory" ("id", "erpOrderSyncId", "opportunityId", "syncStatus", "orderStatus", "operationalStatusRaw", "source", "errorMessage", "occurredAt")
 SELECT CONCAT('backfill-', "id"), "id", "opportunityId", "status", "orderStatus", NULL, 'migration-backfill', NULL, "createdAt"
 FROM "ErpOrderSync";
+
+COMMIT;

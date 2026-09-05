@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 const PREVIEW_SEED_TAG = "[preview-seed]";
-const PREVIEW_SEED_PASSWORD = "123456";
+const PREVIEW_SEED_PASSWORD = process.env.PREVIEW_SEED_PASSWORD?.trim();
 // Synthetic-only stable identity. Runtime receives this value through DEFAULT_TENANT_ID.
 export const PREVIEW_DEFAULT_TENANT_ID = "tenant-default-v1";
 const PREVIEW_SELLERS = [
@@ -308,6 +308,7 @@ function assertSafePreviewEnvironment() {
 }
 
 async function upsertSeller(name: string, email: string, region: string) {
+  if (!PREVIEW_SEED_PASSWORD) throw new Error("PREVIEW_SEED_PASSWORD ausente para o dataset sintético.");
   const passwordHash = await bcrypt.hash(PREVIEW_SEED_PASSWORD, 10);
   return prisma.user.upsert({
     where: { email },

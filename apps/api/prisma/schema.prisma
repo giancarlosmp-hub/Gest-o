@@ -631,8 +631,8 @@ enum ErpOrderManualResolutionTerminalState {
 }
 
 model ErpOrderSync {
-  tenantId           String?
-  tenant             Tenant?                      @relation("TenantErpOrders", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  tenantId           String
+  tenant             Tenant                       @relation("TenantErpOrders", fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   id                 String                     @id @default(cuid())
   opportunityId      String
   opportunity        Opportunity                @relation(fields: [opportunityId], references: [id], onDelete: Cascade)

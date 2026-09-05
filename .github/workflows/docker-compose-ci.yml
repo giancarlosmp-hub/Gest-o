@@ -121,6 +121,11 @@ jobs:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:tenancy-expand:postgres
 
+      - name: Prove Orders migration on PostgreSQL 16
+        env:
+          API_IMAGE: gest-o-api:${{ github.sha }}
+        run: npm run test:orders-migration:postgres
+
       - name: Prove tenancy backfill tooling on PostgreSQL 16
         env:
           API_IMAGE: gest-o-api:${{ github.sha }}

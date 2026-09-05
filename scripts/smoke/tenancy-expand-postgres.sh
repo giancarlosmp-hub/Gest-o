@@ -23,6 +23,9 @@ mapfile -t intro_commits < <(git log --all --format=%H --diff-filter=A -- apps/a
 [[ ${#intro_commits[@]} == 1 ]]
 predecessor_commit=$(git rev-parse "${intro_commits[0]}^")
 git show "$predecessor_commit:apps/api/prisma/schema.prisma" > "$tmp/predecessor.prisma"
+manual_intro_commit=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql)
+[[ -n "$manual_intro_commit" && "$manual_intro_commit" != *$'\n'* ]]
+git show "$manual_intro_commit:apps/api/prisma/schema.prisma" > "$tmp/tenancy-boundary.prisma"
 step docker_network_setup "create internal Docker network"
 docker network create --internal "$net" >/dev/null
 step postgres_start "start disposable PostgreSQL 16"
@@ -131,8 +134,8 @@ INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",s
 INSERT INTO "ErpOrderManualResolution" (id,"erpOrderSyncId","opportunityId","resolvedById","resolvedRole",category,"terminalState",justification,"originalPedidoIdImportacao","originalCorrelationId","statusCheckedAt","statusCheckCorrelationId","createdAt") VALUES ('erp-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check',now());
 SQL
 if docker exec "$pg" psql -U postgres -d expand -c "INSERT INTO \"ErpOrderManualResolution\" (id,\"erpOrderSyncId\",\"opportunityId\",\"resolvedById\",\"resolvedRole\",category,\"terminalState\",justification,\"originalPedidoIdImportacao\",\"originalCorrelationId\",\"statusCheckedAt\",\"statusCheckCorrelationId\",\"createdAt\") VALUES ('duplicate-resolution','erp-attempt','erp-opportunity','erp-user','diretor','manual_verified_not_found','manually_resolved_not_found','synthetic','synthetic-import','synthetic-correlation',now(),'synthetic-check-2',now())" >/dev/null 2>&1; then echo 'duplicate ERP manual resolution accepted' >&2; exit 1; fi
-step post_diff "validate final schema diff"
-run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --script > "$tmp/post-diff.raw.sql"
+step post_diff "validate historical tenancy boundary schema diff"
+run_tooling ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /work/tenancy-boundary.prisma --script > "$tmp/post-diff.raw.sql"
 # The sole raw diff is the deliberately unmanaged forensic fixture; stripping that exact block yields an empty managed diff.
 sed '/-- DropTable/,/DROP TABLE "incident_synthetic";/d' "$tmp/post-diff.raw.sql" | sed '/^[[:space:]]*$/d' > "$tmp/post-diff.managed.sql"
 test "$(grep -Fxc 'DROP TABLE "incident_synthetic";' "$tmp/post-diff.raw.sql")" = 1

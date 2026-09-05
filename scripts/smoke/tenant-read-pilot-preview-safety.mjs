@@ -36,6 +36,10 @@ assert.doesNotMatch(requestContext, /req\.(?:get|header|query|body).*request.?id
 assert.match(preview, /TENANCY_MODE=default-only\$\/TENANCY_MODE=disabled[\s\S]*TENANT_READ_PILOT_ENABLED=true\$\/TENANT_READ_PILOT_ENABLED=false/, "rollback must restore disabled/false");
 for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!preview.includes(forbidden), `forbidden preview bypass: ${forbidden}`);
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
+assert.match(preview, /environment:\s*preview/);
+assert.match(preview, /secrets\.PREVIEW_AUTH_EMAIL/);
+assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*pr\$\{\{/);
 assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);
 assert.match(preview, /TENANCY_MODE=disabled/);
 assert.match(production, /TENANCY_MODE:\s*(?:"disabled"|disabled)/);
