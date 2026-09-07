@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const preview = readFileSync(".github/workflows/preview.yml", "utf8");
 const production = readFileSync("docker-compose.production.yml", "utf8");
@@ -39,6 +40,13 @@ for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
 assert.match(preview, /environment:\s*preview/);
 assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
+assert.match(preview, /PREVIEW_AUTH_PASSWORD: \$\{\{ secrets\.PREVIEW_AUTH_PASSWORD \}\}[\s\S]*base64 -w 0/);
+assert.match(preview, /PREVIEW_AUTH_PASSWORD_B64: \$\{\{ steps\.preview-credential\.outputs\.password_b64 \}\}/);
+assert.match(preview, /decoded_with_sentinel=\$\(printf '%s' "\$PREVIEW_AUTH_PASSWORD_B64" \| base64 --decode[\s\S]*ADMIN_BOOTSTRAP_PASSWORD=\$\{decoded_with_sentinel%\.\}/);
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*\$\{\{\s*secrets\.PREVIEW_AUTH_PASSWORD/, "raw password must not enter ssh-action envs");
+assert.doesNotMatch(preview, /--password "\$\{ADMIN_BOOTSTRAP_PASSWORD\}"/, "password must not be passed in process argv");
+assert.doesNotMatch(preview, /--data "\{\\"email[\s\S]*ADMIN_BOOTSTRAP_PASSWORD/, "password must not be interpolated into JSON text");
+assert.match(preview, /--data-binary "@\$LOGIN_PAYLOAD_FILE"/);
 assert.match(preview, /ADMIN_BOOTSTRAP_EMAIL="pr\$\{PR_NUMBER\}@preview\.local"/);
 assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_EMAIL:\s*\$\{\{\s*secrets\./, "preview email must not be a secret");
 assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*pr\$\{\{/);
@@ -71,4 +79,5 @@ assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diag
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
   assert.ok(postgresHarness.includes(`set_failure_context ${stage} `), `missing PostgreSQL failure stage ${stage}`);
 }
+execFileSync("bash", ["scripts/smoke/preview-secret-transport.test.sh"], { stdio: "inherit" });
 console.log("tenant read pilot preview workflow safety: PASS");

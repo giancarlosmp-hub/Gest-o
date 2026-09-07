@@ -33,9 +33,22 @@ jobs:
       POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
       API_PORT: 0
       WEB_PORT: 0
-      ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.PREVIEW_AUTH_PASSWORD }}
-
     steps:
+      - name: Encode preview credential for SSH transport
+        id: preview-credential
+        shell: bash
+        env:
+          PREVIEW_AUTH_PASSWORD: ${{ secrets.PREVIEW_AUTH_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PREVIEW_AUTH_PASSWORD:-}" ]; then
+            echo "PREVIEW_PASSWORD_PRESENT=NO"
+            exit 1
+          fi
+          encoded=$(printf '%s' "$PREVIEW_AUTH_PASSWORD" | base64 -w 0)
+          echo "::add-mask::$encoded"
+          printf 'password_b64=%s\n' "$encoded" >> "$GITHUB_OUTPUT"
+
       - name: Deploy preview on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
@@ -54,14 +67,14 @@ jobs:
           POSTGRES_VOLUME_NAME: gesto_pgdata_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
           API_PORT: 0
           WEB_PORT: 0
-          ADMIN_BOOTSTRAP_PASSWORD: ${{ secrets.PREVIEW_AUTH_PASSWORD }}
+          PREVIEW_AUTH_PASSWORD_B64: ${{ steps.preview-credential.outputs.password_b64 }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,ADMIN_BOOTSTRAP_PASSWORD,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA
+          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,PREVIEW_AUTH_PASSWORD_B64,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA
           script: |
             set -euo pipefail
             echo "PREVIEW_DEPLOY_STEP=configuration"
@@ -79,7 +92,7 @@ jobs:
               ;;
             esac
             ADMIN_BOOTSTRAP_EMAIL="pr${PR_NUMBER}@preview.local"
-            [ -n "${ADMIN_BOOTSTRAP_PASSWORD:-}" ] || {
+            [ -n "${PREVIEW_AUTH_PASSWORD_B64:-}" ] || {
               echo "PREVIEW_PASSWORD_PRESENT=NO"
               echo "PREVIEW_CONFIGURATION_NAME=PREVIEW_AUTH_PASSWORD"
               echo "PREVIEW_CONFIGURATION_EXPECTED_SOURCE=GitHub_Environment_preview"
@@ -88,6 +101,19 @@ jobs:
               echo "PREVIEW_DEPLOY_RESULT=FAIL"
               exit 1
             }
+            if ! decoded_with_sentinel=$(printf '%s' "$PREVIEW_AUTH_PASSWORD_B64" | base64 --decode 2>/dev/null && printf '.'); then
+              echo "PREVIEW_PASSWORD_PRESENT=YES"
+              echo "PREVIEW_PASSWORD_FORMAT_VALID=NO"
+              echo "PREVIEW_CONFIGURATION_NAME=PREVIEW_AUTH_PASSWORD"
+              echo "PREVIEW_CONFIGURATION_EXPECTED_SOURCE=GitHub_Environment_preview_base64_transport"
+              echo "PREVIEW_CONFIGURATION_STATE=INVALID"
+              echo "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_TRANSPORT"
+              echo "PREVIEW_DEPLOY_RESULT=FAIL"
+              exit 1
+            fi
+            ADMIN_BOOTSTRAP_PASSWORD=${decoded_with_sentinel%.}
+            unset decoded_with_sentinel
+            unset PREVIEW_AUTH_PASSWORD_B64
             echo "PREVIEW_PASSWORD_PRESENT=YES"
             password_line_count=$(printf '%s' "$ADMIN_BOOTSTRAP_PASSWORD" | awk 'END { print NR }')
             password_without_cr=$(printf '%s' "$ADMIN_BOOTSTRAP_PASSWORD" | tr -d '\r')
@@ -159,6 +185,7 @@ jobs:
             export WEB_PORT=0
             export ADMIN_BOOTSTRAP_EMAIL
             export ADMIN_BOOTSTRAP_PASSWORD
+            export PREVIEW_SEED_PASSWORD="$ADMIN_BOOTSTRAP_PASSWORD"
 
             validate_current_run_ownership() {
               ids="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -aq)"
@@ -261,21 +288,14 @@ jobs:
 
             echo "PREVIEW_DEPLOY_STEP=seed_candidate"
             echo "=== BOOTSTRAP ADMIN ==="
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T api \
-              node apps/api/dist/scripts/adminEnsureUser.js \
-              --name "Admin Preview PR ${PR_NUMBER}" \
-              --email "${ADMIN_BOOTSTRAP_EMAIL}" \
-              --password "${ADMIN_BOOTSTRAP_PASSWORD}" \
-              --role "diretor" \
-              --region "Nacional"
-            echo "Bootstrap executed"
-            echo "Admin ensured"
+            # The API entrypoint consumes ADMIN_BOOTSTRAP_PASSWORD from its
+            # environment before becoming healthy; never put it in argv.
+            echo "Admin bootstrap verified by healthy API startup"
 
             echo "=== PREVIEW SEED ==="
             docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml exec -T \
               -e ENABLE_PREVIEW_SEED=true \
               -e NODE_ENV=development \
-              -e PREVIEW_SEED_PASSWORD="${ADMIN_BOOTSTRAP_PASSWORD}" \
               api npm run seed:preview -w @salesforce-pro/api
 
             echo "TENANT_READ_PREVIEW_SEED=PASS"
@@ -316,7 +336,7 @@ jobs:
 
 
             # Enable only after seed certification. Normal failures use fail_shadow_proof; EXIT is emergency-only.
-            LOGIN_FILE="$(mktemp)"; LOGIN_HTTP_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"; RESULT_DIR="$(mktemp -d)"
+            LOGIN_FILE="$(mktemp)"; LOGIN_HTTP_FILE="$(mktemp)"; LOGIN_PAYLOAD_FILE="$(mktemp)"; SHADOW_LOG="$(mktemp)"; RESULT_DIR="$(mktemp -d)"
             PILOT_ACTIVATED=false
             ROLLBACK_ATTEMPTED=false
             STABILITY_CYCLES=10
@@ -386,7 +406,7 @@ jobs:
                 print_shadow_diagnostic
                 if ! rollback_preview_pilot; then echo "TENANT_READ_PREVIEW_ROLLBACK=ERROR stage=emergency"; fi
               fi
-              rm -f "$LOGIN_FILE" "$LOGIN_HTTP_FILE" "$SHADOW_LOG"
+              rm -f "$LOGIN_FILE" "$LOGIN_HTTP_FILE" "$LOGIN_PAYLOAD_FILE" "$SHADOW_LOG"
               rm -rf "$RESULT_DIR"
               if [ "$rc" -ne 0 ]; then
                 if validate_current_run_ownership; then
@@ -419,8 +439,9 @@ jobs:
               'if(process.env.DEPLOYMENT_ENV!=="preview"||process.env.TENANCY_MODE!=="default-only"||process.env.TENANT_READ_PILOT_ENABLED!=="true"||process.env.DEFAULT_TENANT_ID!=="tenant-default-v1")process.exit(1)'; then fail_shadow_proof activation_config; fi
 
             echo "=== REAL GET /clients SHADOW PROOF ==="
+            node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({email:process.env.ADMIN_BOOTSTRAP_EMAIL,password:process.env.ADMIN_BOOTSTRAP_PASSWORD}),{mode:0o600})' "$LOGIN_PAYLOAD_FILE"
             if curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" --data "{\"email\":\"${ADMIN_BOOTSTRAP_EMAIL}\",\"password\":\"${ADMIN_BOOTSTRAP_PASSWORD}\"}" > "$LOGIN_HTTP_FILE"; then
+              -H "Content-Type: application/json" --data-binary "@$LOGIN_PAYLOAD_FILE" > "$LOGIN_HTTP_FILE"; then
               LOGIN_CURL_EXIT=0
             else
               LOGIN_CURL_EXIT="$?"
