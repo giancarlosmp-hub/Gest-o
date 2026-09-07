@@ -9,6 +9,7 @@ import crudRoutes from "./routes/crudRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import platformHealthRoutes from "./routes/platformHealthRoutes.js";
 import ultraFv3Routes from "./routes/ultraFv3Routes.js";
+import orderRoutes from "./routes/orderRoutes.js";
 import conversationalCrmRoutes from "./routes/conversationalCrmRoutes.js";
 import { communicationWebhookRoutes } from "./routes/communicationWebhookRoutes.js";
 import { communicationRoutes } from "./routes/communicationRoutes.js";
@@ -260,6 +261,7 @@ app.use("/api/auth", authRoutes);
 
 app.use("/dashboard", dashboardRoutes);
 app.use("/", ultraFv3Routes);
+app.use("/", orderRoutes);
 app.use("/", clientLookupRoutes);
 app.use("/", crudRoutes);
 
@@ -269,6 +271,7 @@ app.use("/api/dashboard", dashboardRoutes);
 // compatibility with the host reverse proxy that historically stripped it.
 app.use(["/platform-health", "/api/platform-health"], platformHealthRoutes);
 app.use("/api", ultraFv3Routes);
+app.use("/api", orderRoutes);
 app.use("/api", clientLookupRoutes);
 app.use("/api", crudRoutes);
 

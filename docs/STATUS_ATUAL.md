@@ -787,3 +787,12 @@ servidor/banco no conector, além de componentes Firebird no Gestao; não compro
 UltraFV3 segue parcial por falta de DTO rigoroso, contatos/proveniência e temporalidade financeira.
 Próxima ação segura: executar o gate documental e obter somente schemas/timestamps sanitizados por
 canal aprovado; não executar anexos, sync, Recovery, migration ou reparo.
+
+## Pedidos UltraFV3 (2026-09-04)
+
+Implementada a visão responsiva de pedidos com resumo, busca, período, vendedor, status, cards, progresso, detalhe de itens, erros e histórico. Estados contratuais comprovados: `DIGITADO`, `ACEITO`, `PARCIAL`, `FINALIZADO`, `CANCELADO`. `EXPEDINDO`, `FATURAR` e `SUSPENSO` são exibíveis como texto recebido, mas permanecem evidência apenas da UI do ERP. A associação pedido–NFe segue **não comprovada/não instrumentada**: nenhuma rota ou chave foi inventada.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.

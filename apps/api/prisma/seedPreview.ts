@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 const PREVIEW_SEED_TAG = "[preview-seed]";
-const PREVIEW_SEED_PASSWORD = "123456";
+const PREVIEW_SEED_PASSWORD = process.env.PREVIEW_SEED_PASSWORD?.trim();
 // Synthetic-only stable identity. Runtime receives this value through DEFAULT_TENANT_ID.
 export const PREVIEW_DEFAULT_TENANT_ID = "tenant-default-v1";
 const PREVIEW_SELLERS = [
@@ -308,6 +308,7 @@ function assertSafePreviewEnvironment() {
 }
 
 async function upsertSeller(name: string, email: string, region: string) {
+  if (!PREVIEW_SEED_PASSWORD) throw new Error("PREVIEW_SEED_PASSWORD ausente para o dataset sintético.");
   const passwordHash = await bcrypt.hash(PREVIEW_SEED_PASSWORD, 10);
   return prisma.user.upsert({
     where: { email },
@@ -462,8 +463,12 @@ async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertS
       if (fixture.status === "green") {
         await prisma.erpOrderSync.create({
           data: {
-            opportunityId: opportunity.id,
-            sellerId: seller.id,
+            // Keep the order's root tenant explicit. Prisma intentionally requires
+            // this relation; it must agree with the client reached through the
+            // opportunity and must never be inferred from request input.
+            tenant: { connect: { id: PREVIEW_DEFAULT_TENANT_ID } },
+            opportunity: { connect: { id: opportunity.id } },
+            seller: { connect: { id: seller.id } },
             pedidoIdImportacao: `${PREVIEW_SEED_TAG}-territory-${seller.id}-${index}`,
             numPedido: `PV-${String(index + 1).padStart(4, "0")}`,
             erpOrderNumber: `ERP-PV-${String(index + 1).padStart(4, "0")}`,

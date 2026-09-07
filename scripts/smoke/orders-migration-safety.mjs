@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+
+const harness = readFileSync("scripts/smoke/orders-migration-postgres.sh", "utf8");
+const migration = readFileSync("apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql", "utf8");
+const workflow = readFileSync(".github/workflows/docker-compose-ci.yml", "utf8");
+assert.match(harness, /fresh_sequence predecessor_baseline[\s\S]*previous\/schema\.prisma/, "fresh supported install must materialize the supported predecessor baseline");
+assert.doesNotMatch(harness, /prisma migrate deploy/, "incomplete historical migration chain must not be presented as a fresh-install contract");
+assert.match(harness, /20260904120000_orders_operational_view\/migration\.sql/);
+for (const proof of ["final_schema_diff", "migration-backfill", "order-orphan", "unresolved_count", "ErpOrderSync_tenantId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_fkey"]) assert.ok(harness.includes(proof), proof);
+for (const marker of ["ORDERS_MIGRATION_STEP=", "ORDERS_MIGRATION_PHASE=", "ORDERS_MIGRATION_NAME=", "ORDERS_MIGRATION_COMMAND_KIND=", "ORDERS_MIGRATION_ERROR_CODE=", "ORDERS_MIGRATION_ERROR_MESSAGE=", "ORDERS_MIGRATION_RESULT="]) assert.ok(harness.includes(marker) || readFileSync("scripts/smoke/orders-migration-diagnostics.sh", "utf8").includes(marker), marker);
+assert.match(harness, /apply_orders_migration fresh fresh_sequence/, "fresh proof must reach the orders migration");
+assert.match(harness, /chmod 600/, "diagnostic logs must be private");
+assert.doesNotMatch(harness, />\/dev\/null 2>&1[^\n]*20260904120000/, "migration errors must remain observable");
+execFileSync("bash", ["scripts/smoke/orders-migration-diagnostics.test.sh"], { stdio: "inherit" });
+execFileSync("bash", ["scripts/smoke/orders-migration-destructive-sql.test.sh"], { stdio: "inherit" });
+for (const marker of ["POSTGRES_IMAGE_PULL_ATTEMPT=", "POSTGRES_IMAGE_PULL_RESULT="]) assert.ok(workflow.includes(marker), marker);
+assert.match(workflow, /for attempt in 1 2 3;/, "PostgreSQL pull retry must be bounded to three attempts");
+assert.match(workflow, /POSTGRES_IMAGE_PULL_RESULT=FAIL[\s\S]*exit 1/, "exhausted pulls must fail closed");
+assert.match(migration, /^BEGIN;/);
+assert.match(migration, /COMMIT;\s*$/);
+assert.doesNotMatch(migration, /^\s*(?:DELETE|TRUNCATE|DROP\s+TABLE)\b/im);
+console.log("orders migration harness safety passed");

@@ -97,6 +97,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-/api}
+        APP_COMMIT: ${APP_COMMIT:-unknown}
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+        APP_BUILT_AT: ${APP_BUILT_AT:-unknown}
     environment:
       VITE_API_URL: ${VITE_API_URL:-/api}
     ports:

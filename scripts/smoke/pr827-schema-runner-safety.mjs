@@ -33,6 +33,9 @@ for (const token of ["Record checkout lockfile", "node-version-file: .nvmrc", "n
 assert.doesNotMatch(composeCi,/run: npm install\s*$/m);
 assert.ok(composeCi.indexOf("Record checkout lockfile") < composeCi.indexOf("Setup Node.js"),"checkout lockfile must be classified before toolchain setup");
 const postgresHarness=read("scripts/smoke/pr827-preview-postgres.sh"), rejectionSql=read("scripts/sql/pr827-read-only-write-rejection.sql");
+const implicitPsqlCalls = postgresHarness.split("\n").filter((line) => /(^|[;|&()$]\s*)psql(?:\s|$)/.test(line) && !/docker exec/.test(line));
+assert.deepEqual(implicitPsqlCalls, [], "PR827 preview harness must never call runner-socket psql implicitly");
+assert.match(postgresHarness, /harness_psql\(\)\{ docker exec -i "\$name" psql[^]*-d salesforce_pro/);
 for (const token of ["readonly_rc=$?", "25006", "READ_ONLY_ENFORCEMENT=PASS", "PR827_PREVIEW_POSTGRES_RESULT=PASS", "docker network create --internal"]) assert.match(postgresHarness,new RegExp(token.replace(/[?$]/g,"\\$&")));
 const applyHarness=read("scripts/smoke/pr827-apply-postgres.sh");
 for (const token of ["pr827_backup_proof_publish", "pr827_backup_proof_validate", "BACKUP_FIXTURE_CONTRACT=PASS", "BACKUP_FIXTURE_FINAL_VALIDATION=PASS", "BACKUP_NEGATIVE_CASES=PASS", "APPLY_IDEMPOTENCY=PASS", "APPLY_ROLLBACK_CASES=PASS", "PRISMA_LEDGER_CREATED=NO", "PR827_APPLY_POSTGRES_RESULT=PASS"])

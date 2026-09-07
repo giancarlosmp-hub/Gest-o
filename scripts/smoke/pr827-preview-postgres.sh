@@ -17,9 +17,9 @@ docker run -d --pull=never --name "$name" --network "$network" -e POSTGRES_PASSW
 HARNESS_CONTAINER_CREATED=1
 for _ in {1..60}; do docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null 2>&1 && break; sleep 1; done
 docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null
-psql(){ docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
-sql_file(){ psql -AtF $'\t' -f - <"$1"; }
-reset(){ psql -c 'DROP SCHEMA IF EXISTS other CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;' >/dev/null; }
+harness_psql(){ docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
+sql_file(){ harness_psql -AtF $'\t' -f - <"$1"; }
+reset(){ harness_psql -c 'DROP SCHEMA IF EXISTS other CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;' >/dev/null; }
 diagnose(){ local path=$1 out=$2; docker exec -e PGOPTIONS="-c search_path=$path" -i "$name" psql -X -qAtF $'\t' -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro -f - <scripts/sql/pr827-connection-diagnostics.sql >"$out"; }
 assert_line(){ grep -Fqx "$2" "$1" || { echo "missing sanitized classification: $2" >&2; exit 1; }; }
 assert_clean_worktree(){
@@ -47,17 +47,17 @@ assert_clean_worktree(){
 
 reset; diagnose 'public' "$HARNESS_TEMP_ROOT/absent"; assert_line "$HARNESS_TEMP_ROOT/absent" $'PRISMA_LEDGER_LOCATION\tABSENT'; assert_line "$HARNESS_TEMP_ROOT/absent" $'SEARCH_PATH_CLASS\tPUBLIC_FIRST'; assert_line "$HARNESS_TEMP_ROOT/absent" $'TRANSACTION_ACCESS_CLASS\tREAD_ONLY'
 echo 'POSTGRESQL_16_LEDGER_ABSENT=PASS'
-psql -c 'CREATE TABLE public."_prisma_migrations" (checksum text, finished_at timestamptz, rolled_back_at timestamptz, migration_name text, started_at timestamptz);' >/dev/null
+harness_psql -c 'CREATE TABLE public."_prisma_migrations" (checksum text, finished_at timestamptz, rolled_back_at timestamptz, migration_name text, started_at timestamptz);' >/dev/null
 diagnose 'public' "$HARNESS_TEMP_ROOT/public"; assert_line "$HARNESS_TEMP_ROOT/public" $'PRISMA_LEDGER_LOCATION\tPUBLIC'; echo 'POSTGRESQL_16_LEDGER_PUBLIC=PASS'
-reset; psql -c 'CREATE SCHEMA other; CREATE TABLE other."_prisma_migrations" (id text);' >/dev/null
+reset; harness_psql -c 'CREATE SCHEMA other; CREATE TABLE other."_prisma_migrations" (id text);' >/dev/null
 diagnose 'other,public' "$HARNESS_TEMP_ROOT/other"; assert_line "$HARNESS_TEMP_ROOT/other" $'PRISMA_LEDGER_LOCATION\tOTHER_SCHEMA_REDACTED'; assert_line "$HARNESS_TEMP_ROOT/other" $'SEARCH_PATH_CLASS\tPUBLIC_INCLUDED'; echo 'POSTGRESQL_16_LEDGER_OTHER_SCHEMA=PASS'
 
 reset
 sql_file scripts/pr827-predecessor-catalog.sql >"$HARNESS_TEMP_ROOT/pred-absent"; assert_line "$HARNESS_TEMP_ROOT/pred-absent" $'PREDECESSOR_CATALOG_STATE\tABSENT'
-psql -c 'CREATE TABLE public."KnowledgeDocument" ("tenantId" text);' >/dev/null
+harness_psql -c 'CREATE TABLE public."KnowledgeDocument" ("tenantId" text);' >/dev/null
 sql_file scripts/pr827-predecessor-catalog.sql >"$HARNESS_TEMP_ROOT/pred-partial"; assert_line "$HARNESS_TEMP_ROOT/pred-partial" $'PREDECESSOR_CATALOG_STATE\tPARTIAL'
 reset
-psql <<'SQL' >/dev/null
+harness_psql <<'SQL' >/dev/null
 CREATE TABLE public."Tenant" (id text PRIMARY KEY);
 DO $fixture$ DECLARE n text; BEGIN
  FOREACH n IN ARRAY ARRAY['KnowledgeDocument','Client','AgendaEvent','Goal','ActivityKPI','Sale','SellerTerritoryCity','AppConfig','Product','ErpSyncRun','ErpSyncLock'] LOOP
@@ -70,36 +70,36 @@ SQL
 sql_file scripts/pr827-predecessor-catalog.sql >"$HARNESS_TEMP_ROOT/pred-complete"; assert_line "$HARNESS_TEMP_ROOT/pred-complete" $'PREDECESSOR_CATALOG_STATE\tCOMPLETE'; echo 'POSTGRESQL_16_PREDECESSOR_STATES=COMPLETE,PARTIAL,ABSENT'
 
 reset; sql_file scripts/pr827-schema-catalog.sql >"$HARNESS_TEMP_ROOT/pr-absent"; test ! -s "$HARNESS_TEMP_ROOT/pr-absent"
-psql -c 'CREATE TYPE public."ErpOrderManualResolutionCategory" AS ENUM ($$manual_verified_not_found$$);' >/dev/null
+harness_psql -c 'CREATE TYPE public."ErpOrderManualResolutionCategory" AS ENUM ($$manual_verified_not_found$$);' >/dev/null
 sql_file scripts/pr827-schema-catalog.sql >"$HARNESS_TEMP_ROOT/pr-partial"; test "$(wc -l <"$HARNESS_TEMP_ROOT/pr-partial")" -eq 1; ! node scripts/pr827-schema-catalog-validate.mjs "$HARNESS_TEMP_ROOT/pr-partial" >/dev/null 2>&1
 reset
-psql <<'SQL' >/dev/null
+harness_psql <<'SQL' >/dev/null
 CREATE TYPE public."Role" AS ENUM ('diretor');
 CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY);
 CREATE TABLE public."Opportunity" (id text PRIMARY KEY);
 CREATE TABLE public."User" (id text PRIMARY KEY);
 SQL
-psql -f - <apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
+harness_psql -f - <apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql >/dev/null
 sql_file scripts/pr827-schema-catalog.sql >"$HARNESS_TEMP_ROOT/pr-complete"; node scripts/pr827-schema-catalog-validate.mjs "$HARNESS_TEMP_ROOT/pr-complete" >/dev/null
 echo 'POSTGRESQL_16_PR827_STATES=COMPLETE,PARTIAL,ABSENT'
 
 reset
-psql <<'SQL' >/dev/null
+harness_psql <<'SQL' >/dev/null
 CREATE TYPE public."Role" AS ENUM ('diretor');
 CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY);
 CREATE TABLE public."Opportunity" (id text PRIMARY KEY);
 CREATE TABLE public."User" (id text PRIMARY KEY);
 SQL
 sql_file scripts/pr827-baseline-catalog.sql >"$HARNESS_TEMP_ROOT/baseline-valid"; assert_line "$HARNESS_TEMP_ROOT/baseline-valid" $'PR827_BASELINE_CATALOG_STATE\tVALID'
-erp_order_sync_pk=$(psql -Atc "SELECT c.conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname='ErpOrderSync' AND c.contype='p'")
+erp_order_sync_pk=$(harness_psql -Atc "SELECT c.conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname='public' AND t.relname='ErpOrderSync' AND c.contype='p'")
 [[ "$erp_order_sync_pk" == ErpOrderSync_pkey ]]
-psql -c 'ALTER TABLE public."ErpOrderSync" DROP CONSTRAINT "ErpOrderSync_pkey"' >/dev/null
+harness_psql -c 'ALTER TABLE public."ErpOrderSync" DROP CONSTRAINT "ErpOrderSync_pkey"' >/dev/null
 sql_file scripts/pr827-baseline-catalog.sql >"$HARNESS_TEMP_ROOT/baseline-invalid"; assert_line "$HARNESS_TEMP_ROOT/baseline-invalid" $'PR827_BASELINE_CATALOG_STATE\tINVALID'
 echo 'POSTGRESQL_16_REAL_BASELINE=VALID,INVALID'
 
 # Execute the real runner against PostgreSQL 16 and protected synthetic legacy history.
 reset
-psql <<'SQL' >/dev/null
+harness_psql <<'SQL' >/dev/null
 CREATE TYPE public."Role" AS ENUM ('diretor');
 CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY);
 CREATE TABLE public."Opportunity" (id text PRIMARY KEY);
@@ -133,9 +133,9 @@ run_runner(){
  assert_clean_worktree AFTER
  return "$rc"
 }
-make_baseline; db_before=$(psql -Atc "SELECT md5(string_agg(c.relname,',' ORDER BY c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'"); history_before=$(find "$history" -type f -exec sha256sum {} + | sort | sha256sum)
+make_baseline; db_before=$(harness_psql -Atc "SELECT md5(string_agg(c.relname,',' ORDER BY c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'"); history_before=$(find "$history" -type f -exec sha256sum {} + | sort | sha256sum)
 run_runner >"$HARNESS_TEMP_ROOT/runner-ready"; grep -Fxq READY_TO_APPLY "$HARNESS_TEMP_ROOT/runner-ready"; ! grep -q API_IMAGE "$HARNESS_TEMP_ROOT/runner-ready"
-[[ $(psql -Atc "SELECT md5(string_agg(c.relname,',' ORDER BY c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'") == "$db_before" ]]
+[[ $(harness_psql -Atc "SELECT md5(string_agg(c.relname,',' ORDER BY c.relname)) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'") == "$db_before" ]]
 [[ $(find "$history" -type f -exec sha256sum {} + | sort | sha256sum) == "$history_before" ]]
 echo 'REAL_RUNNER_PREVIEW_READ_ONLY=PASS'
 rm -rf "$history"/*; if run_runner >"$HARNESS_TEMP_ROOT/missing" 2>&1; then exit 1; fi
@@ -155,16 +155,16 @@ else
 fi
 if (( readonly_rc == 0 )); then echo 'read-only rejection returned an invalid zero status' >&2; exit 1; fi
 if ! grep -Eq '^psql:<stdin>:[0-9]+: ERROR:  25006: cannot execute CREATE TABLE in a read-only transaction$' "$HARNESS_TEMP_ROOT/write.err"; then
-  printf 'unexpected read-only probe failure (psql exit %d)\n' "$readonly_rc" >&2
+  printf 'unexpected read-only probe failure (harness_psql exit %d)\n' "$readonly_rc" >&2
   cat "$HARNESS_TEMP_ROOT/write.err" >&2
   exit "$readonly_rc"
 fi
-test "$(psql -Atc "SELECT to_regclass('public.pr827_forbidden_write') IS NULL")" = t
+test "$(harness_psql -Atc "SELECT to_regclass('public.pr827_forbidden_write') IS NULL")" = t
 echo 'READ_ONLY_ENFORCEMENT=PASS'
 
 # Execute the exact parameterized ledger SQL used by the runner, including checksum/state projection.
-psql -c 'CREATE TABLE public."_prisma_migrations" (checksum text, finished_at timestamptz, rolled_back_at timestamptz, migration_name text, started_at timestamptz); INSERT INTO public."_prisma_migrations" VALUES ($$synthetic_checksum$$,now(),NULL,$$synthetic_migration$$,now());' >/dev/null
-ledger=$(psql -AtF $'\t' --set=migration_name=synthetic_migration -f - <scripts/sql/pr827-ledger-query.sql); test "$ledger" = $'synthetic_checksum\tt'
+harness_psql -c 'CREATE TABLE public."_prisma_migrations" (checksum text, finished_at timestamptz, rolled_back_at timestamptz, migration_name text, started_at timestamptz); INSERT INTO public."_prisma_migrations" VALUES ($$synthetic_checksum$$,now(),NULL,$$synthetic_migration$$,now());' >/dev/null
+ledger=$(harness_psql -AtF $'\t' --set=migration_name=synthetic_migration -f - <scripts/sql/pr827-ledger-query.sql); test "$ledger" = $'synthetic_checksum\tt'
 echo 'ALL_PREVIEW_SQL_EXECUTED_ON_POSTGRESQL_16=PASS'
 echo 'PREVIEW_WRITES=NONE'
 echo 'PR827_PREVIEW_POSTGRES_RESULT=PASS'

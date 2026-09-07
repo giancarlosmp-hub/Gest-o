@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const preview = readFileSync(".github/workflows/preview.yml", "utf8");
 const production = readFileSync("docker-compose.production.yml", "utf8");
+const compose = readFileSync("docker-compose.yml", "utf8");
+const webDockerfile = readFileSync("apps/web/Dockerfile", "utf8");
 const pilot = readFileSync("apps/api/src/tenancy/tenantReadPilot.ts", "utf8");
 const routes = readFileSync("apps/api/src/routes/crudRoutes.ts", "utf8");
 const requestContext = readFileSync("apps/api/src/middlewares/requestLogging.ts", "utf8");
 const postgresHarness = readFileSync("scripts/smoke/tenant-read-pilot-preview-seed-postgres.sh", "utf8");
+const previewSeed = readFileSync("apps/api/prisma/seedPreview.ts", "utf8");
 const seed = preview.indexOf("=== PREVIEW SEED ===");
 const validate = preview.indexOf("=== CERTIFY PREVIEW DATASET ===");
 const enable = preview.indexOf("Enable only after seed certification");
@@ -36,6 +40,35 @@ assert.doesNotMatch(requestContext, /req\.(?:get|header|query|body).*request.?id
 assert.match(preview, /TENANCY_MODE=default-only\$\/TENANCY_MODE=disabled[\s\S]*TENANT_READ_PILOT_ENABLED=true\$\/TENANT_READ_PILOT_ENABLED=false/, "rollback must restore disabled/false");
 for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!preview.includes(forbidden), `forbidden preview bypass: ${forbidden}`);
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
+assert.match(preview, /environment:\s*preview/);
+assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
+assert.match(preview, /PREVIEW_AUTH_PASSWORD: \$\{\{ secrets\.PREVIEW_AUTH_PASSWORD \}\}[\s\S]*base64 -w 0/);
+assert.match(preview, /PREVIEW_AUTH_PASSWORD_B64: \$\{\{ steps\.preview-credential\.outputs\.password_b64 \}\}/);
+assert.match(preview, /decoded_with_sentinel=\$\(printf '%s' "\$PREVIEW_AUTH_PASSWORD_B64" \| base64 --decode[\s\S]*ADMIN_BOOTSTRAP_PASSWORD=\$\{decoded_with_sentinel%\.\}/);
+assert.match(preview, /export PREVIEW_SEED_PASSWORD="\$ADMIN_BOOTSTRAP_PASSWORD"[\s\S]*-e PREVIEW_SEED_PASSWORD\s*\\/);
+assert.doesNotMatch(preview, /-e PREVIEW_SEED_PASSWORD=/, "decoded password must not be included in docker argv");
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*\$\{\{\s*secrets\.PREVIEW_AUTH_PASSWORD/, "raw password must not enter ssh-action envs");
+assert.doesNotMatch(preview, /--password "\$\{ADMIN_BOOTSTRAP_PASSWORD\}"/, "password must not be passed in process argv");
+assert.doesNotMatch(preview, /--data "\{\\"email[\s\S]*ADMIN_BOOTSTRAP_PASSWORD/, "password must not be interpolated into JSON text");
+assert.match(preview, /--data-binary "@\$LOGIN_PAYLOAD_FILE"/);
+assert.match(preview, /ADMIN_BOOTSTRAP_EMAIL="pr\$\{PR_NUMBER\}@preview\.local"/);
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_EMAIL:\s*\$\{\{\s*secrets\./, "preview email must not be a secret");
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*pr\$\{\{/);
+const previewEnvFile = preview.match(/cat > \.env <<ENVFILE([\s\S]*?)ENVFILE/)?.[1] || "";
+assert.doesNotMatch(previewEnvFile, /ADMIN_BOOTSTRAP_(?:EMAIL|PASSWORD)=/, "preview secrets must not be persisted in the generated .env file");
+assert.match(preview, /#ADMIN_BOOTSTRAP_PASSWORD\}" -lt 16/);
+assert.match(preview, /EXPECTED_PREVIEW_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+assert.doesNotMatch(preview, /EXPECTED_PREVIEW_SHA: \$\{\{ github\.sha \}\}/, "PR preview must not identify the synthetic merge commit as branch HEAD");
+assert.match(preview, /git fetch --depth 1 origin "pull\/\$\{PR_NUMBER\}\/head"/);
+assert.match(preview, /API_DEPLOYED_SHA=[\s\S]*WEB_DEPLOYED_SHA=[\s\S]*PREVIEW_SHA_MATCH=YES/);
+assert.match(compose, /web:[\s\S]*build:[\s\S]*args:[\s\S]*APP_COMMIT: \$\{APP_COMMIT:-unknown\}/, "web build must receive the same APP_COMMIT as the API");
+assert.match(webDockerfile, /ARG APP_COMMIT=unknown[\s\S]*LABEL org\.opencontainers\.image\.revision=\$APP_COMMIT[\s\S]*build-info\.json/, "web image label and runtime build info must derive from APP_COMMIT");
+for (const marker of ["PREVIEW_API_SHA=", "PREVIEW_WEB_SHA=", "PREVIEW_API_IMAGE_SHA=", "PREVIEW_WEB_IMAGE_SHA="]) assert.ok(preview.includes(marker), `missing artifact provenance marker ${marker}`);
+assert.match(preview, /API_IMAGE_SHA[\s\S]*WEB_IMAGE_SHA[\s\S]*API_DEPLOYED_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*WEB_DEPLOYED_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*API_IMAGE_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*WEB_IMAGE_SHA[^\n]*EXPECTED_PREVIEW_SHA/, "runtime and both image labels must match the PR head SHA");
+for (const marker of ["PREVIEW_DEPLOY_STEP=", "PREVIEW_CONFIGURATION_STATUS=", "PREVIEW_MIGRATION_STATUS=", "PREVIEW_SEED_STATUS=", "PREVIEW_HEALTH_STATUS=", "PREVIEW_EXPECTED_SHA=", "PREVIEW_OBSERVED_SHA="]) assert.ok(preview.includes(marker), `missing sanitized deploy marker ${marker}`);
+for (const marker of ["PREVIEW_ENVIRONMENT_DECLARED=preview", "PREVIEW_EMAIL_SOURCE=github_pull_request_number", "PREVIEW_PASSWORD_PRESENT=NO", "PREVIEW_PASSWORD_PRESENT=YES", "PREVIEW_PASSWORD_FORMAT_VALID=NO", "PREVIEW_PASSWORD_FORMAT_VALID=YES", "PREVIEW_CONFIGURATION_NAME=", "PREVIEW_CONFIGURATION_EXPECTED_SOURCE=", "PREVIEW_CONFIGURATION_STATE=", "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING", "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT", "PREVIEW_DEPLOY_RESULT=PASS", "PREVIEW_DEPLOY_RESULT=FAIL"]) assert.ok(preview.includes(marker), `missing preview configuration result ${marker}`);
+assert.match(preview, /PREVIEW_SEED_STATUS=PASS[\s\S]*sudo install -m 644 "\$NGINX_RENDERED"/, "candidate must be seeded before nginx activation");
+assert.match(preview, /PREVIOUS_NGINX_SITE[\s\S]*sudo install -m 644 "\$PREVIOUS_NGINX_SITE"/, "failed candidate must restore the previous nginx route");
 assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);
 assert.match(preview, /TENANCY_MODE=disabled/);
 assert.match(production, /TENANCY_MODE:\s*(?:"disabled"|disabled)/);
@@ -43,8 +76,17 @@ assert.match(production, /TENANT_READ_PILOT_ENABLED:\s*"false"/);
 for (const marker of ["TENANT_PREVIEW_SEED_FAILURE_STAGE=", "TENANT_PREVIEW_SEED_FAILURE_COMMAND=", "TENANT_PREVIEW_SEED_FAILURE_EXIT_CODE="]) {
   assert.ok(postgresHarness.includes(marker), `PostgreSQL harness must emit ${marker}`);
 }
+assert.match(postgresHarness, /preview_seed_password=\$\(head -c 48 \/dev\/urandom \| base64/);
+assert.match(postgresHarness, /-e PREVIEW_SEED_PASSWORD="\$preview_seed_password"/);
+assert.match(postgresHarness, /count\(\*\) FROM "ErpOrderSync"[\s\S]*<> 4/, "seed proof must require exactly four synthetic orders");
+assert.match(postgresHarness, /e\."tenantId" <> c\."tenantId"/, "seed proof must reject cross-tenant orders");
+assert.match(previewSeed, /tenant:\s*\{\s*connect:\s*\{\s*id:\s*PREVIEW_DEFAULT_TENANT_ID/, "seeded orders must connect the explicit tenant relation");
+assert.match(previewSeed, /opportunity:\s*\{\s*connect:\s*\{\s*id:\s*opportunity\.id/, "seeded orders must connect the explicit opportunity relation");
+assert.match(previewSeed, /seller:\s*\{\s*connect:\s*\{\s*id:\s*seller\.id/, "seeded orders must connect the explicit seller relation");
+assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
   assert.ok(postgresHarness.includes(`set_failure_context ${stage} `), `missing PostgreSQL failure stage ${stage}`);
 }
+execFileSync("bash", ["scripts/smoke/preview-secret-transport.test.sh"], { stdio: "inherit" });
 console.log("tenant read pilot preview workflow safety: PASS");

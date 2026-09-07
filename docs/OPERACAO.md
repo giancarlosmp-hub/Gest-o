@@ -866,3 +866,48 @@ cardinalidades, enums e timestamps; nunca valores ou corpo bruto. Telefone/e-mai
 coleção de contatos são fontes distintas. Até existir contrato confirmado, não criar, apagar ou
 deduplicar `Contact` automaticamente. O procedimento e a regra de decisão financeira estão na
 [auditoria de setembro](investigations/ultrafv3-client-financial-contact-mapping-2026-09.md).
+
+## Operação e rollback — Pedidos
+
+- A listagem não consulta o ERP no navegador; usa somente dados persistidos e sanitizados da API.
+- Falhas de `/orderStatus` mantêm o pedido e acrescentam histórico sanitizado; não reabrem nem apagam a oportunidade ganha.
+- Monitorar `ErpOrderSync.status`, `statusSyncedAt` e `ErpOrderStatusHistory.source`, sem registrar payload integral ou PII.
+- Aplicar a migration `20260904120000_orders_operational_view` pelo fluxo de schema homologado, nunca manualmente em produção.
+- Rollback funcional: remover a rota/menu da interface e manter as colunas/tabela aditivas; não apagar histórico durante rollback.
+
+
+### Complemento de evidência: solicitações e NF-e (2026-09-04)
+
+A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
+
+## PR #856 — prova da migration Pedidos e acesso ao preview (05/09/2026)
+
+O gate histórico de tenancy termina no boundary da versão completa de `20260827190000_add_erp_order_manual_resolution`; banco sob teste e banco de referência recebem exatamente as mesmas migrations até esse ponto e o diff ocorre entre os dois catálogos reais. Não selecionar schema pela simples criação do diretório da migration e não comparar banco parcial com schema atual ou anterior demais. Execute `npm run test:tenancy-expand:postgres` para a prova histórica e, separadamente, `npm run test:orders-migration:postgres` para banco novo e upgrade completo até Pedidos. Nenhum diff é ignorado. Se o segundo teste reportar `orders tenant backfill unresolved_count=N`, interrompa a implantação e corrija ownership por procedimento separado e autorizado; o erro nunca lista IDs ou dados comerciais. Rollback operacional é manter a versão anterior antes do apply: a migration é atômica e uma falha reverte todo o bloco. Depois de commit bem-sucedido, rollback de dados exige migration corretiva revisada, nunca `DROP`, edição de ledger ou reversão manual.
+
+Para acesso humano ao preview, o workflow deriva apenas o email sintético como `pr<PR>@preview.local`. O proprietário configura o único secret necessário em **GitHub → Settings → Environments → preview → Environment secrets**, com o nome `PREVIEW_AUTH_PASSWORD`. Ele não pode ser de produção, não aparece em comentário/artifact/log e deve ser compartilhado por gerenciador de senhas ou canal privado corporativo. Ausência do secret faz o deploy falhar fechado com marcador sem valor. A senha antiga derivada do número da PR foi removida e deve permanecer invalidada.
+
+## PR #856 — baseline histórico e prova de SHA do preview (05/09/2026)
+
+Não executar `prisma migrate deploy` em banco vazio como prova de instalação nova: a cadeia versionada começa com alteração de `Goal`, criada pelo baseline histórico externo. O contrato descartável suportado é `prisma db push` para instalação nova; para validar Pedidos, materializar o schema imediatamente anterior com `db push` e aplicar a migration de Pedidos transacionalmente. O CI gera `PREVIEW_SEED_PASSWORD` aleatória apenas em memória e destrói container/rede ao sair. O deploy usa email `pr<PR>@preview.local` e apenas `PREVIEW_AUTH_PASSWORD` do Environment `preview`; o valor antigo previsível deve permanecer inválido. Não aceitar preview saudável sem `PREVIEW_SHA_MATCH=YES` para API e WEB.
+
+## PR #856 — quarta correção dos gates (07/09/2026)
+
+O seed falhava na criação de `ErpOrderSync`: depois de `tenantId` tornar-se obrigatório, o `create` Prisma continuou informando somente oportunidade e vendedor. O seed conecta explicitamente cada pedido ao tenant único do preview, e a certificação executada antes da ativação exige exatamente quatro pedidos, igualdade entre tenant do pedido e do cliente, e igualdade entre vendedores de pedido, oportunidade e cliente. A segunda execução deve manter as mesmas contagens.
+
+O harness de Pedidos materializa o predecessor suportado por `db push` tanto para a instalação nova quanto para o upgrade, mas em ambos os caminhos aplica explicitamente `20260904120000_orders_operational_view`. Falhas agora publicam fase, nome da migration, código e stderr sanitizado a partir de arquivo temporário modo 0600; URL e credenciais são removidas e o exit code original é preservado. O preview sobe como candidato, valida saúde, SHA, seed e isolamento antes de trocar o nginx; uma falha restaura a configuração anterior.
+
+## PR #856 — quinta correção dos gates (07/09/2026)
+
+O log remoto comprovou que a migration de Pedidos foi iniciada. O `exit 1` seguinte não era evidência de falha no SQL: o harness gravava a saída bem-sucedida de `prisma migrate diff` em arquivo e exigia que o arquivo estivesse vazio, mas o Prisma pode emitir uma mensagem informativa mesmo quando não existe diferença. O contrato correto usa `--exit-code`: zero significa catálogo equivalente e qualquer retorno não zero é observado e falha. Todas as fases relevantes agora passam pelo mesmo executor diagnóstico, que publica tipo lógico do comando, código e mensagem sanitizados.
+
+O pull de `postgres:16` no Compose CI possui no máximo três tentativas, com espera limitada e falha definitiva após a terceira; uma imagem já presente é aceita somente para a mesma referência configurada. No preview, os marcadores distinguem Environment declarado, origem do email, presença e validade formal da senha sem publicar conteúdo ou comprimento. `PREVIEW_AUTH_PASSWORD` continua sendo configuração externa obrigatória do Environment `preview`.
+
+## PR #856 — correção dos três checks (07/09/2026)
+
+- **Seed:** ao usar a relação Prisma `tenant`, o create passa a usar o input relacional validado; por isso `opportunityId` e `sellerId` isolados não satisfaziam mais o contrato e o Prisma exigia `opportunity`. O seed conecta explicitamente tenant, oportunidade e vendedor já criados no mesmo fluxo, e a certificação continua rejeitando divergência de tenant ou vendedor.
+- **Migration:** o diff final já havia passado. O marcador `destructive SQL found` vinha do classificador do próprio harness, que interpretava `ON DELETE CASCADE/RESTRICT` das FKs como comando `DELETE`. O classificador agora aceita apenas comandos destrutivos executáveis no início da instrução (`DELETE FROM`, `TRUNCATE` e `DROP TABLE`), preservando o bloqueio sem rejeitar integridade referencial.
+- **Preview:** depois de confirmar a presença da senha, havia uma validação composta sem indicar qual configuração falhou e com construções específicas de Bash dentro do script remoto. O email agora é derivado no host a partir do número validado da PR e cada falha de senha publica apenas nome lógico, origem esperada e estado. Conteúdo, comprimento e hash nunca são exibidos.
+
+## PR #856 — transporte final do secret do preview (07/09/2026)
+
+O `ssh-action` materializa as variáveis listadas em `envs` no comando remoto. Enviar a senha bruta por esse mecanismo permitia que caracteres como `;`, aspas, cifrão, exclamação ou espaços alterassem o parsing do `bash -c` antes mesmo da validação remota. O job agora codifica o secret em base64 no runner, mascara também a representação codificada e transporta apenas esse alfabeto seguro. O host decodifica para uma variável de ambiente sem `eval`, sem inserir a senha no texto do script, em argv, no `.env` persistido ou em JSON interpolado. O bootstrap lê a senha do ambiente do container; o seed recebe `PREVIEW_SEED_PASSWORD` pelo ambiente do Compose; e o login usa um arquivo JSON temporário modo 0600 criado por Node e removido pelo trap.
