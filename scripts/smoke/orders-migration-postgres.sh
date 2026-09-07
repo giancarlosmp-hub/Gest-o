@@ -8,6 +8,7 @@ docker image inspect "$image" >/dev/null 2>&1 || { echo 'required pinned API too
 [[ $(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image") == "$sha" ]] || { echo 'API tooling image SHA mismatch' >&2; exit 1; }
 [[ -z ${DATABASE_URL:-} && -z ${TEST_DATABASE_URL:-} ]] || { echo 'refusing inherited database URL' >&2; exit 1; }
 id="$$-$RANDOM"; pg="gesto-orders-pg-$id"; net="gesto-orders-net-$id"; tmp=$(mktemp -d)
+chmod 700 "$tmp"
 cleanup(){ docker rm -f "$pg" >/dev/null 2>&1 || true; docker network rm "$net" >/dev/null 2>&1 || true; rm -rf "$tmp"; }
 trap cleanup EXIT
 docker network create --internal "$net" >/dev/null
@@ -17,6 +18,27 @@ docker exec "$pg" pg_isready -U postgres >/dev/null
 for db in fresh upgrade invalid; do docker exec "$pg" createdb -U postgres "$db"; done
 url(){ printf 'postgresql://postgres:test@%s:5432/%s?schema=public' "$pg" "$1"; }
 run_tooling(){ local db=$1; shift; docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$(url "$db")" "$image" "$@"; }
+diagnose() {
+  local rc=$1 log=$2
+  sed -E 's#postgresql://[^[:space:]]+#postgresql://[REDACTED]#g; s/(password|token|secret)=?[^[:space:]]*/\1=[REDACTED]/Ig' "$log" >&2
+  local code
+  code=$(grep -Eo 'P[0-9]{4}|SQLSTATE[ =:]+[0-9A-Z]{5}|PostgreSQL error code: [0-9A-Z]+' "$log" | head -1 || true)
+  printf 'ORDERS_MIGRATION_ERROR_CODE=%s\n' "${code:-EXIT_$rc}" >&2
+  printf 'ORDERS_MIGRATION_RESULT=FAIL\n' >&2
+  return "$rc"
+}
+run_observed() {
+  local phase=$1 name=$2; shift 2
+  local log="$tmp/${phase}-${name}.log" rc=0
+  : >"$log"; chmod 600 "$log"
+  printf 'ORDERS_MIGRATION_PHASE=%s\nORDERS_MIGRATION_NAME=%s\n' "$phase" "$name"
+  "$@" >"$log" 2>&1 || rc=$?
+  if (( rc != 0 )); then diagnose "$rc" "$log"; return "$rc"; fi
+}
+apply_orders_migration() {
+  local db=$1 phase=$2
+  run_observed "$phase" 20260904120000_orders_operational_view docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
+}
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
@@ -26,7 +48,8 @@ cp "$tmp/previous.prisma" "$tmp/previous/schema.prisma"
 find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904120000_orders_operational_view -print0 | while IFS= read -r -d '' migration; do cp -R "$migration" "$tmp/previous/migrations/"; done
 
 echo 'ORDERS_MIGRATION_STEP=fresh_sequence'
-run_tooling fresh ./node_modules/.bin/prisma db push --schema /app/apps/api/prisma/schema.prisma --skip-generate >/dev/null
+run_observed fresh_sequence predecessor_baseline run_tooling fresh ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate
+apply_orders_migration fresh fresh_sequence
 run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code >"$tmp/fresh.diff"
 [[ ! -s "$tmp/fresh.diff" ]]
 
@@ -39,7 +62,7 @@ INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",s
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade >/dev/null
 
 echo 'ORDERS_MIGRATION_STEP=upgrade_from_previous'
-docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql >/dev/null
+apply_orders_migration upgrade upgrade_from_previous
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderSync" WHERE "tenantId" IS NULL') == 0 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderStatusHistory" WHERE source='"'"'migration-backfill'"'"'') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(DISTINCT "erpOrderSyncId") FROM "ErpOrderStatusHistory" WHERE source='"'"'migration-backfill'"'"'') == 3 ]]

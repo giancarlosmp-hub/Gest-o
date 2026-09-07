@@ -463,6 +463,10 @@ async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertS
       if (fixture.status === "green") {
         await prisma.erpOrderSync.create({
           data: {
+            // Keep the order's root tenant explicit. Prisma intentionally requires
+            // this relation; it must agree with the client reached through the
+            // opportunity and must never be inferred from request input.
+            tenant: { connect: { id: PREVIEW_DEFAULT_TENANT_ID } },
             opportunityId: opportunity.id,
             sellerId: seller.id,
             pedidoIdImportacao: `${PREVIEW_SEED_TAG}-territory-${seller.id}-${index}`,

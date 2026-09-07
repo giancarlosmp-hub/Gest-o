@@ -64,7 +64,7 @@ run_api 'npm run seed:preview -w @salesforce-pro/api >/dev/null'
 set_failure_context initial_snapshot read_preview_counts
 before="$(docker exec -i "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -At <<'SQL'
 SET search_path TO public;
-SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client");
+SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%');
 SQL
 )"
 echo "checkpoint: validate"
@@ -76,7 +76,7 @@ run_api 'npm run seed:preview -w @salesforce-pro/api >/dev/null'
 set_failure_context final_snapshot read_reapplied_counts
 after="$(docker exec -i "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -At <<'SQL'
 SET search_path TO public;
-SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client");
+SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%');
 SQL
 )"
 set_failure_context idempotency compare_seed_counts
@@ -88,6 +88,8 @@ DO \$\$ BEGIN
  IF (SELECT count(*) FROM "Tenant" WHERE id = '$tenant_id' AND status = 'active') <> 1 THEN RAISE EXCEPTION 'tenant'; END IF;
  IF EXISTS (SELECT 1 FROM "Client" WHERE "tenantId" IS NULL OR "tenantId" <> '$tenant_id') THEN RAISE EXCEPTION 'client tenant'; END IF;
  IF EXISTS (SELECT 1 FROM "Client" c LEFT JOIN "TenantMembership" m ON m."userId"=c."ownerSellerId" AND m."tenantId"=c."tenantId" AND m.status='active' WHERE m.id IS NULL) THEN RAISE EXCEPTION 'ownership'; END IF;
+ IF (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') <> 4 THEN RAISE EXCEPTION 'order count'; END IF;
+ IF EXISTS (SELECT 1 FROM "ErpOrderSync" e JOIN "Opportunity" o ON o.id=e."opportunityId" JOIN "Client" c ON c.id=o."clientId" WHERE e."pedidoIdImportacao" LIKE '%[preview-seed]%' AND (e."tenantId" <> c."tenantId" OR e."tenantId" <> '$tenant_id' OR e."sellerId" <> o."ownerSellerId" OR e."sellerId" <> c."ownerSellerId")) THEN RAISE EXCEPTION 'order tenant ownership'; END IF;
 END \$\$;
 SQL
 set_failure_context completed emit_success
