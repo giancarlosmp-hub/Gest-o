@@ -7,6 +7,7 @@ const pilot = readFileSync("apps/api/src/tenancy/tenantReadPilot.ts", "utf8");
 const routes = readFileSync("apps/api/src/routes/crudRoutes.ts", "utf8");
 const requestContext = readFileSync("apps/api/src/middlewares/requestLogging.ts", "utf8");
 const postgresHarness = readFileSync("scripts/smoke/tenant-read-pilot-preview-seed-postgres.sh", "utf8");
+const previewSeed = readFileSync("apps/api/prisma/seedPreview.ts", "utf8");
 const seed = preview.indexOf("=== PREVIEW SEED ===");
 const validate = preview.indexOf("=== CERTIFY PREVIEW DATASET ===");
 const enable = preview.indexOf("Enable only after seed certification");
@@ -38,16 +39,17 @@ for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
 assert.match(preview, /environment:\s*preview/);
 assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
-assert.match(preview, /ADMIN_BOOTSTRAP_EMAIL: pr\$\{\{ github\.event\.pull_request\.number \}\}@preview\.local/);
+assert.match(preview, /ADMIN_BOOTSTRAP_EMAIL="pr\$\{PR_NUMBER\}@preview\.local"/);
+assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_EMAIL:\s*\$\{\{\s*secrets\./, "preview email must not be a secret");
 assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*pr\$\{\{/);
 const previewEnvFile = preview.match(/cat > \.env <<ENVFILE([\s\S]*?)ENVFILE/)?.[1] || "";
 assert.doesNotMatch(previewEnvFile, /ADMIN_BOOTSTRAP_(?:EMAIL|PASSWORD)=/, "preview secrets must not be persisted in the generated .env file");
-assert.match(preview, /#ADMIN_BOOTSTRAP_PASSWORD\} -ge 16/);
+assert.match(preview, /#ADMIN_BOOTSTRAP_PASSWORD\}" -lt 16/);
 assert.match(preview, /EXPECTED_PREVIEW_SHA: \$\{\{ github\.sha \}\}/);
 assert.match(preview, /git fetch --depth 1 origin "pull\/\$\{PR_NUMBER\}\/merge"/);
 assert.match(preview, /API_DEPLOYED_SHA=[\s\S]*WEB_DEPLOYED_SHA=[\s\S]*PREVIEW_SHA_MATCH=YES/);
 for (const marker of ["PREVIEW_DEPLOY_STEP=", "PREVIEW_CONFIGURATION_STATUS=", "PREVIEW_MIGRATION_STATUS=", "PREVIEW_SEED_STATUS=", "PREVIEW_HEALTH_STATUS=", "PREVIEW_EXPECTED_SHA=", "PREVIEW_OBSERVED_SHA="]) assert.ok(preview.includes(marker), `missing sanitized deploy marker ${marker}`);
-for (const marker of ["PREVIEW_ENVIRONMENT_DECLARED=preview", "PREVIEW_EMAIL_SOURCE=github_pull_request_number", "PREVIEW_PASSWORD_PRESENT=NO", "PREVIEW_PASSWORD_PRESENT=YES", "PREVIEW_PASSWORD_FORMAT_VALID=NO", "PREVIEW_PASSWORD_FORMAT_VALID=YES", "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING", "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT", "PREVIEW_DEPLOY_RESULT=PASS", "PREVIEW_DEPLOY_RESULT=FAIL"]) assert.ok(preview.includes(marker), `missing preview configuration result ${marker}`);
+for (const marker of ["PREVIEW_ENVIRONMENT_DECLARED=preview", "PREVIEW_EMAIL_SOURCE=github_pull_request_number", "PREVIEW_PASSWORD_PRESENT=NO", "PREVIEW_PASSWORD_PRESENT=YES", "PREVIEW_PASSWORD_FORMAT_VALID=NO", "PREVIEW_PASSWORD_FORMAT_VALID=YES", "PREVIEW_CONFIGURATION_NAME=", "PREVIEW_CONFIGURATION_EXPECTED_SOURCE=", "PREVIEW_CONFIGURATION_STATE=", "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING", "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT", "PREVIEW_DEPLOY_RESULT=PASS", "PREVIEW_DEPLOY_RESULT=FAIL"]) assert.ok(preview.includes(marker), `missing preview configuration result ${marker}`);
 assert.match(preview, /PREVIEW_SEED_STATUS=PASS[\s\S]*sudo install -m 644 "\$NGINX_RENDERED"/, "candidate must be seeded before nginx activation");
 assert.match(preview, /PREVIOUS_NGINX_SITE[\s\S]*sudo install -m 644 "\$PREVIOUS_NGINX_SITE"/, "failed candidate must restore the previous nginx route");
 assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);
@@ -61,6 +63,9 @@ assert.match(postgresHarness, /preview_seed_password=\$\(head -c 48 \/dev\/urand
 assert.match(postgresHarness, /-e PREVIEW_SEED_PASSWORD="\$preview_seed_password"/);
 assert.match(postgresHarness, /count\(\*\) FROM "ErpOrderSync"[\s\S]*<> 4/, "seed proof must require exactly four synthetic orders");
 assert.match(postgresHarness, /e\."tenantId" <> c\."tenantId"/, "seed proof must reject cross-tenant orders");
+assert.match(previewSeed, /tenant:\s*\{\s*connect:\s*\{\s*id:\s*PREVIEW_DEFAULT_TENANT_ID/, "seeded orders must connect the explicit tenant relation");
+assert.match(previewSeed, /opportunity:\s*\{\s*connect:\s*\{\s*id:\s*opportunity\.id/, "seeded orders must connect the explicit opportunity relation");
+assert.match(previewSeed, /seller:\s*\{\s*connect:\s*\{\s*id:\s*seller\.id/, "seeded orders must connect the explicit seller relation");
 assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {

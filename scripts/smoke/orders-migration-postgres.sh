@@ -71,5 +71,7 @@ if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid <apps/
 grep -Eq 'unresolved_count=[1-9][0-9]*' "$tmp/invalid.err"
 ! grep -Eq 'order-orphan|missing-opportunity|import-orphan|seller-a' "$tmp/invalid.err"
 [[ $(docker exec "$pg" psql -X -U postgres -d invalid -qAt -c "SELECT count(*) FROM information_schema.columns WHERE table_name='ErpOrderSync' AND column_name='tenantId'") == 0 ]]
-if grep -Eiq '\b(delete|truncate|drop[[:space:]]+table)\b' apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql; then echo 'destructive SQL found' >&2; exit 1; fi
+# Match executable destructive statements, not referential clauses such as
+# "ON DELETE CASCADE/RESTRICT" that are required by the Prisma relations.
+if grep -Eiq '^[[:space:]]*(delete[[:space:]]+from|truncate([[:space:]]+table)?|drop[[:space:]]+table)[[:space:]]' apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql; then echo 'destructive SQL found' >&2; exit 1; fi
 echo 'ORDERS_MIGRATION_POSTGRES=PASS'

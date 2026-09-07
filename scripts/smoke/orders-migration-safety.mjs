@@ -14,6 +14,7 @@ assert.match(harness, /apply_orders_migration fresh fresh_sequence/, "fresh proo
 assert.match(harness, /chmod 600/, "diagnostic logs must be private");
 assert.doesNotMatch(harness, />\/dev\/null 2>&1[^\n]*20260904120000/, "migration errors must remain observable");
 execFileSync("bash", ["scripts/smoke/orders-migration-diagnostics.test.sh"], { stdio: "inherit" });
+execFileSync("bash", ["scripts/smoke/orders-migration-destructive-sql.test.sh"], { stdio: "inherit" });
 for (const marker of ["POSTGRES_IMAGE_PULL_ATTEMPT=", "POSTGRES_IMAGE_PULL_RESULT="]) assert.ok(workflow.includes(marker), marker);
 assert.match(workflow, /for attempt in 1 2 3;/, "PostgreSQL pull retry must be bounded to three attempts");
 assert.match(workflow, /POSTGRES_IMAGE_PULL_RESULT=FAIL[\s\S]*exit 1/, "exhausted pulls must fail closed");

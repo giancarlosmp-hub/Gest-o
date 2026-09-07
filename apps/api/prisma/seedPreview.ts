@@ -467,8 +467,8 @@ async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertS
             // this relation; it must agree with the client reached through the
             // opportunity and must never be inferred from request input.
             tenant: { connect: { id: PREVIEW_DEFAULT_TENANT_ID } },
-            opportunityId: opportunity.id,
-            sellerId: seller.id,
+            opportunity: { connect: { id: opportunity.id } },
+            seller: { connect: { id: seller.id } },
             pedidoIdImportacao: `${PREVIEW_SEED_TAG}-territory-${seller.id}-${index}`,
             numPedido: `PV-${String(index + 1).padStart(4, "0")}`,
             erpOrderNumber: `ERP-PV-${String(index + 1).padStart(4, "0")}`,
