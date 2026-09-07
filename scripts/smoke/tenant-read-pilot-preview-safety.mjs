@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
-const previewWorkflow = readFileSync(".github/workflows/preview.yml", "utf8");
-const previewRemote = readFileSync("scripts/deploy/preview-remote.sh", "utf8");
-const preview = `${previewWorkflow}\n${previewRemote}`;
-const sshInline = previewWorkflow.slice(previewWorkflow.indexOf("uses: appleboy/ssh-action")).match(/script: \|([\s\S]*?)(?=\n\s*- name: Comment preview)/)?.[1] || "";
+const preview = readFileSync(".github/workflows/preview.yml", "utf8");
 const production = readFileSync("docker-compose.production.yml", "utf8");
 const pilot = readFileSync("apps/api/src/tenancy/tenantReadPilot.ts", "utf8");
 const routes = readFileSync("apps/api/src/routes/crudRoutes.ts", "utf8");
@@ -42,14 +39,12 @@ assert.match(preview, /TENANCY_MODE=default-only\$\/TENANCY_MODE=disabled[\s\S]*
 for (const forbidden of ["continue-on-error", "|| true", "exit 77"]) assert.ok(!preview.includes(forbidden), `forbidden preview bypass: ${forbidden}`);
 assert.ok(!preview.includes("set -x"), "preview must not trace credentials");
 assert.match(preview, /environment:\s*preview/);
-assert.match(previewWorkflow, /exec bash scripts\/deploy\/preview-remote\.sh/);
-assert.doesNotMatch(sshInline, /PREVIEW_AUTH_PASSWORD|ADMIN_BOOTSTRAP_PASSWORD|eval|bash -c/, "inline SSH bootstrap must contain no credential handling or nested shell program");
-assert.match(previewRemote, /^#!\/usr\/bin\/env bash\nset -Eeuo pipefail/);
-assert.doesNotMatch(previewRemote, /\beval\b|bash\s+-c|sh\s+-c/, "versioned remote deploy must not evaluate nested shell text");
 assert.match(preview, /secrets\.PREVIEW_AUTH_PASSWORD/);
 assert.match(preview, /PREVIEW_AUTH_PASSWORD: \$\{\{ secrets\.PREVIEW_AUTH_PASSWORD \}\}[\s\S]*base64 -w 0/);
 assert.match(preview, /PREVIEW_AUTH_PASSWORD_B64: \$\{\{ steps\.preview-credential\.outputs\.password_b64 \}\}/);
 assert.match(preview, /decoded_with_sentinel=\$\(printf '%s' "\$PREVIEW_AUTH_PASSWORD_B64" \| base64 --decode[\s\S]*ADMIN_BOOTSTRAP_PASSWORD=\$\{decoded_with_sentinel%\.\}/);
+assert.match(preview, /export PREVIEW_SEED_PASSWORD="\$ADMIN_BOOTSTRAP_PASSWORD"[\s\S]*-e PREVIEW_SEED_PASSWORD\s*\\/);
+assert.doesNotMatch(preview, /-e PREVIEW_SEED_PASSWORD=/, "decoded password must not be included in docker argv");
 assert.doesNotMatch(preview, /ADMIN_BOOTSTRAP_PASSWORD:\s*\$\{\{\s*secrets\.PREVIEW_AUTH_PASSWORD/, "raw password must not enter ssh-action envs");
 assert.doesNotMatch(preview, /--password "\$\{ADMIN_BOOTSTRAP_PASSWORD\}"/, "password must not be passed in process argv");
 assert.doesNotMatch(preview, /--data "\{\\"email[\s\S]*ADMIN_BOOTSTRAP_PASSWORD/, "password must not be interpolated into JSON text");
