@@ -47,6 +47,7 @@ assert.match(preview, /EXPECTED_PREVIEW_SHA: \$\{\{ github\.sha \}\}/);
 assert.match(preview, /git fetch --depth 1 origin "pull\/\$\{PR_NUMBER\}\/merge"/);
 assert.match(preview, /API_DEPLOYED_SHA=[\s\S]*WEB_DEPLOYED_SHA=[\s\S]*PREVIEW_SHA_MATCH=YES/);
 for (const marker of ["PREVIEW_DEPLOY_STEP=", "PREVIEW_CONFIGURATION_STATUS=", "PREVIEW_MIGRATION_STATUS=", "PREVIEW_SEED_STATUS=", "PREVIEW_HEALTH_STATUS=", "PREVIEW_EXPECTED_SHA=", "PREVIEW_OBSERVED_SHA="]) assert.ok(preview.includes(marker), `missing sanitized deploy marker ${marker}`);
+for (const marker of ["PREVIEW_ENVIRONMENT_DECLARED=preview", "PREVIEW_EMAIL_SOURCE=github_pull_request_number", "PREVIEW_PASSWORD_PRESENT=NO", "PREVIEW_PASSWORD_PRESENT=YES", "PREVIEW_PASSWORD_FORMAT_VALID=NO", "PREVIEW_PASSWORD_FORMAT_VALID=YES", "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING", "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT", "PREVIEW_DEPLOY_RESULT=PASS", "PREVIEW_DEPLOY_RESULT=FAIL"]) assert.ok(preview.includes(marker), `missing preview configuration result ${marker}`);
 assert.match(preview, /PREVIEW_SEED_STATUS=PASS[\s\S]*sudo install -m 644 "\$NGINX_RENDERED"/, "candidate must be seeded before nginx activation");
 assert.match(preview, /PREVIOUS_NGINX_SITE[\s\S]*sudo install -m 644 "\$PREVIOUS_NGINX_SITE"/, "failed candidate must restore the previous nginx route");
 assert.match(preview, /TENANT_READ_PILOT_ENABLED=false/);

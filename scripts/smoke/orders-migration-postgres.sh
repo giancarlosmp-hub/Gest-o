@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -eEuo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd); cd "$root"
+source "$root/scripts/smoke/orders-migration-diagnostics.sh"
 command -v docker >/dev/null || { echo 'SKIP: docker unavailable' >&2; exit 77; }
 docker image inspect postgres:16 >/dev/null 2>&1 || { echo 'SKIP: postgres:16 unavailable locally' >&2; exit 77; }
 sha=$(git rev-parse HEAD); image=${API_IMAGE:-gest-o-api:$sha}
@@ -18,26 +19,17 @@ docker exec "$pg" pg_isready -U postgres >/dev/null
 for db in fresh upgrade invalid; do docker exec "$pg" createdb -U postgres "$db"; done
 url(){ printf 'postgresql://postgres:test@%s:5432/%s?schema=public' "$pg" "$1"; }
 run_tooling(){ local db=$1; shift; docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$(url "$db")" "$image" "$@"; }
-diagnose() {
-  local rc=$1 log=$2
-  sed -E 's#postgresql://[^[:space:]]+#postgresql://[REDACTED]#g; s/(password|token|secret)=?[^[:space:]]*/\1=[REDACTED]/Ig' "$log" >&2
-  local code
-  code=$(grep -Eo 'P[0-9]{4}|SQLSTATE[ =:]+[0-9A-Z]{5}|PostgreSQL error code: [0-9A-Z]+' "$log" | head -1 || true)
-  printf 'ORDERS_MIGRATION_ERROR_CODE=%s\n' "${code:-EXIT_$rc}" >&2
-  printf 'ORDERS_MIGRATION_RESULT=FAIL\n' >&2
-  return "$rc"
-}
 run_observed() {
-  local phase=$1 name=$2; shift 2
+  local step=$1 phase=$2 name=$3 kind=$4; shift 4
   local log="$tmp/${phase}-${name}.log" rc=0
   : >"$log"; chmod 600 "$log"
-  printf 'ORDERS_MIGRATION_PHASE=%s\nORDERS_MIGRATION_NAME=%s\n' "$phase" "$name"
+  printf 'ORDERS_MIGRATION_STEP=%s\nORDERS_MIGRATION_PHASE=%s\nORDERS_MIGRATION_NAME=%s\nORDERS_MIGRATION_COMMAND_KIND=%s\n' "$step" "$phase" "$name" "$kind"
   "$@" >"$log" 2>&1 || rc=$?
-  if (( rc != 0 )); then diagnose "$rc" "$log"; return "$rc"; fi
+  if (( rc != 0 )); then report_orders_migration_failure "$rc" "$log" "$step" "$phase" "$name" "$kind" "$tmp/${phase}-${name}.sanitized"; return "$rc"; fi
 }
 apply_orders_migration() {
   local db=$1 phase=$2
-  run_observed "$phase" 20260904120000_orders_operational_view docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
+  run_observed "$phase" "$phase" 20260904120000_orders_operational_view psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
 }
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
@@ -48,10 +40,9 @@ cp "$tmp/previous.prisma" "$tmp/previous/schema.prisma"
 find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904120000_orders_operational_view -print0 | while IFS= read -r -d '' migration; do cp -R "$migration" "$tmp/previous/migrations/"; done
 
 echo 'ORDERS_MIGRATION_STEP=fresh_sequence'
-run_observed fresh_sequence predecessor_baseline run_tooling fresh ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate
+run_observed fresh_sequence fresh_sequence predecessor_baseline prisma_db_push run_tooling fresh ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate
 apply_orders_migration fresh fresh_sequence
-run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code >"$tmp/fresh.diff"
-[[ ! -s "$tmp/fresh.diff" ]]
+run_observed fresh_sequence final_schema_diff current_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 for db in upgrade invalid; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
 fixture_sql='INSERT INTO "Tenant" (id,slug,"legalName","displayName",status,"createdAt","updatedAt") VALUES ('"'"'tenant-a'"'"','"'"'tenant-a'"'"','"'"'Synthetic A'"'"','"'"'Synthetic A'"'"','"'"'active'"'"',now(),now()),('"'"'tenant-b'"'"','"'"'tenant-b'"'"','"'"'Synthetic B'"'"','"'"'Synthetic B'"'"','"'"'active'"'"',now(),now());
@@ -71,8 +62,7 @@ if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderSync"') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('ErpOrderSync_tenantId_fkey','ErpOrderStatusHistory_erpOrderSyncId_fkey','ErpOrderStatusHistory_opportunityId_fkey')") == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_indexes WHERE indexname IN ('ErpOrderSync_tenantId_createdAt_idx','ErpOrderSync_tenantId_sellerId_createdAt_idx','ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx','ErpOrderStatusHistory_opportunityId_occurredAt_idx')") == 4 ]]
-run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code >"$tmp/upgrade.diff"
-[[ ! -s "$tmp/upgrade.diff" ]]
+run_observed upgrade_from_previous final_schema_diff current_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid >/dev/null
 docker exec "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid -c 'ALTER TABLE "ErpOrderSync" DROP CONSTRAINT "ErpOrderSync_opportunityId_fkey"; INSERT INTO "ErpOrderSync" (id,"opportunityId","sellerId","pedidoIdImportacao",status,"payloadSent","createdAt","updatedAt") VALUES ('"'"'order-orphan'"'"','"'"'missing-opportunity'"'"','"'"'seller-a'"'"','"'"'import-orphan'"'"','"'"'error'"'"','"'"'{}'"'"',now(),now());' >/dev/null

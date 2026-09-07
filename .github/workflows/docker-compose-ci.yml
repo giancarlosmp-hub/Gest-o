@@ -85,7 +85,25 @@ jobs:
         run: npm run test:preview-isolation
 
       - name: Cache PostgreSQL 16 image for pull-free restore harness
-        run: docker pull postgres:16
+        env:
+          POSTGRES_TEST_IMAGE: postgres:16
+        run: |
+          if docker image inspect "$POSTGRES_TEST_IMAGE" >/dev/null 2>&1; then
+            echo "POSTGRES_IMAGE_PULL_ATTEMPT=0"
+            echo "POSTGRES_IMAGE_PULL_RESULT=ALREADY_AVAILABLE"
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            echo "POSTGRES_IMAGE_PULL_ATTEMPT=$attempt"
+            if docker pull "$POSTGRES_TEST_IMAGE" >/dev/null; then
+              echo "POSTGRES_IMAGE_PULL_RESULT=PASS"
+              exit 0
+            fi
+            echo "POSTGRES_IMAGE_PULL_RESULT=RETRY"
+            if [ "$attempt" -lt 3 ]; then sleep $((attempt * 2)); fi
+          done
+          echo "POSTGRES_IMAGE_PULL_RESULT=FAIL"
+          exit 1
 
       - name: Execute every PR827 preview diagnostic on PostgreSQL 16
         run: |

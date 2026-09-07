@@ -67,16 +67,31 @@ jobs:
           script: |
             set -euo pipefail
             echo "PREVIEW_DEPLOY_STEP=configuration"
+            echo "PREVIEW_ENVIRONMENT_DECLARED=preview"
+            echo "PREVIEW_EMAIL_SOURCE=github_pull_request_number"
 
-            [ -n "${ADMIN_BOOTSTRAP_EMAIL:-}" ] && [ -n "${ADMIN_BOOTSTRAP_PASSWORD:-}" ] || {
+            [ -n "${ADMIN_BOOTSTRAP_EMAIL:-}" ] || {
+              echo "PREVIEW_PASSWORD_PRESENT=UNKNOWN"
+              echo "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_EMAIL_SOURCE"
+              echo "PREVIEW_DEPLOY_RESULT=FAIL"
+              exit 1
+            }
+            [ -n "${ADMIN_BOOTSTRAP_PASSWORD:-}" ] || {
+              echo "PREVIEW_PASSWORD_PRESENT=NO"
               echo "PREVIEW_CREDENTIAL_CONFIGURATION=MISSING"
+              echo "PREVIEW_DEPLOY_RESULT=FAIL"
               exit 1
             }
+            echo "PREVIEW_PASSWORD_PRESENT=YES"
             [[ "$ADMIN_BOOTSTRAP_EMAIL" == *@* && ${#ADMIN_BOOTSTRAP_EMAIL} -le 160 && ${#ADMIN_BOOTSTRAP_PASSWORD} -ge 16 && ${#ADMIN_BOOTSTRAP_PASSWORD} -le 160 && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\n'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\n'* && "$ADMIN_BOOTSTRAP_EMAIL" != *$'\r'* && "$ADMIN_BOOTSTRAP_PASSWORD" != *$'\r'* ]] || {
+              echo "PREVIEW_PASSWORD_FORMAT_VALID=NO"
               echo "PREVIEW_CREDENTIAL_CONFIGURATION=INVALID_FORMAT"
+              echo "PREVIEW_DEPLOY_RESULT=FAIL"
               exit 1
             }
 
+            echo "PREVIEW_PASSWORD_FORMAT_VALID=YES"
+            echo "PREVIEW_CREDENTIAL_CONFIGURATION=PASS"
             echo "PREVIEW_CONFIGURATION_STATUS=PASS"
             echo "PREVIEW_EXPECTED_SHA=${EXPECTED_PREVIEW_SHA}"
             PREVIEW_DIR="/var/www/preview/pr-${PR_NUMBER}/${COMPOSE_PROJECT_NAME}"
@@ -154,6 +169,7 @@ jobs:
             cleanup_current_run_on_failure() {
               rc="$?"
               if [ "$rc" -ne 0 ]; then
+                echo "PREVIEW_DEPLOY_RESULT=FAIL"
                 if validate_current_run_ownership; then
                   docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans
                 fi
@@ -492,6 +508,7 @@ jobs:
             echo "TENANT_READ_PREVIEW_STABILITY={\"runId\":\"${STABILITY_RUN_ID}\",\"cyclesPlanned\":${STABILITY_CYCLES},\"cyclesCompleted\":${COMPLETED_CYCLES},\"requestsPlanned\":${PLANNED_REQUESTS},\"requestsCompleted\":${COMPLETED_REQUESTS},\"http200Total\":${HTTP_200_COUNT},\"matchTotal\":${MATCH_COUNT},\"mismatchTotal\":${MISMATCH_COUNT},\"missingIds\":${MISSING_ID_COUNT},\"duplicateIds\":${DUPLICATE_ID_COUNT},\"durationSeconds\":${STABILITY_DURATION_SECONDS},\"result\":\"PASS\"}"
             echo "TENANT_READ_PREVIEW_STABILITY=PASS"
             PILOT_ACTIVATED=false
+            echo "PREVIEW_DEPLOY_RESULT=PASS"
 
 
 
