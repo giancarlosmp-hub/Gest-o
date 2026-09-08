@@ -1,3 +1,9 @@
+## Incidente de contrato da evidência de Pedidos (08/09/2026)
+
+Na `main` `ee6211b4809ae9dac109dea8bae8dafcd4d4c486` (PR #859), o Production Schema PR827 #26 (`34243463045`) aplicou com sucesso `20260904120000_orders_operational_view` e aprovou as pós-validações. O schema de Pedidos está aplicado. O produtor, entretanto, usava `mkdir -p` e redirecionamentos sob umask comum, enquanto o consumidor começa exigindo o diretório do SHA como diretório real `root:700`; essa foi a primeira condição rejeitada (modo sanitizado 755). Em seguida, o contrato exige `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` regulares, não symlinks, `root:600`.
+
+O Deploy Production #152 é o run `34243608671`: build/build-info passaram, mas a ausência de evidência equivalente validável causou `DEPLOY_FAILURE_STAGE=deploy_script` antes de `docker stop`. Containers e runtime foram preservados e não houve cutover. A retomada autorizável, somente após merge e nova main verde, é: novo build do SHA; backup fresco quando requerido pelo preflight; apply idempotente para republicar a evidência do novo SHA sem repetir DDL; validação pelo mesmo `validate_schema_evidence`; nova autorização humana; cutover. Recovery, SQL manual, reparo manual de arquivos e atalhos paralelos permanecem proibidos.
+
 ## Decisão PR827 — autoridade histórica dos 226 pedidos (08/09/2026)
 
 `ErpOrderSync.sellerId`, atividade do usuário e membership atual não são autoridade de tenant. A única cadeia histórica aceita é `ErpOrderSync.opportunityId → Opportunity.clientId → Client`. Para pedidos existentes, a migration exige exatamente um Tenant no banco, esse Tenant ativo, cadeia integral e nenhum `Client.tenantId` conflitante ou inválido. Qualquer ambiguidade aborta a transação antes do backfill. Banco vazio continua suportado sem inventar tenant.

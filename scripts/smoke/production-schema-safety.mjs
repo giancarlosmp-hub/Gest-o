@@ -86,6 +86,7 @@ assert.doesNotMatch(apply, /psql\s+"\$DATABASE_URL"/, "Prisma DATABASE_URL must 
 assert.match(apply, /PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717/);
 assert.match(apply, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED"[\s\S]*psql --dbname="\$DB_NAME" -X -v ON_ERROR_STOP=1/);
 assert.match(apply, /admin_psql --single-transaction -f - < "\$MIGRATION"/);
+assert.match(apply, /orders_tenant_column" == 1[\s\S]*DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Orders path must not repeat DDL");
 assert.match(apply, /current_database\(\)[\s\S]*current_user/);
 assert.doesNotMatch(apply, /POSTGRES_PASSWORD|GRANT\s+CREATE|ALTER\s+SCHEMA[\s\S]*OWNER|ALTER\s+TABLE[\s\S]*OWNER/i);
 assert.doesNotMatch(apply, /docker\s+compose\s+down|docker\s+volume\s+rm|docker\s+(?:rm|volume rm)[^\n]*postgres/i);
@@ -115,8 +116,10 @@ const unconfirmed = spawnSync("bash", [resolve(root, "scripts/production-schema-
 assert.notEqual(unconfirmed.status, 0, "apply must fail without explicit confirmation");
 assert.match(unconfirmed.stdout + unconfirmed.stderr, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.match(apply, /pre-apply-diff\.raw\.sql[\s\S]*schema-diff-filter\.mjs[\s\S]*--single-transaction/);
-assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*applied\.tsv/);
-assert.ok(apply.indexOf("post-apply-diff.sql") < apply.indexOf('> "$evidence/applied.tsv"'), "evidence must only be released after empty Prisma diff");
+assert.match(apply, /umask 077[\s\S]*prepare_schema_evidence_directory/);
+assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*applied_staging/);
+assert.ok(apply.indexOf('schema-diff-filter.mjs "$evidence/post-apply-diff.raw.sql"') < apply.indexOf('mv -T -- "$applied_staging" "$evidence/applied.tsv"'), "applied.tsv must be published last, after the post-apply diff");
+assert.ok(apply.indexOf('mv -T -- "$applied_staging" "$evidence/applied.tsv"') < apply.indexOf('validate_schema_evidence "$evidence/applied.tsv"'), "producer must call the cutover validator after publication");
 assert.match(postgresSmoke, /CREATE ROLE runtime/);
 assert.match(postgresSmoke, /REVOKE CREATE ON SCHEMA public FROM PUBLIC/);
 assert.match(postgresSmoke, /psql -U runtime[\s\S]*--single-transaction/);
