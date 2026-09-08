@@ -37,7 +37,7 @@ type Opportunity = {
   ownerSellerId: string;
   client?: { id: string; name: string } | string;
   clientData?: { id: string; name?: string | null; fantasyName?: string | null; code?: string | null; cnpj?: string | null; city?: string | null; state?: string | null } | null;
-  ownerSeller?: { id: string; name: string };
+  ownerSeller?: { id: string; name: string; isActive?: boolean };
   owner?: string;
   clientCity?: string | null;
   clientState?: string | null;
@@ -700,7 +700,7 @@ export default function OpportunitiesPage() {
     return item.client?.name || item.clientId;
   };
 
-  const getSellerName = (item: Opportunity) => item.ownerSeller?.name || item.owner || item.ownerSellerId;
+  const getSellerName = (item: Opportunity) => item.ownerSeller?.isActive === false ? `Responsável inativo: ${item.ownerSeller.name}` : item.ownerSeller?.name || item.owner || item.ownerSellerId;
 
   const opportunitiesByStage = useMemo(() => {
     return stages.reduce<Record<Stage, Opportunity[]>>((acc, stage) => {
@@ -2009,6 +2009,7 @@ export default function OpportunitiesPage() {
                     <td className="p-2"><ReturnStatusBadge status={getReturnStatus(item)} /></td>
                     <td className="space-x-2 whitespace-nowrap p-2">
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
+                      {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="font-semibold text-amber-700" onClick={() => onEdit(item)}>Transferir responsável</button> : null}
                       <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
                       {item.stage === "ganho" ? (

@@ -752,7 +752,8 @@ const serializeOpportunity = (opportunity: any, todayStart: Date) => ({
         erpCode: opportunity.ownerSeller.erpCode ?? null,
         erpOperatorCode: opportunity.ownerSeller.erpOperatorCode ?? null,
         erpLoginUsername: opportunity.ownerSeller.erpLoginUsername ?? null,
-        erpLoginPasswordConfigured: Boolean(opportunity.ownerSeller.erpLoginPasswordEncrypted)
+        erpLoginPasswordConfigured: Boolean(opportunity.ownerSeller.erpLoginPasswordEncrypted),
+        isActive: opportunity.ownerSeller.isActive !== false
       }
     : null,
   daysOverdue: opportunity.expectedCloseDate ? getDaysOverdue(opportunity.expectedCloseDate, opportunity.stage, todayStart) : null,
@@ -5569,7 +5570,7 @@ router.get("/opportunities", async (req, res) => {
     where,
     include: {
       client: { select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true } },
-      ownerSeller: { select: { id: true, name: true } }
+      ownerSeller: { select: { id: true, name: true, isActive: true } }
     },
     orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }] as Prisma.Enumerable<Prisma.OpportunityOrderByWithRelationInput>
   };
@@ -7871,8 +7872,16 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 
   const previous = await prisma.opportunity.findUnique({
     where: { id: req.params.id },
-    select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true }
+    select: { stage: true, notes: true, clientId: true, ownerSellerId: true, followUpDate: true, probability: true, ownerSeller: { select: { name: true } }, client: { select: { tenantId: true } } }
   });
+
+  const requestedOwnerSellerId = typeof req.body.ownerSellerId === "string" ? req.body.ownerSellerId.trim() : undefined;
+  if (requestedOwnerSellerId && previous && requestedOwnerSellerId !== previous.ownerSellerId) {
+    if (req.user!.role === "vendedor") return res.status(403).json({ message: "Somente diretor ou gerente pode transferir responsável." });
+    if (CLOSED_STAGES.has(previous.stage)) return res.status(409).json({ message: "O responsável original de oportunidade encerrada é histórico e não pode ser transferido." });
+    const destination = await prisma.user.findFirst({ where: { id: requestedOwnerSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId: previous.client.tenantId || "__missing_tenant__", status: "active" } } }, select: { id: true, name: true } });
+    if (!destination) return res.status(409).json({ message: "O novo responsável deve ser um vendedor ativo." });
+  }
 
   const nextStageRaw = typeof req.body.stage === "string" ? STAGE_ALIASES[req.body.stage] : undefined;
   const isMovingToClosedStage = !!(nextStageRaw && CLOSED_STAGES.has(nextStageRaw) && previous && !CLOSED_STAGES.has(previous.stage));
@@ -7886,6 +7895,14 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
       ...(nextStageRaw && !CLOSED_STAGES.has(nextStageRaw) ? { closedAt: null } : {})
     }
   });
+
+  if (requestedOwnerSellerId && previous && requestedOwnerSellerId !== previous.ownerSellerId) {
+    const destination = await prisma.user.findUnique({ where: { id: requestedOwnerSellerId }, select: { name: true } });
+    await prisma.$transaction([
+      prisma.opportunityChangeLog.create({ data: { opportunityId: data.id, actorId: req.user!.id, field: "ownerSellerId", oldValue: previous.ownerSellerId, newValue: requestedOwnerSellerId } }),
+      prisma.timelineEvent.create({ data: { type: "status", opportunityId: data.id, clientId: data.clientId, ownerSellerId: previous.ownerSellerId, description: `Responsável transferido manualmente de ${previous.ownerSeller.name} para ${destination?.name || requestedOwnerSellerId}; operador=${req.user!.id}.` } })
+    ]);
+  }
 
   if (req.body.stage && previous && req.body.stage !== previous.stage) {
     const fromStage = STAGE_ALIASES[previous.stage] || "prospeccao";
@@ -9897,6 +9914,12 @@ const territoryKmlConfirmSchema = z.object({
   cities: z.array(territoryCityInputSchema).max(500)
 });
 
+const territoryTransferSchema = z.object({
+  sourceSellerId: z.string().trim().min(1),
+  destinationSellerId: z.string().trim().min(1),
+  cityIds: z.array(z.string().trim().min(1)).min(1).max(500)
+});
+
 const decodeXmlEntities = (value: string) => value
   .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
   .replace(/&lt;/g, "<")
@@ -10042,9 +10065,10 @@ const resolveOfficialCityFromPlacemarkName = async (name: string) => {
   return matches.length === 1 ? matches[0] : null;
 };
 
-const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[]) => {
+const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[], tenantId: string) => {
   const existingCities = await prisma.sellerTerritoryCity.findMany({
-    select: { sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true } } }
+    where: { tenantId },
+    select: { sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true, isActive: true } } }
   });
   const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityStableKey(city), city]));
   const seenInFile = new Set<string>();
@@ -10070,7 +10094,7 @@ const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: 
       continue;
     }
     if (existing && existing.sellerId !== sellerId) {
-      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "conflict", sellerName: existing.seller.name, message: `Esta cidade já está vinculada ao vendedor ${existing.seller.name}.` });
+      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "conflict", sellerName: existing.seller.name, message: existing.seller.isActive ? `Esta cidade já está vinculada ao vendedor ${existing.seller.name}.` : `Território vinculado a vendedor inativo — transferência necessária (${existing.seller.name}).` });
       continue;
     }
 
@@ -10135,6 +10159,15 @@ const getTerritorySellerWhereForActor = (actor: { id: string; role: Role; region
   return { role: "vendedor" as const, isActive: true };
 };
 
+const getTerritoryTenantId = async (userId: string) => {
+  const memberships = await prisma.tenantMembership.findMany({
+    where: { userId, status: "active", tenant: { status: "active" } },
+    select: { tenantId: true }
+  });
+  if (memberships.length !== 1) throw Object.assign(new Error("Contexto de tenant ausente ou ambíguo."), { status: 403 });
+  return memberships[0].tenantId;
+};
+
 const assertTerritorySellerAccess = async (req: Request, sellerId: string, mode: "read" | "edit") => {
   const actor = await getTerritoryActor(req);
   if (!actor) return { allowed: false as const, status: 401, message: "Não autenticado" };
@@ -10147,7 +10180,7 @@ const assertTerritorySellerAccess = async (req: Request, sellerId: string, mode:
     select: { id: true, name: true, role: true, region: true, isActive: true }
   });
 
-  if (!seller || seller.role !== "vendedor" || !seller.isActive) {
+  if (!seller || seller.role !== "vendedor") {
     return { allowed: false as const, status: 404, message: "Vendedor não encontrado." };
   }
 
@@ -10250,15 +10283,23 @@ router.get("/territories/sellers", async (req, res) => {
 router.get("/territories/config/sellers", authorize("diretor", "gerente"), async (req, res) => {
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
+  const tenantId = await getTerritoryTenantId(actor.id);
 
   const users = await prisma.user.findMany({
-    where: getTerritorySellerWhereForActor(actor),
+    where: {
+      role: "vendedor",
+      tenantMemberships: { some: { tenantId, status: "active" } },
+      ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}),
+      OR: [{ isActive: true }, { territoryCities: { some: { tenantId } } }]
+    },
     select: { id: true, name: true, role: true, region: true, isActive: true },
     orderBy: { name: "asc" }
   });
   return res.json(users.map((seller) => ({
     ...seller,
-    canEdit: actor.role === "diretor" || actor.role === "gerente"
+    canEdit: seller.isActive && (actor.role === "diretor" || actor.role === "gerente"),
+    canTransfer: actor.role === "diretor" || actor.role === "gerente",
+    territoryWarning: seller.isActive ? null : "Território vinculado a vendedor inativo — transferência necessária"
   })));
 });
 
@@ -10271,22 +10312,76 @@ router.get("/territories/config/official-cities", authorize("diretor", "gerente"
 router.get("/territories/config/city-links", authorize("diretor", "gerente"), async (req, res) => {
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
+  const tenantId = await getTerritoryTenantId(actor.id);
 
-  const sellerWhereForActor = getTerritorySellerWhereForActor(actor);
   const cities = await prisma.sellerTerritoryCity.findMany({
-    where: { seller: sellerWhereForActor },
+    where: { tenantId, seller: { role: "vendedor", ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}) } },
     select: {
       id: true,
       sellerId: true,
       city: true,
       state: true,
       ibgeCode: true,
-      seller: { select: { id: true, name: true } }
+      seller: { select: { id: true, name: true, isActive: true } }
     },
     orderBy: [{ state: "asc" }, { city: "asc" }]
   });
 
-  return res.json(cities.map((city) => ({ ...toTerritoryCityResponse(city), sellerName: city.seller.name })));
+  return res.json(cities.map((city) => ({ ...toTerritoryCityResponse(city), sellerName: city.seller.name, sellerIsActive: city.seller.isActive })));
+});
+
+router.post("/territories/config/transfers/preview", authorize("diretor", "gerente"), validateBody(territoryTransferSchema), async (req, res) => {
+  try {
+    const tenantId = await getTerritoryTenantId(req.user!.id);
+    const { sourceSellerId, destinationSellerId, cityIds } = req.body;
+    if (sourceSellerId === destinationSellerId) return res.status(400).json({ message: "Origem e destino devem ser vendedores diferentes." });
+    const [sourceAccess, destinationAccess, source, destination] = await Promise.all([
+      assertTerritorySellerAccess(req, sourceSellerId, "edit"),
+      assertTerritorySellerAccess(req, destinationSellerId, "edit"),
+      prisma.user.findFirst({ where: { id: sourceSellerId, role: "vendedor", tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true, name: true, isActive: true } }),
+      prisma.user.findFirst({ where: { id: destinationSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true, name: true } })
+    ]);
+    if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
+    if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
+    if (!source || !destination) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
+    const cities = await prisma.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: [{ state: "asc" }, { city: "asc" }] });
+    const conflicts = [] as Array<{ cityId: string; city: string; state: string; sellerId: string; sellerName: string }>;
+    for (const city of cities) {
+      const conflict = await prisma.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, tenantId, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { sellerId: true, seller: { select: { id: true, name: true } } } });
+      if (conflict && conflict.seller.id !== destinationSellerId) conflicts.push({ cityId: city.id, city: city.city, state: city.state, sellerId: conflict.seller.id, sellerName: conflict.seller.name });
+    }
+    return res.json({ source, destination, requested: cityIds.length, transferable: cities.filter((city) => !conflicts.some((conflict) => conflict.cityId === city.id)).map(toTerritoryCityResponse), conflicts });
+  } catch (error: any) { return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível gerar a prévia da transferência." }); }
+});
+
+router.post("/territories/config/transfers/confirm", authorize("diretor", "gerente"), validateBody(territoryTransferSchema), async (req, res) => {
+  try {
+    const tenantId = await getTerritoryTenantId(req.user!.id);
+    const { sourceSellerId, destinationSellerId, cityIds } = req.body;
+    if (sourceSellerId === destinationSellerId) return res.status(400).json({ message: "Origem e destino devem ser vendedores diferentes." });
+    const [sourceAccess, destinationAccess, sourceMembership, destinationMembership] = await Promise.all([
+      assertTerritorySellerAccess(req, sourceSellerId, "edit"),
+      assertTerritorySellerAccess(req, destinationSellerId, "edit"),
+      prisma.tenantMembership.findFirst({ where: { userId: sourceSellerId, tenantId, status: "active" }, select: { id: true } }),
+      prisma.tenantMembership.findFirst({ where: { userId: destinationSellerId, tenantId, status: "active" }, select: { id: true } })
+    ]);
+    if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
+    if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
+    if (!sourceMembership || !destinationMembership || !destinationAccess.seller.isActive) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
+    const moved = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`territory-transfer:${tenantId}`}))`;
+      const cities = await tx.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: { id: "asc" } });
+      for (const city of cities) {
+        const thirdParty = await tx.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, tenantId, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { seller: { select: { name: true } } } });
+        if (thirdParty) throw Object.assign(new Error(`Conflito real: ${city.city}/${city.state} pertence a ${thirdParty.seller.name}.`), { status: 409 });
+      }
+      if (!cities.length) return [];
+      await Promise.all(cities.map((city) => tx.sellerTerritoryCity.update({ where: { id: city.id }, data: { sellerId: destinationSellerId } })));
+      await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: sourceSellerId, description: `Transferência de território: ${cities.length} cidade(s) de ${sourceAccess.seller.name} para ${destinationAccess.seller.name}; operador=${req.user!.id}; tenant=${tenantId}.` } });
+      return cities;
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    return res.json({ moved: moved.length, idempotent: moved.length === 0, sourceSellerId, destinationSellerId, cityIds: moved.map((city) => city.id) });
+  } catch (error: any) { return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível transferir o território." }); }
 });
 
 router.post("/territories/config/import-kml-preview", authorize("diretor", "gerente"), express.raw({ type: ["multipart/form-data", "application/vnd.google-earth.kmz", "application/vnd.google-earth.kml+xml", "application/octet-stream", "text/xml", "application/xml"], limit: TERRITORY_KML_IMPORT_MAX_BYTES }), async (req, res) => {
@@ -10297,6 +10392,7 @@ router.post("/territories/config/import-kml-preview", authorize("diretor", "gere
   if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para importar territórios." });
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
+  const tenantId = await getTerritoryTenantId(req.user!.id);
   if (!uploadedFile) return res.status(400).json({ message: "Envie um arquivo .kml ou .kmz." });
   if (uploadedFile.buffer.length > TERRITORY_KML_IMPORT_MAX_BYTES) return res.status(413).json({ message: "Arquivo excede o limite de 8 MB." });
 
@@ -10309,7 +10405,7 @@ router.post("/territories/config/import-kml-preview", authorize("diretor", "gere
   if (!kmlText) return res.status(400).json({ message: "Não foi possível localizar um arquivo .kml válido para processar." });
 
   const placemarkNames = extractPlacemarkNamesFromKml(kmlText);
-  const preview = await buildTerritoryKmlImportPreview(sellerId, placemarkNames);
+  const preview = await buildTerritoryKmlImportPreview(sellerId, placemarkNames, tenantId);
   return res.json({ fileName: uploadedFile.fileName, sellerId, ...preview });
 });
 
@@ -10358,10 +10454,12 @@ router.get("/territories/config/cities", authorize("diretor", "gerente"), async 
   if (!sellerId) return res.status(400).json({ message: "Informe um vendedor para consultar territórios." });
   const access = await assertTerritorySellerAccess(req, sellerId, "read");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
+  const tenantId = await getTerritoryTenantId(req.user!.id);
 
   const cities = await prisma.sellerTerritoryCity.findMany({
     where: {
       sellerId,
+      tenantId,
       ...(uf ? { state: uf } : {}),
       ...(search.trim() ? { city: { contains: search.trim(), mode: "insensitive" } } : {})
     },
@@ -10642,6 +10740,22 @@ const sanitizeUserForList = (user: Prisma.UserGetPayload<{ select: typeof userLi
     ...safeUser,
     erpLoginConfigured: Boolean(user.erpLoginUsername?.trim() && erpLoginPasswordEncrypted),
   };
+};
+
+const findDuplicateUserIdentity = async (values: { email?: string | null; erpCode?: string | null; erpOperatorCode?: string | null; erpLoginUsername?: string | null }, excludeId?: string) => {
+  const checks: Array<{ field: "email" | "erpCode" | "erpOperatorCode" | "erpLoginUsername"; value: string }> = [];
+  for (const field of ["email", "erpCode", "erpOperatorCode", "erpLoginUsername"] as const) {
+    const value = values[field]?.trim();
+    if (value) checks.push({ field, value });
+  }
+  if (!checks.length) return null;
+  const duplicate = await prisma.user.findFirst({
+    where: { ...(excludeId ? { id: { not: excludeId } } : {}), OR: checks.map(({ field, value }) => ({ [field]: { equals: value, mode: "insensitive" } })) },
+    select: { id: true, name: true, email: true, erpCode: true, erpOperatorCode: true, erpLoginUsername: true }
+  });
+  if (!duplicate) return null;
+  const field = checks.find(({ field, value }) => String(duplicate[field] || "").toLowerCase() === value.toLowerCase())?.field || "identidade";
+  return { field, userId: duplicate.id, userName: duplicate.name };
 };
 
 const getUserBlockingLinks = async (id: string) => {
@@ -11000,6 +11114,8 @@ router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSc
     return res.status(403).json({ success: false, message: "Gerentes não podem criar usuários diretores." });
   }
   const erpOption = await resolveErpSalesmanOption(erpCode);
+  const duplicateIdentity = await findDuplicateUserIdentity({ email, erpCode: erpOption?.code ?? erpCode, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode, erpLoginUsername });
+  if (duplicateIdentity) return res.status(409).json({ success: false, message: `Identidade ${duplicateIdentity.field} já vinculada a outro usuário.` });
   const passwordHash = await hashPassword(password);
   if (typeof erpLoginPassword === "string" && erpLoginPassword.trim() && !isErpCredentialEncryptionConfigured()) {
     return res.status(400).json({ success: false, message: "Configure ERP_CREDENTIAL_ENCRYPTION_KEY antes de salvar senha FV3." });
@@ -11060,6 +11176,8 @@ router.put("/users/:id", authorize("diretor", "gerente"), validateBody(userUpdat
     const resolvedErpOperatorCode = resolvedErpCode
       ? erpOperatorCode ?? erpOption?.erpOperatorCode ?? (shouldPreserveExistingOperator ? user.erpOperatorCode : null)
       : null;
+    const duplicateIdentity = await findDuplicateUserIdentity({ email, erpCode: resolvedErpCode, erpOperatorCode: resolvedErpOperatorCode, erpLoginUsername }, id);
+    if (duplicateIdentity) return res.status(409).json({ success: false, message: `Identidade ${duplicateIdentity.field} já vinculada a outro usuário.` });
     const data: Record<string, unknown> = {
       name,
       email,

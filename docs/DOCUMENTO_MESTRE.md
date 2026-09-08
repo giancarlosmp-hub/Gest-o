@@ -1012,3 +1012,35 @@ O comentário de preview apontava para um canal seguro inexistente: email e senh
 A cadeia histórica em `apps/api/prisma/migrations` não é uma instalação nova autossuficiente: seu primeiro arquivo, `20260226120000_goal_unique_and_updated_at`, altera `Goal`, enquanto não há migration anterior versionada que crie a tabela. `Goal` provém do baseline histórico materializado por `prisma db push`; os fluxos descartáveis suportados do projeto também usam `DATABASE_SCHEMA_MODE=ephemeral-push`. A prova de Pedidos foi corrigida sem editar migrations históricas: banco novo suportado usa `db push` do schema atual; upgrade materializa por `db push` o datamodel imediatamente anterior e então executa diretamente, de forma transacional, `20260904120000_orders_operational_view`, comprovando que a migration é efetivamente alcançada.
 
 O PR827 preview tinha uma função shell chamada `psql`, permitindo resolução implícita indevida para o binário do runner em um caminho de subprocesso. Todas as chamadas locais foram renomeadas para `harness_psql`, cuja implementação fixa `docker exec`, container e banco descartáveis; regressão estática proíbe `psql` implícito. O CI do seed recebe senha aleatória efêmera de `/dev/urandom`, nunca secret do Environment. No deploy humano, somente a senha é secret `PREVIEW_AUTH_PASSWORD`; o email volta a ser a identidade sintética `pr<PR>@preview.local`. O workflow faz checkout do merge SHA de `github.sha`, injeta esse SHA no build e exige igualdade no `/health/version` da API e `build-info.json` do WEB antes de publicar sucesso.
+
+## Correção pós-cutover da aba Pedidos (08/09/2026)
+
+A aba separa seis dimensões: **Envio ao ERP** (`ErpOrderSync.status`), **Situação atual no ERP** (`operationalStatusRaw` + enum normalizado), **Última consulta ao ERP** (`statusSyncedAt`), **Solicitações** (`requestAuthorizationStatus`), **Faturamento/expedição** (quantidades somente quando fornecidas) e **NF-e** (não instrumentada). `sent` não é situação operacional e jamais implica `DIGITADO`.
+
+A causa da defasagem histórica era dupla: o scheduler ignorava `orderStatus` no modo de credenciais individuais e a cadeia de identificadores omitia `PEDIDO_ID`. O reconciliador existente agora usa a credencial pertencente ao vendedor registrado no pedido e tenta `PEDIDO_ID_IMPORTACAO`, `PEDIDO_ID`, `erpOrderNumber/NUM_PEDIDO` e `numPedido/NUM_PEDIDO`, sem qualquer `POST /orders`. Tenant e carteira são validados na rota antes da consulta pontual. Usuários/vendedores inativos continuam referenciados; cliente, oportunidade, vendedor e histórico anterior não são alterados.
+
+A causa da tela branca era a formatação não protegida de data inválida pelo `Intl.DateTimeFormat`, que lança `RangeError`. Datas inválidas e campos incompletos agora rendem fallback, e falhas do detalhe ficam contidas no drawer com tentativa novamente e `correlationId`. Quantidades não presentes não são mais convertidas em zero ou 0%.
+
+O contrato sanitizado disponível não contém payload integral comprovado de `FINALIZADO`, nem garante as quatro quantidades, nem expõe contrato oficial de NF-e. Logo, esses pontos permanecem lacunas explícitas, e não se infere nota por `FINALIZADO`.
+
+## Regra autoritativa de desligamento de vendedor (08/09/2026)
+
+| Vínculo | Classe | Regra |
+|---|---|---|
+| Pedidos, vendas, autoria, Timeline e change logs | Histórico imutável | Permanecem no ID original; nunca renomear/fundir usuário |
+| Metas/KPIs de período iniciado ou passado | Histórico imutável | Permanecem no vendedor original |
+| Territórios/cidades | Responsabilidade transferível | Transferência explícita, seletiva, prévia, transacional e auditada |
+| Carteira atual | Responsabilidade operacional ERP | `/partners` altera o mesmo cliente quando a identidade e o novo vendedor são comprovados |
+| Oportunidades abertas | Decisão humana | Permanecem no desligado até “Transferir responsável” |
+| Oportunidades encerradas | Histórico imutável | Responsável original não pode ser alterado |
+| Agenda/follow-ups futuros | Decisão humana | Não transferir na desativação; ação futura deve ser selecionada |
+| Metas futuras não iniciadas | Decisão humana | Não transferir automaticamente |
+| Documentos, atividades concluídas e registros produzidos | Histórico imutável | Preservar autor e vendedor original |
+| Sessões/tokens | Remoção segura de acesso | Rejeitar imediatamente quando `User.isActive=false` |
+| Território sem substituto | Pendência operacional | Manter visível com aviso de transferência necessária |
+
+Edirlei e Vitor são identidades distintas. Trocar e-mail não troca IDs nem relações. E-mail, código ERP, operador ERP e login FV3 não podem ficar duplicados; credencial de Vitor pertence somente ao ID de Vitor. A desativação não transfere oportunidade, pedido, venda, atividade, Timeline, meta ou autoria. Consulta GET-only de pedido histórico pode usar credencial técnica global autorizada quando a credencial original falhar, sem usar a identidade de Vitor como autor.
+
+### Auditoria das telas
+
+Usuários exibe ativos/inativos e vínculos bloqueadores; Territórios passa a expor inativos e transferência; Clientes preserva identidade e recebe carteira comprovada pelo ERP; Oportunidades exibe “Responsável inativo” e ação manual; Agenda/follow-ups e metas futuras são pendências humanas; Atividades, Timeline, Pedidos e Vendas são históricos; KPIs passados são históricos; Equipe/dashboards podem agregar inativos em janelas históricas; automações não devem criar novas responsabilidades para inativo; `/partners` pode trocar somente carteira atual; `/orderStatus` preserva autoria; seletores operacionais continuam oferecendo ativos, exceto o seletor de origem da transferência, que também mostra inativos com território.

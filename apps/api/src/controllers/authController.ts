@@ -83,7 +83,9 @@ export async function refresh(req: Request, res: Response) {
   if (!token) return res.status(401).json({ message: "Refresh token ausente" });
   try {
     const payload = verifyRefreshToken(token) as Express.UserPayload;
-    const accessToken = signAccessToken(payload);
+    const user = await prisma.user.findFirst({ where: { id: payload.id, isActive: true }, select: { id: true, email: true, role: true, region: true } });
+    if (!user) return res.status(401).json({ message: "Usuário inativo ou removido" });
+    const accessToken = signAccessToken(user);
     return res.json({ accessToken });
   } catch {
     return res.status(401).json({ message: "Refresh token inválido" });
@@ -93,6 +95,7 @@ export async function refresh(req: Request, res: Response) {
 export async function me(req: Request, res: Response) {
   if (!req.user) return res.status(401).json({ message: "Não autenticado" });
   const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, name: true, email: true, role: true, region: true, isActive: true } });
+  if (!user?.isActive) return res.status(401).json({ message: "Usuário inativo ou removido" });
   return res.json(user);
 }
 

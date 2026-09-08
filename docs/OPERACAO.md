@@ -936,3 +936,34 @@ O pull de `postgres:16` no Compose CI possui no máximo três tentativas, com es
 ## PR #856 — transporte final do secret do preview (07/09/2026)
 
 O `ssh-action` materializa as variáveis listadas em `envs` no comando remoto. Enviar a senha bruta por esse mecanismo permitia que caracteres como `;`, aspas, cifrão, exclamação ou espaços alterassem o parsing do `bash -c` antes mesmo da validação remota. O job agora codifica o secret em base64 no runner, mascara também a representação codificada e transporta apenas esse alfabeto seguro. O host decodifica para uma variável de ambiente sem `eval`, sem inserir a senha no texto do script, em argv, no `.env` persistido ou em JSON interpolado. O bootstrap lê a senha do ambiente do container; o seed recebe `PREVIEW_SEED_PASSWORD` pelo ambiente do Compose; e o login usa um arquivo JSON temporário modo 0600 criado por Node e removido pelo trap.
+
+## Primeira reconciliação produtiva de Pedidos após o merge (08/09/2026)
+
+1. Implantar pelo fluxo normal somente depois de merge e checks verdes; não aplicar schema, pois esta correção não cria migration.
+2. Não habilitar scheduler e não executar sincronização global como primeira ação.
+3. Autenticar como diretor, abrir `/pedidos`, selecionar primeiro o pedido conhecido `#900118` e acionar **Consultar status no ERP** uma única vez.
+4. Confirmar no Network que ocorreu `POST /api/orders/<id>/status-consultation` no CRM e, nos logs pelo `correlationId`, somente chamadas GET `/orderStatus`; não pode existir `POST /orders`.
+5. Confirmar que **Envio ao ERP** continua “Enviado”, **Situação atual no ERP** passa a `FINALIZADO` se essa for a resposta, e **Última consulta ao ERP** avança. Ausência de quantidades deve aparecer como `Não informado`.
+6. Repetir a mesma consulta e confirmar que o histórico não ganhou evento duplicado.
+7. Consultar `#900151`; confirmar que data inválida/payload parcial não fecha a lista. Em falha, registrar somente `correlationId` e mensagem sanitizada.
+8. Expandir gradualmente a reconciliação manual, por vendedor/lotes observados, usando a mesma ação. Vendedor só pode consultar item próprio; diretor/gerente respeitam o tenant ativo.
+9. Somente após amostra revisada, decidir separadamente se o scheduler existente deve ser habilitado; esta alteração não o habilita.
+
+Rollback funcional: ocultar/evitar a ação e manter a leitura local. Não reenviar pedido, não alterar Firebird, credenciais, cliente, oportunidade, vendedor ou histórico. A falha do UltraFV3 deve conservar o último estado conhecido.
+
+## Procedimento controlado Edirlei Zewe → Vitor (após merge)
+
+1. Não renomear, fundir, reativar ou editar novamente e-mails/credenciais dos dois usuários.
+2. Em **Usuários**, filtrar “todos/inativos” e executar diagnóstico read-only: confirmar IDs diferentes; Edirlei inativo; Vitor ativo; e-mails exclusivos; login FV3, `erpCode` e `erpOperatorCode` sem duplicidade. Não registrar senhas/tokens.
+3. Em **Territórios Comerciais**, selecionar “Edirlei Zewe • Inativo”. O aviso de transferência necessária e suas cidades devem permanecer visíveis.
+4. Marcar todas ou somente as cidades pretendidas, escolher Vitor e clicar **Prévia da transferência**. Revisar quantidade e conflitos de terceiros.
+5. Confirmar **Transferir cidades de Edirlei Zewe para Vitor**. Repetir a mesma requisição deve retornar idempotente e mover zero.
+6. Reprocessar o KML/KMZ de 71 localidades: as 67 transferidas devem aparecer vinculadas a Vitor; as quatro não encontradas continuam como pendência de catálogo, não são inventadas.
+7. Verificar amostra de pedidos, vendas, atividades, Timeline, change logs e autoria anteriores: todos continuam com o ID/nome de Edirlei.
+8. Em Oportunidades, filtrar as abertas de Edirlei. Elas devem mostrar **Responsável inativo: Edirlei Zewe**; usar **Transferir responsável** individualmente apenas nas escolhidas. Encerradas não são transferíveis.
+9. Executar o sync `/partners` autorizado e conferir que cliente cuja carteira mudou no ERP mantém o mesmo ID e histórico, recebendo apenas novo `ownerSellerId` e evento de auditoria.
+10. Com token antigo sanitizado de teste, confirmar HTTP 401 após a desativação. Confirmar novo login de Edirlei bloqueado e autenticação de Vitor válida.
+11. Consultar status de um pedido histórico de Edirlei. Confirmar somente GET `/orderStatus`, autoria original intacta e uso da credencial técnica global apenas se a credencial original estiver indisponível.
+12. Não transferir automaticamente agenda, follow-ups ou metas futuras nesta operação; decidir e executar seletivamente em tarefa operacional própria.
+
+Rollback da transferência de território usa a mesma operação explícita no sentido Vitor → Edirlei somente se Edirlei tiver sido reativado e houver autorização humana; não executar SQL manual, delete/recreate ou alteração de histórico.
