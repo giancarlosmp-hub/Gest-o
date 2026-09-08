@@ -7,8 +7,15 @@ on:
         required: true
         type: choice
         options: [preview, apply]
+      migration:
+        description: "Migration produtiva cadastrada"
+        required: true
+        type: choice
+        options:
+          - 20260827190000_add_erp_order_manual_resolution
+          - 20260904120000_orders_operational_view
       confirm:
-        description: "Para apply, digite APPLY_PR827_SCHEMA"
+        description: "Para apply, digite a confirmação exigida pelo runner selecionado"
         required: false
         type: string
 permissions: { contents: read }
@@ -24,15 +31,21 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
           SCHEMA_MODE: ${{ inputs.mode }}
           SCHEMA_CONFIRM: ${{ inputs.confirm }}
+          SCHEMA_MIGRATION: ${{ inputs.migration }}
         with:
           host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || '22022' }}
-          envs: EXPECTED_SHA,SCHEMA_MODE,SCHEMA_CONFIRM
+          envs: EXPECTED_SHA,SCHEMA_MODE,SCHEMA_CONFIRM,SCHEMA_MIGRATION
           script: |
             set -Eeuo pipefail
-            test "$SCHEMA_MODE" = preview || test "$SCHEMA_CONFIRM" = APPLY_PR827_SCHEMA
+            case "$SCHEMA_MIGRATION:$SCHEMA_MODE:$SCHEMA_CONFIRM" in
+              20260827190000_add_erp_order_manual_resolution:preview:*) ;;
+              20260827190000_add_erp_order_manual_resolution:apply:APPLY_PR827_SCHEMA) ;;
+              20260904120000_orders_operational_view:apply:PRODUCTION_SCHEMA_APPLY) ;;
+              *) echo 'PRODUCTION_SCHEMA_SELECTION=REJECTED'; exit 1 ;;
+            esac
             cd /apps/gest-o
             git fetch origin main && git switch main && git pull --ff-only origin main
             resolved_env="$(MODE=build PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true \
@@ -44,13 +57,22 @@ jobs:
               canonical) erp_env_source=canonical ;;
               *) echo 'PR827_ENV_SOURCE_CLASSIFICATION=REJECTED'; exit 1 ;;
             esac
-            MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
-              ERP_PRODUCTION_ENV_SOURCE="$erp_env_source" \
-              PRODUCTION_ENV_SOURCE="$resolved_env_source" PRODUCTION_ENV_FILE="$resolved_env_file" \
-              MIGRATION_ID_REQUESTED=20260827190000_add_erp_order_manual_resolution \
-              DATABASE_SCHEMA_MODE=external SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
-              PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
-              PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
-              ${{ inputs.mode == 'apply' && format('API_IMAGE=gest-o-api:{0}', github.sha) || '' }} \
-              BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
-              bash scripts/pr827-schema-runner.sh
+            if [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ]; then
+              CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+                PRODUCTION_ENV_FILE="$resolved_env_file" \
+                MIGRATION_ID_REQUESTED="$SCHEMA_MIGRATION" DATABASE_SCHEMA_MODE=external \
+                SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
+                PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
+                bash scripts/production-schema-apply.sh
+            else
+              MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+                ERP_PRODUCTION_ENV_SOURCE="$erp_env_source" \
+                PRODUCTION_ENV_SOURCE="$resolved_env_source" PRODUCTION_ENV_FILE="$resolved_env_file" \
+                MIGRATION_ID_REQUESTED="$SCHEMA_MIGRATION" \
+                DATABASE_SCHEMA_MODE=external SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \
+                PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
+                PRODUCTION_DB_NAME_EXPECTED=salesforce_pro \
+                ${{ inputs.mode == 'apply' && format('API_IMAGE=gest-o-api:{0}', github.sha) || '' }} \
+                BACKUP_RESULT_FILE=/var/log/gest-o/backup/latest/result.tsv \
+                bash scripts/pr827-schema-runner.sh
+            fi

@@ -2,7 +2,12 @@
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
 ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
-MIGRATION="apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql"
+MIGRATION_ID_REQUESTED="${MIGRATION_ID_REQUESTED:-20260731150000_safe_production_schema_transition}"
+registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID_REQUESTED") || {
+  printf '[production-schema-apply] ERRO: migration não cadastrada ou checksum divergente\n' >&2
+  exit 1
+}
+MIGRATION=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).path)' "$registry")
 PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717
 log(){ printf '[production-schema-apply] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }

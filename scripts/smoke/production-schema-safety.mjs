@@ -66,7 +66,17 @@ rmSync(temporary, { recursive: true });
 assert.notEqual(malicious.status, 0, "preview must reject DROP");
 assert.match(malicious.stdout + malicious.stderr, /BLOQUEADO/);
 
+const registry = resolve(root, "scripts/production-schema-migrations.mjs");
+const ordersId = "20260904120000_orders_operational_view";
+const ordersEntry = spawnSync("node", [registry, ordersId], { cwd: root, encoding: "utf8" });
+assert.equal(ordersEntry.status, 0, ordersEntry.stderr);
+assert.equal(JSON.parse(ordersEntry.stdout).sha256, "0a463c060373c52cb9602ea3898b16f163aaa0c2530c00414dd023c8f1c5503f");
+const unknownEntry = spawnSync("node", [registry, "20260904120001_not_allowlisted"], { cwd: root, encoding: "utf8" });
+assert.notEqual(unknownEntry.status, 0, "an unregistered migration must be rejected");
+assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);
+
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
+assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 assert.match(apply, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.doesNotMatch(apply, /db push|prisma:seed|seedOnBootstrap/);
 assert.match(apply, /PSQL_DATABASE_URL=\$\(DATABASE_URL="\$DATABASE_URL" node scripts\/postgres-connection-url\.mjs\)/);
