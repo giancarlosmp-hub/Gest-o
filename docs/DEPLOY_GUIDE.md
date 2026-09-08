@@ -1,3 +1,9 @@
+## Gate de evidência de Pedidos e retomada do cutover (08/09/2026)
+
+O Production Schema PR827 #26 (run `34243463045`) aplicou e pós-validou a migration `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`; portanto o schema de Pedidos já existe. O bundle não satisfez o contrato: a primeira rejeição de `validate_schema_evidence` foi o diretório do SHA em modo 755, pois ele deve ser diretório real `root:700`; `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` também devem ser arquivos regulares, não symlinks, `root:600`.
+
+O identificador correto do Deploy Production #152 é `34243608671`. O run concluiu build/build-info, mas falhou fechado no gate com `DEPLOY_FAILURE_STAGE=deploy_script` antes de `docker stop`; containers foram preservados e não houve cutover. Após merge/checks verdes da correção: (1) novo build do SHA; (2) backup fresco se requerido; (3) apply idempotente de Pedidos para o novo SHA, revalidando o catálogo sem repetir DDL e publicando evidência válida; (4) validação da evidência; (5) nova autorização humana para cutover. Não executar Recovery, SQL ou correção manual dos arquivos.
+
 ## Gate PR827 para histórico de Pedidos (08/09/2026)
 
 - O run `34181699345` não deve ser repetido como apply: a exceção ocorreu antes do commit; por atomicidade, `UPDATE 226` e DDL foram revertidos, e `applied.tsv` não foi publicado.

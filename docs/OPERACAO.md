@@ -1,3 +1,9 @@
+## Retomada do deploy de Pedidos após o incidente de evidência
+
+O apply #26 (`34243463045`) aplicou e pós-validou `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`, mas publicou o diretório do SHA com modo 755; a primeira verificação do consumidor exige diretório real `root:700`, antes de validar os arquivos regulares `root:600`. Por isso o Deploy Production #152 (`34243608671`) parou em `DEPLOY_FAILURE_STAGE=deploy_script`, antes de qualquer `docker stop`. Nenhum container foi parado/recriado e nenhum cutover foi feito.
+
+Depois — e somente depois — do merge da correção e de todos os checks da nova main: execute `Deploy Production` em `phase=build` para o novo SHA; prepare backup fresco apenas se o preflight exigir; execute `Production Schema PR827` em apply homologado para Pedidos e confirmação `PRODUCTION_SCHEMA_APPLY`. Esse caminho detecta `tenantId` já presente, não repete DDL, repete as pós-validações e publica por último `applied.tsv` protegido para o novo SHA; confirme a aceitação pelo validador compartilhado. Então solicite nova aprovação humana do environment `production-cutover` e execute um novo cutover. Não use Recovery, SQL manual nem chmod/cópia manual para reparar o bundle anterior.
+
 ## Operação segura — diagnóstico dos 226 pedidos históricos (08/09/2026)
 
 1. Reutilizar exclusivamente **Production Schema PR827**, migration `20260904120000_orders_operational_view`, modo `preview`. Não executar SQL manual, apply ou cutover durante o diagnóstico.

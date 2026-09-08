@@ -16,6 +16,35 @@ schema_protected_file(){
   [[ -f "$1" && ! -L "$1" && "$(stat -c '%u:%a' -- "$1")" == "0:600" ]]
 }
 
+# Producer-side helpers deliberately share the cutover contract above.  The
+# caller must set umask 077 before creating any bundle member.
+prepare_schema_evidence_directory(){
+  local evidence_root=$1 commit=$2 evidence_dir="$1/$2"
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ -d "$evidence_root" && ! -L "$evidence_root" && "$(stat -c '%u' -- "$evidence_root")" == 0 ]] || return 1
+  if [[ -e "$evidence_dir" || -L "$evidence_dir" ]]; then
+    schema_protected_directory "$evidence_dir" || return 1
+  else
+    mkdir -m 700 -- "$evidence_dir" || return 1
+  fi
+  schema_protected_directory "$evidence_dir" || return 1
+  printf '%s' "$evidence_dir"
+}
+
+prepare_schema_evidence_file(){
+  local file=$1
+  if [[ -e "$file" || -L "$file" ]]; then
+    schema_protected_file "$file" || return 1
+  fi
+}
+
+protect_schema_evidence_file(){
+  local file=$1
+  [[ -f "$file" && ! -L "$file" && "$(stat -c '%u' -- "$file")" == 0 ]] || return 1
+  chmod 600 -- "$file" || return 1
+  schema_protected_file "$file"
+}
+
 validate_schema_evidence(){
   local applied=$1 evidence_dir=${1%/*} directory_commit applied_at evidence_commit evidence_migration
   local recorded_hash recorded_path current_hash commit_hash field_count

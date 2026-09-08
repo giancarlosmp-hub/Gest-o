@@ -1,3 +1,9 @@
+## Pedidos — apply concluído e cutover preservado (08/09/2026)
+
+A PR #859 foi mesclada na `main` `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`. O **Production Schema PR827 #26** (run `34243463045`) concluiu em modo apply, com confirmação `PRODUCTION_SCHEMA_APPLY`, para `20260904120000_orders_operational_view`: a migration e suas pós-validações passaram e o schema de Pedidos está aplicado. A evidência publicada, porém, foi criada pelo produtor com `mkdir -p` sob umask comum; a primeira condição de `validate_schema_evidence` falhou porque o diretório do SHA não era `root:700` (classe sanitizada observada: modo 755). O contrato também exige `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` regulares, sem symlink, `root:600`.
+
+O **Deploy Production #152** correto é o run `34243608671`. Build e build-info concluíram, mas o gate de evidência encerrou o deploy com `DEPLOY_FAILURE_STAGE=deploy_script` antes de qualquer `docker stop`; nenhum container foi parado/recriado e nenhum cutover ocorreu. Após mesclar a correção e obter a nova `main` verde: (1) faça novo build do SHA; (2) prepare backup fresco se o preflight exigir; (3) execute o apply homologado de forma idempotente para o mesmo SHA — o catálogo existente evita repetir DDL e somente revalida/publica evidência protegida; (4) valide a evidência; (5) só então solicite nova autorização humana para cutover. Não executar Recovery, SQL ou reparo manual de evidência.
+
 ## PR827 run 34181699345 — backfill histórico de Pedidos (08/09/2026)
 
 O apply parou com `unresolved_count=226` dentro do `BEGIN` da migration. Portanto, o PostgreSQL reverteu o `UPDATE 226` e todo o DDL da tentativa; o runner, com `set -e`, não alcançou a publicação de `applied.tsv`. Não houve cutover. Esta conclusão decorre da fronteira transacional e da ordem do runner, não de uma nova consulta ou escrita em produção.

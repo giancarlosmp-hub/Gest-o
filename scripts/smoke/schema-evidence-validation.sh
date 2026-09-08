@@ -15,6 +15,28 @@ git add .; git commit -qm baseline; BASE=$(git rev-parse HEAD)
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
 
+# Exercise the producer helpers from a conventional 022 starting mask.  The
+# producer switches to 077 before any evidence member is created and the same
+# validator used by cutover must accept the result.
+umask 022
+producer_root="$TMP/producer-evidence"
+mkdir -m 755 "$producer_root"
+umask 077
+producer_dir=$(prepare_schema_evidence_directory "$producer_root" "$BASE")
+printf '%s  %s\n' "$(sha256sum "$orders" | cut -d' ' -f1)" "$orders" >"$producer_dir/migration.sha256"
+: >"$producer_dir/post-apply-diff.sql"
+protect_schema_evidence_file "$producer_dir/migration.sha256"
+protect_schema_evidence_file "$producer_dir/post-apply-diff.sql"
+printf '2026-09-01T00:00:00Z\t%s\t%s\n' "$BASE" "$orders" >"$producer_dir/.applied.tsv.test"
+protect_schema_evidence_file "$producer_dir/.applied.tsv.test"
+mv -T "$producer_dir/.applied.tsv.test" "$producer_dir/applied.tsv"
+[[ "$(stat -c '%a' "$producer_dir")" == 700 ]]
+[[ "$(stat -c '%a' "$producer_dir/applied.tsv")" == 600 ]]
+[[ "$(stat -c '%a' "$producer_dir/migration.sha256")" == 600 ]]
+[[ "$(stat -c '%a' "$producer_dir/post-apply-diff.sql")" == 600 ]]
+validate_schema_evidence "$producer_dir/applied.tsv"
+printf 'SCHEMA_EVIDENCE_PRODUCER_CONTRACT=PASS\n'
+
 make_bundle(){
   local commit=$1 migration=$2 dir
   dir="$TMP/evidence/$commit"
@@ -46,6 +68,7 @@ rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827"); printf '\textra' >>
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827"); chmod 644 "$dir/applied.tsv"; expect_reject "$dir" invalid_file_mode
 chmod 600 "$dir/applied.tsv"; chmod 755 "$dir"; expect_reject "$dir" invalid_directory_mode
 chmod 700 "$dir"; chown 1 "$dir/applied.tsv"; expect_reject "$dir" invalid_owner; chown 0 "$dir/applied.tsv"
+chown 1 "$dir"; expect_reject "$dir" invalid_directory_owner; chown 0 "$dir"
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827"); mv "$dir/applied.tsv" "$dir/real"; ln -s real "$dir/applied.tsv"; expect_reject "$dir" file_symlink
 rm -rf "$TMP/evidence"; real=$(make_bundle "$BASE" "$pr827"); mv "$real" "$TMP/real-bundle"; ln -s "$TMP/real-bundle" "$TMP/evidence/$BASE"; expect_reject "$TMP/evidence/$BASE" directory_symlink
 

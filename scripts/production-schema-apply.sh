@@ -29,7 +29,19 @@ MODE=validate SQL_FILE="$MIGRATION" \
   ALLOW_DATA_BACKFILL="$([[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]] && printf orders-tenant-authority-v1)" \
   bash scripts/production-schema-preview.sh
 
-evidence="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$APP_COMMIT"; mkdir -p "$evidence"
+umask 077
+# shellcheck source=scripts/schema-evidence-validation.sh
+source scripts/schema-evidence-validation.sh
+evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
+evidence=$(prepare_schema_evidence_directory "$evidence_root" "$APP_COMMIT") ||
+  die "diretório de evidência não satisfaz owner root, tipo regular e modo 700"
+for evidence_name in apply.stdout.log apply.stderr.log migration.sha256 pre-apply-diff.raw.sql \
+  pre-apply-managed-diff.sql incident-counts.sql incident.before.tsv orders-counts.before.tsv \
+  incident.after.tsv orders-counts.after.tsv post-validation.tsv post-apply-diff.raw.sql \
+  post-apply-diff.sql applied.tsv; do
+  prepare_schema_evidence_file "$evidence/$evidence_name" ||
+    die "arquivo de evidência existente não satisfaz owner root, tipo regular e modo 600"
+done
 exec > >(tee -a "$evidence/apply.stdout.log") 2> >(tee -a "$evidence/apply.stderr.log" >&2)
 sha256sum "$MIGRATION" | tee "$evidence/migration.sha256"
 admin_psql(){
@@ -124,5 +136,14 @@ esac
 prisma_diff >"$evidence/post-apply-diff.raw.sql"
 node scripts/schema-diff-filter.mjs "$evidence/post-apply-diff.raw.sql" \
   "$evidence/post-apply-diff.sql" post
-printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$APP_COMMIT" "$MIGRATION" > "$evidence/applied.tsv"
+protect_schema_evidence_file "$evidence/migration.sha256" || die "migration.sha256 não pôde ser protegido"
+protect_schema_evidence_file "$evidence/post-apply-diff.sql" || die "post-apply-diff.sql não pôde ser protegido"
+# applied.tsv is the completion marker and is therefore created only after all
+# postconditions and the protected companion files have passed.
+applied_staging="$evidence/.applied.tsv.$$"
+[[ ! -e "$applied_staging" && ! -L "$applied_staging" ]] || die "staging de applied.tsv já existe"
+printf '%s\t%s\t%s\n' "$(date -u +%FT%TZ)" "$APP_COMMIT" "$MIGRATION" >"$applied_staging"
+protect_schema_evidence_file "$applied_staging" || die "staging de applied.tsv não pôde ser protegido"
+mv -T -- "$applied_staging" "$evidence/applied.tsv"
+validate_schema_evidence "$evidence/applied.tsv" || die "evidência final incompatível com o gate de cutover"
 log "schema aplicado e validado; nenhum cutover foi executado"
