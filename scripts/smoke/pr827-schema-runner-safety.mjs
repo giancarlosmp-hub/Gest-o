@@ -68,7 +68,7 @@ const workflow=read(".github/workflows/production-schema-pr827.yml"); assert.mat
 const postFilter=read("scripts/pr827-post-diff-filter.mjs");
 for (const token of ["ErpOrderManualResolution", "supersedesErpOrderSyncId"]) assert.match(postFilter,new RegExp(token));
 assert.match(runner,/pr827-post-diff-filter\.mjs/);
-assert.match(workflow,/resolve-production-env\.sh/); assert.match(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true/);
+assert.match(workflow,/resolve-production-env\.sh/); assert.doesNotMatch(workflow,/PRODUCTION_ENV_REQUIRE_EXACTLY_ONE/);
 assert.match(workflow,/PRODUCTION_ENV_SOURCE="\$resolved_env_source" PRODUCTION_ENV_FILE="\$resolved_env_file"/);
 assert.match(workflow,/SCHEMA_EVIDENCE_DIR=\/var\/log\/gest-o\/schema/);
 assert.match(workflow,/BACKUP_RESULT_FILE=\/var\/log\/gest-o\/backup\/latest\/result\.tsv/);

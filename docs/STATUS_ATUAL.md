@@ -1,3 +1,9 @@
+## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
+
+O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.
+
+A resolução permanece fail-closed e sem merge de fontes: a presença do canônico torna sua validação e seleção obrigatórias; um canônico inválido falha sem fallback; o legado só pode ser considerado quando o canônico estiver ausente. A regressão automatizada cobre canônico válido + legado válido, canônico inválido + legado válido e redaction de valores protegidos. Nenhuma migration, schema, banco, container, secret ou scheduler ERP foi alterado ou executado por esta correção. A nova PR deve ser validada contra `main` e não deve ser mesclada automaticamente.
+
 ## Estado operacional confirmado — PR #857 (08/09/2026)
 
 A `main` confirmada é `ea5a846db8c46967a25d077d13e915123f53e186`, com a PR #856 mesclada, porém **Pedidos ainda não foi implantado em produção**. O workflow **Prepare Production Recovery Backup #49** passou e o **Deploy Production #147** (`phase=build`) passou. O **Deploy Production #148** (`phase=cutover`) foi bloqueado, antes de `docker stop`, porque não havia evidência equivalente de schema. A PR #857 continua aberta e em correção: quatro checks estavam verdes e o Preview Deploy estava vermelho; nenhum resultado dessa PR constitui evidência produtiva.
