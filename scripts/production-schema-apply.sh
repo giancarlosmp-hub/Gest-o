@@ -25,7 +25,9 @@ APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"; export APP_COMMIT
 # This performs backup/SHA, origin/main, expected PostgreSQL/network/volume and runtime checks.
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
 docker image inspect "gest-o-api:$APP_COMMIT" >/dev/null 2>&1 || die "imagem API do SHA ausente"
-MODE=validate SQL_FILE="$MIGRATION" bash scripts/production-schema-preview.sh
+MODE=validate SQL_FILE="$MIGRATION" \
+  ALLOW_DATA_BACKFILL="$([[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]] && printf orders-tenant-authority-v1)" \
+  bash scripts/production-schema-preview.sh
 
 evidence="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}/$APP_COMMIT"; mkdir -p "$evidence"
 exec > >(tee -a "$evidence/apply.stdout.log") 2> >(tee -a "$evidence/apply.stderr.log" >&2)
@@ -66,7 +68,7 @@ incident_counts(){
 incident_counts >"$evidence/incident.before.tsv"
 [[ "$(wc -l <"$evidence/incident.before.tsv")" -eq 8 ]] || die "inventário incident_* divergente; apply bloqueado"
 if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]]; then
-  admin_psql -Atc "SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" ORDER BY 1" >"$evidence/orders-counts.before.tsv"
+  admin_psql -Atc "SELECT 'Activity' || E'\\t' || count(*) FROM \"Activity\" UNION ALL SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" UNION ALL SELECT 'OpportunityChangeLog' || E'\\t' || count(*) FROM \"OpportunityChangeLog\" UNION ALL SELECT 'TimelineEvent' || E'\\t' || count(*) FROM \"TimelineEvent\" ORDER BY 1" >"$evidence/orders-counts.before.tsv"
   orders_tenant_column=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name='tenantId'")
 fi
 
@@ -101,7 +103,7 @@ case "$MIGRATION_ID_REQUESTED" in
     printf 'required_tables\t%s\nrequired_enums\t%s\nphone_columns\t%s\n' "$required" "$enums" "$phone_columns" >"$evidence/post-validation.tsv"
     ;;
   20260904120000_orders_operational_view)
-    admin_psql -Atc "SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" ORDER BY 1" >"$evidence/orders-counts.after.tsv"
+    admin_psql -Atc "SELECT 'Activity' || E'\\t' || count(*) FROM \"Activity\" UNION ALL SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" UNION ALL SELECT 'OpportunityChangeLog' || E'\\t' || count(*) FROM \"OpportunityChangeLog\" UNION ALL SELECT 'TimelineEvent' || E'\\t' || count(*) FROM \"TimelineEvent\" ORDER BY 1" >"$evidence/orders-counts.after.tsv"
     cmp "$evidence/orders-counts.before.tsv" "$evidence/orders-counts.after.tsv" || die "contagens essenciais foram alteradas"
     columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name IN ('tenantId','erpOrderId','operationalStatusRaw')")
     tenant_not_null=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name='tenantId' AND is_nullable='NO'")

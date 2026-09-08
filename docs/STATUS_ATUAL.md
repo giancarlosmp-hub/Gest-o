@@ -1,3 +1,9 @@
+## PR827 run 34181699345 — backfill histórico de Pedidos (08/09/2026)
+
+O apply parou com `unresolved_count=226` dentro do `BEGIN` da migration. Portanto, o PostgreSQL reverteu o `UPDATE 226` e todo o DDL da tentativa; o runner, com `set -e`, não alcançou a publicação de `applied.tsv`. Não houve cutover. Esta conclusão decorre da fronteira transacional e da ordem do runner, não de uma nova consulta ou escrita em produção.
+
+A remediação permanece pendente de um novo **preview** do mesmo workflow Production Schema PR827. O preview agora executa somente um relatório agregado, em `BEGIN TRANSACTION READ ONLY`, cobrindo pedidos, cadeia Opportunity → Client, tenant do cliente, vendedores ativos/inativos/ausentes, tenants existentes/ativos, Timeline, Activity, change logs e FKs inválidas. Nenhum identificador ou dado comercial é emitido. O apply continua proibido até `authority_ready=1` e revisão humana das contagens.
+
 ## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
 
 O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.

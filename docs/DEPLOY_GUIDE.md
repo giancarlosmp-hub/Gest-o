@@ -1,3 +1,10 @@
+## Gate PR827 para histórico de Pedidos (08/09/2026)
+
+- O run `34181699345` não deve ser repetido como apply: a exceção ocorreu antes do commit; por atomicidade, `UPDATE 226` e DDL foram revertidos, e `applied.tsv` não foi publicado.
+- Abrir primeiro o modo `preview` no workflow existente, sem confirmação de apply. O diagnóstico é versionado, agregado e read-only; não criar workflow/environment alternativo.
+- Autorizar apply apenas quando `authority_ready=1`, as contagens forem conciliadas e houver exatamente um Tenant existente e ativo. Mais de um tenant, Opportunity/Client ausente ou tenant inválido deve falhar fechado.
+- Após eventual apply aprovado, exigir contagens idênticas para Client, Opportunity, ErpOrderSync, TimelineEvent, Activity e OpportunityChangeLog; zero tenant nulo; e exatamente um `migration-backfill` por pedido. Não fazer merge/cutover como parte da investigação.
+
 ## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
 
 O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.

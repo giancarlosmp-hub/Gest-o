@@ -8,7 +8,7 @@ const workflow = readFileSync(".github/workflows/docker-compose-ci.yml", "utf8")
 assert.match(harness, /fresh_sequence predecessor_baseline[\s\S]*previous\/schema\.prisma/, "fresh supported install must materialize the supported predecessor baseline");
 assert.doesNotMatch(harness, /prisma migrate deploy/, "incomplete historical migration chain must not be presented as a fresh-install contract");
 assert.match(harness, /20260904120000_orders_operational_view\/migration\.sql/);
-for (const proof of ["final_schema_diff", "migration-backfill", "order-orphan", "unresolved_count", "ErpOrderSync_tenantId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_fkey"]) assert.ok(harness.includes(proof), proof);
+for (const proof of ["final_schema_diff", "migration-backfill", "ambiguous_tenant_fail_closed", "historical_seller_removed", "ErpOrderSync_tenantId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_fkey"]) assert.ok(harness.includes(proof), proof);
 for (const marker of ["ORDERS_MIGRATION_STEP=", "ORDERS_MIGRATION_PHASE=", "ORDERS_MIGRATION_NAME=", "ORDERS_MIGRATION_COMMAND_KIND=", "ORDERS_MIGRATION_ERROR_CODE=", "ORDERS_MIGRATION_ERROR_MESSAGE=", "ORDERS_MIGRATION_RESULT="]) assert.ok(harness.includes(marker) || readFileSync("scripts/smoke/orders-migration-diagnostics.sh", "utf8").includes(marker), marker);
 assert.match(harness, /apply_orders_migration fresh fresh_sequence/, "fresh proof must reach the orders migration");
 assert.match(harness, /chmod 600/, "diagnostic logs must be private");
@@ -21,4 +21,7 @@ assert.match(workflow, /POSTGRES_IMAGE_PULL_RESULT=FAIL[\s\S]*exit 1/, "exhauste
 assert.match(migration, /^BEGIN;/);
 assert.match(migration, /COMMIT;\s*$/);
 assert.doesNotMatch(migration, /^\s*(?:DELETE|TRUNCATE|DROP\s+TABLE)\b/im);
+assert.match(migration, /tenant_count <> 1[\s\S]*active_tenant_count <> 1/);
+assert.match(migration, /orders_history_guard[\s\S]*sellerId[\s\S]*TimelineEvent[\s\S]*Activity/);
+assert.match(migration, /ON CONFLICT \("id"\) DO NOTHING/);
 console.log("orders migration harness safety passed");

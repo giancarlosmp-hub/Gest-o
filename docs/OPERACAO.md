@@ -1,3 +1,10 @@
+## Operação segura — diagnóstico dos 226 pedidos históricos (08/09/2026)
+
+1. Reutilizar exclusivamente **Production Schema PR827**, migration `20260904120000_orders_operational_view`, modo `preview`. Não executar SQL manual, apply ou cutover durante o diagnóstico.
+2. Confirmar que o output contém apenas pares `metric/value` agregados e termina com `authority_ready`. Conferir as 17 métricas: total e presença de Opportunity/Client, tenant nulo/válido, seller ativo/inativo/ausente, clientes históricos nulos, tenants existentes/ativos, Timeline, Activity, change log e FK de tenant inválida.
+3. Interromper se `authority_ready=0`, se não houver exatamente um tenant existente e ativo, se a cadeia tiver lacuna ou se qualquer contagem for ambígua. Seller inativo/ausente é informativo e jamais bloqueia a preservação ou autoriza troca de seller.
+4. Somente após revisão e aprovação humana, um apply futuro exige `PRODUCTION_SCHEMA_APPLY`, backup fresco e SHA exato. O runner executa uma transação única e compara contagens antes/depois; qualquer órfão, alteração histórica ou quantidade de history diferente de um por pedido causa rollback.
+
 ## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
 
 O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.

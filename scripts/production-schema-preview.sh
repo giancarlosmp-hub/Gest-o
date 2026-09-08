@@ -40,7 +40,8 @@ if grep -Eiq 'DROP[[:space:]]+(TABLE|COLUMN)[^;]*incident_' "$sql"; then
   log "BLOQUEADO: tentativa de alterar objeto incident_* não gerenciado"
   blocked=$((blocked + 1))
 fi
-if [[ -n "$SQL_FILE" ]] && grep -Eiq '^[[:space:]]*(UPDATE|DELETE|INSERT|MERGE|COPY|CREATE[[:space:]]+OR[[:space:]]+REPLACE)' "$normalized"; then
+if [[ -n "$SQL_FILE" ]] && grep -Eiq '^[[:space:]]*(UPDATE|DELETE|INSERT|MERGE|COPY|CREATE[[:space:]]+OR[[:space:]]+REPLACE)' "$normalized" \
+   && [[ "${ALLOW_DATA_BACKFILL:-}" != orders-tenant-authority-v1 ]]; then
   log "BLOQUEADO: arquivo aprovado deve conter somente DDL aditiva"
   blocked=$((blocked + 1))
 fi
