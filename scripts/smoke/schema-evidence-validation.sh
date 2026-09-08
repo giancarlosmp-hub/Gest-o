@@ -8,7 +8,9 @@ mkdir -p "$REPO/scripts"; cp "$ROOT/scripts/schema-evidence-validation.sh" "$ROO
 cd "$REPO"; git init -q; git config user.email test@example.invalid; git config user.name test
 legacy=apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql
 pr827=apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql
-mkdir -p "${legacy%/*}" "${pr827%/*}"; printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"
+orders=apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
+mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}"
+printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"
 git add .; git commit -qm baseline; BASE=$(git rev-parse HEAD)
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -26,6 +28,9 @@ expect_reject(){ if validate_schema_evidence "$1/applied.tsv"; then echo "accept
 
 dir=$(make_bundle "$BASE" "$legacy"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
 validate_schema_evidence "$dir/applied.tsv" # legacy valid
+rm -rf "$TMP/evidence"
+dir=$(make_bundle "$BASE" "$orders"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
+validate_schema_evidence "$dir/applied.tsv" # registered orders migration valid
 rm "$dir/post-apply-diff.sql"; expect_reject "$dir" legacy_without_post_diff
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827")

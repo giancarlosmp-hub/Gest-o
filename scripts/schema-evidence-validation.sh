@@ -4,6 +4,7 @@
 
 SCHEMA_MIGRATION_LEGACY="apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql"
 SCHEMA_MIGRATION_PR827="apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql"
+SCHEMA_MIGRATION_ORDERS="apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql"
 TENANCY_EXPAND_ROOTS_ID="20260808120000_tenancy_expand_roots"
 TENANCY_EXPAND_ROOTS_MIGRATION="apps/api/prisma/migrations/$TENANCY_EXPAND_ROOTS_ID/migration.sql"
 
@@ -29,7 +30,7 @@ validate_schema_evidence(){
   [[ -n "$applied_at" && "$evidence_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
   [[ "$evidence_commit" == "$directory_commit" ]] || return 1
   case "$evidence_migration" in
-    "$SCHEMA_MIGRATION_LEGACY")
+    "$SCHEMA_MIGRATION_LEGACY"|"$SCHEMA_MIGRATION_ORDERS")
       schema_protected_file "$evidence_dir/post-apply-diff.sql" || return 1
       [[ ! -s "$evidence_dir/post-apply-diff.sql" ]] || return 1
       ;;

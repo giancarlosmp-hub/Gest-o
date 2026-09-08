@@ -1,3 +1,9 @@
+## Extensão produtiva allowlisted de Pedidos (08/09/2026)
+
+A migration `20260904120000_orders_operational_view` integra o catálogo produtivo fechado pelo checksum versionado. O fluxo autorizado permanece o workflow existente **Production Schema PR827** e a sequência obrigatória é: **preview read-only → aprovação humana → apply com `PRODUCTION_SCHEMA_APPLY` → validação da evidência → cutover**. O preview resolve exclusivamente o ID cadastrado e chama `production-schema-preview.sh`; o apply reutiliza `production-schema-apply.sh`, sem aceitar migration ou caminho arbitrário.
+
+O workflow **ERP Production Recovery** não aplica, não substitui e não produz evidência do schema de Pedidos. Backup/Recovery, build da imagem e schema apply têm autoridades distintas. Pedidos somente pode ser considerado implantado depois de apply validado e cutover posterior; a PR #856 mesclada não comprova implantação.
+
 ## Auditoria de confiabilidade da Saúde da Plataforma (03/09/2026)
 
 A auditoria estática do contrato 3.0 confirmou `Contact` como fonte de telefone/e-mail e corrigiu valores compostos somente por espaços; confirmou que vendedor inativo e cliente arquivado usam predicados independentes; e corrigiu o rótulo enganoso de “FinancialProfiles órfãos”, pois o schema possui JSONs opcionais em `Client`, não entidades relacionais. Métricas ERP sem chave numérica inequívoca permanecem `null`. Nenhum dado, migration, ERP ou produção foi acessado/modificado. Dicionário, limites e um único diagnóstico agregado read-only estão em `investigations/platform-health-metric-reliability-2026-09.md`.

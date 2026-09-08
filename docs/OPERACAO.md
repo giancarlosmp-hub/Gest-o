@@ -1,3 +1,9 @@
+## Production Schema PR827 — Pedidos (08/09/2026)
+
+Use o workflow existente **Production Schema PR827** no SHA novo de `main`. Para preview, informe exatamente `mode=preview`, `migration=20260904120000_orders_operational_view` e deixe `confirm` vazio. Esse modo resolve a entrada no catálogo e executa somente `production-schema-preview.sh`, sem DDL. Depois da aprovação, execute separadamente com `mode=apply`, `migration=20260904120000_orders_operational_view` e `confirm=PRODUCTION_SCHEMA_APPLY`.
+
+O apply preserva backup, SHA/`origin/main`, worktree, imagem, identidade PostgreSQL, transação, idempotência e evidências protegidas. As pós-validações de Pedidos exigem `ErpOrderSync.tenantId` existente, `NOT NULL` e sem valores nulos; `erpOrderId` e `operationalStatusRaw`; os enums `ErpOperationalOrderStatus` e `ErpRequestAuthorizationStatus`; `ErpOrderSync_tenantId_fkey`; os dois índices tenant-scoped; `ErpOrderStatusHistory`, suas duas FKs e seus dois índices; exatamente um histórico inicial `source=migration-backfill` para cada pedido anterior; contagens essenciais e tabelas `incident_*` preservadas; diff Prisma final vazio; e `applied.tsv`/`migration.sha256` coerentes com migration e SHA. Só então a evidência pode liberar uma tentativa posterior de cutover.
+
 ## Auditoria de confiabilidade da Saúde da Plataforma (03/09/2026)
 
 A auditoria estática do contrato 3.0 confirmou `Contact` como fonte de telefone/e-mail e corrigiu valores compostos somente por espaços; confirmou que vendedor inativo e cliente arquivado usam predicados independentes; e corrigiu o rótulo enganoso de “FinancialProfiles órfãos”, pois o schema possui JSONs opcionais em `Client`, não entidades relacionais. Métricas ERP sem chave numérica inequívoca permanecem `null`. Nenhum dado, migration, ERP ou produção foi acessado/modificado. Dicionário, limites e um único diagnóstico agregado read-only estão em `investigations/platform-health-metric-reliability-2026-09.md`.

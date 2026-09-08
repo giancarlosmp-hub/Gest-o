@@ -63,6 +63,8 @@ assert.match(preview, /git fetch --depth 1 origin "pull\/\$\{PR_NUMBER\}\/head"/
 assert.match(preview, /API_DEPLOYED_SHA=[\s\S]*WEB_DEPLOYED_SHA=[\s\S]*PREVIEW_SHA_MATCH=YES/);
 assert.match(compose, /web:[\s\S]*build:[\s\S]*args:[\s\S]*APP_COMMIT: \$\{APP_COMMIT:-unknown\}/, "web build must receive the same APP_COMMIT as the API");
 assert.match(webDockerfile, /ARG APP_COMMIT=unknown[\s\S]*LABEL org\.opencontainers\.image\.revision=\$APP_COMMIT[\s\S]*build-info\.json/, "web image label and runtime build info must derive from APP_COMMIT");
+assert.match(webDockerfile, /RUN npm ci/, "preview web image must honor the committed dependency lock");
+assert.doesNotMatch(webDockerfile, /RUN npm install\s*$/m, "preview web image must not re-resolve incompatible build tooling");
 for (const marker of ["PREVIEW_API_SHA=", "PREVIEW_WEB_SHA=", "PREVIEW_API_IMAGE_SHA=", "PREVIEW_WEB_IMAGE_SHA="]) assert.ok(preview.includes(marker), `missing artifact provenance marker ${marker}`);
 assert.match(preview, /API_IMAGE_SHA[\s\S]*WEB_IMAGE_SHA[\s\S]*API_DEPLOYED_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*WEB_DEPLOYED_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*API_IMAGE_SHA[^\n]*EXPECTED_PREVIEW_SHA[\s\S]*WEB_IMAGE_SHA[^\n]*EXPECTED_PREVIEW_SHA/, "runtime and both image labels must match the PR head SHA");
 for (const marker of ["PREVIEW_DEPLOY_STEP=", "PREVIEW_CONFIGURATION_STATUS=", "PREVIEW_MIGRATION_STATUS=", "PREVIEW_SEED_STATUS=", "PREVIEW_HEALTH_STATUS=", "PREVIEW_EXPECTED_SHA=", "PREVIEW_OBSERVED_SHA="]) assert.ok(preview.includes(marker), `missing sanitized deploy marker ${marker}`);

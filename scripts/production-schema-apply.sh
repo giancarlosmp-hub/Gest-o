@@ -2,7 +2,12 @@
 set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
 ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
-MIGRATION="apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql"
+MIGRATION_ID_REQUESTED="${MIGRATION_ID_REQUESTED:-20260731150000_safe_production_schema_transition}"
+registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID_REQUESTED") || {
+  printf '[production-schema-apply] ERRO: migration não cadastrada ou checksum divergente\n' >&2
+  exit 1
+}
+MIGRATION=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).path)' "$registry")
 PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717
 log(){ printf '[production-schema-apply] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
@@ -60,6 +65,10 @@ incident_counts(){
 }
 incident_counts >"$evidence/incident.before.tsv"
 [[ "$(wc -l <"$evidence/incident.before.tsv")" -eq 8 ]] || die "inventário incident_* divergente; apply bloqueado"
+if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]]; then
+  admin_psql -Atc "SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" ORDER BY 1" >"$evidence/orders-counts.before.tsv"
+  orders_tenant_column=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name='tenantId'")
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -70,20 +79,43 @@ incident_counts >"$evidence/incident.before.tsv"
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
 sha256sum -c "$evidence/migration.sha256" >/dev/null || die "migration mudou após registro do SHA256"
 admin_identity
-log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
-admin_psql --single-transaction -f - < "$MIGRATION"
+if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view && "$orders_tenant_column" == 1 ]]; then
+  log "migration de Pedidos já presente; DDL ignorado e pós-condições serão revalidadas"
+else
+  log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
+  admin_psql --single-transaction -f - < "$MIGRATION"
+fi
 
 # Postconditions are read-only: all incident table names and row counts must be byte-identical.
 incident_counts >"$evidence/incident.after.tsv"
 cmp "$evidence/incident.before.tsv" "$evidence/incident.after.tsv" || die "tabelas incident_* foram alteradas"
-required=$(admin_psql -Atc \
-  "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent')")
-[[ "$required" == 5 ]] || die "objetos obrigatórios ausentes após migration"
-enums=$(admin_psql -Atc "SELECT count(*) FROM pg_type WHERE typnamespace='public'::regnamespace AND typname IN ('CommunicationChannelType','CommunicationProviderType','CommunicationDirection','CommunicationMessageType','CommunicationMessageStatus','CommunicationConversationStatus','CommunicationWebhookStatus')")
-[[ "$enums" == 7 ]] || die "enums obrigatórios ausentes após migration"
-phone_columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='Contact' AND column_name IN ('phoneHash','phoneNormalized')")
-[[ "$phone_columns" == 2 ]] || die "colunas normalizadas de telefone ausentes após migration"
-printf 'required_tables\t%s\nrequired_enums\t%s\nphone_columns\t%s\n' "$required" "$enums" "$phone_columns" >"$evidence/post-validation.tsv"
+case "$MIGRATION_ID_REQUESTED" in
+  20260731150000_safe_production_schema_transition)
+    required=$(admin_psql -Atc \
+      "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname IN ('ClientCodeAudit','CommunicationIntegrationAccount','CommunicationConversation','CommunicationMessage','CommunicationWebhookEvent')")
+    [[ "$required" == 5 ]] || die "objetos obrigatórios ausentes após migration"
+    enums=$(admin_psql -Atc "SELECT count(*) FROM pg_type WHERE typnamespace='public'::regnamespace AND typname IN ('CommunicationChannelType','CommunicationProviderType','CommunicationDirection','CommunicationMessageType','CommunicationMessageStatus','CommunicationConversationStatus','CommunicationWebhookStatus')")
+    [[ "$enums" == 7 ]] || die "enums obrigatórios ausentes após migration"
+    phone_columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='Contact' AND column_name IN ('phoneHash','phoneNormalized')")
+    [[ "$phone_columns" == 2 ]] || die "colunas normalizadas de telefone ausentes após migration"
+    printf 'required_tables\t%s\nrequired_enums\t%s\nphone_columns\t%s\n' "$required" "$enums" "$phone_columns" >"$evidence/post-validation.tsv"
+    ;;
+  20260904120000_orders_operational_view)
+    admin_psql -Atc "SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" ORDER BY 1" >"$evidence/orders-counts.after.tsv"
+    cmp "$evidence/orders-counts.before.tsv" "$evidence/orders-counts.after.tsv" || die "contagens essenciais foram alteradas"
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name IN ('tenantId','erpOrderId','operationalStatusRaw')")
+    tenant_not_null=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name='tenantId' AND is_nullable='NO'")
+    tenant_nulls=$(admin_psql -Atc 'SELECT count(*) FROM "ErpOrderSync" WHERE "tenantId" IS NULL')
+    enums=$(admin_psql -Atc "SELECT count(*) FROM pg_type WHERE typnamespace='public'::regnamespace AND typname IN ('ErpOperationalOrderStatus','ErpRequestAuthorizationStatus')")
+    constraints=$(admin_psql -Atc "SELECT count(*) FROM pg_constraint WHERE connamespace='public'::regnamespace AND conname IN ('ErpOrderSync_tenantId_fkey','ErpOrderStatusHistory_erpOrderSyncId_fkey','ErpOrderStatusHistory_opportunityId_fkey')")
+    indexes=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname IN ('ErpOrderSync_tenantId_createdAt_idx','ErpOrderSync_tenantId_sellerId_createdAt_idx','ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx','ErpOrderStatusHistory_opportunityId_occurredAt_idx')")
+    history_table=$(admin_psql -Atc "SELECT count(*) FROM pg_class WHERE relnamespace='public'::regnamespace AND relkind='r' AND relname='ErpOrderStatusHistory'")
+    invalid_history=$(admin_psql -Atc "SELECT count(*) FROM \"ErpOrderSync\" o LEFT JOIN LATERAL (SELECT count(*) AS n FROM \"ErpOrderStatusHistory\" h WHERE h.\"erpOrderSyncId\"=o.id AND h.source='migration-backfill') h ON true WHERE h.n <> 1")
+    [[ "$columns:$tenant_not_null:$tenant_nulls:$enums:$constraints:$indexes:$history_table:$invalid_history" == 3:1:0:2:3:4:1:0 ]] || die "pós-condições da migration de Pedidos divergentes"
+    printf 'columns\t%s\ntenant_not_null\t%s\ntenant_nulls\t%s\nenums\t%s\nconstraints\t%s\nindexes\t%s\nhistory_table\t%s\ninvalid_initial_history\t%s\n' "$columns" "$tenant_not_null" "$tenant_nulls" "$enums" "$constraints" "$indexes" "$history_table" "$invalid_history" >"$evidence/post-validation.tsv"
+    ;;
+  *) die "migration sem pós-condições cadastradas" ;;
+esac
 # Final authority is Prisma itself, from the same pinned API image/SHA. Preserve the raw
 # evidence, remove exclusively the eight intentional unmanaged DROP TABLE statements, and
 # require the requested post-apply-diff.sql to contain no managed DDL whatsoever.

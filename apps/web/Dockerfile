@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY apps/web/package*.json ./apps/web/
 COPY packages/shared/package*.json ./packages/shared/
-RUN npm install
+RUN npm ci
 COPY . .
 RUN npm run build -w @salesforce-pro/shared \
   && npm run build -w @salesforce-pro/web
