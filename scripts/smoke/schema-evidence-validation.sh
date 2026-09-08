@@ -37,6 +37,18 @@ mv -T "$producer_dir/.applied.tsv.test" "$producer_dir/applied.tsv"
 validate_schema_evidence "$producer_dir/applied.tsv"
 printf 'SCHEMA_EVIDENCE_PRODUCER_CONTRACT=PASS\n'
 
+# The consumer accepts application and documentation-only successors because
+# neither changes the database contract represented by the full Prisma tree.
+mkdir -p apps/api/src apps/web/src docs
+printf 'api\n' >apps/api/src/application.ts; printf 'web\n' >apps/web/src/application.ts
+git add .; git commit -qm application-only; APP_ONLY=$(git rev-parse HEAD)
+validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$APP_ONLY"
+printf 'docs\n' >docs/operation.md; git add .; git commit -qm documentation-only; DOCS_ONLY=$(git rev-parse HEAD)
+validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$DOCS_ONLY"
+if validate_schema_evidence_for_commit "$producer_dir/applied.tsv" ffffffffffffffffffffffffffffffffffffffff; then
+  echo 'nonexistent current commit was accepted' >&2; exit 1
+fi
+
 make_bundle(){
   local commit=$1 migration=$2 dir
   dir="$TMP/evidence/$commit"
@@ -46,7 +58,7 @@ make_bundle(){
   chmod 600 "$dir/applied.tsv" "$dir/migration.sha256"
   printf '%s' "$dir"
 }
-expect_reject(){ if validate_schema_evidence "$1/applied.tsv"; then echo "accepted invalid case: $2" >&2; exit 1; fi; }
+expect_reject(){ if validate_schema_evidence "$1/applied.tsv" 2>/dev/null; then echo "accepted invalid case: $2" >&2; exit 1; fi; }
 
 dir=$(make_bundle "$BASE" "$legacy"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
 validate_schema_evidence "$dir/applied.tsv" # legacy valid
@@ -73,12 +85,24 @@ rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827"); mv "$dir/applied.ts
 rm -rf "$TMP/evidence"; real=$(make_bundle "$BASE" "$pr827"); mv "$real" "$TMP/real-bundle"; ln -s "$TMP/real-bundle" "$TMP/evidence/$BASE"; expect_reject "$TMP/evidence/$BASE" directory_symlink
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827"); printf 'changed\n' >"$pr827"; git add "$pr827"; git commit -qm changed-migration; expect_reject "$dir" migration_changed_between_commits
+git reset --hard -q "$BASE"; rm "$pr827"; git add -u; git commit -qm removed-migration; expect_reject "$dir" migration_removed
 git reset --hard -q "$BASE"; printf 'change\n' >apps/api/prisma/schema.prisma; git add .; git commit -qm prisma-tree-change; HEAD_SHA=$(git rev-parse HEAD)
 if git diff --quiet "$BASE" "$HEAD_SHA" -- apps/api/prisma; then echo 'Prisma tree change was not rejected' >&2; exit 1; fi
+if validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$HEAD_SHA"; then echo 'Prisma tree change was accepted by consumer' >&2; exit 1; fi
+
+# Git equivalence is only evaluated after the original protected evidence has
+# validated, so tampering can never be promoted to a later equivalent SHA.
+git reset --hard -q "$DOCS_ONLY"
+cp "$producer_dir/applied.tsv" "$producer_dir/applied.tsv.real"
+printf '\textra' >>"$producer_dir/applied.tsv"
+if validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$DOCS_ONLY"; then echo 'tampered evidence was promoted' >&2; exit 1; fi
+mv "$producer_dir/applied.tsv.real" "$producer_dir/applied.tsv"; chmod 600 "$producer_dir/applied.tsv"
 
 deploy=$(cat "$ROOT/scripts/deploy-production.sh")
 [[ "$deploy" != *'find "$schema_evidence_root"'* ]]
 [[ "$deploy" != *'|| continue'* ]]
+[[ "$deploy" == *'validate_schema_evidence_for_commit "$candidate" "$APP_COMMIT"'* ]]
+[[ "$deploy" != *'is_schema_evidence_operational_path'* ]]
 evidence_gate=${deploy%%'docker stop'*}
 [[ "$evidence_gate" == *'nenhuma evidência equivalente de schema foi validada'* ]]
 [[ "$evidence_gate" == *'diff Prisma atual não está vazio'* ]]

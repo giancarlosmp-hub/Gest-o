@@ -86,13 +86,6 @@ schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
 
-is_schema_evidence_operational_path(){
-  case "$1" in
-    .github/workflows/prepare-canonical-production-env.yml|docs/DEPLOY_GUIDE.md|docs/DOCUMENTO_MESTRE.md|docs/OPERACAO.md|docs/STATUS_ATUAL.md|docs/investigations/production-schema-transition-july-2026.md|package.json|scripts/deploy-production.sh|scripts/prepare-canonical-production-env.sh|scripts/production-rollback.sh|scripts/schema-evidence-validation.sh|scripts/smoke/prepare-canonical-production-env-safety.sh|scripts/smoke/production-deploy-safety.mjs|scripts/smoke/schema-evidence-validation.sh) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
 tenancy_bundle="$schema_evidence_root/$APP_COMMIT/migrations/$TENANCY_EXPAND_ROOTS_ID"
 if validate_tenancy_expand_roots_evidence "$tenancy_bundle" "$APP_COMMIT" "$schema_evidence_root"; then
@@ -120,20 +113,10 @@ else
   done
   for candidate in "$schema_evidence_root"/*/applied.tsv; do
     [[ -z "$schema_evidence" ]] || break
-    if [[ -f "$candidate" && ! -L "$candidate" ]] && validate_schema_evidence "$candidate" && git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT" -- apps/api/prisma; then
-      changed_paths=$(git diff --name-only "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT")
-      blocked_paths=""
-      while IFS= read -r changed_path; do
-        if ! is_schema_evidence_operational_path "$changed_path"; then
-          blocked_paths+="${blocked_paths:+$'\n'}$changed_path"
-        fi
-      done <<<"$changed_paths"
-      if [[ -z "$blocked_paths" ]]; then
-        schema_evidence=$candidate
-        break
-      fi
-      log "evidência rejeitada: arquivos fora da allowlist:" >&2
-      printf '%s\n' "$blocked_paths" >&2
+    if [[ -f "$candidate" && ! -L "$candidate" ]] && validate_schema_evidence_for_commit "$candidate" "$APP_COMMIT"; then
+      schema_evidence=$candidate
+      log "evidência aplicada protegida de SHA Prisma-equivalente validada"
+      break
     fi
   done
   [[ -n "$schema_evidence" ]] || die "cutover bloqueado: nenhuma evidência equivalente de schema foi validada"

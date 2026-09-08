@@ -2,7 +2,9 @@
 
 O Production Schema PR827 #26 (run `34243463045`) aplicou e pós-validou a migration `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`; portanto o schema de Pedidos já existe. O bundle não satisfez o contrato: a primeira rejeição de `validate_schema_evidence` foi o diretório do SHA em modo 755, pois ele deve ser diretório real `root:700`; `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` também devem ser arquivos regulares, não symlinks, `root:600`.
 
-O identificador correto do Deploy Production #152 é `34243608671`. O run concluiu build/build-info, mas falhou fechado no gate com `DEPLOY_FAILURE_STAGE=deploy_script` antes de `docker stop`; containers foram preservados e não houve cutover. Após merge/checks verdes da correção: (1) novo build do SHA; (2) backup fresco se requerido; (3) apply idempotente de Pedidos para o novo SHA, revalidando o catálogo sem repetir DDL e publicando evidência válida; (4) validação da evidência; (5) nova autorização humana para cutover. Não executar Recovery, SQL ou correção manual dos arquivos.
+No Deploy Production `34278387474`/job `102236939425`, para `99b4473b900f88a6d6018f906b0bc3a0a3eff0c9`, preflight, imagens e build-info passaram e nenhum container foi parado. O consumidor encontrou o `applied.tsv` protegido produzido por `a4e0e4560870f07e44b75d88e761c909f00fb7f4`; toda `apps/api/prisma` era Git-equivalente, mas uma segunda regra recusou arquivos normais de API/WEB da PR #861 por não estarem na allowlist operacional. Essa regra era redundante e conflitava com a equivalência já usada pelo bundle tenancy.
+
+O fallback de `applied.tsv` agora segue o mesmo limite de segurança: valida integralmente o bundle contra o SHA produtor (tipo, symlink, owner, modos, formato, migration existente e checksums), exige produtor e SHA atual existentes e aceita somente equivalência Git da árvore Prisma completa. Qualquer divergência falha fechada. A validação de catálogo e o `prisma migrate diff` ao vivo continuam obrigatórios antes de `docker stop`. Mudança apenas em aplicação, frontend ou documentação não autoriza nem requer executar **Production Schema PR827** para republicar evidência.
 
 ## Gate PR827 para histórico de Pedidos (08/09/2026)
 
@@ -604,7 +606,7 @@ Além disso, banco, proxy, scheduler e integração devem passar seus checks. �
 
 ## Etapa separada e obrigatória: schema de produção
 
-O bootstrap de produção não reconcilia schema. O cutover exige evidência do apply para o mesmo SHA.
+O bootstrap de produção não reconcilia schema. O cutover exige evidência íntegra do SHA atual ou de um SHA produtor cuja árvore `apps/api/prisma` inteira seja Git-equivalente.
 A ordem obrigatória é preflight, build, preview `MODE=validate`, aprovação humana, apply confirmado,
 validação das evidências e apenas depois cutover. Use `production-schema-apply.sh`; ele aplica somente
 a migration aditiva aprovada, não inicia API/WEB, não executa db push/seed e não toca em
