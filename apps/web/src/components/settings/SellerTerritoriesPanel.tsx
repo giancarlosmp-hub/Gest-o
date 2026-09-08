@@ -14,6 +14,7 @@ type SellerOption = {
   canEdit: boolean;
   canTransfer: boolean;
   territoryWarning?: string | null;
+  territoryCount: number;
 };
 
 type TerritoryCity = {
@@ -25,7 +26,7 @@ type TerritoryCity = {
 };
 
 type TerritoryCityLink = TerritoryCity & { sellerName: string };
-type TransferPreview = { source: SellerOption; destination: SellerOption; requested: number; transferable: TerritoryCity[]; conflicts: Array<{ cityId: string; city: string; state: string; sellerName: string }> };
+type TransferPreview = { source: SellerOption; destination: SellerOption; requested: number; transferable: TerritoryCity[]; conflicts: Array<{ cityId: string; city: string; state: string; sellerName: string }>; snapshotToken: string };
 
 type OfficialCity = {
   city: string;
@@ -35,7 +36,7 @@ type OfficialCity = {
 
 type DraftCity = TerritoryCity & { draftId: string; isNew?: boolean };
 
-type KmlImportItemStatus = "to_add" | "already_seller" | "conflict" | "not_found" | "duplicate_file";
+type KmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file";
 
 type KmlImportPreview = {
   fileName: string;
@@ -45,6 +46,7 @@ type KmlImportPreview = {
     valid: number;
     alreadySeller: number;
     linkedToOtherSeller: number;
+    transferableFromInactive: number;
     notFound: number;
     duplicateInFile?: number;
     toAdd: number;
@@ -59,6 +61,8 @@ type KmlImportPreview = {
     sellerName?: string;
   }>;
   citiesToAdd: Array<{ city: string; state: string; ibgeCode?: string | null }>;
+  transferableCityIds: string[];
+  snapshotToken: string;
 };
 
 const ufOptions = ["PR", "MS", "SC"];
@@ -256,7 +260,7 @@ export default function SellerTerritoriesPanel() {
     if (!transferPreview) return;
     setTransferring(true);
     try {
-      const { data } = await api.post<{ moved: number; idempotent: boolean }>("/territories/config/transfers/confirm", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: transferPreview.transferable.map((city) => city.id) });
+      const { data } = await api.post<{ moved: number; idempotent: boolean }>("/territories/config/transfers/confirm", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: transferPreview.transferable.map((city) => city.id), snapshotToken: transferPreview.snapshotToken });
       toast.success(data.idempotent ? "Transferência já aplicada anteriormente." : `${data.moved} cidade(s) transferida(s) com auditoria.`);
       setTransferPreview(null); setSelectedCityIds([]);
       const refreshed = await api.get<TerritoryCity[]>("/territories/config/cities", { params: { sellerId: selectedSellerId } });
@@ -433,12 +437,14 @@ export default function SellerTerritoriesPanel() {
   };
 
   const confirmKmlImport = async () => {
-    if (!selectedSellerId || !importPreview || importPreview.citiesToAdd.length === 0) return;
+    if (!selectedSellerId || !importPreview || (importPreview.citiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0) return;
     setConfirmingImport(true);
     try {
       const { data } = await api.post<{ created: number; cities: TerritoryCity[] }>("/territories/config/import-kml-confirm", {
         sellerId: selectedSellerId,
-        cities: importPreview.citiesToAdd
+        cities: importPreview.citiesToAdd,
+        transferableCityIds: importPreview.transferableCityIds,
+        snapshotToken: importPreview.snapshotToken
       });
       setCities(data.cities.map((city) => ({ ...city, draftId: city.id })));
       toast.success(`${data.created} cidade(s) importada(s) para ${selectedSeller?.name ?? "o vendedor"}.`);
@@ -453,6 +459,7 @@ export default function SellerTerritoriesPanel() {
   const importStatusLabel: Record<KmlImportItemStatus, string> = {
     to_add: "Será adicionada",
     already_seller: "Já vinculada",
+    inactive_transfer: "Transferível de vendedor inativo",
     conflict: "Conflito",
     not_found: "Não encontrada",
     duplicate_file: "Duplicada no arquivo"
@@ -461,6 +468,7 @@ export default function SellerTerritoriesPanel() {
   const importStatusClass: Record<KmlImportItemStatus, string> = {
     to_add: "bg-emerald-50 text-emerald-700 ring-emerald-100",
     already_seller: "bg-slate-100 text-slate-700 ring-slate-200",
+    inactive_transfer: "bg-blue-50 text-blue-700 ring-blue-100",
     conflict: "bg-red-50 text-red-700 ring-red-100",
     not_found: "bg-amber-50 text-amber-700 ring-amber-100",
     duplicate_file: "bg-orange-50 text-orange-700 ring-orange-100"
@@ -496,7 +504,7 @@ export default function SellerTerritoriesPanel() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,360px)_1fr]">
         <aside className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <label className="block text-sm font-semibold text-slate-700">
-            Vendedor
+            Origem dos territórios
             <select
               className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm disabled:bg-slate-100"
               value={selectedSellerId}
@@ -504,7 +512,7 @@ export default function SellerTerritoriesPanel() {
               disabled={isSellerViewer || loading}
             >
               {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>{seller.name}{!seller.isActive ? " • Inativo" : seller.region ? ` • ${seller.region}` : ""}</option>
+                <option key={seller.id} value={seller.id}>{seller.name}{!seller.isActive ? ` • Inativo — ${seller.territoryCount} cidades` : seller.region ? ` • ${seller.region}` : ` • ${seller.territoryCount} cidades`}</option>
               ))}
             </select>
           </label>
@@ -513,7 +521,7 @@ export default function SellerTerritoriesPanel() {
 
           {selectedSeller?.canTransfer && cities.length > 0 ? (
             <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
-              <p className="text-sm font-bold text-blue-900">Transferir cidades de {selectedSeller.name}</p>
+              <p className="text-sm font-bold text-blue-900">Vendedor de destino (ativo)</p>
               <select className="w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm" value={destinationSellerId} onChange={(event) => { setDestinationSellerId(event.target.value); setTransferPreview(null); }}>
                 <option value="">Selecione o vendedor ativo de destino</option>
                 {activeDestinations.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
@@ -709,7 +717,7 @@ export default function SellerTerritoriesPanel() {
           <p className="mt-2 text-sm">Transferir {transferPreview.transferable.length} cidade(s) de <b>{transferPreview.source.name}</b> para <b>{transferPreview.destination.name}</b>.</p>
           {transferPreview.conflicts.length ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{transferPreview.conflicts.length} conflito(s) real(is) com terceiros não serão transferidos.</div> : null}
           <ul className="mt-3 max-h-56 overflow-auto text-sm">{transferPreview.transferable.map((city) => <li key={city.id}>{city.city}/{city.state}</li>)}</ul>
-          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setTransferPreview(null)} className="rounded-lg border px-3 py-2">Cancelar</button><button onClick={confirmTransfer} disabled={!transferPreview.transferable.length || transferring} className="rounded-lg bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-300">Confirmar transferência</button></div>
+          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setTransferPreview(null)} className="rounded-lg border px-3 py-2">Cancelar</button><button onClick={confirmTransfer} disabled={!transferPreview.transferable.length || transferPreview.conflicts.length > 0 || transferring} className="rounded-lg bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-300">Confirmar transferência</button></div>
         </div>
       </div>
     ) : null}
@@ -761,7 +769,8 @@ export default function SellerTerritoriesPanel() {
                     ["Total lido", importPreview.summary.totalRead],
                     ["Cidades válidas", importPreview.summary.valid],
                     ["Já vinculadas", importPreview.summary.alreadySeller],
-                    ["Em outro vendedor", importPreview.summary.linkedToOtherSeller],
+                    ["Conflitos ativos", importPreview.summary.linkedToOtherSeller],
+                    ["Transferíveis (inativo)", importPreview.summary.transferableFromInactive],
                     ["Não encontradas", importPreview.summary.notFound],
                     ["Serão adicionadas", importPreview.summary.toAdd]
                   ].map(([label, value]) => (
@@ -825,7 +834,7 @@ export default function SellerTerritoriesPanel() {
             <button
               type="button"
               onClick={confirmKmlImport}
-              disabled={!importPreview || importPreview.citiesToAdd.length === 0 || confirmingImport}
+              disabled={!importPreview || (importPreview.citiesToAdd.length === 0 && importPreview.transferableCityIds.length === 0) || importPreview.summary.linkedToOtherSeller > 0 || confirmingImport}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               <CheckCircle2 size={16} /> {confirmingImport ? "Importando..." : "Confirmar importação"}

@@ -33,7 +33,7 @@ import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
 import { z } from "zod";
@@ -9898,7 +9898,7 @@ const territoryBulkCitySchema = z.object({
 const TERRITORY_KML_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 const TERRITORY_KML_IMPORT_ALLOWED_EXTENSIONS = [".kml", ".kmz"] as const;
 
-type TerritoryKmlImportItemStatus = "to_add" | "already_seller" | "conflict" | "not_found" | "duplicate_file";
+type TerritoryKmlImportItemStatus = "to_add" | "already_seller" | "inactive_transfer" | "conflict" | "not_found" | "duplicate_file";
 type TerritoryKmlImportItem = {
   sourceName: string;
   city: string | null;
@@ -9906,19 +9906,28 @@ type TerritoryKmlImportItem = {
   ibgeCode: string | null;
   status: TerritoryKmlImportItemStatus;
   message: string;
+  territoryCityId?: string;
+  sellerId?: string;
   sellerName?: string;
 };
 
 const territoryKmlConfirmSchema = z.object({
   sellerId: z.string().trim().min(1),
-  cities: z.array(territoryCityInputSchema).max(500)
+  cities: z.array(territoryCityInputSchema).max(500),
+  snapshotToken: z.string().trim().min(1),
+  transferableCityIds: z.array(z.string().trim().min(1)).max(500).default([])
 });
 
 const territoryTransferSchema = z.object({
   sourceSellerId: z.string().trim().min(1),
   destinationSellerId: z.string().trim().min(1),
-  cityIds: z.array(z.string().trim().min(1)).min(1).max(500)
+  cityIds: z.array(z.string().trim().min(1)).min(1).max(500),
+  snapshotToken: z.string().trim().min(1).optional()
 });
+
+const territorySnapshotToken = (tenantId: string, destinationSellerId: string, rows: Array<{ id: string; sellerId: string; updatedAt: Date }>) => createHash("sha256")
+  .update(JSON.stringify({ tenantId, destinationSellerId, rows: rows.map((row) => [row.id, row.sellerId, row.updatedAt.toISOString()]).sort() }))
+  .digest("hex");
 
 const decodeXmlEntities = (value: string) => value
   .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
@@ -10068,7 +10077,7 @@ const resolveOfficialCityFromPlacemarkName = async (name: string) => {
 const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: string[], tenantId: string) => {
   const existingCities = await prisma.sellerTerritoryCity.findMany({
     where: { tenantId },
-    select: { sellerId: true, city: true, state: true, ibgeCode: true, seller: { select: { id: true, name: true, isActive: true } } }
+    select: { id: true, sellerId: true, city: true, state: true, ibgeCode: true, updatedAt: true, seller: { select: { id: true, name: true, isActive: true } } }
   });
   const existingByKey = new Map(existingCities.map((city) => [getTerritoryCityStableKey(city), city]));
   const seenInFile = new Set<string>();
@@ -10094,7 +10103,7 @@ const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: 
       continue;
     }
     if (existing && existing.sellerId !== sellerId) {
-      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: "conflict", sellerName: existing.seller.name, message: existing.seller.isActive ? `Esta cidade já está vinculada ao vendedor ${existing.seller.name}.` : `Território vinculado a vendedor inativo — transferência necessária (${existing.seller.name}).` });
+      items.push({ sourceName, city: officialCity.city, state: officialCity.state, ibgeCode: officialCity.ibgeCode, status: existing.seller.isActive ? "conflict" : "inactive_transfer", territoryCityId: existing.id, sellerId: existing.sellerId, sellerName: existing.seller.name, message: existing.seller.isActive ? `Esta cidade já está vinculada ao vendedor ativo ${existing.seller.name}; a importação está bloqueada.` : `Transferível de vendedor inativo: ${existing.seller.name}. A confirmação moverá somente o vínculo territorial.` });
       continue;
     }
 
@@ -10106,12 +10115,14 @@ const buildTerritoryKmlImportPreview = async (sellerId: string, placemarkNames: 
     valid: items.filter((item) => item.status !== "not_found").length,
     alreadySeller: items.filter((item) => item.status === "already_seller").length,
     linkedToOtherSeller: items.filter((item) => item.status === "conflict").length,
+    transferableFromInactive: items.filter((item) => item.status === "inactive_transfer").length,
     notFound: items.filter((item) => item.status === "not_found").length,
     duplicateInFile: items.filter((item) => item.status === "duplicate_file").length,
     toAdd: items.filter((item) => item.status === "to_add").length
   };
 
-  return { summary, items, citiesToAdd: items.filter((item) => item.status === "to_add").map((item) => ({ city: item.city!, state: item.state!, ibgeCode: item.ibgeCode })) };
+  const transferableRows = existingCities.filter((row) => items.some((item) => item.status === "inactive_transfer" && item.territoryCityId === row.id));
+  return { summary, items, citiesToAdd: items.filter((item) => item.status === "to_add").map((item) => ({ city: item.city!, state: item.state!, ibgeCode: item.ibgeCode })), transferableCityIds: transferableRows.map((row) => row.id), snapshotToken: territorySnapshotToken(tenantId, sellerId, transferableRows) };
 };
 
 const OPEN_TERRITORY_OPPORTUNITY_STAGES = [OpportunityStage.prospeccao, OpportunityStage.negociacao, OpportunityStage.proposta] as const;
@@ -10284,19 +10295,29 @@ router.get("/territories/config/sellers", authorize("diretor", "gerente"), async
   const actor = await getTerritoryActor(req);
   if (!actor) return res.status(401).json({ message: "Não autenticado" });
   const tenantId = await getTerritoryTenantId(actor.id);
+  // Users created after the tenancy backfill used to miss their membership. Repair is safe
+  // only in a provably single-tenant installation; ambiguous installations remain blocked.
+  const activeTenants = await prisma.tenant.findMany({ where: { status: "active" }, select: { id: true }, take: 2 });
+  if (activeTenants.length === 1 && activeTenants[0].id === tenantId) {
+    const unscoped = await prisma.user.findMany({ where: { isActive: true, tenantMemberships: { none: {} } }, select: { id: true, role: true } });
+    if (unscoped.length) await prisma.tenantMembership.createMany({ data: unscoped.map((user) => ({ id: randomUUID(), tenantId, userId: user.id, role: user.role, status: "active", version: 1, acceptedAt: new Date() })), skipDuplicates: true });
+  }
 
   const users = await prisma.user.findMany({
     where: {
       role: "vendedor",
-      tenantMemberships: { some: { tenantId, status: "active" } },
       ...(actor.role === "gerente" && actor.region?.trim() && !isNationalTerritoryRegion(actor.region) ? { region: actor.region } : {}),
-      OR: [{ isActive: true }, { territoryCities: { some: { tenantId } } }]
+      OR: [
+        { tenantMemberships: { some: { tenantId, status: "active" } } },
+        { isActive: false, territoryCities: { some: { tenantId } } }
+      ]
     },
-    select: { id: true, name: true, role: true, region: true, isActive: true },
+    select: { id: true, name: true, role: true, region: true, isActive: true, _count: { select: { territoryCities: { where: { tenantId } } } } },
     orderBy: { name: "asc" }
   });
-  return res.json(users.map((seller) => ({
+  return res.json(users.map(({ _count, ...seller }) => ({
     ...seller,
+    territoryCount: _count.territoryCities,
     canEdit: seller.isActive && (actor.role === "diretor" || actor.role === "gerente"),
     canTransfer: actor.role === "diretor" || actor.role === "gerente",
     territoryWarning: seller.isActive ? null : "Território vinculado a vendedor inativo — transferência necessária"
@@ -10338,19 +10359,21 @@ router.post("/territories/config/transfers/preview", authorize("diretor", "geren
     const [sourceAccess, destinationAccess, source, destination] = await Promise.all([
       assertTerritorySellerAccess(req, sourceSellerId, "edit"),
       assertTerritorySellerAccess(req, destinationSellerId, "edit"),
-      prisma.user.findFirst({ where: { id: sourceSellerId, role: "vendedor", tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true, name: true, isActive: true } }),
+      prisma.user.findFirst({ where: { id: sourceSellerId, role: "vendedor", OR: [{ tenantMemberships: { some: { tenantId } } }, { territoryCities: { some: { tenantId } } }] }, select: { id: true, name: true, isActive: true } }),
       prisma.user.findFirst({ where: { id: destinationSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true, name: true } })
     ]);
     if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
     if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
     if (!source || !destination) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
     const cities = await prisma.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: [{ state: "asc" }, { city: "asc" }] });
+    if (cities.length !== cityIds.length) return res.status(409).json({ message: "A origem mudou durante a prévia; nenhuma cidade foi transferida." });
     const conflicts = [] as Array<{ cityId: string; city: string; state: string; sellerId: string; sellerName: string }>;
     for (const city of cities) {
       const conflict = await prisma.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, tenantId, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { sellerId: true, seller: { select: { id: true, name: true } } } });
       if (conflict && conflict.seller.id !== destinationSellerId) conflicts.push({ cityId: city.id, city: city.city, state: city.state, sellerId: conflict.seller.id, sellerName: conflict.seller.name });
     }
-    return res.json({ source, destination, requested: cityIds.length, transferable: cities.filter((city) => !conflicts.some((conflict) => conflict.cityId === city.id)).map(toTerritoryCityResponse), conflicts });
+    const snapshotRows = await prisma.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, tenantId }, select: { id: true, sellerId: true, updatedAt: true } });
+    return res.json({ source, destination, requested: cityIds.length, transferable: cities.filter((city) => !conflicts.some((conflict) => conflict.cityId === city.id)).map(toTerritoryCityResponse), conflicts, snapshotToken: territorySnapshotToken(tenantId, destinationSellerId, snapshotRows) });
   } catch (error: any) { return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível gerar a prévia da transferência." }); }
 });
 
@@ -10358,26 +10381,30 @@ router.post("/territories/config/transfers/confirm", authorize("diretor", "geren
   try {
     const tenantId = await getTerritoryTenantId(req.user!.id);
     const { sourceSellerId, destinationSellerId, cityIds } = req.body;
+    if (!req.body.snapshotToken) return res.status(400).json({ message: "Gere uma nova prévia antes de confirmar." });
     if (sourceSellerId === destinationSellerId) return res.status(400).json({ message: "Origem e destino devem ser vendedores diferentes." });
-    const [sourceAccess, destinationAccess, sourceMembership, destinationMembership] = await Promise.all([
+    const [sourceAccess, destinationAccess, destinationMembership] = await Promise.all([
       assertTerritorySellerAccess(req, sourceSellerId, "edit"),
       assertTerritorySellerAccess(req, destinationSellerId, "edit"),
-      prisma.tenantMembership.findFirst({ where: { userId: sourceSellerId, tenantId, status: "active" }, select: { id: true } }),
       prisma.tenantMembership.findFirst({ where: { userId: destinationSellerId, tenantId, status: "active" }, select: { id: true } })
     ]);
     if (!sourceAccess.allowed) return res.status(sourceAccess.status).json({ message: sourceAccess.message });
     if (!destinationAccess.allowed) return res.status(destinationAccess.status).json({ message: destinationAccess.message });
-    if (!sourceMembership || !destinationMembership || !destinationAccess.seller.isActive) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
+    if (!destinationMembership || !destinationAccess.seller.isActive) return res.status(409).json({ message: "Origem e destino devem pertencer ao mesmo tenant; o destino deve estar ativo." });
     const moved = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`territory-transfer:${tenantId}`}))`;
       const cities = await tx.sellerTerritoryCity.findMany({ where: { id: { in: cityIds }, sellerId: sourceSellerId, tenantId }, orderBy: { id: "asc" } });
+      const destinationNow = await tx.user.findFirst({ where: { id: destinationSellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true } });
+      if (!destinationNow) throw Object.assign(new Error("O destino foi desativado ou mudou de tenant; nenhuma cidade foi transferida."), { status: 409 });
+      if (cities.length !== cityIds.length || territorySnapshotToken(tenantId, destinationSellerId, cities) !== req.body.snapshotToken) throw Object.assign(new Error("O território mudou após a prévia; nenhuma cidade foi transferida."), { status: 409 });
       for (const city of cities) {
         const thirdParty = await tx.sellerTerritoryCity.findFirst({ where: { id: { not: city.id }, sellerId: { notIn: [sourceSellerId, destinationSellerId] }, tenantId, state: city.state, OR: [{ ibgeCode: city.ibgeCode || undefined }, { city: { equals: city.city, mode: "insensitive" } }] }, select: { seller: { select: { name: true } } } });
         if (thirdParty) throw Object.assign(new Error(`Conflito real: ${city.city}/${city.state} pertence a ${thirdParty.seller.name}.`), { status: 409 });
       }
       if (!cities.length) return [];
       await Promise.all(cities.map((city) => tx.sellerTerritoryCity.update({ where: { id: city.id }, data: { sellerId: destinationSellerId } })));
-      await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: sourceSellerId, description: `Transferência de território: ${cities.length} cidade(s) de ${sourceAccess.seller.name} para ${destinationAccess.seller.name}; operador=${req.user!.id}; tenant=${tenantId}.` } });
+      const correlationId = randomUUID();
+      await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: sourceSellerId, description: `Auditoria de transferência territorial [${correlationId}]: ${cities.length} cidade(s) de ${sourceAccess.seller.name} para ${destinationAccess.seller.name}; ator=${req.user!.id}.` } });
       return cities;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return res.json({ moved: moved.length, idempotent: moved.length === 0, sourceSellerId, destinationSellerId, cityIds: moved.map((city) => city.id) });
@@ -10413,36 +10440,47 @@ router.post("/territories/config/import-kml-confirm", authorize("diretor", "gere
   const { sellerId } = req.body;
   const access = await assertTerritorySellerAccess(req, sellerId, "edit");
   if (!access.allowed) return res.status(access.status).json({ message: access.message });
+  if (!access.seller.isActive) return res.status(409).json({ message: "Vendedor inativo não pode receber novos territórios." });
+  const tenantId = await getTerritoryTenantId(req.user!.id);
+  const destinationMembership = await prisma.tenantMembership.findFirst({ where: { userId: sellerId, tenantId, status: "active" }, select: { id: true } });
+  if (!destinationMembership) return res.status(409).json({ message: "O destino não pertence ao tenant da operação." });
 
   const officialValidation = await validateOfficialTerritoryCities(req.body.cities);
   if (officialValidation.errors.length > 0) return res.status(400).json({ message: officialValidation.errors[0], errors: officialValidation.errors });
-
-  const existingCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId }, select: { state: true, city: true, ibgeCode: true } });
-  const existingKeys = new Set(existingCities.map((city) => getTerritoryCityStableKey(city)));
-  const citiesToCreate: OfficialTerritoryCity[] = [];
-
-  for (const city of officialValidation.cities) {
-    const key = getTerritoryCityStableKey(city);
-    if (existingKeys.has(key)) continue;
-    const conflict = await findTerritoryCityLinkedToOtherSeller(sellerId, city.state, city.city, city.ibgeCode);
-    if (conflict) return res.status(409).json({ message: getTerritoryCityConflictMessage(conflict.seller.name) });
-    existingKeys.add(key);
-    citiesToCreate.push(city);
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`territory-transfer:${tenantId}`}))`;
+      const transferable = await tx.sellerTerritoryCity.findMany({ where: { id: { in: req.body.transferableCityIds }, tenantId }, select: { id: true, sellerId: true, updatedAt: true, seller: { select: { name: true, isActive: true } } } });
+      const destinationNow = await tx.user.findFirst({ where: { id: sellerId, role: "vendedor", isActive: true, tenantMemberships: { some: { tenantId, status: "active" } } }, select: { id: true } });
+      if (!destinationNow) throw Object.assign(new Error("O destino foi desativado ou mudou de tenant; nenhuma cidade foi importada."), { status: 409 });
+      if (transferable.length !== req.body.transferableCityIds.length || transferable.some((row) => row.seller.isActive) || territorySnapshotToken(tenantId, sellerId, transferable) !== req.body.snapshotToken) {
+        throw Object.assign(new Error("Os vínculos mudaram após a prévia; nenhuma cidade foi importada ou transferida."), { status: 409 });
+      }
+      const allTenantCities = await tx.sellerTerritoryCity.findMany({ where: { tenantId }, select: { id: true, sellerId: true, state: true, city: true, ibgeCode: true } });
+      const transferableIds = new Set(transferable.map((row) => row.id));
+      const destinationKeys = new Set(allTenantCities.filter((row) => row.sellerId === sellerId).map(getTerritoryCityStableKey));
+      const citiesToCreate: OfficialTerritoryCity[] = [];
+      for (const city of officialValidation.cities) {
+        const key = getTerritoryCityStableKey(city);
+        if (destinationKeys.has(key)) continue;
+        const conflicting = allTenantCities.find((row) => row.sellerId !== sellerId && !transferableIds.has(row.id) && getTerritoryCityStableKey(row) === key);
+        if (conflicting) throw Object.assign(new Error("Conflito com outro vendedor detectado; nenhuma cidade foi importada."), { status: 409 });
+        destinationKeys.add(key);
+        citiesToCreate.push(city);
+      }
+      if (transferable.length) await tx.sellerTerritoryCity.updateMany({ where: { id: { in: transferable.map((row) => row.id) }, tenantId }, data: { sellerId } });
+      if (citiesToCreate.length) await tx.sellerTerritoryCity.createMany({ data: citiesToCreate.map((city) => ({ sellerId, tenantId, ...city })) });
+      if (transferable.length) {
+        const origins = [...new Set(transferable.map((row) => row.seller.name))].join(", ");
+        await tx.timelineEvent.create({ data: { type: "status", ownerSellerId: transferable[0].sellerId, description: `Auditoria de transferência territorial [${randomUUID()}]: ${transferable.length} cidade(s) de ${origins} para ${access.seller.name}; ator=${req.user!.id}.` } });
+      }
+      return { created: citiesToCreate.length, transferred: transferable.length };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    const savedCities = await prisma.sellerTerritoryCity.findMany({ where: { sellerId, tenantId }, orderBy: [{ state: "asc" }, { city: "asc" }] });
+    return res.status(201).json({ ...result, cities: savedCities.map(toTerritoryCityResponse) });
+  } catch (error: any) {
+    return res.status(error?.status || 500).json({ message: error?.message || "Não foi possível confirmar a importação." });
   }
-
-  if (citiesToCreate.length > 0) {
-    await prisma.sellerTerritoryCity.createMany({
-      data: citiesToCreate.map((city) => ({ sellerId, ...city })),
-      skipDuplicates: true
-    });
-  }
-
-  const savedCities = await prisma.sellerTerritoryCity.findMany({
-    where: { sellerId },
-    orderBy: [{ state: "asc" }, { city: "asc" }]
-  });
-
-  return res.status(201).json({ created: citiesToCreate.length, cities: savedCities.map(toTerritoryCityResponse) });
 });
 
 router.get("/territories/config/cities", authorize("diretor", "gerente"), async (req, res) => {
@@ -11123,8 +11161,11 @@ router.post("/users", authorize("diretor", "gerente"), validateBody(userCreateSc
   const erpLoginPasswordEncrypted = typeof erpLoginPassword === "string" && erpLoginPassword.trim()
     ? encryptErpCredential(erpLoginPassword)
     : null;
+  const tenantId = await getTerritoryTenantId(req.user!.id);
   const user = await prisma.user.create({
-    data: { name, email, passwordHash, role, region, erpCode: erpOption?.code ?? erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted },
+    data: { name, email, passwordHash, role, region, erpCode: erpOption?.code ?? erpCode ?? null, erpOperatorCode: erpOperatorCode ?? erpOption?.erpOperatorCode ?? null, erpRawPayload: erpOption?.raw ? sanitizeErpRawPayload(erpOption.raw) as Prisma.InputJsonValue : undefined, erpLoginUsername: erpLoginUsername ?? null, erpLoginPasswordEncrypted,
+      tenantMemberships: { create: { id: randomUUID(), tenantId, role, status: "active", version: 1, acceptedAt: new Date() } }
+    },
     select: userListSelect
   });
   return res.status(201).json({ success: true, message: "Usuário criado com sucesso.", data: sanitizeUserForList(user) });
