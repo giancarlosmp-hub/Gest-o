@@ -82,6 +82,19 @@ validate_schema_evidence(){
   SCHEMA_EVIDENCE_MIGRATION=$evidence_migration
 }
 
+# Evidence proves the database state produced by its original commit.  It may
+# authorize a later application commit only when both commits exist and Git
+# proves that the complete Prisma tree is identical.  validate_schema_evidence
+# remains first so equivalence can never promote an incomplete or tampered
+# bundle.
+validate_schema_evidence_for_commit(){
+  local applied=$1 current_commit=$2
+  validate_schema_evidence "$applied" || return 1
+  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git cat-file -e "$current_commit^{commit}" 2>/dev/null || return 1
+  git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$current_commit" -- apps/api/prisma || return 1
+}
+
 # Validate the complete TENANCY_EXPAND_ROOTS_V1 bundle.  result.tsv is only one
 # member of this contract and is deliberately never accepted on its own.
 validate_tenancy_expand_roots_evidence(){

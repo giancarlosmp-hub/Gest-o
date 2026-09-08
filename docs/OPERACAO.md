@@ -2,7 +2,7 @@
 
 O apply #26 (`34243463045`) aplicou e pós-validou `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`, mas publicou o diretório do SHA com modo 755; a primeira verificação do consumidor exige diretório real `root:700`, antes de validar os arquivos regulares `root:600`. Por isso o Deploy Production #152 (`34243608671`) parou em `DEPLOY_FAILURE_STAGE=deploy_script`, antes de qualquer `docker stop`. Nenhum container foi parado/recriado e nenhum cutover foi feito.
 
-Depois — e somente depois — do merge da correção e de todos os checks da nova main: execute `Deploy Production` em `phase=build` para o novo SHA; prepare backup fresco apenas se o preflight exigir; execute `Production Schema PR827` em apply homologado para Pedidos e confirmação `PRODUCTION_SCHEMA_APPLY`. Esse caminho detecta `tenantId` já presente, não repete DDL, repete as pós-validações e publica por último `applied.tsv` protegido para o novo SHA; confirme a aceitação pelo validador compartilhado. Então solicite nova aprovação humana do environment `production-cutover` e execute um novo cutover. Não use Recovery, SQL manual nem chmod/cópia manual para reparar o bundle anterior.
+Depois — e somente depois — do merge da correção e de todos os checks da nova main: execute `Deploy Production` em `phase=build` para o novo SHA e prepare backup fresco apenas se o preflight exigir. Quando `apps/api/prisma` for Git-equivalente ao SHA produtor de um `applied.tsv` integralmente válido, reutilize essa evidência no cutover normal; **não execute Production Schema PR827 apenas para republicá-la sob o novo SHA**. O consumidor ainda revalida catálogo e diff Prisma ao vivo antes de qualquer parada. Não use Recovery, SQL manual nem chmod/cópia manual para reparar evidência.
 
 ## Operação segura — diagnóstico dos 226 pedidos históricos (08/09/2026)
 
@@ -29,7 +29,7 @@ A auditoria estática do contrato 3.0 confirmou `Contact` como fonte de telefone
 
 ## Deploy de produção: evidência equivalente de schema (03/09/2026)
 
-`Deploy Production` tem modos `build` (preflight/imagens, sem parar containers) e `cutover` (environment aprovado e troca controlada). Para o bundle protegido de `tenancy expand roots`, o cutover agora procura primeiro o SHA atual e depois bundles históricos completos; um histórico só é reutilizado se passar owner/mode/symlink/allowlist de arquivos, metadata, migration ID, checksums, result, catálogo e filtro do post-diff e se `apps/api/prisma` não mudou entre os SHAs. O Prisma diff ao vivo permanece obrigatório. Aplicação, frontend e documentação não demandam nova migration. Não execute schema/Recovery por tentativa nem fabrique evidência. Sequência, gates, pós-checks e rollback estão em `DOCUMENTO_MESTRE.md`.
+`Deploy Production` tem modos `build` (preflight/imagens, sem parar containers) e `cutover` (environment aprovado e troca controlada). Tanto o bundle protegido de `tenancy expand roots` quanto o `applied.tsv` de Pedidos podem ser reutilizados de um SHA histórico somente após validação integral contra o produtor e equivalência Git de toda `apps/api/prisma`; ambos os commits devem existir. Owner, mode, arquivos regulares, ausência de symlink, migration, checksum, catálogo aplicável e Prisma diff ao vivo permanecem obrigatórios. Aplicação, frontend e documentação não demandam nova migration nem nova evidência. Não execute schema/Recovery por tentativa nem fabrique evidência.
 
 ## INC-ERP-5050 — reconciliação read-only após as PRs #826, #849 e #850 (03/09/2026)
 

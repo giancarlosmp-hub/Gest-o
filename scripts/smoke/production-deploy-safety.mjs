@@ -72,37 +72,13 @@ assert.match(schemaEvidence,/schema_protected_file "\$evidence_dir\/post-apply-d
 assert.match(schemaEvidence,/! -e "\$evidence_dir\/post-apply-diff\.sql"/);
 assert.match(deploy,/schema-diff-filter\.mjs "\$schema_validation_tmp\/raw\.sql" "\$schema_validation_tmp\/managed\.sql" post/);
 assert.match(deploy,/\[\[ ! -s "\$schema_validation_tmp\/managed\.sql" \]\]/);
-const allowlistCase = deploy.match(/is_schema_evidence_operational_path\(\)\{[\s\S]*?\n\}/)?.[0] ?? "";
-assert.ok(allowlistCase, "função da allowlist operacional ausente");
-const operationalAllowlist = [
-  ".github/workflows/prepare-canonical-production-env.yml",
-  "docs/DEPLOY_GUIDE.md",
-  "docs/DOCUMENTO_MESTRE.md",
-  "docs/OPERACAO.md",
-  "docs/STATUS_ATUAL.md",
-  "docs/investigations/production-schema-transition-july-2026.md",
-  "package.json",
-  "scripts/deploy-production.sh",
-  "scripts/prepare-canonical-production-env.sh",
-  "scripts/production-rollback.sh",
-  "scripts/schema-evidence-validation.sh",
-  "scripts/smoke/prepare-canonical-production-env-safety.sh",
-  "scripts/smoke/production-deploy-safety.mjs",
-  "scripts/smoke/schema-evidence-validation.sh",
-];
-const casePaths = (allowlistCase.match(/^    (.+)\) return 0 ;;$/m)?.[1] ?? "").split("|");
-assert.deepEqual(casePaths, operationalAllowlist, "allowlist deve conter somente os caminhos operacionais exatos");
-for (const path of operationalAllowlist) assert.ok(casePaths.includes(path), `allowlist rejeitou ${path}`);
-for (const path of [
-  "apps/api/src/app.ts",
-  "apps/web/src/App.tsx",
-  "apps/api/prisma/schema.prisma",
-  "apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql",
-  "docker-compose.production.yml",
-  ".github/workflows/deploy-production.yml",
-]) assert.ok(!casePaths.includes(path), `allowlist aceitou caminho proibido: ${path}`);
-assert.match(deploy,/log "evidência rejeitada: arquivos fora da allowlist:"/);
-assert.match(deploy,/printf '%s\\n' "\$blocked_paths" >&2/);
+assert.doesNotMatch(deploy,/is_schema_evidence_operational_path|blocked_paths|arquivos fora da allowlist/);
+assert.match(deploy,/validate_schema_evidence_for_commit "\$candidate" "\$APP_COMMIT"/);
+const equivalentEvidence = schemaEvidence.match(/validate_schema_evidence_for_commit\(\)\{[\s\S]*?\n\}/)?.[0] ?? "";
+assert.ok(equivalentEvidence, "validador de equivalência do applied.tsv ausente");
+assert.ok(equivalentEvidence.indexOf('validate_schema_evidence "$applied"') < equivalentEvidence.indexOf('git diff --quiet'), "evidência original deve validar antes da equivalência");
+assert.match(equivalentEvidence,/git cat-file -e "\$current_commit\^\{commit\}"/);
+assert.match(equivalentEvidence,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$current_commit" -- apps\/api\/prisma/);
 assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
 const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
 for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {
