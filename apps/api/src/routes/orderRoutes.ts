@@ -1,10 +1,11 @@
 import { Router, type Request } from "express";
+import { randomUUID } from "node:crypto";
 import { ErpOrderSyncStatus, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
-import { sanitizeErpOrderErrorMessage } from "../services/erpOrderService.js";
+import { sanitizeErpOrderErrorMessage, syncErpOrderStatuses } from "../services/erpOrderService.js";
 
 const router = Router();
 router.use(authMiddleware, appUsageRateLimit);
@@ -21,10 +22,12 @@ const object = (value: unknown): Record<string, unknown> => value && typeof valu
 const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
 const first = (row: Record<string, unknown>, keys: string[]) => keys.map((key) => row[key]).find((value) => value !== undefined && value !== null && String(value).trim() !== "");
 const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
+const nullableNumber = (value: unknown) => value === undefined || value === null || String(value).trim() === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const text = (value: unknown) => value === undefined || value === null ? null : String(value).trim() || null;
-const responseRoot = (value: unknown) => {
-  const root = object(value); const nested = object(root.data || root.result || root.pedido || root.order);
-  return Object.keys(nested).length ? nested : root;
+const responseRoot = (value: unknown): Record<string, unknown> => {
+  if (Array.isArray(value)) return object(value[0]);
+  const root = object(value); const nested = root.response ?? root.data ?? root.result ?? root.pedido ?? root.order;
+  return nested === undefined ? root : responseRoot(nested);
 };
 const statusGroup = (sync: string, operational: string | null, fulfillment: string | null) => {
   if (sync === "error") return "error";
@@ -50,13 +53,13 @@ const serialize = (order: any) => {
   const payload = object(order.payloadSent); const erp = responseRoot(order.erpResponse); const statusPayload = responseRoot(order.lastStatusPayload);
   const source = Object.keys(statusPayload).length ? statusPayload : erp;
   const ordered = number(first(source, ["QTD_PEDIDO"]) ?? first(payload, ["QTD_PEDIDO"]));
-  const billed = number(first(source, ["QTD_FATURADO"])); const shipped = number(first(source, ["QTD_EXPEDIDO"]));
-  const cancelled = number(first(source, ["QTD_CANCELADO"])); const pending = number(first(source, ["QTD_AEXPEDIR"]));
+  const billed = nullableNumber(first(source, ["QTD_FATURADO"])); const shipped = nullableNumber(first(source, ["QTD_EXPEDIDO"]));
+  const cancelled = nullableNumber(first(source, ["QTD_CANCELADO"])); const pending = nullableNumber(first(source, ["QTD_AEXPEDIR"]));
   const operational = order.operationalStatusRaw || text(first(source, ["SITUACAO_PEDIDO", "situacao", "status"]));
   return {
     id: order.id, internalNumber: order.numPedido, erpOrderId: order.erpOrderId, erpOrderNumber: order.erpOrderNumber,
     importId: order.pedidoIdImportacao, createdAt: order.createdAt, expectedDeliveryDate: first(payload, ["DATA_PREV_ENTREGA"]),
-    lastSyncAt: order.statusSyncedAt || order.sentAt || order.updatedAt, syncStatus: order.status,
+    lastSyncAt: order.statusSyncedAt, syncStatus: order.status,
     opportunityStatus: order.opportunity.stage, operationalOrderStatus: order.operationalOrderStatus,
     requestAuthorizationStatus: order.requestAuthorizationStatus,
     fulfillmentStatus: order.orderStatus, operationalStatus: operational, statusGroup: statusGroup(order.status, operational, order.orderStatus),
@@ -89,15 +92,28 @@ router.get("/orders", async (req, res) => {
 });
 
 router.get("/orders/:id", async (req, res) => {
+  const correlationId = randomUUID();
   try {
     const tenantId = await tenantIdFor(req);
     const order = await prisma.erpOrderSync.findFirst({ where: { id: req.params.id, ...baseWhere(req, tenantId) }, include: { seller: { select: { id: true, name: true } }, statusHistory: { orderBy: { occurredAt: "desc" } }, opportunity: { select: { id: true, title: true, stage: true, value: true, notes: true, client: { select: { id: true, code: true, name: true, fantasyName: true } }, items: { orderBy: { lineNumber: "asc" } } } } } });
-    if (!order) return res.status(404).json({ message: "Pedido não encontrado" });
-    const payload = object(order.payloadSent); const erp = responseRoot(order.erpResponse); const erpItems = array(first(erp, ["ITENS", "itens"])).map(object);
+    if (!order) return res.status(404).json({ message: "Pedido não encontrado", correlationId });
+    const payload = object(order.payloadSent); const erp = responseRoot(order.lastStatusPayload || order.erpResponse); const erpItems = array(first(erp, ["ITENS", "itens"])).map(object);
     const itemByLine = new Map(erpItems.map((item) => [number(first(item, ["ITEM", "item"])), item]));
-    const items = order.opportunity.items.map((item) => { const remote = itemByLine.get(item.lineNumber) || {}; return { id: item.id, lineNumber: item.lineNumber, productCode: item.erpProductCode, productClassCode: item.erpProductClassCode, description: item.productNameSnapshot, unit: item.unit, quantities: { ordered: item.quantity, billed: number(first(remote, ["QTD_FATURADO"])), shipped: number(first(remote, ["QTD_EXPEDIDO"])), cancelled: number(first(remote, ["QTD_CANCELADO"])), pending: number(first(remote, ["QTD_AEXPEDIR"])) }, values: { unit: item.unitPrice, gross: item.grossTotal, discount: item.discountTotal, net: item.netTotal } }; });
+    const items = order.opportunity.items.map((item) => { const remote = itemByLine.get(item.lineNumber) || {}; return { id: item.id, lineNumber: item.lineNumber, productCode: item.erpProductCode, productClassCode: item.erpProductClassCode, description: item.productNameSnapshot, unit: item.unit, quantities: { ordered: item.quantity, billed: nullableNumber(first(remote, ["QTD_FATURADO"])), shipped: nullableNumber(first(remote, ["QTD_EXPEDIDO"])), cancelled: nullableNumber(first(remote, ["QTD_CANCELADO"])), pending: nullableNumber(first(remote, ["QTD_AEXPEDIR"])) }, values: { unit: item.unitPrice, gross: item.grossTotal, discount: item.discountTotal, net: item.netTotal } }; });
     return res.json({ ...serialize(order), notes: text(first(payload, ["OBS_PEDIDO"])), items, history: order.statusHistory.map((event) => ({ ...event, errorMessage: event.errorMessage ? sanitizeErpOrderErrorMessage(event.errorMessage) : null })), errors: order.syncErrors ? [{ message: sanitizeErpOrderErrorMessage(first(object(array(order.syncErrors)[0]), ["message"]) || "Falha de sincronização"), at: order.statusSyncedAt || order.updatedAt }] : [] });
-  } catch (error) { return res.status((error as any)?.status || 500).json({ message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error) }); }
+  } catch (error) { return res.status((error as any)?.status || 500).json({ message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error), correlationId }); }
+});
+
+router.post("/orders/:id/status-consultation", async (req, res) => {
+  const correlationId = randomUUID();
+  try {
+    const tenantId = await tenantIdFor(req);
+    const order = await prisma.erpOrderSync.findFirst({ where: { id: req.params.id, ...baseWhere(req, tenantId) }, select: { id: true } });
+    if (!order) return res.status(404).json({ message: "Pedido não encontrado", correlationId });
+    const result = await syncErpOrderStatuses(undefined, order.id);
+    if (result.errorCount > 0 && result.syncedCount === 0) return res.status(502).json({ message: "A consulta ao UltraFV3 falhou; o último estado conhecido foi preservado.", correlationId });
+    return res.json({ ...result, correlationId });
+  } catch (error) { return res.status((error as any)?.status || 502).json({ message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error), correlationId }); }
 });
 
 export default router;

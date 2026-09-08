@@ -765,3 +765,15 @@ O job Preview Deploy referencia o Environment `preview`. Um owner autorizado dev
 ## PR #856 — configuração mínima do preview e identidade do build (05/09/2026)
 
 No Environment GitHub `preview`, configure somente `PREVIEW_AUTH_PASSWORD` com senha forte exclusiva e compartilhe-a pelo gerenciador privado. O email é derivado como `pr<numero>@preview.local`. O workflow transporta a senha como variável mascarada, não a grava no `.env`, fornece-a ao seed como `PREVIEW_SEED_PASSWORD` e falha sanitizado quando ausente. Depois do deploy, `/health/version.commit` e `/build-info.json.commit` devem ser idênticos a `github.sha`; uma implantação anterior ainda acessível não satisfaz o gate.
+
+## Deploy da correção pós-cutover de Pedidos (08/09/2026)
+
+Esta entrega é somente aplicação e **não possui migration**. Após merge e checks, usar o build/cutover canônico já documentado, sem criar workflow/environment, sem schema apply e sem habilitar `ERP_SYNC_SCHEDULER_ENABLED`. O smoke posterior deve seguir a reconciliação unitária de `OPERACAO.md`: recarregar lista (somente banco), consultar status explicitamente, verificar `correlationId`, ausência de `POST /orders`, isolamento de vendedor e idempotência do histórico.
+
+Critérios de rollback: regressão de autorização/tenant, emissão de `POST /orders`, perda do último estado em falha, histórico duplicado ou erro não contido no detalhe. NF-e permanece fora do deploy até existir endpoint oficial, chave pedido–nota, cardinalidade, cancelamento/parcial e permissão de leitura comprovados.
+
+## Entrega do ciclo de desligamento de vendedores (08/09/2026)
+
+A alteração reutiliza API, autenticação, Territórios, Timeline e sincronização UltraFV3 existentes; não cria workflow/environment. Não há migration: a auditoria usa Timeline existente e a transferência atualiza `SellerTerritoryCity` dentro de transação. Após merge, executar build/cutover canônico sem schema apply adicional e seguir exclusivamente o procedimento de `OPERACAO.md`.
+
+Gates pós-cutover: inativo visível em Territórios; prévia antes da confirmação; destino ativo/mesmo tenant; conflito de terceiro bloqueado; segunda execução idempotente; KML sinalizando origem inativa; histórico sem reatribuição; oportunidade aberta ainda em Edirlei até ação; cliente ERP sem duplicação; token antigo HTTP 401; status histórico GET-only funcionando. Reverter a aplicação se qualquer gate de tenant, autoria, idempotência ou autenticação falhar. Não executar merge, deploy ou cutover nesta entrega.

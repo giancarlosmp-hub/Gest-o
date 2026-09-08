@@ -1,8 +1,9 @@
 import { NextFunction, Request, Response } from "express";
 import { verifyAccessToken } from "../utils/jwt.js";
 import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath } from "../utils/erpOrderFailureResponse.js";
+import { prisma } from "../config/prisma.js";
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   const erpOrderRequest = isErpOrderEndpointPath(req.method, req.path);
   if (!header?.startsWith("Bearer ")) {
@@ -22,7 +23,9 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
   }
   try {
     const decoded = verifyAccessToken(header.slice(7)) as Express.UserPayload;
-    req.user = decoded;
+    const activeUser = await prisma.user.findFirst({ where: { id: decoded.id, isActive: true }, select: { id: true, email: true, role: true, region: true } });
+    if (!activeUser) return res.status(401).json({ message: "Usuário inativo ou removido" });
+    req.user = activeUser;
     next();
   } catch {
     if (erpOrderRequest) {

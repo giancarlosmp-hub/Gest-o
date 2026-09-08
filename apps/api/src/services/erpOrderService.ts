@@ -1842,13 +1842,16 @@ const collectReconciliationRecords = (payload: unknown) => {
 /** Classifies only an exact, identifier-bound UltraFV3 result. Empty/unmatched results are never proof of non-creation. */
 export function classifyUltraFv3OrderLookup(
   payload: unknown,
-  expected: { pedidoIdImportacao: string; numPedido?: string | null },
+  expected: { pedidoIdImportacao: string; numPedido?: string | null; erpOrderId?: string | null; erpOrderNumber?: string | null },
 ): { outcome: ErpOrderReconciliationOutcome; matched: boolean; erpOrderNumber: string | null; orderStatus: ErpOrderFulfillmentStatus | null } {
   const records = collectReconciliationRecords(payload);
   const matching = records.find((record) => {
     const importId = pickFirstString(record, RECONCILIATION_IMPORT_ID_KEYS);
     const numPedido = pickFirstString(record, RECONCILIATION_ORDER_NUMBER_KEYS);
-    return importId === expected.pedidoIdImportacao || Boolean(expected.numPedido && numPedido === expected.numPedido);
+    const erpOrderId = pickFirstString(record, ["PEDIDO_ID", "pedidoId", "ID_PEDIDO", "idPedido"]);
+    return importId === expected.pedidoIdImportacao
+      || Boolean(expected.erpOrderId && erpOrderId === expected.erpOrderId)
+      || Boolean((expected.erpOrderNumber || expected.numPedido) && numPedido === (expected.erpOrderNumber || expected.numPedido));
   });
   if (!matching) return { outcome: "unknown", matched: false, erpOrderNumber: null, orderStatus: null };
 
@@ -2148,11 +2151,12 @@ export async function runUltraFv3OrderProtocolTest(
   }
 }
 
-export async function syncErpOrderStatuses(opportunityId?: string) {
+export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncId?: string) {
   const orders = await prisma.erpOrderSync.findMany({
     where: {
       status: { in: [ErpOrderSyncStatus.sent, ErpOrderSyncStatus.pending, ErpOrderSyncStatus.error] },
       ...(opportunityId ? { opportunityId } : {}),
+      ...(erpOrderSyncId ? { id: erpOrderSyncId } : {}),
     },
     include: { seller: { select: { erpLoginUsername: true, erpLoginPasswordEncrypted: true } }, opportunity: { select: { clientId: true } }, manualResolution: true },
     orderBy: [{ createdAt: "desc" }],
@@ -2170,15 +2174,21 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
       const credentials = username && encryptedPassword
         ? { username, password: decryptErpCredential(encryptedPassword) }
         : null;
-      const queries = Array.from(new Set([order.pedidoIdImportacao, order.numPedido, order.erpOrderNumber].filter((value): value is string => Boolean(value))));
+      const queries = Array.from(new Set([order.pedidoIdImportacao, order.erpOrderId, order.erpOrderNumber, order.numPedido].filter((value): value is string => Boolean(value))));
       let response: unknown = null;
       let classification: ReturnType<typeof classifyUltraFv3OrderLookup> = { outcome: "unknown", matched: false, erpOrderNumber: null, orderStatus: null };
       query = queries[0] || order.pedidoIdImportacao;
       for (const candidate of queries) {
         query = candidate;
-        const candidateResponse = credentials
-          ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, credentials, correlationId)
-          : await requestUltraFv3ReadOnlyWithRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, correlationId);
+        let candidateResponse: unknown;
+        try {
+          candidateResponse = credentials
+            ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, credentials, correlationId)
+            : await requestUltraFv3ReadOnlyWithRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, correlationId);
+        } catch (sellerCredentialError) {
+          if (!credentials || !ultraFv3Client.hasGlobalCredentials()) throw sellerCredentialError;
+          candidateResponse = await requestUltraFv3ReadOnlyWithRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, correlationId);
+        }
         response = candidateResponse;
         classification = classifyUltraFv3OrderLookup(candidateResponse, order);
         if (classification.matched) break;
@@ -2196,24 +2206,27 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
       const operationalStatusRaw = extractOperationalStatus(response);
       const operationalOrderStatus = normalizeOperationalOrderStatus(operationalStatusRaw);
       const nextSyncStatus = confirmed ? ErpOrderSyncStatus.sent : classification.outcome === "processing" ? ErpOrderSyncStatus.pending : order.status;
+      const nextOrderStatus = classification.orderStatus ?? order.orderStatus;
+      const nextOperationalStatusRaw = operationalStatusRaw ?? order.operationalStatusRaw;
+      const nextOperationalOrderStatus = operationalStatusRaw ? operationalOrderStatus : order.operationalOrderStatus;
       await prisma.erpOrderSync.update({
         where: { id: order.id },
         data: {
           ...(confirmed ? { status: ErpOrderSyncStatus.sent, erpOrderNumber: classification.erpOrderNumber || order.erpOrderNumber || order.numPedido, sentAt: order.sentAt || reconciledAt } : {}),
           ...(classification.outcome === "processing" ? { status: ErpOrderSyncStatus.pending } : {}),
           ...(classification.orderStatus ? { orderStatus: classification.orderStatus } : {}),
-          operationalStatusRaw,
-          operationalOrderStatus,
+          operationalStatusRaw: nextOperationalStatusRaw,
+          operationalOrderStatus: nextOperationalOrderStatus,
           lastStatusPayload: toJson(reconciliationAudit),
           syncErrors: classification.outcome === "unknown" ? toJson([{ ...reconciliationAudit, nonCritical: true, message: "Resultado inconclusivo; reenvio permanece bloqueado." }]) : Prisma.JsonNull,
           ...(classification.outcome === "rejected" ? { erpResponse: toJson(reconciliationAudit) } : {}),
           statusSyncedAt: reconciledAt,
         },
       });
-      const changed = nextSyncStatus !== order.status || classification.orderStatus !== order.orderStatus || operationalStatusRaw !== order.operationalStatusRaw;
+      const changed = nextSyncStatus !== order.status || nextOrderStatus !== order.orderStatus || nextOperationalStatusRaw !== order.operationalStatusRaw;
       if (changed) await prisma.erpOrderStatusHistory.create({ data: {
         erpOrderSyncId: order.id, opportunityId: order.opportunityId, syncStatus: nextSyncStatus,
-        orderStatus: classification.orderStatus, operationalStatusRaw, source: "ultrafv3-order-status",
+        orderStatus: nextOrderStatus, operationalStatusRaw: nextOperationalStatusRaw, source: "ultrafv3-order-status",
       } });
       if (changed && operationalStatusRaw) await prisma.timelineEvent.create({ data: {
         type: "status", opportunityId: order.opportunityId, clientId: order.opportunity.clientId,
@@ -2241,11 +2254,6 @@ export async function syncErpOrderStatuses(opportunityId?: string) {
           statusSyncedAt: new Date(),
         },
       });
-      await prisma.erpOrderStatusHistory.create({ data: {
-        erpOrderSyncId: order.id, opportunityId: order.opportunityId, syncStatus: order.status,
-        orderStatus: order.orderStatus, operationalStatusRaw: order.operationalStatusRaw,
-        source: "ultrafv3-order-status-error", errorMessage: sanitizeErpOrderErrorMessage(message).slice(0, 500),
-      } });
       logApiEvent(
         "WARN",
         "[erp order status] UltraFV3 order status sync failed (non-critical)",

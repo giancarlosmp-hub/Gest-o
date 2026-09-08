@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, CheckCircle2, FileUp, MapPinned, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertCircle, ArrowRightLeft, CheckCircle2, FileUp, MapPinned, Plus, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
@@ -10,7 +10,10 @@ type SellerOption = {
   name: string;
   role: "vendedor";
   region?: string | null;
+  isActive: boolean;
   canEdit: boolean;
+  canTransfer: boolean;
+  territoryWarning?: string | null;
 };
 
 type TerritoryCity = {
@@ -22,6 +25,7 @@ type TerritoryCity = {
 };
 
 type TerritoryCityLink = TerritoryCity & { sellerName: string };
+type TransferPreview = { source: SellerOption; destination: SellerOption; requested: number; transferable: TerritoryCity[]; conflicts: Array<{ cityId: string; city: string; state: string; sellerName: string }> };
 
 type OfficialCity = {
   city: string;
@@ -109,6 +113,10 @@ export default function SellerTerritoriesPanel() {
   const [importingPreview, setImportingPreview] = useState(false);
   const [confirmingImport, setConfirmingImport] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedCityIds, setSelectedCityIds] = useState<string[]>([]);
+  const [destinationSellerId, setDestinationSellerId] = useState("");
+  const [transferPreview, setTransferPreview] = useState<TransferPreview | null>(null);
+  const [transferring, setTransferring] = useState(false);
 
   const selectedSeller = sellers.find((seller) => seller.id === selectedSellerId);
   const canEditSelectedSeller = Boolean(selectedSeller?.canEdit);
@@ -218,6 +226,8 @@ export default function SellerTerritoriesPanel() {
       .then(({ data }) => {
         if (!mounted) return;
         setCities((Array.isArray(data) ? data : []).map((city) => ({ ...city, draftId: city.id })));
+        setSelectedCityIds([]);
+        setTransferPreview(null);
       })
       .catch((err) => {
         if (!mounted) return;
@@ -230,6 +240,30 @@ export default function SellerTerritoriesPanel() {
 
     return () => { mounted = false; };
   }, [selectedSellerId]);
+
+  const activeDestinations = sellers.filter((seller) => seller.isActive && seller.id !== selectedSellerId);
+  const toggleTransferCity = (id: string) => setSelectedCityIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const previewTransfer = async () => {
+    if (!selectedSellerId || !destinationSellerId || !selectedCityIds.length) return;
+    setTransferring(true);
+    try {
+      const { data } = await api.post<TransferPreview>("/territories/config/transfers/preview", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: selectedCityIds });
+      setTransferPreview(data);
+    } catch (err) { toast.error(getApiErrorMessage(err, "Não foi possível gerar a prévia da transferência.")); }
+    finally { setTransferring(false); }
+  };
+  const confirmTransfer = async () => {
+    if (!transferPreview) return;
+    setTransferring(true);
+    try {
+      const { data } = await api.post<{ moved: number; idempotent: boolean }>("/territories/config/transfers/confirm", { sourceSellerId: selectedSellerId, destinationSellerId, cityIds: transferPreview.transferable.map((city) => city.id) });
+      toast.success(data.idempotent ? "Transferência já aplicada anteriormente." : `${data.moved} cidade(s) transferida(s) com auditoria.`);
+      setTransferPreview(null); setSelectedCityIds([]);
+      const refreshed = await api.get<TerritoryCity[]>("/territories/config/cities", { params: { sellerId: selectedSellerId } });
+      setCities(refreshed.data.map((city) => ({ ...city, draftId: city.id })));
+    } catch (err) { toast.error(getApiErrorMessage(err, "Não foi possível confirmar a transferência.")); }
+    finally { setTransferring(false); }
+  };
 
   const findLinkedCityConflict = (city: Pick<OfficialCity, "city" | "state">) => {
     const key = buildDraftKey(city);
@@ -470,10 +504,24 @@ export default function SellerTerritoriesPanel() {
               disabled={isSellerViewer || loading}
             >
               {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>{seller.name}{seller.region ? ` • ${seller.region}` : ""}</option>
+                <option key={seller.id} value={seller.id}>{seller.name}{!seller.isActive ? " • Inativo" : seller.region ? ` • ${seller.region}` : ""}</option>
               ))}
             </select>
           </label>
+
+          {selectedSeller?.territoryWarning ? <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-semibold text-amber-900">{selectedSeller.territoryWarning}</div> : null}
+
+          {selectedSeller?.canTransfer && cities.length > 0 ? (
+            <div className="space-y-2 rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <p className="text-sm font-bold text-blue-900">Transferir cidades de {selectedSeller.name}</p>
+              <select className="w-full rounded-lg border border-blue-200 bg-white px-2 py-2 text-sm" value={destinationSellerId} onChange={(event) => { setDestinationSellerId(event.target.value); setTransferPreview(null); }}>
+                <option value="">Selecione o vendedor ativo de destino</option>
+                {activeDestinations.map((seller) => <option key={seller.id} value={seller.id}>{seller.name}</option>)}
+              </select>
+              <button type="button" onClick={() => setSelectedCityIds(selectedCityIds.length === cities.length ? [] : cities.map((city) => city.id))} className="text-xs font-semibold text-blue-800">{selectedCityIds.length === cities.length ? "Desmarcar todas" : "Selecionar todas"}</button>
+              <button type="button" onClick={previewTransfer} disabled={!destinationSellerId || !selectedCityIds.length || transferring} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-700 px-3 py-2 text-sm font-semibold text-white disabled:bg-slate-300"><ArrowRightLeft size={16}/>{transferring ? "Processando…" : `Prévia da transferência (${selectedCityIds.length})`}</button>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-3 gap-2 rounded-xl bg-white p-3 text-center ring-1 ring-slate-200">
             {ufOptions.map((uf) => (
@@ -616,6 +664,7 @@ export default function SellerTerritoriesPanel() {
               <table className="min-w-full divide-y divide-slate-100 text-sm">
                 <thead className="sticky top-0 bg-white">
                   <tr className="text-left text-xs font-bold uppercase tracking-wide text-slate-500">
+                    {selectedSeller?.canTransfer ? <th className="px-4 py-3">Transferir</th> : null}
                     <th className="px-4 py-3">Cidade</th>
                     <th className="px-4 py-3">UF</th>
                     <th className="px-4 py-3">Código IBGE</th>
@@ -626,9 +675,10 @@ export default function SellerTerritoriesPanel() {
                   {loading ? (
                     <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Carregando cidades...</td></tr>
                   ) : filteredCities.length === 0 ? (
-                    <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">Nenhuma cidade encontrada para os filtros.</td></tr>
+                    <tr><td colSpan={selectedSeller?.canTransfer ? 5 : 4} className="px-4 py-8 text-center text-slate-500">Nenhuma cidade encontrada para os filtros.</td></tr>
                   ) : filteredCities.map((city) => (
                     <tr key={city.draftId} className={city.isNew ? "bg-emerald-50/40" : "bg-white"}>
+                      {selectedSeller?.canTransfer ? <td className="px-4 py-3"><input type="checkbox" aria-label={`Selecionar ${city.city}`} checked={selectedCityIds.includes(city.id)} onChange={() => toggleTransferCity(city.id)} /></td> : null}
                       <td className="px-4 py-3 font-semibold text-slate-900">{city.city}</td>
                       <td className="px-4 py-3 text-slate-700">{city.state}</td>
                       <td className="px-4 py-3 text-slate-500">{city.ibgeCode || "—"}</td>
@@ -651,6 +701,18 @@ export default function SellerTerritoriesPanel() {
         </section>
       </div>
     </div>
+
+    {transferPreview ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+        <div className="w-full max-w-xl rounded-2xl bg-white p-5 shadow-2xl">
+          <h3 className="text-lg font-bold">Confirmar transferência de território</h3>
+          <p className="mt-2 text-sm">Transferir {transferPreview.transferable.length} cidade(s) de <b>{transferPreview.source.name}</b> para <b>{transferPreview.destination.name}</b>.</p>
+          {transferPreview.conflicts.length ? <div className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-800">{transferPreview.conflicts.length} conflito(s) real(is) com terceiros não serão transferidos.</div> : null}
+          <ul className="mt-3 max-h-56 overflow-auto text-sm">{transferPreview.transferable.map((city) => <li key={city.id}>{city.city}/{city.state}</li>)}</ul>
+          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setTransferPreview(null)} className="rounded-lg border px-3 py-2">Cancelar</button><button onClick={confirmTransfer} disabled={!transferPreview.transferable.length || transferring} className="rounded-lg bg-blue-700 px-3 py-2 font-semibold text-white disabled:bg-slate-300">Confirmar transferência</button></div>
+        </div>
+      </div>
+    ) : null}
 
     {importModalOpen ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">

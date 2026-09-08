@@ -820,3 +820,31 @@ Implementada a visão responsiva de pedidos com resumo, busca, período, vendedo
 ### Complemento de evidência: solicitações e NF-e (2026-09-04)
 
 A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
+
+## Pedidos — diagnóstico pós-cutover e correção de reconciliação (08/09/2026)
+
+A investigação do código implantado confirmou que **Atualizar** executava somente `GET /api/orders`, isto é, relia a projeção PostgreSQL e não chamava o UltraFV3. O `orderStatus` automático era explicitamente devolvido como `skipped` quando não havia credencial global e existiam credenciais individuais, embora o reconciliador já soubesse resolver a credencial persistida de cada vendedor. Além disso, pedidos históricos não eram localizados de forma completa: a busca não incluía `erpOrderId` (`PEDIDO_ID`) e o classificador não aceitava essa chave na resposta. A consulta agora tenta, de forma GET-only e limitada, `PEDIDO_ID_IMPORTACAO`, `PEDIDO_ID`, `NUM_PEDIDO` retornado e `NUM_PEDIDO` enviado, usando a credencial do vendedor do próprio registro.
+
+A tela branca foi reproduzida estaticamente e por teste: `Intl.DateTimeFormat.format(new Date(valor))` lança `RangeError: Invalid time value` para uma previsão inválida do payload. A apresentação agora trata data ausente/inválida, payload parcial e quantidade ausente como `Não informado`; o painel de detalhe possui erro local recuperável e `correlationId`, sem fechar ou substituir a lista.
+
+`sent` significa exclusivamente **envio ao ERP concluído**, nunca `DIGITADO`. A situação operacional bruta e normalizada continua separada; `DIGITADO` e `ACEITO` são pendentes, `PARCIAL` é parcial, `FINALIZADO` é entregue/finalizado, `CANCELADO` é cancelado e qualquer texto novo fica bruto com normalização `UNKNOWN`. Falha ou resposta inconclusiva preserva o último estado. Histórico só é acrescentado quando muda sincronização, fulfillment ou situação operacional; consultas idênticas e falhas não criam eventos duplicados.
+
+Não foi localizado nos arquivos disponíveis no checkout nem no contrato visível da API um endpoint oficial de NF-e, chave estável, cardinalidade, regra para cancelamento/parcial ou permissão. A NF-e 10424 observada no ERP não autoriza inferência nem acesso Firebird; a interface permanece em **NF-e não instrumentada**. O payload real integral de `FINALIZADO` e a presença contratual de `QTD_FATURADO`, `QTD_EXPEDIDO`, `QTD_CANCELADO` e `QTD_AEXPEDIR` também não estão disponíveis como evidência sanitizada; por isso apenas valores efetivamente presentes são projetados, e ausência permanece `null`/`Não informado`.
+
+Validação local: testes de regressão de Pedidos da API e da apresentação web, typecheck integral e build integral passaram após `npm ci`. O build preserva apenas o aviso conhecido de chunk web acima de 500 kB.
+
+## Ciclo de desligamento e substituição de vendedores — Edirlei → Vitor (08/09/2026)
+
+### Diagnóstico comprovado no código
+
+A desativação de usuário alterava somente `User.isActive`; `SellerTerritoryCity` permanecia ligado ao ID histórico. Ao mesmo tempo, `getTerritorySellerWhereForActor`, `assertTerritorySellerAccess` e os seletores de configuração exigiam `isActive=true`, enquanto o detector de conflitos consultava os vínculos restantes. Isso tornava o território do desligado invisível e não editável, mas ainda bloqueador — exatamente o ciclo que produziu 67 conflitos na importação de 71 localidades (67 válidas e 4 não encontradas).
+
+A correção mantém vendedores inativos com território visíveis a diretor/gerente, rotulados como **Território vinculado a vendedor inativo — transferência necessária**, e implementa prévia + confirmação transacional para transferência total ou parcial. Os mesmos registros `SellerTerritoryCity` são atualizados; origem não é conflito, terceiro continua sendo conflito, destino deve estar ativo e no mesmo tenant, repetição sem linhas na origem é idempotente. A auditoria registra origem, destino, operador, tenant, data (`createdAt`) e quantidade na Timeline sem reatribuir história anterior.
+
+O sincronismo `/partners` já localiza o cliente por identidade ERP/documento, atualiza `ownerSellerId` no mesmo `Client` e cria Timeline quando o vendedor muda; oportunidades, atividades, pedidos e autoria não são reatribuídos. O fluxo foi mantido e coberto por regressão. O acesso também foi corrigido: login já bloqueava inativos, mas access/refresh tokens emitidos anteriormente continuavam válidos; agora cada autenticação protegida e refresh revalidam `User.isActive`.
+
+A consulta histórica de `/orderStatus` tenta primeiro a credencial original preservada. Se ela deixou de ser autorizada após o desligamento e a integração global configurada existe, usa essa credencial técnica somente para GET `/orderStatus`; nunca usa automaticamente a credencial pessoal do substituto e nunca muda autoria do pedido.
+
+A inspeção local não acessou produção, portanto não declara como observados os valores pessoais de Edirlei/Vitor. O endpoint de diagnóstico existente e a operação pós-merge devem confirmar IDs distintos, estados ativo/inativo, e-mails e ausência de duplicidade. Criação/edição de usuário agora rejeita duplicidade de e-mail, `erpCode`, `erpOperatorCode` ou login FV3, inclusive contra usuário inativo.
+
+Validação local concluída: typecheck API/web, regressão de desligamento, regressão de Pedidos, suíte de segurança de autenticação e build integral passaram após instalação determinística com `npm ci`; permaneceu somente o aviso não bloqueante de tamanho do chunk web. Nenhuma consulta ou mutação produtiva foi realizada.

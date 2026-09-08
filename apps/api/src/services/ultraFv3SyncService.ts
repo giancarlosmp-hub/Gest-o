@@ -3352,21 +3352,7 @@ export async function syncOrderStatus(
   options?: RunSyncOptions,
 ) {
   return runSync("orderStatus", async (correlationId) => {
-    if (!ultraFv3Client.hasGlobalCredentials() && await hasConfiguredSellerFv3Credentials()) {
-      logApiEvent("WARN", "[ultrafv3 sync orderStatus] skipped in seller-auth mode", {
-        correlationId,
-        missingGlobalCredentials: ["ULTRAFV3_USERNAME", "ULTRAFV3_PASSWORD"],
-        nonCritical: true,
-        skipped: true,
-      });
-      return {
-        syncedCount: 0,
-        diagnostics: {
-          skippedOrderStatusMissingGlobalCredentials: 1,
-          nonCriticalOrderStatusErrors: 1,
-        },
-      };
-    }
+    // The reconciler resolves the credential belonging to each persisted order.
     return runner();
   }, options);
 }
