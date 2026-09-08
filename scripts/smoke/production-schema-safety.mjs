@@ -70,7 +70,7 @@ const registry = resolve(root, "scripts/production-schema-migrations.mjs");
 const ordersId = "20260904120000_orders_operational_view";
 const ordersEntry = spawnSync("node", [registry, ordersId], { cwd: root, encoding: "utf8" });
 assert.equal(ordersEntry.status, 0, ordersEntry.stderr);
-assert.equal(JSON.parse(ordersEntry.stdout).sha256, "0a463c060373c52cb9602ea3898b16f163aaa0c2530c00414dd023c8f1c5503f");
+assert.equal(JSON.parse(ordersEntry.stdout).sha256, "486c25d46702a8f91131fa6669b12e9119a62b098aed6c3a091fff4cdca892b9");
 const unknownEntry = spawnSync("node", [registry, "20260904120001_not_allowlisted"], { cwd: root, encoding: "utf8" });
 assert.notEqual(unknownEntry.status, 0, "an unregistered migration must be rejected");
 assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);

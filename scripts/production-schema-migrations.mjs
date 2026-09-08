@@ -14,7 +14,7 @@ export const migrations = Object.freeze({
   "20260904120000_orders_operational_view": Object.freeze({
     id: "20260904120000_orders_operational_view",
     path: "apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql",
-    sha256: "0a463c060373c52cb9602ea3898b16f163aaa0c2530c00414dd023c8f1c5503f"
+    sha256: "486c25d46702a8f91131fa6669b12e9119a62b098aed6c3a091fff4cdca892b9"
   }),
   "20260808120000_tenancy_expand_roots": Object.freeze({
     id: "20260808120000_tenancy_expand_roots",

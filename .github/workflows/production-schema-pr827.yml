@@ -61,7 +61,11 @@ jobs:
             if [ "$SCHEMA_MIGRATION:$SCHEMA_MODE" = 20260904120000_orders_operational_view:preview ]; then
               registry=$(node scripts/production-schema-migrations.mjs "$SCHEMA_MIGRATION")
               migration=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).path)' "$registry")
-              MODE=validate SQL_FILE="$migration" bash scripts/production-schema-preview.sh
+              MODE=validate SQL_FILE="$migration" ALLOW_DATA_BACKFILL=orders-tenant-authority-v1 \
+                bash scripts/production-schema-preview.sh
+              PRODUCTION_ENV_FILE="$resolved_env_file" \
+                PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
+                bash scripts/production-orders-tenant-preview.sh
             elif [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ]; then
               CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
                 PRODUCTION_ENV_FILE="$resolved_env_file" \

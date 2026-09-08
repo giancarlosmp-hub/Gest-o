@@ -1,3 +1,9 @@
+## Decisão PR827 — autoridade histórica dos 226 pedidos (08/09/2026)
+
+`ErpOrderSync.sellerId`, atividade do usuário e membership atual não são autoridade de tenant. A única cadeia histórica aceita é `ErpOrderSync.opportunityId → Opportunity.clientId → Client`. Para pedidos existentes, a migration exige exatamente um Tenant no banco, esse Tenant ativo, cadeia integral e nenhum `Client.tenantId` conflitante ou inválido. Qualquer ambiguidade aborta a transação antes do backfill. Banco vazio continua suportado sem inventar tenant.
+
+Com autoridade comprovada, somente clientes alcançados pelos pedidos e ainda sem tenant recebem o único tenant; depois cada pedido recebe o tenant de seu próprio cliente. Uma tabela temporária guarda pedido, oportunidade, cliente, seller, status e contagens relacionadas e bloqueia o commit se autoria, propriedade, Timeline, Activity ou change logs mudarem. O histórico inicial usa chave determinística e `ON CONFLICT DO NOTHING`, com pós-condição de exatamente um `migration-backfill` por pedido. Não há DELETE, troca de seller ou dependência de membership.
+
 ## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
 
 O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.
