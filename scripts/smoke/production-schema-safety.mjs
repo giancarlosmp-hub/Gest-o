@@ -77,6 +77,8 @@ assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
+for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
+assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
 assert.match(apply, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.doesNotMatch(apply, /db push|prisma:seed|seedOnBootstrap/);
 assert.match(apply, /PSQL_DATABASE_URL=\$\(DATABASE_URL="\$DATABASE_URL" node scripts\/postgres-connection-url\.mjs\)/);
@@ -157,6 +159,13 @@ assertContactDiff("dropped Contact column", 'ALTER TABLE "Contact" DROP COLUMN "
 assertContactDiff("mixed Contact operations", `ALTER TABLE "Contact"
 ADD COLUMN "phoneHash" VARCHAR(64),
 DROP COLUMN "phoneNormalized";`, false);
+assertContactDiff("complete Orders columns", `ALTER TABLE "ErpOrderSync"
+ADD COLUMN "erpOrderId" TEXT,
+ADD COLUMN "operationalOrderStatus" "ErpOperationalOrderStatus" NOT NULL DEFAULT 'UNKNOWN',
+ADD COLUMN "operationalStatusRaw" TEXT,
+ADD COLUMN "requestAuthorizationStatus" "ErpRequestAuthorizationStatus" NOT NULL DEFAULT 'UNKNOWN',
+ADD COLUMN "tenantId" TEXT NOT NULL;`, true);
+assertContactDiff("partial Orders columns", 'ALTER TABLE "ErpOrderSync" ADD COLUMN "tenantId" TEXT NOT NULL;', false);
 const bootstrap = readFileSync(resolve(root, "apps/api/src/scripts/bootstrap.ts"), "utf8");
 assert.match(bootstrap, /type DatabaseSchemaMode = "external" \| "ephemeral-push"/);
 assert.match(bootstrap, /if \(value === "external" \|\| value === "ephemeral-push"\) return value/);

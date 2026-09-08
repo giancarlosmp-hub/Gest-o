@@ -43,6 +43,7 @@ jobs:
             case "$SCHEMA_MIGRATION:$SCHEMA_MODE:$SCHEMA_CONFIRM" in
               20260827190000_add_erp_order_manual_resolution:preview:*) ;;
               20260827190000_add_erp_order_manual_resolution:apply:APPLY_PR827_SCHEMA) ;;
+              20260904120000_orders_operational_view:preview:*) ;;
               20260904120000_orders_operational_view:apply:PRODUCTION_SCHEMA_APPLY) ;;
               *) echo 'PRODUCTION_SCHEMA_SELECTION=REJECTED'; exit 1 ;;
             esac
@@ -57,7 +58,11 @@ jobs:
               canonical) erp_env_source=canonical ;;
               *) echo 'PR827_ENV_SOURCE_CLASSIFICATION=REJECTED'; exit 1 ;;
             esac
-            if [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ]; then
+            if [ "$SCHEMA_MIGRATION:$SCHEMA_MODE" = 20260904120000_orders_operational_view:preview ]; then
+              registry=$(node scripts/production-schema-migrations.mjs "$SCHEMA_MIGRATION")
+              migration=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).path)' "$registry")
+              MODE=validate SQL_FILE="$migration" bash scripts/production-schema-preview.sh
+            elif [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ]; then
               CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
                 PRODUCTION_ENV_FILE="$resolved_env_file" \
                 MIGRATION_ID_REQUESTED="$SCHEMA_MIGRATION" DATABASE_SCHEMA_MODE=external \

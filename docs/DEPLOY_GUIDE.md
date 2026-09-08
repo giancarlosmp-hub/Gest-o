@@ -1,3 +1,9 @@
+## Retomada controlada de Pedidos após a PR #857 (08/09/2026)
+
+A retomada autorizada é estritamente sequencial: **merge da PR #857 → obter o novo SHA de `main` → preparar novo backup protegido → executar Deploy Production em `phase=build` → executar preview read-only de Pedidos → obter aprovação → executar apply confirmado → validar a evidência protegida e o diff Prisma vazio → executar Deploy Production em `phase=cutover` → executar validação pós-deploy**. Um resultado de etapa anterior não autoriza pular a seguinte.
+
+O cutover deve continuar bloqueado antes de `docker stop` se a evidência equivalente de schema não validar. Não use ERP Production Recovery para aplicar o schema, não habilite o scheduler e não recrie containers como substituto do fluxo. A PR #856 já mesclada entrega código, mas não prova que Pedidos esteja implantado.
+
 ## Procedimento canônico de produção (03/09/2026)
 
 Merge e CI verde não implantam produção. Use, nesta ordem: checks verdes da `main`; **Prepare Production Recovery Backup**; **Deploy Production / build**; conferência de SHA e resultado; **Deploy Production / cutover**; aprovação de `production-cutover`; validação de API, WEB, banco read-only e SHA. Build verde significa somente imagens/preflight. `backup_proof_invalid`, prova de schema, Prisma diff, health e SHA são gates fail-closed. Recovery e os workflows **Prepare Canonical Production Environment**, **Production Schema PR827** e **Production tenancy expand roots** nunca são tentativas de desbloqueio. Veja a seção autoritativa “Como implantar o Gest-o em produção” em `DOCUMENTO_MESTRE.md`.
