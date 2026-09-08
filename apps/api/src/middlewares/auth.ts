@@ -3,7 +3,14 @@ import { verifyAccessToken } from "../utils/jwt.js";
 import { buildControlledErpOrderFailurePayload, isErpOrderEndpointPath } from "../utils/erpOrderFailureResponse.js";
 import { prisma } from "../config/prisma.js";
 
-export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export type ActiveUserResolver = (decoded: Express.UserPayload) => Promise<Express.UserPayload | null>;
+
+const resolveActiveUserWithPrisma: ActiveUserResolver = async (decoded) => prisma.user.findFirst({
+  where: { id: decoded.id, isActive: true }, select: { id: true, email: true, role: true, region: true }
+});
+
+export function createAuthMiddleware(resolveActiveUser: ActiveUserResolver) {
+  return async function resolvedAuthMiddleware(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   const erpOrderRequest = isErpOrderEndpointPath(req.method, req.path);
   if (!header?.startsWith("Bearer ")) {
@@ -23,7 +30,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   }
   try {
     const decoded = verifyAccessToken(header.slice(7)) as Express.UserPayload;
-    const activeUser = await prisma.user.findFirst({ where: { id: decoded.id, isActive: true }, select: { id: true, email: true, role: true, region: true } });
+    const activeUser = await resolveActiveUser(decoded);
     if (!activeUser) return res.status(401).json({ message: "Usuário inativo ou removido" });
     req.user = activeUser;
     next();
@@ -42,4 +49,8 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       ...(req.correlationId ? { correlationId: req.correlationId } : {}),
     });
   }
+  };
 }
+
+/** Production stays fail-closed and always revalidates the active user through Prisma. */
+export const authMiddleware = createAuthMiddleware(resolveActiveUserWithPrisma);

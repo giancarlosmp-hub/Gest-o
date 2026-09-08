@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import express from "express";
-import { authMiddleware } from "../middlewares/auth.js";
+import { createAuthMiddleware } from "../middlewares/auth.js";
 import { requestContextMiddleware } from "../middlewares/requestLogging.js";
 import { signAccessToken } from "../utils/jwt.js";
 import { formatTenantReadPilotMarker, runClientListShadowPilot, validateTenantReadPilotConfig, type TenantReadPilotEvent } from "./tenantReadPilot.js";
@@ -40,8 +40,10 @@ const disabled = validateTenantReadPilotConfig({ NODE_ENV: "production", TENANCY
 const pilotOff = validateTenantReadPilotConfig({ NODE_ENV: "test", TENANCY_MODE: "default-only", TENANT_READ_PILOT_ENABLED: "false" });
 
 const events: TenantReadPilotEvent[] = [];
+const syntheticUserIds = new Set(["user-a", "user-b", "ambiguous", "inactive", "suspended"]);
+const syntheticAuthMiddleware = createAuthMiddleware(async (decoded) => syntheticUserIds.has(decoded.id) ? { ...decoded } : null);
 const buildApp = (configuredPilot: typeof enabledA) => { const app = express();
-app.use(requestContextMiddleware, express.json(), authMiddleware);
+app.use(requestContextMiddleware, express.json(), syntheticAuthMiddleware);
 app.all("/clients", async (req, res) => {
   const legacy = clients.filter((client) => client.ownerSellerId === req.user!.id);
   try {
