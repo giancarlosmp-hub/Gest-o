@@ -1,3 +1,9 @@
+## Production Schema PR827 — regressão de resolução do environment (08/09/2026)
+
+O run `34179257031` falhou antes do runner com `[production-env-resolution] FAIL: more than one authorized environment source is present`. O estado é legítimo e foi criado pelo procedimento oficial: `/root/demetra-env/.env` é a fonte canônica, enquanto `/root/demetra-env/production.env` permanece preservado para legado/rollback. A correção remove somente a política `PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true` do workflow **Production Schema PR827**; nenhum arquivo da VPS deve ser alterado, excluído, movido ou renomeado.
+
+A resolução permanece fail-closed e sem merge de fontes: a presença do canônico torna sua validação e seleção obrigatórias; um canônico inválido falha sem fallback; o legado só pode ser considerado quando o canônico estiver ausente. A regressão automatizada cobre canônico válido + legado válido, canônico inválido + legado válido e redaction de valores protegidos. Nenhuma migration, schema, banco, container, secret ou scheduler ERP foi alterado ou executado por esta correção. A nova PR deve ser validada contra `main` e não deve ser mesclada automaticamente.
+
 ## Retomada controlada de Pedidos após a PR #857 (08/09/2026)
 
 A retomada autorizada é estritamente sequencial: **merge da PR #857 → obter o novo SHA de `main` → preparar novo backup protegido → executar Deploy Production em `phase=build` → executar preview read-only de Pedidos → obter aprovação → executar apply confirmado → validar a evidência protegida e o diff Prisma vazio → executar Deploy Production em `phase=cutover` → executar validação pós-deploy**. Um resultado de etapa anterior não autoriza pular a seguinte.

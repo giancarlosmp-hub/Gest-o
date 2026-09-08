@@ -8,7 +8,7 @@ SECRET='postgresql://secret-user:secret-password@protected.invalid/database'
 
 resolve(){
   MODE=build ERP_ENV_EXPECTED_OWNER="$OWNER" PRODUCTION_CANONICAL_ENV_FILE="$CANONICAL" \
-    PRODUCTION_LEGACY_ENV_FILE="$LEGACY" PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true \
+    PRODUCTION_LEGACY_ENV_FILE="$LEGACY" \
     PRODUCTION_ENV_RESOLVER_OUTPUT=record bash "$ROOT/scripts/resolve-production-env.sh"
 }
 runner(){
@@ -40,13 +40,32 @@ assert_redacted
 
 rm "$LEGACY"; expect_fail resolve; assert_redacted
 printf 'DATABASE_URL=%s\n' "$SECRET" >"$CANONICAL"; chmod 600 "$CANONICAL"
-ln -s "$CANONICAL" "$LEGACY"; expect_fail resolve; assert_redacted
+ln -s "$CANONICAL" "$LEGACY"
+record=$(resolve 2>"$TMP/resolve.err")
+[[ "$record" == "canonical"$'\t'"$CANONICAL" ]]
+! grep -Fq 'secret-password' "$TMP/resolve.err"
+! grep -Fq 'postgresql://' "$TMP/resolve.err"
 rm "$LEGACY"; chmod 640 "$CANONICAL"; expect_fail resolve; assert_redacted
 chmod 600 "$CANONICAL"
 expect_fail env ERP_ENV_EXPECTED_OWNER=definitely-not-owner PRODUCTION_CANONICAL_ENV_FILE="$CANONICAL" \
-  PRODUCTION_LEGACY_ENV_FILE="$LEGACY" MODE=build PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true bash "$ROOT/scripts/resolve-production-env.sh"
+  PRODUCTION_LEGACY_ENV_FILE="$LEGACY" MODE=build bash "$ROOT/scripts/resolve-production-env.sh"
 assert_redacted
-printf 'DATABASE_URL=%s\n' "$SECRET" >"$LEGACY"; chmod 600 "$LEGACY"; expect_fail resolve; assert_redacted
+# A preserved valid legacy file must not make a valid canonical source ambiguous.
+printf 'DATABASE_URL=%s\n' "$SECRET" >"$LEGACY"; chmod 600 "$LEGACY"
+record=$(resolve 2>"$TMP/resolve.err")
+[[ "$record" == "canonical"$'\t'"$CANONICAL" ]]
+grep -Fxq 'ERP_PRODUCTION_ENV_SOURCE=canonical' "$TMP/resolve.err"
+! grep -Fq 'legacy_build_only' "$TMP/resolve.err"
+! grep -Fq 'secret-password' "$TMP/resolve.err"
+! grep -Fq 'postgresql://' "$TMP/resolve.err"
+
+# An invalid authoritative canonical source must fail instead of falling back.
+chmod 640 "$CANONICAL"
+expect_fail resolve
+assert_redacted
+! grep -Fq 'ERP_PRODUCTION_ENV_SOURCE=legacy_build_only' "$TMP/out"
+chmod 600 "$CANONICAL"
+
 rm "$CANONICAL"; printf 'NOT_DATABASE_URL=value\n' >"$LEGACY"; before=$(sha256sum "$LEGACY")
 expect_fail runner preview legacy_copy "$LEGACY"; assert_redacted; [[ $(sha256sum "$LEGACY") == "$before" ]]
 expect_fail runner apply legacy_copy "$LEGACY"; ! grep -Fq 'PR827_MIGRATION_APPLY=PASS' "$TMP/out"

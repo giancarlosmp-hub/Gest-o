@@ -49,8 +49,8 @@ jobs:
             esac
             cd /apps/gest-o
             git fetch origin main && git switch main && git pull --ff-only origin main
-            resolved_env="$(MODE=build PRODUCTION_ENV_REQUIRE_EXACTLY_ONE=true \
-              PRODUCTION_ENV_RESOLVER_OUTPUT=record bash scripts/resolve-production-env.sh)"
+            resolved_env="$(MODE=build PRODUCTION_ENV_RESOLVER_OUTPUT=record \
+              bash scripts/resolve-production-env.sh)"
             IFS=$'\t' read -r resolved_env_source resolved_env_file extra <<<"$resolved_env"
             test -n "$resolved_env_source" && test -n "$resolved_env_file" && test -z "${extra:-}"
             case "$resolved_env_source" in
