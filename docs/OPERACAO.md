@@ -951,19 +951,31 @@ O `ssh-action` materializa as variáveis listadas em `envs` no comando remoto. E
 
 Rollback funcional: ocultar/evitar a ação e manter a leitura local. Não reenviar pedido, não alterar Firebird, credenciais, cliente, oportunidade, vendedor ou histórico. A falha do UltraFV3 deve conservar o último estado conhecido.
 
-## Procedimento controlado Edirlei Zewe → Vitor (após merge)
+## Procedimento operacional — desligamento e sucessão de vendedor (09/09/2026)
 
-1. Não renomear, fundir, reativar ou editar novamente e-mails/credenciais dos dois usuários.
-2. Em **Usuários**, filtrar “todos/inativos” e executar diagnóstico read-only: confirmar IDs diferentes; Edirlei inativo; Vitor ativo; e-mails exclusivos; login FV3, `erpCode` e `erpOperatorCode` sem duplicidade. Não registrar senhas/tokens.
-3. Em **Territórios Comerciais**, selecionar “Edirlei Zewe • Inativo”. O aviso de transferência necessária e suas cidades devem permanecer visíveis.
-4. Marcar todas ou somente as cidades pretendidas, escolher Vitor e clicar **Prévia da transferência**. Revisar quantidade e conflitos de terceiros.
-5. Confirmar **Transferir cidades de Edirlei Zewe para Vitor**. Repetir a mesma requisição deve retornar idempotente e mover zero.
-6. Reprocessar o KML/KMZ de 71 localidades: as 67 transferidas devem aparecer vinculadas a Vitor; as quatro não encontradas continuam como pendência de catálogo, não são inventadas.
-7. Verificar amostra de pedidos, vendas, atividades, Timeline, change logs e autoria anteriores: todos continuam com o ID/nome de Edirlei.
-8. Em Oportunidades, filtrar as abertas de Edirlei. Elas devem mostrar **Responsável inativo: Edirlei Zewe**; usar **Transferir responsável** individualmente apenas nas escolhidas. Encerradas não são transferíveis.
-9. Executar o sync `/partners` autorizado e conferir que cliente cuja carteira mudou no ERP mantém o mesmo ID e histórico, recebendo apenas novo `ownerSellerId` e evento de auditoria.
-10. Com token antigo sanitizado de teste, confirmar HTTP 401 após a desativação. Confirmar novo login de Edirlei bloqueado e autenticação de Vitor válida.
-11. Consultar status de um pedido histórico de Edirlei. Confirmar somente GET `/orderStatus`, autoria original intacta e uso da credencial técnica global apenas se a credencial original estiver indisponível.
-12. Não transferir automaticamente agenda, follow-ups ou metas futuras nesta operação; decidir e executar seletivamente em tarefa operacional própria.
+Execute somente depois do merge, implantação aprovada e validação do novo HEAD. Código implementado/testado não significa que a sucessão ou transferência já ocorreu em produção.
 
-Rollback da transferência de território usa a mesma operação explícita no sentido Vitor → Edirlei somente se Edirlei tiver sido reativado e houver autorização humana; não executar SQL manual, delete/recreate ou alteração de histórico.
+1. Alterar o e-mail do vendedor antigo quando o endereço corporativo precisar ser reutilizado, sem mudar seu ID, nome histórico ou relações.
+2. Criar o novo usuário como identidade independente; nunca renomear, fundir ou reutilizar o ID do vendedor antigo.
+3. Confirmar o membership no tenant correto e, quando aplicável, o vínculo ERP/FV3 (`erpCode`, operador e login exclusivos) do novo usuário, sem registrar credenciais.
+4. Desativar o vendedor antigo, sem excluí-lo. A desativação revoga acesso, mas preserva territórios pendentes e todo o histórico.
+5. Como diretor ou gerente, abrir **Configurações → Territórios Comerciais**.
+6. Em **Origem dos territórios**, selecionar o vendedor inativo e conferir que ele está identificado como inativo e ainda possui cidades.
+7. Em **Vendedor de destino**, selecionar o vendedor ativo. Vendedor ativo deve estar disponível mesmo com zero cidades; vendedor inativo nunca pode ser destino.
+8. Carregar o KML/KMZ aplicável e gerar a prévia antes de qualquer gravação.
+9. Conferir separadamente cidades livres/“serão adicionadas”, `inactive_transfer`/transferíveis do vendedor inativo, não encontradas, duplicadas e conflitos com vendedor ativo.
+10. Confirmar somente quando origem, destino, quantidades e classificações do resumo estiverem corretos e não houver conflito impeditivo.
+11. Após sucesso, validar na própria tela que as cidades aparecem no destino e saíram da origem, sem depender de recarga completa da aplicação.
+12. Reatribuir oportunidades pendentes manual e individualmente por diretor ou gerente, conforme decisão comercial. Oportunidades não acompanham automaticamente as cidades.
+13. Não alterar nem transferir pedidos, vendas, atividades, Timeline anterior, change logs ou autoria histórica; eles permanecem no vendedor original.
+
+### Bloqueios e resposta a falhas
+
+- Vendedor inativo não recebe novos territórios e só aparece como origem quando ainda possui vínculos.
+- Cidade vinculada a vendedor ativo é conflito impeditivo; não é transferida automaticamente nem considerada livre.
+- Qualquer mudança entre prévia e confirmação invalida o snapshot. Não force a operação: gere uma nova prévia e revise novamente.
+- Destino desativado, tenant divergente, snapshot inválido ou conflito concorrente aborta a confirmação inteira; falha não pode deixar transferência parcial nem auditoria duplicada.
+- Não execute SQL manual, `delete/recreate`, schema apply ou alteração direta de banco para resolver territórios.
+- Uma reversão territorial, se autorizada, deve usar novamente o fluxo explícito e um destino ativo; nunca altere registros históricos para simular rollback.
+
+Para o caso Edirlei → Vitor, confirme antes os IDs distintos e preserve ambos como identidades diferentes. Este procedimento não afirma que essa transferência foi executada nem fixa uma quantidade produtiva. Consulte a [investigação detalhada](investigations/seller-territory-offboarding-2026-09.md).

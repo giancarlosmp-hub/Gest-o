@@ -1023,13 +1023,13 @@ A causa da tela branca era a formatação não protegida de data inválida pelo 
 
 O contrato sanitizado disponível não contém payload integral comprovado de `FINALIZADO`, nem garante as quatro quantidades, nem expõe contrato oficial de NF-e. Logo, esses pontos permanecem lacunas explícitas, e não se infere nota por `FINALIZADO`.
 
-## Regra autoritativa de desligamento de vendedor (08/09/2026)
+## Regra permanente de desligamento e sucessão de vendedor (09/09/2026)
 
 | Vínculo | Classe | Regra |
 |---|---|---|
 | Pedidos, vendas, autoria, Timeline e change logs | Histórico imutável | Permanecem no ID original; nunca renomear/fundir usuário |
 | Metas/KPIs de período iniciado ou passado | Histórico imutável | Permanecem no vendedor original |
-| Territórios/cidades | Responsabilidade transferível | Transferência explícita, seletiva, prévia, transacional e auditada |
+| Territórios/cidades | Responsabilidade operacional transferível | Transferência explícita, seletiva, com prévia consistente, confirmação, atomicidade e auditoria |
 | Carteira atual | Responsabilidade operacional ERP | `/partners` altera o mesmo cliente quando a identidade e o novo vendedor são comprovados |
 | Oportunidades abertas | Decisão humana | Permanecem no desligado até “Transferir responsável” |
 | Oportunidades encerradas | Histórico imutável | Responsável original não pode ser alterado |
@@ -1039,8 +1039,14 @@ O contrato sanitizado disponível não contém payload integral comprovado de `F
 | Sessões/tokens | Remoção segura de acesso | Rejeitar imediatamente quando `User.isActive=false` |
 | Território sem substituto | Pendência operacional | Manter visível com aviso de transferência necessária |
 
-Edirlei e Vitor são identidades distintas. Trocar e-mail não troca IDs nem relações. E-mail, código ERP, operador ERP e login FV3 não podem ficar duplicados; credencial de Vitor pertence somente ao ID de Vitor. A desativação não transfere oportunidade, pedido, venda, atividade, Timeline, meta ou autoria. Consulta GET-only de pedido histórico pode usar credencial técnica global autorizada quando a credencial original falhar, sem usar a identidade de Vitor como autor.
+Desativar um vendedor revoga seu acesso, mas não apaga sua identidade nem seu histórico. Reutilizar um e-mail corporativo não reutiliza o usuário: Edirlei e Vitor são identidades e IDs diferentes, e trocar o endereço não troca relações nem autoria. E-mail, código ERP, operador ERP e login FV3 não podem ficar duplicados; a credencial de Vitor pertence somente ao ID de Vitor.
+
+Pedidos, Timeline, Activity, change logs, vendas e toda autoria histórica permanecem ligados ao vendedor original. Oportunidades também permanecem com o responsável original até reassociação manual e seletiva por diretor ou gerente; oportunidades encerradas não mudam de responsável. A desativação nunca transfere automaticamente esses registros.
+
+Territórios são responsabilidade operacional transferível. Vendedor inativo com cidades pode aparecer somente como origem e nunca como destino; vendedor ativo do tenant deve aparecer como destino mesmo sem território atual. A transferência exige prévia consistente, confirmação humana explícita, destino ainda ativo, mesmo tenant, snapshot válido, transação atômica e uma auditoria correlacionada. Conflito com vendedor ativo, mudança concorrente, snapshot divergente ou tenant divergente bloqueia a operação inteira, sem transferência parcial. Cidades de inativo permanecem vinculadas e nunca são consideradas livres automaticamente.
+
+A implementação e a operação produtiva são estados distintos: código aprovado/testado não comprova transferência executada. Consulte a [investigação detalhada](investigations/seller-territory-offboarding-2026-09.md) para causa raiz, predicados e limites técnicos, sem usar esse registro histórico como substituto desta regra permanente.
 
 ### Auditoria das telas
 
-Usuários exibe ativos/inativos e vínculos bloqueadores; Territórios passa a expor inativos e transferência; Clientes preserva identidade e recebe carteira comprovada pelo ERP; Oportunidades exibe “Responsável inativo” e ação manual; Agenda/follow-ups e metas futuras são pendências humanas; Atividades, Timeline, Pedidos e Vendas são históricos; KPIs passados são históricos; Equipe/dashboards podem agregar inativos em janelas históricas; automações não devem criar novas responsabilidades para inativo; `/partners` pode trocar somente carteira atual; `/orderStatus` preserva autoria; seletores operacionais continuam oferecendo ativos, exceto o seletor de origem da transferência, que também mostra inativos com território.
+Usuários exibe ativos/inativos e vínculos bloqueadores; Territórios separa origem de destino; Clientes preserva identidade e recebe carteira comprovada pelo ERP; Oportunidades exibe “Responsável inativo” e ação manual; Agenda/follow-ups e metas futuras são pendências humanas; Atividades, Timeline, Pedidos e Vendas são históricos; KPIs passados são históricos; Equipe/dashboards podem agregar inativos em janelas históricas; automações não devem criar novas responsabilidades para inativo; `/partners` pode trocar somente carteira atual; `/orderStatus` preserva autoria. Seletores operacionais oferecem vendedores ativos mesmo com zero cidades; apenas a origem da transferência também oferece inativos que ainda possuam territórios.
