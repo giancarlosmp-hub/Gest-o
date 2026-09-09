@@ -1050,3 +1050,18 @@ A implementação e a operação produtiva são estados distintos: código aprov
 ### Auditoria das telas
 
 Usuários exibe ativos/inativos e vínculos bloqueadores; Territórios separa origem de destino; Clientes preserva identidade e recebe carteira comprovada pelo ERP; Oportunidades exibe “Responsável inativo” e ação manual; Agenda/follow-ups e metas futuras são pendências humanas; Atividades, Timeline, Pedidos e Vendas são históricos; KPIs passados são históricos; Equipe/dashboards podem agregar inativos em janelas históricas; automações não devem criar novas responsabilidades para inativo; `/partners` pode trocar somente carteira atual; `/orderStatus` preserva autoria. Seletores operacionais oferecem vendedores ativos mesmo com zero cidades; apenas a origem da transferência também oferece inativos que ainda possuam territórios.
+# Regra canônica — autoridade de tenant na importação de clientes
+
+Toda criação ou atualização de cliente por integração deve receber `tenantId` de autoridade
+interna comprovada: `AuthTenantContext`/membership única, ativa, em tenant ativo. Payload ERP,
+frontend, vendedor (`sellerId`), nome, e-mail, território, região e a existência de um único
+tenant no banco jamais são autoridade. Em job global/agendado, integração, vendedor e tenant
+devem formar vínculo explícito e não ambíguo; do contrário, não há escrita. Matching,
+deduplicação e merge são sempre limitados ao tenant comprovado.
+
+Um legado com tenant nulo pode ser adotado apenas numa sincronização autenticada/autorizada,
+idempotente, se código/documento não conflitarem em outro tenant; a adoção é auditada e não
+reescreve autoria, datas ou relacionamentos. Tenant diferente ou múltiplas autoridades bloqueiam.
+E-mail é credencial de acesso, não identidade histórica nem autoridade de tenant. Desativar um
+vendedor não apaga/transfere históricos; mudar o responsável atual do cliente e de novas
+oportunidades não muda autores de pedidos, oportunidades, Timeline, Activity ou change logs.

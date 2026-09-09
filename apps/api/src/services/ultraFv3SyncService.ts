@@ -65,7 +65,42 @@ export type RunSyncOptions = {
   authMode?: "global" | "seller" | "seller_reference";
   writeStatus?: boolean;
   correlationId?: string;
+  /** Tenant proved by the authenticated request. Never populated from ERP input. */
+  authenticatedTenantId?: string;
+  authenticatedActorUserId?: string;
 };
+
+type PartnerTenantAuthority = Readonly<{
+  tenantId: string;
+  source: "authenticated_membership" | "seller_membership";
+  actorUserId?: string;
+  allowLegacyAdoption: boolean;
+}>;
+
+export async function resolveUniqueActiveTenantForUser(userId: string): Promise<string> {
+  const memberships = await prisma.tenantMembership.findMany({
+    where: { userId, status: "active", tenant: { status: "active" } },
+    select: { tenantId: true },
+    take: 2,
+  });
+  if (memberships.length !== 1) {
+    throw Object.assign(new Error("Contexto de tenant ausente ou ambíguo para sincronização UltraFV3."), { status: 403 });
+  }
+  return memberships[0].tenantId;
+}
+
+async function resolvePartnerTenantAuthority(userId: string, options?: RunSyncOptions): Promise<PartnerTenantAuthority> {
+  const sellerTenantId = await resolveUniqueActiveTenantForUser(userId);
+  if (options?.authenticatedTenantId && options.authenticatedTenantId !== sellerTenantId) {
+    throw Object.assign(new Error("Vendedor não pertence ao tenant autenticado; sincronização bloqueada."), { status: 403 });
+  }
+  return Object.freeze({
+    tenantId: sellerTenantId,
+    source: options?.authenticatedTenantId ? "authenticated_membership" : "seller_membership",
+    actorUserId: options?.authenticatedActorUserId,
+    allowLegacyAdoption: Boolean(options?.authenticatedTenantId && options.authenticatedActorUserId),
+  });
+}
 type LockAcquireResult =
   | { acquired: true; runId: string }
   | { acquired: false; runId: string; lockedUntil: Date | null };
@@ -1463,6 +1498,7 @@ type PartnerMappedData = {
 
 type PartnerClientCandidate = {
   id: string;
+  tenantId: string | null;
   code: string | null;
   cnpj: string | null;
   cnpjNormalized: string | null;
@@ -1563,6 +1599,7 @@ const buildPartnerMappedData = (
 
 const selectPartnerClientCandidate = {
   id: true,
+  tenantId: true,
   code: true,
   cnpj: true,
   cnpjNormalized: true,
@@ -1609,20 +1646,23 @@ const choosePrimaryPartnerClient = (candidates: PartnerClientCandidate[], ownerS
     return a.createdAt.getTime() - b.createdAt.getTime();
   })[0] ?? null;
 
-const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDocument: string) => {
+const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDocument: string, authority: PartnerTenantAuthority) => {
+  const tenantScope: Prisma.ClientWhereInput = authority.allowLegacyAdoption
+    ? { OR: [{ tenantId: authority.tenantId }, { tenantId: null }] }
+    : { tenantId: authority.tenantId };
   const byCode = data.code
     ? await prisma.client.findMany({
-        where: { code: data.code, NOT: legacyArchivedDuplicateNameWhere },
+        where: { AND: [tenantScope, { code: data.code }], NOT: legacyArchivedDuplicateNameWhere },
         select: selectPartnerClientCandidate,
       }) as PartnerClientCandidate[]
     : [];
   const byDocument = normalizedDocument
     ? await prisma.client.findMany({
         where: {
-          OR: [
+          AND: [tenantScope, { OR: [
             { cnpjNormalized: normalizedDocument },
             ...(data.cnpj ? [{ cnpj: data.cnpj }] : []),
-          ],
+          ] }],
           NOT: legacyArchivedDuplicateNameWhere,
         },
         select: selectPartnerClientCandidate,
@@ -1632,6 +1672,7 @@ const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDo
   if (!byCode.length && !byDocument.length && data.nameNormalized && data.cityNormalized && data.state) {
     byIdentity = await prisma.client.findMany({
       where: {
+        AND: [tenantScope],
         nameNormalized: data.nameNormalized,
         cityNormalized: data.cityNormalized,
         state: data.state,
@@ -1644,6 +1685,21 @@ const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDo
   for (const candidate of [...byCode, ...byDocument, ...byIdentity]) merged.set(candidate.id, candidate);
   return { candidates: [...merged.values()], byCode, byDocument, byIdentity };
 };
+
+const hasCrossTenantIdentityConflict = async (
+  data: PartnerMappedData,
+  normalizedDocument: string,
+  tenantId: string,
+) => prisma.client.count({
+  where: {
+    AND: [{ tenantId: { not: null } }, { tenantId: { not: tenantId } }],
+    NOT: legacyArchivedDuplicateNameWhere,
+    OR: [
+      ...(data.code ? [{ code: data.code }] : []),
+      ...(normalizedDocument ? [{ cnpjNormalized: normalizedDocument }] : []),
+    ],
+  },
+});
 
 const getPartnerAmbiguityReasons = (params: {
   data: PartnerMappedData;
@@ -1741,6 +1797,7 @@ async function mergeDuplicateClientsIntoPrimary(
 async function persistPartnerPayload(
   payload: Record<string, unknown>,
   ownerSellerId: string,
+  authority: PartnerTenantAuthority,
   diagnostics: PartnerPersistenceDiagnostics,
   correlationId: string,
 ) {
@@ -1753,7 +1810,7 @@ async function persistPartnerPayload(
   if (cnpj) diagnostics.receivedWithDocument += 1;
   else diagnostics.receivedWithoutDocument += 1;
 
-  const found = await findPartnerClientCandidates(data, normalizedDocument);
+  const found = await findPartnerClientCandidates(data, normalizedDocument, authority);
   const resolution = resolvePartnerIdentityMatch({
     code: data.code,
     normalizedDocument,
@@ -1764,6 +1821,20 @@ async function persistPartnerPayload(
   });
   incrementPartnerMatchCounter(diagnostics, resolution.matchStrategy);
   const candidates = resolution.candidates;
+  const legacyCandidates = candidates.filter((candidate) => candidate.tenantId === null);
+  if (legacyCandidates.length && (!authority.allowLegacyAdoption
+    || await hasCrossTenantIdentityConflict(data, normalizedDocument, authority.tenantId) > 0)) {
+    diagnostics.ambiguousDuplicates += 1;
+    logApiEvent("WARN", "[ultrafv3 sync partners] tenant adoption blocked", {
+      correlationId,
+      reason: authority.allowLegacyAdoption ? "cross_tenant_identity_conflict" : "authenticated_authority_required",
+      tenantId: authority.tenantId,
+      candidateCount: legacyCandidates.length,
+      codePresent: Boolean(data.code),
+      documentPresent: Boolean(normalizedDocument),
+    });
+    return false;
+  }
   const { byCode, byDocument } = found;
   const ambiguityReasons = getPartnerAmbiguityReasons({ data, normalizedDocument, byCode, byDocument });
   if (resolution.ambiguous || ambiguityReasons.length) {
@@ -1807,6 +1878,7 @@ async function persistPartnerPayload(
   if (candidates.length > 1) diagnostics.duplicatesFound += candidates.length;
 
   const updateData: Prisma.ClientUpdateInput = {
+    tenant: { connect: { id: authority.tenantId } },
     code: data.code,
     name: data.name,
     fantasyName: data.fantasyName,
@@ -1838,6 +1910,19 @@ async function persistPartnerPayload(
         origin: "UltraFV3 Partner Sync", requestId: correlationId,
         metadata: { matchStrategy: resolution.matchStrategy, documentPresent: Boolean(normalizedDocument) },
       });
+      if (primary.tenantId === null) {
+        await tx.clientCodeAudit.create({ data: {
+          clientId: primary.id, oldValue: primary.code, newValue: data.code,
+          partnerErp: data.code, origin: "UltraFV3 Tenant Adoption",
+          actorUserId: authority.actorUserId, requestId: correlationId,
+          metadata: { operation: "tenant_adoption", tenantId: authority.tenantId, authority: authority.source },
+        } });
+        await createUltraFv3ClientAuditEvent(tx, {
+          clientId: primary.id,
+          ownerSellerId,
+          description: "Tenant comprovado e adotado por sincronização UltraFV3 autenticada. Históricos, autoria e datas foram preservados.",
+        });
+      }
       if (sellerChanged) {
         const newSeller = await tx.user.findUnique({ where: { id: ownerSellerId }, select: { name: true } });
         await createUltraFv3ClientAuditEvent(tx, {
@@ -1866,6 +1951,7 @@ async function persistPartnerPayload(
 
   await prisma.$transaction(async (tx) => {
     const created = await tx.client.create({ data: {
+      tenantId: authority.tenantId,
       code: data.code,
       name: data.name,
       fantasyName: data.fantasyName,
@@ -1894,6 +1980,7 @@ async function persistPartnerPayload(
 async function persistPartnerRowsForSeller(
   rows: unknown[],
   seller: SellerSyncUser,
+  authority: PartnerTenantAuthority,
   correlationId: string,
 ) {
   const diagnostics: PartnerPersistenceDiagnostics = {
@@ -1927,7 +2014,7 @@ async function persistPartnerRowsForSeller(
       diagnostics.discardedNonObject += 1;
       continue;
     }
-    const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, diagnostics, correlationId);
+    const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, authority, diagnostics, correlationId);
     if (persisted) syncedCount += 1;
   }
 
@@ -1948,25 +2035,23 @@ export async function syncPartners(options?: RunSyncOptions) {
         resolved.credentials,
       );
       await cachePartnerRows(rows);
-      const fallbackSeller = await prisma.user.findFirst({
-        where: { role: "vendedor", isActive: true },
-        select: { id: true },
+      const configuredSellers = await prisma.user.findMany({
+        where: { role: "vendedor", erpCode: { not: null }, isActive: true },
+        select: {
+          id: true,
+          erpCode: true,
+          tenantMemberships: {
+            where: { status: "active", tenant: { status: "active" } },
+            select: { tenantId: true },
+            take: 2,
+          },
+        },
       });
-      if (!fallbackSeller)
-        throw new Error(
-          "Nenhum vendedor ativo encontrado para vincular clientes sincronizados.",
-        );
-
-      const sellersByErpCode = new Map(
-        (
-          await prisma.user.findMany({
-            where: { erpCode: { not: null }, isActive: true },
-            select: { id: true, erpCode: true },
-          })
-        )
-          .map((seller) => [normalizePartnerCacheCode(seller.erpCode?.trim() || ""), seller.id] as const)
-          .filter(([code]) => Boolean(code)),
-      );
+      const sellerBuckets = new Map<string, typeof configuredSellers>();
+      for (const seller of configuredSellers) {
+        const code = normalizePartnerCacheCode(seller.erpCode?.trim() || "");
+        if (code) sellerBuckets.set(code, [...(sellerBuckets.get(code) || []), seller]);
+      }
 
       const diagnostics: PartnerPersistenceDiagnostics = {
         received: rows.length,
@@ -2003,9 +2088,23 @@ export async function syncPartners(options?: RunSyncOptions) {
         }
         const payload = row as Record<string, unknown>;
         const sellerCode = normalizePartnerCacheCode(pickFirstString(payload, partnerSellerCodeKeys));
-        const ownerSellerId = sellersByErpCode.get(sellerCode) || fallbackSeller.id;
-        if (!sellersByErpCode.has(sellerCode)) diagnostics.fallbackSellerLinks = (diagnostics.fallbackSellerLinks || 0) + 1;
-        const persisted = await persistPartnerPayload(payload, ownerSellerId, diagnostics, correlationId);
+        const sellerMatches = sellerBuckets.get(sellerCode) || [];
+        const seller = sellerMatches.length === 1 ? sellerMatches[0] : null;
+        if (!seller || seller.tenantMemberships.length !== 1
+          || (options?.authenticatedTenantId && seller.tenantMemberships[0].tenantId !== options.authenticatedTenantId)) {
+          diagnostics.fallbackSellerLinks = (diagnostics.fallbackSellerLinks || 0) + 1;
+          logApiEvent("WARN", "[ultrafv3 sync partners] partner skipped without unambiguous tenant authority", {
+            correlationId, sellerCodePresent: Boolean(sellerCode), sellerMatchCount: sellerMatches.length,
+          });
+          continue;
+        }
+        const authority: PartnerTenantAuthority = {
+          tenantId: seller.tenantMemberships[0].tenantId,
+          source: options?.authenticatedTenantId ? "authenticated_membership" : "seller_membership",
+          actorUserId: options?.authenticatedActorUserId,
+          allowLegacyAdoption: Boolean(options?.authenticatedTenantId && options.authenticatedActorUserId),
+        };
+        const persisted = await persistPartnerPayload(payload, seller.id, authority, diagnostics, correlationId);
         if (persisted) syncedCount += 1;
       }
       diagnostics.validAfterNormalization = syncedCount;
@@ -2115,6 +2214,7 @@ export async function syncPartnersByUser(
     throw Object.assign(new Error("Vendedor ativo não encontrado."), {
       status: 404,
     });
+  const tenantAuthority = await resolvePartnerTenantAuthority(seller.id, options);
   const credentials = getConfiguredSellerCredentials(seller);
 
   return runSync(
@@ -2195,6 +2295,7 @@ export async function syncPartnersByUser(
       const result = await persistPartnerRowsForSeller(
         rows,
         seller,
+        tenantAuthority,
         correlationId,
       );
       Object.assign(result.diagnostics, {

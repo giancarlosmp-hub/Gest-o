@@ -848,3 +848,26 @@ A prévia KML/KMZ usa a mesma fonte tenant-scoped e a mesma chave estável de ci
 A transferência altera somente `SellerTerritoryCity.sellerId`. Oportunidades, pedidos, clientes, atividades, Timeline preexistente, change logs e autoria histórica não são transferidos; oportunidades permanecem no vendedor original até reassociação manual por diretor ou gerente. Pedidos não recebeu campo ou comportamento especulativo nesta PR, e o contrato comprovado de `Não informado`/NF-e não instrumentada foi preservado.
 
 Não há declaração de transferência Edirlei → Vitor realizada em produção nem de quantidade produtiva transferida. Nenhuma consulta ou mutação produtiva, deploy, backup, cutover, Recovery, schema apply ou SQL manual foi executado nesta entrega. Detalhes técnicos e limites: [investigação de desligamento e territórios](investigations/seller-territory-offboarding-2026-09.md).
+# Incidente — tenant não comprovado em cliente UltraFV3 (2026-09-09)
+
+O correlation ID `7df84030-cf1b-4b14-8afb-a99b737d2011` foi informado para uma
+simulação de Vitor. Este ambiente de desenvolvimento não possui acesso autenticado aos logs,
+ao banco ou ao endpoint de versão de produção; portanto o SHA implantado, a linha de log e a
+quantidade agregada de clientes ativos com `tenantId` nulo permanecem **não comprovados** e
+devem ser levantados read-only pelo runbook, sem identificadores comerciais. O código confirma
+a causa: `persistPartnerPayload` criava/atualizava `Client` sem `tenantId`, enquanto o pedido e
+o teste de protocolo falham fechados quando o tenant do cliente é nulo. Nenhum envio real foi
+executado nesta investigação; o relato confirma que a opção usada era Simulação ERP.
+
+A correção atribui o tenant no mesmo transaction write da criação, deriva autoridade apenas de
+uma membership ativa e tenant ativo, restringe matching/merge ao tenant e remove o vendedor
+fallback da sincronização global. Cliente legado nulo só é adotado por sync autenticada, sem
+conflito de código/documento em outro tenant, com registro auditável. Tenant conflitante,
+membership ausente/ambígua e vínculo ERP-vendedor ambíguo param sem escrita. Não houve schema,
+migration, SQL produtivo, apply, Recovery ou cutover.
+
+Após o futuro deploy: (1) confirmar SHA/API/WEB; (2) executar a sincronização autorizada dos
+clientes de Vitor; (3) conferir agregadamente que o reparo ocorreu; (4) validar novamente em
+**Simulação ERP**; (5) somente após sucesso explícito autorizar envio real. Os testes locais
+cobrem autoridade, criação/adoção, conflito, isolamento da deduplicação, preservação histórica e
+os gates de simulação/envio; checks remotos ainda devem concluir antes de merge.

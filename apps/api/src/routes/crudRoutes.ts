@@ -70,7 +70,8 @@ import {
   syncReceivingConditions,
   syncSalesmen,
   syncOrderStatus,
-  startUltraFv3FullSyncJob
+  startUltraFv3FullSyncJob,
+  resolveUniqueActiveTenantForUser
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
 import { buildSalesmenDiagnostic, createErpOrderFromOpportunity, getErpOrderOperationalSummary, getErpOrderParameterDiagnostics, getZeroNumPedidoDryRunReport, normalizeErpOrderParameterCodes, runUltraFv3OrderProtocolTest, sanitizeErpOrderErrorMessage, sanitizeErpOrderPayload, syncErpOrderStatuses, type UltraFv3OrderPayload } from "../services/erpOrderService.js";
@@ -1894,7 +1895,8 @@ const findImportExistingClient = (params: {
 };
 
 const buildImportPreview = async (req: any, rows: unknown[]): Promise<ImportPreviewItem[]> => {
-  const scopedWhere = sellerWhere(req);
+  const tenantId = await resolveUniqueActiveTenantForUser(req.user.id);
+  const scopedWhere = { tenantId };
 
   // Carrega o mínimo necessário para deduplicação
   const existingClients = await prisma.client.findMany({
@@ -1931,7 +1933,7 @@ const buildImportPreview = async (req: any, rows: unknown[]): Promise<ImportPrev
       .replace(/\s+/g, " ");
 
   const availableSellers = await prisma.user.findMany({
-    where: { role: "vendedor" },
+    where: { role: "vendedor", tenantMemberships: { some: { tenantId, status: "active", tenant: { status: "active" } } } },
     select: { id: true, name: true }
   });
 
@@ -4431,9 +4433,10 @@ router.post("/clients/check-duplicate", async (req, res) => {
     return res.status(400).json({ message: "Payload inválido para validação de cliente." });
   }
 
+  const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
   const duplicate = await findDuplicateClient({
     candidate: parsed.data,
-    scope: sellerWhere(req),
+    scope: { tenantId },
     ignoreClientId: parsed.data.ignoreClientId
   });
 
@@ -4456,6 +4459,7 @@ router.post("/clients/exists-bulk", async (req, res) => {
   }
 
   const page = parsed.data.page ?? 1;
+  const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
   const pageSize = parsed.data.pageSize ?? 500;
 
   const normalizedKeys = parsed.data.keys.map((key) => ({
@@ -4507,7 +4511,7 @@ router.post("/clients/exists-bulk", async (req, res) => {
   const existingClients = whereOr.length
     ? await prisma.client.findMany({
         where: {
-          ...sellerWhere(req),
+          tenantId,
           isArchived: false,
           OR: whereOr
         },
@@ -4557,6 +4561,7 @@ router.post("/clients/exists-bulk", async (req, res) => {
 
 router.post("/clients", validateBody(clientSchema), async (req, res) => {
   try {
+    const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
     const ownerSellerId =
       req.user!.role === "vendedor"
         ? req.user!.id
@@ -4564,8 +4569,8 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
           ? resolveOwnerId(req, req.body.ownerSellerId)
           : resolveOwnerId(req);
 
-    const payload = withClientNormalizedFields({ ...req.body, ownerSellerId });
-    await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
+    const payload = withClientNormalizedFields({ ...req.body, tenantId, ownerSellerId });
+    await ensureClientIsNotDuplicate({ candidate: payload, scope: { tenantId } });
 
     const data = await prisma.$transaction(async (tx) => {
       const created = await tx.client.create({ data: payload });
@@ -4636,7 +4641,8 @@ router.post("/clients/import", async (req, res) => {
   if (!isValid) return res.status(400).json({ message: "Payload de importação inválido." });
 
   const preview = await buildImportPreview(req, rows);
-  const scopedWhere = sellerWhere(req);
+  const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
+  const scopedWhere = { tenantId };
 
   const existingClients = await prisma.client.findMany({
     where: { ...scopedWhere, isArchived: false },
@@ -4770,7 +4776,7 @@ router.post("/clients/import", async (req, res) => {
         continue;
       }
 
-      const payload = resolveImportCreateData(item.payload, req);
+      const payload = { ...resolveImportCreateData(item.payload, req), tenantId };
       await ensureClientIsNotDuplicate({ candidate: payload, scope: scopedWhere });
       const createdClient = await prisma.$transaction(async (tx) => {
         const created = await tx.client.create({ data: payload });
@@ -5027,6 +5033,7 @@ router.get("/companies", async (req, res) => {
 
 router.post("/companies", validateBody(companySchema), async (req, res) => {
   try {
+    const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
     const payload = withClientNormalizedFields({
       name: req.body.name,
       city: "Não informado",
@@ -5035,10 +5042,11 @@ router.post("/companies", validateBody(companySchema), async (req, res) => {
       clientType: ClientType.PJ,
       cnpj: req.body.cnpj,
       segment: req.body.segment,
-      ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId)
+      ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId),
+      tenantId,
     });
 
-    await ensureClientIsNotDuplicate({ candidate: payload, scope: sellerWhere(req) });
+    await ensureClientIsNotDuplicate({ candidate: payload, scope: { tenantId } });
 
     const data = await prisma.client.create({ data: payload });
 
@@ -8830,9 +8838,14 @@ const ultraFv3SyncHandlers = {
   operations: syncOperations
 } as const;
 
-const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (_req: Request, res: express.Response) => {
+const authenticatedPartnerSyncOptions = async (req: Request) => ({
+  authenticatedTenantId: await resolveUniqueActiveTenantForUser(req.user!.id),
+  authenticatedActorUserId: req.user!.id,
+});
+
+const runUltraFv3Sync = (scope: keyof typeof ultraFv3SyncHandlers) => async (req: Request, res: express.Response) => {
   try {
-    const result = await ultraFv3SyncHandlers[scope]();
+    const result = await ultraFv3SyncHandlers[scope](scope === "partners" ? await authenticatedPartnerSyncOptions(req) : undefined);
     return res.status(200).json({ scope, ...result });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
@@ -9035,7 +9048,7 @@ router.post("/erp/ultrafv3/sync/financial-profiles", authorize("diretor", "geren
 router.post("/erp/ultrafv3/sync/partner-titles", authorize("diretor", "gerente"), runUltraFv3Sync("partnerTitles"));
 router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
   try {
-    const result = await syncPartnersForAllConfiguredSellers({ trigger: ErpSyncTrigger.manual });
+    const result = await syncPartnersForAllConfiguredSellers({ trigger: ErpSyncTrigger.manual, ...await authenticatedPartnerSyncOptions(req) });
     logApiEvent("INFO", "[ultrafv3 sync route] opportunity clients all-sellers sync finished", {
       userId: req.user!.id,
       role: req.user!.role,
@@ -9070,7 +9083,7 @@ router.post("/erp/ultrafv3/sync/partners/opportunity-clients", authorize("direto
 
 router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", "gerente"), async (req, res) => {
   try {
-    const result = await syncPartnersByUser(req.params.userId);
+    const result = await syncPartnersByUser(req.params.userId, await authenticatedPartnerSyncOptions(req));
     return res.status(200).json({ scope: "partners", authMode: "seller", sellerId: req.params.userId, ...result });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
@@ -9084,8 +9097,8 @@ router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", 
     });
   }
 });
-router.post("/erp/ultrafv3/sync/partners/all-sellers", authorize("diretor", "gerente"), async (_req, res) => {
-  const result = await syncPartnersForAllConfiguredSellers();
+router.post("/erp/ultrafv3/sync/partners/all-sellers", authorize("diretor", "gerente"), async (req, res) => {
+  const result = await syncPartnersForAllConfiguredSellers(await authenticatedPartnerSyncOptions(req));
   return res.status(result.status === "failed" ? 502 : result.status === "partial" ? 207 : 200).json(result);
 });
 router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runUltraFv3Sync("salesmen"));
