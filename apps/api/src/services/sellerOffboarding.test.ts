@@ -19,6 +19,14 @@ const routes = fs.readFileSync(new URL("../routes/crudRoutes.ts", import.meta.ur
 const auth = fs.readFileSync(new URL("../middlewares/auth.ts", import.meta.url), "utf8");
 const sync = fs.readFileSync(new URL("./ultraFv3SyncService.ts", import.meta.url), "utf8");
 assert.match(routes, /Território vinculado a vendedor inativo — transferência necessária/, "KML/KMZ sinaliza território inativo");
+assert.match(routes, /status: existing\.seller\.isActive \? "conflict" : "inactive_transfer"/, "prévia distingue conflito ativo de origem inativa transferível");
+assert.match(routes, /territorySnapshotToken[\s\S]*O território mudou após a prévia/, "snapshot divergente aborta a confirmação");
+assert.match(routes, /cities\.length !== cityIds\.length/, "seleção incompleta aborta sem transferência parcial");
+assert.match(routes, /destinationNow[\s\S]*foi desativado ou mudou de tenant/, "destino é revalidado dentro da transação");
+assert.match(routes, /isActive: false, territoryCities: \{ some: \{ tenantId \} \}/, "inativo com território aparece como origem");
+assert.match(routes, /isActive: true, tenantMemberships: \{ some: \{ tenantId, status: "active" \} \}/, "destino exige vendedor ativo no tenant");
+assert.match(routes, /tenantMemberships: \{ create:/, "novo vendedor recebe membership no mesmo cadastro");
+assert.match(routes, /Auditoria de transferência territorial \[\$\{correlationId\}\]/, "auditoria inclui correlação sem credenciais");
 assert.match(routes, /transfers\/preview[\s\S]*transfers\/confirm/, "prévia precede confirmação explícita");
 assert.match(routes, /sellerTerritoryCity\.update/, "vínculos são atualizados, não recriados");
 assert.match(routes, /destinationAccess\.seller\.isActive/, "destino inativo é bloqueado");
@@ -33,5 +41,6 @@ assert.match(sync, /const sellerChanged = primary\.ownerSellerId !== ownerSeller
 assert.doesNotMatch(routes.slice(routes.indexOf('router.patch("/users/:id/active"')), /opportunity\.updateMany[\s\S]{0,1000}ownerSellerId/, "desativação não transfere oportunidades automaticamente");
 const activationRoute = routes.slice(routes.indexOf('router.patch("/users/:id/active"'), routes.indexOf('router.patch("/users/:id/role"'));
 assert.doesNotMatch(activationRoute, /deleteMany|updateMany|ownerSellerId|sellerTerritoryCity/, "desativação preserva todos os vínculos históricos e operacionais");
+assert.doesNotMatch(routes.slice(routes.indexOf('router.post("/territories/config/transfers/confirm"'), routes.indexOf('router.post("/territories/config/import-kml-preview"')), /opportunity\.(update|delete)|erpOrderSync\.(update|delete)|activity\.(update|delete)/, "transferência territorial não altera oportunidades, pedidos ou atividades");
 
 console.log("Seller offboarding regression tests passed");
