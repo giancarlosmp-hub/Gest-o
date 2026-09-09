@@ -979,3 +979,23 @@ Execute somente depois do merge, implantação aprovada e validação do novo HE
 - Uma reversão territorial, se autorizada, deve usar novamente o fluxo explícito e um destino ativo; nunca altere registros históricos para simular rollback.
 
 Para o caso Edirlei → Vitor, confirme antes os IDs distintos e preserve ambos como identidades diferentes. Este procedimento não afirma que essa transferência foi executada nem fixa uma quantidade produtiva. Consulte a [investigação detalhada](investigations/seller-territory-offboarding-2026-09.md).
+# Troca de vendedor e validação ERP com tenant comprovado
+
+1. Desative o vendedor anterior sem reutilizar seu usuário; altere a credencial de e-mail apenas
+   como ação de acesso. Crie o sucessor como outro usuário e valide exatamente uma membership
+   ativa no tenant ativo correto. E-mail não é identidade nem autoridade de tenant.
+2. Transfira somente responsabilidade atual. Não altere autoria, vendedor histórico, datas,
+   pedidos, oportunidades antigas, Timeline, Activity, contatos, agenda ou change logs.
+3. Execute a sincronização UltraFV3 **por usuário** do novo vendedor, autenticado no mesmo
+   tenant. A sincronização de clientes deve terminar antes da validação do pedido.
+4. Se aparecer “Tenant do cliente não comprovado”, não envie pedido e não faça SQL. Confirme em
+   leitura sanitizada membership/tenant do usuário e oportunidade, tenant/código ERP/responsável
+   do cliente, conflitos de código/documento entre tenants e trigger do sync. Depois repita o sync
+   autorizado: ele pode adotar legado nulo apenas sem conflito e deixa auditoria por correlation ID.
+5. Execute **Simulação ERP**. Ela deve passar antes de qualquer envio real; só então, mediante
+   autorização operacional separada, habilite o envio. Simulação nunca autoriza nem envia pedido.
+
+Para aferir impacto em produção, publique somente `count(*)` agregado de clientes ativos com
+`tenantId IS NULL`; não publique código, documento, nome, e-mail, payload ou credencial. Registre
+SHA de `/health/version`, trigger (`user`, `global` ou `scheduled`) e correlation ID. Não execute
+migration, Production Schema PR827, Recovery, apply ou cutover como parte do diagnóstico.
