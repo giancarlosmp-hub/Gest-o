@@ -8,6 +8,7 @@
     "build": "npm run build -w @salesforce-pro/shared && tsc -p tsconfig.json --noEmit && vite build && node ./scripts/verify-brand-assets.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:responsive": "node ./scripts/verify-mobile-layout.mjs",
     "test:orders": "npx tsx tests/orderPresentation.test.ts"
   },
   "dependencies": {

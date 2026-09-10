@@ -871,3 +871,12 @@ clientes de Vitor; (3) conferir agregadamente que o reparo ocorreu; (4) validar 
 **Simulação ERP**; (5) somente após sucesso explícito autorizar envio real. Os testes locais
 cobrem autoridade, criação/adoção, conflito, isolamento da deduplicação, preservação histórica e
 os gates de simulação/envio; checks remotos ainda devem concluir antes de merge.
+## Fundação visual responsiva mobile (10/09/2026)
+
+Esta entrega estabiliza exclusivamente enquadramento, dimensões, rolagem e sobreposições no WEB; a experiência e a organização das abas continuarão a ser revistas separadamente. Não foram alterados permissões, fluxos comerciais, Pedidos, UltraFV3, tenant, territórios/históricos, API, banco ou migrations.
+
+**Registro da auditoria anterior à implementação.** Eram comprovados pelas evidências fornecidas: drawer de gerente/diretor sem alcance seguro de Configurações, rosca cortada/deslocada e conteúdo encoberto ou cortado no iPhone. A leitura do código comprovou as causas compartilhadas: navegação do drawer sem `overflow-y`, drawer/desktop presos a alturas inadequadas, bloqueio global de `overflow-x` que mascarava a origem, reserva inferior fixa sem contrato comum e modais baseados em `vh`. Foram tratadas como hipóteses a confirmar em dispositivo real: variação exata com teclado virtual, zoom de texto do usuário e combinações de dados produtivos muito longos.
+
+O layout compartilhado agora usa viewport dinâmica e safe areas, trava/restaura o scroll do documento durante o drawer, mantém o cabeçalho do menu fixo e dá rolagem própria aos itens. O shell reserva a barra inferior; mídias e canvas respeitam o container; filhos de flex/grid podem encolher; textos longos quebram; tabelas largas continuam rolando somente em seus wrappers. O modal canônico tem painel limitado por `dvh`, corpo rolável e rodapé seguro. Foram inspecionados Dashboard/Relatórios, Equipe, Clientes, Oportunidades, Pedidos, Atividades, Agenda, Territórios, Configurações e os componentes compartilhados de modal/importação.
+
+A validação automatizada local cobre os contratos estruturais de 320, 360, 375, 390, 414 e 430 px por regras fluidas comuns, incluindo drawer, safe areas, barra inferior, mídia e proibição de ocultar overflow global. Build, typecheck e inspeção em browser devem complementar esse contrato. A matriz completa em Safari/iPhone, Chrome/Android, teclado virtual, zoom de texto e os perfis vendedor/gerente/diretor permanece como validação visual humana no preview, pois este ambiente não possui sessão/dados produtivos nem navegador gráfico.

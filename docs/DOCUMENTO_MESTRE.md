@@ -1065,3 +1065,10 @@ reescreve autoria, datas ou relacionamentos. Tenant diferente ou múltiplas auto
 E-mail é credencial de acesso, não identidade histórica nem autoridade de tenant. Desativar um
 vendedor não apaga/transfere históricos; mudar o responsável atual do cliente e de novas
 oportunidades não muda autores de pedidos, oportunidades, Timeline, Activity ou change logs.
+# Padrão canônico de layout mobile
+
+Esta é a fundação visual do WEB; não redefine navegação, prioridade de informações ou fluxo comercial. Todo container flex/grid deve permitir encolhimento com `min-width: 0`, textos longos devem quebrar previsivelmente e imagem, SVG, vídeo e canvas devem ter `max-width: 100%`. Não se usa `overflow-x: hidden` no documento para esconder defeitos: a causa deve ser removida, e conteúdo intrinsecamente largo (tabela ou mapa) recebe rolagem no próprio wrapper, com `max-width: 100%`, inércia de toque e contenção de overscroll.
+
+No celular, cabeçalho, drawer e barra de ações usam `env(safe-area-inset-*)`. O shell reserva a altura contratual da navegação inferior mais a safe area. O drawer usa `100dvh`, cabeçalho e rodapé não encolhem, somente a lista central rola; ao abrir, o documento é travado preservando sua posição, e ao fechar ela é restaurada. Controles essenciais devem se aproximar de 44 × 44 px CSS e manter foco visível.
+
+O modal canônico separa overlay sem rolagem, painel limitado pela viewport dinâmica, cabeçalho/rodapé estáveis e corpo com rolagem própria. O rodapé soma a safe area inferior. Gráficos devem ser responsivos, sem proporção fixa quando o container define altura, e canvas centralizado e limitado ao container. Tabelas simples podem quebrar texto; as multidimensionais preservam colunas e rolam horizontalmente somente dentro do componente. Mapas seguem o mesmo limite externo e mantêm pan/zoom dentro da própria área.
