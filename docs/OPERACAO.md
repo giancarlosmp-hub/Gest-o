@@ -999,3 +999,8 @@ Para aferir impacto em produção, publique somente `count(*)` agregado de clien
 `tenantId IS NULL`; não publique código, documento, nome, e-mail, payload ou credencial. Registre
 SHA de `/health/version`, trigger (`user`, `global` ou `scheduled`) e correlation ID. Não execute
 migration, Production Schema PR827, Recovery, apply ou cutover como parte do diagnóstico.
+# Validação visual mobile
+
+Antes de aprovar uma entrega WEB, validar no preview autenticado em 320, 360, 375, 390, 414 e 430 px, em retrato e paisagem: (1) percorrer o fim de cada página e confirmar que a barra inferior não cobre a última ação; (2) abrir o menu como vendedor, gerente e diretor, rolar até o último item e abrir **Configurações** nos perfis autorizados; (3) fechar o menu e confirmar que a página voltou à mesma posição; (4) conferir gráficos, rankings, tabelas e mapa sem scroll horizontal do documento; (5) abrir formulário/modal curto e extenso, teclado e seletor de data; e (6) repetir com texto ampliado no Safari/iPhone e Chrome/Android. Tabela ou mapa largo pode rolar dentro de sua moldura, nunca a página inteira.
+
+Para validar a ação rápida **Oportunidade**, acioná-la partindo de outra tela e novamente a partir de Oportunidades. Em ambos os casos deve abrir **Nova oportunidade**, sem mensagem de carregamento de identificador, requisição de detalhe ou gravação automática. Cancelar, abrir novamente e usar Voltar; depois abrir normalmente os detalhes de uma oportunidade existente. Repetir como vendedor, gerente e diretor e conferir que Importar, Nova oportunidade, Pipeline e Lista permanecem inteiros e confortáveis para toque.

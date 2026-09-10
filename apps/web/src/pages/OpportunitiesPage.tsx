@@ -12,6 +12,7 @@ import CreateOpportunityModal from "../components/opportunities/CreateOpportunit
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
+import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -1198,6 +1199,14 @@ export default function OpportunitiesPage() {
     setSelectedProduct(null);
   };
 
+  useEffect(() => {
+    const { shouldOpen, nextSearchParams } = consumeOpportunityCreateRequest(searchParams);
+    if (!shouldOpen) return;
+
+    openCreateModal();
+    setSearchParams(nextSearchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const onEdit = (item: Opportunity) => {
     setEditing(item.id);
     setOpportunityModalMode("edit");
@@ -1631,34 +1640,34 @@ export default function OpportunitiesPage() {
 
   return (
     <div className="space-y-5 pb-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
           <button
             type="button"
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            className="min-h-11 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
             onClick={() => setIsImportModalOpen(true)}
           >
             Importar
           </button>
           <button
             type="button"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+            className="min-h-11 whitespace-nowrap rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
             onClick={openCreateModal}
           >
             Nova oportunidade
           </button>
-          <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
+          <div className="inline-flex min-h-11 shrink-0 rounded-lg border border-slate-300 bg-slate-100 p-1 text-sm font-medium">
             <button
               type="button"
-              className={`rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 transition ${viewMode === "pipeline" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
               onClick={() => handleViewModeChange("pipeline")}
             >
               Pipeline
             </button>
             <button
               type="button"
-              className={`rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
+              className={`whitespace-nowrap rounded-md px-3 py-1.5 transition ${viewMode === "list" ? "bg-white text-slate-900 shadow" : "text-slate-600 hover:text-slate-900"}`}
               onClick={() => handleViewModeChange("list")}
             >
               Lista

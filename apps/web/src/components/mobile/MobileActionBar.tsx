@@ -1,5 +1,6 @@
 import { CalendarPlus, MessageCircle, TrendingUp } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { OPPORTUNITY_CREATE_TARGET } from "../../lib/opportunityQuickAction";
 
 const actionButtonBaseClass =
   "flex min-w-0 min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-tight transition active:scale-[0.99]";
@@ -14,7 +15,7 @@ const primaryActions = [
   {
     id: "oportunidade",
     label: "Oportunidade",
-    to: "/oportunidades/nova",
+    to: OPPORTUNITY_CREATE_TARGET,
     icon: TrendingUp
   },
   {
@@ -29,7 +30,7 @@ export default function MobileActionBar() {
   const location = useLocation();
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+    <nav aria-label="Ações rápidas" className="fixed inset-x-0 bottom-0 z-40 w-full max-w-[100vw] border-t border-slate-200 bg-white/95 px-[max(12px,env(safe-area-inset-left))] pb-[calc(env(safe-area-inset-bottom)+12px)] pr-[max(12px,env(safe-area-inset-right))] pt-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
       <div className="mx-auto flex w-full max-w-3xl items-stretch gap-2">
         {primaryActions.map((action) => {
           const Icon = action.icon;
