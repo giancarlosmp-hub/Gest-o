@@ -21,5 +21,10 @@ assert.doesNotMatch(
   /html,\s*body,\s*#root\s*{[^}]*overflow-x:\s*hidden/s,
   "global overflow hiding would conceal unresolved content",
 );
+assert.doesNotMatch(
+  styles,
+  /button,\s*\[role="button"\][^{]*\{[^}]*word-break:/s,
+  "buttons must not receive indiscriminate word-breaking rules",
+);
 
 console.log("Responsive layout contracts: PASS");

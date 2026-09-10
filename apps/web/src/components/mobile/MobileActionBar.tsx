@@ -1,5 +1,6 @@
 import { CalendarPlus, MessageCircle, TrendingUp } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+import { OPPORTUNITY_CREATE_TARGET } from "../../lib/opportunityQuickAction";
 
 const actionButtonBaseClass =
   "flex min-w-0 min-h-16 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] font-semibold leading-tight transition active:scale-[0.99]";
@@ -14,7 +15,7 @@ const primaryActions = [
   {
     id: "oportunidade",
     label: "Oportunidade",
-    to: "/oportunidades/nova",
+    to: OPPORTUNITY_CREATE_TARGET,
     icon: TrendingUp
   },
   {

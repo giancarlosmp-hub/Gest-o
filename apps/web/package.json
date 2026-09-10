@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:responsive": "node ./scripts/verify-mobile-layout.mjs",
+    "test:opportunity-quick-action": "npx tsx tests/opportunityQuickAction.test.ts",
     "test:orders": "npx tsx tests/orderPresentation.test.ts"
   },
   "dependencies": {
