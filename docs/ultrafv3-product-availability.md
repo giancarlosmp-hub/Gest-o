@@ -42,3 +42,11 @@ Esses mecanismos explicam como `1/12` e `1/13` podiam continuar elegíveis. Regi
 3. Pesquise `MARANDU`: valide código/classe, duas descrições, marca, unidade, preço e estoque. No cenário informado, somente `1/9` (R$ 128, estoque 411) e `1/19` (R$ 296, estoque 85) aparecem; `1/12` e `1/13` não aparecem após zero/ausência autoritativa.
 4. Em uma fixture com preço positivo e estoque zero, confirme que o item aparece com **Sem saldo**.
 5. Um diretor/gerente pode consultar o diagnóstico sanitizado para os quatro códigos e confirmar endpoint, tabela e classificação. Não execute pedido real e não faça escrita manual em produção.
+
+## Adendo corretivo pós-PR #866
+
+A evidência disponível no repositório comprova que `/products` contém preço por aliases e que o schema exato/universalidade de `/prices` não estão provados. Portanto, as duas rotas produzem **observações explícitas identificadas pela origem**, e não uma cadeia de fallback. `available` e `explicit_zero` participam da resolução temporal do mesmo produto/classificação/tabela/filial; `absent` significa apenas que aquela origem não viu o preço em snapshot completo de seu escopo e não invalida uma afirmação explícita de outra origem.
+
+A PR #866 violou essa fronteira em `upsertProductPricesFromRows`: qualquer array de `/prices` autorizava um `updateMany` global sobre todo `ProductPrice > 0`, inclusive linhas acabadas de criar a partir de `/products`. A pesquisa então funcionava conforme o novo filtro e corretamente não retornava as linhas agora zeradas; não há evidência local de cache incorreto no frontend. O sweep corrigido exige completude de transporte **e** contexto de tabela explícito, limita-se a `source=prices`, filial/tabela observadas e tenant autenticado quando disponível. HTTP 200 isolado e formato sem escopo não autorizam invalidação.
+
+Contagens sanitizadas são emitidas na sincronização (`received`, `validAfterNormalization`, descartes, preços criados/atualizados, zeros explícitos, ausentes invalidados e produtos sem correspondência) e na pesquisa (`receivedFromDatabase`, visíveis e exclusões por inativo, não sincronizado ou preço inválido). Não se registram credenciais nem payload comercial completo. Sem remote e sem credenciais nesta cópia, o SHA produtivo e os valores atuais de MARANDU permanecem não comprovados.

@@ -6355,16 +6355,14 @@ router.get("/products/search", async (req, res) => {
   }).slice(0, 30);
 
   const hiddenTotal = hiddenDiagnostics.inactive + hiddenDiagnostics.not_synchronized + hiddenDiagnostics.invalid_price;
-  if (hiddenTotal > 0) {
-    logApiEvent("INFO", "[products search] hidden invalid opportunity products", {
-      query: q,
+  logApiEvent("INFO", "[products search] opportunity availability counts", {
+      receivedFromDatabase: products.length,
       priceTableCode: requestedPriceTableCode,
       visibleCount: visibleProducts.length,
       hiddenCount: hiddenTotal,
       hiddenDiagnostics,
       hiddenSamples,
-    });
-  }
+  });
 
   return res.json(visibleProducts);
 });

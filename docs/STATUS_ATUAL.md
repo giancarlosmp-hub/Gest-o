@@ -1,3 +1,7 @@
+# Regressão pós-PR #866 — correção em PR, produção pendente (11/09/2026)
+
+A investigação local confirmou que a PR #866 (`2cf1cda`, merge `4d538c6`) passou a exigir `ProductPrice`, porém a etapa `/prices` classificava um array HTTP 200 como snapshot global completo e zerava **todas** as linhas positivas não vistas, inclusive as recém-normalizadas de `/products`. Assim, houve alteração indevida persistida, não cache do frontend nem apenas filtro de pesquisa. A correção separa observações por origem/estado, limita ausência ao escopo de `/prices` comprovado e mantém zero explícito e precedência temporal. Sem remote, credenciais ou acesso produtivo, SHA implantado e recuperação real continuam `NOT_PROVEN`; após implantação é necessária nova sincronização corrigida e validação operacional.
+
 # Disponibilidade de produtos UltraFV3 (11/09/2026)
 
 O contrato autoritativo de seleção, reconciliação de zero/ausência, proteção de snapshot parcial, marca e comportamento dos botões está em [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md). A pesquisa backend agora exige `ProductPrice > 0` na tabela selecionada e não usa preços legados como fallback; estoque zero continua visível como **Sem saldo**. Não houve consulta ou escrita em produção nesta alteração.

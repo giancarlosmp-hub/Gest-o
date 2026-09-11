@@ -1,3 +1,11 @@
+## Validação móvel pós-correção da PR #866 (pendente)
+
+1. Confirmar que preview e release usam o SHA aprovado desta PR; não executar Recovery, SQL manual ou pedido real.
+2. No celular, abrir **Nova oportunidade**, tabela/filial esperadas, tocar **Atualizar estoque** e exigir mensagem de sucesso somente se catálogo e preços concluírem; erro da segunda etapa deve aparecer como falha, não sucesso.
+3. Pesquisar `MARANDU` por nome e por código: `1/9` e `1/19` devem aparecer somente se o ERP ainda afirmar preço positivo; `1/12` e `1/13` devem ficar ausentes sob zero explícito vigente. Confirmar também um item positivo sem saldo como **Sem saldo**.
+4. Consultar logs agregados sanitizados (`received`, normalizados, persistidos, preço positivo, motivos ocultos e retornados). Depois do deploy, executar uma sincronização corrigida para reparar naturalmente as invalidações da PR #866; nunca reativar em massa.
+5. Se houver falha/parcial, preservar catálogo, registrar correlação e interromper a validação. Só declarar resolvido após esta prova operacional.
+
 # Validação de disponibilidade UltraFV3 (11/09/2026)
 
 Na oportunidade, **Atualizar estoque** executa catálogo/estado/marca/estoque e depois preços; em Configurações, **Sincronização completa** preserva a mesma ordem autoritativa. Após atualizar, pesquise `MARANDU` na tabela `1`: no cenário de referência devem aparecer `1/9` e `1/19`, não `1/12`/`1/13`, e cada opção deve mostrar marca, unidade, preço e estoque. Estoque zero com preço positivo aparece como **Sem saldo**. Não valide emitindo pedido real. Detalhes e diagnóstico sanitizado: [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md).
