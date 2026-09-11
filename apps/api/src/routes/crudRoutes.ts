@@ -66,6 +66,7 @@ import {
   syncPriceTables,
   syncPriceVariations,
   syncPrices,
+  syncOpportunityProductAvailability,
   syncProducts,
   syncReceivingConditions,
   syncSalesmen,
@@ -79,7 +80,7 @@ import { logApiEvent, sanitizePayload } from "../utils/logger.js";
 import { buildControlledErpOrderFailurePayload, safeJsonStringify } from "../utils/erpOrderFailureResponse.js";
 import { decryptErpCredential, encryptErpCredential, isErpCredentialEncryptionConfigured } from "../services/erpCredentialCrypto.js";
 import { buildErpOrderPdf, getErpOrderPdfCompany, getErpOrderPdfFilename, getErpOrderPdfMetadata, type ErpOrderPdfRecord } from "../services/erpOrderPdfService.js";
-import { calculateOpportunityPriceForTable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
+import { calculateOpportunityPriceForTable, isOpportunityProductSelectable, normalizeOpportunityPriceTableCode } from "../services/opportunityPriceService.js";
 import { getCommercialInsights, invalidateCommercialInsightsCache } from "../services/commercialInsightsService.js";
 import { timelineIntelligenceService } from "../services/timelineIntelligenceService.js";
 import { planningIntelligenceService } from "../services/planningIntelligenceService.js";
@@ -6262,7 +6263,13 @@ router.get("/products/search", async (req, res) => {
     const stock = Number(product.stockQuantity || 0);
     const isActiveForErpOrder = product.isActive && !product.isSuspended;
     const isSynchronized = isSynchronizedProduct(product);
-    const hasValidSelectedTablePrice = pickedPrice.price > 0 && pickedPrice.priceTableMatched;
+    const hasValidSelectedTablePrice = isOpportunityProductSelectable({
+      isActive: true,
+      isSuspended: false,
+      isSynchronized: true,
+      price: pickedPrice.price,
+      priceTableMatched: pickedPrice.priceTableMatched,
+    });
     const hiddenReason: HiddenProductDiagnosticReason | null = !isActiveForErpOrder
       ? "inactive"
       : !isSynchronized
@@ -9040,6 +9047,23 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
 
 router.post("/erp/ultrafv3/sync/connection", authorize("diretor", "gerente"), runUltraFv3Sync("connection"));
 router.post("/erp/ultrafv3/sync/products", authorize("diretor", "gerente", "vendedor"), runUltraFv3Sync("products"));
+router.post("/erp/ultrafv3/sync/opportunity-products", authorize("diretor", "gerente", "vendedor"), async (req, res) => {
+  try {
+    const result = await syncOpportunityProductAvailability({
+      ...(await authenticatedPartnerSyncOptions(req)),
+      trigger: ErpSyncTrigger.manual,
+    });
+    return res.status(200).json({ scope: "opportunityProducts", ...result });
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 opportunity products sync] failed", { error: details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
+      scope: "opportunityProducts",
+      message: "Falha ao atualizar catálogo, preços e estoque do UltraFV3.",
+      details,
+    });
+  }
+});
 router.post("/erp/ultrafv3/sync/partners", authorize("diretor", "gerente"), runUltraFv3Sync("partners"));
 router.get("/erp/investigate/:erpCode", authorize("diretor", "gerente"), runErpPartnerInvestigationHttp);
 router.post("/erp/investigate", authorize("diretor", "gerente"), runErpPartnerInvestigationHttp);
