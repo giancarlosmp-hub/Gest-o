@@ -1,5 +1,7 @@
 ## Implantação protegida da autoridade ProductPrice (pendente de checks)
 
+> **Correção do CI #3834:** a prova de Pedidos usa dois alvos deliberados: após SQL de Pedidos, o schema correspondente ao commit introdutor de Pedidos; após aplicar também o SQL ProductPrice, o `schema.prisma` atual. A prova dedicada ProductPrice parte do `schema.prisma` imediatamente anterior à sua introdução. `prisma db push` é permitido somente para materializar esses predecessores descartáveis, nunca depois de uma migration. Merge continua bloqueado até as duas provas PostgreSQL 16 terminarem com exit code 0.
+
 A migration `20260911190000_product_price_authority` é aditiva. A API anterior ignora as novas colunas e continua escrevendo porque ambas possuem defaults; a API nova **não pode** iniciar antes do apply. Sequência exata, sem executar produção:
 
 1. Mesclar somente após **Docker Compose CI** verde, incluindo `Build workspace @salesforce-pro/web` e `Prove ProductPrice authority migration preserves existing rows`.
