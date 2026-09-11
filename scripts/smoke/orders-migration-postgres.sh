@@ -39,7 +39,13 @@ apply_product_price_authority_migration() {
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
 git show "${intro}^:apps/api/prisma/schema.prisma" >"$tmp/previous.prisma"
-git show "${intro}:apps/api/prisma/schema.prisma" >"$tmp/orders-target.prisma"
+# The migration-introduction commit accidentally left ErpOrderSync.tenantId
+# nullable in Prisma although its SQL sets NOT NULL. This immediate corrective
+# commit is the first schema that represents the migration's real post-state.
+orders_schema_commit=e7590d0a03fbf1b137e0e88c5f2b7c429594c29f
+git merge-base --is-ancestor "$intro" "$orders_schema_commit"
+git show "$orders_schema_commit:apps/api/prisma/schema.prisma" >"$tmp/orders-target.prisma"
+grep -Eq '^  tenantId +String$' <(sed -n '/model ErpOrderSync {/,/^}/p' "$tmp/orders-target.prisma")
 mkdir -p "$tmp/previous/migrations"
 cp "$tmp/previous.prisma" "$tmp/previous/schema.prisma"
 find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904120000_orders_operational_view -print0 | while IFS= read -r -d '' migration; do cp -R "$migration" "$tmp/previous/migrations/"; done

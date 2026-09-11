@@ -2,6 +2,8 @@
 
 > **Correção do CI #3834:** a prova de Pedidos usa dois alvos deliberados: após SQL de Pedidos, o schema correspondente ao commit introdutor de Pedidos; após aplicar também o SQL ProductPrice, o `schema.prisma` atual. A prova dedicada ProductPrice parte do `schema.prisma` imediatamente anterior à sua introdução. `prisma db push` é permitido somente para materializar esses predecessores descartáveis, nunca depois de uma migration. Merge continua bloqueado até as duas provas PostgreSQL 16 terminarem com exit code 0.
 
+> **Precisão após o CI #3836:** “schema correspondente a Pedidos” significa o primeiro snapshot historicamente corrigido (`e7590d0a...`), pois o commit introdutor ainda declarava `ErpOrderSync.tenantId` nullable em desacordo com seu próprio `SET NOT NULL`. O harness verifica somente o bloco do modelo `ErpOrderSync`; não faz substituições globais de `tenantId`. Na comparação, `--from-url` é o banco migrado e `--to-schema-datamodel` é esse alvo obrigatório.
+
 A migration `20260911190000_product_price_authority` é aditiva. A API anterior ignora as novas colunas e continua escrevendo porque ambas possuem defaults; a API nova **não pode** iniciar antes do apply. Sequência exata, sem executar produção:
 
 1. Mesclar somente após **Docker Compose CI** verde, incluindo `Build workspace @salesforce-pro/web` e `Prove ProductPrice authority migration preserves existing rows`.
