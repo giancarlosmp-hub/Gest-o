@@ -13,6 +13,7 @@ export type OpportunityPriceCalculationInput = {
   priceTableCode?: string | null;
   priceVariations?: unknown[];
   erpPrices?: unknown[];
+  branchCode?: string | null;
 };
 
 export type OpportunityPriceCalculationResult = {
@@ -22,6 +23,19 @@ export type OpportunityPriceCalculationResult = {
   priceWarning: string | null;
   source: "product.PRECO" | "productPrice" | "rawProduct" | "priceVariation" | "prices" | "default" | "missing";
 };
+
+export const isOpportunityProductSelectable = (input: {
+  isActive: boolean;
+  isSuspended: boolean;
+  isSynchronized: boolean;
+  price: number;
+  priceTableMatched: boolean;
+}) => input.isActive
+  && !input.isSuspended
+  && input.isSynchronized
+  && Number.isFinite(input.price)
+  && input.price > 0
+  && input.priceTableMatched;
 
 const normalizeOptionalString = (value: unknown) => {
   if (value === null || value === undefined) return "";
@@ -156,27 +170,30 @@ export const calculateOpportunityPriceForTable = ({
   priceTableCode,
   priceVariations = [],
   erpPrices = [],
+  branchCode,
 }: OpportunityPriceCalculationInput): OpportunityPriceCalculationResult => {
   const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
   const productPrices = product.prices || [];
-  const selectedTableRows = productPrices.filter((item) => priceTableMatches(item.erpPriceId, normalizedPriceTableCode));
-  const tablePrice = selectedTableRows.find((item) => Number(item.price) > 0);
+  const normalizedBranchCode = normalizeOptionalString(branchCode);
+  const selectedTableRows = productPrices.filter((item) => {
+    if (!priceTableMatches(item.erpPriceId, normalizedPriceTableCode)) return false;
+    const rowBranch = normalizeOptionalString((item as { branchCode?: string | null }).branchCode);
+    return !normalizedBranchCode || rowBranch === normalizedBranchCode;
+  });
   const hasExplicitInvalidSelectedTablePrice = selectedTableRows.some((item) => Number(item.price) <= 0);
-  const rawTablePrice = tablePrice || hasExplicitInvalidSelectedTablePrice ? null : pickRawPriceForTable(product.rawErpPayload, normalizedPriceTableCode);
+  const tablePrice = hasExplicitInvalidSelectedTablePrice
+    ? undefined
+    : selectedTableRows.find((item) => Number(item.price) > 0);
+  // ProductPrice is the sole availability authority. Product/default/min prices,
+  // cached payloads and calculated-price caches are deliberately not fallbacks:
+  // they can outlive a zero/absent price in the current ERP snapshot.
+  const rawTablePrice = null;
 
   if (normalizedPriceTableCode === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE) {
-    const basePrice = getProductBasePrice(product);
-    const calculatedPrice = tablePrice || hasExplicitInvalidSelectedTablePrice ? null : findCalculatedPrice(product, normalizedPriceTableCode, erpPrices);
-    const selectedPrice = tablePrice?.price ?? rawTablePrice ?? calculatedPrice ?? (hasExplicitInvalidSelectedTablePrice ? 0 : basePrice);
+    const selectedPrice = tablePrice?.price ?? 0;
     const source = tablePrice
       ? "productPrice"
-      : rawTablePrice
-        ? "rawProduct"
-        : calculatedPrice
-          ? "prices"
-          : hasExplicitInvalidSelectedTablePrice
-            ? "missing"
-            : "product.PRECO";
+        : "missing";
     return {
       price: Number(selectedPrice.toFixed(2)),
       priceTableCode: normalizedPriceTableCode,
@@ -186,48 +203,11 @@ export const calculateOpportunityPriceForTable = ({
     };
   }
 
-  if (normalizedPriceTableCode === "2") {
-    const basePrice = getProductBasePrice(product);
-    const variationPercent = findVariationPercent(product, normalizedPriceTableCode, priceVariations);
-    if (basePrice > 0 && variationPercent) {
-      return {
-        price: Number((basePrice * (1 + variationPercent / 100)).toFixed(2)),
-        priceTableCode: normalizedPriceTableCode,
-        priceTableMatched: true,
-        priceWarning: null,
-        source: "priceVariation",
-      };
-    }
-
-    const calculatedPrice = findCalculatedPrice(product, normalizedPriceTableCode, erpPrices);
-    if (calculatedPrice) {
-      return {
-        price: Number(calculatedPrice.toFixed(2)),
-        priceTableCode: normalizedPriceTableCode,
-        priceTableMatched: true,
-        priceWarning: null,
-        source: "prices",
-      };
-    }
-
-    return {
-      price: 0,
-      priceTableCode: normalizedPriceTableCode,
-      priceTableMatched: false,
-      priceWarning: `Sem regra de preço sincronizada para a tabela ${normalizedPriceTableCode}; preço unitário definido como 0.`,
-      source: "missing",
-    };
-  }
-
-  const latestPositivePrice = productPrices.find((item) => Number(item.price) > 0);
-  const fallbackPrice = Number(product.defaultPrice ?? latestPositivePrice?.price ?? 0);
-  const matchedPrice = tablePrice?.price ?? rawTablePrice;
-
   return {
-    price: Number(matchedPrice ?? fallbackPrice ?? 0),
+    price: Number(tablePrice?.price ?? 0),
     priceTableCode: normalizedPriceTableCode,
-    priceTableMatched: Boolean(tablePrice || rawTablePrice),
-    priceWarning: tablePrice || rawTablePrice ? null : `Sem preço sincronizado para a tabela ${normalizedPriceTableCode}; mantendo preço padrão/manual.`,
-    source: tablePrice ? "productPrice" : rawTablePrice ? "rawProduct" : "default",
+    priceTableMatched: Boolean(tablePrice),
+    priceWarning: tablePrice ? null : `Sem preço positivo sincronizado para a tabela ${normalizedPriceTableCode}.`,
+    source: tablePrice ? "productPrice" : "missing",
   };
 };

@@ -1385,11 +1385,11 @@ export default function OpportunitiesPage() {
   const syncProductsStock = async () => {
     setIsSyncingProducts(true);
     try {
-      await api.post("/erp/ultrafv3/sync/products");
+      await api.post("/erp/ultrafv3/sync/opportunity-products");
       await searchProducts(productSearch);
-      toast.success("Estoque atualizado com sucesso.");
+      toast.success("Catálogo, preços e estoque atualizados com sucesso.");
     } catch (error) {
-      toast.error(getApiErrorMessage(error, "Não foi possível atualizar o estoque."));
+      toast.error(getApiErrorMessage(error, "Não foi possível atualizar catálogo, preços e estoque."));
     } finally {
       setIsSyncingProducts(false);
     }
@@ -1850,7 +1850,7 @@ export default function OpportunitiesPage() {
                       >
                         <p className="text-sm font-medium text-slate-900">{product.erpProductCode} / {product.erpProductClassCode} · {product.name}</p>
                         <p className="text-xs text-slate-600">
-                          {product.className || "Sem classificação"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} ·{" "}
+                          {product.className || "Sem classificação"} · Marca {product.brand || "-"} · UND {product.unit || "-"} · {formatCurrencyBRL(Number(product.defaultPrice || 0))} ·{" "}
                           <strong className={Number(product.stock || 0) <= 0 ? "text-red-600" : "text-slate-800"}>ESTOQUE {Number(product.stock || 0)}</strong>
                           {getStockBadge(product.stock) ? (
                             <span className={`ml-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getStockBadge(product.stock)?.className}`}>
@@ -1867,7 +1867,7 @@ export default function OpportunitiesPage() {
                 ) : null}
                 {itemDraft.productNameSnapshot ? (
                   <p className="text-xs text-slate-500">
-                    Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
+                    Produto: {itemDraft.productNameSnapshot || "-"} · Marca: {selectedProduct?.brand || productOptions.find((option) => option.id === itemDraft.productId)?.brand || "-"} · Unidade: {itemDraft.unit || "-"} · Código ERP: {itemDraft.erpProductCode || "-"} · Classificação ERP: {itemDraft.erpProductClassCode || "-"} · Descrição da classificação: {selectedProduct?.className || productOptions.find((option) => option.id === itemDraft.productId)?.className || "-"}
                     {getStockBadge(selectedProduct?.stock ?? itemDraft.stock) ? (
                       <span className={`ml-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getStockBadge(selectedProduct?.stock ?? itemDraft.stock)?.className}`}>
                         {getStockBadge(selectedProduct?.stock ?? itemDraft.stock)?.label}

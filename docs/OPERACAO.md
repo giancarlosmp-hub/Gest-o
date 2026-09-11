@@ -1,3 +1,7 @@
+# Validação de disponibilidade UltraFV3 (11/09/2026)
+
+Na oportunidade, **Atualizar estoque** executa catálogo/estado/marca/estoque e depois preços; em Configurações, **Sincronização completa** preserva a mesma ordem autoritativa. Após atualizar, pesquise `MARANDU` na tabela `1`: no cenário de referência devem aparecer `1/9` e `1/19`, não `1/12`/`1/13`, e cada opção deve mostrar marca, unidade, preço e estoque. Estoque zero com preço positivo aparece como **Sem saldo**. Não valide emitindo pedido real. Detalhes e diagnóstico sanitizado: [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md).
+
 ## Retomada do deploy de Pedidos após o incidente de evidência
 
 O apply #26 (`34243463045`) aplicou e pós-validou `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`, mas publicou o diretório do SHA com modo 755; a primeira verificação do consumidor exige diretório real `root:700`, antes de validar os arquivos regulares `root:600`. Por isso o Deploy Production #152 (`34243608671`) parou em `DEPLOY_FAILURE_STAGE=deploy_script`, antes de qualquer `docker stop`. Nenhum container foi parado/recriado e nenhum cutover foi feito.

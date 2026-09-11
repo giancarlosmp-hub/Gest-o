@@ -174,8 +174,9 @@ const extractProductPrices = (
     priceValue: unknown,
     priceBranchCode: unknown = branchCode,
   ) => {
-    const price = parsePositivePrice(priceValue);
-    if (!price) return;
+    const parsedPrice = parseNumber(priceValue);
+    if (parsedPrice === null) return;
+    const price = parsedPrice > 0 ? parsedPrice : 0;
     const tableCode =
       pickFirstValue({ value: priceTableCode }, ["value"]) === null
         ? null
@@ -650,16 +651,25 @@ async function fetchUltraFv3RowsWithAlias(
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     try {
-      const rows = await fetchUltraFv3Rows(
-        candidate,
-        scope,
-        correlationId,
-        credentials,
-      );
+      const response = credentials
+        ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(candidate, credentials, correlationId)
+        : await requestUltraFv3ReadOnlyWithRetry<unknown>(candidate, correlationId);
+      const rows = toArray(response);
+      if (!rows.length) throw new Error(`Retorno vazio do UltraFV3 para ${scope} (${candidate}).`);
+      const metadata = response && typeof response === "object" && !Array.isArray(response)
+        ? response as Record<string, unknown>
+        : null;
+      const total = metadata ? getPaginationNumber(metadata, ["total", "totalCount", "count"]) : null;
+      const hasNext = metadata?.hasNext === true || metadata?.has_next === true || metadata?.nextPage != null || metadata?.next_page != null;
+      // A successful bare array is the connector's documented snapshot shape.
+      // Wrapped/paginated responses are authoritative only when their metadata
+      // proves that every advertised row was read.
+      const snapshotComplete = Array.isArray(response) || (!hasNext && (total === null || rows.length >= total));
       return {
         rows,
         endpointUsed: candidate,
         aliasFallbackUsed: index > 0 ? 1 : 0,
+        snapshotComplete,
       };
     } catch (error) {
       lastError = error;
@@ -2644,7 +2654,7 @@ const ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE = "228";
 
 const normalizeErpLookupCode = (value: unknown) => String(value ?? "").trim().replace(/^0+(?=\d)/, "");
 
-async function upsertProductPricesFromRows(rows: unknown[], correlationId: string) {
+export async function upsertProductPricesFromRows(rows: unknown[], correlationId: string, snapshotComplete = false) {
   const diagnostics = {
     received: rows.length,
     matchedProducts: 0,
@@ -2896,7 +2906,9 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
   const staleWhere: Prisma.ProductPriceWhereInput = seenProductPriceIds.size
     ? { id: { notIn: [...seenProductPriceIds] }, price: { gt: 0 } }
     : { price: { gt: 0 } };
-  const staleResult = await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0 } });
+  const staleResult = snapshotComplete
+    ? await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0 } })
+    : { count: 0 };
   diagnostics.absentPriceInvalidated = staleResult.count;
   if (staleResult.count > 0) {
     const product273AfterInvalidation = await prisma.product.findFirst({
@@ -2922,6 +2934,7 @@ async function upsertProductPricesFromRows(rows: unknown[], correlationId: strin
     correlationId,
     diagnostics,
     touchedProductCount: touchedProductIds.size,
+    snapshotComplete,
   });
   return diagnostics;
 }
@@ -2946,7 +2959,7 @@ export async function syncPrices(options?: RunSyncOptions) {
         update: { value: JSON.stringify(result.rows) },
         create: { key: "erp.ultrafv3.prices", value: JSON.stringify(result.rows) },
       });
-      const productPriceDiagnostics = await upsertProductPricesFromRows(result.rows, correlationId);
+      const productPriceDiagnostics = await upsertProductPricesFromRows(result.rows, correlationId, result.snapshotComplete);
       return {
         syncedCount: result.rows.length,
         diagnostics: {
@@ -2963,6 +2976,21 @@ export async function syncPrices(options?: RunSyncOptions) {
       sellerName: resolved.sellerName ?? undefined,
     },
   );
+}
+
+/** Minimum safe refresh used by opportunity product selection.
+ * Catalog (descriptions/status/brand/stock) must precede authoritative prices.
+ */
+export async function syncOpportunityProductAvailability(options?: RunSyncOptions) {
+  const correlationId = options?.correlationId || randomUUID();
+  const products = await syncProducts({ ...options, correlationId, lockScope: "opportunity-products" });
+  const prices = await syncPrices({ ...options, correlationId, lockScope: "opportunity-products" });
+  return {
+    syncedCount: products.syncedCount,
+    correlationId,
+    products,
+    prices,
+  };
 }
 export const syncPaymentMethods = (options?: RunSyncOptions) =>
   syncReferenceData("paymentMethods", "/payment-methods", options, [

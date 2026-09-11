@@ -1,3 +1,7 @@
+# Disponibilidade de produtos UltraFV3 (11/09/2026)
+
+Preço elegível de oportunidade tem uma única autoridade: `ProductPrice > 0` para produto/classificação, tabela (padrão `1`) e filial aplicável. Catálogo/estoque vêm de `/products`, preço de `/prices` ou campo de tabela explícito, e marca de `MARCA`. Fallback por `defaultPrice`, `minPrice`, payload/cache é proibido para seleção. Ausentes só são invalidados após snapshot integral comprovado. Contrato e validação: [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md).
+
 ## Incidente de contrato da evidência de Pedidos (08/09/2026)
 
 Na `main` `ee6211b4809ae9dac109dea8bae8dafcd4d4c486` (PR #859), o Production Schema PR827 #26 (`34243463045`) aplicou com sucesso `20260904120000_orders_operational_view` e aprovou as pós-validações. O schema de Pedidos está aplicado. A evidência protegida posteriormente encontrada pelo Deploy Production `34278387474`/job `102236939425` foi produzida pelo SHA `a4e0e4560870f07e44b75d88e761c909f00fb7f4`. A árvore `apps/api/prisma` desse produtor é Git-equivalente à da main `99b4473b900f88a6d6018f906b0bc3a0a3eff0c9`.

@@ -1,3 +1,7 @@
+# Disponibilidade de produtos UltraFV3 (11/09/2026)
+
+O contrato autoritativo de seleção, reconciliação de zero/ausência, proteção de snapshot parcial, marca e comportamento dos botões está em [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md). A pesquisa backend agora exige `ProductPrice > 0` na tabela selecionada e não usa preços legados como fallback; estoque zero continua visível como **Sem saldo**. Não houve consulta ou escrita em produção nesta alteração.
+
 ## Pedidos — apply concluído e cutover preservado (08/09/2026)
 
 A PR #859 foi mesclada na `main` `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`. O **Production Schema PR827 #26** (run `34243463045`) concluiu em modo apply, com confirmação `PRODUCTION_SCHEMA_APPLY`, para `20260904120000_orders_operational_view`: a migration e suas pós-validações passaram e o schema de Pedidos está aplicado. A evidência publicada, porém, foi criada pelo produtor com `mkdir -p` sob umask comum; a primeira condição de `validate_schema_evidence` falhou porque o diretório do SHA não era `root:700` (classe sanitizada observada: modo 755). O contrato também exige `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` regulares, sem symlink, `root:600`.

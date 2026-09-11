@@ -1,3 +1,5 @@
+> **Adendo de catálogo/preço (11/09/2026):** o contrato definitivo de disponibilidade, completude de snapshot, zero, marca e botões está em [`ultrafv3-product-availability.md`](ultrafv3-product-availability.md). Para novas oportunidades, somente `ProductPrice > 0` no contexto solicitado é autoridade; caches e campos legados não são fallback.
+
 # Integração ERP UltraFV3 — contrato técnico sanitizado
 
 | Metadado | Valor |
