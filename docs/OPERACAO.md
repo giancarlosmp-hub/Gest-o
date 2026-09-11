@@ -1,3 +1,19 @@
+## Implantação protegida da autoridade ProductPrice (pendente de checks)
+
+A migration `20260911190000_product_price_authority` é aditiva. A API anterior ignora as novas colunas e continua escrevendo porque ambas possuem defaults; a API nova **não pode** iniciar antes do apply. Sequência exata, sem executar produção:
+
+1. Mesclar somente após **Docker Compose CI** verde, incluindo `Build workspace @salesforce-pro/web` e `Prove ProductPrice authority migration preserves existing rows`.
+2. Executar **Deploy Production**, `phase=build`, no SHA integral da nova `main`; confirmar imagens API/WEB pinadas, sem cutover.
+3. Executar **Prepare Production Recovery Backup** para o mesmo SHA e confirmar evidência recente/protegida exigida pelo preflight.
+4. Executar **Production Schema PR827** com `migration=20260911190000_product_price_authority`, `mode=preview`, confirmação vazia. Revisar preview read-only, checksum allowlisted e managed diff.
+5. Com aprovação humana separada, executar o mesmo workflow com `mode=apply` e `confirm=PRODUCTION_SCHEMA_APPLY`. O runner reexecuta preflight, exige imagem do SHA, backup, `origin/main == HEAD`, worktree limpa, container/database exatos, aplica em transação única, compara contagem de `ProductPrice`, valida defaults/NOT NULL/índice, exige Prisma diff vazio e publica evidência protegida.
+6. Somente após o apply verde, executar **Deploy Production**, `phase=cutover`, no mesmo SHA.
+7. Fazer login pelo celular, executar **Atualizar estoque** uma vez e validar MARANDU conforme roteiro abaixo. Não emitir pedido real.
+
+Rollback: antes do cutover, nenhuma troca de aplicação ocorreu; corrija/rerode sem rollback de dados. Depois do cutover, use **Production Rollback** para restaurar apenas API/WEB anteriores. Preserve a migration aditiva: a versão anterior é compatível com as colunas/defaults e removê-las poderia destruir observações já gravadas pela versão nova. Não executar `DROP COLUMN`, SQL manual, Recovery ou downgrade. Se o apply falhar, a transação reverte o DDL e não publica `applied.tsv`; se falhar somente uma pós-condição, bloquear cutover e investigar, sem reaplicar manualmente.
+
+Estado nesta cópia: runner/workflow/validador foram habilitados e os testes estáticos passaram; build WEB passou após `npm ci`. O teste PostgreSQL foi adicionado ao check obrigatório, mas Docker não existe neste ambiente local e não há remote para confirmar o run do último commit. Portanto `READY_FOR_MERGE=NO` e `READY_FOR_CUTOVER=NO` até ambos os checks remotos ficarem verdes.
+
 ## Validação móvel pós-correção da PR #866 (pendente)
 
 1. Confirmar que preview e release usam o SHA aprovado desta PR; não executar Recovery, SQL manual ou pedido real.

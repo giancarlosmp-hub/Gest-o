@@ -15,6 +15,8 @@ assert.match(step.with.script, /20260904120000_orders_operational_view:preview:\
 assert.match(step.with.script, /MODE=validate SQL_FILE="\$migration" ALLOW_DATA_BACKFILL=orders-tenant-authority-v1[\s\\]*bash scripts\/production-schema-preview\.sh/, "Orders preview must validate the registered data backfill");
 assert.match(step.with.script, /PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717[\s\\]*bash scripts\/production-orders-tenant-preview\.sh/, "Orders preview must execute the aggregate read-only production diagnostic");
 assert.match(step.with.script, /20260904120000_orders_operational_view:apply:PRODUCTION_SCHEMA_APPLY/, "Orders apply must retain its exact confirmation");
+assert.match(step.with.script, /20260911190000_product_price_authority:preview:\*/, "ProductPrice preview must be selectable");
+assert.match(step.with.script, /20260911190000_product_price_authority:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice apply must retain its exact confirmation");
 
 const expression = /\$\{\{ inputs\.mode == 'apply' && format\('API_IMAGE=gest-o-api:\{0\}', github\.sha\) \|\| '' \}\}/g;
 const cases = [

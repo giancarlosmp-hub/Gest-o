@@ -74,6 +74,9 @@ assert.equal(JSON.parse(ordersEntry.stdout).sha256, "486c25d46702a8f91131fa6669b
 const unknownEntry = spawnSync("node", [registry, "20260904120001_not_allowlisted"], { cwd: root, encoding: "utf8" });
 assert.notEqual(unknownEntry.status, 0, "an unregistered migration must be rejected");
 assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);
+const authorityEntry = spawnSync("node", [registry, "20260911190000_product_price_authority"], { cwd: root, encoding: "utf8" });
+assert.equal(authorityEntry.status, 0, authorityEntry.stderr);
+assert.equal(JSON.parse(authorityEntry.stdout).sha256, "52101c9cee86211717bac9ba444735fd8f4120723f64988f1f32211dee56c024");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
@@ -87,6 +90,7 @@ assert.match(apply, /PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-2026071
 assert.match(apply, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED"[\s\S]*psql --dbname="\$DB_NAME" -X -v ON_ERROR_STOP=1/);
 assert.match(apply, /admin_psql --single-transaction -f - < "\$MIGRATION"/);
 assert.match(apply, /orders_tenant_column" == 1[\s\S]*DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Orders path must not repeat DDL");
+for (const authorityPostcondition of ["product-price-counts.before.tsv", "product-price-counts.after.tsv", "ProductPrice_source_availabilityState_idx", "migration ProductPrice parcialmente aplicada", "old_api_compatible"] ) assert.ok(apply.includes(authorityPostcondition), `missing ProductPrice authority postcondition ${authorityPostcondition}`);
 assert.match(apply, /current_database\(\)[\s\S]*current_user/);
 assert.doesNotMatch(apply, /POSTGRES_PASSWORD|GRANT\s+CREATE|ALTER\s+SCHEMA[\s\S]*OWNER|ALTER\s+TABLE[\s\S]*OWNER/i);
 assert.doesNotMatch(apply, /docker\s+compose\s+down|docker\s+volume\s+rm|docker\s+(?:rm|volume rm)[^\n]*postgres/i);

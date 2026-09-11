@@ -1,3 +1,7 @@
+# Prontidão da correção PR #866 — gates pendentes (11/09/2026)
+
+O procedimento protegido inicialmente **não suportava** `20260911190000_product_price_authority`: faltavam allowlist/checksum, opção do workflow, pós-condições e aceitação da evidência. O suporte foi preparado nesta revisão. `npm ci && npm run build:web` e a suíte estática do schema passam; o CI agora inclui teste PostgreSQL 16 que preserva linhas/preços existentes e prova INSERT da API anterior via defaults. Como este ambiente não possui Docker nem remote, o teste PostgreSQL e os checks do último commit ainda não foram observados remotamente. Estados: `READY_FOR_MERGE=NO`, `READY_FOR_SCHEMA_APPLY=NO`, `READY_FOR_CUTOVER=NO` até Docker Compose CI integralmente verde. Nenhuma ação produtiva foi executada.
+
 # Regressão pós-PR #866 — correção em PR, produção pendente (11/09/2026)
 
 A investigação local confirmou que a PR #866 (`2cf1cda`, merge `4d538c6`) passou a exigir `ProductPrice`, porém a etapa `/prices` classificava um array HTTP 200 como snapshot global completo e zerava **todas** as linhas positivas não vistas, inclusive as recém-normalizadas de `/products`. Assim, houve alteração indevida persistida, não cache do frontend nem apenas filtro de pesquisa. A correção separa observações por origem/estado, limita ausência ao escopo de `/prices` comprovado e mantém zero explícito e precedência temporal. Sem remote, credenciais ou acesso produtivo, SHA implantado e recuperação real continuam `NOT_PROVEN`; após implantação é necessária nova sincronização corrigida e validação operacional.

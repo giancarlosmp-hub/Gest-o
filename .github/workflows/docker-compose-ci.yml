@@ -290,3 +290,6 @@ jobs:
         env:
           API_IMAGE: gest-o-api:${{ github.sha }}
         run: npm run test:orders-migration:postgres
+
+      - name: Prove ProductPrice authority migration preserves existing rows
+        run: npm run test:product-price-authority-migration:postgres

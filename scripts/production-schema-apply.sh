@@ -38,6 +38,7 @@ evidence=$(prepare_schema_evidence_directory "$evidence_root" "$APP_COMMIT") ||
 for evidence_name in apply.stdout.log apply.stderr.log migration.sha256 pre-apply-diff.raw.sql \
   pre-apply-managed-diff.sql incident-counts.sql incident.before.tsv orders-counts.before.tsv \
   incident.after.tsv orders-counts.after.tsv post-validation.tsv post-apply-diff.raw.sql \
+  product-price-counts.before.tsv product-price-counts.after.tsv \
   post-apply-diff.sql applied.tsv; do
   prepare_schema_evidence_file "$evidence/$evidence_name" ||
     die "arquivo de evidência existente não satisfaz owner root, tipo regular e modo 600"
@@ -83,6 +84,11 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]]; th
   admin_psql -Atc "SELECT 'Activity' || E'\\t' || count(*) FROM \"Activity\" UNION ALL SELECT 'Client' || E'\\t' || count(*) FROM \"Client\" UNION ALL SELECT 'ErpOrderSync' || E'\\t' || count(*) FROM \"ErpOrderSync\" UNION ALL SELECT 'Opportunity' || E'\\t' || count(*) FROM \"Opportunity\" UNION ALL SELECT 'OpportunityChangeLog' || E'\\t' || count(*) FROM \"OpportunityChangeLog\" UNION ALL SELECT 'TimelineEvent' || E'\\t' || count(*) FROM \"TimelineEvent\" ORDER BY 1" >"$evidence/orders-counts.before.tsv"
   orders_tenant_column=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ErpOrderSync' AND column_name='tenantId'")
 fi
+if [[ "$MIGRATION_ID_REQUESTED" == 20260911190000_product_price_authority ]]; then
+  product_price_columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND column_name IN ('source','availabilityState')")
+  [[ "$product_price_columns" == 0 || "$product_price_columns" == 2 ]] || die "migration ProductPrice parcialmente aplicada"
+  admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.before.tsv"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -95,6 +101,8 @@ sha256sum -c "$evidence/migration.sha256" >/dev/null || die "migration mudou ap�
 admin_identity
 if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view && "$orders_tenant_column" == 1 ]]; then
   log "migration de Pedidos já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20260911190000_product_price_authority && "$product_price_columns" == 2 ]]; then
+  log "migration de autoridade ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -127,6 +135,15 @@ case "$MIGRATION_ID_REQUESTED" in
     invalid_history=$(admin_psql -Atc "SELECT count(*) FROM \"ErpOrderSync\" o LEFT JOIN LATERAL (SELECT count(*) AS n FROM \"ErpOrderStatusHistory\" h WHERE h.\"erpOrderSyncId\"=o.id AND h.source='migration-backfill') h ON true WHERE h.n <> 1")
     [[ "$columns:$tenant_not_null:$tenant_nulls:$enums:$constraints:$indexes:$history_table:$invalid_history" == 3:1:0:2:3:4:1:0 ]] || die "pós-condições da migration de Pedidos divergentes"
     printf 'columns\t%s\ntenant_not_null\t%s\ntenant_nulls\t%s\nenums\t%s\nconstraints\t%s\nindexes\t%s\nhistory_table\t%s\ninvalid_initial_history\t%s\n' "$columns" "$tenant_not_null" "$tenant_nulls" "$enums" "$constraints" "$indexes" "$history_table" "$invalid_history" >"$evidence/post-validation.tsv"
+    ;;
+  20260911190000_product_price_authority)
+    admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.after.tsv"
+    cmp "$evidence/product-price-counts.before.tsv" "$evidence/product-price-counts.after.tsv" || die "registros ProductPrice foram alterados pela migration"
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND column_name IN ('source','availabilityState') AND is_nullable='NO' AND column_default IS NOT NULL")
+    authority_index=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='ProductPrice' AND indexname='ProductPrice_source_availabilityState_idx'")
+    invalid_defaults=$(admin_psql -Atc 'SELECT count(*) FROM "ProductPrice" WHERE "source" IS NULL OR "availabilityState" IS NULL')
+    [[ "$columns:$authority_index:$invalid_defaults" == 2:1:0 ]] || die "pós-condições da migration de autoridade ProductPrice divergentes"
+    printf 'columns_not_null_with_defaults\t%s\nauthority_index\t%s\nnull_authority_rows\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$authority_index" "$invalid_defaults" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac

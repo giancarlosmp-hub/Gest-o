@@ -9,8 +9,9 @@ cd "$REPO"; git init -q; git config user.email test@example.invalid; git config 
 legacy=apps/api/prisma/migrations/20260731150000_safe_production_schema_transition/migration.sql
 pr827=apps/api/prisma/migrations/20260827190000_add_erp_order_manual_resolution/migration.sql
 orders=apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
-mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}"
-printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"
+authority=apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql
+mkdir -p "${legacy%/*}" "${pr827%/*}" "${orders%/*}" "${authority%/*}"
+printf 'legacy\n' >"$legacy"; printf 'pr827\n' >"$pr827"; printf 'orders\n' >"$orders"; printf 'authority\n' >"$authority"
 git add .; git commit -qm baseline; BASE=$(git rev-parse HEAD)
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -66,6 +67,9 @@ rm -rf "$TMP/evidence"
 dir=$(make_bundle "$BASE" "$orders"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
 validate_schema_evidence "$dir/applied.tsv" # registered orders migration valid
 rm "$dir/post-apply-diff.sql"; expect_reject "$dir" legacy_without_post_diff
+
+rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$authority"); : >"$dir/post-apply-diff.sql"; chmod 600 "$dir/post-apply-diff.sql"
+validate_schema_evidence "$dir/applied.tsv" # ProductPrice authority evidence valid
 
 rm -rf "$TMP/evidence"; dir=$(make_bundle "$BASE" "$pr827")
 validate_schema_evidence "$dir/applied.tsv" # exact PR827 V1 valid without post-diff
