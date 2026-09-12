@@ -74,8 +74,15 @@ assert.equal(JSON.parse(ordersEntry.stdout).sha256, "486c25d46702a8f91131fa6669b
 const unknownEntry = spawnSync("node", [registry, "20260904120001_not_allowlisted"], { cwd: root, encoding: "utf8" });
 assert.notEqual(unknownEntry.status, 0, "an unregistered migration must be rejected");
 assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);
+const authorityEntry = spawnSync("node", [registry, "20260911190000_product_price_authority"], { cwd: root, encoding: "utf8" });
+assert.equal(authorityEntry.status, 0, authorityEntry.stderr);
+assert.equal(JSON.parse(authorityEntry.stdout).sha256, "52101c9cee86211717bac9ba444735fd8f4120723f64988f1f32211dee56c024");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
+const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
+assert.match(productPricePostgres, /column_name IN \('source', 'availabilityState'\)/, "authority column names must reach PostgreSQL as SQL string literals");
+assert.doesNotMatch(productPricePostgres, /-Atc '[^\n]*\\'/, "multi-layer shell quote splicing is forbidden for ProductPrice SQL assertions");
+assert.match(productPricePostgres, /authority_columns=\$\(psql -At <<'SQL'/, "catalog assertion must use a protected heredoc");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");
@@ -87,6 +94,7 @@ assert.match(apply, /PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-2026071
 assert.match(apply, /docker exec --user postgres -i "\$PRODUCTION_DB_CONTAINER_EXPECTED"[\s\S]*psql --dbname="\$DB_NAME" -X -v ON_ERROR_STOP=1/);
 assert.match(apply, /admin_psql --single-transaction -f - < "\$MIGRATION"/);
 assert.match(apply, /orders_tenant_column" == 1[\s\S]*DDL ignorado[\s\S]*else[\s\S]*admin_psql --single-transaction/, "already-applied Orders path must not repeat DDL");
+for (const authorityPostcondition of ["product-price-counts.before.tsv", "product-price-counts.after.tsv", "ProductPrice_source_availabilityState_idx", "migration ProductPrice parcialmente aplicada", "old_api_compatible"] ) assert.ok(apply.includes(authorityPostcondition), `missing ProductPrice authority postcondition ${authorityPostcondition}`);
 assert.match(apply, /current_database\(\)[\s\S]*current_user/);
 assert.doesNotMatch(apply, /POSTGRES_PASSWORD|GRANT\s+CREATE|ALTER\s+SCHEMA[\s\S]*OWNER|ALTER\s+TABLE[\s\S]*OWNER/i);
 assert.doesNotMatch(apply, /docker\s+compose\s+down|docker\s+volume\s+rm|docker\s+(?:rm|volume rm)[^\n]*postgres/i);

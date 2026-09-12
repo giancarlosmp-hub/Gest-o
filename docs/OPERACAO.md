@@ -1,3 +1,35 @@
+## Nota de validação CI #3837/#3838 (12/09/2026)
+
+Os smokes PostgreSQL devem transmitir consultas com literais por heredoc protegido; não reconstruir SQL com sequências de aspas em `-c`. Para containers PostgreSQL recém-iniciados, `pg_isready` isolado não comprova a criação do banco solicitado: o gate deve abrir conexão no banco exato, validar `current_database()` e a identidade do container antes de carregar fixtures. Após o novo push, exigir execução integral e exit code 0 para Pedidos, ProductPrice e Activity e conclusão dos jobs `orders-migration-postgres` e `compose-smoke`; etapa ignorada não é aprovação.
+
+## Implantação protegida da autoridade ProductPrice (pendente de checks)
+
+> **Correção do CI #3834:** a prova de Pedidos usa dois alvos deliberados: após SQL de Pedidos, o schema correspondente ao commit introdutor de Pedidos; após aplicar também o SQL ProductPrice, o `schema.prisma` atual. A prova dedicada ProductPrice parte do `schema.prisma` imediatamente anterior à sua introdução. `prisma db push` é permitido somente para materializar esses predecessores descartáveis, nunca depois de uma migration. Merge continua bloqueado até as duas provas PostgreSQL 16 terminarem com exit code 0.
+
+> **Precisão após o CI #3836:** “schema correspondente a Pedidos” significa o primeiro snapshot historicamente corrigido (`e7590d0a...`), pois o commit introdutor ainda declarava `ErpOrderSync.tenantId` nullable em desacordo com seu próprio `SET NOT NULL`. O harness verifica somente o bloco do modelo `ErpOrderSync`; não faz substituições globais de `tenantId`. Na comparação, `--from-url` é o banco migrado e `--to-schema-datamodel` é esse alvo obrigatório.
+
+A migration `20260911190000_product_price_authority` é aditiva. A API anterior ignora as novas colunas e continua escrevendo porque ambas possuem defaults; a API nova **não pode** iniciar antes do apply. Sequência exata, sem executar produção:
+
+1. Mesclar somente após **Docker Compose CI** verde, incluindo `Build workspace @salesforce-pro/web` e `Prove ProductPrice authority migration preserves existing rows`.
+2. Executar **Deploy Production**, `phase=build`, no SHA integral da nova `main`; confirmar imagens API/WEB pinadas, sem cutover.
+3. Executar **Prepare Production Recovery Backup** para o mesmo SHA e confirmar evidência recente/protegida exigida pelo preflight.
+4. Executar **Production Schema PR827** com `migration=20260911190000_product_price_authority`, `mode=preview`, confirmação vazia. Revisar preview read-only, checksum allowlisted e managed diff.
+5. Com aprovação humana separada, executar o mesmo workflow com `mode=apply` e `confirm=PRODUCTION_SCHEMA_APPLY`. O runner reexecuta preflight, exige imagem do SHA, backup, `origin/main == HEAD`, worktree limpa, container/database exatos, aplica em transação única, compara contagem de `ProductPrice`, valida defaults/NOT NULL/índice, exige Prisma diff vazio e publica evidência protegida.
+6. Somente após o apply verde, executar **Deploy Production**, `phase=cutover`, no mesmo SHA.
+7. Fazer login pelo celular, executar **Atualizar estoque** uma vez e validar MARANDU conforme roteiro abaixo. Não emitir pedido real.
+
+Rollback: antes do cutover, nenhuma troca de aplicação ocorreu; corrija/rerode sem rollback de dados. Depois do cutover, use **Production Rollback** para restaurar apenas API/WEB anteriores. Preserve a migration aditiva: a versão anterior é compatível com as colunas/defaults e removê-las poderia destruir observações já gravadas pela versão nova. Não executar `DROP COLUMN`, SQL manual, Recovery ou downgrade. Se o apply falhar, a transação reverte o DDL e não publica `applied.tsv`; se falhar somente uma pós-condição, bloquear cutover e investigar, sem reaplicar manualmente.
+
+Estado nesta cópia: runner/workflow/validador foram habilitados e os testes estáticos passaram; build WEB passou após `npm ci`. O teste PostgreSQL foi adicionado ao check obrigatório, mas Docker não existe neste ambiente local e não há remote para confirmar o run do último commit. Portanto `READY_FOR_MERGE=NO` e `READY_FOR_CUTOVER=NO` até ambos os checks remotos ficarem verdes.
+
+## Validação móvel pós-correção da PR #866 (pendente)
+
+1. Confirmar que preview e release usam o SHA aprovado desta PR; não executar Recovery, SQL manual ou pedido real.
+2. No celular, abrir **Nova oportunidade**, tabela/filial esperadas, tocar **Atualizar estoque** e exigir mensagem de sucesso somente se catálogo e preços concluírem; erro da segunda etapa deve aparecer como falha, não sucesso.
+3. Pesquisar `MARANDU` por nome e por código: `1/9` e `1/19` devem aparecer somente se o ERP ainda afirmar preço positivo; `1/12` e `1/13` devem ficar ausentes sob zero explícito vigente. Confirmar também um item positivo sem saldo como **Sem saldo**.
+4. Consultar logs agregados sanitizados (`received`, normalizados, persistidos, preço positivo, motivos ocultos e retornados). Depois do deploy, executar uma sincronização corrigida para reparar naturalmente as invalidações da PR #866; nunca reativar em massa.
+5. Se houver falha/parcial, preservar catálogo, registrar correlação e interromper a validação. Só declarar resolvido após esta prova operacional.
+
 # Validação de disponibilidade UltraFV3 (11/09/2026)
 
 Na oportunidade, **Atualizar estoque** executa catálogo/estado/marca/estoque e depois preços; em Configurações, **Sincronização completa** preserva a mesma ordem autoritativa. Após atualizar, pesquise `MARANDU` na tabela `1`: no cenário de referência devem aparecer `1/9` e `1/19`, não `1/12`/`1/13`, e cada opção deve mostrar marca, unidade, preço e estoque. Estoque zero com preço positivo aparece como **Sem saldo**. Não valide emitindo pedido real. Detalhes e diagnóstico sanitizado: [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md).

@@ -12,6 +12,8 @@ for (const proof of ["postgres:16", "docker exec -i", "psql -X", "ON_ERROR_STOP=
 }
 assert.ok(harness.indexOf("fixtures_before_ddl") < harness.indexOf("candidate_ddl"));
 assert.ok(harness.indexOf("baseline_before_ddl") < harness.indexOf("candidate_ddl"));
+assert.match(harness, /database_name=\$\(docker exec "\$pg" psql[\s\S]*-d proof[\s\S]*SELECT current_database\(\)/, "readiness must prove the requested database on the selected container");
+assert.match(harness, /docker inspect --format '\{\{\.Name\}\}' "\$pg"/, "harness must prove which isolated container it addresses");
 for (const forbidden of ["|| true", "IF EXISTS", "incident_"]) assert.ok(!harness.includes(forbidden), `forbidden harness bypass/dependency: ${forbidden}`);
 for (const concurrencyContract of [
   'psql_exec < "$tmp/parent.sql" >"$tmp/parent.out" 2>&1 & p1=$!',

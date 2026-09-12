@@ -40,6 +40,26 @@ const staleThenZero = price(product({
 assert.equal(staleThenZero.price, 0);
 assert.equal(staleThenZero.source, "missing");
 
+// PR #866 used a global absence sweep from /prices and erased the price just
+// asserted by /products. Absence is source-local; it is not an explicit zero.
+const productAuthoritySurvivesPricesAbsence = price(product({ prices: [
+  { erpPriceId: "1", branchCode: "1", price: 128, source: "products", availabilityState: "available", updatedAt: new Date("2026-09-11T10:00:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 0, source: "prices", availabilityState: "absent", updatedAt: new Date("2026-09-11T10:01:00Z") },
+] }));
+assert.equal(productAuthoritySurvivesPricesAbsence.price, 128);
+
+const explicitZeroWins = price(product({ prices: [
+  { erpPriceId: "1", branchCode: "1", price: 128, source: "products", availabilityState: "available", updatedAt: new Date("2026-09-11T10:00:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 0, source: "prices", availabilityState: "explicit_zero", updatedAt: new Date("2026-09-11T10:01:00Z") },
+] }));
+assert.equal(explicitZeroWins.price, 0);
+
+const laterPositiveRestoresAvailability = price(product({ prices: [
+  { erpPriceId: "1", branchCode: "1", price: 0, source: "prices", availabilityState: "explicit_zero", updatedAt: new Date("2026-09-11T10:00:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 296, source: "products", availabilityState: "available", updatedAt: new Date("2026-09-11T10:01:00Z") },
+] }));
+assert.equal(laterPositiveRestoresAvailability.price, 296);
+
 // Missing selected-table price is unavailable; a price from another table or
 // branch cannot cross the commercial boundary.
 assert.equal(price(product(), "2").priceTableMatched, false);

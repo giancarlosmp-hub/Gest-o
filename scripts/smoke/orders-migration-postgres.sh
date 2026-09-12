@@ -31,10 +31,21 @@ apply_orders_migration() {
   local db=$1 phase=$2
   run_observed "$phase" "$phase" 20260904120000_orders_operational_view psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql
 }
+apply_product_price_authority_migration() {
+  local db=$1 phase=$2
+  run_observed "$phase" "$phase" 20260911190000_product_price_authority psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql
+}
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
 git show "${intro}^:apps/api/prisma/schema.prisma" >"$tmp/previous.prisma"
+# The migration-introduction commit accidentally left ErpOrderSync.tenantId
+# nullable in Prisma although its SQL sets NOT NULL. This immediate corrective
+# commit is the first schema that represents the migration's real post-state.
+orders_schema_commit=e7590d0a03fbf1b137e0e88c5f2b7c429594c29f
+git merge-base --is-ancestor "$intro" "$orders_schema_commit"
+git show "$orders_schema_commit:apps/api/prisma/schema.prisma" >"$tmp/orders-target.prisma"
+grep -Eq '^  tenantId +String$' <(sed -n '/model ErpOrderSync {/,/^}/p' "$tmp/orders-target.prisma")
 mkdir -p "$tmp/previous/migrations"
 cp "$tmp/previous.prisma" "$tmp/previous/schema.prisma"
 find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904120000_orders_operational_view -print0 | while IFS= read -r -d '' migration; do cp -R "$migration" "$tmp/previous/migrations/"; done
@@ -42,6 +53,8 @@ find apps/api/prisma/migrations -mindepth 1 -maxdepth 1 -type d ! -name 20260904
 echo 'ORDERS_MIGRATION_STEP=fresh_sequence'
 run_observed fresh_sequence fresh_sequence predecessor_baseline prisma_db_push run_tooling fresh ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate
 apply_orders_migration fresh fresh_sequence
+run_observed fresh_sequence orders_schema_diff orders_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /work/orders-target.prisma --exit-code
+apply_product_price_authority_migration fresh complete_relevant_sequence
 run_observed fresh_sequence final_schema_diff current_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 for db in upgrade invalid historical; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
@@ -67,6 +80,8 @@ if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c 'SELECT count(*) FROM "ErpOrderSync"') == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_constraint WHERE conname IN ('ErpOrderSync_tenantId_fkey','ErpOrderStatusHistory_erpOrderSyncId_fkey','ErpOrderStatusHistory_opportunityId_fkey')") == 3 ]]
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_indexes WHERE indexname IN ('ErpOrderSync_tenantId_createdAt_idx','ErpOrderSync_tenantId_sellerId_createdAt_idx','ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx','ErpOrderStatusHistory_opportunityId_occurredAt_idx')") == 4 ]]
+run_observed upgrade_from_previous orders_schema_diff orders_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /work/orders-target.prisma --exit-code
+apply_product_price_authority_migration upgrade complete_relevant_sequence
 run_observed upgrade_from_previous final_schema_diff current_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid >/dev/null

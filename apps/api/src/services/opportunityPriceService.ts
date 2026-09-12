@@ -5,7 +5,15 @@ export type OpportunityPriceProduct = {
   erpProductCode?: string | null;
   erpProductClassCode?: string | null;
   rawErpPayload?: unknown;
-  prices?: Array<{ erpPriceId?: string | null; price: number; validFrom?: Date | null }>;
+  prices?: Array<{
+    erpPriceId?: string | null;
+    price: number;
+    validFrom?: Date | null;
+    updatedAt?: Date | null;
+    source?: string | null;
+    availabilityState?: string | null;
+    branchCode?: string | null;
+  }>;
 };
 
 export type OpportunityPriceCalculationInput = {
@@ -180,10 +188,19 @@ export const calculateOpportunityPriceForTable = ({
     const rowBranch = normalizeOptionalString((item as { branchCode?: string | null }).branchCode);
     return !normalizedBranchCode || rowBranch === normalizedBranchCode;
   });
-  const hasExplicitInvalidSelectedTablePrice = selectedTableRows.some((item) => Number(item.price) <= 0);
-  const tablePrice = hasExplicitInvalidSelectedTablePrice
-    ? undefined
-    : selectedTableRows.find((item) => Number(item.price) > 0);
+  const explicitRows = selectedTableRows
+    .filter((item) => (item.availabilityState || (Number(item.price) > 0 ? "available" : "explicit_zero")) !== "absent")
+    .sort((left, right) => {
+      const timeDifference = new Date(right.updatedAt || right.validFrom || 0).getTime()
+        - new Date(left.updatedAt || left.validFrom || 0).getTime();
+      if (timeDifference) return timeDifference;
+      // Legacy duplicate rows have no observation timestamp. Fail closed: a
+      // zero wins a tie rather than resurrecting an old positive.
+      return Number(left.price) <= 0 ? -1 : Number(right.price) <= 0 ? 1 : 0;
+    });
+  const newestExplicit = explicitRows[0];
+  const hasExplicitInvalidSelectedTablePrice = Boolean(newestExplicit) && Number(newestExplicit.price) <= 0;
+  const tablePrice = newestExplicit && Number(newestExplicit.price) > 0 ? newestExplicit : undefined;
   // ProductPrice is the sole availability authority. Product/default/min prices,
   // cached payloads and calculated-price caches are deliberately not fallbacks:
   // they can outlive a zero/absent price in the current ERP snapshot.

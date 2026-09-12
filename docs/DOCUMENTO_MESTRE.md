@@ -1,3 +1,7 @@
+## Incidente de disponibilidade após PR #866 (11/09/2026)
+
+O defeito comprovado foi uma reconciliação sem fronteira de origem: preços válidos de `/products` eram persistidos e, logo depois, o sweep global de `/prices` os convertia em zero quando não apareciam naquele payload de contrato não comprovado. O modelo agora registra `source` e `availabilityState`; `explicit_zero` bloqueia seleção, `absent` só aposenta a própria origem no escopo tabela/filial observado, e uma afirmação positiva explicitamente posterior restaura o SKU. Pesquisa continua exigindo preço positivo vigente, ativo, não suspenso e sincronizado; estoque zero permanece visível. Histórico de itens não é alterado. Produção não foi consultada nem modificada.
+
 # Disponibilidade de produtos UltraFV3 (11/09/2026)
 
 Preço elegível de oportunidade tem uma única autoridade: `ProductPrice > 0` para produto/classificação, tabela (padrão `1`) e filial aplicável. Catálogo/estoque vêm de `/products`, preço de `/prices` ou campo de tabela explícito, e marca de `MARCA`. Fallback por `defaultPrice`, `minPrice`, payload/cache é proibido para seleção. Ausentes só são invalidados após snapshot integral comprovado. Contrato e validação: [`docs/ultrafv3-product-availability.md`](ultrafv3-product-availability.md).
