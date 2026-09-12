@@ -79,6 +79,10 @@ assert.equal(authorityEntry.status, 0, authorityEntry.stderr);
 assert.equal(JSON.parse(authorityEntry.stdout).sha256, "52101c9cee86211717bac9ba444735fd8f4120723f64988f1f32211dee56c024");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
+const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");
+assert.match(productPricePostgres, /column_name IN \('source', 'availabilityState'\)/, "authority column names must reach PostgreSQL as SQL string literals");
+assert.doesNotMatch(productPricePostgres, /-Atc '[^\n]*\\'/, "multi-layer shell quote splicing is forbidden for ProductPrice SQL assertions");
+assert.match(productPricePostgres, /authority_columns=\$\(psql -At <<'SQL'/, "catalog assertion must use a protected heredoc");
 assert.match(apply, /production-schema-migrations\.mjs "\$MIGRATION_ID_REQUESTED"/);
 for (const ordersPostcondition of ["orders-counts.before.tsv", "tenant_not_null", "tenant_nulls", "ErpOperationalOrderStatus", "ErpRequestAuthorizationStatus", "ErpOrderSync_tenantId_fkey", "ErpOrderSync_tenantId_createdAt_idx", "ErpOrderSync_tenantId_sellerId_createdAt_idx", "ErpOrderStatusHistory", "ErpOrderStatusHistory_erpOrderSyncId_fkey", "ErpOrderStatusHistory_opportunityId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx", "ErpOrderStatusHistory_opportunityId_occurredAt_idx", "migration-backfill"]) assert.ok(apply.includes(ordersPostcondition), `missing Orders postcondition ${ordersPostcondition}`);
 assert.match(apply, /20260731150000_safe_production_schema_transition\)[\s\S]*required_tables/, "the historical migration must retain its dedicated postconditions");

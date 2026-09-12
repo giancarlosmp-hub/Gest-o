@@ -16,8 +16,22 @@ reject_sql(){ local label=$1 sql=$2; if psql_exec -c "$sql" >"$tmp/$label.out" 2
 checkpoint network
 docker network create --internal "$net" >/dev/null
 docker run -d --rm --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWORD=redacted -e POSTGRES_DB=proof postgres:16 >/dev/null
-for _ in {1..60}; do if docker exec "$pg" pg_isready -U postgres -d proof >/dev/null 2>&1; then break; fi; sleep 1; done
-docker exec "$pg" pg_isready -U postgres -d proof >/dev/null
+# pg_isready only proves that a server is accepting connections; during image
+# initialization its temporary server can be ready before POSTGRES_DB is created.
+# Prove the requested database on this exact container with a real SQL session.
+database_ready=false
+for _ in {1..60}; do
+  if database_name=$(docker exec "$pg" psql -X -U postgres -d proof -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
+    if [[ "$database_name" == proof ]]; then
+      database_ready=true
+      break
+    fi
+  fi
+  sleep 1
+done
+[[ "$database_ready" == true ]]
+[[ $(docker inspect --format '{{.Name}}' "$pg") == "/$pg" ]]
+[[ $(psql_exec -Atc 'SELECT current_database()') == proof ]]
 
 checkpoint predecessor
 # Minimal, faithful projection of the real predecessor: real quoted names, types, nullability,

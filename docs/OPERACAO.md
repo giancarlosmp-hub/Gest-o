@@ -1,3 +1,7 @@
+## Nota de validação CI #3837/#3838 (12/09/2026)
+
+Os smokes PostgreSQL devem transmitir consultas com literais por heredoc protegido; não reconstruir SQL com sequências de aspas em `-c`. Para containers PostgreSQL recém-iniciados, `pg_isready` isolado não comprova a criação do banco solicitado: o gate deve abrir conexão no banco exato, validar `current_database()` e a identidade do container antes de carregar fixtures. Após o novo push, exigir execução integral e exit code 0 para Pedidos, ProductPrice e Activity e conclusão dos jobs `orders-migration-postgres` e `compose-smoke`; etapa ignorada não é aprovação.
+
 ## Implantação protegida da autoridade ProductPrice (pendente de checks)
 
 > **Correção do CI #3834:** a prova de Pedidos usa dois alvos deliberados: após SQL de Pedidos, o schema correspondente ao commit introdutor de Pedidos; após aplicar também o SQL ProductPrice, o `schema.prisma` atual. A prova dedicada ProductPrice parte do `schema.prisma` imediatamente anterior à sua introdução. `prisma db push` é permitido somente para materializar esses predecessores descartáveis, nunca depois de uma migration. Merge continua bloqueado até as duas provas PostgreSQL 16 terminarem com exit code 0.

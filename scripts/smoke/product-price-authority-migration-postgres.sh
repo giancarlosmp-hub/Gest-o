@@ -27,15 +27,51 @@ VALUES ('p1','1','9','Synthetic Positive',now(),now()),('p2','1','12','Synthetic
 INSERT INTO "ProductPrice" (id,"productId","erpPriceId","branchCode",price,"createdAt","updatedAt")
 VALUES ('positive','p1','1','1',128,now(),now()),('zero','p2','1','1',0,now(),now());
 SQL
-before=$(psql -Atc 'SELECT string_agg(id||'\''|'\''||price, '\'', '\'' ORDER BY id) FROM "ProductPrice"')
+before=$(psql -At <<'SQL'
+SELECT string_agg(id || '|' || price, ', ' ORDER BY id) FROM "ProductPrice";
+SQL
+)
 psql <apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql
-after=$(psql -Atc 'SELECT string_agg(id||'\''|'\''||price, '\'', '\'' ORDER BY id) FROM "ProductPrice"')
+after=$(psql -At <<'SQL'
+SELECT string_agg(id || '|' || price, ', ' ORDER BY id) FROM "ProductPrice";
+SQL
+)
 [[ "$before" == "$after" ]]
-[[ $(psql -Atc 'SELECT count(*) FROM "ProductPrice" WHERE "source"='\''legacy'\'' AND "availabilityState"='\''available'\''') == 2 ]]
-[[ $(psql -Atc 'SELECT count(*) FROM information_schema.columns WHERE table_schema='\''public'\'' AND table_name='\''ProductPrice'\'' AND column_name IN ('\''source'\','\''availabilityState'\'') AND is_nullable='\''NO'\'' AND column_default IS NOT NULL') == 2 ]]
-[[ $(psql -Atc 'SELECT count(*) FROM pg_indexes WHERE schemaname='\''public'\'' AND indexname='\''ProductPrice_source_availabilityState_idx'\''') == 1 ]]
+legacy_rows=$(psql -At <<'SQL'
+SELECT count(*) FROM "ProductPrice"
+WHERE "source" = 'legacy' AND "availabilityState" = 'available';
+SQL
+)
+[[ "$legacy_rows" == 2 ]]
+authority_columns=$(psql -At <<'SQL'
+SELECT count(*)
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'ProductPrice'
+  AND column_name IN ('source', 'availabilityState')
+  AND is_nullable = 'NO'
+  AND column_default IS NOT NULL;
+SQL
+)
+[[ "$authority_columns" == 2 ]]
+authority_indexes=$(psql -At <<'SQL'
+SELECT count(*) FROM pg_indexes
+WHERE schemaname = 'public'
+  AND indexname = 'ProductPrice_source_availabilityState_idx';
+SQL
+)
+[[ "$authority_indexes" == 1 ]]
 # Previous API INSERT omits both new columns; database defaults must keep it valid.
-psql -c 'INSERT INTO "ProductPrice" (id,"productId",price,"createdAt","updatedAt") VALUES ('\''old-api-write'\'','\''p3'\'',42,now(),now())' >/dev/null
-[[ $(psql -Atc 'SELECT "source"||'\''|'\''||"availabilityState" FROM "ProductPrice" WHERE id='\''old-api-write'\''') == 'legacy|available' ]]
+psql <<'SQL' >/dev/null
+INSERT INTO "ProductPrice" (id, "productId", price, "createdAt", "updatedAt")
+VALUES ('old-api-write', 'p3', 42, now(), now());
+SQL
+old_api_authority=$(psql -At <<'SQL'
+SELECT "source" || '|' || "availabilityState"
+FROM "ProductPrice"
+WHERE id = 'old-api-write';
+SQL
+)
+[[ "$old_api_authority" == 'legacy|available' ]]
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 printf '%s\n' PRODUCT_PRICE_AUTHORITY_PREDECESSOR_SCHEMA=PASS PRODUCT_PRICE_AUTHORITY_EXISTING_ROWS=PRESERVED PRODUCT_PRICE_AUTHORITY_OLD_API_COMPATIBILITY=PASS PRODUCT_PRICE_AUTHORITY_FINAL_SCHEMA_DIFF=PASS PRODUCT_PRICE_AUTHORITY_MIGRATION_POSTGRES=PASS
