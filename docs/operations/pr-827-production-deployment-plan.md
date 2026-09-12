@@ -209,3 +209,8 @@ e checksums e falhar fechado em artefato ausente/divergente.
 
 `SAFE_TO_DEPLOY=NO`; `READY_TO_RERUN_PREVIEW=NO` até merge e main verde;
 `READY_TO_APPLY_PR827=NO`.
+## Errata operacional — run #30 / ProductPrice
+
+O run #30 parou no pre-diff: o Prisma agrupou as duas adições em um `ALTER TABLE`, formato que não estava representado no filtro. Esse ponto é anterior à transação DDL e à publicação final de `applied.tsv`; logo o preview não aplicou schema nem publicou evidência. A allowlist corrigida é específica ao registro imutável `20260911190000_product_price_authority` e exige exatamente duas colunas, seus tipos/nullability/defaults e o índice registrado, tolerando apenas variações textuais equivalentes.
+
+Após a futura mesclagem, o operador deve obter o novo SHA da `main` e repetir estritamente: Deploy Production em `build`; Prepare Production Recovery Backup; PR827 em `preview` com confirmação vazia; revisão humana; PR827 em `apply` com `PRODUCTION_SCHEMA_APPLY`; somente depois Deploy Production em `cutover`. Os estados READY permanecem negativos enquanto os checks remotos do último commit não estiverem integralmente verdes.

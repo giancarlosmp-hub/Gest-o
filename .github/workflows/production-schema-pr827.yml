@@ -70,7 +70,7 @@ jobs:
                 PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean-v2-20260717 \
                 bash scripts/production-orders-tenant-preview.sh
             elif [ "$SCHEMA_MIGRATION" = 20260904120000_orders_operational_view ] || [ "$SCHEMA_MIGRATION" = 20260911190000_product_price_authority ]; then
-              CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
+              MODE="$SCHEMA_MODE" CONFIRM="$SCHEMA_CONFIRM" EXPECTED_SHA="$EXPECTED_SHA" \
                 PRODUCTION_ENV_FILE="$resolved_env_file" \
                 MIGRATION_ID_REQUESTED="$SCHEMA_MIGRATION" DATABASE_SCHEMA_MODE=external \
                 SCHEMA_EVIDENCE_DIR=/var/log/gest-o/schema \

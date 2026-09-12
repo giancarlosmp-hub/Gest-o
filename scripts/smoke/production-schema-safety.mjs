@@ -124,6 +124,8 @@ const unconfirmed = spawnSync("bash", [resolve(root, "scripts/production-schema-
 assert.notEqual(unconfirmed.status, 0, "apply must fail without explicit confirmation");
 assert.match(unconfirmed.stdout + unconfirmed.stderr, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
 assert.match(apply, /pre-apply-diff\.raw\.sql[\s\S]*schema-diff-filter\.mjs[\s\S]*--single-transaction/);
+assert.match(apply, /MODE.*preview[\s\S]*schema-diff-filter\.mjs[\s\S]*preview validado em modo estritamente read-only[\s\S]*exit 0[\s\S]*prepare_schema_evidence_directory/, "preview must exit before evidence preparation and DDL");
+assert.match(apply, /schema-diff-filter\.mjs "\$evidence\/pre-apply-diff\.raw\.sql"[\s\S]*pre "\$MIGRATION_ID_REQUESTED"/, "pre-diff authorization must be migration-bound");
 assert.match(apply, /umask 077[\s\S]*prepare_schema_evidence_directory/);
 assert.match(apply, /post-apply-diff\.raw\.sql[\s\S]*post-apply-diff\.sql[\s\S]*applied_staging/);
 assert.ok(apply.indexOf('schema-diff-filter.mjs "$evidence/post-apply-diff.raw.sql"') < apply.indexOf('mv -T -- "$applied_staging" "$evidence/applied.tsv"'), "applied.tsv must be published last, after the post-apply diff");

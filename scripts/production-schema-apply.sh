@@ -3,6 +3,8 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/apps/gest-o}"
 ENV_FILE="${PRODUCTION_ENV_FILE:-/root/demetra-env/.env}"
 MIGRATION_ID_REQUESTED="${MIGRATION_ID_REQUESTED:-20260731150000_safe_production_schema_transition}"
+MODE="${MODE:-apply}"
+[[ "$MODE" == preview || "$MODE" == apply ]] || { echo '[production-schema-apply] ERRO: MODE inválido' >&2; exit 1; }
 registry=$(node scripts/production-schema-migrations.mjs "$MIGRATION_ID_REQUESTED") || {
   printf '[production-schema-apply] ERRO: migration não cadastrada ou checksum divergente\n' >&2
   exit 1
@@ -11,7 +13,9 @@ MIGRATION=$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).path)' "$r
 PRODUCTION_DB_CONTAINER_REQUIRED=gest-o-db-clean-v2-20260717
 log(){ printf '[production-schema-apply] %s\n' "$*"; }
 die(){ log "ERRO: $*" >&2; exit 1; }
-[[ "${CONFIRM:-}" == PRODUCTION_SCHEMA_APPLY ]] || die "exige CONFIRM=PRODUCTION_SCHEMA_APPLY"
+if [[ "$MODE" == apply ]]; then
+  [[ "${CONFIRM:-}" == PRODUCTION_SCHEMA_APPLY ]] || die "exige CONFIRM=PRODUCTION_SCHEMA_APPLY"
+fi
 [[ -f "$ENV_FILE" ]] || die "arquivo seguro de ambiente ausente: $ENV_FILE"
 cd "$APP_DIR"; set -a; source "$ENV_FILE"; set +a
 [[ "${PRODUCTION_DB_CONTAINER_EXPECTED:-}" == "$PRODUCTION_DB_CONTAINER_REQUIRED" ]] ||
@@ -28,6 +32,19 @@ docker image inspect "gest-o-api:$APP_COMMIT" >/dev/null 2>&1 || die "imagem API
 MODE=validate SQL_FILE="$MIGRATION" \
   ALLOW_DATA_BACKFILL="$([[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]] && printf orders-tenant-authority-v1)" \
   bash scripts/production-schema-preview.sh
+
+if [[ "$MODE" == preview ]]; then
+  preview_tmp=$(mktemp -d)
+  trap 'rm -rf "$preview_tmp"' EXIT
+  docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
+    "gest-o-api:$APP_COMMIT" ./node_modules/.bin/prisma migrate diff \
+    --from-schema-datasource apps/api/prisma/schema.prisma \
+    --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$preview_tmp/pre.raw.sql"
+  node scripts/schema-diff-filter.mjs "$preview_tmp/pre.raw.sql" "$preview_tmp/pre.sql" pre "$MIGRATION_ID_REQUESTED"
+  cat "$preview_tmp/pre.sql"
+  log "preview validado em modo estritamente read-only; nenhum DDL ou applied.tsv foi produzido"
+  exit 0
+fi
 
 umask 077
 # shellcheck source=scripts/schema-evidence-validation.sh
@@ -65,7 +82,7 @@ prisma_diff(){
 # statements are excluded from management; any partial/incompatible target object aborts.
 prisma_diff >"$evidence/pre-apply-diff.raw.sql"
 node scripts/schema-diff-filter.mjs "$evidence/pre-apply-diff.raw.sql" \
-  "$evidence/pre-apply-managed-diff.sql" pre
+  "$evidence/pre-apply-managed-diff.sql" pre "$MIGRATION_ID_REQUESTED"
 cat >"$evidence/incident-counts.sql" <<'SQL'
 SELECT format('%I.%I', schemaname, tablename) || E'\t' ||
        (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', schemaname, tablename), false, true, '')))[1]::text
@@ -139,8 +156,8 @@ case "$MIGRATION_ID_REQUESTED" in
   20260911190000_product_price_authority)
     admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.after.tsv"
     cmp "$evidence/product-price-counts.before.tsv" "$evidence/product-price-counts.after.tsv" || die "registros ProductPrice foram alterados pela migration"
-    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND column_name IN ('source','availabilityState') AND is_nullable='NO' AND column_default IS NOT NULL")
-    authority_index=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='ProductPrice' AND indexname='ProductPrice_source_availabilityState_idx'")
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND is_nullable='NO' AND ((column_name='source' AND data_type='text' AND column_default=\$\$'legacy'::text\$\$) OR (column_name='availabilityState' AND data_type='text' AND column_default=\$\$'available'::text\$\$))")
+    authority_index=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='ProductPrice' AND indexname='ProductPrice_source_availabilityState_idx' AND indexdef='CREATE INDEX \"ProductPrice_source_availabilityState_idx\" ON public.\"ProductPrice\" USING btree (source, \"availabilityState\")'")
     invalid_defaults=$(admin_psql -Atc 'SELECT count(*) FROM "ProductPrice" WHERE "source" IS NULL OR "availabilityState" IS NULL')
     [[ "$columns:$authority_index:$invalid_defaults" == 2:1:0 ]] || die "pós-condições da migration de autoridade ProductPrice divergentes"
     printf 'columns_not_null_with_defaults\t%s\nauthority_index\t%s\nnull_authority_rows\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$authority_index" "$invalid_defaults" >"$evidence/post-validation.tsv"
