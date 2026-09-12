@@ -10,6 +10,15 @@ export const migrations = Object.freeze({
     id: "20260911190000_product_price_authority",
     path: "apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql",
     sha256: "52101c9cee86211717bac9ba444735fd8f4120723f64988f1f32211dee56c024",
+    objects: Object.freeze({
+      columns: Object.freeze({
+        availabilityState: "TEXT NOT NULL DEFAULT 'available'",
+        source: "TEXT NOT NULL DEFAULT 'legacy'"
+      }),
+      indexes: Object.freeze({
+        ProductPrice_source_availabilityState_idx: Object.freeze(["source", "availabilityState"])
+      })
+    }),
     postconditions: Object.freeze(["existing-rows-preserved", "columns-not-null-with-defaults", "index-present", "managed-diff-empty", "old-api-compatible"]),
     evidenceVersion: 1
   }),

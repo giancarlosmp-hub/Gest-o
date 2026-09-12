@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolveMigration } from "./production-schema-migrations.mjs";
 
-const [input, output, mode = "post"] = process.argv.slice(2);
-if (!input || !output) throw new Error("usage: schema-diff-filter.mjs INPUT OUTPUT [pre|post]");
+const [input, output, mode = "post", migrationId = ""] = process.argv.slice(2);
+if (!input || !output) throw new Error("usage: schema-diff-filter.mjs INPUT OUTPUT [pre|post] [migration-id]");
 const incidentTables = [
   "incident_20260718_client_enrichment_audit", "incident_20260718_client_map",
   "incident_20260718_june_client_source", "incident_20260718_recovery_audit",
@@ -80,6 +81,51 @@ function isApprovedContactAddition(statement) {
   return true;
 }
 const statements = meaningful.split(/;\s*/).map((s) => s.replace(/^\s*--.*$/gm, "").trim()).filter(Boolean);
+if (migrationId === "20260911190000_product_price_authority") {
+  const migration = resolveMigration(migrationId);
+  // An empty diff is the only acceptable idempotent pre-apply result. The runner
+  // independently proves the complete catalog before treating it as applied.
+  if (statements.length === 0) process.exit(0);
+  const expectedColumns = new Map(Object.entries(migration.objects.columns));
+  const expectedIndexes = new Map(Object.entries(migration.objects.indexes));
+  const foundColumns = new Set();
+  const foundIndexes = new Set();
+
+  for (const statement of statements) {
+    const alter = statement.match(/^ALTER\s+TABLE\s+(?:(?:"public"|public)\.)?"ProductPrice"\s+([\s\S]+)$/i);
+    if (alter) {
+      const clauses = alter[1].split(",").map((clause) => clause.trim());
+      for (const clause of clauses) {
+        const addition = clause.match(/^ADD\s+COLUMN\s+"(availabilityState|source)"\s+([\s\S]+)$/i);
+        if (!addition) throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+        const [, column, definition] = addition;
+        const normalizedDefinition = definition.replace(/\s+/g, " ").trim();
+        if (foundColumns.has(column) || expectedColumns.get(column) !== normalizedDefinition) {
+          throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+        }
+        foundColumns.add(column);
+      }
+      continue;
+    }
+
+    const index = statement.match(/^CREATE\s+INDEX\s+"([^"]+)"\s+ON\s+(?:(?:"public"|public)\.)?"ProductPrice"\s*\(([^)]+)\)$/i);
+    if (index) {
+      const [, name, rawColumns] = index;
+      const columns = rawColumns.split(",").map((column) => column.trim().replace(/^"|"$/g, ""));
+      const expected = expectedIndexes.get(name);
+      if (!expected || foundIndexes.has(name) || columns.length !== expected.length || columns.some((column, i) => column !== expected[i])) {
+        throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+      }
+      foundIndexes.add(name);
+      continue;
+    }
+    throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
+  }
+  if (foundColumns.size !== expectedColumns.size || foundIndexes.size !== expectedIndexes.size) {
+    throw new Error("unapproved or partially-compatible pre-apply drift: authorized ProductPrice operation set is incomplete");
+  }
+  process.exit(0);
+}
 for (const statement of statements) {
   const allowed = new RegExp(`^CREATE TYPE "${enums}" AS ENUM`, "s").test(statement)
     || new RegExp(`^CREATE TABLE "${tables}" \\(`, "s").test(statement)
