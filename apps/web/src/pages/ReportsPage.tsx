@@ -62,6 +62,7 @@ type ClosedOpportunity = {
   season?: string | null;
   closedAt?: string | null;
   expectedCloseDate: string;
+  effectiveWin?: { value: number; count: number; disregarded: boolean; partialCancellation: boolean; reason: string | null; originalValue: number } | null;
 };
 
 type PaginatedClosedOpportunitiesResponse = {
@@ -268,6 +269,17 @@ export default function ReportsPage() {
   useEffect(() => {
     refreshClosedData();
   }, [closedFilters, closedTotals.page, closedTotals.pageSize]);
+
+  const exportClosedCsv = async () => {
+    const params = new URLSearchParams({ status: "closed", page: "1", pageSize: String(Math.max(closedTotals.total, 1)) });
+    Object.entries(closedFilters).forEach(([key, value]) => { if (value) params.set(key, value); });
+    const response = await api.get<PaginatedClosedOpportunitiesResponse>(`/opportunities?${params.toString()}`);
+    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const rows = (response.data.items || []).map((item) => [getClosedDate(item), item.title, item.client, item.owner, item.stage === "ganho" ? "Ganho (evento histórico)" : "Perdido", item.effectiveWin?.value ?? item.value, item.effectiveWin?.reason || ""].map(escape).join(";"));
+    const csv = ["Data;Oportunidade;Cliente;Vendedor;Etapa histórica;Valor efetivo;Observação ERP", ...rows].join("\n");
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a"); link.href = url; link.download = "oportunidades-encerradas.csv"; link.click(); URL.revokeObjectURL(url);
+  };
 
   const openClosedEditModal = (opportunity: ClosedOpportunity) => {
     setEditingClosed(opportunity);
@@ -622,6 +634,7 @@ export default function ReportsPage() {
             <option value="ganho">Ganho</option>
             <option value="perdido">Perdido</option>
           </select>
+          <button type="button" onClick={() => void exportClosedCsv()} className="rounded-lg border border-brand-300 bg-white px-3 py-2 text-sm font-semibold text-brand-700 hover:bg-brand-50">Exportar CSV</button>
         </div>
 
         <div className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -662,8 +675,8 @@ export default function ReportsPage() {
                   <td className="py-2 pr-3 text-slate-700">{item.owner}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.crop || "—"}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.season || "—"}</td>
-                  <td className="py-2 pr-3 text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</td>
-                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</td>
+                  <td className="py-2 pr-3 text-slate-700">{item.stage === "ganho" ? "Ganho (evento histórico)" : "Perdido"}{item.effectiveWin?.reason ? <div className="mt-1 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}</td>
+                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(item.effectiveWin?.value ?? item.value)}</td>
                   <td className="py-2 pr-3 text-right">
                     {canEditClosedOpportunities ? (
                       <button
@@ -693,9 +706,10 @@ export default function ReportsPage() {
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Cliente</dt><dd className="text-slate-700 text-right">{item.client}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Cidade/UF</dt><dd className="text-slate-700 text-right">{formatClientCityState(item)}</dd></div>
                 <div className="flex justify-between gap-3"><dt className="text-slate-500">Vendedor</dt><dd className="text-slate-700 text-right">{item.owner}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Status</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho" : "Perdido"}</dd></div>
-                <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(item.value)}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Status</dt><dd className="text-slate-700">{item.stage === "ganho" ? "Ganho (evento histórico)" : "Perdido"}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-slate-500">Valor</dt><dd className="font-semibold text-slate-900">{formatCurrencyBRL(item.effectiveWin?.value ?? item.value)}</dd></div>
               </dl>
+              {item.effectiveWin?.reason ? <div className="mt-2 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}
               <div className="mt-3 flex justify-end">
                 {canEditClosedOpportunities ? (
                   <button

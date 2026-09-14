@@ -49,6 +49,7 @@ type Opportunity = {
   expectedTicketPerHa?: number | null;
   priceTableCode?: string | null;
   risk?: OpportunityRisk;
+  effectiveWin?: { value: number; count: number; disregarded: boolean; partialCancellation: boolean; reason: string | null; originalValue: number } | null;
 };
 
 type Client = {
@@ -2005,7 +2006,7 @@ export default function OpportunitiesPage() {
                         {riskLabel[risk]}
                       </span>
                     </td>
-                    <td className="p-2">{stageLabel[item.stage]}</td>
+                    <td className="p-2"><div>{stageLabel[item.stage]}</div>{item.effectiveWin?.reason ? <div className="mt-1 max-w-52 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}</td>
                     <td className="p-2">{formatCurrencyBRL(item.value)}</td>
                     <td className="p-2">{item.probability ?? 0}%</td>
                     <td className="p-2">{formatCurrencyBRL(weighted)}</td>
@@ -2121,6 +2122,7 @@ export default function OpportunitiesPage() {
                         >
                           <div className="min-w-0 space-y-1">
                             <div className="text-sm font-semibold leading-tight text-slate-800 break-words">{item.title}</div>
+                            {item.effectiveWin?.reason ? <div className="rounded bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}
                             <div className="text-xs text-slate-600 break-words">{getClientName(item)}</div>
                           </div>
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -2213,6 +2215,7 @@ export default function OpportunitiesPage() {
                 <span className="text-slate-500">Etapa</span>
                 <span className="font-semibold text-slate-900">{stageLabel[selectedOpportunity.stage]}</span>
               </div>
+              {selectedOpportunity.effectiveWin?.reason ? <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-900">{selectedOpportunity.effectiveWin.reason}</div> : null}
               <div className="flex items-center justify-between gap-3">
                 <span className="text-slate-500">Cultura</span>
                 <span className="font-semibold text-slate-900">{selectedOpportunity.crop || "-"}</span>

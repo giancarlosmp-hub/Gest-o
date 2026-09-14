@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { classifyUltraFv3OrderLookup, extractOperationalStatus, normalizeOperationalOrderStatus, sanitizeErpOrderErrorMessage } from "./erpOrderService.js";
+import { classifyUltraFv3OrderLookup, extractMatchedOperationalStatus, extractOperationalStatus, normalizeOperationalOrderStatus, sanitizeErpOrderErrorMessage } from "./erpOrderService.js";
 
 const expected = { pedidoIdImportacao: "import-123", numPedido: "42" };
 for (const [raw, mapped] of [["DIGITADO", "pendente"], ["ACEITO", "pendente"], ["PARCIAL", "parcial"], ["FINALIZADO", "entregue"], ["CANCELADO", "cancelado"]] as const) {
@@ -8,6 +8,11 @@ for (const [raw, mapped] of [["DIGITADO", "pendente"], ["ACEITO", "pendente"], [
   assert.equal(result.matched, true); assert.equal(result.orderStatus, mapped); assert.equal(extractOperationalStatus({ SITUACAO_PEDIDO: raw }), raw);
   assert.equal(normalizeOperationalOrderStatus(raw), raw);
 }
+
+const representative = { status: "FINALIZADO", data: [{ PEDIDO_ID_IMPORTACAO: expected.pedidoIdImportacao, NUM_PEDIDO: "42", SITUACAO_PEDIDO: "CANCELADO" }] };
+assert.equal(classifyUltraFv3OrderLookup(representative, expected).orderStatus, "cancelado");
+assert.equal(extractMatchedOperationalStatus(representative, expected), "CANCELADO", "situação do registro identificado prevalece sobre envelope genérico");
+assert.equal(extractMatchedOperationalStatus({ data: [{ PEDIDO_ID_IMPORTACAO: "other", SITUACAO_PEDIDO: "CANCELADO" }] }, expected), null);
 assert.equal(classifyUltraFv3OrderLookup({ PEDIDO_ID_IMPORTACAO: "other", SITUACAO_PEDIDO: "FINALIZADO" }, expected).matched, false);
 assert.equal(classifyUltraFv3OrderLookup({ PEDIDO_ID_IMPORTACAO: expected.pedidoIdImportacao, SITUACAO_PEDIDO: "ESTADO_NOVO" }, expected).orderStatus, "pendente");
 assert.equal(normalizeOperationalOrderStatus("ESTADO_NOVO"), "UNKNOWN");
@@ -28,3 +33,5 @@ assert.match(service, /order\.pedidoIdImportacao, order\.erpOrderId, order\.erpO
 assert.doesNotMatch(service.slice(service.indexOf("export async function syncErpOrderStatuses")), /method:\s*["']POST["']/);
 
 console.log("Orders module regression tests passed");
+
+assert.match(service, /statusSyncedAt: \{ lte: syncStartedAt \}/, "sincronização antiga não pode sobrescrever execução iniciada depois");

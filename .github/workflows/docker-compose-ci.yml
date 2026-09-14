@@ -75,6 +75,9 @@ jobs:
       - name: Type check (all workspaces)
         run: npm run typecheck
 
+      - name: Validate effective wins and ERP cancellation regressions
+        run: npm run test:effective-wins
+
       - name: Validate control-plane operational gates
         run: npm run test:tenancy-control-plane-operation
 

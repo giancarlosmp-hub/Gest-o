@@ -1045,3 +1045,17 @@ Para validar a ação rápida **Oportunidade**, acioná-la partindo de outra tel
 O #30 foi um preview bloqueado pelo formato agrupado dos dois `ADD COLUMN`; o filtro rodou antes de qualquer DDL e antes da criação de `applied.tsv`. A correção aceita exclusivamente `ProductPrice.availabilityState TEXT NOT NULL DEFAULT 'available'`, `ProductPrice.source TEXT NOT NULL DEFAULT 'legacy'` e `ProductPrice_source_availabilityState_idx` sobre `(source, availabilityState)`, sempre vinculados ao id/path/SHA-256 cadastrado. Qualquer estado parcial ou operação adicional permanece bloqueado.
 
 Somente após merge e CI integralmente verde, fixe o novo SHA da `main` e execute, em ordem: (1) Deploy Production `build`; (2) Prepare Production Recovery Backup; (3) Production Schema PR827 `preview`, confirmação vazia; (4) revisão humana; (5) `apply` com `PRODUCTION_SCHEMA_APPLY`; (6) Deploy Production `cutover`. Não use a confirmação em preview e não execute SQL manual, merge, deploy, schema apply, Recovery ou cutover como parte desta investigação.
+
+### Reconciliação segura de cancelamentos ERP
+Execute a consulta de situação dos pedidos identificados por número/ID estável no tenant correto e recarregue dashboard/relatórios após sucesso. Repetir é seguro porque os totais são recalculados do estado consolidado, sem decrementos. Falha, resposta antiga, ausência em lista parcial ou vínculo ambíguo não comprovam cancelamento. Não há migration nesta correção. “Recarregar lista” (`GET /orders`) consulta somente o CRM; “Consultar situação no ERP” (`POST /orders/:id/status-consultation`) sincroniza o pedido.
+
+#### Roteiro de validação de cancelamento
+1. No preview, localizar `900169-PREVIEW` e confirmar filtro/contador/cartão/detalhe `CANCELADO` em vermelho.
+2. Abrir a oportunidade vinculada e confirmar “Ganho desconsiderado — pedido cancelado no ERP”, mantendo etapa e timeline históricas.
+3. Comparar dashboard, relatório de encerradas e CSV: quantidade/valor efetivos devem excluir 369,86; `900033-PREVIEW`, `900051-PREVIEW` e `900071-PREVIEW` permanecem finalizados.
+4. Repetir a consulta de situação e confirmar totais idênticos. Validar como vendedor, gerente e diretor.
+5. Para registros existentes, usar “Consultar situação no ERP” ou o escopo `orderStatus` da sincronização já existente. “Recarregar lista” não sincroniza ERP.
+Não há migration nem backfill destrutivo; o recálculo ocorre em leitura. Não executar Recovery, SQL comercial manual ou envio real.
+
+#### Diagnóstico de múltiplos pedidos
+Nunca calcule percentual do valor da oportunidade. Confirme vínculos estáveis, cadeia explícita de substituição e `VALOR_LIQUIDO` de cada pedido remanescente. Se a soma dos pedidos divergir da oportunidade, mantenha o aviso de inconsistência; se faltar valor em pedido válido, não publique estimativa como confirmado. `PARCIAL` sem `CANCELADO` preserva integralmente a métrica anterior.

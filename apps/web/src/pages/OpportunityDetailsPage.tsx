@@ -99,6 +99,7 @@ type Opportunity = {
   notes?: string | null;
   priceTableCode?: string | null;
   daysOverdue?: number | null;
+  effectiveWin?: { value: number; count: number; disregarded: boolean; partialCancellation: boolean; reason: string | null; originalValue: number } | null;
 };
 
 type ClientErpSummary = {
@@ -1366,6 +1367,9 @@ export default function OpportunityDetailsPage() {
           <p>
             <strong>Etapa:</strong> {stageLabel[item.stage]}
           </p>
+          {item.effectiveWin?.reason ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3 font-semibold text-red-900">{item.effectiveWin.reason}</div>
+          ) : null}
           <p>
             <strong>Valor:</strong> {formatCurrencyBRL(item.value)}
           </p>

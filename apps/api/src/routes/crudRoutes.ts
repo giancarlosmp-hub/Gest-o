@@ -33,6 +33,7 @@ import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
+import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { buildTimelineEventWhere } from "./timelineEventWhere.js";
 import { ActivityType, ClientType, ErpOrderSyncStatus, ErpSyncTrigger, OpportunityStage, Prisma, Role, type User } from "@prisma/client";
@@ -3391,13 +3392,9 @@ router.get("/reports/score-monthly", async (req, res) => {
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" }
     }),
-    prisma.opportunity.groupBy({
-      by: ["ownerSellerId"],
-      where: {
-        stage: "ganho",
-        ...buildWonOpportunityDateRangeFilter(start, end)
-      },
-      _sum: { value: true }
+    loadEffectiveWonTotals({
+      stage: "ganho",
+      ...buildWonOpportunityDateRangeFilter(start, end)
     }),
     prisma.goal.findMany({
       where: { month },
@@ -3415,10 +3412,7 @@ router.get("/reports/score-monthly", async (req, res) => {
     })
   ]);
 
-  const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
-    acc[item.ownerSellerId] = item._sum.value ?? 0;
-    return acc;
-  }, {});
+  const salesBySeller = Object.fromEntries(Object.entries(monthSales).map(([sellerId, total]) => [sellerId, total.value]));
 
   const goalsBySeller = monthGoals.reduce<Record<string, number>>((acc, item) => {
     acc[item.sellerId] = item.targetValue ?? 0;
@@ -3501,23 +3495,15 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       where: { role: "vendedor", ...(scopedSellerId ? { id: scopedSellerId } : {}) },
       select: { id: true, name: true }
     }),
-    prisma.opportunity.groupBy({
-      by: ["ownerSellerId"],
-      where: {
-        stage: "ganho",
-        ...sellerWhere(req),
-        ...buildWonOpportunityDateRangeFilter(range.start, range.end)
-      },
-      _sum: { value: true }
+    loadEffectiveWonTotals({
+      stage: "ganho",
+      ...sellerWhere(req),
+      ...buildWonOpportunityDateRangeFilter(range.start, range.end)
     }),
-    prisma.opportunity.groupBy({
-      by: ["ownerSellerId"],
-      where: {
-        stage: "ganho",
-        ...sellerWhere(req),
-        ...buildWonOpportunityDateRangeFilter(previousStart, previousEnd)
-      },
-      _sum: { value: true }
+    loadEffectiveWonTotals({
+      stage: "ganho",
+      ...sellerWhere(req),
+      ...buildWonOpportunityDateRangeFilter(previousStart, previousEnd)
     }),
     prisma.activity.findMany({
       where: {
@@ -3548,17 +3534,9 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     })
   ]);
 
-  const currentSalesMap = currentWonOpportunities.reduce<Record<string, number>>((acc, row) => {
-    if (!row.ownerSellerId) return acc;
-    acc[row.ownerSellerId] = row._sum.value ?? 0;
-    return acc;
-  }, {});
+  const currentSalesMap = Object.fromEntries(Object.entries(currentWonOpportunities).map(([sellerId, total]) => [sellerId, total.value]));
 
-  const previousSalesMap = previousWonOpportunities.reduce<Record<string, number>>((acc, row) => {
-    if (!row.ownerSellerId) return acc;
-    acc[row.ownerSellerId] = row._sum.value ?? 0;
-    return acc;
-  }, {});
+  const previousSalesMap = Object.fromEntries(Object.entries(previousWonOpportunities).map(([sellerId, total]) => [sellerId, total.value]));
 
   const opportunitiesCreatedMap = opportunitiesCreated.reduce<Record<string, number>>((acc, row) => {
     acc[row.ownerSellerId] = (acc[row.ownerSellerId] || 0) + 1;
@@ -3713,14 +3691,10 @@ router.get("/reports/commercial-score", async (req, res) => {
         description: true
       }
     }),
-    prisma.opportunity.groupBy({
-      by: ["ownerSellerId"],
-      where: {
-        stage: "ganho",
-        ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
-        ...buildWonOpportunityDateRangeFilter(start, end)
-      },
-      _sum: { value: true }
+    loadEffectiveWonTotals({
+      stage: "ganho",
+      ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
+      ...buildWonOpportunityDateRangeFilter(start, end)
     }),
     prisma.goal.findMany({
       where: {
@@ -3835,10 +3809,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     return acc;
   }, {});
 
-  const salesBySeller = monthSales.reduce<Record<string, number>>((acc, item) => {
-    acc[item.ownerSellerId] = item._sum.value ?? 0;
-    return acc;
-  }, {});
+  const salesBySeller = Object.fromEntries(Object.entries(monthSales).map(([sellerId, total]) => [sellerId, total.value]));
   const goalsBySeller = monthGoals.reduce<Record<string, number>>((acc, item) => {
     acc[item.sellerId] = item.targetValue;
     return acc;
@@ -3942,14 +3913,10 @@ router.get("/reports/consistency", async (req, res) => {
     monthKeys.map(async (month) => {
       const { start, end } = getMonthRangeFromKey(month);
       const [sales, goals] = await Promise.all([
-        prisma.opportunity.groupBy({
-          by: ["ownerSellerId"],
-          where: {
-            stage: "ganho",
-            ownerSellerId: { in: sellers.map((seller) => seller.id) },
-            ...buildWonOpportunityDateRangeFilter(start, end)
-          },
-          _sum: { value: true }
+        loadEffectiveWonTotals({
+          stage: "ganho",
+          ownerSellerId: { in: sellers.map((seller) => seller.id) },
+          ...buildWonOpportunityDateRangeFilter(start, end)
         }),
         prisma.goal.findMany({
           where: {
@@ -3963,10 +3930,7 @@ router.get("/reports/consistency", async (req, res) => {
         })
       ]);
 
-      const salesBySeller = sales.reduce<Record<string, number>>((acc, item) => {
-        acc[item.ownerSellerId] = item._sum.value ?? 0;
-        return acc;
-      }, {});
+      const salesBySeller = Object.fromEntries(Object.entries(sales).map(([sellerId, total]) => [sellerId, total.value]));
 
       const goalsBySeller = goals.reduce<Record<string, number>>((acc, item) => {
         acc[item.sellerId] = item.targetValue;
@@ -5578,7 +5542,7 @@ router.get("/opportunities", async (req, res) => {
   const baseQuery = {
     where,
     include: {
-      client: { select: { id: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true } },
+      client: { select: { id: true, tenantId: true, code: true, name: true, fantasyName: true, cnpj: true, city: true, state: true } },
       ownerSeller: { select: { id: true, name: true, isActive: true } }
     },
     orderBy: [{ expectedCloseDate: "asc" }, { value: "desc" }] as Prisma.Enumerable<Prisma.OpportunityOrderByWithRelationInput>
@@ -5617,7 +5581,8 @@ router.get("/opportunities", async (req, res) => {
         consideredOpportunities
       });
     }
-    return res.json(opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)));
+    const effectiveStates = await loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho"));
+    return res.json(opportunities.map((opportunity) => serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart)));
   }
 
   const [total, opportunities] = await Promise.all([
@@ -5663,8 +5628,9 @@ router.get("/opportunities", async (req, res) => {
       consideredOpportunities
     });
   }
+  const effectiveStates = await loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho"));
   return res.json({
-    items: opportunities.map((opportunity) => serializeOpportunity(opportunity, todayStart)),
+    items: opportunities.map((opportunity) => serializeOpportunity(withEffectiveWin(opportunity, effectiveStates), todayStart)),
     total,
     page,
     pageSize,
@@ -5703,6 +5669,7 @@ router.get("/opportunities/summary", async (req, res) => {
       closedAt: true,
       expectedCloseDate: true,
       proposalDate: true,
+      client: { select: { tenantId: true } },
       ownerSeller: { select: { id: true, name: true } }
     }
   });
@@ -5712,30 +5679,33 @@ router.get("/opportunities/summary", async (req, res) => {
   const breakdownByCrop: Record<string, { value: number; weighted: number; count: number }> = {};
   const breakdownBySeason: Record<string, { value: number; weighted: number; count: number }> = {};
 
+  const summaryEffectiveStates = await loadEffectiveWonContributions(opportunities.filter((opportunity) => opportunity.stage === "ganho"));
   const pipelineMetrics = calculatePipelineMetrics(opportunities, todayStart);
   let wonCount = 0;
   let lossCount = 0;
 
   for (const opportunity of opportunities) {
-    const weighted = getWeightedValue(opportunity.value, opportunity.probability);
+    const effective = opportunity.stage === "ganho" ? summaryEffectiveStates.get(opportunity.id)! : null;
+    const metricValue = effective?.value ?? opportunity.value;
+    const weighted = getWeightedValue(metricValue, opportunity.probability);
 
-    if (opportunity.stage === "ganho") wonCount += 1;
+    if (opportunity.stage === "ganho") wonCount += effective!.count;
     if (opportunity.stage === "perdido") lossCount += 1;
 
     if (!totalsByStage[opportunity.stage]) totalsByStage[opportunity.stage] = { value: 0, weighted: 0 };
-    totalsByStage[opportunity.stage].value += opportunity.value;
+    totalsByStage[opportunity.stage].value += metricValue;
     totalsByStage[opportunity.stage].weighted += weighted;
-    countByStage[opportunity.stage] = (countByStage[opportunity.stage] || 0) + 1;
+    countByStage[opportunity.stage] = (countByStage[opportunity.stage] || 0) + (effective?.count ?? 1);
 
     const cropKey = opportunity.crop || "não informado";
     if (!breakdownByCrop[cropKey]) breakdownByCrop[cropKey] = { value: 0, weighted: 0, count: 0 };
-    breakdownByCrop[cropKey].value += opportunity.value;
+    breakdownByCrop[cropKey].value += metricValue;
     breakdownByCrop[cropKey].weighted += weighted;
     breakdownByCrop[cropKey].count += 1;
 
     const seasonKey = opportunity.season || "não informado";
     if (!breakdownBySeason[seasonKey]) breakdownBySeason[seasonKey] = { value: 0, weighted: 0, count: 0 };
-    breakdownBySeason[seasonKey].value += opportunity.value;
+    breakdownBySeason[seasonKey].value += metricValue;
     breakdownBySeason[seasonKey].weighted += weighted;
     breakdownBySeason[seasonKey].count += 1;
 
@@ -5762,7 +5732,7 @@ router.get("/opportunities/summary", async (req, res) => {
       endpoint: "/opportunities/summary",
       filters: parsedFilters.params,
       prismaWhere: where,
-      totalCount: opportunities.length,
+      totalCount: opportunities.filter((opportunity) => opportunity.stage !== "ganho").length + wonCount,
       pipelineTotal: pipelineMetrics.pipelineTotal,
       weightedTotal: pipelineMetrics.weightedTotal,
       overdueCount: pipelineMetrics.overdueCount,
@@ -5784,7 +5754,7 @@ router.get("/opportunities/summary", async (req, res) => {
     totalWeightedValue: pipelineMetrics.weightedTotal,
     totalsByStage,
     countByStage,
-    totalCount: opportunities.length,
+    totalCount: opportunities.filter((opportunity) => opportunity.stage !== "ganho").length + wonCount,
     breakdownByCrop,
     breakdownBySeason
   });
@@ -6637,6 +6607,7 @@ router.get("/opportunities/:id", async (req, res) => {
       client: {
         select: {
           id: true,
+          tenantId: true,
           code: true,
           name: true,
           fantasyName: true,
@@ -6651,7 +6622,8 @@ router.get("/opportunities/:id", async (req, res) => {
 
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
-  return res.json(serializeOpportunity(opportunity, todayStart));
+  const states = await loadEffectiveWonContributions(opportunity.stage === "ganho" ? [opportunity] : []);
+  return res.json(serializeOpportunity(withEffectiveWin(opportunity, states), todayStart));
 });
 
 

@@ -3,6 +3,7 @@ import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sellerWhere } from "../utils/access.js";
+import { loadEffectiveWonContributions } from "../services/effectiveWins.js";
 
 const router = Router();
 router.use(authMiddleware);
@@ -77,7 +78,8 @@ router.get("/summary", async (req, res) => {
         expectedCloseDate: true,
         proposalDate: true,
         ownerSellerId: true,
-        ownerSeller: { select: { name: true } }
+        ownerSeller: { select: { name: true } },
+        client: { select: { tenantId: true } }
       }
     }),
     prisma.opportunity.findMany({
@@ -107,15 +109,18 @@ router.get("/summary", async (req, res) => {
     prisma.activity.findMany({ where: whereOwner, take: 8, orderBy: { createdAt: "desc" } })
   ]);
 
+  const effectiveWinStates = await loadEffectiveWonContributions(wonOpportunities);
   const salesBySeller = wonOpportunities.reduce<Record<string, { revenue: number; sales: number }>>((acc, opportunity) => {
     if (!acc[opportunity.ownerSellerId]) acc[opportunity.ownerSellerId] = { revenue: 0, sales: 0 };
-    acc[opportunity.ownerSellerId].revenue += opportunity.value;
-    acc[opportunity.ownerSellerId].sales += 1;
+    const effective = effectiveWinStates.get(opportunity.id)!;
+    acc[opportunity.ownerSellerId].revenue += effective.value;
+    acc[opportunity.ownerSellerId].sales += effective.count;
     return acc;
   }, {});
 
-  const totalRevenue = wonOpportunities.reduce((acc, opportunity) => acc + opportunity.value, 0);
-  const totalSales = wonOpportunities.length;
+  const effectiveWins = wonOpportunities.map((opportunity) => effectiveWinStates.get(opportunity.id)!);
+  const totalRevenue = effectiveWins.reduce((acc, state) => acc + state.value, 0);
+  const totalSales = effectiveWins.reduce((acc, opportunity) => acc + opportunity.count, 0);
   const lostSales = lostOpportunities.length;
   const conversionRate = totalSales + lostSales > 0
     ? (totalSales / (totalSales + lostSales)) * 100
@@ -151,7 +156,7 @@ router.get("/summary", async (req, res) => {
     .sort((a, b) => b.revenue - a.revenue);
 
   if (shouldLogDashboardDiagnostics) {
-    const summarize = (opportunity: (typeof wonOpportunities)[number]) => ({
+    const summarize = (opportunity: any) => ({
       id: opportunity.id,
       title: opportunity.title,
       stage: opportunity.stage,
@@ -206,11 +211,13 @@ router.get("/sales-series", async (req, res) => {
         stage: "ganho",
         ...buildWonDateRangeFilter(start, end)
       },
-      orderBy: [{ closedAt: "asc" }, { expectedCloseDate: "asc" }]
+      orderBy: [{ closedAt: "asc" }, { expectedCloseDate: "asc" }],
+      select: { id: true, client: { select: { tenantId: true } }, value: true, closedAt: true, expectedCloseDate: true }
     }),
     prisma.goal.findMany({ where: { month, ...(req.user!.role === "vendedor" ? { sellerId: req.user!.id } : whereSale) } })
   ]);
 
+  const seriesEffectiveWins = await loadEffectiveWonContributions(wonOpportunities);
   const objectiveTotal = goals.reduce((acc, goal) => acc + goal.targetValue, 0);
   const businessDays = getBusinessDaysOfMonth(year, monthN);
   const objectiveByDay = new Map<number, number>();
@@ -234,7 +241,7 @@ router.get("/sales-series", async (req, res) => {
 
     const realizedOfDay = wonOpportunities
       .filter((opportunity) => (opportunity.closedAt || opportunity.expectedCloseDate).getDate() === day)
-      .reduce((acc, opportunity) => acc + opportunity.value, 0);
+      .reduce((acc, opportunity) => acc + seriesEffectiveWins.get(opportunity.id)!.value, 0);
     const objectiveOfDay = objectiveByDay.get(day) || 0;
 
     realizedRunning += realizedOfDay;
@@ -284,7 +291,7 @@ router.get("/portfolio", async (req, res) => {
           { closedAt: null, expectedCloseDate: { lte: end } }
         ]
       },
-      select: { clientId: true, value: true, expectedCloseDate: true, closedAt: true }
+      select: { id: true, client: { select: { tenantId: true } }, clientId: true, value: true, expectedCloseDate: true, closedAt: true }
     }),
     prisma.opportunity.findMany({
       where: {
@@ -292,20 +299,22 @@ router.get("/portfolio", async (req, res) => {
         stage: "ganho",
         ...buildWonDateRangeFilter(windowStart, end)
       },
-      select: { clientId: true, value: true }
+      select: { id: true, client: { select: { tenantId: true } }, clientId: true, value: true }
     }),
-    prisma.opportunity.aggregate({
+    prisma.opportunity.findMany({
       where: {
         ...whereOwner,
         stage: "ganho",
         ...buildWonDateRangeFilter(todayStart, todayEnd)
       },
-      _sum: { value: true }
+      select: { id: true, client: { select: { tenantId: true } }, value: true }
     })
   ]);
 
+  const portfolioStates = await loadEffectiveWonContributions([...wonOpportunities, ...recentWonOpportunities, ...soldTodayData]);
   const lastSaleByClient = new Map<string, Date>();
   for (const opportunity of wonOpportunities) {
+    if (portfolioStates.get(opportunity.id)!.count === 0) continue;
     const currentDate = lastSaleByClient.get(opportunity.clientId);
     const effectiveCloseDate = opportunity.closedAt || opportunity.expectedCloseDate;
     if (!currentDate || effectiveCloseDate > currentDate) {
@@ -329,7 +338,7 @@ router.get("/portfolio", async (req, res) => {
 
   const revenueByClient = new Map<string, number>();
   for (const opportunity of recentWonOpportunities) {
-    revenueByClient.set(opportunity.clientId, (revenueByClient.get(opportunity.clientId) || 0) + opportunity.value);
+    revenueByClient.set(opportunity.clientId, (revenueByClient.get(opportunity.clientId) || 0) + portfolioStates.get(opportunity.id)!.value);
   }
 
   const sortedRevenue = [...revenueByClient.entries()].sort((a, b) => b[1] - a[1]);
@@ -377,7 +386,7 @@ router.get("/portfolio", async (req, res) => {
       }
     },
     totalClients: clients.length,
-    soldToday: soldTodayData._sum.value || 0
+    soldToday: soldTodayData.reduce((sum, opportunity) => sum + portfolioStates.get(opportunity.id)!.value, 0)
   });
 });
 
