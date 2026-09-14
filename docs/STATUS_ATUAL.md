@@ -930,3 +930,8 @@ Dashboard (resumo, série e carteira), Oportunidades (lista, pipeline, detalhe e
 
 #### Revisão final — múltiplos pedidos e atendimento parcial
 Não há rateio proporcional. Havendo cancelamento entre múltiplos pedidos, a quantidade efetiva continua `1` se restar pedido válido e o valor usa somente `VALOR_LIQUIDO` explícito desses pedidos. Divergência entre oportunidade e soma dos pedidos é sinalizada; valor remanescente ausente preserva o valor anterior como não confirmado. `PARCIAL` isolado descreve atendimento e não prova cancelamento. As regressões fazem parte do gate obrigatório `test:effective-wins` no CI.
+
+### PR #869 — correção do seed de preview (2026-09-14)
+O Docker Compose CI #3848 falhou em `Prove tenant read pilot preview dataset`: `seedCancelledOrderScenario` criava o cliente `968-PREVIEW` sem o campo obrigatório `Client.region`. A fixture agora usa a região sintética `Sul`, coerente com Quedas do Iguaçu/PR e com os demais clientes do seed. Cliente, quatro oportunidades e quatro pedidos são criados em uma única transação; a limpeza anterior por `[preview-seed]` continua tornando a reexecução idempotente após qualquer execução interrompida. Tenant, vendedor, oportunidade e pedido permanecem ligados a `tenant-default-v1`.
+
+Neste checkout, Docker/PostgreSQL não estão instalados, portanto a prova real `test:tenant-read-pilot-preview-seed` e o compose-smoke não puderam ser executados localmente. O log do Preview Deploy #571, run `34895835525`, também não está acessível: não há remote/token GitHub configurado e a consulta anônima foi rejeitada. Assim, a causa desse segundo run permanece **não confirmada**; nenhuma hipótese de credencial foi tratada como fato e nenhum secret foi alterado.

@@ -1059,3 +1059,6 @@ Não há migration nem backfill destrutivo; o recálculo ocorre em leitura. Não
 
 #### Diagnóstico de múltiplos pedidos
 Nunca calcule percentual do valor da oportunidade. Confirme vínculos estáveis, cadeia explícita de substituição e `VALOR_LIQUIDO` de cada pedido remanescente. Se a soma dos pedidos divergir da oportunidade, mantenha o aviso de inconsistência; se faltar valor em pedido válido, não publique estimativa como confirmado. `PARCIAL` sem `CANCELADO` preserva integralmente a métrica anterior.
+
+### Reexecução do preview após a correção da PR #869
+O cenário cancelado é exclusivo de preview e transacional. `cleanOldPreviewSeedData` remove primeiro pedidos, oportunidades e clientes marcados com `[preview-seed]`; em seguida o cenário é recriado integralmente com `region=Sul` e tenant `tenant-default-v1`. No CI com Docker/PostgreSQL, executar `npm run test:tenant-read-pilot-preview-seed`; a prova aplica schema, executa o seed real, valida tenant/ownership/cardinalidade, executa o seed novamente e compara snapshots. Depois, continuar todas as etapas do job `compose-smoke`, sem `continue-on-error`.

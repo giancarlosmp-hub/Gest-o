@@ -499,7 +499,8 @@ async function seedPreviewTerritories(sellers: Awaited<ReturnType<typeof upsertS
 }
 
 async function seedCancelledOrderScenario(seller: Awaited<ReturnType<typeof upsertSeller>>, now: Date) {
-  const client = await prisma.client.create({ data: { tenantId: PREVIEW_DEFAULT_TENANT_ID, code: "968-PREVIEW", name: `${PREVIEW_SEED_TAG} AGROPECUÁRIA QUEDAS SINTÉTICA`, city: "Quedas do Iguaçu", state: "PR", ownerSellerId: seller.id } });
+  await prisma.$transaction(async (tx) => {
+  const client = await tx.client.create({ data: { tenantId: PREVIEW_DEFAULT_TENANT_ID, code: "968-PREVIEW", name: `${PREVIEW_SEED_TAG} AGROPECUÁRIA QUEDAS SINTÉTICA`, city: "Quedas do Iguaçu", state: "PR", region: "Sul", ownerSellerId: seller.id } });
   const fixtures = [
     { number: "900169-PREVIEW", status: "CANCELADO" as const, value: 369.86 },
     { number: "900033-PREVIEW", status: "FINALIZADO" as const, value: 520 },
@@ -507,9 +508,10 @@ async function seedCancelledOrderScenario(seller: Awaited<ReturnType<typeof upse
     { number: "900071-PREVIEW", status: "FINALIZADO" as const, value: 740 },
   ];
   for (const fixture of fixtures) {
-    const opportunity = await prisma.opportunity.create({ data: { title: `${PREVIEW_SEED_TAG} Pedido ${fixture.number}`, value: fixture.value, stage: "ganho", probability: 100, proposalDate: addDays(now, -3), followUpDate: addDays(now, -2), expectedCloseDate: addDays(now, -1), closedAt: addDays(now, -1), notes: `${PREVIEW_SEED_TAG} histórico comercial sintético preservado`, clientId: client.id, ownerSellerId: seller.id } });
-    await prisma.erpOrderSync.create({ data: { tenantId: PREVIEW_DEFAULT_TENANT_ID, opportunityId: opportunity.id, sellerId: seller.id, pedidoIdImportacao: `${PREVIEW_SEED_TAG}-${fixture.number}`, numPedido: fixture.number, erpOrderNumber: fixture.number, operationalStatusRaw: fixture.status, operationalOrderStatus: fixture.status, status: "sent", orderStatus: fixture.status === "CANCELADO" ? "cancelado" : "entregue", payloadSent: { CODFILIAL: 1, VALOR_LIQUIDO: fixture.value, previewSeed: true }, lastStatusPayload: { response: { PEDIDO_ID_IMPORTACAO: `${PREVIEW_SEED_TAG}-${fixture.number}`, NUM_PEDIDO: fixture.number, SITUACAO_PEDIDO: fixture.status } }, statusSyncedAt: now, sentAt: now } });
+    const opportunity = await tx.opportunity.create({ data: { title: `${PREVIEW_SEED_TAG} Pedido ${fixture.number}`, value: fixture.value, stage: "ganho", probability: 100, proposalDate: addDays(now, -3), followUpDate: addDays(now, -2), expectedCloseDate: addDays(now, -1), closedAt: addDays(now, -1), notes: `${PREVIEW_SEED_TAG} histórico comercial sintético preservado`, clientId: client.id, ownerSellerId: seller.id } });
+    await tx.erpOrderSync.create({ data: { tenantId: PREVIEW_DEFAULT_TENANT_ID, opportunityId: opportunity.id, sellerId: seller.id, pedidoIdImportacao: `${PREVIEW_SEED_TAG}-${fixture.number}`, numPedido: fixture.number, erpOrderNumber: fixture.number, operationalStatusRaw: fixture.status, operationalOrderStatus: fixture.status, status: "sent", orderStatus: fixture.status === "CANCELADO" ? "cancelado" : "entregue", payloadSent: { CODFILIAL: 1, VALOR_LIQUIDO: fixture.value, previewSeed: true }, lastStatusPayload: { response: { PEDIDO_ID_IMPORTACAO: `${PREVIEW_SEED_TAG}-${fixture.number}`, NUM_PEDIDO: fixture.number, SITUACAO_PEDIDO: fixture.status } }, statusSyncedAt: now, sentAt: now } });
   }
+  });
 }
 
 async function createPreviewDataset() {

@@ -85,6 +85,9 @@ assert.match(postgresHarness, /e\."tenantId" <> c\."tenantId"/, "seed proof must
 assert.match(previewSeed, /tenant:\s*\{\s*connect:\s*\{\s*id:\s*PREVIEW_DEFAULT_TENANT_ID/, "seeded orders must connect the explicit tenant relation");
 assert.match(previewSeed, /opportunity:\s*\{\s*connect:\s*\{\s*id:\s*opportunity\.id/, "seeded orders must connect the explicit opportunity relation");
 assert.match(previewSeed, /seller:\s*\{\s*connect:\s*\{\s*id:\s*seller\.id/, "seeded orders must connect the explicit seller relation");
+const cancelledScenario = previewSeed.slice(previewSeed.indexOf("async function seedCancelledOrderScenario"), previewSeed.indexOf("async function createPreviewDataset"));
+assert.ok(cancelledScenario.includes('code: "968-PREVIEW"') && cancelledScenario.includes('region: "Sul"'), "cancelled-order preview client must satisfy the required synthetic region contract");
+assert.match(previewSeed, /seedCancelledOrderScenario[\s\S]*prisma\.\$transaction/, "cancelled-order preview scenario must be atomic on partial failure");
 assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
