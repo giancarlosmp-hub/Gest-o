@@ -1093,3 +1093,6 @@ Preview é uma autoridade separada e read-only: a confirmação eventualmente pr
 
 #### Autoridade e cardinalidade de ganhos efetivos
 A oportunidade permanece autoridade do valor comercial. Sem cancelamento, nenhuma soma de pedidos substitui esse valor. Em múltiplos pedidos com cancelamento, não há rateio: somam-se apenas os valores ERP explícitos dos pedidos remanescentes. Se um pedido remanescente não informar valor, preserva-se o valor anterior e sinaliza-se a inconsistência. Apenas `supersedesErpOrderSyncId` comprova substituição. Consulte `effective-wins-consumer-inventory.md` para o inventário completo.
+
+### Contrato de responsividade desktop/mobile (2026-09-15)
+Regras de contenção de `svg`/`canvas` e `overflow-wrap:anywhere` são exclusivamente mobile (`max-width:767px`), nunca globais. No desktop, gráficos Chart.js usam todo o contêiner responsivo e resumos não impõem rolagem vertical. Scrollbars pertencem ao componente: o menu usa calha automática e indicador discreto; tabelas usam overflow horizontal localizado somente quando a largura mínima não couber. Datas, safras, moedas e cabeçalhos curtos não quebram no meio; textos longos mantêm quebra natural.

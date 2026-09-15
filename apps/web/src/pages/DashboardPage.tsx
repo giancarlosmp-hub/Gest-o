@@ -1039,7 +1039,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
         {[
           { label: "Faturamento no mês", value: formatCurrencyBRL(summary.totalRevenue) },
           { label: "Vendas no mês", value: formatNumberBR(summary.totalSales) },
@@ -1050,7 +1050,7 @@ export default function DashboardPage() {
         ].map((item) => (
           <div key={item.label} className={cardClass}>
             <div className="text-sm text-slate-500">{item.label}</div>
-            <div className="text-2xl font-bold text-slate-900">{item.value}</div>
+            <div className="whitespace-nowrap text-xl font-bold tabular-nums text-slate-900 2xl:text-2xl">{item.value}</div>
           </div>
         ))}
       </div>
@@ -1061,7 +1061,7 @@ export default function DashboardPage() {
           <div className="mt-2 text-sm text-amber-600">Objetivo do mês não definido.</div>
         )}
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-stretch">
-          <div className="h-[250px] w-full sm:h-[300px] xl:col-span-9 xl:h-[360px]">
+          <div className="min-w-0 h-[280px] w-full sm:h-[340px] xl:col-span-12 xl:h-[400px]">
             <Line
               options={lineOptions}
               data={{
@@ -1087,8 +1087,8 @@ export default function DashboardPage() {
               }}
             />
           </div>
-          <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 xl:col-span-3 xl:h-[360px]">
-            <div className="flex h-full flex-col gap-4 xl:overflow-y-auto xl:pr-1">
+          <div className="rounded-lg border border-slate-100 bg-slate-50/50 p-3 xl:col-span-12">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <div>
                 <div className="mb-1 text-sm font-medium text-slate-500">Faturado acumulado</div>
                 <div className="text-xl font-bold leading-tight text-slate-900 xl:text-2xl">
@@ -1180,7 +1180,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-12">
-          <div className="h-[230px] sm:h-[280px] xl:col-span-8 xl:h-[320px]">
+          <div className="min-w-0 h-[280px] w-full sm:h-[340px] xl:col-span-12 xl:h-[400px]">
             <Line
               options={activityLineOptions}
               data={{
@@ -1207,27 +1207,27 @@ export default function DashboardPage() {
             />
           </div>
 
-          <div className="xl:col-span-4">
+          <div className="min-w-0 xl:col-span-12">
             <h4 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Meta mensal por tipo</h4>
-            <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-100">
-              <table className="min-w-[600px] w-full text-sm">
-                <thead className="sticky top-0 bg-slate-50">
+            <div className="w-full overflow-x-auto rounded-lg border border-slate-100">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead className="bg-slate-50">
                   <tr className="text-left text-slate-500">
-                    <th className="px-3 py-2">Tipo</th>
-                    <th className="px-3 py-2">Meta</th>
-                    <th className="px-3 py-2">Realizado</th>
-                    <th className="px-3 py-2">% atingido</th>
-                    <th className="px-3 py-2">Média diária</th>
+                    <th className="whitespace-nowrap px-3 py-2">Tipo</th>
+                    <th className="whitespace-nowrap px-3 py-2">Meta</th>
+                    <th className="whitespace-nowrap px-3 py-2">Realizado</th>
+                    <th className="whitespace-nowrap px-3 py-2">% atingido</th>
+                    <th className="whitespace-nowrap px-3 py-2">Média diária</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activityPerformance.summaryByType.map((item) => (
                     <tr key={item.type} className="border-t border-slate-100">
-                      <td className="px-3 py-2 text-slate-700">{toLabel(item.type)}</td>
-                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.target)}</td>
-                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.realized)}</td>
-                      <td className="px-3 py-2 text-slate-700">{formatPercentBR(item.reachedPercent)}</td>
-                      <td className="px-3 py-2 text-slate-700">{formatNumberBR(item.requiredDailyAverage)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{toLabel(item.type)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatNumberBR(item.target)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatNumberBR(item.realized)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatPercentBR(item.reachedPercent)}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatNumberBR(item.requiredDailyAverage)}</td>
                     </tr>
                   ))}
                   {activityPerformance.summaryByType.length === 0 && (

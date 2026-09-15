@@ -493,7 +493,7 @@ export default function ReportsPage() {
               {report.kpis.topClientsByWeightedValue.map((row) => (
                 <tr key={row.clientId} className="border-b border-slate-100">
                   <td className="py-2 pr-3 text-slate-700">{row.clientName}</td>
-                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(row.weightedValue)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 font-semibold tabular-nums text-slate-900">{formatCurrencyBRL(row.weightedValue)}</td>
                   <td className="py-2 pr-3 text-slate-700">{formatCurrencyBRL(row.value)}</td>
                   <td className="py-2 pr-3 text-slate-700">{row.opportunities}</td>
                 </tr>
@@ -572,7 +572,7 @@ export default function ReportsPage() {
                     <td className="py-2 pr-3 text-slate-700">{monthLabel(row.month)}</td>
                     <td className="py-2 pr-3 text-slate-700">{formatNumberBR(row.opportunities)}</td>
                     <td className="py-2 pr-3 text-slate-700">{formatCurrencyBRL(row.pipelineValue)}</td>
-                    <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(row.weightedValue)}</td>
+                    <td className="whitespace-nowrap py-2 pr-3 font-semibold tabular-nums text-slate-900">{formatCurrencyBRL(row.weightedValue)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -649,15 +649,15 @@ export default function ReportsPage() {
           <table className="min-w-[600px] w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-left text-slate-500">
-                <th className="py-2 pr-3 font-medium">Data</th>
+                <th className="whitespace-nowrap py-2 pr-3 font-medium">Data</th>
                 <th className="py-2 pr-3 font-medium">Oportunidade</th>
                 <th className="py-2 pr-3 font-medium">Cliente</th>
-                <th className="py-2 pr-3 font-medium">Cidade/UF</th>
+                <th className="whitespace-nowrap py-2 pr-3 font-medium">Cidade/UF</th>
                 <th className="py-2 pr-3 font-medium">Vendedor</th>
                 <th className="py-2 pr-3 font-medium">Cultura</th>
-                <th className="py-2 pr-3 font-medium">Safra</th>
-                <th className="py-2 pr-3 font-medium">Etapa</th>
-                <th className="py-2 pr-3 font-medium">Valor</th>
+                <th className="whitespace-nowrap py-2 pr-3 font-medium">Safra</th>
+                <th className="whitespace-nowrap py-2 pr-3 font-medium">Etapa</th>
+                <th className="whitespace-nowrap py-2 pr-3 font-medium">Valor</th>
                 <th className="py-2 pr-3 font-medium text-right">Ações</th>
               </tr>
             </thead>
@@ -668,15 +668,15 @@ export default function ReportsPage() {
                 <tr><td colSpan={10} className="py-6 text-center text-slate-500">Nenhuma oportunidade encontrada para os filtros aplicados.</td></tr>
               ) : closedItems.map((item) => (
                 <tr key={item.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-3 text-slate-700">{formatDateBR(getClosedDate(item))}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-slate-700">{formatDateBR(getClosedDate(item))}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.title}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.client}</td>
                   <td className="py-2 pr-3 text-slate-700">{formatClientCityState(item)}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.owner}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.crop || "—"}</td>
-                  <td className="py-2 pr-3 text-slate-700">{item.season || "—"}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 text-slate-700">{item.season || "—"}</td>
                   <td className="py-2 pr-3 text-slate-700">{item.stage === "ganho" ? "Ganho (evento histórico)" : "Perdido"}{item.effectiveWin?.reason ? <div className="mt-1 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}</td>
-                  <td className="py-2 pr-3 font-semibold text-slate-900">{formatCurrencyBRL(item.effectiveWin?.value ?? item.value)}</td>
+                  <td className="whitespace-nowrap py-2 pr-3 font-semibold tabular-nums text-slate-900">{formatCurrencyBRL(item.effectiveWin?.value ?? item.value)}</td>
                   <td className="py-2 pr-3 text-right">
                     {canEditClosedOpportunities ? (
                       <button

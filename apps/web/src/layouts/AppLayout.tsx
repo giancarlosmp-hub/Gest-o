@@ -187,7 +187,7 @@ function AppLayoutShell() {
         <SidebarBrand expanded={expanded} className="mb-4 px-2" />
       )}
 
-      <nav className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pb-2 [scrollbar-gutter:stable] [-webkit-overflow-scrolling:touch]">
+      <nav className="sidebar-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pb-2 [scrollbar-gutter:auto] [-webkit-overflow-scrolling:touch]">
         {visibleItems.map((item) => (
           <SidebarItem
             key={item.id}
