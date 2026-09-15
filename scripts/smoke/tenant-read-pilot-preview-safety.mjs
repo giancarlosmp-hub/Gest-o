@@ -80,7 +80,9 @@ for (const marker of ["TENANT_PREVIEW_SEED_FAILURE_STAGE=", "TENANT_PREVIEW_SEED
 }
 assert.match(postgresHarness, /preview_seed_password=\$\(head -c 48 \/dev\/urandom \| base64/);
 assert.match(postgresHarness, /-e PREVIEW_SEED_PASSWORD="\$preview_seed_password"/);
-assert.match(postgresHarness, /count\(\*\) FROM "ErpOrderSync"[\s\S]*<> 4/, "seed proof must require exactly four synthetic orders");
+assert.match(postgresHarness, /count\(\*\) FROM "ErpOrderSync"[^;]*<> 8/, "seed proof must require exactly eight synthetic orders overall");
+assert.match(postgresHarness, /pedidoIdImportacao" LIKE '%\[preview-seed\]-territory-%'\) <> 4/, "seed proof must retain exactly four territory orders");
+assert.match(postgresHarness, /900169-PREVIEW[\s\S]*900033-PREVIEW[\s\S]*900051-PREVIEW[\s\S]*900071-PREVIEW[\s\S]*<> 4/, "seed proof must require exactly four cancellation-scenario orders");
 assert.match(postgresHarness, /e\."tenantId" <> c\."tenantId"/, "seed proof must reject cross-tenant orders");
 assert.match(previewSeed, /tenant:\s*\{\s*connect:\s*\{\s*id:\s*PREVIEW_DEFAULT_TENANT_ID/, "seeded orders must connect the explicit tenant relation");
 assert.match(previewSeed, /opportunity:\s*\{\s*connect:\s*\{\s*id:\s*opportunity\.id/, "seeded orders must connect the explicit opportunity relation");

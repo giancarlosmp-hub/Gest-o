@@ -15,9 +15,12 @@ async function failClosed() {
       where: { pedidoIdImportacao: { contains: "[preview-seed]" } },
       select: {
         id: true,
+        pedidoIdImportacao: true,
+        erpOrderNumber: true,
+        operationalOrderStatus: true,
         tenantId: true,
         sellerId: true,
-        opportunity: { select: { ownerSellerId: true, client: { select: { tenantId: true, ownerSellerId: true } } } }
+        opportunity: { select: { id: true, ownerSellerId: true, client: { select: { code: true, tenantId: true, ownerSellerId: true } } } }
       }
     })
   ]);
@@ -30,7 +33,20 @@ async function failClosed() {
   if (!clients.length || clients.some((client) => !client.tenantId || client.tenantId !== tenantId)) throw new Error("DATASET_CLIENT_TENANT_FAILED");
   const memberIds = new Set(users.map((user) => user.id));
   if (clients.some((client) => !memberIds.has(client.ownerSellerId))) throw new Error("DATASET_CLIENT_OWNERSHIP_FAILED");
-  if (orders.length !== 4) throw new Error("DATASET_ORDER_CARDINALITY_FAILED");
+  const territoryOrders = orders.filter((order) => order.pedidoIdImportacao.includes("[preview-seed]-territory-"));
+  const cancellationOrders = orders.filter((order) => order.pedidoIdImportacao.match(/^\[preview-seed\]-900(?:169|033|051|071)-PREVIEW$/));
+  const expectedCancellationStatus = new Map([
+    ["900169-PREVIEW", "CANCELADO"],
+    ["900033-PREVIEW", "FINALIZADO"],
+    ["900051-PREVIEW", "FINALIZADO"],
+    ["900071-PREVIEW", "FINALIZADO"],
+  ]);
+  if (orders.length !== 8 || territoryOrders.length !== 4 || cancellationOrders.length !== 4) {
+    console.error("Preview order cardinality mismatch", { total: orders.length, territory: territoryOrders.length, cancellation: cancellationOrders.length });
+    throw new Error("DATASET_ORDER_CARDINALITY_FAILED");
+  }
+  if (new Set(cancellationOrders.map((order) => order.erpOrderNumber)).size !== 4 || new Set(cancellationOrders.map((order) => order.opportunity.id)).size !== 4) throw new Error("DATASET_CANCELLATION_ORDER_UNIQUENESS_FAILED");
+  if (cancellationOrders.some((order) => order.opportunity.client.code !== "968-PREVIEW" || expectedCancellationStatus.get(order.erpOrderNumber || "") !== order.operationalOrderStatus)) throw new Error("DATASET_CANCELLATION_SCENARIO_FAILED");
   if (orders.some((order) => order.tenantId !== tenantId || order.opportunity.client.tenantId !== tenantId)) throw new Error("DATASET_ORDER_TENANT_FAILED");
   if (orders.some((order) => order.sellerId !== order.opportunity.ownerSellerId || order.sellerId !== order.opportunity.client.ownerSellerId)) throw new Error("DATASET_ORDER_SELLER_FAILED");
   for (const user of users.filter((candidate) => candidate.role === "vendedor")) {
@@ -38,7 +54,7 @@ async function failClosed() {
     const scoped = clients.filter((client) => client.ownerSellerId === user.id && !client.isArchived && client.tenantId === tenantId).length;
     if (legacy !== scoped) throw new Error("DATASET_RBAC_COUNT_FAILED");
   }
-  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length });
+  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length, territoryOrders: territoryOrders.length, cancellationOrders: cancellationOrders.length });
 }
 
 failClosed().finally(() => prisma.$disconnect()).catch((error) => { console.error("Preview dataset certification failed", { code: error instanceof Error ? error.message : "UNKNOWN" }); process.exit(1); });

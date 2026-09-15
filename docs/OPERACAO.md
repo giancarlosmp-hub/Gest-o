@@ -1062,3 +1062,6 @@ Nunca calcule percentual do valor da oportunidade. Confirme vínculos estáveis,
 
 ### Reexecução do preview após a correção da PR #869
 O cenário cancelado é exclusivo de preview e transacional. `cleanOldPreviewSeedData` remove primeiro pedidos, oportunidades e clientes marcados com `[preview-seed]`; em seguida o cenário é recriado integralmente com `region=Sul` e tenant `tenant-default-v1`. No CI com Docker/PostgreSQL, executar `npm run test:tenant-read-pilot-preview-seed`; a prova aplica schema, executa o seed real, valida tenant/ownership/cardinalidade, executa o seed novamente e compara snapshots. Depois, continuar todas as etapas do job `compose-smoke`, sem `continue-on-error`.
+
+### Cardinalidade certificada do preview da PR #869
+A cardinalidade autoritativa é segmentada: `8` pedidos `[preview-seed]` no total = `4` pedidos de território (`[preview-seed]-territory-*`) + `4` pedidos do caso de cancelamento (`900169-PREVIEW`, `900033-PREVIEW`, `900051-PREVIEW`, `900071-PREVIEW`). Qualquer total diferente, cenário diferente de quatro, número/oportunidade duplicado, status divergente ou tenant/responsável incompatível deve falhar fechado. Após reexecutar o seed, as contagens agregadas antes/depois devem ser byte a byte iguais.
