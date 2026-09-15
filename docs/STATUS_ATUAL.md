@@ -1,3 +1,10 @@
+# Deploy Production #173 — correção de equivalência preparada (15/09/2026)
+
+- **Incidente:** o run `35013697899` no HEAD produtivo informado `5857eaf9362ecc105d9ca75e58b1a6bdf0840230` bloqueou o cutover antes de parar containers com “nenhuma evidência equivalente de schema foi validada”. A evidência observada na VPS, `/var/log/gest-o/schema/1ad994e31253e100ba69ff7bd50c6c81c55fe19f/applied.tsv`, passou no validador e comprova `20260911190000_product_price_authority`.
+- **Causa/correção:** entre produtor e consumidor, somente `apps/api/prisma/seedPreview.ts` e `apps/api/prisma/validatePreviewTenantReadPilot.ts` diferem; ambos são ferramentas exclusivas do preview. A equivalência compartilhada por `applied.tsv` e `tenancy expand roots` agora ignora somente esses dois caminhos exatos. Schema, migrations e qualquer outro arquivo sob Prisma continuam bloqueando.
+- **Preservação:** validação integral do bundle original, owner/mode, hashes, commits, migration e diff Prisma gerenciado ao vivo permanece obrigatória. Nenhuma evidência histórica foi criada, copiada, alterada ou republicada; nenhum merge, deploy, schema apply, Recovery, limpeza ou cutover foi executado.
+- **Limitação operacional separada:** última medição informada `available_kb=4731516`, `required_kb=5242880`, `deficit_kb=511364`. O limite não foi reduzido e backups não foram excluídos; capacidade continua bloqueio independente.
+
 # Auditoria pós-PR #870 — recuperação ainda não comprovada (15/09/2026)
 
 - **Baseline:** merge da PR #870 confirmado somente no histórico local em `d5e7d2e`; o checkout não possui remote, portanto GitHub atual, checks e implantação são `NOT_OBSERVED`. Branch de auditoria criada a partir desse SHA.

@@ -8,6 +8,8 @@ SCHEMA_MIGRATION_ORDERS="apps/api/prisma/migrations/20260904120000_orders_operat
 SCHEMA_MIGRATION_PRODUCT_PRICE_AUTHORITY="apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql"
 TENANCY_EXPAND_ROOTS_ID="20260808120000_tenancy_expand_roots"
 TENANCY_EXPAND_ROOTS_MIGRATION="apps/api/prisma/migrations/$TENANCY_EXPAND_ROOTS_ID/migration.sql"
+SCHEMA_EQUIVALENCE_PREVIEW_SEED="apps/api/prisma/seedPreview.ts"
+SCHEMA_EQUIVALENCE_PREVIEW_VALIDATOR="apps/api/prisma/validatePreviewTenantReadPilot.ts"
 
 schema_protected_directory(){
   [[ -d "$1" && ! -L "$1" && "$(stat -c '%u:%a' -- "$1")" == "0:700" ]]
@@ -83,17 +85,30 @@ validate_schema_evidence(){
   SCHEMA_EVIDENCE_MIGRATION=$evidence_migration
 }
 
+# These two files are preview-only dataset tooling: the preview workflow/package
+# invokes them explicitly, while neither defines schema nor a migration. Keep
+# this narrow pathspec in one helper so every evidence format has exactly the
+# same fail-closed equivalence rule. Any other Prisma-tree change is material.
+schema_prisma_trees_equivalent(){
+  local producer_commit=$1 current_commit=$2
+  [[ "$producer_commit" =~ ^[0-9a-f]{40}$ && "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git cat-file -e "$producer_commit^{commit}" 2>/dev/null || return 1
+  git cat-file -e "$current_commit^{commit}" 2>/dev/null || return 1
+  git diff --quiet "$producer_commit" "$current_commit" -- \
+    apps/api/prisma \
+    ":(exclude)$SCHEMA_EQUIVALENCE_PREVIEW_SEED" \
+    ":(exclude)$SCHEMA_EQUIVALENCE_PREVIEW_VALIDATOR"
+}
+
 # Evidence proves the database state produced by its original commit.  It may
 # authorize a later application commit only when both commits exist and Git
-# proves that the complete Prisma tree is identical.  validate_schema_evidence
+# proves that the material Prisma tree is identical. validate_schema_evidence
 # remains first so equivalence can never promote an incomplete or tampered
 # bundle.
 validate_schema_evidence_for_commit(){
   local applied=$1 current_commit=$2
   validate_schema_evidence "$applied" || return 1
-  [[ "$current_commit" =~ ^[0-9a-f]{40}$ ]] || return 1
-  git cat-file -e "$current_commit^{commit}" 2>/dev/null || return 1
-  git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$current_commit" -- apps/api/prisma || return 1
+  schema_prisma_trees_equivalent "$SCHEMA_EVIDENCE_COMMIT" "$current_commit"
 }
 
 # Validate the complete TENANCY_EXPAND_ROOTS_V1 bundle.  result.tsv is only one

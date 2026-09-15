@@ -8,7 +8,7 @@ const envResolver=read("scripts/resolve-production-env.sh");
 const entrypoint=read("scripts/production-deploy-entrypoint.sh");
 assert.match(deploy, /schema_evidence_root"\/\*\/migrations\/"\$TENANCY_EXPAND_ROOTS_ID"/);
 assert.match(deploy, /validate_tenancy_expand_roots_evidence "\$candidate" "\$candidate_commit"/);
-assert.match(deploy, /git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
+assert.match(deploy, /schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT"/);
 assert.match(deploy, /if ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
 assert.match(workflow, /production-deploy-entrypoint\.sh/);
 assert.doesNotMatch(workflow, /test "\$\(git rev-parse HEAD\)"/);
@@ -62,7 +62,7 @@ for (const services of [["api", "web", "db"], ["api", "web", "worker"], ["api"],
 }
 assert.ok(deploy.indexOf('build api web') < deploy.indexOf('docker stop')); assert.match(deploy,/CONFIRM.*PRODUCTION_CUTOVER/); assert.match(deploy,/trap rollback ERR/);
 assert.ok(deploy.includes("tr -cd '[:alnum:]._ -'")); assert.ok(!deploy.includes("tr -cd '[:alnum:]._- '"));
-assert.match(deploy,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT" -- apps\/api\/prisma/);
+assert.match(deploy,/schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT"/);
 assert.match(schemaEvidence,/git show "\$evidence_commit:\$evidence_migration" \| sha256sum/);
 assert.match(schemaEvidence,/SCHEMA_MIGRATION_PR827/);
 for (const token of ["validate_tenancy_expand_roots_evidence", "metadata.tsv", "catalog-after.tsv", "business_rows_modified", "schema-diff-filter.mjs"]) assert.ok(schemaEvidence.includes(token));
@@ -76,9 +76,11 @@ assert.doesNotMatch(deploy,/is_schema_evidence_operational_path|blocked_paths|ar
 assert.match(deploy,/validate_schema_evidence_for_commit "\$candidate" "\$APP_COMMIT"/);
 const equivalentEvidence = schemaEvidence.match(/validate_schema_evidence_for_commit\(\)\{[\s\S]*?\n\}/)?.[0] ?? "";
 assert.ok(equivalentEvidence, "validador de equivalência do applied.tsv ausente");
-assert.ok(equivalentEvidence.indexOf('validate_schema_evidence "$applied"') < equivalentEvidence.indexOf('git diff --quiet'), "evidência original deve validar antes da equivalência");
-assert.match(equivalentEvidence,/git cat-file -e "\$current_commit\^\{commit\}"/);
-assert.match(equivalentEvidence,/git diff --quiet "\$SCHEMA_EVIDENCE_COMMIT" "\$current_commit" -- apps\/api\/prisma/);
+assert.ok(equivalentEvidence.indexOf('validate_schema_evidence "$applied"') < equivalentEvidence.indexOf('schema_prisma_trees_equivalent'), "evidência original deve validar antes da equivalência");
+assert.match(equivalentEvidence,/schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "\$current_commit"/);
+assert.match(deploy,/schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT"/);
+assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_SEED"/);
+assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_VALIDATOR"/);
 assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
 const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
 for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {

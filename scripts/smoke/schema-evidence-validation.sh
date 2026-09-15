@@ -50,6 +50,22 @@ if validate_schema_evidence_for_commit "$producer_dir/applied.tsv" fffffffffffff
   echo 'nonexistent current commit was accepted' >&2; exit 1
 fi
 
+# Only the two reviewed preview-only Prisma files are immaterial. Exercise
+# them independently and together so widening either pathspec fails loudly.
+mkdir -p apps/api/prisma
+printf 'preview seed v1\n' >apps/api/prisma/seedPreview.ts
+git add .; git commit -qm preview-seed-only; PREVIEW_SEED_ONLY=$(git rev-parse HEAD)
+validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$PREVIEW_SEED_ONLY"
+printf 'preview validator v1\n' >apps/api/prisma/validatePreviewTenantReadPilot.ts
+git add .; git commit -qm preview-validator-only; PREVIEW_BOTH=$(git rev-parse HEAD)
+validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$PREVIEW_BOTH"
+git reset --hard -q "$DOCS_ONLY"
+printf 'not approved\n' >apps/api/prisma/seed.ts
+git add .; git commit -qm unauthorized-prisma-file; UNAUTHORIZED_PRISMA=$(git rev-parse HEAD)
+if validate_schema_evidence_for_commit "$producer_dir/applied.tsv" "$UNAUTHORIZED_PRISMA"; then
+  echo 'unauthorized Prisma file was accepted by consumer' >&2; exit 1
+fi
+
 make_bundle(){
   local commit=$1 migration=$2 dir
   dir="$TMP/evidence/$commit"
@@ -106,6 +122,7 @@ deploy=$(cat "$ROOT/scripts/deploy-production.sh")
 [[ "$deploy" != *'find "$schema_evidence_root"'* ]]
 [[ "$deploy" != *'|| continue'* ]]
 [[ "$deploy" == *'validate_schema_evidence_for_commit "$candidate" "$APP_COMMIT"'* ]]
+[[ "$deploy" == *'schema_prisma_trees_equivalent "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT"'* ]]
 [[ "$deploy" != *'is_schema_evidence_operational_path'* ]]
 evidence_gate=${deploy%%'docker stop'*}
 [[ "$evidence_gate" == *'nenhuma evidência equivalente de schema foi validada'* ]]
