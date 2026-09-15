@@ -1,10 +1,19 @@
+# Auditoria pós-PR #870 — recuperação ainda não comprovada (15/09/2026)
+
+- **Baseline:** merge da PR #870 confirmado somente no histórico local em `d5e7d2e`; o checkout não possui remote, portanto GitHub atual, checks e implantação são `NOT_OBSERVED`. Branch de auditoria criada a partir desse SHA.
+- **Evidência do operador:** após o run `34983466759` falhar em `disk_capacity`, havia cerca de 4,3 GiB livres; `docker builder prune --filter "until=168h"` relatou 2,415 GB recuperados; a medição posterior foi 6.759.752 KiB, margem calculada de 1.516.872 KiB sobre o default 5.242.880 KiB. Não houve relato de remoção de backups/volumes. Isso não prova espaço futuro nem backup verde.
+- **Implementação confirmada:** o legado gira 48 arquivos após criar/validar o novo, mas não usa lock e nomes no mesmo segundo podem colidir; o preparador atual usa nome SHA+UTC+aleatório, destino inexistente e lock; o bundle protegido é imutável e somente `latest` troca atomicamente. Nenhuma rotina versionada prova agendamento ativo na VPS.
+- **Cobertura:** os mecanismos auditados protegem `salesforce_pro`. O Compose não monta storage persistente em API/WEB e o código não evidenciou uploads persistidos, mas mounts/arquivos reais da VPS seguem sem inventário: é backup do banco, não backup completo comprovado.
+- **Alteração nesta auditoria:** diagnóstico read-only passou a cobrir `/root/backups`, `/var/backups/gest-o/automatic`, `/var/log/gest-o/backup`, `latest`, filesystem/inodes, device+inode e schedulers. A proposta de retenção não executa exclusão e protege evidência/incidente.
+- **Estado:** nenhuma ação produtiva, novo prune, backup, restore real, Recovery, retenção, merge ou cutover. `BACKUP_RECOVERY=NOT_PROVEN`; encerramento depende de inventário VPS, novo bundle único e ensaio isolado/funcional com integrações bloqueadas. Detalhes: [auditoria consolidada](investigations/backup-reliability-post-pr870-2026-09.md).
+
 # Backup produtivo #64 — diagnóstico implementado, operação pendente (15/09/2026)
 
 - **Sintoma/evidência recebida:** run `34983466759`, `disk_capacity/validate_available_disk_capacity`, exit 1, após gates anteriores informados como aprovados. O filesystem é o que contém `/root/backups`; o padrão de 5 GiB permanece inalterado.
 - **Implementação local:** commits `8acbc53` e `8a96c35` publicam métricas sanitizadas, adicionam inventário read-only e isolam corretamente a raiz histórica do teste. `npm run test:production-backup-recovery` passou localmente.
 - **Checks remotos:** `NOT_OBSERVED` nesta complementação; não havia autenticação GitHub disponível. Testes locais não substituem CI.
-- **VPS:** `NOT_MEASURED`; não houve SSH, portanto espaço, inodes, déficit, tamanhos e reclaimable Docker não são evidência coletada. Não afirmar insuficiência real nem incidente resolvido.
-- **Limpeza:** `NOT_EXECUTED`; lista exata e estimativa recuperável permanecem vazias até inventário, correlação e revisão humana. Nenhum preview, imagem, cache, volume ou backup foi removido.
+- **VPS na investigação original:** `NOT_MEASURED`; o relato posterior do operador está registrado acima e não equivale a inventário atual completo.
+- **Limpeza:** o operador relatou exclusivamente o prune de builder por idade e 2,415 GB recuperados; não houve relato de remoção de backup/volume. Nenhuma limpeza adicional foi executada nesta auditoria.
 - **Backup produtivo:** `NOT_PROVEN`; não houve nova execução/promoção íntegra que altere a conclusão do run #64.
 - **Implantação:** `PENDING`; merge, deploy, Recovery e cutover não ocorreram nesta complementação. A retomada depende dos checks remotos, medições/revisão, backup verde do SHA aprovado e todos os requisitos do runbook. Detalhes: [investigação do run 34983466759](investigations/prepare-production-recovery-backup-64-disk-capacity.md).
 
