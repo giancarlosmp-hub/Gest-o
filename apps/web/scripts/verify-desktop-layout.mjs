@@ -7,7 +7,10 @@ const reports = readFileSync(new URL("../src/pages/ReportsPage.tsx", import.meta
 assert.match(layout, /sidebar-scroll[^"]*overflow-y-auto/);
 assert.match(layout, /scrollbar-gutter:auto/);
 assert.doesNotMatch(layout, /scrollbar-gutter:stable/);
-assert.match(css, /\.sidebar-scroll[\s\S]*scrollbar-width: thin/);
+assert.match(css, /\.sidebar-scroll[\s\S]*scrollbar-width: none/);
+assert.match(css, /\.sidebar-scroll::\-webkit-scrollbar \{[\s\S]*width: 0;[\s\S]*height: 0;[\s\S]*display: none;/);
+assert.doesNotMatch(css, /\.sidebar-scroll::\-webkit-scrollbar-(?:track|thumb|button)/, "sidebar scrollbar chrome must be fully hidden");
+assert.doesNotMatch(layout, /sidebar-scroll[^"]*overflow-hidden/, "sidebar navigation must remain scrollable");
 assert.doesNotMatch(css, /^svg,\s*$[\s\S]{0,40}max-width: 100%/m, "desktop SVGs must not receive a global size cap");
 assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.crm-page-shell :where\(p, h1, h2, h3, h4, dd, td, th\) \{\s*overflow-wrap: anywhere;/, "anywhere wrapping must remain inside the mobile breakpoint");
 assert.match(dashboard, /xl:col-span-12 xl:h-\[400px\]/);

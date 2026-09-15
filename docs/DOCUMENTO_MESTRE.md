@@ -1096,3 +1096,6 @@ A oportunidade permanece autoridade do valor comercial. Sem cancelamento, nenhum
 
 ### Contrato de responsividade desktop/mobile (2026-09-15)
 Regras de contenção de `svg`/`canvas` e `overflow-wrap:anywhere` são exclusivamente mobile (`max-width:767px`), nunca globais. No desktop, gráficos Chart.js usam todo o contêiner responsivo e resumos não impõem rolagem vertical. Scrollbars pertencem ao componente: o menu usa calha automática e indicador discreto; tabelas usam overflow horizontal localizado somente quando a largura mínima não couber. Datas, safras, moedas e cabeçalhos curtos não quebram no meio; textos longos mantêm quebra natural.
+
+#### Scroll do menu sem chrome visual
+`.sidebar-scroll` mantém rolagem nativa e `overflow-y:auto`, mas não apresenta trilho, indicador ou setas. A ocultação é localizada por `scrollbar-width:none` e `::-webkit-scrollbar`; é proibido substituir por `overflow:hidden`, pois primeiro/último item e foco de teclado devem continuar alcançáveis em baixa altura e zoom.

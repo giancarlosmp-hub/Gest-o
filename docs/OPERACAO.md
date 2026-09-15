@@ -1068,3 +1068,6 @@ A cardinalidade autoritativa é segmentada: `8` pedidos `[preview-seed]` no tota
 
 ### Validação visual da correção desktop da PR #869
 Com o mesmo tenant, mês e filtros, validar antes/depois em 1366×768, 1920×1080 e zoom 125%; repetir tablet/celular. Em cada viewport: alternar menu expandido/recolhido sem recarregar, rolar por roda/teclado/toque até Configurações conforme RBAC, redimensionar a janela e confirmar que ambos os gráficos preenchem o cartão. Conferir resumo sem scroll vertical, moedas/datas/safras/cabeçalho Cultura inteiros e tabela de metas com scroll apenas local em largura pequena. Repetir como vendedor, gerente e diretor. Confirmar também Pedidos CANCELADO vermelho, relatório com ganho desconsiderado R$ 0,00 e CSV efetivo. Anexar screenshots reais; build/typecheck não aprovam esta etapa visual.
+
+#### Validação da rolagem invisível do menu
+Em menu expandido e recolhido, reduzir a altura e usar zoom 125%; alcançar o primeiro e o último item com roda/touchpad, gesto de toque e Tab/Shift+Tab, confirmando que o foco entra automaticamente na área visível. Repetir desktop, tablet e celular e confirmar ausência completa de trilho/indicador/setas apenas no menu, sem afetar scroll da página ou tabelas.
