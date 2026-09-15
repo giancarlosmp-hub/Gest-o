@@ -99,12 +99,13 @@ else
   # artifact.  The previous implementation only looked for a bundle under the
   # current application SHA, while the legacy applied.tsv path already had an
   # equivalence fallback. Reuse is safe only when the complete bundle validates
-  # against its own commit and the entire Prisma tree is byte-equivalent.
+  # against its own commit and the shared, narrowly scoped Prisma equivalence
+  # predicate accepts the application commit.
   for candidate in "$schema_evidence_root"/*/migrations/"$TENANCY_EXPAND_ROOTS_ID"; do
     if [[ -d "$candidate" && ! -L "$candidate" ]]; then
       candidate_commit=${candidate#"$schema_evidence_root"/}; candidate_commit=${candidate_commit%%/*}
       if validate_tenancy_expand_roots_evidence "$candidate" "$candidate_commit" "$schema_evidence_root" && \
-         git diff --quiet "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT" -- apps/api/prisma; then
+         schema_prisma_trees_equivalent "$SCHEMA_EVIDENCE_COMMIT" "$APP_COMMIT"; then
         schema_evidence="$candidate/result.tsv"
         log "bundle protegido tenancy expand roots de SHA Prisma-equivalente validado"
         break
