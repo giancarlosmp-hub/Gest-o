@@ -105,7 +105,12 @@ const statusMeta: Record<
     icon: CheckCircle2,
   },
   cancelled: {
-    label: "Cancelado",
+    label: "CANCELADO",
+    classes: "bg-red-100 text-red-900 ring-red-400",
+    icon: AlertCircle,
+  },
+  unknown: {
+    label: "NÃO INFORMADO",
     classes: "bg-slate-100 text-slate-800 ring-slate-300",
     icon: AlertCircle,
   },
@@ -116,14 +121,14 @@ const statusMeta: Record<
   },
 };
 function Status({ order }: { order: Order }) {
-  const meta = statusMeta[order.statusGroup] || statusMeta.processing;
+  const meta = statusMeta[order.statusGroup] || statusMeta.unknown;
   const Icon = meta.icon;
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${meta.classes}`}
     >
       <Icon size={14} aria-hidden />
-      {order.operationalStatus || "Não consultado"}
+      {order.statusGroup === "cancelled" ? "CANCELADO" : order.operationalStatus || "NÃO INFORMADO"}
     </span>
   );
 }

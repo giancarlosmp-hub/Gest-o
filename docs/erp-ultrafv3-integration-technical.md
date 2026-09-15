@@ -205,3 +205,12 @@ O contrato comprovado é `POST /orders` e `GET /orderStatus`. `PEDIDO_ID_IMPORTA
 ### Complemento de evidência: solicitações e NF-e (2026-09-04)
 
 A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
+
+## Situação operacional e métricas (2026-09-14)
+O contrato disponível expõe `SITUACAO_PEDIDO`: `DIGITADO`, `ACEITO`, `EXPEDINDO`, `FATURAR`, `PARCIAL`, `FINALIZADO`, `CANCELADO`, `SUSPENSO`; qualquer outro valor é `UNKNOWN`, preservando `operationalStatusRaw`. A situação operacional não é status de sincronização, autorização, faturamento ou expedição. `FINALIZADO` não implica `FATURADO`; quantidades ausentes permanecem não informadas. Somente resposta válida casada por `PEDIDO_ID_IMPORTACAO`, `PEDIDO_ID` ou `NUM_PEDIDO` atualiza o estado.
+
+### Entradas de atualização de status
+Consulta individual (`POST /orders/:id/status-consultation`), consulta na oportunidade, endpoint administrativo, sincronização completa e scheduler chamam `syncErpOrderStatuses`. O registro identificado é a única fonte de `SITUACAO_PEDIDO`; status genérico do envelope não prevalece. Uma guarda por início da execução rejeita conclusão concorrente obsoleta. O contrato consultado não comprova timestamp do evento ERP, limitação registrada sem inferência.
+
+### Valor em múltiplos pedidos
+`PARCIAL` é situação de atendimento, não cancelamento. Quando coexistem pedidos `CANCELADO` e válidos, somente valores `VALOR_LIQUIDO` explicitamente ligados aos pedidos válidos formam a contribuição remanescente; não há rateio proporcional do valor da oportunidade. Ausência ou divergência é exposta como inconsistência, nunca convertida em estimativa confirmada.

@@ -6,6 +6,7 @@ import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sanitizeErpOrderErrorMessage, syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { orderStatusGroup } from "../services/orderStatusProjection.js";
 
 const router = Router();
 router.use(authMiddleware, appUsageRateLimit);
@@ -29,16 +30,6 @@ const responseRoot = (value: unknown): Record<string, unknown> => {
   const root = object(value); const nested = root.response ?? root.data ?? root.result ?? root.pedido ?? root.order;
   return nested === undefined ? root : responseRoot(nested);
 };
-const statusGroup = (sync: string, operational: string | null, fulfillment: string | null) => {
-  if (sync === "error") return "error";
-  if (sync === "pending") return "pending";
-  const raw = (operational || "").toUpperCase();
-  if (raw === "CANCELADO" || fulfillment === "cancelado") return "cancelled";
-  if (raw === "FINALIZADO" || fulfillment === "entregue") return "finished";
-  if (raw === "PARCIAL" || fulfillment === "parcial") return "partial";
-  return "processing";
-};
-
 async function tenantIdFor(req: Request) {
   const memberships = await prisma.tenantMembership.findMany({ where: { userId: req.user!.id, status: "active", tenant: { status: "active" } }, select: { tenantId: true } });
   if (memberships.length !== 1) throw Object.assign(new Error("Contexto de tenant ausente ou ambíguo."), { status: 403 });
@@ -62,7 +53,7 @@ const serialize = (order: any) => {
     lastSyncAt: order.statusSyncedAt, syncStatus: order.status,
     opportunityStatus: order.opportunity.stage, operationalOrderStatus: order.operationalOrderStatus,
     requestAuthorizationStatus: order.requestAuthorizationStatus,
-    fulfillmentStatus: order.orderStatus, operationalStatus: operational, statusGroup: statusGroup(order.status, operational, order.orderStatus),
+    fulfillmentStatus: order.orderStatus, operationalStatus: operational, statusGroup: orderStatusGroup(order.status, operational, order.orderStatus),
     client: order.opportunity.client, seller: order.seller, opportunity: { id: order.opportunity.id, title: order.opportunity.title, stage: order.opportunity.stage },
     branch: text(first(payload, ["CODFILIAL"])), origin: "opportunity", totalValue: number(first(payload, ["VALOR_LIQUIDO"])) || number(order.opportunity.value),
     quantities: { ordered, billed, shipped, cancelled, pending }, invoice: { available: false, reason: "Associação pedido–NFe não instrumentada" },

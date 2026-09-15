@@ -505,13 +505,14 @@ const normalizeOrderStatus = (
   payload: Record<string, unknown>,
 ): ErpOrderFulfillmentStatus | null => {
   const raw = pickFirstString(payload, [
-    "status",
-    "orderStatus",
+    "SITUACAO_PEDIDO",
+    "situacaoPedido",
     "situacao",
     "SITUACAO",
-    "STATUS",
+    "orderStatus",
     "descricaoStatus",
-    "SITUACAO_PEDIDO",
+    "status",
+    "STATUS",
   ]).toLowerCase();
   if (!raw) return null;
   if (/cancel/.test(raw)) return ErpOrderFulfillmentStatus.cancelado;
@@ -1839,6 +1840,24 @@ const collectReconciliationRecords = (payload: unknown) => {
   return records;
 };
 
+export function extractMatchedOperationalStatus(
+  payload: unknown,
+  expected: { pedidoIdImportacao: string; numPedido?: string | null; erpOrderId?: string | null; erpOrderNumber?: string | null },
+): string | null {
+  const records = collectReconciliationRecords(payload);
+  const matching = records.find((record) => {
+    const importId = pickFirstString(record, RECONCILIATION_IMPORT_ID_KEYS);
+    const numPedido = pickFirstString(record, RECONCILIATION_ORDER_NUMBER_KEYS);
+    const erpOrderId = pickFirstString(record, ["PEDIDO_ID", "pedidoId", "ID_PEDIDO", "idPedido"]);
+    return importId === expected.pedidoIdImportacao
+      || Boolean(expected.erpOrderId && erpOrderId === expected.erpOrderId)
+      || Boolean((expected.erpOrderNumber || expected.numPedido) && numPedido === (expected.erpOrderNumber || expected.numPedido));
+  });
+  if (!matching) return null;
+  const value = pickFirstString(matching, ["SITUACAO_PEDIDO", "situacaoPedido", "situacao", "SITUACAO", "status", "STATUS"]);
+  return value ? value.toUpperCase().slice(0, 80) : null;
+}
+
 /** Classifies only an exact, identifier-bound UltraFV3 result. Empty/unmatched results are never proof of non-creation. */
 export function classifyUltraFv3OrderLookup(
   payload: unknown,
@@ -2166,6 +2185,7 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
   let errorCount = 0;
   for (const order of orders) {
     if (order.manualResolution) continue;
+    const syncStartedAt = new Date();
     const correlationId = randomUUID();
     let query = order.pedidoIdImportacao;
     try {
@@ -2203,14 +2223,14 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
       const reconciledAt = new Date();
       const reconciliationAudit = { operation: "orderStatus-reconciliation", outcome: classification.outcome, matched: classification.matched, queryOrder: queries, correlationId, at: reconciledAt.toISOString(), response: sanitizeErpOrderPayload(response) };
       const confirmed = classification.outcome === "confirmed";
-      const operationalStatusRaw = extractOperationalStatus(response);
+      const operationalStatusRaw = extractMatchedOperationalStatus(response, order);
       const operationalOrderStatus = normalizeOperationalOrderStatus(operationalStatusRaw);
       const nextSyncStatus = confirmed ? ErpOrderSyncStatus.sent : classification.outcome === "processing" ? ErpOrderSyncStatus.pending : order.status;
       const nextOrderStatus = classification.orderStatus ?? order.orderStatus;
       const nextOperationalStatusRaw = operationalStatusRaw ?? order.operationalStatusRaw;
       const nextOperationalOrderStatus = operationalStatusRaw ? operationalOrderStatus : order.operationalOrderStatus;
-      await prisma.erpOrderSync.update({
-        where: { id: order.id },
+      const persisted = await prisma.erpOrderSync.updateMany({
+        where: { id: order.id, OR: [{ statusSyncedAt: null }, { statusSyncedAt: { lte: syncStartedAt } }] },
         data: {
           ...(confirmed ? { status: ErpOrderSyncStatus.sent, erpOrderNumber: classification.erpOrderNumber || order.erpOrderNumber || order.numPedido, sentAt: order.sentAt || reconciledAt } : {}),
           ...(classification.outcome === "processing" ? { status: ErpOrderSyncStatus.pending } : {}),
@@ -2223,6 +2243,7 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
           statusSyncedAt: reconciledAt,
         },
       });
+      if (persisted.count === 0) continue; // a synchronization started later already consolidated the state
       const changed = nextSyncStatus !== order.status || nextOrderStatus !== order.orderStatus || nextOperationalStatusRaw !== order.operationalStatusRaw;
       if (changed) await prisma.erpOrderStatusHistory.create({ data: {
         erpOrderSyncId: order.id, opportunityId: order.opportunityId, syncStatus: nextSyncStatus,

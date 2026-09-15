@@ -1087,3 +1087,15 @@ Controles de cabeçalho podem usar `flex-wrap` e ocupar linhas adicionais; rótu
 O preview de `20260911190000_product_price_authority` produziu um único `ALTER TABLE "ProductPrice"` com dois `ADD COLUMN`. A migration e seu SHA-256 estavam cadastrados, porém o canonicalizador geral não tinha contrato semântico ProductPrice e rejeitou o statement antes do `psql --single-transaction`; como `applied.tsv` é publicado somente após pós-condições e post-diff vazio, não houve DDL nem evidência aplicada. O contrato corrigido deriva a autorização do registro imutável selecionado (id, path, checksum, colunas e índice), compara o conjunto completo sem depender da apresentação e não adiciona regra genérica de `ALTER TABLE` ou índice.
 
 Preview é uma autoridade separada e read-only: a confirmação eventualmente preenchida é ignorada como autorização, o diff real é validado e o processo termina antes da preparação do bundle. Apply continua exigindo confirmação literal, revalida SHA/checksum/estado, usa uma transação, preserva contagens e publica `applied.tsv` por último. Após merge e checks verdes, a ordem obrigatória é build, backup Recovery, preview sem confirmação, revisão humana, apply confirmado e cutover; jamais antecipar Recovery, apply ou cutover durante revisão.
+
+### Ganho comercial versus ganho efetivo
+`Opportunity.stage=ganho` preserva o evento comercial. Métricas efetivas projetam os pedidos vinculados por `opportunityId` e `tenantId`: cancelamento ERP confirmado não altera a etapa, itens ou histórico. Pedidos múltiplos contribuem pelos respectivos `VALOR_LIQUIDO` não cancelados; oportunidades sem pedido preservam o valor comercial.
+
+#### Autoridade e cardinalidade de ganhos efetivos
+A oportunidade permanece autoridade do valor comercial. Sem cancelamento, nenhuma soma de pedidos substitui esse valor. Em múltiplos pedidos com cancelamento, não há rateio: somam-se apenas os valores ERP explícitos dos pedidos remanescentes. Se um pedido remanescente não informar valor, preserva-se o valor anterior e sinaliza-se a inconsistência. Apenas `supersedesErpOrderSyncId` comprova substituição. Consulte `effective-wins-consumer-inventory.md` para o inventário completo.
+
+### Contrato de responsividade desktop/mobile (2026-09-15)
+Regras de contenção de `svg`/`canvas` e `overflow-wrap:anywhere` são exclusivamente mobile (`max-width:767px`), nunca globais. No desktop, gráficos Chart.js usam todo o contêiner responsivo e resumos não impõem rolagem vertical. Scrollbars pertencem ao componente: o menu usa calha automática e indicador discreto; tabelas usam overflow horizontal localizado somente quando a largura mínima não couber. Datas, safras, moedas e cabeçalhos curtos não quebram no meio; textos longos mantêm quebra natural.
+
+#### Scroll do menu sem chrome visual
+`.sidebar-scroll` mantém rolagem nativa e `overflow-y:auto`, mas não apresenta trilho, indicador ou setas. A ocultação é localizada por `scrollbar-width:none` e `::-webkit-scrollbar`; é proibido substituir por `overflow:hidden`, pois primeiro/último item e foco de teclado devem continuar alcançáveis em baixa altura e zoom.

@@ -88,7 +88,9 @@ DO \$\$ BEGIN
  IF (SELECT count(*) FROM "Tenant" WHERE id = '$tenant_id' AND status = 'active') <> 1 THEN RAISE EXCEPTION 'tenant'; END IF;
  IF EXISTS (SELECT 1 FROM "Client" WHERE "tenantId" IS NULL OR "tenantId" <> '$tenant_id') THEN RAISE EXCEPTION 'client tenant'; END IF;
  IF EXISTS (SELECT 1 FROM "Client" c LEFT JOIN "TenantMembership" m ON m."userId"=c."ownerSellerId" AND m."tenantId"=c."tenantId" AND m.status='active' WHERE m.id IS NULL) THEN RAISE EXCEPTION 'ownership'; END IF;
- IF (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') <> 4 THEN RAISE EXCEPTION 'order count'; END IF;
+ IF (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') <> 8 THEN RAISE EXCEPTION 'total order count'; END IF;
+ IF (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]-territory-%') <> 4 THEN RAISE EXCEPTION 'territory order count'; END IF;
+ IF (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" IN ('[preview-seed]-900169-PREVIEW','[preview-seed]-900033-PREVIEW','[preview-seed]-900051-PREVIEW','[preview-seed]-900071-PREVIEW')) <> 4 THEN RAISE EXCEPTION 'cancellation scenario order count'; END IF;
  IF EXISTS (SELECT 1 FROM "ErpOrderSync" e JOIN "Opportunity" o ON o.id=e."opportunityId" JOIN "Client" c ON c.id=o."clientId" WHERE e."pedidoIdImportacao" LIKE '%[preview-seed]%' AND (e."tenantId" <> c."tenantId" OR e."tenantId" <> '$tenant_id' OR e."sellerId" <> o."ownerSellerId" OR e."sellerId" <> c."ownerSellerId")) THEN RAISE EXCEPTION 'order tenant ownership'; END IF;
 END \$\$;
 SQL

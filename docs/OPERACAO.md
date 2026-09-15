@@ -1045,3 +1045,29 @@ Para validar a ação rápida **Oportunidade**, acioná-la partindo de outra tel
 O #30 foi um preview bloqueado pelo formato agrupado dos dois `ADD COLUMN`; o filtro rodou antes de qualquer DDL e antes da criação de `applied.tsv`. A correção aceita exclusivamente `ProductPrice.availabilityState TEXT NOT NULL DEFAULT 'available'`, `ProductPrice.source TEXT NOT NULL DEFAULT 'legacy'` e `ProductPrice_source_availabilityState_idx` sobre `(source, availabilityState)`, sempre vinculados ao id/path/SHA-256 cadastrado. Qualquer estado parcial ou operação adicional permanece bloqueado.
 
 Somente após merge e CI integralmente verde, fixe o novo SHA da `main` e execute, em ordem: (1) Deploy Production `build`; (2) Prepare Production Recovery Backup; (3) Production Schema PR827 `preview`, confirmação vazia; (4) revisão humana; (5) `apply` com `PRODUCTION_SCHEMA_APPLY`; (6) Deploy Production `cutover`. Não use a confirmação em preview e não execute SQL manual, merge, deploy, schema apply, Recovery ou cutover como parte desta investigação.
+
+### Reconciliação segura de cancelamentos ERP
+Execute a consulta de situação dos pedidos identificados por número/ID estável no tenant correto e recarregue dashboard/relatórios após sucesso. Repetir é seguro porque os totais são recalculados do estado consolidado, sem decrementos. Falha, resposta antiga, ausência em lista parcial ou vínculo ambíguo não comprovam cancelamento. Não há migration nesta correção. “Recarregar lista” (`GET /orders`) consulta somente o CRM; “Consultar situação no ERP” (`POST /orders/:id/status-consultation`) sincroniza o pedido.
+
+#### Roteiro de validação de cancelamento
+1. No preview, localizar `900169-PREVIEW` e confirmar filtro/contador/cartão/detalhe `CANCELADO` em vermelho.
+2. Abrir a oportunidade vinculada e confirmar “Ganho desconsiderado — pedido cancelado no ERP”, mantendo etapa e timeline históricas.
+3. Comparar dashboard, relatório de encerradas e CSV: quantidade/valor efetivos devem excluir 369,86; `900033-PREVIEW`, `900051-PREVIEW` e `900071-PREVIEW` permanecem finalizados.
+4. Repetir a consulta de situação e confirmar totais idênticos. Validar como vendedor, gerente e diretor.
+5. Para registros existentes, usar “Consultar situação no ERP” ou o escopo `orderStatus` da sincronização já existente. “Recarregar lista” não sincroniza ERP.
+Não há migration nem backfill destrutivo; o recálculo ocorre em leitura. Não executar Recovery, SQL comercial manual ou envio real.
+
+#### Diagnóstico de múltiplos pedidos
+Nunca calcule percentual do valor da oportunidade. Confirme vínculos estáveis, cadeia explícita de substituição e `VALOR_LIQUIDO` de cada pedido remanescente. Se a soma dos pedidos divergir da oportunidade, mantenha o aviso de inconsistência; se faltar valor em pedido válido, não publique estimativa como confirmado. `PARCIAL` sem `CANCELADO` preserva integralmente a métrica anterior.
+
+### Reexecução do preview após a correção da PR #869
+O cenário cancelado é exclusivo de preview e transacional. `cleanOldPreviewSeedData` remove primeiro pedidos, oportunidades e clientes marcados com `[preview-seed]`; em seguida o cenário é recriado integralmente com `region=Sul` e tenant `tenant-default-v1`. No CI com Docker/PostgreSQL, executar `npm run test:tenant-read-pilot-preview-seed`; a prova aplica schema, executa o seed real, valida tenant/ownership/cardinalidade, executa o seed novamente e compara snapshots. Depois, continuar todas as etapas do job `compose-smoke`, sem `continue-on-error`.
+
+### Cardinalidade certificada do preview da PR #869
+A cardinalidade autoritativa é segmentada: `8` pedidos `[preview-seed]` no total = `4` pedidos de território (`[preview-seed]-territory-*`) + `4` pedidos do caso de cancelamento (`900169-PREVIEW`, `900033-PREVIEW`, `900051-PREVIEW`, `900071-PREVIEW`). Qualquer total diferente, cenário diferente de quatro, número/oportunidade duplicado, status divergente ou tenant/responsável incompatível deve falhar fechado. Após reexecutar o seed, as contagens agregadas antes/depois devem ser byte a byte iguais.
+
+### Validação visual da correção desktop da PR #869
+Com o mesmo tenant, mês e filtros, validar antes/depois em 1366×768, 1920×1080 e zoom 125%; repetir tablet/celular. Em cada viewport: alternar menu expandido/recolhido sem recarregar, rolar por roda/teclado/toque até Configurações conforme RBAC, redimensionar a janela e confirmar que ambos os gráficos preenchem o cartão. Conferir resumo sem scroll vertical, moedas/datas/safras/cabeçalho Cultura inteiros e tabela de metas com scroll apenas local em largura pequena. Repetir como vendedor, gerente e diretor. Confirmar também Pedidos CANCELADO vermelho, relatório com ganho desconsiderado R$ 0,00 e CSV efetivo. Anexar screenshots reais; build/typecheck não aprovam esta etapa visual.
+
+#### Validação da rolagem invisível do menu
+Em menu expandido e recolhido, reduzir a altura e usar zoom 125%; alcançar o primeiro e o último item com roda/touchpad, gesto de toque e Tab/Shift+Tab, confirmando que o foco entra automaticamente na área visível. Repetir desktop, tablet e celular e confirmar ausência completa de trilho/indicador/setas apenas no menu, sem afetar scroll da página ou tabelas.
