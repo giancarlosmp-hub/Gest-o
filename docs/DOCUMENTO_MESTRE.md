@@ -1,3 +1,9 @@
+## Incidente de capacidade do backup produtivo #64 (15/09/2026)
+
+O **Prepare Production Recovery Backup #64**, run `34983466759`, falhou em `disk_capacity/validate_available_disk_capacity` depois de aprovar os gates anteriores informados. O gate mede, em KiB, o filesystem que contém `/root/backups` e exige `available_kb >= PRODUCTION_MIN_DISK_KB`, com padrão **5.242.880 KiB (5 GiB)**. O limite foi preservado. Como o run antigo não publicou o operando disponível e esta investigação não teve SSH para a VPS, a causa operacional continua **NOT_MEASURED/NOT_CONFIRMED**: não há base para afirmar falta real de espaço, erro de medição ou override do limite.
+
+O commit `8acbc53` adiciona os valores sanitizados de disponível, inodes e necessário ao preparador, preservando o bloqueio fail-closed, e inclui inventário somente de leitura. O commit `8a96c35` corrige exclusivamente o harness `production-backup-validated-container-safety.sh`: cria a raiz histórica protegida dentro do fixture temporário e usa `PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY`, sem relaxar o contrato produtivo. A suíte local completa `test:production-backup-recovery` passou; checks remotos, medições da VPS, limpeza, novo backup produtivo e implantação não foram executados/comprovados. Sintoma, evidência, hipóteses limitadas, correção, validação, limitações e próximo passo estão na [investigação detalhada](investigations/prepare-production-recovery-backup-64-disk-capacity.md).
+
 ## Incidente de disponibilidade após PR #866 (11/09/2026)
 
 O defeito comprovado foi uma reconciliação sem fronteira de origem: preços válidos de `/products` eram persistidos e, logo depois, o sweep global de `/prices` os convertia em zero quando não apareciam naquele payload de contrato não comprovado. O modelo agora registra `source` e `availabilityState`; `explicit_zero` bloqueia seleção, `absent` só aposenta a própria origem no escopo tabela/filial observado, e uma afirmação positiva explicitamente posterior restaura o SKU. Pesquisa continua exigindo preço positivo vigente, ativo, não suspenso e sincronizado; estoque zero permanece visível. Histórico de itens não é alterado. Produção não foi consultada nem modificada.
@@ -612,6 +618,11 @@ e cumprimento da [REGRA 002](#regra-002--encerramento-de-incidentes).
 ### Regras permanentes
 - O Documento Mestre governa estado e prioridade; ADR governa o porquê; runbook governa execução;
   investigação guarda hipótese/evidência; arquitetura governa limites técnicos.
+- Todo incidente deve registrar, nos documentos centrais existentes e na mesma PR, **sintoma,
+  evidência, causa confirmada ou hipótese explicitamente rotulada, correção, validação, limitações e
+  próximo passo**. Um arquivo isolado de investigação apenas detalha esse registro; não o substitui.
+  Atualize uma seção apropriada antes de criar documentação paralela e nunca promova ausência de
+  medição, teste local ou merge a evidência operacional.
 - Backups administrativos usam `docker exec -u postgres`, `psql -U postgres` e `pg_dump -U postgres`
   com autenticação peer; não dependem de `POSTGRES_USER`, `POSTGRES_PASSWORD` ou `DATABASE_URL`.
 - Dados reais, código do repositório e revisão implantada são fontes distintas e devem ser correlacionadas.

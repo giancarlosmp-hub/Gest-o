@@ -1,3 +1,36 @@
+# Diagnóstico read-only do disco do backup #64
+
+O run `34983466759` não contém o valor disponível, portanto seu exit 1 não comprova falta física de espaço. O gate usa o filesystem de `/root/backups`; `available_kb` deve ser maior ou igual ao limite efetivo, cujo padrão preservado é `5242880` KiB. `deficit_kb = max(required_kb - available_kb, 0)`.
+
+## Disponibilização segura e verificação do diagnóstico
+
+Não presuma que uma PR ainda não mesclada esteja em `/apps/gest-o`. Primeiro confirme o checkout e a presença do arquivo, sem trocar branch nem alterar o checkout produtivo:
+
+```bash
+cd /apps/gest-o
+printf 'checkout=%s\n' "$(git rev-parse --show-toplevel)"
+git status --short --branch
+git rev-parse HEAD
+test -x scripts/diagnose-production-disk-capacity.sh && sha256sum scripts/diagnose-production-disk-capacity.sh
+```
+
+Se o arquivo ainda não existe, use o bloco inline read-only da investigação. O meio operacional suportado para disponibilizá-lo é: após merge e checks verdes, executar o workflow existente **Deploy Production** somente com `phase=build` para o SHA integral aprovado. Essa fase atualiza o checkout e constrói imagens sem parar/recriar containers e **não executa cutover**. Em seguida, repita as verificações acima e só execute o script se `HEAD` for o SHA aprovado, a worktree estiver limpa e o arquivo existir. Não copiar script avulso para o checkout nem fazer `git pull` manual durante esta investigação.
+
+## Coleta e interpretação
+
+```bash
+cd /apps/gest-o
+bash scripts/diagnose-production-disk-capacity.sh 5242880
+```
+
+Se um run revisado publicar outro `PRODUCTION_BACKUP_DISK_REQUIRED_KB`, passe exatamente esse inteiro sem exibir/sourcing do env. Preserve a saída integral para revisão. `capacity_gate_pass=1` e déficit zero indicam que a medição atual satisfaz o gate; não provam retrospectivamente o estado do run #64. Valor menor indica insuficiência no momento da coleta; inodes baixos são um risco separado e não mudam a fórmula de blocos. Timeout do scan superior significa inventário parcial, não diretório vazio.
+
+## Revisão e retomada
+
+Para cada candidato, registrar ID/path, tamanho exclusivo ou reclaimable, motivo, labels de PR/run/projeto, containers/imagens dependentes e prova de ausência de vínculo com produção ou rollback. Não somar tamanhos compartilhados de imagens. Previews somente podem virar proposta após PR fechada, labels coerentes e run concluído; a execução futura deve reutilizar **Preview Cleanup**, nunca prune amplo. Excluir da proposta volumes produtivos, bundle/manifesto/evidência vigentes, backups válidos/retidos e imagens atuais/de rollback. Nenhuma remoção ocorre antes da revisão humana.
+
+Depois da causa corrigida: checks/main verdes → `Deploy Production phase=build` no SHA aprovado → **Prepare Production Recovery Backup** uma vez no mesmo SHA → revisar todos os PASS e a prova recente/íntegra → cumprir eventual fluxo de schema → somente então `Deploy Production phase=cutover` com aprovações. Recovery é separado e não é solução para disco. Investigação completa: [capacidade do backup #64](investigations/prepare-production-recovery-backup-64-disk-capacity.md).
+
 ## Nota de validação CI #3837/#3838 (12/09/2026)
 
 Os smokes PostgreSQL devem transmitir consultas com literais por heredoc protegido; não reconstruir SQL com sequências de aspas em `-c`. Para containers PostgreSQL recém-iniciados, `pg_isready` isolado não comprova a criação do banco solicitado: o gate deve abrir conexão no banco exato, validar `current_database()` e a identidade do container antes de carregar fixtures. Após o novo push, exigir execução integral e exit code 0 para Pedidos, ProductPrice e Activity e conclusão dos jobs `orders-migration-postgres` e `compose-smoke`; etapa ignorada não é aprovação.

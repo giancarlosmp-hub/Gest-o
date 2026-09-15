@@ -140,6 +140,11 @@ MOCK_NETWORK=absent; run_case absent-network database_network
 MOCK_VOLUME=absent; run_case absent-volume database_volume
 MOCK_MOUNT_DEST=/wrong; run_case divergent-mount database_mount
 CASE_MIN_DISK=999999999999; run_case insufficient-disk disk_capacity
+grep -Eq '^PRODUCTION_BACKUP_DISK_AVAILABLE_KB=[0-9]+$' "$TMP/insufficient-disk.out"
+grep -Eq '^PRODUCTION_BACKUP_DISK_AVAILABLE_INODES=[0-9]+$' "$TMP/insufficient-disk.out"
+grep -Fqx 'PRODUCTION_BACKUP_DISK_REQUIRED_KB=999999999999' "$TMP/insufficient-disk.out"
+grep -Fqx 'PRODUCTION_BACKUP_DISK_TARGET=authorized_directory' "$TMP/insufficient-disk.out"
+! grep -Fq "$AUTH" "$TMP/insufficient-disk.out"
 
 # A held exclusive lock blocks before dump creation.
 exec 8>"$AUTH/.prepare-production-recovery-backup.lock"; flock -n 8

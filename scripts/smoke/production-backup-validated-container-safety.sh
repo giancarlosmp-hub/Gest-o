@@ -4,8 +4,9 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP" /var/log/gest-o/backup' EXIT
 [[ ! -e /var/log/gest-o/backup && ! -L /var/log/gest-o/backup ]]
-APP="$TMP/app"; AUTH="$TMP/authorized"; BIN="$TMP/bin"; ENV_FILE="$TMP/production.env"
-mkdir -p "$APP/scripts/lib" "$AUTH" "$BIN"
+APP="$TMP/app"; AUTH="$TMP/authorized"; HIST="$TMP/historical"; BIN="$TMP/bin"; ENV_FILE="$TMP/production.env"
+mkdir -p "$APP/scripts/lib" "$AUTH" "$HIST" "$BIN"
+chmod 700 "$HIST"
 cp "$ROOT/scripts/prepare-production-recovery-backup.sh" "$APP/scripts/"
 cp "$ROOT/scripts/resolve-production-env.sh" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$APP/scripts/lib/"
@@ -96,6 +97,7 @@ EOF
   chmod 600 "$ENV_FILE"
   set +e
   env PATH="$BIN:$PATH" APP_DIR="$APP" PRODUCTION_BACKUP_AUTHORIZED_DIRECTORY="$AUTH" \
+    PRODUCTION_BACKUP_HISTORICAL_AUTHORIZED_DIRECTORY="$HIST" \
     PRODUCTION_BACKUP_ENV_FILE="$ENV_FILE" PRODUCTION_BACKUP_LEGACY_ENV_FILE="$TMP/absent" \
     PRODUCTION_MIN_DISK_KB=1 PRODUCTION_BACKUP_MIN_SIZE_BYTES=1 MOCK_DOCKER_LOG="$TMP/docker.log" \
     INSPECT_COUNT="$TMP/inspect-count" ORDER_LOG="$TMP/order.log" MOCK_STATE="${MOCK_STATE:-running}" \
