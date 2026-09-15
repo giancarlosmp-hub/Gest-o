@@ -1,3 +1,24 @@
+# Operação revisável de backup pós-PR #870
+
+Não executar backup produtivo ainda. O inventário aprovado é read-only e não lê env/dumps:
+
+```bash
+cd /apps/gest-o
+git status --short --branch && git rev-parse HEAD
+bash scripts/diagnose-production-disk-capacity.sh 5242880
+```
+
+Registrar por `device:inode` para não contar hardlinks duas vezes; correlacionar data, bytes, tipo, produtor, checksum, incidente e restore. A saída inclui os três destinos, `latest`, filesystems/inodes e cron/timers, mas a mera definição de um scheduler não comprova execução. O relato posterior ao #64 (6.759.752 KiB, margem 1.516.872 KiB após prune de builder cache) é histórico e não substitui essa coleta.
+
+Antes de autorizar um novo workflow, medir o pico: no destino de criação, maior SQL plain `S` + duas vezes o maior comprimido `C` + margem `M`, pois o bundle recebe uma cópia; no ensaio, `C` + tamanho restaurado `D` + `M`; somar picos se compartilharem filesystem. Exigir nome novo/destino ausente, lock e todos os checkpoints até bundle/preflight `PASS`. Não alterar/excluir anteriores. Depois executar primeiro com fixture sintética:
+
+```bash
+npm run test:production-backup-restore
+npm run test:production-backup-restore:postgres
+```
+
+O ensaio PostgreSQL usa rede interna, nenhuma porta, tmpfs e nenhum runtime API; portanto scheduler e ERP não iniciam. Para dados reais, a revisão deve ainda pinçar imagem API, bloquear saída de rede, forçar scheduler/Communications/WhatsApp/IA desligados, conciliar contagens/relações, revisar Prisma diff e smoke funcional. O teste atual marca Prisma/API como pendentes. Retenção, cópia externa, holds e critérios completos: [auditoria pós-PR #870](investigations/backup-reliability-post-pr870-2026-09.md). Não executar prune, exclusão, Recovery ou cutover como parte desse diagnóstico.
+
 # Diagnóstico read-only do disco do backup #64
 
 O run `34983466759` não contém o valor disponível, portanto seu exit 1 não comprova falta física de espaço. O gate usa o filesystem de `/root/backups`; `available_kb` deve ser maior ou igual ao limite efetivo, cujo padrão preservado é `5242880` KiB. `deficit_kb = max(required_kb - available_kb, 0)`.
