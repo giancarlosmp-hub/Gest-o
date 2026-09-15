@@ -291,11 +291,17 @@ docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRO
 checkpoint PRODUCTION_BACKUP_DB_MOUNT=PASS
 
 STAGE=disk_capacity; COMMAND=read_available_disk_capacity
-available_kb="$(df -Pk "$AUTHORIZED_DIR" | awk 'NR==2{print $4}')"
-[[ "$available_kb" =~ ^[0-9]+$ ]]
+available_kb="$(df -Pk -- "$AUTHORIZED_DIR" | awk 'END{print $4}')"
+available_inodes="$(df -Pi -- "$AUTHORIZED_DIR" | awk 'END{print $4}')"
+required_kb="${PRODUCTION_MIN_DISK_KB:-5242880}"
+[[ "$available_kb" =~ ^[0-9]+$ && "$available_inodes" =~ ^[0-9]+$ && "$required_kb" =~ ^[0-9]+$ ]]
+checkpoint PRODUCTION_BACKUP_DISK_TARGET=authorized_directory
+checkpoint "PRODUCTION_BACKUP_DISK_AVAILABLE_KB=$available_kb"
+checkpoint "PRODUCTION_BACKUP_DISK_AVAILABLE_INODES=$available_inodes"
+checkpoint "PRODUCTION_BACKUP_DISK_REQUIRED_KB=$required_kb"
 STAGE=disk_capacity; COMMAND=validate_available_disk_capacity
-(( available_kb >= ${PRODUCTION_MIN_DISK_KB:-5242880} ))
-unset available_kb
+(( available_kb >= required_kb ))
+unset available_kb available_inodes required_kb
 checkpoint PRODUCTION_BACKUP_DISK_CAPACITY=PASS
 STAGE=preparation_lock; COMMAND=open_preparation_lock
 exec 9>"$AUTHORIZED_DIR/.prepare-production-recovery-backup.lock"

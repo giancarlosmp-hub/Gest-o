@@ -1,3 +1,13 @@
+# Backup produtivo #64 — diagnóstico implementado, operação pendente (15/09/2026)
+
+- **Sintoma/evidência recebida:** run `34983466759`, `disk_capacity/validate_available_disk_capacity`, exit 1, após gates anteriores informados como aprovados. O filesystem é o que contém `/root/backups`; o padrão de 5 GiB permanece inalterado.
+- **Implementação local:** commits `8acbc53` e `8a96c35` publicam métricas sanitizadas, adicionam inventário read-only e isolam corretamente a raiz histórica do teste. `npm run test:production-backup-recovery` passou localmente.
+- **Checks remotos:** `NOT_OBSERVED` nesta complementação; não havia autenticação GitHub disponível. Testes locais não substituem CI.
+- **VPS:** `NOT_MEASURED`; não houve SSH, portanto espaço, inodes, déficit, tamanhos e reclaimable Docker não são evidência coletada. Não afirmar insuficiência real nem incidente resolvido.
+- **Limpeza:** `NOT_EXECUTED`; lista exata e estimativa recuperável permanecem vazias até inventário, correlação e revisão humana. Nenhum preview, imagem, cache, volume ou backup foi removido.
+- **Backup produtivo:** `NOT_PROVEN`; não houve nova execução/promoção íntegra que altere a conclusão do run #64.
+- **Implantação:** `PENDING`; merge, deploy, Recovery e cutover não ocorreram nesta complementação. A retomada depende dos checks remotos, medições/revisão, backup verde do SHA aprovado e todos os requisitos do runbook. Detalhes: [investigação do run 34983466759](investigations/prepare-production-recovery-backup-64-disk-capacity.md).
+
 # Correções dos checks #3837/#3838 da PR #867 — execução Docker pendente (12/09/2026)
 
 A falha ProductPrice foi causada pela composição de SQL com aspas shell aninhadas em `psql -Atc`: a consulta efetivamente enviada perdeu a delimitação dos literais de `column_name IN ('source', 'availabilityState')` e o PostgreSQL abortou com erro de sintaxe. Todas as consultas com literais desse smoke agora usam heredocs protegidos, sem interpolação ou múltiplas camadas de escape; uma barreira estática proíbe a forma defeituosa. A falha Activity era uma prova de prontidão insuficiente: `pg_isready -d proof` confirma que o servidor aceita conexões, não que `POSTGRES_DB=proof` já foi criado durante a inicialização da imagem. O teste já usava container/rede exclusivos e apontava por `docker exec` ao nome correto; agora aguarda uma sessão SQL real em `proof`, verifica `current_database()` e confirma o nome exato do container antes do predecessor.
