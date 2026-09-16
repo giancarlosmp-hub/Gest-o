@@ -978,3 +978,13 @@ Build e contratos estáticos não substituem validação visual. Este ambiente n
 
 ### PR #869 — barra visual do menu lateral (2026-09-15)
 A aparência da barra foi ocultada exclusivamente em `.sidebar-scroll` com `scrollbar-width:none` e `::-webkit-scrollbar` sem dimensão/exibição. O contêiner mantém `overflow-y:auto`, calha automática e links focáveis nativos; roda, touchpad, toque, Tab/Shift+Tab e revelação do item focado continuam funcionais. Nenhuma scrollbar da página, tabela ou outro componente foi alterada.
+# Capacidade Docker após implantação #172 — inventário preparado (15/09/2026)
+
+- **Produção (relato do operador):** implantação saudável no SHA `186fe0c5f8710ac3c4368711fd348e1be6e27474`; API/WEB permaneceram healthy e `/health/version` convergiu após parar, sem excluir, os nove containers das PRs #526–#528. O banco produtivo permanece em `gest-o_pgdata_clean_v2_20260717` e o histórico `gest-o_pgdata`, compartilhado pelos três previews, está protegido.
+- **Capacidade (relato do operador):** `docker builder prune --all --keep-storage 2GB` recuperou 6,754 GB. A medição final tem 11.384.724 KiB disponíveis (margem de 6.141.844 KiB sobre 5 GiB); backups, volumes e imagens não foram explicitamente excluídos. O reclaimable de imagens negativo é inválido e não é usado.
+- **Implementação local:** diagnóstico read-only agrupa por IMAGE ID completo e correlaciona containers parados; limpeza legada exige manifest explícito, múltiplas provas, revalidação e jamais remove volumes. Não houve acesso à VPS nem remoção nesta entrega.
+- **Pendências:** 883 imagens e os projetos legados das PRs #508–#836 continuam sem classificação real; candidatos = nenhum e recuperação = `NOT_MEASURED` até coleta VPS/GitHub. PRs/runs atuais são `NOT_OBSERVED` (checkout sem remote e rede indisponível). Restore validado e proposta de retenção de dois backups permanecem pendentes. Consulte [investigação e plano](investigations/docker-images-legacy-previews-2026-09.md).
+
+## Revisão de segurança da PR #873 (16/09/2026)
+
+O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não prova ownership, pois os recursos não têm labels PR/run nem outra correlação independente observada. Inventory agora exige igualdade exata dos conjuntos descobertos por label Compose, IDs completos, identidade/projeto/nome/topologia coerentes e protege produção e os volumes histórico/produtivo. Apply sempre falha antes de Docker; mais de uma linha falha como lote inválido. Não há remoção de container, rede, volume ou imagem nesta PR.
