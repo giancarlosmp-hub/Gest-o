@@ -1,3 +1,13 @@
+# Retomada segura após Cleanup #328 e Docker Compose CI #3881 (16/09/2026)
+
+1. Tratar os runs como incidentes independentes. Não repetir Cleanup #328 na VPS e não remover manualmente imagens, containers, volumes ou backups.
+2. Na nova PR, confirmar que `test:docker-cleanup-safety` executa o shell de `preview-cleanup-remote.sh` com múltiplos projetos, grande volume de saída e manifesto sem runtime. Exit 141, `SKIP` e exit 77 reprovam.
+3. Exigir no Docker Compose CI o marcador literal `PREVIEW_IMAGE_DOCKER=PASS` e, no job de Pedidos, `ORDERS_MIGRATION_POSTGRES=PASS`. Em falha, coletar o primeiro bloco `ORDERS_MIGRATION_STEP/PHASE/NAME/COMMAND_KIND/ERROR_CODE/ERROR_MESSAGE`; não inferir a causa somente do exit 2 e nunca publicar URL, senha, token, host ou usuário.
+4. Comparar SHA do checkout, label `org.opencontainers.image.revision`, versão Docker/Compose/PostgreSQL, estado do cache e timestamps entre o run verde da PR e o run do merge. Nesta investigação esses dados remotos são `NOT_OBSERVED`.
+5. Somente com todos os checks obrigatórios verdes, sem etapas ignoradas, considerar o fluxo normal de um **novo evento futuro**. A correção não autoriza deploy, cutover, Recovery, migration produtiva, prune nem cleanup manual.
+
+O run #328 não permite determinar pela evidência recebida se uma iteração anterior já havia executado `compose down`, cleanup de imagem ou remoção de diretório. Registrar `CLEANUP_328_MUTATION_STATE=PARTIAL_UNKNOWN`; antes de qualquer retomada operacional, fazer apenas inventário read-only e reconciliar manifestos/runtimes.
+
 # Validação do incidente de IMAGE ID da PR #874 (16/09/2026)
 
 No HEAD publicado da mesma PR, o Docker Compose CI deve executar `npm run test:preview-images:docker` e terminar com `PREVIEW_IMAGE_DOCKER=PASS`. Conferir duas linhas sanitizadas `PREVIEW_IMAGE_REFERENCE`, uma por serviço, sempre com `candidates=1`; `kind` e `length` caracterizam a saída do Compose sem revelar a referência. O Preview Deploy também deve concluir o registro com `PREVIEW_IMAGE_PROVENANCE=PASS` e passar por todas as etapas posteriores. `full_image_id_required`, referência ausente/ambígua/não resolvível, exit 77, `SKIP` ou etapa ignorada mantêm merge e ativação bloqueados. Não executar o teste na VPS nem fazer limpeza manual para validar.
