@@ -1,3 +1,10 @@
+# Validação complementar da PR #875 (16/09/2026)
+
+1. No Docker Compose CI do novo HEAD, exigir `PREVIEW_CLEANUP_TRUSTED_SCRIPT_CONTRACT=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS`, `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS`. `SKIP`/77 não aprova.
+2. Confirmar no diff que o workflow transporta `preview-cleanup-remote.sh` e `preview-image-lifecycle.mjs`, e executa exatamente o `CLEANUP_RUNNER` copiado. O runner deve consultar `/actions/runs/${owner_run}`; o lifecycle deve validar PR, run, attempt, SHA, workflow, event, sucesso e concorrência. Nome de projeto, tag ou label isolados não substituem essa correlação.
+3. Abrir o log completo do outro check vermelho e registrar job, etapa, primeiro comando, exit e stderr sanitizado. Até isso ocorrer, usar `SECOND_RED_CHECK=NOT_IDENTIFIED`; não atribuir a Pedidos e não modificar SQL/schema.
+4. Não reexecutar cleanup produtivo e não realizar deploy, cutover, Recovery, migration, prune ou remoção manual na VPS.
+
 # Retomada segura após Cleanup #328 e Docker Compose CI #3881 (16/09/2026)
 
 1. Tratar os runs como incidentes independentes. Não repetir Cleanup #328 na VPS e não remover manualmente imagens, containers, volumes ou backups.

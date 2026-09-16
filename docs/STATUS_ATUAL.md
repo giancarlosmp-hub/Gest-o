@@ -1,3 +1,10 @@
+# Regressão do check de isolamento na PR #875 (16/09/2026)
+
+- **Falha comprovada:** `preview-run-isolation-safety.mjs:10` ainda procurava `actions/runs/${owner_run}` somente no YAML depois que a PR #875 extraiu o shell para `scripts/preview-cleanup-remote.sh`. O gate não foi removido: o runner efetivo consulta esse endpoint, e `preview-image-lifecycle.mjs` autentica PR fechada, run/attempt/SHA/workflow/event, `conclusion=success`, correlação do PR e ausência de runs concorrentes.
+- **Correção:** o teste agora prova separadamente que o workflow copia os dois scripts em paths exatos e executa `CLEANUP_RUNNER`; que o runner consulta o endpoint derivado de `owner_run`; e que o lifecycle conserva toda a correlação autenticada. Alterar transporte/execução, remover o endpoint ou reduzir ownership a nome/tag faz a regressão falhar.
+- **Segundo check vermelho:** `NOT_IDENTIFIED`. O log completo não está disponível no checkout e a rede bloqueia GitHub com HTTP 403. Não há evidência para classificá-lo como Pedidos ou como a mesma causa. Nenhum SQL/schema foi alterado.
+- **Gates:** a prova estática local passou, mas a parte Docker de isolamento, `PREVIEW_IMAGE_DOCKER` e Pedidos permanecem `NOT_EXECUTED` localmente porque Docker não existe. Merge continua bloqueado até todos emitirem PASS, sem SKIP.
+
 # Pós-merge da PR #874 — Cleanup #328 e Docker Compose CI #3881 (16/09/2026)
 
 - **Incidentes separados:** o merge informado `ba80eb5` foi confirmado no histórico local. Não há remote configurado, Docker, credenciais de GitHub ou acesso à VPS; portanto logs completos, SHAs dos runs e estado remoto atual são `NOT_OBSERVED`. Tentativas read-only de consultar GitHub foram bloqueadas pela rede (HTTP 403). Nenhum cleanup, deploy, cutover, Recovery, migration, prune ou remoção produtiva foi executado.

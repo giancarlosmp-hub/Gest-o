@@ -1,3 +1,9 @@
+## Regressão de localização do gate de isolamento — PR #875 (16/09/2026)
+
+A extração correta do shell remoto deixou obsoleto `preview-run-isolation-safety.mjs`: o teste continuava inspecionando apenas `.github/workflows/preview-cleanup.yml` e, por isso, relatou falsamente a ausência de `actions/runs/${owner_run}`. A consulta autenticada permanece no runner realmente executado, enquanto o lifecycle valida PR fechada, identidade completa do run (id/attempt/SHA/workflow/event), sucesso, correlação com o PR e concorrência. A correção testa a cadeia inteira **workflow copia → workflow executa → runner consulta owner_run → lifecycle autentica e correlaciona**, sem flexibilizar nenhum gate.
+
+O segundo check vermelho continua sem identificação comprovada: não foi fornecido seu log e o ambiente não alcança GitHub. Ele não foi presumido como Pedidos nem relacionado à regressão de isolamento. Docker indisponível impede as três provas reais exigidas; resultados PASS remotos continuam obrigatórios antes do merge.
+
 ## Correção pós-merge da PR #874 — incidentes independentes (16/09/2026)
 
 O **Preview Cleanup #328** terminou em 141 dentro do script remoto com `pipefail`. O caminho executável continha dois consumidores antecipados: `docker ps ... | head -n 1` e o fallback `docker network ls ... | head -n 1`. Em reprodução descartável com 20.000 linhas, o primeiro padrão encerra o produtor por SIGPIPE; isso confirma o defeito, sem transformar todo exit 141 em sucesso. A implementação confiável foi extraída para `scripts/preview-cleanup-remote.sh`; `awk` retém a primeira linha somente depois de consumir o stream completo. Erros reais do Docker, identidade, GitHub, manifesto, Compose e remoção de imagem continuam fatais. Como o trecho de log fornecido não mostra o comando/projeto, não é possível provar se falhou na primeira iteração ou após uma anterior: o estado de mutação do run é **parcial desconhecido**.
