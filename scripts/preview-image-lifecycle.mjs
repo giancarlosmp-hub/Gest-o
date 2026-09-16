@@ -50,7 +50,7 @@ const assertIdentity = (observed, expected) => {
 
 const command = process.argv[2];
 const manifestPath = process.argv[3];
-if (!['record', 'cleanup'].includes(command) || !manifestPath) die('usage_record_or_cleanup_manifest', 2);
+if (!['record', 'authorize', 'cleanup'].includes(command) || !manifestPath) die('usage_record_authorize_or_cleanup_manifest', 2);
 
 if (command === 'record') {
   const project = process.env.COMPOSE_PROJECT_NAME || die('project_missing');
@@ -92,8 +92,25 @@ if (pr.state !== 'closed') die('pr_not_closed');
 const run = await github(`/actions/runs/${expectedBase['run-id']}`);
 if (run.status !== 'completed') die('producer_run_not_completed');
 if (run.conclusion !== 'success') die('producer_run_not_successful');
-if (String(run.run_attempt) !== String(expectedBase['run-attempt']) || run.head_sha !== expectedBase.commit || run.name !== 'Preview Deploy' || run.event !== 'pull_request') die('authenticated_run_identity_diverged');
-if (!Array.isArray(run.pull_requests) || !run.pull_requests.some(x => String(x.number) === String(expectedBase.pr))) die('run_pr_correlation_missing');
+const identityDiverged = field => die(`authenticated_run_identity_diverged field=${field}`);
+if (String(run.run_attempt) !== String(expectedBase['run-attempt'])) identityDiverged('run_attempt');
+if (!/^[a-f0-9]{40}$/.test(run.head_sha || '')) identityDiverged('run_head_sha');
+if (run.name !== 'Preview Deploy') identityDiverged('workflow_name');
+if (run.path !== '.github/workflows/preview.yml') identityDiverged('workflow_path');
+if (run.event !== 'pull_request') identityDiverged('event');
+if (!Number.isSafeInteger(run.workflow_id) || run.workflow_id <= 0) identityDiverged('workflow_id');
+const authenticatedWorkflow = await github(`/actions/workflows/${run.workflow_id}`);
+if (authenticatedWorkflow.path !== '.github/workflows/preview.yml') identityDiverged('workflow_id_path');
+if (typeof run.head_branch !== 'string' || run.head_branch !== pr.head?.ref) identityDiverged('head_ref');
+const correlatedPull = Array.isArray(run.pull_requests) && run.pull_requests.find(x => String(x.number) === String(expectedBase.pr));
+if (!correlatedPull) die('run_pr_correlation_missing');
+// For pull_request runs GitHub's run.head_sha is the workflow-run revision
+// (commonly the synthetic merge revision). The build deliberately checks out
+// pull_request.head.sha. Authenticate that distinct build revision through the
+// run's PR association and the current PR object instead of treating head_sha
+// as the image commit.
+if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
 
 for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
   for (let page = 1; ; page++) {
@@ -137,8 +154,21 @@ for (const recorded of [...manifest.images].sort((a, b) => a.labels.service.loca
   if (current.tags.some(tag => /production|rollback|recovery|incident/i.test(tag))) die('protected_tag_present');
   if (evidenceContains(current.image_id)) die('rollback_or_recovery_evidence_present');
   const referencing = containers.filter(container => container.Image === current.image_id);
-  if (referencing.length) die(protectedNames.has(String(referencing[0].Name || '').replace(/^\//, '')) ? 'production_container_reference' : 'container_reference_present');
+  if (referencing.length) {
+    const ownedRuntimeOnly = command === 'authorize' && referencing.every(container => {
+      const labels = container.Config?.Labels || {};
+      return labels['com.docker.compose.project'] === expectedBase.project
+        && labels['com.docker.compose.service'] === current.labels.service
+        && ['pr', 'run-id', 'run-attempt', 'workflow'].every(key => String(labels[`${LABEL}${key}`] || '') === String(expectedBase[key]));
+    });
+    if (!ownedRuntimeOnly) die(protectedNames.has(String(referencing[0].Name || '').replace(/^\//, '')) ? 'production_container_reference' : 'container_reference_present');
+  }
   candidates.push(current);
+}
+
+if (command === 'authorize') {
+  console.log(`PREVIEW_IMAGE_AUTHORIZATION=PASS project=${expectedBase.project} images=${candidates.length}`);
+  process.exit(0);
 }
 
 for (const current of candidates) {

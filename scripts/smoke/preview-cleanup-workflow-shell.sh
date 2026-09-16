@@ -48,9 +48,10 @@ SH
 cat >"$tmp/bin/node" <<'SH'
 #!/usr/bin/env bash
 if [[ $1 == -e && $# -gt 2 ]]; then
-  printf '42\t102\t1\tPreview-Deploy'
+  project=${4:-}; run=${project#gesto-pr-42-}; run=${run%-1}
+  printf '42\t%s\t1\tPreview-Deploy\t%040d' "$run" 0
 elif [[ $1 == -e ]]; then
-  cat | sed -n 's/.*"status":"\([^"]*\)".*"head_sha":"\([^"]*\)".*/\1\t\2/p'
+  cat | sed -n 's/.*"status":"\([^"]*\)".*/\1/p'
 else
   printf 'LIFECYCLE_CALLED=%s\n' "$(basename "$3")"
 fi
@@ -78,15 +79,18 @@ legacy_rc=$?
 set -e
 test "$legacy_rc" -eq 141
 
-# A manifest-only project proves discovery after all runtime objects vanished.
-cat >"$tmp/provenance/gesto-pr-42-102-1.json" <<'JSON'
-{"format":1,"project":"gesto-pr-42-102-1","images":[{"labels":{"pr":"42","run-id":"102","run-attempt":"1","workflow":"Preview-Deploy"}},{"labels":{"pr":"42","run-id":"102","run-attempt":"1","workflow":"Preview-Deploy"}}]}
-JSON
+# Every project has immutable provenance; 102 proves discovery after runtime vanished.
+for run in 100 101 102; do
+  printf '{"format":1,"project":"gesto-pr-42-%s-1","images":[{"labels":{"pr":"42","run-id":"%s","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"%s","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' "$run" "$run" "$run" >"$tmp/provenance/gesto-pr-42-$run-1.json"
+done
 
-PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic \
+if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic \
   CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
   PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
-  bash "$tmp/copied/scripts/runner.sh" >"$tmp/out"
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/out" 2>"$tmp/err"; then
+  cat "$tmp/out" "$tmp/err" >&2
+  exit 1
+fi
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-1' "$tmp/out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-101-1' "$tmp/out"
 grep -Fq 'PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=gesto-pr-42-102-1' "$tmp/out"

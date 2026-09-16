@@ -1181,3 +1181,21 @@ Checklist de revisão: (1) confirmar checks remotos do novo HEAD; (2) confirmar 
 Antes de qualquer limpeza, execute `node scripts/diagnose-docker-images.mjs` na VPS e revise o JSON conforme [`docs/investigations/docker-images-legacy-previews-2026-09.md`](investigations/docker-images-legacy-previews-2026-09.md). A unidade é o IMAGE ID completo, não tag; containers parados, rollback, bundles, recuperação e vínculos desconhecidos protegem a imagem. Não use o reclaimable negativo, não some tags/camadas e registre `NOT_MEASURED` quando Docker não comprovar exclusividade.
 
 Para legados, construa manualmente um TSV revisado e rode `bash scripts/legacy-preview-cleanup.sh inventory <manifesto>`. Inventory compara o manifesto ao conjunto integral descoberto por label Compose e valida IDs, nomes, projetos, mounts e topologia. A PR declarada permanece `PR_STATE=NOT_PROVEN`. **Não use apply:** ele está deliberadamente desabilitado e falha antes de acessar Docker porque não existe correlação PR/projeto/run independente suficiente. O script não contém remoção, não remove volumes/imagens, não executa Compose antigo, não seleciona por prefixo e não cria labels. Proteja produção, rollback, recuperação/incidente, identidades desconhecidas, `gest-o_pgdata` e `gest-o_pgdata_clean_v2_20260717`.
+# Retomada pendente do Preview Cleanup #329 (PR #875)
+
+**Não executar durante a correção e não repetir os runs #328/#329.** O log do operador já prova teardown parcial do projeto `gesto-pr-875-35118489755-1`; imagens foram preservadas naquela etapa e o estado atual dos demais recursos é desconhecido. Fechar a PR corretiva só descobre manifestos da própria PR e não deve ser tratado como limpeza automática das PRs #874/#875.
+
+Após merge da correção e somente com os gates `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS` reais (nunca SKIP/77), preparar uma execução nova que use o runner/lifecycle corrigidos e tenha `PR_NUMBER=875`. Ela deve redescobrir `/var/www/preview-provenance/gesto-pr-875-35118489755-1.json`, autorizar antes de mutar, aceitar runtime já ausente, e repetir toda a autorização imediatamente antes de remover imagens. Não apagar, editar ou recriar o manifesto para obter elegibilidade.
+
+Diagnóstico VPS opcional e **estritamente read-only**, a executar apenas por operador autorizado antes da retomada (não imprime conteúdo do manifesto, env, tokens ou labels completas):
+
+```bash
+project=gesto-pr-875-35118489755-1
+test -f "/var/www/preview-provenance/$project.json" && manifest=PRESENT || manifest=ABSENT
+printf 'project=%s manifest=%s containers=%s networks=%s volumes=%s\n' "$project" "$manifest" \
+  "$(docker ps -aq --filter "label=com.docker.compose.project=$project" | wc -l)" \
+  "$(docker network ls -q --filter "label=com.docker.compose.project=$project" | wc -l)" \
+  "$(docker volume ls -q --filter "label=com.docker.compose.project=$project" | wc -l)"
+```
+
+Se qualquer consulta GitHub estiver indisponível/incompleta, PR tiver reaberto, produtor não estiver concluído com sucesso, attempt/workflow/event/PR/commit divergir, houver run concorrente, referências mudarem ou qualquer container (inclusive parado) referenciar a imagem, preservar tudo e investigar o campo sanitizado. A conclusão operacional só ocorre após observar a nova execução e inventariar o resultado; CI verde sozinho não encerra o incidente.

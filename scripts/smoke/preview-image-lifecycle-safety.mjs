@@ -18,7 +18,7 @@ for (const marker of ['repository', 'pr', 'run-id', 'run-attempt', 'workflow', '
   assert.match(apiDockerfile, new RegExp(`com\\.gesto\\.preview\\.${marker}`));
   assert.match(webDockerfile, new RegExp(`com\\.gesto\\.preview\\.${marker}`));
 }
-for (const gate of ['pr_not_closed', 'producer_run_not_completed', 'producer_run_not_successful', 'github_auth_missing', 'github_query_failed', 'identity_\\$\\{key\\}_not_proven', 'references_diverged_since_manifest', 'protected_tag_present', 'container_reference_present', 'container_reference_created_before_delete', 'production_container_reference', 'rollback_or_recovery_evidence_present', 'concurrent_run_']) assert.match(lifecycle, new RegExp(gate));
+for (const gate of ['pr_not_closed', 'producer_run_not_completed', 'producer_run_not_successful', 'github_auth_missing', 'github_query_failed', 'identity_\\$\\{key\\}_not_proven', 'authenticated_run_identity_diverged field=', 'run_pull_request_head_sha', 'pull_request_head_sha', 'workflow_path', 'workflow_id_path', 'head_ref', 'references_diverged_since_manifest', 'protected_tag_present', 'container_reference_present', 'container_reference_created_before_delete', 'production_container_reference', 'rollback_or_recovery_evidence_present', 'concurrent_run_']) assert.match(lifecycle, new RegExp(gate));
 assert.match(lifecycle, /docker\('image', 'rm', \.\.\.removalReferences\)/);
 assert.doesNotMatch(lifecycle, /image[^\n]*rm[^\n]*(?:--force|-f\b)|\bprune\b/);
 assert.doesNotMatch(workflow, /docker rm -f|image prune|system prune|volume prune/);
@@ -26,6 +26,8 @@ assert.match(workflow, /concurrency:[\s\S]*cancel-in-progress: false/);
 assert.match(deployWorkflow, /concurrency:\s*\n\s*group: preview-pr-\$\{\{ github\.event\.pull_request\.number \}\}\s*\n\s*cancel-in-progress: false/);
 assert.match(cleanupRunner, /preview-provenance[\s\S]*PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT/, 'manifest must discover images after runtime resources disappear');
 assert.match(cleanupRunner, /trusted_compose_files_missing/);
+assert.match(cleanupRunner, /node "\$CLEANUP_SCRIPT" authorize "\$manifest_path"[\s\S]*docker compose[\s\S]*node "\$CLEANUP_SCRIPT" cleanup/, 'authenticated authorization must precede teardown and be repeated before image deletion');
+assert.doesNotMatch(cleanupRunner, /EXPECTED_PREVIEW_SHA="\$producer_sha"/, 'workflow run revision must not replace the built PR head revision');
 assert.match(workflow, /bash "\$CLEANUP_RUNNER"/);
 assert.match(cleanupRunner, /set -euo pipefail/);
 assert.doesNotMatch(cleanupRunner, /\|\s*head\b|\|\s*grep\s+-q\b|\|\|\s*true/);

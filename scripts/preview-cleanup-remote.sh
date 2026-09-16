@@ -26,6 +26,8 @@ while IFS= read -r project; do
   case "$project" in "gesto-pr-${PR_NUMBER}-"*) ;; *) echo 'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT'; exit 1;; esac
   owner_id="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" | first_line)"
   manifest_path="${PREVIEW_PROVENANCE_DIR}/${project}.json"
+  manifest_facts="$(node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));if(m.format!==1||m.project!==process.argv[2]||!Array.isArray(m.images)||m.images.length!==2)process.exit(1);const v=m.images.map(x=>x.labels||{});for(const k of ["pr","run-id","run-attempt","workflow","commit"]){if(!v[0][k]||v.some(x=>x[k]!==v[0][k]))process.exit(1)}process.stdout.write([v[0].pr,v[0]["run-id"],v[0]["run-attempt"],v[0].workflow,v[0].commit].join("\t"))' "$manifest_path" "$project")"
+  IFS=$'\t' read -r manifest_pr manifest_run manifest_attempt manifest_workflow owner_commit <<<"$manifest_facts"
   if [ -n "$owner_id" ]; then
     owner_pr="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.pr" }}' "$owner_id")"
     owner_run="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.run-id" }}' "$owner_id")"
@@ -37,18 +39,33 @@ while IFS= read -r project; do
     owner_attempt="$(docker network inspect -f '{{ index .Labels "com.gesto.preview.run-attempt" }}' "$network_id")"
     owner_workflow="$(docker network inspect -f '{{ index .Labels "com.gesto.preview.workflow" }}' "$network_id")"
   else
-    manifest_facts="$(node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));if(m.format!==1||m.project!==process.argv[2]||!Array.isArray(m.images)||m.images.length!==2)process.exit(1);const v=m.images.map(x=>x.labels||{});for(const k of ["pr","run-id","run-attempt","workflow"]){if(!v[0][k]||v.some(x=>x[k]!==v[0][k]))process.exit(1)}process.stdout.write([v[0].pr,v[0]["run-id"],v[0]["run-attempt"],v[0].workflow].join("\t"))' "$manifest_path" "$project")"
-    IFS=$'\t' read -r owner_pr owner_run owner_attempt owner_workflow <<<"$manifest_facts"
+    owner_pr=$manifest_pr owner_run=$manifest_run owner_attempt=$manifest_attempt owner_workflow=$manifest_workflow
   fi
+  for identity_field in pr run_id run_attempt workflow; do
+    case "$identity_field" in
+      pr) observed=$owner_pr expected=$manifest_pr ;;
+      run_id) observed=$owner_run expected=$manifest_run ;;
+      run_attempt) observed=$owner_attempt expected=$manifest_attempt ;;
+      workflow) observed=$owner_workflow expected=$manifest_workflow ;;
+    esac
+    if [ "$observed" != "$expected" ]; then
+      echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=runtime_manifest_identity_diverged field=${identity_field}"
+      exit 1
+    fi
+  done
   [ "$owner_pr" = "$PR_NUMBER" ]
   [ "$owner_workflow" = Preview-Deploy ]
-  run_facts="$(curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${owner_run}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(typeof x.status!=="string"||!(/^[a-f0-9]{40}$/).test(x.head_sha||""))process.exit(1);process.stdout.write(x.status+"\t"+x.head_sha)})')"
-  IFS=$'\t' read -r run_status producer_sha <<<"$run_facts"
+  run_status="$(curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${owner_run}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(typeof x.status!=="string")process.exit(1);process.stdout.write(x.status)})')"
   [ "$run_status" = completed ]
-  export EXPECTED_PREVIEW_SHA="$producer_sha"
+  # The image commit is the PR head checked out by preview.yml. A pull_request
+  # run's head_sha is a distinct workflow-run revision and must not overwrite it.
+  if [ -n "${owner_commit:-}" ]; then export EXPECTED_PREVIEW_SHA="$owner_commit"; fi
   export PREVIEW_OWNER_PR="$owner_pr" PREVIEW_OWNER_RUN_ID="$owner_run" PREVIEW_OWNER_RUN_ATTEMPT="$owner_attempt"
   export PREVIEW_OWNER_WORKFLOW="$owner_workflow" COMPOSE_PROJECT_NAME="$project"
   preview_dir="${PREVIEW_ROOT}/pr-${PR_NUMBER}/${project}"
+  # Authenticate ownership and immutable image facts before the first teardown
+  # mutation. Cleanup repeats every check after teardown immediately before rm.
+  node "$CLEANUP_SCRIPT" authorize "$manifest_path"
   resource_count=$(( $(docker ps -aq --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker network ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker volume ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) ))
   if [ "$resource_count" -eq 0 ]; then
     echo "PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=${project}"
