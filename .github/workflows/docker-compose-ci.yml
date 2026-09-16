@@ -33,6 +33,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Preview image lifecycle (synthetic Docker)
+        run: npm run test:preview-images:docker
+
       - name: Pin and verify Node/npm
         run: |
           npm install --global npm@11.4.2

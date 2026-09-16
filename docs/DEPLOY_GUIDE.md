@@ -1,3 +1,7 @@
+## Imagens de preview após fechamento de PR (16/09/2026)
+
+O `Preview Deploy` incorpora labels de proveniência na imagem final API/WEB e publica manifesto com IMAGE IDs completos. O `Preview Cleanup` é a única automação de encerramento: possui concorrência por PR, valida metadados autenticados do GitHub, executa o `compose down -v` escopado e revalida imediatamente containers, tags, digests, labels e evidências protegidas antes da remoção sem force. Qualquer falha preserva. Não criar cleanup paralelo, não usar prune e não usar imagens de preview como rollback produtivo. Imagens legadas continuam fora do apply automático.
+
 ## Gate de evidência de Pedidos e retomada do cutover (08/09/2026)
 
 O Production Schema PR827 #26 (run `34243463045`) aplicou e pós-validou a migration `20260904120000_orders_operational_view` na main `ee6211b4809ae9dac109dea8bae8dafcd4d4c486`; portanto o schema de Pedidos já existe. O bundle não satisfez o contrato: a primeira rejeição de `validate_schema_evidence` foi o diretório do SHA em modo 755, pois ele deve ser diretório real `root:700`; `applied.tsv`, `migration.sha256` e `post-apply-diff.sql` também devem ser arquivos regulares, não symlinks, `root:600`.

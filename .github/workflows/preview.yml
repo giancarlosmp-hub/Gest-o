@@ -11,6 +11,10 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   deploy-preview:
     runs-on: ubuntu-latest
@@ -27,6 +31,9 @@ jobs:
       PREVIEW_OWNER_RUN_ID: ${{ github.run_id }}
       PREVIEW_OWNER_RUN_ATTEMPT: ${{ github.run_attempt }}
       PREVIEW_OWNER_WORKFLOW: Preview-Deploy
+      PREVIEW_OWNER_REPOSITORY: ${{ github.repository }}
+      PREVIEW_OWNER_SERVICE_API: api
+      PREVIEW_OWNER_SERVICE_WEB: web
       EXPECTED_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
       COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
       POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
@@ -61,6 +68,9 @@ jobs:
           PREVIEW_OWNER_RUN_ID: ${{ github.run_id }}
           PREVIEW_OWNER_RUN_ATTEMPT: ${{ github.run_attempt }}
           PREVIEW_OWNER_WORKFLOW: Preview-Deploy
+          PREVIEW_OWNER_REPOSITORY: ${{ github.repository }}
+          PREVIEW_OWNER_SERVICE_API: api
+          PREVIEW_OWNER_SERVICE_WEB: web
           EXPECTED_PREVIEW_SHA: ${{ github.event.pull_request.head.sha }}
           COMPOSE_PROJECT_NAME: gesto-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
           POSTGRES_DB: salesforce_pro_preview_pr_${{ github.event.pull_request.number }}_${{ github.run_id }}_${{ github.run_attempt }}
@@ -74,7 +84,7 @@ jobs:
           key: ${{ secrets.VPS_KEY }}
           port: 22022
           script_stop: true
-          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,PREVIEW_AUTH_PASSWORD_B64,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA
+          envs: PR_NUMBER,PR_BRANCH,GITHUB_REPOSITORY,GITHUB_TOKEN,COMPOSE_PROJECT_NAME,POSTGRES_DB,POSTGRES_VOLUME_NAME,API_PORT,WEB_PORT,PREVIEW_AUTH_PASSWORD_B64,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,PREVIEW_OWNER_REPOSITORY,PREVIEW_OWNER_SERVICE_API,PREVIEW_OWNER_SERVICE_WEB,EXPECTED_PREVIEW_SHA
           script: |
             set -euo pipefail
             echo "PREVIEW_DEPLOY_STEP=configuration"
@@ -184,6 +194,7 @@ jobs:
             export ADMIN_BOOTSTRAP_EMAIL
             export ADMIN_BOOTSTRAP_PASSWORD
             export PREVIEW_SEED_PASSWORD="$ADMIN_BOOTSTRAP_PASSWORD"
+            export PREVIEW_OWNER_REPOSITORY PREVIEW_OWNER_SERVICE_API PREVIEW_OWNER_SERVICE_WEB
 
             validate_current_run_ownership() {
               ids="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml ps -aq)"
@@ -290,6 +301,9 @@ jobs:
             fi
             echo "PREVIEW_OBSERVED_SHA=${API_DEPLOYED_SHA}"
             echo "PREVIEW_SHA_MATCH=YES"
+            PREVIEW_PROVENANCE_ROOT="/var/www/preview-provenance"
+            install -d -m 700 "$PREVIEW_PROVENANCE_ROOT"
+            node scripts/preview-image-lifecycle.mjs record "$PREVIEW_PROVENANCE_ROOT/${COMPOSE_PROJECT_NAME}.json"
 
             echo "PREVIEW_DEPLOY_STEP=seed_candidate"
             echo "=== BOOTSTRAP ADMIN ==="
