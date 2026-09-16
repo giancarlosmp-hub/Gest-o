@@ -1,3 +1,23 @@
+## Incidente de identidade local das imagens — PR #874 (16/09/2026)
+
+Nos resultados informados pelo operador, Docker Compose CI #3878 e Preview Deploy #581 preservaram com `full_image_id_required`. A causa está na fronteira Compose/Docker: o recorder exigia que a saída de `docker compose images -q` já fosse `sha256:` com 64 hexadecimais, embora essa saída possa ser uma referência ou ID abreviado conforme a versão. A falha ocorria antes da inspeção autoritativa; versões e valores brutos não constam da evidência e são `NOT_OBSERVED`.
+
+A correção não transforma nem completa a referência. Exige uma única linha não vazia por serviço, resolve-a no daemon com `docker image inspect`, exige um único objeto e aceita como identidade somente o `.Id` local completo. Tag/referência e ID abreviado são entradas de resolução; digest de manifesto/índice permanece em `RepoDigests` e não substitui IMAGE ID; a identidade do container continua sendo seu campo `Image`, comparado ao ID local completo. Diagnóstico sanitizado publica apenas classe/comprimento/cardinalidade. Ausência, ambiguidade, referência inválida ou inspeção sem ID completo preservam. As demais proteções e revalidações não foram reduzidas.
+
+## Auditoria da automação de imagens de preview (16/09/2026)
+
+**Implementação submetida à revisão e CI; merge e ativação bloqueados até comprovação.** Remote, PR e checks não são observáveis neste checkout e permanecem `NOT_OBSERVED`. O gate do HEAD efetivamente publicado exige os dois comandos de teste, execução Docker real terminando em `PREVIEW_IMAGE_DOCKER=PASS` e todos os checks obrigatórios verdes; exit 77, `SKIP` ou etapa ignorada não contam como aprovação. CI não comprova ausência de cron/timers na VPS, e o diagnóstico sanitizado só pode ser executado depois de confirmar que o script chegou ao host pelo procedimento suportado.
+
+Há uma única automação de encerramento: `Preview Cleanup` em `pull_request.closed`. `Preview Deploy` trata falhas internas desmontando apenas o candidato da própria execução; não é uma segunda política de retenção. Ambos usam `concurrency.group=preview-pr-<PR>` com `cancel-in-progress=false`, de modo que close/merge, reabertura e nova tentativa são serializados. O cleanup consulta novamente o estado: PR reaberta, run em andamento ou conclusão diferente de `success` preserva imagens.
+
+O manifesto é índice protegido, não autoridade isolada. Deve ser arquivo regular, não symlink, owner do processo, modo 600, schema fechado e identidade uniforme. A autorização resulta da conjunção de metadados GitHub autenticados, labels da imagem final e estado Docker reinspecionado. A descoberta inclui manifestos órfãos de recursos runtime; antes de qualquer exclusão todo o conjunto é validado, e cada ID/containers é revalidado imediatamente antes de `docker image rm` sem force. Falha parcial interrompe, nunca amplia o lote. Legados continuam read-only. Ativação permanece bloqueada até o job Docker sintético remoto passar.
+
+## Política de retenção de imagens de preview (16/09/2026)
+
+Preview ativo é preservado, incluindo a versão servida e qualquer versão explicitamente necessária à reversão do próprio preview. Preview encerrado pode ser removido no evento de fechamento somente após correlação autenticada exata e revalidação imediata. Imagens produtivas, rollback produtivo e recuperação permanecem sob seus contratos atuais; hold de incidente/recuperação não expira por esta política. Origem não comprovada é `NOT_PROVEN` e deve ser preservada.
+
+Ausência de container, tag/nome, idade ou label isolada nunca prova elegibilidade. A identidade é o IMAGE ID completo e deve correlacionar repositório, PR, run, tentativa, workflow, commit, serviço e projeto. Todas as tags/digests e containers ativos/parados são revalidados; divergência, consulta indisponível, execução concorrente ou referência produtiva/rollback/recuperação interrompe sem force. Camadas compartilhadas ficam sob gestão do Docker. Retenção de backup e rollback produtivo não é alterada. Detalhes e separação de evidências: [ciclo de vida](investigations/preview-image-lifecycle-2026-09.md).
+
 ## Decisão de backup e retenção pós-PR #870 (15/09/2026)
 
 O baseline local contém o merge #870 (`d5e7d2e`), sem remote configurado; logo não há afirmação de sincronização atual com GitHub ou implantação. O relato do operador registra prune apenas do builder cache (2,415 GB reportados), seguido de 6.759.752 KiB livres: margem aritmética de 1.516.872 KiB sobre o gate default, mas não prova de capacidade futura ou backup. Não houve relato de exclusão de backup/volume e a causalidade entre sobrescrita histórica e perda continua não comprovada.

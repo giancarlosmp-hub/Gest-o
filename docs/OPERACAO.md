@@ -1,3 +1,32 @@
+# Validação do incidente de IMAGE ID da PR #874 (16/09/2026)
+
+No HEAD publicado da mesma PR, o Docker Compose CI deve executar `npm run test:preview-images:docker` e terminar com `PREVIEW_IMAGE_DOCKER=PASS`. Conferir duas linhas sanitizadas `PREVIEW_IMAGE_REFERENCE`, uma por serviço, sempre com `candidates=1`; `kind` e `length` caracterizam a saída do Compose sem revelar a referência. O Preview Deploy também deve concluir o registro com `PREVIEW_IMAGE_PROVENANCE=PASS` e passar por todas as etapas posteriores. `full_image_id_required`, referência ausente/ambígua/não resolvível, exit 77, `SKIP` ou etapa ignorada mantêm merge e ativação bloqueados. Não executar o teste na VPS nem fazer limpeza manual para validar.
+
+# Auditoria read-only de schedulers de cleanup (16/09/2026)
+
+A existência ou ausência de cron/timers na VPS é `NOT_OBSERVED`. Não execute o script novo em `/apps/gest-o` enquanto não houver confirmação de que o HEAD aprovado foi disponibilizado pelo procedimento suportado. Depois dessa confirmação, o diagnóstico sanitizado pode ser executado a partir do checkout confirmado, sem imprimir linhas de comando, argumentos, env ou credenciais:
+
+```bash
+cd -- /caminho/do/checkout-confirmado
+sudo bash scripts/diagnose-preview-cleanup-schedulers.sh
+```
+
+Revisar `SYSTEMD_TIMERS_*`, `CRONTAB_*` e `RELEVANT_NAME_MATCHES`; zero por nome não prova inexistência de uma tarefa com nome genérico. Se houver match ou fonte indisponível, o operador deve revisar localmente por canal protegido, sem colar conteúdo potencialmente sensível. O CI sintético não comprova o estado dos schedulers da VPS. Para o HEAD efetivamente publicado, exigir `npm run test:docker-cleanup-safety` e `npm run test:preview-images:docker`; o segundo deve executar com Docker e terminar `PREVIEW_IMAGE_DOCKER=PASS`. Exit 77, `SKIP` ou etapa ignorada não aprovam, e todos os checks obrigatórios devem ficar verdes. Não executar o ensaio Docker na VPS produtiva.
+
+# Validação futura do ciclo de imagens de preview (16/09/2026)
+
+Use somente recursos sintéticos/descartáveis para testes; não use a VPS produtiva como ambiente de teste. Comandos curtos:
+
+```bash
+npm run test:docker-cleanup-safety
+node scripts/diagnose-docker-images.mjs > /root/docker-images-read-only.json
+GITHUB_TOKEN="$TOKEN" node scripts/plan-legacy-preview-images.mjs inventory.json independent-evidence.json > plan.json
+sha256sum plan.json
+df -Pk /root/backups   # antes e depois de lote aprovado; registrar somente variação líquida
+```
+
+O diagnóstico e planejador não removem objetos. Revise cada IMAGE ID, todas as tags/digests/containers, estados remotos e proteções; `NOT_PROVEN` é preservação. Não há apply para legado. O cleanup de novos previews ocorre exclusivamente no workflow existente após fechamento da PR; qualquer motivo `PRESERVED` exige investigação, nunca prune/force. A soma de tamanhos ou reclaimable negativo não estima ganho: use `NOT_MEASURED` e `df` antes/depois, anotando atividade concorrente.
+
 # Operação revisável de backup pós-PR #870
 
 Não executar backup produtivo ainda. O inventário aprovado é read-only e não lê env/dumps:
