@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -44,4 +44,39 @@ assert.equal(output.images.length, 1, 'multiple tags remain one IMAGE ID');
 assert.equal(output.images[0].decision, 'NOT_PROVEN');
 assert.match(output.images[0].reasons.join(','), /github_auth_missing/);
 assert.equal(output.reclaimable_bytes, 'NOT_MEASURED');
+
+// Compose versions may return a tag or abbreviated ID. The recorder must ask
+// Docker for the complete local identity, never pad or otherwise invent it.
+const fakeBin = join(dir, 'bin');
+await import('node:fs/promises').then(fs => fs.mkdir(fakeBin));
+const fakeDocker = join(fakeBin, 'docker');
+writeFileSync(fakeDocker, `#!/usr/bin/env node
+const args=process.argv.slice(2), mode=process.env.FAKE_DOCKER_MODE||'short';
+const service=args[0]==='compose'?args.at(-1):(String(args.at(-1)).startsWith('a')?'api':'web'), hex=service==='api'?'a':'b', id='sha256:'+hex.repeat(64);
+const labels={repository:'owner/repo',pr:'42','run-id':'100','run-attempt':'1',workflow:'Preview-Deploy',commit:'${'c'.repeat(40)}',service,project:'gesto-pr-42-100-1'};
+if(args[0]==='compose') {
+  if(mode==='missing') process.exit(0);
+  if(mode==='compose-ambiguous') { console.log(hex.repeat(12)+'\\n'+hex.repeat(13)); process.exit(0); }
+  console.log(mode==='invalid'?'not-a-local-image':hex.repeat(12)); process.exit(0);
+}
+if(args[0]==='image'&&args[1]==='inspect') {
+  if(mode==='invalid') process.exit(1);
+  const image={Id:id,RepoTags:['synthetic-'+service+':one'],RepoDigests:[],Config:{Labels:Object.fromEntries(Object.entries(labels).map(([k,v])=>['com.gesto.preview.'+k,v]))}};
+  console.log(JSON.stringify(mode==='inspect-ambiguous'?[image,image]:[image])); process.exit(0);
+}
+process.exit(2);
+`);
+chmodSync(fakeDocker, 0o755);
+const recordEnv = { ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, FAKE_DOCKER_MODE: 'short', PREVIEW_OWNER_REPOSITORY: 'owner/repo', PREVIEW_OWNER_PR: '42', PREVIEW_OWNER_RUN_ID: '100', PREVIEW_OWNER_RUN_ATTEMPT: '1', PREVIEW_OWNER_WORKFLOW: 'Preview-Deploy', EXPECTED_PREVIEW_SHA: 'c'.repeat(40), COMPOSE_PROJECT_NAME: 'gesto-pr-42-100-1' };
+const lifecyclePath = join(process.cwd(), 'scripts/preview-image-lifecycle.mjs');
+const resolvedManifest = join(dir, 'resolved.json');
+let record = spawnSync(process.execPath, [lifecyclePath, 'record', resolvedManifest], { cwd: dir, encoding: 'utf8', env: recordEnv });
+assert.equal(record.status, 0, record.stderr);
+assert.match(record.stdout, /kind=abbreviated_id length=12/);
+assert.deepEqual(JSON.parse(readFileSync(resolvedManifest)).images.map(image => image.image_id), [`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`]);
+for (const [mode, reason] of [['missing', 'compose_image_reference_api_missing'], ['compose-ambiguous', 'compose_image_reference_api_ambiguous'], ['invalid', 'image_reference_api_unresolvable'], ['inspect-ambiguous', 'image_reference_api_ambiguous']]) {
+  record = spawnSync(process.execPath, [lifecyclePath, 'record', join(dir, `${mode}.json`)], { cwd: dir, encoding: 'utf8', env: { ...recordEnv, FAKE_DOCKER_MODE: mode } });
+  assert.notEqual(record.status, 0, mode);
+  assert.match(record.stderr, new RegExp(reason), mode);
+}
 console.log('PREVIEW_IMAGE_LIFECYCLE_SAFETY=PASS mutations=0');

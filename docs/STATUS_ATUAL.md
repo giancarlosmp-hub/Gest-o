@@ -1,3 +1,10 @@
+# Incidente PR #874 — resolução de IMAGE ID em validação (16/09/2026)
+
+- **Evidência do operador:** Docker Compose CI #3878 falhou no `record` do ensaio sintético e Preview Deploy #581 falhou depois de `PREVIEW_SHA_MATCH=YES`; ambos emitiram `PREVIEW_IMAGE_RESULT=PRESERVED reason=full_image_id_required`. Esses resultados remotos são relato do operador, não observação direta desta sessão.
+- **Causa comprovada no código:** `docker compose images -q <service>` era enviado diretamente ao validador de IMAGE ID completo. A saída é uma referência resolvível pelo Docker, mas varia por versão do Compose e pode ser abreviada; portanto era rejeitada antes de `docker image inspect`. O valor bruto e as versões exatas dos dois ambientes não foram registrados nos logs fornecidos e permanecem `NOT_OBSERVED`.
+- **Correção submetida:** cada serviço deve produzir exatamente uma referência não vazia; ela é resolvida por `docker image inspect`, que deve retornar exatamente um objeto, e somente o campo `.Id` completo retornado pelo daemon vira identidade. Não há padding de ID abreviado nem uso de digest de manifesto como IMAGE ID. O diagnóstico registra apenas serviço, cardinalidade, classe e comprimento da referência, sem valor, Env ou credencial.
+- **Regressões locais:** referência abreviada resolvida, ausência, múltiplas linhas, referência inválida/não resolvível e inspeção ambígua. As proteções posteriores de tags/digests, lote, produção, rollback, recuperação e containers permanecem inalteradas. O teste Docker real e o Preview Deploy corrigido ainda dependem de novo resultado remoto no HEAD publicado.
+
 # Revisão do ciclo de imagens de preview — submetida, com ativação bloqueada (16/09/2026)
 
 - **Parecer:** **Implementação submetida à revisão e CI; merge e ativação bloqueados até comprovação.** O checkout local preserva o conteúdo da branch solicitada, mas não há remote configurado nem sessão autenticada do GitHub; por isso publicação do HEAD, URL/estado de PR, comentários inline e checks obrigatórios são `NOT_OBSERVED`. A entrega pela interface deve usar **Criar PR** uma única vez, ou reutilizar a PR da mesma branch caso a interface já a apresente.

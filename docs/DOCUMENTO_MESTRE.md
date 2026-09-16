@@ -1,3 +1,9 @@
+## Incidente de identidade local das imagens — PR #874 (16/09/2026)
+
+Nos resultados informados pelo operador, Docker Compose CI #3878 e Preview Deploy #581 preservaram com `full_image_id_required`. A causa está na fronteira Compose/Docker: o recorder exigia que a saída de `docker compose images -q` já fosse `sha256:` com 64 hexadecimais, embora essa saída possa ser uma referência ou ID abreviado conforme a versão. A falha ocorria antes da inspeção autoritativa; versões e valores brutos não constam da evidência e são `NOT_OBSERVED`.
+
+A correção não transforma nem completa a referência. Exige uma única linha não vazia por serviço, resolve-a no daemon com `docker image inspect`, exige um único objeto e aceita como identidade somente o `.Id` local completo. Tag/referência e ID abreviado são entradas de resolução; digest de manifesto/índice permanece em `RepoDigests` e não substitui IMAGE ID; a identidade do container continua sendo seu campo `Image`, comparado ao ID local completo. Diagnóstico sanitizado publica apenas classe/comprimento/cardinalidade. Ausência, ambiguidade, referência inválida ou inspeção sem ID completo preservam. As demais proteções e revalidações não foram reduzidas.
+
 ## Auditoria da automação de imagens de preview (16/09/2026)
 
 **Implementação submetida à revisão e CI; merge e ativação bloqueados até comprovação.** Remote, PR e checks não são observáveis neste checkout e permanecem `NOT_OBSERVED`. O gate do HEAD efetivamente publicado exige os dois comandos de teste, execução Docker real terminando em `PREVIEW_IMAGE_DOCKER=PASS` e todos os checks obrigatórios verdes; exit 77, `SKIP` ou etapa ignorada não contam como aprovação. CI não comprova ausência de cron/timers na VPS, e o diagnóstico sanitizado só pode ser executado depois de confirmar que o script chegou ao host pelo procedimento suportado.

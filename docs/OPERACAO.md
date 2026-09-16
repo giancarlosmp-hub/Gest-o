@@ -1,3 +1,7 @@
+# Validação do incidente de IMAGE ID da PR #874 (16/09/2026)
+
+No HEAD publicado da mesma PR, o Docker Compose CI deve executar `npm run test:preview-images:docker` e terminar com `PREVIEW_IMAGE_DOCKER=PASS`. Conferir duas linhas sanitizadas `PREVIEW_IMAGE_REFERENCE`, uma por serviço, sempre com `candidates=1`; `kind` e `length` caracterizam a saída do Compose sem revelar a referência. O Preview Deploy também deve concluir o registro com `PREVIEW_IMAGE_PROVENANCE=PASS` e passar por todas as etapas posteriores. `full_image_id_required`, referência ausente/ambígua/não resolvível, exit 77, `SKIP` ou etapa ignorada mantêm merge e ativação bloqueados. Não executar o teste na VPS nem fazer limpeza manual para validar.
+
 # Auditoria read-only de schedulers de cleanup (16/09/2026)
 
 A existência ou ausência de cron/timers na VPS é `NOT_OBSERVED`. Não execute o script novo em `/apps/gest-o` enquanto não houver confirmação de que o HEAD aprovado foi disponibilizado pelo procedimento suportado. Depois dessa confirmação, o diagnóstico sanitizado pode ser executado a partir do checkout confirmado, sem imprimir linhas de comando, argumentos, env ou credenciais:

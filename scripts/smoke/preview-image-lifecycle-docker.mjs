@@ -38,6 +38,7 @@ docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml
 const manifest = join(dir, 'manifest.json');
 let result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'record', manifest], { env: identity });
 assert.equal(result.status, 0, result.stderr);
+assert.equal((result.stdout.match(/PREVIEW_IMAGE_REFERENCE service=(api|web) candidates=1 kind=(full_id|abbreviated_id|tag_or_reference) length=[0-9]+/g) || []).length, 2, 'both Compose references are resolved through Docker inspect');
 const recorded = JSON.parse(readFileSync(manifest));
 assert.equal(recorded.images.length, 2);
 assert.ok(recorded.images.every(image => image.tags.length === 2), 'multiple tags are grouped under each IMAGE ID');

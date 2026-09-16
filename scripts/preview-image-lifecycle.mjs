@@ -12,6 +12,20 @@ const fullId = value => /^sha256:[a-f0-9]{64}$/.test(value || '') ? value : die(
 const lines = value => value.split('\n').map(x => x.trim()).filter(Boolean);
 const canonical = values => [...new Set(values || [])].sort();
 const inspectImages = ids => ids.length ? JSON.parse(docker('image', 'inspect', ...ids)) : [];
+const referenceKind = value => /^sha256:[a-f0-9]{64}$/.test(value) ? 'full_id' : /^[a-f0-9]{12,64}$/.test(value) ? 'abbreviated_id' : 'tag_or_reference';
+const resolveLocalImage = (raw, service) => {
+  const references = lines(raw);
+  if (references.length === 0) die(`compose_image_reference_${service}_missing`);
+  if (references.length !== 1) die(`compose_image_reference_${service}_ambiguous`);
+  const reference = references[0];
+  console.log(`PREVIEW_IMAGE_REFERENCE service=${service} candidates=1 kind=${referenceKind(reference)} length=${reference.length}`);
+  let inspected;
+  try { inspected = inspectImages([reference]); } catch { die(`image_reference_${service}_unresolvable`); }
+  if (!Array.isArray(inspected) || inspected.length !== 1) die(`image_reference_${service}_ambiguous`);
+  // The reference may be a tag or a Compose-version-dependent abbreviated ID.
+  // Only Docker inspect is authoritative for the complete local IMAGE ID.
+  return facts(inspected[0]);
+};
 const labelsOf = image => image?.Config?.Labels || {};
 const facts = image => ({
   image_id: fullId(image.Id),
@@ -40,9 +54,9 @@ if (!['record', 'cleanup'].includes(command) || !manifestPath) die('usage_record
 
 if (command === 'record') {
   const project = process.env.COMPOSE_PROJECT_NAME || die('project_missing');
-  const imageIds = ['api', 'web'].map(service => fullId(docker('compose', '-p', project, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'images', '-q', service)));
-  if (new Set(imageIds).size !== 2) die('service_image_identity_not_distinct');
-  const images = inspectImages(imageIds).map(facts).sort((a, b) => a.labels.service.localeCompare(b.labels.service));
+  const images = ['api', 'web'].map(service => resolveLocalImage(docker('compose', '-p', project, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'images', '-q', service), service));
+  if (new Set(images.map(image => image.image_id)).size !== 2) die('service_image_identity_not_distinct');
+  images.sort((a, b) => a.labels.service.localeCompare(b.labels.service));
   for (const image of images) assertIdentity(image.labels, envIdentity(image.labels.service));
   if (!same(images.map(x => x.labels.service), ['api', 'web'])) die('service_set_diverged');
   const manifest = { format: 1, created_at: new Date().toISOString(), project, images };
