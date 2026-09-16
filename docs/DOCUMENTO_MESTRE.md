@@ -1,3 +1,17 @@
+## Regressão de localização do gate de isolamento — PR #875 (16/09/2026)
+
+A extração correta do shell remoto deixou obsoleto `preview-run-isolation-safety.mjs`: o teste continuava inspecionando apenas `.github/workflows/preview-cleanup.yml` e, por isso, relatou falsamente a ausência de `actions/runs/${owner_run}`. A consulta autenticada permanece no runner realmente executado, enquanto o lifecycle valida PR fechada, identidade completa do run (id/attempt/SHA/workflow/event), sucesso, correlação com o PR e concorrência. A correção testa a cadeia inteira **workflow copia → workflow executa → runner consulta owner_run → lifecycle autentica e correlaciona**, sem flexibilizar nenhum gate.
+
+O segundo check vermelho continua sem identificação comprovada: não foi fornecido seu log e o ambiente não alcança GitHub. Ele não foi presumido como Pedidos nem relacionado à regressão de isolamento. Docker indisponível impede as três provas reais exigidas; resultados PASS remotos continuam obrigatórios antes do merge.
+
+## Correção pós-merge da PR #874 — incidentes independentes (16/09/2026)
+
+O **Preview Cleanup #328** terminou em 141 dentro do script remoto com `pipefail`. O caminho executável continha dois consumidores antecipados: `docker ps ... | head -n 1` e o fallback `docker network ls ... | head -n 1`. Em reprodução descartável com 20.000 linhas, o primeiro padrão encerra o produtor por SIGPIPE; isso confirma o defeito, sem transformar todo exit 141 em sucesso. A implementação confiável foi extraída para `scripts/preview-cleanup-remote.sh`; `awk` retém a primeira linha somente depois de consumir o stream completo. Erros reais do Docker, identidade, GitHub, manifesto, Compose e remoção de imagem continuam fatais. Como o trecho de log fornecido não mostra o comando/projeto, não é possível provar se falhou na primeira iteração ou após uma anterior: o estado de mutação do run é **parcial desconhecido**.
+
+O **Docker Compose CI #3881** é tratado separadamente. `orders-migration-postgres` terminou em 2, mas isso também é o contrato de `prisma migrate diff --exit-code` quando há diff e não identifica, sozinho, migration defeituosa. O harness e SQL de Pedidos não mudaram entre o parent pré-merge e `ba80eb5`; o merge mudou o SHA pinado da imagem, enquanto ambiente/cache/timing e o primeiro stderr do run não puderam ser consultados. Não houve alteração de SQL/schema. O diagnóstico continua delimitando fase, migration, classe de comando, código e stderr sanitizado, preservando o status original; os próprios extratores agora consomem integralmente o arquivo.
+
+Limitações: checkout sem remote, GitHub/VPS inacessíveis e Docker ausente. Nenhum resultado remoto foi inventado e nenhuma operação produtiva foi executada. A nova PR corretiva só pode ser aceita após o shell real, a prova Docker de imagens (`PREVIEW_IMAGE_DOCKER=PASS`), Pedidos PostgreSQL (`ORDERS_MIGRATION_POSTGRES=PASS`) e todos os checks obrigatórios passarem sem `SKIP`.
+
 ## Incidente de identidade local das imagens — PR #874 (16/09/2026)
 
 Nos resultados informados pelo operador, Docker Compose CI #3878 e Preview Deploy #581 preservaram com `full_image_id_required`. A causa está na fronteira Compose/Docker: o recorder exigia que a saída de `docker compose images -q` já fosse `sha256:` com 64 hexadecimais, embora essa saída possa ser uma referência ou ID abreviado conforme a versão. A falha ocorria antes da inspeção autoritativa; versões e valores brutos não constam da evidência e são `NOT_OBSERVED`.
