@@ -17,7 +17,7 @@ writeFileSync(join(dir, 'server.mjs'), `
 import http from 'node:http'; import {readFileSync,writeFileSync} from 'node:fs';
 const [modeFile,portFile]=process.argv.slice(2);
 const server=http.createServer((req,res)=>{const mode=readFileSync(modeFile,'utf8').trim();if(mode==='error'){res.writeHead(503);return res.end('{}')}
-let body;if(req.url.includes('/pulls/'))body={state:mode==='open'?'open':'closed'};else if(req.url.includes('/actions/runs/100'))body={status:mode==='cancelled'?'completed':'completed',conclusion:mode==='cancelled'?'cancelled':'success',run_attempt:1,head_sha:'${'b'.repeat(40)}',name:'Preview Deploy',event:'pull_request',pull_requests:[{number:42}]};else body={workflow_runs:[]};res.setHeader('content-type','application/json');res.end(JSON.stringify(body))});
+let body;if(req.url.includes('/pulls/'))body={state:mode==='open'?'open':'closed',head:{sha:'${'b'.repeat(40)}',ref:'feature'}};else if(req.url.includes('/actions/runs/100'))body={status:'completed',conclusion:mode==='cancelled'?'cancelled':'success',run_attempt:mode==='attempt' ? 2:1,head_sha:'${'a'.repeat(40)}',head_branch:'feature',workflow_id:7,name:'Preview Deploy',path:mode==='path'?'.github/workflows/other.yml':'.github/workflows/preview.yml',event:'pull_request',pull_requests:[{number:42,head:{sha:mode==='head'?'${'c'.repeat(40)}':'${'b'.repeat(40)}'}}]};else if(req.url.includes('/actions/workflows/7'))body={path:'.github/workflows/preview.yml'};else body=mode==='incomplete'?{}:{workflow_runs:[]};res.setHeader('content-type','application/json');res.end(JSON.stringify(body))});
 server.listen(0,'127.0.0.1',()=>writeFileSync(portFile,String(server.address().port)));`);
 const server = spawn(process.execPath, [join(dir, 'server.mjs'), modeFile, portFile], { stdio: 'ignore' });
 for (let i = 0; i < 100; i++) { try { if (readFileSync(portFile, 'utf8')) break; } catch {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20); }
@@ -32,7 +32,8 @@ for (const service of ['api', 'web']) {
   const built = spawnSync('docker', ['build', '-q', '-t', `gesto-synthetic-${service}:one`, '-t', `gesto-synthetic-${service}:two`, '-'], { input: dockerfile, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
 }
-writeFileSync(join(dir, 'docker-compose.yml'), `services:\n  api:\n    image: gesto-synthetic-api:one\n  web:\n    image: gesto-synthetic-web:one\n`);
+const composeFor = suffix => `services:\n${['api','web'].map(service => `  ${service}:\n    image: gesto-synthetic-${service}:${suffix}\n    labels:\n${Object.entries({ repository:'owner/repo', pr:'42', 'run-id':'100', 'run-attempt':'1', workflow:'Preview-Deploy', commit:'b'.repeat(40), project:identity.COMPOSE_PROJECT_NAME }).map(([key,value]) => `      com.gesto.preview.${key}: "${value}"`).join('\n')}`).join('\n')}\n`;
+writeFileSync(join(dir, 'docker-compose.yml'), composeFor('one'));
 writeFileSync(join(dir, 'docker-compose.preview.yml'), 'services: {}\n');
 docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'create');
 const manifest = join(dir, 'manifest.json');
@@ -42,6 +43,18 @@ assert.equal((result.stdout.match(/PREVIEW_IMAGE_REFERENCE service=(api|web) can
 const recorded = JSON.parse(readFileSync(manifest));
 assert.equal(recorded.images.length, 2);
 assert.ok(recorded.images.every(image => image.tags.length === 2), 'multiple tags are grouped under each IMAGE ID');
+// The authenticated run revision intentionally differs from the checked-out PR
+// head. The association's head SHA proves the build commit explicitly.
+result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'authorize', manifest], { env: identity });
+assert.equal(result.status, 0, result.stderr + result.stdout);
+assert.match(result.stdout, /PREVIEW_IMAGE_AUTHORIZATION=PASS/);
+for (const [mode, field] of [['attempt','run_attempt'], ['head','run_pull_request_head_sha'], ['path','workflow_path']]) {
+  writeFileSync(modeFile, mode);
+  const divergent = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'authorize', manifest], { env: identity });
+  assert.notEqual(divergent.status, 0, mode);
+  assert.match(divergent.stderr, new RegExp(`authenticated_run_identity_diverged field=${field}`));
+}
+writeFileSync(modeFile, 'ok');
 docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'down', '-v');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', manifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
@@ -54,7 +67,7 @@ for (const service of ['api', 'web']) {
   const dockerfile = `FROM scratch\n${labels(service)}\nCMD ["/synthetic"]\n`;
   const built = spawnSync('docker', ['build', '-q', '-t', `gesto-synthetic-${service}:failure`, '-'], { input: dockerfile, encoding: 'utf8' }); assert.equal(built.status, 0, built.stderr);
 }
-writeFileSync(join(dir, 'docker-compose.yml'), `services:\n  api:\n    image: gesto-synthetic-api:failure\n  web:\n    image: gesto-synthetic-web:failure\n`);
+writeFileSync(join(dir, 'docker-compose.yml'), composeFor('failure'));
 docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'create');
 const failureManifest = join(dir, 'failure.json');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'record', failureManifest], { env: identity }); assert.equal(result.status, 0, result.stderr);
@@ -81,4 +94,4 @@ docker('rm', protectedContainer);
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
 server.kill();
-console.log('PREVIEW_IMAGE_DOCKER=PASS lifecycle=complete idempotence=pass github_failure=preserved reopened=preserved cancelled=preserved stopped_container=preserved');
+console.log('PREVIEW_IMAGE_DOCKER=PASS lifecycle=complete distinct_run_and_build_sha=pass identity_divergence=preserved idempotence=pass github_failure=preserved reopened=preserved cancelled=preserved stopped_container=preserved');
