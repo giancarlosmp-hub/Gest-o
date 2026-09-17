@@ -36,6 +36,9 @@ jobs:
       - name: Preview image lifecycle (synthetic Docker)
         run: npm run test:preview-images:docker
 
+      - name: Prove preview cleanup workflow shell
+        run: npm run test:docker-cleanup-safety
+
       - name: Pin and verify Node/npm
         run: |
           npm install --global npm@11.4.2
