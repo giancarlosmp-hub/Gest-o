@@ -6,6 +6,7 @@ command_label=initialize
 temporary_directory=""
 name=""
 network=""
+expected_database=tenant_data_readiness
 checkpoint() { step="$1"; command_label="$1"; printf 'HARNESS_STEP=%s\n' "$step"; }
 on_error() {
   local exit_code=$?
@@ -32,16 +33,25 @@ checkpoint docker_network_setup
 docker network create --internal "$network" >/dev/null
 
 checkpoint postgres_start
-docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e POSTGRES_DB=readiness postgres:16 >/dev/null
+docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic-only -e "POSTGRES_DB=$expected_database" postgres:16 >/dev/null
 
 checkpoint postgres_readiness
 postgres_ready=false
 for _ in $(seq 1 60); do
-  if docker exec "$name" pg_isready -U postgres -d readiness >/dev/null 2>&1; then postgres_ready=true; break; fi
+  if readiness_database=$(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -qAt -U postgres -d "$expected_database" -c 'SELECT current_database();' 2>"$temporary_directory/readiness.err"); then
+    readiness_exit=0
+  else
+    readiness_exit=$?
+  fi
+  if [[ $readiness_exit -eq 0 && ! -s "$temporary_directory/readiness.err" && "$readiness_database" == "$expected_database" ]]; then postgres_ready=true; break; fi
   sleep 1
 done
 [[ "$postgres_ready" == true ]]
-psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d readiness)
+readiness_database=$(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -qAt -U postgres -d "$expected_database" -c 'SELECT current_database();' 2>"$temporary_directory/readiness-final.err")
+[[ ! -s "$temporary_directory/readiness-final.err" ]]
+[[ "$readiness_database" == "$expected_database" ]]
+printf 'TENANT_DATA_READINESS_DATABASE=%s\nTENANT_DATA_READINESS_DATABASE_READY=PASS\n' "$expected_database"
+psql=(docker exec -i "$name" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$expected_database")
 
 checkpoint fixtures
 "${psql[@]}" <<'SQL'

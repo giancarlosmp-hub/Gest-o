@@ -55,8 +55,13 @@ while IFS= read -r project; do
   done
   [ "$owner_pr" = "$PR_NUMBER" ]
   [ "$owner_workflow" = Preview-Deploy ]
-  run_status="$(curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${owner_run}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(typeof x.status!=="string")process.exit(1);process.stdout.write(x.status)})')"
+  run_facts="$(curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${owner_run}/attempts/${owner_attempt}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const x=JSON.parse(s);if(typeof x.status!=="string"||!Number.isSafeInteger(x.run_attempt))process.exit(1);process.stdout.write(`${x.status}\t${x.run_attempt}`)})')"
+  IFS=$'\t' read -r run_status authenticated_attempt <<<"$run_facts"
   [ "$run_status" = completed ]
+  if [ "$authenticated_attempt" != "$owner_attempt" ]; then
+    echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=authenticated_run_identity_diverged field=run_attempt pr=${owner_pr} run_id=${owner_run} expected=${owner_attempt} observed=${authenticated_attempt}"
+    exit 1
+  fi
   # The image commit is the PR head checked out by preview.yml. A pull_request
   # run's head_sha is a distinct workflow-run revision and must not overwrite it.
   if [ -n "${owner_commit:-}" ]; then export EXPECTED_PREVIEW_SHA="$owner_commit"; fi

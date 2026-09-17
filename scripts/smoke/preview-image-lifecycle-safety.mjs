@@ -28,6 +28,10 @@ assert.match(deployWorkflow, /concurrency:\s*\n\s*group: preview-pr-\$\{\{ githu
 assert.match(cleanupRunner, /preview-provenance[\s\S]*PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT/, 'manifest must discover images after runtime resources disappear');
 assert.match(cleanupRunner, /trusted_compose_files_missing/);
 assert.match(cleanupRunner, /node "\$CLEANUP_SCRIPT" authorize "\$manifest_path"[\s\S]*docker compose[\s\S]*node "\$CLEANUP_SCRIPT" cleanup/, 'authenticated authorization must precede teardown and be repeated before image deletion');
+assert.match(cleanupRunner, /actions\/runs\/\$\{owner_run\}\/attempts\/\$\{owner_attempt\}/, 'runner must authenticate the immutable producer attempt');
+assert.match(lifecycle, /actions\/runs\/\$\{expectedBase\['run-id'\]\}\/attempts\/\$\{expectedBase\['run-attempt'\]\}/, 'lifecycle must not resolve a re-run through the latest-attempt endpoint');
+assert.match(lifecycle, /field=\$\{field\} pr=\$\{expectedBase\.pr\} run_id=\$\{expectedBase\['run-id'\]\}/);
+assert.match(lifecycle, /expected=\$\{expectedBase\['run-attempt'\]\} observed=/);
 assert.doesNotMatch(cleanupRunner, /EXPECTED_PREVIEW_SHA="\$producer_sha"/, 'workflow run revision must not replace the built PR head revision');
 assert.match(workflow, /bash "\$CLEANUP_RUNNER"/);
 assert.match(composeCiWorkflow, /on:\s*\n\s*push:[\s\S]*\n\s*pull_request:/, 'cleanup shell gate must run for the existing push and pull_request triggers');
