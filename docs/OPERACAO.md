@@ -1206,3 +1206,17 @@ Não reexecute o cleanup #330 e não faça limpeza manual. Em novo evento futuro
 No `compose-smoke`, readiness de PostgreSQL não pode ser inferida de `pg_isready`. O gate obrigatório abre sessão com `psql -X -v ON_ERROR_STOP=1` no banco descartável `tenant_data_readiness`, executa `SELECT current_database()` e exige exatamente o nome configurado, sem stderr, antes das fixtures. Exigir `TENANT_DATA_READINESS_DATABASE_READY=PASS` e `TENANT_DATA_READINESS_POSTGRES=PASS`; ausência do banco deve falhar, nunca criar silenciosamente outro nome ou continuar.
 
 Antes de qualquer retomada operacional de #874, #875 ou #876, publicar a branch corretiva, observar CI real do mesmo HEAD e exigir sem SKIP/exit 77: `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS`, `TENANT_DATA_READINESS_DATABASE_READY=PASS`, `TENANT_DATA_READINESS_POSTGRES=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS`. O ambiente local desta investigação não tinha remote/autenticação/Docker; resultados remotos são `NOT_OBSERVED` e provas Docker/PostgreSQL são `NOT_EXECUTED`. Não executar deploy, cutover, Recovery, migration, prune, remoção de volume/backup/imagem produtiva nem reativar apply legado.
+
+## Diagnóstico read-only da capacidade de rede — PR #877
+
+Enquanto existir `all predefined address pools have been fully subnetted`, não reexecute Preview Deploy. No checkout aprovado, produza o inventário sanitizado com:
+
+```bash
+node scripts/diagnose-preview-networks.mjs > preview-networks.json
+```
+
+O comando consulta apenas `docker network ls/inspect`, `docker ps`, `docker container inspect` e `docker info`; sua saída contém IDs, nomes, driver/escopo, sub-redes/IPAM, labels Compose/proveniência allowlisted, endpoints e containers associados inclusive parados. Guarde o arquivo como evidência operacional: IPs e topologia não são credenciais, mas não devem ser publicados sem revisão. Ele não imprime `Config.Env` ou inspect bruto e marca todas as redes `removal=NOT_AUTHORIZED`.
+
+Classifique somente após revisar: (1) redes acumuladas com ownership completo; (2) `DefaultAddressPools` restritos ou `NOT_OBSERVED`; (3) sub-redes duplicadas/conflitantes; (4) origem incompleta/externa/produtiva protegida. Ausência de endpoints nunca basta para remover. Qualquer proposta posterior deve listar IDs exatos, labels PR/run/attempt/workflow/projeto, containers running/exited, proteção produtiva/externa e autorização humana. Não executar `network prune`, `network rm`, restart Docker, editar `daemon.json` ou ampliar pools como parte deste diagnóstico.
+
+No novo fluxo, exigir `PREVIEW_NETWORK_CAPACITY=PASS` antes do primeiro build; a sonda pode remover somente a bridge que acabou de criar, após identidade e zero endpoints. O manifesto deve existir depois de `build api web` e antes de `up -d --no-build`, permitindo retomada fail-closed se a criação do runtime falhar. Isso não autoriza tocar nas imagens já construídas pelo run `35253792293`, cujo manifesto/IDs/estado são desconhecidos. Retomadas de #874, #875, #876 e #877 continuam bloqueadas até inventário, correção de capacidade autorizada e todos os gates CI obrigatórios verdes sem SKIP/77.

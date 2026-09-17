@@ -34,7 +34,12 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Preview image lifecycle (synthetic Docker)
-        run: npm run test:preview-images:docker
+        run: |
+          for iteration in 1 2; do
+            echo "PREVIEW_IMAGE_DOCKER_ITERATION=$iteration"
+            npm run test:preview-images:docker
+          done
+          echo "PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2"
 
       - name: Prove preview cleanup workflow shell
         run: npm run test:docker-cleanup-safety
