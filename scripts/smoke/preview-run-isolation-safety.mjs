@@ -15,12 +15,12 @@ for (const token of [
   "CLEANUP_RUNNER: /tmp/gesto-preview-cleanup-${{ github.run_id }}/scripts/preview-cleanup-remote.sh",
   'bash "$CLEANUP_RUNNER"',
 ]) assert.ok(cleanupWorkflow.includes(token),`cleanup workflow no longer transports/invokes trusted script: ${token}`);
-for (const token of ["actions/runs/${owner_run}", "run_status", "completed", "com.gesto.preview.pr", "com.gesto.preview.run-id", "com.gesto.preview.run-attempt", "com.gesto.preview.workflow", "gesto-pr-${PR_NUMBER}-"])
+for (const token of ["actions/runs/${owner_run}/attempts/${owner_attempt}", "run_status", "completed", "com.gesto.preview.pr", "com.gesto.preview.run-id", "com.gesto.preview.run-attempt", "com.gesto.preview.workflow", "gesto-pr-${PR_NUMBER}-"])
   assert.ok(cleanupRunner.includes(token),`missing remote cleanup ownership gate: ${token}`);
 for (const token of [
   "if (!process.env.GITHUB_TOKEN) die('github_auth_missing')",
   "`/pulls/${expectedBase.pr}`", "pr.state !== 'closed'",
-  "`/actions/runs/${expectedBase['run-id']}`", "run.status !== 'completed'", "run.conclusion !== 'success'",
+  "`/actions/runs/${expectedBase['run-id']}/attempts/${expectedBase['run-attempt']}`", "run.status !== 'completed'", "run.conclusion !== 'success'",
   "run.run_attempt", "run.head_sha", "run.name !== 'Preview Deploy'", "run.event !== 'pull_request'",
   "run.pull_requests", "run_pr_correlation_missing", "concurrent_run_${status}",
 ]) assert.ok(lifecycle.includes(token),`authenticated cleanup correlation weakened: ${token}`);
