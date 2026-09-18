@@ -1235,3 +1235,61 @@ ssh -p <porta-ssh-aprovada> <usuario-aprovado>@<host-aprovado> \
 O comando remoto não grava o script nem altera o checkout. Ele executa somente o inventário Docker read-only documentado. Não colocar host/usuário reais em logs públicos; não encadear `network rm`, prune, restart, edição de pools ou qualquer comando de mutação. O resultado não autoriza remoção: encaminhe-o para revisão humana e associe qualquer proposta futura a IDs/labels/endpoints exatos.
 
 Para o CI do harness, `PREVIEW_IMAGE_DOCKER=PASS` só é válido quando termina com `teardown=pass helper_exit=awaited` e o processo retorna exit 0. Exigir duas ocorrências, uma por subprocesso terminado, seguidas de `PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2`. Ausência do segundo marcador, timeout, sinal, erro de teardown, SKIP ou exit 77 reprovam. O bloqueio de capacidade da VPS continua separado e impede novo Preview Deploy.
+
+### Procedimento completo de coleta para o HEAD corrigido
+
+Execute em uma estação autorizada com `gh`, `ssh` e `scp`. As variáveis de conexão devem vir do canal operacional privado; o procedimento não as imprime. Ele baixa o arquivo diretamente do SHA completo da PR #877, valida sintaxe/hash, usa diretório remoto separado e traz o JSON de volta sem tocar no checkout de produção:
+
+```bash
+set -euo pipefail
+REPOSITORY=giancarlosmp-hub/Gest-o
+PR_NUMBER=877
+: "${VPS_HOST:?defina pelo canal privado}"
+: "${VPS_USER:?defina pelo canal privado}"
+VPS_PORT=${VPS_PORT:-22022}
+
+APPROVED_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json headRefOid --jq .headRefOid)
+[[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+printf 'DIAGNOSTIC_SOURCE_SHA=%s\n' "$APPROVED_SHA"
+
+LOCAL_BUNDLE=$(mktemp -d "${TMPDIR:-/tmp}/gesto-network-diagnostic.XXXXXX")
+LOCAL_SCRIPT="$LOCAL_BUNDLE/diagnose-preview-networks.mjs"
+LOCAL_JSON="$LOCAL_BUNDLE/preview-networks.json"
+gh api "repos/$REPOSITORY/contents/scripts/diagnose-preview-networks.mjs?ref=$APPROVED_SHA" \
+  --jq .content | tr -d '\n' | base64 --decode > "$LOCAL_SCRIPT"
+chmod 500 "$LOCAL_SCRIPT"
+node --check "$LOCAL_SCRIPT"
+LOCAL_SCRIPT_SHA256=$(sha256sum "$LOCAL_SCRIPT" | awk '{print $1}')
+[[ "$LOCAL_SCRIPT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+
+REMOTE_DIR="/tmp/gesto-preview-network-diagnostic-$APPROVED_SHA"
+ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "umask 077; install -d -m 700 '$REMOTE_DIR'"
+scp -P "$VPS_PORT" "$LOCAL_SCRIPT" \
+  "$VPS_USER@$VPS_HOST:$REMOTE_DIR/diagnose-preview-networks.mjs"
+REMOTE_SCRIPT_SHA256=$(ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "chmod 500 '$REMOTE_DIR/diagnose-preview-networks.mjs'; sha256sum '$REMOTE_DIR/diagnose-preview-networks.mjs' | awk '{print \$1}'")
+[[ "$REMOTE_SCRIPT_SHA256" == "$LOCAL_SCRIPT_SHA256" ]]
+
+ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "set -euo pipefail; umask 077; cd '$REMOTE_DIR'; \
+   node diagnose-preview-networks.mjs > preview-networks.json.tmp; \
+   node -e 'JSON.parse(require(\"fs\").readFileSync(process.argv[1],\"utf8\"))' preview-networks.json.tmp; \
+   chmod 600 preview-networks.json.tmp; \
+   mv preview-networks.json.tmp preview-networks.json"
+scp -P "$VPS_PORT" \
+  "$VPS_USER@$VPS_HOST:$REMOTE_DIR/preview-networks.json" "$LOCAL_JSON"
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$LOCAL_JSON"
+printf 'NETWORK_INVENTORY_RESULT=CAPTURED_READ_ONLY\nSOURCE_SHA=%s\nSCRIPT_SHA256=%s\nLOCAL_JSON=%s\n' \
+  "$APPROVED_SHA" "$LOCAL_SCRIPT_SHA256" "$LOCAL_JSON"
+```
+
+Não apague o diretório remoto durante a coleta: ele preserva script e resultado com o SHA de origem para auditoria. Isso não autoriza retenção indefinida nem remoção posterior sem decisão operacional. O script executa somente `docker network ls/inspect`, `docker ps -a`, `docker container inspect` e `docker info`; a saída é allowlisted e não contém `Config.Env`.
+
+### Análise obrigatória depois de receber o JSON
+
+1. Registre `SOURCE_SHA`, `SCRIPT_SHA256` e o hash SHA-256 do JSON recebido.
+2. Compare `default_address_pools` com todas as entradas `networks[].ipam`; conte sub-redes alocadas dentro de cada pool e examine `summary.duplicate_subnets`. Se pools forem `NOT_OBSERVED`, não conclua “acúmulo”: classifique configuração como pendente.
+3. Para cada rede candidata, registre em tabela: `network_id`, nome, driver/escopo, IPAM, labels completas allowlisted, endpoints, containers associados e estados running/exited, `preview_identity`, `protection_reason` e referências às PRs #874–#877.
+4. Classifique produção, rollback, recovery, incident, built-ins, externas e toda origem incompleta como protegidas. Rede vazia, nome `gesto-pr-*` ou PR fechada isoladamente não é ownership suficiente.
+5. Só prepare proposta — nunca execução — para IDs exatos cuja proveniência completa seja independente e cujos containers/endpoints, produção e evidências protegidas tenham sido reconciliados. Inclua benefício esperado, riscos, ordem, autorização humana necessária e rollback aplicável. Sem inventário recebido, causa e lista de IDs permanecem `PENDING_EVIDENCE`.

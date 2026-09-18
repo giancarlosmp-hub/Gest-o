@@ -32,6 +32,8 @@ const report = JSON.parse(result.stdout);
 assert.equal(report.mode, 'READ_ONLY');
 assert.equal(report.networks[0].classification.preview_identity, 'PROVEN');
 assert.equal(report.networks[0].classification.removal, 'NOT_AUTHORIZED');
+assert.equal(report.networks.find(row => row.name === 'production-external').classification.production_or_external_protected, true);
+assert.equal(report.networks.find(row => row.name === 'production-external').classification.protection_reason, 'PROTECTED_ROLE_OR_BUILTIN');
 assert.equal(report.associated_containers_including_stopped.find(row => row.name === 'preview-stopped').state, 'exited');
 assert.doesNotMatch(result.stdout, /must-not-leak|secret/);
 assert.doesNotMatch(result.stderr, /\brm\b|\bprune\b|\bcreate\b|\bconnect\b|\bdisconnect\b/);
