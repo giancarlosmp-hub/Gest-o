@@ -41,7 +41,7 @@ assert.match(lifecycle, /expected=\$\{expectedBase\['run-attempt'\]\} observed=/
 assert.doesNotMatch(cleanupRunner, /EXPECTED_PREVIEW_SHA="\$producer_sha"/, 'workflow run revision must not replace the built PR head revision');
 assert.match(workflow, /bash "\$CLEANUP_RUNNER"/);
 assert.match(composeCiWorkflow, /on:\s*\n\s*push:[\s\S]*\n\s*pull_request:/, 'cleanup shell gate must run for the existing push and pull_request triggers');
-assert.match(composeCiWorkflow, /for iteration in 1 2; do[\s\S]*npm run test:preview-images:docker[\s\S]*PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2/, 'Docker lifecycle must run twice from disposable state');
+assert.match(composeCiWorkflow, /run: npm run test:preview-images:docker:repeated/, 'CI must invoke the bounded repeated lifecycle harness');
 const cleanupCiStepStart = composeCiWorkflow.indexOf('- name: Prove preview cleanup workflow shell');
 const cleanupCiStepEnd = composeCiWorkflow.indexOf('\n      - name:', cleanupCiStepStart + 1);
 assert.ok(cleanupCiStepStart >= 0 && cleanupCiStepEnd > cleanupCiStepStart, 'Docker Compose CI must contain a bounded cleanup shell gate');

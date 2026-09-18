@@ -46,6 +46,13 @@ server.on('error', error => {
   console.error(`MOCK_SERVER_ERROR=listen_failed code=${error.code || 'unknown'}`);
   process.exitCode = 4;
 });
-setTimeout(() => server.listen(0, '127.0.0.1', () => {
+const startupTimer = setTimeout(() => server.listen(0, '127.0.0.1', () => {
   writeFileSync(readyFile, `${server.address().port}\n`, { flag: 'wx' });
 }), delayMs);
+const shutdown = () => {
+  clearTimeout(startupTimer);
+  if (server.listening) server.close(() => { process.exitCode = 0; });
+  else process.exitCode = 0;
+};
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);

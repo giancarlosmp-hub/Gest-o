@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { waitForReadyFile } from './lib/wait-for-ready-file.mjs';
+import { runBounded, terminateAndWait } from './lib/managed-process.mjs';
 
 const root = process.cwd();
 if (spawnSync('docker', ['compose', 'version']).status !== 0) {
@@ -17,15 +18,28 @@ writeFileSync(modeFile, 'ok');
 const server = spawn(process.execPath, [join(root, 'scripts/smoke/preview-github-api-mock.mjs'), modeFile, portFile], { stdio: ['ignore', 'ignore', 'pipe'] });
 let serverStderr = '';
 server.stderr.on('data', chunk => { serverStderr += chunk; });
-const dispose = () => {
-  if (server.exitCode === null && server.signalCode === null) server.kill('SIGTERM');
-  spawnSync('docker', ['rm', '-f', `gesto-synthetic-stopped-${process.pid}`], { stdio: 'ignore' });
-  for (const project of ['gesto-pr-42-100-1', 'gesto-pr-42-100-2']) spawnSync('docker', ['compose', '-p', project, '-f', join(dir, 'docker-compose.yml'), '-f', join(dir, 'docker-compose.preview.yml'), 'down', '-v', '--remove-orphans'], { stdio: 'ignore' });
-  for (const service of ['api', 'web']) spawnSync('docker', ['image', 'rm', `gesto-synthetic-${service}:one`, `gesto-synthetic-${service}:two`, `gesto-synthetic-${service}:rerun`, `gesto-synthetic-${service}:failure`], { stdio: 'ignore' });
+let disposePromise;
+const dispose = () => disposePromise ??= (async () => {
+  const errors = [];
+  try { await terminateAndWait(server, { timeoutMs: 3000 }); } catch (error) { errors.push(error); }
+  const bounded = (command, args) => { try { runBounded(command, args, { timeoutMs: 10000, stdio: 'ignore' }); } catch (error) { errors.push(error); } };
+  // Every identity below is unique to this synthetic process. No broad prune.
+  const stoppedName = `gesto-synthetic-stopped-${process.pid}`;
+  if (spawnSync('docker', ['container', 'inspect', stoppedName], { stdio: 'ignore', timeout: 3000 }).status === 0) bounded('docker', ['rm', '-f', stoppedName]);
+  if (existsSync(join(dir, 'docker-compose.yml')) && existsSync(join(dir, 'docker-compose.preview.yml'))) {
+    for (const project of ['gesto-pr-42-100-1', 'gesto-pr-42-100-2']) bounded('docker', ['compose', '-p', project, '-f', join(dir, 'docker-compose.yml'), '-f', join(dir, 'docker-compose.preview.yml'), 'down', '-v', '--remove-orphans']);
+  }
+  for (const service of ['api', 'web']) {
+    const tags = ['one', 'two', 'rerun', 'failure'].map(tag => `gesto-synthetic-${service}:${tag}`).filter(tag => spawnSync('docker', ['image', 'inspect', tag], { stdio: 'ignore', timeout: 3000 }).status === 0);
+    if (tags.length) bounded('docker', ['image', 'rm', ...tags]);
+  }
   rmSync(dir, { recursive: true, force: true });
-};
-process.once('exit', dispose);
-for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => process.exit(128));
+  return errors;
+})();
+let interrupted = '';
+for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { interrupted = signal; process.exitCode = 128; void dispose(); });
+let originalError;
+try {
 const port = await waitForReadyFile({ child: server, path: portFile, timeoutMs: 5000, stderr: () => serverStderr });
 const run = (command, args, options = {}) => spawnSync(command, args, { cwd: options.cwd || dir, encoding: 'utf8', env: { ...process.env, ...options.env } });
 const docker = (...args) => { const result = run('docker', args); assert.equal(result.status, 0, result.stderr); return result.stdout.trim(); };
@@ -119,4 +133,14 @@ assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', 
 docker('rm', protectedContainer);
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
-console.log('PREVIEW_IMAGE_DOCKER=PASS lifecycle=complete distinct_run_and_build_sha=pass rerun_same_id_incremented_attempt=pass identity_divergence=preserved idempotence=pass github_failure=preserved reopened=preserved cancelled=preserved stopped_container=preserved');
+} catch (error) {
+  originalError = error;
+}
+const teardownErrors = await dispose();
+if (originalError) {
+  if (teardownErrors.length) originalError.message += `; teardown_errors=${teardownErrors.map(error => error.message).join('|')}`;
+  throw originalError;
+}
+if (interrupted) throw new Error(`harness_interrupted signal=${interrupted}`);
+if (teardownErrors.length) throw new AggregateError(teardownErrors, 'preview harness teardown failed');
+console.log('PREVIEW_IMAGE_DOCKER=PASS lifecycle=complete distinct_run_and_build_sha=pass rerun_same_id_incremented_attempt=pass identity_divergence=preserved idempotence=pass github_failure=preserved reopened=preserved cancelled=preserved stopped_container=preserved teardown=pass helper_exit=awaited');

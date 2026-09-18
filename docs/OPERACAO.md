@@ -1220,3 +1220,18 @@ O comando consulta apenas `docker network ls/inspect`, `docker ps`, `docker cont
 Classifique somente após revisar: (1) redes acumuladas com ownership completo; (2) `DefaultAddressPools` restritos ou `NOT_OBSERVED`; (3) sub-redes duplicadas/conflitantes; (4) origem incompleta/externa/produtiva protegida. Ausência de endpoints nunca basta para remover. Qualquer proposta posterior deve listar IDs exatos, labels PR/run/attempt/workflow/projeto, containers running/exited, proteção produtiva/externa e autorização humana. Não executar `network prune`, `network rm`, restart Docker, editar `daemon.json` ou ampliar pools como parte deste diagnóstico.
 
 No novo fluxo, exigir `PREVIEW_NETWORK_CAPACITY=PASS` antes do primeiro build; a sonda pode remover somente a bridge que acabou de criar, após identidade e zero endpoints. O manifesto deve existir depois de `build api web` e antes de `up -d --no-build`, permitindo retomada fail-closed se a criação do runtime falhar. Isso não autoriza tocar nas imagens já construídas pelo run `35253792293`, cujo manifesto/IDs/estado são desconhecidos. Retomadas de #874, #875, #876 e #877 continuam bloqueadas até inventário, correção de capacidade autorizada e todos os gates CI obrigatórios verdes sem SKIP/77.
+
+### Executar o inventário sem atualizar a VPS
+
+Não é necessário fazer checkout, pull ou merge na VPS para usar o diagnóstico. Em uma estação autorizada com o worktree revisado da PR, transporte o programa somente por stdin e mantenha o resultado local:
+
+```bash
+ssh -p <porta-ssh-aprovada> <usuario-aprovado>@<host-aprovado> \
+  'node --input-type=module -' \
+  < scripts/diagnose-preview-networks.mjs \
+  > preview-networks.json
+```
+
+O comando remoto não grava o script nem altera o checkout. Ele executa somente o inventário Docker read-only documentado. Não colocar host/usuário reais em logs públicos; não encadear `network rm`, prune, restart, edição de pools ou qualquer comando de mutação. O resultado não autoriza remoção: encaminhe-o para revisão humana e associe qualquer proposta futura a IDs/labels/endpoints exatos.
+
+Para o CI do harness, `PREVIEW_IMAGE_DOCKER=PASS` só é válido quando termina com `teardown=pass helper_exit=awaited` e o processo retorna exit 0. Exigir duas ocorrências, uma por subprocesso terminado, seguidas de `PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2`. Ausência do segundo marcador, timeout, sinal, erro de teardown, SKIP ou exit 77 reprovam. O bloqueio de capacidade da VPS continua separado e impede novo Preview Deploy.
