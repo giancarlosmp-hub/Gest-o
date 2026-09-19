@@ -1293,3 +1293,39 @@ Não apague o diretório remoto durante a coleta: ele preserva script e resultad
 3. Para cada rede candidata, registre em tabela: `network_id`, nome, driver/escopo, IPAM, labels completas allowlisted, endpoints, containers associados e estados running/exited, `preview_identity`, `protection_reason` e referências às PRs #874–#877.
 4. Classifique produção, rollback, recovery, incident, built-ins, externas e toda origem incompleta como protegidas. Rede vazia, nome `gesto-pr-*` ou PR fechada isoladamente não é ownership suficiente.
 5. Só prepare proposta — nunca execução — para IDs exatos cuja proveniência completa seja independente e cujos containers/endpoints, produção e evidências protegidas tenham sido reconciliados. Inclua benefício esperado, riscos, ordem, autorização humana necessária e rollback aplicável. Sem inventário recebido, causa e lista de IDs permanecem `PENDING_EVIDENCE`.
+
+## Plano revisável de recuperação dos previews — inventário de 19/09/2026
+
+### Proteções fora de todos os lotes
+
+Preservar incondicionalmente `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volumes `gest-o_pgdata_clean_v2_20260717` e `gest-o_pgdata`, e todo recurso de recovery, rollback, restauração ou backup. Antes e depois de qualquer janela futura, confirmar IDs, running/health, mounts, redes e CRM; nenhum comando deste plano executa essa janela.
+
+### Classificação e lotes propostos
+
+1. **Lote P0 — somente preservação:** as nove redes de #874–#876 com três endpoints e todos os recursos protegidos acima. Evidência presente: endpoints ativos. Ação proposta: nenhuma.
+2. **Lote D1 — diagnóstico de previews degradados:** projetos #508 e #510. Coletar restart count, health/status, IMAGE ID, network ID, volume, manifesto e attempt produtor; registrar somente trecho sanitizado do erro atual. O log ~2,07 GB é do `gesto-pr-510-api-1`, mas tamanho de log e restart não autorizam teardown. Ação proposta: decidir separadamente entre recuperação do preview ou futura aposentadoria autenticada.
+3. **Lote C1 — candidatos bloqueados:** `pr-526_default`, `pr-527_default`, `pr-528_default`. Ausência de endpoints é insuficiente porque há containers parados associados. Para cada um, preencher IDs completos da rede e containers, IMAGE IDs, volume, manifesto, PR/run/attempt/workflow/commit e resposta autenticada GitHub. Enquanto qualquer campo faltar ou divergir: `PRESERVE/NOT_PROVEN`.
+4. **Lote L1 — legado:** previews antigos sem manifesto íntegro e tentativa autenticável. Idade de cinco semanas, nome e labels não promovem o recurso. Ação proposta: preservar e encaminhar para revisão humana; o apply legado continua desabilitado.
+5. **Lote E1 — elegível futuro:** somente recursos que, depois da coleta complementar, tenham manifesto íntegro, labels e runtime congruentes, PR fechada, endpoint exato de attempt concluído/success, nenhuma execução concorrente, nenhuma referência por container ativo/parado e nenhuma proteção de produção/rollback/recovery/incident. A proposta deve enumerar IDs completos; sem isso o lote fica vazio.
+
+O resumo fornecido não contém os IDs do JSON anexado no contexto de filesystem desta sessão. Portanto, não preencher placeholders com nomes ou IDs inventados. Quando o arquivo efetivo for entregue, anexar uma tabela por recurso com `network_id`, `container_id`, `image_id`, volume, projeto, PR, run, attempt, commit, endpoints, estado, manifesto, resultado GitHub e decisão.
+
+### Coleta complementar mínima — não repetir inventário
+
+Para cada projeto listado nos lotes D1/C1 e para cada ID que o JSON apontar como candidato, coletar apenas:
+
+- o arquivo correspondente de `/var/www/preview-provenance/<projeto>.json`, preservando mode/owner e SHA-256;
+- `docker container inspect` reduzido a ID, nome, status/health, restart count, IMAGE ID, redes, mounts, labels allowlisted e `HostConfig.LogConfig` — nunca `Config.Env`;
+- `docker network inspect` reduzido ao ID já inventariado, IPAM, labels e endpoints;
+- `docker volume inspect` reduzido a nome, driver, labels e containers que o montam;
+- via `gh api` autenticado na estação, PR atual e `/actions/runs/<run_id>/attempts/<run_attempt>` para a identidade literal do manifesto.
+
+Essa complementação serve para preencher IDs/evidências faltantes, não para executar cleanup. Se o manifesto estiver ausente, inválido ou divergente, classificar legado/`NOT_PROVEN`.
+
+### Verificações de uma futura janela autorizada
+
+**Antes:** reexecutar somente probes read-only; confirmar produção/volumes protegidos; autenticar attempt exato; provar PR ainda fechada e ausência de runs concorrentes; revalidar manifesto/labels/tags/digests; enumerar containers inclusive parados; registrar `df`, número de redes e saúde produtiva. **Durante:** um lote por vez, somente IDs aprovados, sem prune/force e usando o cleanup versionado. **Depois:** repetir inventário, confirmar que apenas IDs aprovados mudaram, validar produção/CRM/PostgreSQL, volumes/backups, redes restantes, espaço e capacidade por uma sonda isolada. Falha em qualquer gate interrompe o lote seguinte.
+
+### Aplicação da rotação de logs
+
+Novos previews recebem no override `json-file`, `max-size=25m`, `max-file=4` para DB/API/WEB. Validar com `docker compose ... config` e depois com inspect allowlisted de `HostConfig.LogConfig`. Containers existentes com `Config={}` precisam ser recriados para adotar a configuração; `docker update` não a aplica. Essa recriação não faz parte desta tarefa: só pode ocorrer por projeto de preview autenticado, com Compose e manifesto exatos, depois que capacidade de rede for recuperada. Nunca usar o Compose de produção nem recriar produção automaticamente.
