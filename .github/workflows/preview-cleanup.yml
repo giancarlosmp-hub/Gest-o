@@ -14,7 +14,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  defer-cleanup-pr-877:
+    if: github.event.pull_request.number == 877
+    runs-on: ubuntu-latest
+    steps:
+      - name: Defer PR 877 cleanup during network-capacity incident
+        shell: bash
+        run: |
+          echo "PREVIEW_CLEANUP_RESULT=DEFERRED"
+          echo "PREVIEW_CLEANUP_EXECUTED=NO"
+          echo "PREVIEW_CLEANUP_REASON=PR_877_NETWORK_CAPACITY_INCIDENT"
+          echo "Preview cleanup for PR #877 is explicitly deferred pending reviewed operational recovery."
+
   cleanup-preview:
+    if: github.event.pull_request.number != 877
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

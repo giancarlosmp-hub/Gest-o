@@ -79,7 +79,7 @@
     "test:preflight-plan-ledger": "tsx apps/api/src/tenancy/preflightPlanLedger.test.ts && node scripts/smoke/preflight-plan-ledger-safety.mjs",
     "test:preflight-plan-ledger:postgres": "bash scripts/smoke/preflight-plan-ledger-postgres.sh",
     "test:preview-isolation": "node scripts/smoke/preview-run-isolation-safety.mjs",
-    "test:docker-cleanup-safety": "node scripts/smoke/docker-cleanup-safety.mjs && node scripts/smoke/preview-image-lifecycle-safety.mjs && node scripts/smoke/preview-logging-safety.mjs && node scripts/smoke/wait-for-ready-file.test.mjs && node scripts/smoke/run-subprocess-within.test.mjs && node scripts/smoke/preview-network-inventory-safety.mjs && bash scripts/smoke/preview-network-capacity-safety.sh && bash scripts/smoke/preview-cleanup-workflow-shell.sh",
+    "test:docker-cleanup-safety": "node scripts/smoke/docker-cleanup-safety.mjs && node scripts/smoke/preview-image-lifecycle-safety.mjs && node scripts/smoke/preview-cleanup-pr877-defer-safety.mjs && node scripts/smoke/preview-logging-safety.mjs && node scripts/smoke/wait-for-ready-file.test.mjs && node scripts/smoke/run-subprocess-within.test.mjs && node scripts/smoke/preview-network-inventory-safety.mjs && bash scripts/smoke/preview-network-capacity-safety.sh && bash scripts/smoke/preview-cleanup-workflow-shell.sh",
     "test:preview-images:docker": "node scripts/smoke/preview-image-lifecycle-docker.mjs",
     "test:preview-images:docker:repeated": "node scripts/smoke/preview-image-lifecycle-repeated.mjs",
     "test:platform-health-routing": "node scripts/smoke/platform-health-routing-contract.mjs",

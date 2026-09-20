@@ -1329,3 +1329,26 @@ Essa complementação serve para preencher IDs/evidências faltantes, não para 
 ### Aplicação da rotação de logs
 
 Novos previews recebem no override `json-file`, `max-size=25m`, `max-file=4` para DB/API/WEB. Validar com `docker compose ... config` e depois com inspect allowlisted de `HostConfig.LogConfig`. Containers existentes com `Config={}` precisam ser recriados para adotar a configuração; `docker update` não a aplica. Essa recriação não faz parte desta tarefa: só pode ocorrer por projeto de preview autenticado, com Compose e manifesto exatos, depois que capacidade de rede for recuperada. Nunca usar o Compose de produção nem recriar produção automaticamente.
+
+## Pausa do cleanup automático da PR #877
+
+Ao fechar ou mesclar a PR #877, confirmar no workflow **Preview Cleanup** exclusivamente:
+
+```text
+PREVIEW_CLEANUP_RESULT=DEFERRED
+PREVIEW_CLEANUP_EXECUTED=NO
+PREVIEW_CLEANUP_REASON=PR_877_NETWORK_CAPACITY_INCIDENT
+```
+
+Esse resultado significa “cleanup adiado”, não cleanup aprovado ou concluído. Para #877 não devem existir steps de checkout, SCP, SSH ou comandos VPS. Não reexecutar cleanup antigo e não criar dispatch/manual alternativo.
+
+### Gate para retirar a pausa
+
+1. Receber e reconciliar os IDs exatos de rede/container/imagem/volume e manifestos da #877.
+2. Autenticar PR, `run_id/run_attempt`, workflow, commit e estado do produtor; enumerar containers ativos e parados e todas as proteções.
+3. Comprovar capacidade de rede por janela operacional separada, sem confundir espaço em disco com subnet disponível.
+4. Aprovar um plano explícito para recursos da #877, incluindo Nginx, volume descartável e comportamento de imagens; preservar produção/backups/recovery/rollback.
+5. Submeter uma alteração revisada que remova **juntos** o job `defer-cleanup-pr-877` e `if: github.event.pull_request.number != 877` do job normal.
+6. Exigir todos os checks no novo HEAD e aprovação operacional antes de qualquer novo evento de fechamento aplicável.
+
+A integração do código da PR não satisfaz esses gates, não valida Preview Deploy e não autoriza merge. Limpeza histórica e recriação de previews antigos para receber rotação de logs permanecem atividades futuras separadas.
