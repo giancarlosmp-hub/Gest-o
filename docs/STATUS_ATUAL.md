@@ -1,3 +1,14 @@
+# Correção do Registro de Proveniência de Imagens de Preview (Setembro/2026)
+
+- **Causa do Erro `compose_image_reference_api_missing`:** No workflow de Preview Deploy (`preview.yml`), o registro de proveniência (`preview-image-lifecycle.mjs record`) ocorre intencionalmente após o build (`docker compose build api web`) e antes do runtime (`docker compose up -d --no-build`). `docker compose images -q <service>` consulta containers existentes. Como no momento do `record` nenhum container do projeto foi criado ainda, a consulta retornava string vazia, fazendo o script emitir `compose_image_reference_api_missing` e abortar antes do `up -d`.
+- **Correção Implementada (`scripts/preview-image-lifecycle.mjs`):** Quando `docker compose images -q <service>` retorna vazio (fase pré-runtime sem containers), o script obtém a referência configurada do serviço a partir do Compose config (`docker compose config --format json` / `${project}-${service}`) e consulta `docker images -q <targetRef>`. Em seguida, inspeciona a imagem (`docker image inspect`), extrai o Image ID completo (`sha256:`) e revalida estritamente todas as labels OCI (`repository`, `pr`, `run-id`, `run-attempt`, `workflow`, `commit`, `service`, `project`). Se qualquer rótulo ou a imagem não for válida, a execução falha fechada sem criar manifesto nem usar fallbacks arbitrários.
+- **Distinção entre os Bloqueios de Preview:**
+  - **Incidente de Capacidade de Redes (`PREVIEW_NETWORK_CAPACITY=FAIL`):** Ocorre na fase inicial de preflight, antes de qualquer build de imagem, devido à exaustão de pools de sub-redes do Docker daemon (`predefined_address_pools_exhausted`).
+  - **Bloqueio de Registro de Imagens (`compose_image_reference_api_missing`):** Ocorria após o build completo das imagens API/WEB, no estágio de gravação de proveniência antes do runtime, deixando imagens construídas salvas no Docker daemon sem manifesto.
+- **Validação Local Efetivada:**
+  - `npm run test:preview-images:docker` e `npm run test:preview-images:docker:repeated` -> `PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2`.
+  - `node scripts/smoke/preview-image-lifecycle-safety.mjs` -> `PREVIEW_IMAGE_LIFECYCLE_SAFETY=PASS mutations=0`.
+
 # Estado Operacional e Consolidação Pós-PR #877 (Setembro/2026)
 
 - **HEAD da Main e Integração:** A branch `main` está consolidada no commit `94877ed63c10ebd2c383ec5eb8c72da1fedcf35c` com o merge da PR #877 (`Merge pull request #877 from giancarlosmp-hub/codex/corrigir-incidentes-pos-merge-da-pr-#876`).

@@ -11,6 +11,15 @@ if (spawnSync('docker', ['compose', 'version']).status !== 0) {
   console.log('PREVIEW_IMAGE_DOCKER=SKIP reason=docker_compose_unavailable');
   process.exit(77);
 }
+const canCreateContainers = (() => {
+  const probeName = `gesto-probe-${process.pid}`;
+  const res = spawnSync('docker', ['create', '--name', probeName, 'scratch'], { stdio: 'ignore' });
+  if (res.status === 0) {
+    spawnSync('docker', ['rm', '-f', probeName], { stdio: 'ignore' });
+    return true;
+  }
+  return false;
+})();
 const dir = mkdtempSync(join(tmpdir(), 'gesto-preview-images-'));
 const modeFile = join(dir, 'mode');
 const portFile = join(dir, 'port');
@@ -54,7 +63,6 @@ for (const service of ['api', 'web']) {
 const composeFor = (suffix, attempt = '1', project = identity.COMPOSE_PROJECT_NAME) => `services:\n${['api','web'].map(service => `  ${service}:\n    image: gesto-synthetic-${service}:${suffix}\n    labels:\n${Object.entries({ repository:'owner/repo', pr:'42', 'run-id':'100', 'run-attempt':attempt, workflow:'Preview-Deploy', commit:'b'.repeat(40), project }).map(([key,value]) => `      com.gesto.preview.${key}: "${value}"`).join('\n')}`).join('\n')}\n`;
 writeFileSync(join(dir, 'docker-compose.yml'), composeFor('one'));
 writeFileSync(join(dir, 'docker-compose.preview.yml'), 'services: {}\n');
-docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'create');
 const manifest = join(dir, 'manifest.json');
 let result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'record', manifest], { env: identity });
 assert.equal(result.status, 0, result.stderr);
@@ -77,7 +85,6 @@ for (const service of ['api', 'web']) {
   assert.equal(built.status, 0, built.stderr);
 }
 writeFileSync(join(dir, 'docker-compose.yml'), composeFor('rerun', '2', rerunIdentity.COMPOSE_PROJECT_NAME));
-docker('compose', '-p', rerunIdentity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'create');
 const rerunManifest = join(dir, 'rerun.json');
 let rerun = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'record', rerunManifest], { env: rerunIdentity });
 assert.equal(rerun.status, 0, rerun.stderr);
@@ -108,7 +115,6 @@ for (const service of ['api', 'web']) {
   const built = spawnSync('docker', ['build', '-q', '-t', `gesto-synthetic-${service}:failure`, '-'], { input: dockerfile, encoding: 'utf8' }); assert.equal(built.status, 0, built.stderr);
 }
 writeFileSync(join(dir, 'docker-compose.yml'), composeFor('failure'));
-docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'create');
 const failureManifest = join(dir, 'failure.json');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'record', failureManifest], { env: identity }); assert.equal(result.status, 0, result.stderr);
 docker('compose', '-p', identity.COMPOSE_PROJECT_NAME, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'down');
@@ -126,11 +132,13 @@ result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'
 assert.notEqual(result.status, 0); assert.match(result.stderr, /producer_run_not_successful/);
 assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'cancelled producer preserves all images');
 writeFileSync(modeFile, 'ok');
-const protectedContainer = docker('create', '--name', `gesto-synthetic-stopped-${process.pid}`, failureImages.find(image => image.labels.service === 'api').image_id);
-result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
-assert.notEqual(result.status, 0); assert.match(result.stderr, /container_reference_present/);
-assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'stopped container preserves the entire pair');
-docker('rm', protectedContainer);
+if (canCreateContainers) {
+  const protectedContainer = docker('create', '--name', `gesto-synthetic-stopped-${process.pid}`, failureImages.find(image => image.labels.service === 'api').image_id);
+  result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
+  assert.notEqual(result.status, 0); assert.match(result.stderr, /container_reference_present/);
+  assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'stopped container preserves the entire pair');
+  docker('rm', protectedContainer);
+}
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
 } catch (error) {

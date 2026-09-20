@@ -54,7 +54,23 @@ if (!['record', 'authorize', 'cleanup'].includes(command) || !manifestPath) die(
 
 if (command === 'record') {
   const project = process.env.COMPOSE_PROJECT_NAME || die('project_missing');
-  const images = ['api', 'web'].map(service => resolveLocalImage(docker('compose', '-p', project, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'images', '-q', service), service));
+  const resolveServiceRaw = service => {
+    let raw = docker('compose', '-p', project, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'images', '-q', service);
+    if (!lines(raw).length) {
+      let targetRef = `${project}-${service}`;
+      try {
+        const cfg = JSON.parse(docker('compose', '-p', project, '-f', 'docker-compose.yml', '-f', 'docker-compose.preview.yml', 'config', '--format', 'json'));
+        if (cfg.services?.[service]?.image) targetRef = cfg.services[service].image;
+      } catch {}
+      try {
+        raw = docker('images', '-q', targetRef);
+      } catch {
+        raw = '';
+      }
+    }
+    return raw;
+  };
+  const images = ['api', 'web'].map(service => resolveLocalImage(resolveServiceRaw(service), service));
   if (new Set(images.map(image => image.image_id)).size !== 2) die('service_image_identity_not_distinct');
   images.sort((a, b) => a.labels.service.localeCompare(b.labels.service));
   for (const image of images) assertIdentity(image.labels, envIdentity(image.labels.service));
