@@ -1,3 +1,28 @@
+# Registro Histórico Operacional Pós-PR #877 (Setembro/2026)
+
+## Encerramento e Mitigação dos Loops de Restart de Previews Legados (#508 e #510)
+- **Diagnóstico e Causa:** Os previews históricos #508 e #510 (em especial `gesto-pr-510-api-1`) entravam em ciclo contínuo de restart e geravam grandes volumes de logs por ausência de limite de rotação no arquivo Compose.
+- **Ações Executadas na VPS:** Os containers de aplicação de #508 e #510 foram removidos de forma controlada pelo operador. A causa original interna da falha das APIs dos previews legados não foi comprovada.
+- **Remoção Controlada de Previews Parados (#526, #527 e #528):** Containers e redes das PRs #526–#528 foram removidos de forma controlada pelo operador, aliviando o espaço em disco na VPS e mantendo a produção observada operacional e saudável.
+- **Preservação de Dados e Volumes:**
+  - O banco histórico original (`gest-o_pgdata`) e os volumes dos previews #508/#510 (`gesto_pgdata_pr_508_*` e `gesto_pgdata_pr_510_*`) foram preservados.
+  - O banco de produção no volume `gest-o_pgdata_clean_v2_20260717` e os backups em `/root/backups/` permanecem integralmente preservados. Manifestos de checksum SHA-256 estão disponíveis; a restauração completa não foi testada nesta etapa.
+- **Política Permanente de Não-Intervenção Destrutiva:**
+  - O banco de produção NÃO pode ser zerado, recriado, restaurado por cima ou submetido a migrations destrutivas.
+  - Proibida a deleção ou execução de `prune` sobre volumes de banco ou backups históricos.
+- **Política de Rotação de Logs em Novos Previews:**
+  - Configurada a rotação de logs com o driver `json-file` (`max-size: 25m`, `max-file: 4`) em `docker-compose.preview.yml`.
+  - Esta alteração afeta exclusivamente novos previews e não modifica in-place containers antigos existentes.
+- **Diferenciação entre Capacidade de Disco e Capacidade de Sub-redes Docker:**
+  - A liberação de espaço em disco na VPS (alcançando ~17 GB livres) não equivale à recuperação ou liberação automática de sub-redes no IPAM do Docker daemon.
+  - O Preview Deploy continua apresentando o bloqueio de preflight: `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted`.
+  - Uma sonda isolada de criação de ponte passou (`NETWORK_CAPACITY=PASS PROBE_REMOVED=YES`), mas isso não comprova a disponibilidade completa dos pools padrão do Docker.
+- **Critérios para Futuro Preview Deploy Controlado:**
+  1. Coleta e inspeção do inventário de sub-redes Docker via `scripts/diagnose-preview-networks.mjs` (`preview-networks.json`).
+  2. Confirmação da alocação de IPAM sem colisão com sub-redes ativas.
+  3. Verificação da passagem da sonda de preflight de capacidade.
+  4. Manutenção das regras de rotação de logs para novos containers.
+
 ## Regressão de localização do gate de isolamento — PR #875 (16/09/2026)
 
 A extração correta do shell remoto deixou obsoleto `preview-run-isolation-safety.mjs`: o teste continuava inspecionando apenas `.github/workflows/preview-cleanup.yml` e, por isso, relatou falsamente a ausência de `actions/runs/${owner_run}`. A consulta autenticada permanece no runner realmente executado, enquanto o lifecycle valida PR fechada, identidade completa do run (id/attempt/SHA/workflow/event), sucesso, correlação com o PR e concorrência. A correção testa a cadeia inteira **workflow copia → workflow executa → runner consulta owner_run → lifecycle autentica e correlaciona**, sem flexibilizar nenhum gate.

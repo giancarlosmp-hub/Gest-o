@@ -1,3 +1,28 @@
+# Estado Operacional e Consolidação Pós-PR #877 (Setembro/2026)
+
+- **HEAD da Main e Integração:** A branch `main` está consolidada no commit `94877ed63c10ebd2c383ec5eb8c72da1fedcf35c` com o merge da PR #877 (`Merge pull request #877 from giancarlosmp-hub/codex/corrigir-incidentes-pos-merge-da-pr-#876`).
+- **Estado de Produção:** O CRM Gest-o foi observado operacional e saudável no ambiente de produção. O banco de dados produtivo utiliza o volume `gest-o_pgdata_clean_v2_20260717` (PostgreSQL 16) e está em uso normal. Não é permitido zeramento, recriação, restauração por cima ou migration destrutiva sobre este banco.
+- **Remoção Controlada de Containers Antigos e Espaço em Disco:**
+  - Os containers de aplicação antigos dos previews #508 e #510 entravam em loop contínuo de reinício e geravam grande volume de logs. Esses containers de aplicação foram removidos de forma controlada, cessando o loop de restart.
+  - A causa original da falha interna das APIs dos previews #508 e #510 não foi comprovada.
+  - Os containers e redes dos previews #526, #527 e #528 também foram removidos de forma controlada.
+  - O espaço em disco na VPS foi recuperado e a produção permaneceu saudável.
+- **Preservação do Banco Histórico, Volumes e Backups:**
+  - O banco histórico original (`gest-o_pgdata`) e os volumes dos previews #508 e #510 (`gesto_pgdata_pr_508_*` e `gesto_pgdata_pr_510_*`) foram integralmente preservados.
+  - Os backups de produção estão preservados em `/root/backups/`, com manifestos de checksum SHA-256 disponíveis; a restauração completa não foi testada nesta etapa.
+- **Política de Rotação de Logs:**
+  - Todos os serviços do override de preview (`db`, `api`, `web`) estão configurados para usar o driver `json-file` com `max-size: 25m` e `max-file: 4`.
+  - Esta rotação de logs aplica-se exclusivamente a novos previews e não altera in-place containers antigos já existentes.
+- **Incidente Aberto de Capacidade de Redes Docker:**
+  - O Preview Deploy continua falhando antes do build com `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted`.
+  - Uma sonda isolada de criação de rede passou (`NETWORK_CAPACITY=PASS PROBE_REMOVED=YES`), mas isso não comprova a disponibilidade completa nem a reconciliação dos pools padrão de sub-redes do Docker daemon. O incidente de capacidade de redes permanece aberto.
+- **Pausa Protegida do Cleanup da PR #877:**
+  - No evento `pull_request.closed`, a PR #877 executa o job dedicado `defer-cleanup-pr-877`, que emite `PREVIEW_CLEANUP_RESULT=DEFERRED` e `PREVIEW_CLEANUP_EXECUTED=NO`. O cleanup automático para a PR #877 permanece adiado e protegido sem acessar a VPS ou remover recursos.
+- **Pendências Objetivas:**
+  1. Mapeamento e coleta do inventário read-only de sub-redes Docker via `scripts/diagnose-preview-networks.mjs` (`preview-networks.json`).
+  2. Validação da capacidade alocadora do daemon Docker para autorizar novos Preview Deploys controlados.
+  3. Manutenção da estabilidade observada no CRM em produção sem modificações mutáveis.
+
 # PR #877 — integração preparada com cleanup explicitamente adiado (20/09/2026)
 
 - **SHAs e gates:** o HEAD remoto informado `03c7d3cba284825ff6ab87377f2f7ebb8fdbcc9f` passou Docker Compose CI (lifecycle repetido, cleanup shell, isolamento, tenant readiness, Orders e login). O checkout local recebido para esta alteração é o commit consolidado `11cd66a`; o objeto remoto não existe localmente e não há remote/autenticação. Os resultados de `03c7d3c...` não são atribuídos ao novo commit local, que exige novos checks.
