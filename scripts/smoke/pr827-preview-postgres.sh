@@ -15,8 +15,11 @@ docker network create --internal "$network" >/dev/null
 HARNESS_NETWORK_CREATED=1
 docker run -d --pull=never --name "$name" --network "$network" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=salesforce_pro postgres:16 >/dev/null
 HARNESS_CONTAINER_CREATED=1
-for _ in {1..60}; do docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$name" pg_isready -U postgres -d salesforce_pro >/dev/null
+for _ in {1..60}; do
+  if docker exec "$name" psql -X -U postgres -d salesforce_pro -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+docker exec "$name" psql -X -U postgres -d salesforce_pro -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' >/dev/null
 harness_psql(){ docker exec -i "$name" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
 sql_file(){ harness_psql -AtF $'\t' -f - <"$1"; }
 reset(){ harness_psql -c 'DROP SCHEMA IF EXISTS other CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;' >/dev/null; }
