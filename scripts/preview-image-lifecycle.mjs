@@ -81,45 +81,47 @@ if (!same(Object.keys(manifest).sort(), ['created_at', 'format', 'images', 'proj
 if (!/^gesto-pr-[0-9]+-[0-9]+-[0-9]+$/.test(manifest.project || '')) die('project_invalid');
 const expectedBase = envIdentity('');
 if (manifest.project !== expectedBase.project) die('manifest_project_diverged');
+if (!/^[1-9][0-9]*$/.test(expectedBase.pr || '') || !/^[1-9][0-9]*$/.test(expectedBase['run-id'] || '') || !/^[1-9][0-9]*$/.test(expectedBase['run-attempt'] || '')) die('numeric_identity_invalid');
 
 const github = async path => {
   const response = await fetch(`${process.env.GITHUB_API_URL || 'https://api.github.com'}/repos/${expectedBase.repository}${path}`, { headers: { Authorization: `Bearer ${process.env.GITHUB_TOKEN}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } });
   if (!response.ok) die(`github_query_failed_${response.status}`);
   return response.json();
 };
-const pr = await github(`/pulls/${expectedBase.pr}`);
-if (pr.state !== 'closed') die('pr_not_closed');
-const run = await github(`/actions/runs/${expectedBase['run-id']}`);
-if (run.status !== 'completed') die('producer_run_not_completed');
-if (run.conclusion !== 'success') die('producer_run_not_successful');
-const identityDiverged = field => die(`authenticated_run_identity_diverged field=${field}`);
-if (String(run.run_attempt) !== String(expectedBase['run-attempt'])) identityDiverged('run_attempt');
-if (!/^[a-f0-9]{40}$/.test(run.head_sha || '')) identityDiverged('run_head_sha');
-if (run.name !== 'Preview Deploy') identityDiverged('workflow_name');
-if (run.path !== '.github/workflows/preview.yml') identityDiverged('workflow_path');
-if (run.event !== 'pull_request') identityDiverged('event');
-if (!Number.isSafeInteger(run.workflow_id) || run.workflow_id <= 0) identityDiverged('workflow_id');
-const authenticatedWorkflow = await github(`/actions/workflows/${run.workflow_id}`);
-if (authenticatedWorkflow.path !== '.github/workflows/preview.yml') identityDiverged('workflow_id_path');
-if (typeof run.head_branch !== 'string' || run.head_branch !== pr.head?.ref) identityDiverged('head_ref');
-const correlatedPull = Array.isArray(run.pull_requests) && run.pull_requests.find(x => String(x.number) === String(expectedBase.pr));
-if (!correlatedPull) die('run_pr_correlation_missing');
-// For pull_request runs GitHub's run.head_sha is the workflow-run revision
-// (commonly the synthetic merge revision). The build deliberately checks out
-// pull_request.head.sha. Authenticate that distinct build revision through the
-// run's PR association and the current PR object instead of treating head_sha
-// as the image commit.
-if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
-if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
-
-for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
-  for (let page = 1; ; page++) {
-    const pageData = await github(`/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`);
-    const rows = pageData.workflow_runs || [];
-    if (rows.some(x => x.id !== Number(expectedBase['run-id']) && x.pull_requests?.some(p => String(p.number) === String(expectedBase.pr)))) die(`concurrent_run_${status}`);
-    if (rows.length < 100) break;
+const identityDiverged = (field, detail = '') => die(`authenticated_run_identity_diverged field=${field} pr=${expectedBase.pr} run_id=${expectedBase['run-id']}${detail}`);
+const authenticateProducer = async () => {
+  const pr = await github(`/pulls/${expectedBase.pr}`);
+  if (pr.state !== 'closed') die('pr_not_closed');
+  // The unqualified run endpoint describes the latest attempt. A re-run keeps
+  // run_id and increments run_attempt, so authenticate the exact producer whose
+  // immutable attempt is recorded in the project, labels and manifest.
+  const run = await github(`/actions/runs/${expectedBase['run-id']}/attempts/${expectedBase['run-attempt']}`);
+  if (run.status !== 'completed') die('producer_run_not_completed');
+  if (run.conclusion !== 'success') die('producer_run_not_successful');
+  if (!Number.isSafeInteger(run.run_attempt) || String(run.run_attempt) !== expectedBase['run-attempt']) identityDiverged('run_attempt', ` expected=${expectedBase['run-attempt']} observed=${Number.isSafeInteger(run.run_attempt) ? run.run_attempt : 'INVALID'}`);
+  if (!/^[a-f0-9]{40}$/.test(run.head_sha || '')) identityDiverged('run_head_sha');
+  if (run.name !== 'Preview Deploy') identityDiverged('workflow_name');
+  if (run.path !== '.github/workflows/preview.yml') identityDiverged('workflow_path');
+  if (run.event !== 'pull_request') identityDiverged('event');
+  if (!Number.isSafeInteger(run.workflow_id) || run.workflow_id <= 0) identityDiverged('workflow_id');
+  const authenticatedWorkflow = await github(`/actions/workflows/${run.workflow_id}`);
+  if (authenticatedWorkflow.path !== '.github/workflows/preview.yml') identityDiverged('workflow_id_path');
+  if (typeof run.head_branch !== 'string' || run.head_branch !== pr.head?.ref) identityDiverged('head_ref');
+  const correlatedPull = Array.isArray(run.pull_requests) && run.pull_requests.find(x => String(x.number) === String(expectedBase.pr));
+  if (!correlatedPull) die('run_pr_correlation_missing');
+  // The build checks out pull_request.head.sha, distinct from run.head_sha.
+  if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+  if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+  for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
+    for (let page = 1; ; page++) {
+      const pageData = await github(`/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`);
+      const rows = pageData.workflow_runs || [];
+      if (rows.some(x => x.id !== Number(expectedBase['run-id']) && x.pull_requests?.some(p => String(p.number) === String(expectedBase.pr)))) die(`concurrent_run_${status}`);
+      if (rows.length < 100) break;
+    }
   }
-}
+};
+await authenticateProducer();
 
 const evidenceRoots = (process.env.PROTECTED_IMAGE_EVIDENCE_ROOTS || '/var/log/gest-o/deploy,/var/log/gest-o/backup').split(',');
 const evidenceContains = id => {
@@ -172,7 +174,9 @@ if (command === 'authorize') {
 }
 
 for (const current of candidates) {
-  // Final TOCTOU revalidation, immediately before each non-force deletion.
+  // Repeat authenticated authorization and local TOCTOU checks immediately
+  // before every individual, non-force image deletion.
+  await authenticateProducer();
   const finalImage = facts(inspectImages([current.image_id])[0]);
   if (!same(finalImage, current)) die('image_changed_before_delete');
   const finalContainers = lines(docker('ps', '-aq', '--no-trunc'));

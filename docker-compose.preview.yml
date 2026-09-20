@@ -1,7 +1,14 @@
 name: ${COMPOSE_PROJECT_NAME}
 
+x-preview-logging: &preview_logging
+  driver: json-file
+  options:
+    max-size: "25m"
+    max-file: "4"
+
 services:
   db:
+    logging: *preview_logging
     labels: &preview_labels
       com.gesto.preview: "true"
       com.gesto.preview.pr: ${PREVIEW_OWNER_PR:?PREVIEW_OWNER_PR is required}
@@ -18,6 +25,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-salesforce_pro_preview}"]
 
   api:
+    logging: *preview_logging
     labels: *preview_labels
     environment:
       NODE_ENV: production
@@ -37,6 +45,7 @@ services:
       ADMIN_BOOTSTRAP_REGION: ${ADMIN_BOOTSTRAP_REGION:-}
 
   web:
+    logging: *preview_logging
     labels: *preview_labels
 
 volumes:

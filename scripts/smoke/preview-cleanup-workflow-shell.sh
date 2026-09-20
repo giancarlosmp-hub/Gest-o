@@ -3,7 +3,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/provenance" "$tmp/preview/pr-42" "$tmp/nginx/sites-enabled" "$tmp/nginx/sites-available" "$tmp/copied/scripts"
-for project in gesto-pr-42-100-1 gesto-pr-42-101-1; do
+for project in gesto-pr-42-100-1 gesto-pr-42-100-2 gesto-pr-42-101-1; do
   mkdir -p "$tmp/preview/pr-42/$project"
   : >"$tmp/preview/pr-42/$project/docker-compose.yml"
   : >"$tmp/preview/pr-42/$project/docker-compose.preview.yml"
@@ -15,7 +15,7 @@ cat >"$tmp/bin/docker" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ $1 == ps && $2 == -a && "$*" == *'com.gesto.preview=true'* ]]; then
-  printf '%s\n' gesto-pr-42-100-1 gesto-pr-42-101-1; exit
+  printf '%s\n' ${FAKE_DISCOVERY_PROJECTS:-gesto-pr-42-100-1 gesto-pr-42-100-2 gesto-pr-42-101-1}; exit
 fi
 if [[ $1 == network && $2 == ls && "$*" == *'com.gesto.preview=true'* ]]; then exit; fi
 if [[ $1 == volume && $2 == ls && "$*" == *'com.gesto.preview=true'* ]]; then exit; fi
@@ -31,27 +31,31 @@ if [[ $1 == inspect ]]; then
   case "$*" in
     *preview.pr*) printf '42\n';;
     *preview.run-id*) [[ ${*: -1} == *100* ]] && printf '100\n' || printf '101\n';;
-    *preview.run-attempt*) printf '1\n';;
+    *preview.run-attempt*) [[ ${*: -1} == *-2-container* ]] && printf '2\n' || printf '1\n';;
     *preview.workflow*) printf 'Preview-Deploy\n';;
   esac
   exit
 fi
 if [[ $1 == network && $2 == ls ]]; then exit; fi
 if [[ $1 == volume && $2 == ls ]]; then exit; fi
-if [[ $1 == compose ]]; then exit; fi
+if [[ $1 == compose ]]; then [[ -z "${MUTATION_LOG:-}" ]] || printf 'compose\n' >>"$MUTATION_LOG"; exit; fi
 echo "unexpected docker command: $*" >&2; exit 2
 SH
 cat >"$tmp/bin/curl" <<'SH'
 #!/usr/bin/env bash
-printf '{"status":"completed","head_sha":"%040d"}\n' 0
+url=${*: -1}; attempt=${url##*/}; attempt=$((attempt + ${FAKE_API_ATTEMPT_OFFSET:-0}))
+printf '{"status":"completed","run_attempt":%s,"head_sha":"%040d"}\n' "$attempt" 0
 SH
 cat >"$tmp/bin/node" <<'SH'
 #!/usr/bin/env bash
 if [[ $1 == -e && $# -gt 2 ]]; then
-  project=${4:-}; run=${project#gesto-pr-42-}; run=${run%-1}
-  printf '42\t%s\t1\tPreview-Deploy\t%040d' "$run" 0
+  project=${4:-}; run=${project#gesto-pr-42-}; run=${run%-*}; attempt=${project##*-}
+  printf '42\t%s\t%s\tPreview-Deploy\t%040d' "$run" "$attempt" 0
 elif [[ $1 == -e ]]; then
-  cat | sed -n 's/.*"status":"\([^"]*\)".*/\1/p'
+  payload=$(cat)
+  status=$(printf '%s' "$payload" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+  attempt=$(printf '%s' "$payload" | sed -n 's/.*"run_attempt":\([0-9][0-9]*\).*/\1/p')
+  printf '%s\t%s' "$status" "$attempt"
 else
   printf 'LIFECYCLE_CALLED=%s\n' "$(basename "$3")"
 fi
@@ -80,8 +84,9 @@ set -e
 test "$legacy_rc" -eq 141
 
 # Every project has immutable provenance; 102 proves discovery after runtime vanished.
-for run in 100 101 102; do
-  printf '{"format":1,"project":"gesto-pr-42-%s-1","images":[{"labels":{"pr":"42","run-id":"%s","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"%s","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' "$run" "$run" "$run" >"$tmp/provenance/gesto-pr-42-$run-1.json"
+for producer in 100:1 100:2 101:1 102:1; do
+  run=${producer%:*}; attempt=${producer#*:}
+  printf '{"format":1,"project":"gesto-pr-42-%s-%s","images":[{"labels":{"pr":"42","run-id":"%s","run-attempt":"%s","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"%s","run-attempt":"%s","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' "$run" "$attempt" "$run" "$attempt" "$run" "$attempt" >"$tmp/provenance/gesto-pr-42-$run-$attempt.json"
 done
 
 if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic \
@@ -92,8 +97,30 @@ if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKE
   exit 1
 fi
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-1' "$tmp/out"
+grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-101-1' "$tmp/out"
 grep -Fq 'PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=gesto-pr-42-102-1' "$tmp/out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-102-1' "$tmp/out"
 grep -Fq NGINX_RELOAD=PASS "$tmp/out"
-echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=3 large_output_lines=20000 manifest_without_runtime=PASS'
+
+# A conflicting authenticated attempt must stop before compose down or any
+# later nginx/image mutation. This uses only disposable fakes.
+rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+mkdir -p "$tmp/copied/scripts"
+cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+: >"$tmp/copied/scripts/lifecycle.mjs"
+mkdir -p "$tmp/preview/pr-42/gesto-pr-42-100-1"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+set +e
+PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS=gesto-pr-42-100-1 FAKE_API_ATTEMPT_OFFSET=1 MUTATION_LOG="$tmp/mutations" \
+  CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+  PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/diverged.out" 2>"$tmp/diverged.err"
+diverged_rc=$?
+set -e
+test "$diverged_rc" -ne 0
+test ! -e "$tmp/mutations"
+grep -Fq 'field=run_attempt pr=42 run_id=100 expected=1 observed=2' "$tmp/diverged.out"
+echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0'

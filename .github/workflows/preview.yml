@@ -240,8 +240,15 @@ jobs:
             }
             trap cleanup_current_run_on_failure EXIT
 
+            echo "PREVIEW_DEPLOY_STEP=network_capacity_preflight"
+            bash scripts/preview-network-capacity-preflight.sh
+            echo "PREVIEW_DEPLOY_STEP=build_candidate_images"
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml build api web
+            PREVIEW_PROVENANCE_ROOT="/var/www/preview-provenance"
+            install -d -m 700 "$PREVIEW_PROVENANCE_ROOT"
+            node scripts/preview-image-lifecycle.mjs record "$PREVIEW_PROVENANCE_ROOT/${COMPOSE_PROJECT_NAME}.json"
             echo "PREVIEW_DEPLOY_STEP=start_candidate"
-            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --build
+            docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml up -d --no-build
             echo "PREVIEW_MIGRATION_STATUS=PASS"
             validate_current_run_ownership
             API_PORT="$(docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml port api 4000 | awk -F: 'NR==1{print $NF}')"
@@ -301,8 +308,9 @@ jobs:
             fi
             echo "PREVIEW_OBSERVED_SHA=${API_DEPLOYED_SHA}"
             echo "PREVIEW_SHA_MATCH=YES"
-            PREVIEW_PROVENANCE_ROOT="/var/www/preview-provenance"
-            install -d -m 700 "$PREVIEW_PROVENANCE_ROOT"
+            # Re-record only after runtime identity and deployed SHAs pass. If
+            # network creation failed, the pre-runtime manifest remains as the
+            # durable discovery path for the already-built image pair.
             node scripts/preview-image-lifecycle.mjs record "$PREVIEW_PROVENANCE_ROOT/${COMPOSE_PROJECT_NAME}.json"
 
             echo "PREVIEW_DEPLOY_STEP=seed_candidate"

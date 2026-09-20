@@ -1199,3 +1199,156 @@ printf 'project=%s manifest=%s containers=%s networks=%s volumes=%s\n' "$project
 ```
 
 Se qualquer consulta GitHub estiver indisponível/incompleta, PR tiver reaberto, produtor não estiver concluído com sucesso, attempt/workflow/event/PR/commit divergir, houver run concorrente, referências mudarem ou qualquer container (inclusive parado) referenciar a imagem, preservar tudo e investigar o campo sanitizado. A conclusão operacional só ocorre após observar a nova execução e inventariar o resultado; CI verde sozinho não encerra o incidente.
+# Gate pós-PR #876: tentativa exata e tenant readiness (17/09/2026)
+
+Não reexecute o cleanup #330 e não faça limpeza manual. Em novo evento futuro, aceite o cleanup somente se cada manifesto for correlacionado ao endpoint autenticado `/actions/runs/{run_id}/attempts/{run_attempt}` e se divergência registrar `field=run_attempt`, PR, run_id e expected/observed, nunca token ou ambiente. A autorização deve passar antes de `compose down`, depois do teardown e imediatamente antes de cada remoção de imagem. Manifestos de attempts anteriores não devem ser comparados ao endpoint “latest”; múltiplos manifestos do mesmo PR/run são candidatos independentes e todos falham fechados sem evidência.
+
+No `compose-smoke`, readiness de PostgreSQL não pode ser inferida de `pg_isready`. O gate obrigatório abre sessão com `psql -X -v ON_ERROR_STOP=1` no banco descartável `tenant_data_readiness`, executa `SELECT current_database()` e exige exatamente o nome configurado, sem stderr, antes das fixtures. Exigir `TENANT_DATA_READINESS_DATABASE_READY=PASS` e `TENANT_DATA_READINESS_POSTGRES=PASS`; ausência do banco deve falhar, nunca criar silenciosamente outro nome ou continuar.
+
+Antes de qualquer retomada operacional de #874, #875 ou #876, publicar a branch corretiva, observar CI real do mesmo HEAD e exigir sem SKIP/exit 77: `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS`, `TENANT_DATA_READINESS_DATABASE_READY=PASS`, `TENANT_DATA_READINESS_POSTGRES=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS`. O ambiente local desta investigação não tinha remote/autenticação/Docker; resultados remotos são `NOT_OBSERVED` e provas Docker/PostgreSQL são `NOT_EXECUTED`. Não executar deploy, cutover, Recovery, migration, prune, remoção de volume/backup/imagem produtiva nem reativar apply legado.
+
+## Diagnóstico read-only da capacidade de rede — PR #877
+
+Enquanto existir `all predefined address pools have been fully subnetted`, não reexecute Preview Deploy. No checkout aprovado, produza o inventário sanitizado com:
+
+```bash
+node scripts/diagnose-preview-networks.mjs > preview-networks.json
+```
+
+O comando consulta apenas `docker network ls/inspect`, `docker ps`, `docker container inspect` e `docker info`; sua saída contém IDs, nomes, driver/escopo, sub-redes/IPAM, labels Compose/proveniência allowlisted, endpoints e containers associados inclusive parados. Guarde o arquivo como evidência operacional: IPs e topologia não são credenciais, mas não devem ser publicados sem revisão. Ele não imprime `Config.Env` ou inspect bruto e marca todas as redes `removal=NOT_AUTHORIZED`.
+
+Classifique somente após revisar: (1) redes acumuladas com ownership completo; (2) `DefaultAddressPools` restritos ou `NOT_OBSERVED`; (3) sub-redes duplicadas/conflitantes; (4) origem incompleta/externa/produtiva protegida. Ausência de endpoints nunca basta para remover. Qualquer proposta posterior deve listar IDs exatos, labels PR/run/attempt/workflow/projeto, containers running/exited, proteção produtiva/externa e autorização humana. Não executar `network prune`, `network rm`, restart Docker, editar `daemon.json` ou ampliar pools como parte deste diagnóstico.
+
+No novo fluxo, exigir `PREVIEW_NETWORK_CAPACITY=PASS` antes do primeiro build; a sonda pode remover somente a bridge que acabou de criar, após identidade e zero endpoints. O manifesto deve existir depois de `build api web` e antes de `up -d --no-build`, permitindo retomada fail-closed se a criação do runtime falhar. Isso não autoriza tocar nas imagens já construídas pelo run `35253792293`, cujo manifesto/IDs/estado são desconhecidos. Retomadas de #874, #875, #876 e #877 continuam bloqueadas até inventário, correção de capacidade autorizada e todos os gates CI obrigatórios verdes sem SKIP/77.
+
+### Executar o inventário sem atualizar a VPS
+
+Não é necessário fazer checkout, pull ou merge na VPS para usar o diagnóstico. Em uma estação autorizada com o worktree revisado da PR, transporte o programa somente por stdin e mantenha o resultado local:
+
+```bash
+ssh -p <porta-ssh-aprovada> <usuario-aprovado>@<host-aprovado> \
+  'node --input-type=module -' \
+  < scripts/diagnose-preview-networks.mjs \
+  > preview-networks.json
+```
+
+O comando remoto não grava o script nem altera o checkout. Ele executa somente o inventário Docker read-only documentado. Não colocar host/usuário reais em logs públicos; não encadear `network rm`, prune, restart, edição de pools ou qualquer comando de mutação. O resultado não autoriza remoção: encaminhe-o para revisão humana e associe qualquer proposta futura a IDs/labels/endpoints exatos.
+
+Para o CI do harness, `PREVIEW_IMAGE_DOCKER=PASS` só é válido quando termina com `teardown=pass helper_exit=awaited` e o processo retorna exit 0. Exigir duas ocorrências, uma por subprocesso terminado, seguidas de `PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2`. Ausência do segundo marcador, timeout, sinal, erro de teardown, SKIP ou exit 77 reprovam. O bloqueio de capacidade da VPS continua separado e impede novo Preview Deploy.
+
+### Procedimento completo de coleta para o HEAD corrigido
+
+Execute em uma estação autorizada com `gh`, `ssh` e `scp`. As variáveis de conexão devem vir do canal operacional privado; o procedimento não as imprime. Ele baixa o arquivo diretamente do SHA completo da PR #877, valida sintaxe/hash, usa diretório remoto separado e traz o JSON de volta sem tocar no checkout de produção:
+
+```bash
+set -euo pipefail
+REPOSITORY=giancarlosmp-hub/Gest-o
+PR_NUMBER=877
+: "${VPS_HOST:?defina pelo canal privado}"
+: "${VPS_USER:?defina pelo canal privado}"
+VPS_PORT=${VPS_PORT:-22022}
+
+APPROVED_SHA=$(gh pr view "$PR_NUMBER" --repo "$REPOSITORY" --json headRefOid --jq .headRefOid)
+[[ "$APPROVED_SHA" =~ ^[a-f0-9]{40}$ ]]
+printf 'DIAGNOSTIC_SOURCE_SHA=%s\n' "$APPROVED_SHA"
+
+LOCAL_BUNDLE=$(mktemp -d "${TMPDIR:-/tmp}/gesto-network-diagnostic.XXXXXX")
+LOCAL_SCRIPT="$LOCAL_BUNDLE/diagnose-preview-networks.mjs"
+LOCAL_JSON="$LOCAL_BUNDLE/preview-networks.json"
+gh api "repos/$REPOSITORY/contents/scripts/diagnose-preview-networks.mjs?ref=$APPROVED_SHA" \
+  --jq .content | tr -d '\n' | base64 --decode > "$LOCAL_SCRIPT"
+chmod 500 "$LOCAL_SCRIPT"
+node --check "$LOCAL_SCRIPT"
+LOCAL_SCRIPT_SHA256=$(sha256sum "$LOCAL_SCRIPT" | awk '{print $1}')
+[[ "$LOCAL_SCRIPT_SHA256" =~ ^[a-f0-9]{64}$ ]]
+
+REMOTE_DIR="/tmp/gesto-preview-network-diagnostic-$APPROVED_SHA"
+ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "umask 077; install -d -m 700 '$REMOTE_DIR'"
+scp -P "$VPS_PORT" "$LOCAL_SCRIPT" \
+  "$VPS_USER@$VPS_HOST:$REMOTE_DIR/diagnose-preview-networks.mjs"
+REMOTE_SCRIPT_SHA256=$(ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "chmod 500 '$REMOTE_DIR/diagnose-preview-networks.mjs'; sha256sum '$REMOTE_DIR/diagnose-preview-networks.mjs' | awk '{print \$1}'")
+[[ "$REMOTE_SCRIPT_SHA256" == "$LOCAL_SCRIPT_SHA256" ]]
+
+ssh -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+  "set -euo pipefail; umask 077; cd '$REMOTE_DIR'; \
+   node diagnose-preview-networks.mjs > preview-networks.json.tmp; \
+   node -e 'JSON.parse(require(\"fs\").readFileSync(process.argv[1],\"utf8\"))' preview-networks.json.tmp; \
+   chmod 600 preview-networks.json.tmp; \
+   mv preview-networks.json.tmp preview-networks.json"
+scp -P "$VPS_PORT" \
+  "$VPS_USER@$VPS_HOST:$REMOTE_DIR/preview-networks.json" "$LOCAL_JSON"
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$LOCAL_JSON"
+printf 'NETWORK_INVENTORY_RESULT=CAPTURED_READ_ONLY\nSOURCE_SHA=%s\nSCRIPT_SHA256=%s\nLOCAL_JSON=%s\n' \
+  "$APPROVED_SHA" "$LOCAL_SCRIPT_SHA256" "$LOCAL_JSON"
+```
+
+Não apague o diretório remoto durante a coleta: ele preserva script e resultado com o SHA de origem para auditoria. Isso não autoriza retenção indefinida nem remoção posterior sem decisão operacional. O script executa somente `docker network ls/inspect`, `docker ps -a`, `docker container inspect` e `docker info`; a saída é allowlisted e não contém `Config.Env`.
+
+### Análise obrigatória depois de receber o JSON
+
+1. Registre `SOURCE_SHA`, `SCRIPT_SHA256` e o hash SHA-256 do JSON recebido.
+2. Compare `default_address_pools` com todas as entradas `networks[].ipam`; conte sub-redes alocadas dentro de cada pool e examine `summary.duplicate_subnets`. Se pools forem `NOT_OBSERVED`, não conclua “acúmulo”: classifique configuração como pendente.
+3. Para cada rede candidata, registre em tabela: `network_id`, nome, driver/escopo, IPAM, labels completas allowlisted, endpoints, containers associados e estados running/exited, `preview_identity`, `protection_reason` e referências às PRs #874–#877.
+4. Classifique produção, rollback, recovery, incident, built-ins, externas e toda origem incompleta como protegidas. Rede vazia, nome `gesto-pr-*` ou PR fechada isoladamente não é ownership suficiente.
+5. Só prepare proposta — nunca execução — para IDs exatos cuja proveniência completa seja independente e cujos containers/endpoints, produção e evidências protegidas tenham sido reconciliados. Inclua benefício esperado, riscos, ordem, autorização humana necessária e rollback aplicável. Sem inventário recebido, causa e lista de IDs permanecem `PENDING_EVIDENCE`.
+
+## Plano revisável de recuperação dos previews — inventário de 19/09/2026
+
+### Proteções fora de todos os lotes
+
+Preservar incondicionalmente `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volumes `gest-o_pgdata_clean_v2_20260717` e `gest-o_pgdata`, e todo recurso de recovery, rollback, restauração ou backup. Antes e depois de qualquer janela futura, confirmar IDs, running/health, mounts, redes e CRM; nenhum comando deste plano executa essa janela.
+
+### Classificação e lotes propostos
+
+1. **Lote P0 — somente preservação:** as nove redes de #874–#876 com três endpoints e todos os recursos protegidos acima. Evidência presente: endpoints ativos. Ação proposta: nenhuma.
+2. **Lote D1 — diagnóstico de previews degradados:** projetos #508 e #510. Coletar restart count, health/status, IMAGE ID, network ID, volume, manifesto e attempt produtor; registrar somente trecho sanitizado do erro atual. O log ~2,07 GB é do `gesto-pr-510-api-1`, mas tamanho de log e restart não autorizam teardown. Ação proposta: decidir separadamente entre recuperação do preview ou futura aposentadoria autenticada.
+3. **Lote C1 — candidatos bloqueados:** `pr-526_default`, `pr-527_default`, `pr-528_default`. Ausência de endpoints é insuficiente porque há containers parados associados. Para cada um, preencher IDs completos da rede e containers, IMAGE IDs, volume, manifesto, PR/run/attempt/workflow/commit e resposta autenticada GitHub. Enquanto qualquer campo faltar ou divergir: `PRESERVE/NOT_PROVEN`.
+4. **Lote L1 — legado:** previews antigos sem manifesto íntegro e tentativa autenticável. Idade de cinco semanas, nome e labels não promovem o recurso. Ação proposta: preservar e encaminhar para revisão humana; o apply legado continua desabilitado.
+5. **Lote E1 — elegível futuro:** somente recursos que, depois da coleta complementar, tenham manifesto íntegro, labels e runtime congruentes, PR fechada, endpoint exato de attempt concluído/success, nenhuma execução concorrente, nenhuma referência por container ativo/parado e nenhuma proteção de produção/rollback/recovery/incident. A proposta deve enumerar IDs completos; sem isso o lote fica vazio.
+
+O resumo fornecido não contém os IDs do JSON anexado no contexto de filesystem desta sessão. Portanto, não preencher placeholders com nomes ou IDs inventados. Quando o arquivo efetivo for entregue, anexar uma tabela por recurso com `network_id`, `container_id`, `image_id`, volume, projeto, PR, run, attempt, commit, endpoints, estado, manifesto, resultado GitHub e decisão.
+
+### Coleta complementar mínima — não repetir inventário
+
+Para cada projeto listado nos lotes D1/C1 e para cada ID que o JSON apontar como candidato, coletar apenas:
+
+- o arquivo correspondente de `/var/www/preview-provenance/<projeto>.json`, preservando mode/owner e SHA-256;
+- `docker container inspect` reduzido a ID, nome, status/health, restart count, IMAGE ID, redes, mounts, labels allowlisted e `HostConfig.LogConfig` — nunca `Config.Env`;
+- `docker network inspect` reduzido ao ID já inventariado, IPAM, labels e endpoints;
+- `docker volume inspect` reduzido a nome, driver, labels e containers que o montam;
+- via `gh api` autenticado na estação, PR atual e `/actions/runs/<run_id>/attempts/<run_attempt>` para a identidade literal do manifesto.
+
+Essa complementação serve para preencher IDs/evidências faltantes, não para executar cleanup. Se o manifesto estiver ausente, inválido ou divergente, classificar legado/`NOT_PROVEN`.
+
+### Verificações de uma futura janela autorizada
+
+**Antes:** reexecutar somente probes read-only; confirmar produção/volumes protegidos; autenticar attempt exato; provar PR ainda fechada e ausência de runs concorrentes; revalidar manifesto/labels/tags/digests; enumerar containers inclusive parados; registrar `df`, número de redes e saúde produtiva. **Durante:** um lote por vez, somente IDs aprovados, sem prune/force e usando o cleanup versionado. **Depois:** repetir inventário, confirmar que apenas IDs aprovados mudaram, validar produção/CRM/PostgreSQL, volumes/backups, redes restantes, espaço e capacidade por uma sonda isolada. Falha em qualquer gate interrompe o lote seguinte.
+
+### Aplicação da rotação de logs
+
+Novos previews recebem no override `json-file`, `max-size=25m`, `max-file=4` para DB/API/WEB. Validar com `docker compose ... config` e depois com inspect allowlisted de `HostConfig.LogConfig`. Containers existentes com `Config={}` precisam ser recriados para adotar a configuração; `docker update` não a aplica. Essa recriação não faz parte desta tarefa: só pode ocorrer por projeto de preview autenticado, com Compose e manifesto exatos, depois que capacidade de rede for recuperada. Nunca usar o Compose de produção nem recriar produção automaticamente.
+
+## Pausa do cleanup automático da PR #877
+
+Ao fechar ou mesclar a PR #877, confirmar no workflow **Preview Cleanup** exclusivamente:
+
+```text
+PREVIEW_CLEANUP_RESULT=DEFERRED
+PREVIEW_CLEANUP_EXECUTED=NO
+PREVIEW_CLEANUP_REASON=PR_877_NETWORK_CAPACITY_INCIDENT
+```
+
+Esse resultado significa “cleanup adiado”, não cleanup aprovado ou concluído. Para #877 não devem existir steps de checkout, SCP, SSH ou comandos VPS. Não reexecutar cleanup antigo e não criar dispatch/manual alternativo.
+
+### Gate para retirar a pausa
+
+1. Receber e reconciliar os IDs exatos de rede/container/imagem/volume e manifestos da #877.
+2. Autenticar PR, `run_id/run_attempt`, workflow, commit e estado do produtor; enumerar containers ativos e parados e todas as proteções.
+3. Comprovar capacidade de rede por janela operacional separada, sem confundir espaço em disco com subnet disponível.
+4. Aprovar um plano explícito para recursos da #877, incluindo Nginx, volume descartável e comportamento de imagens; preservar produção/backups/recovery/rollback.
+5. Submeter uma alteração revisada que remova **juntos** o job `defer-cleanup-pr-877` e `if: github.event.pull_request.number != 877` do job normal.
+6. Exigir todos os checks no novo HEAD e aprovação operacional antes de qualquer novo evento de fechamento aplicável.
+
+A integração do código da PR não satisfaz esses gates, não valida Preview Deploy e não autoriza merge. Limpeza histórica e recriação de previews antigos para receber rotação de logs permanecem atividades futuras separadas.

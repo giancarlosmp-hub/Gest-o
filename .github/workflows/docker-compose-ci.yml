@@ -34,7 +34,7 @@ jobs:
           node-version-file: .nvmrc
 
       - name: Preview image lifecycle (synthetic Docker)
-        run: npm run test:preview-images:docker
+        run: npm run test:preview-images:docker:repeated
 
       - name: Prove preview cleanup workflow shell
         run: npm run test:docker-cleanup-safety
