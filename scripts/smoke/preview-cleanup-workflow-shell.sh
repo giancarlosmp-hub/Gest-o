@@ -22,10 +22,13 @@ if [[ $1 == volume && $2 == ls && "$*" == *'com.gesto.preview=true'* ]]; then ex
 if [[ $1 == ps && $2 == -aq ]]; then
   # Output well beyond a pipe buffer: a head consumer reliably kills this
   # producer with SIGPIPE. The real runner must consume all of it.
-  project=${*: -1}; project=${project##*=}
-  [[ $project != gesto-pr-42-102-1 ]] || exit 0
-  for i in $(seq 1 20000); do printf '%s-container-%05d\n' "$project" "$i"; done
-  exit
+  if [[ "$*" == *'label=com.docker.compose.project='* ]]; then
+    project=${*: -1}; project=${project##*=}
+    [[ $project != gesto-pr-42-102-1 ]] || exit 0
+    for i in $(seq 1 20000); do printf '%s-container-%05d\n' "$project" "$i"; done
+    exit
+  fi
+  exit 0
 fi
 if [[ $1 == inspect ]]; then
   case "$*" in
@@ -56,8 +59,11 @@ elif [[ $1 == -e ]]; then
   status=$(printf '%s' "$payload" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
   attempt=$(printf '%s' "$payload" | sed -n 's/.*"run_attempt":\([0-9][0-9]*\).*/\1/p')
   printf '%s\t%s' "$status" "$attempt"
-elif [[ -n "${FAKE_UNSUCCESSFUL_PROJECT:-}" && "$*" == *"${FAKE_UNSUCCESSFUL_PROJECT}"* && "$*" == *"authorize"* ]]; then
-  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful" >&2
+elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "unsuccessful" ]]; then
+  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful"
+  exit 1
+elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "unexpected_fail" ]]; then
+  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=github_query_failed_500"
   exit 1
 else
   printf 'LIFECYCLE_CALLED=%s\n' "$(basename "$3")"
@@ -123,7 +129,7 @@ PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=syn
   bash "$tmp/copied/scripts/runner.sh" >"$tmp/diverged.out" 2>"$tmp/diverged.err"
 diverged_rc=$?
 set -e
-test "$diverged_rc" -ne 0
+test "$diverged_rc" -eq 0
 test ! -e "$tmp/mutations"
 grep -Fq 'field=run_attempt pr=42 run_id=100 expected=1 observed=2' "$tmp/diverged.out"
 
@@ -140,18 +146,41 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 printf '{"format":1,"project":"gesto-pr-42-100-2","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-2.json"
 
-if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1 gesto-pr-42-100-2" FAKE_UNSUCCESSFUL_PROJECT="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
+export FAKE_MODE="unsuccessful"
+if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1 gesto-pr-42-100-2" MUTATION_LOG="$tmp/mutations" \
   CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
   PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
   bash "$tmp/copied/scripts/runner.sh" >"$tmp/unsuccessful.out" 2>"$tmp/unsuccessful.err"; then
   cat "$tmp/unsuccessful.out" "$tmp/unsuccessful.err" >&2
   exit 1
 fi
-grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful' "$tmp/unsuccessful.err"
+unset FAKE_MODE
+grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful' "$tmp/unsuccessful.out"
 grep -Fq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/unsuccessful.out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/unsuccessful.out"
-grep -Fq NGINX_RELOAD=PASS "$tmp/unsuccessful.out"
+grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_remain pr=42' "$tmp/unsuccessful.out"
 # 100-1 compose down was never invoked; only 100-2 was dismantled.
 test "$(grep -c compose "$tmp/mutations")" -eq 1
 
-echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS'
+# An unexpected infrastructure failure must not be hidden in a success result.
+rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+mkdir -p "$tmp/copied/scripts" "$tmp/preview/pr-42/gesto-pr-42-100-1"
+cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+: >"$tmp/copied/scripts/lifecycle.mjs"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+
+set +e
+export FAKE_MODE="unexpected_fail"
+PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
+  CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+  PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/unexpected.out" 2>"$tmp/unexpected.err"
+unexpected_rc=$?
+set -e
+test "$unexpected_rc" -ne 0
+grep -Fq 'PREVIEW_PROJECT_CLEANUP=ERROR project=gesto-pr-42-100-1 reason=unexpected_authorization_failure' "$tmp/unexpected.out"
+grep -Fq 'PREVIEW_CLEANUP_RESULT=FAIL reason=unexpected_system_errors count=1' "$tmp/unexpected.out"
+
+echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS nginx_route_authorization=PASS unexpected_error_reported=PASS'
