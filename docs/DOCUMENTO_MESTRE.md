@@ -1,3 +1,14 @@
+# Correção do Registro Pré-Runtime de Imagens de Preview (Setembro/2026)
+
+- **Correção Mínima de Proveniência:** No workflow de Preview Deploy, a gravação do manifesto de proveniência (`scripts/preview-image-lifecycle.mjs record`) ocorre intencionalmente pós-build e pré-runtime (`up -d --no-build`). O comando `docker compose images -q <service>` dependia da existência de containers criados para responder. Na ausência de containers no estágio pré-runtime, o script falhava com `compose_image_reference_api_missing`, impedindo a gravação do manifesto de proveniência e deixando as imagens do build salvaguardadas e acumuladas na VPS.
+- **Resolução Sem Enfraquecer os Gates:** Em `scripts/preview-image-lifecycle.mjs`, se `docker compose images -q <service>` retornar vazio (sem containers criados), o script consulta a referência do serviço configurada via `docker compose config --format json` (ou `${project}-${service}`) e recupera o Image ID por `docker images -q <targetRef>`. Em seguida, inspeciona a imagem e revalida integralmente todas as labels de proveniência OCI (`repository`, `pr`, `run-id`, `run-attempt`, `workflow`, `commit`, `service`, `project`). Se qualquer label divergir ou a imagem não existir, falha fechado.
+- **Diferenciação dos Bloqueios de Preview:**
+  - **Exaustão de Redes (`PREVIEW_NETWORK_CAPACITY=FAIL`):** Incidente do alocador de sub-redes do Docker daemon (`predefined_address_pools_exhausted`), que ocorre no preflight ANTES do build de imagens.
+  - **Falha de Referência de Imagens (`compose_image_reference_api_missing`):** Ocorria APÓS a conclusão bem-sucedida do build de API/WEB, no momento da gravação do manifesto pré-runtime.
+- **Validação Efetivada:**
+  - `npm run test:preview-images:docker:repeated` -> `PREVIEW_IMAGE_DOCKER_REPEATED=PASS iterations=2`.
+  - `npm run test:docker-cleanup-safety` -> `PREVIEW_IMAGE_LIFECYCLE_SAFETY=PASS mutations=0`.
+
 # Registro Histórico Operacional Pós-PR #877 (Setembro/2026)
 
 ## Encerramento e Mitigação dos Loops de Restart de Previews Legados (#508 e #510)
