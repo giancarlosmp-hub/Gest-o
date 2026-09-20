@@ -56,6 +56,9 @@ elif [[ $1 == -e ]]; then
   status=$(printf '%s' "$payload" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
   attempt=$(printf '%s' "$payload" | sed -n 's/.*"run_attempt":\([0-9][0-9]*\).*/\1/p')
   printf '%s\t%s' "$status" "$attempt"
+elif [[ -n "${FAKE_UNSUCCESSFUL_PROJECT:-}" && "$*" == *"${FAKE_UNSUCCESSFUL_PROJECT}"* && "$*" == *"authorize"* ]]; then
+  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful" >&2
+  exit 1
 else
   printf 'LIFECYCLE_CALLED=%s\n' "$(basename "$3")"
 fi
@@ -123,4 +126,32 @@ set -e
 test "$diverged_rc" -ne 0
 test ! -e "$tmp/mutations"
 grep -Fq 'field=run_attempt pr=42 run_id=100 expected=1 observed=2' "$tmp/diverged.out"
-echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0'
+
+# An unsuccessful producer candidate must be preserved without stopping valid candidates
+# or preventing Nginx reload for the closed PR.
+rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+mkdir -p "$tmp/copied/scripts" "$tmp/preview/pr-42/gesto-pr-42-100-1" "$tmp/preview/pr-42/gesto-pr-42-100-2"
+cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+: >"$tmp/copied/scripts/lifecycle.mjs"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-2/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-2/docker-compose.preview.yml"
+printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+printf '{"format":1,"project":"gesto-pr-42-100-2","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-2.json"
+
+if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1 gesto-pr-42-100-2" FAKE_UNSUCCESSFUL_PROJECT="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
+  CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+  PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/unsuccessful.out" 2>"$tmp/unsuccessful.err"; then
+  cat "$tmp/unsuccessful.out" "$tmp/unsuccessful.err" >&2
+  exit 1
+fi
+grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful' "$tmp/unsuccessful.err"
+grep -Fq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/unsuccessful.out"
+grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/unsuccessful.out"
+grep -Fq NGINX_RELOAD=PASS "$tmp/unsuccessful.out"
+# 100-1 compose down was never invoked; only 100-2 was dismantled.
+test "$(grep -c compose "$tmp/mutations")" -eq 1
+
+echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS'

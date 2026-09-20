@@ -70,7 +70,10 @@ while IFS= read -r project; do
   preview_dir="${PREVIEW_ROOT}/pr-${PR_NUMBER}/${project}"
   # Authenticate ownership and immutable image facts before the first teardown
   # mutation. Cleanup repeats every check after teardown immediately before rm.
-  node "$CLEANUP_SCRIPT" authorize "$manifest_path"
+  if ! node "$CLEANUP_SCRIPT" authorize "$manifest_path"; then
+    echo "PREVIEW_PROJECT_CLEANUP=PRESERVED project=${project}"
+    continue
+  fi
   resource_count=$(( $(docker ps -aq --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker network ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker volume ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) ))
   if [ "$resource_count" -eq 0 ]; then
     echo "PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=${project}"
