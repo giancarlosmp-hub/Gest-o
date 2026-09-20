@@ -348,12 +348,19 @@ jobs:
             sudo systemctl reload nginx
             PREVIEW_ACTIVATED=true
 
-            if ! PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/"); then PROXY_HTTP_STATUS=000; fi
-            if ! PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/"); then PROXY_HTTPS_STATUS=000; fi
-            echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}"
-            echo "Proxy HTTPS status: ${PROXY_HTTPS_STATUS}"
+            PROXY_HEALTHY=false
+            for i in {1..15}; do
+              if ! PROXY_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: ${PREVIEW_HOST_HTTP}" "http://127.0.0.1/"); then PROXY_HTTP_STATUS=000; fi
+              if ! PROXY_HTTPS_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" --resolve "${PREVIEW_HOST_TLS}:443:127.0.0.1" "https://${PREVIEW_HOST_TLS}/"); then PROXY_HTTPS_STATUS=000; fi
+              echo "Proxy HTTP status: ${PROXY_HTTP_STATUS}, HTTPS status: ${PROXY_HTTPS_STATUS} (attempt $i)"
+              if [ "${PROXY_HTTP_STATUS}" = "200" ] && [ "${PROXY_HTTPS_STATUS}" = "200" ]; then
+                PROXY_HEALTHY=true
+                break
+              fi
+              sleep 1
+            done
 
-            if [ "${PROXY_HTTP_STATUS}" != "200" ] || [ "${PROXY_HTTPS_STATUS}" != "200" ]; then
+            if [ "${PROXY_HEALTHY}" != "true" ]; then
               echo "Reverse proxy check failed"
               docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs web --tail=200
               docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.yml -f docker-compose.preview.yml logs api --tail=200
