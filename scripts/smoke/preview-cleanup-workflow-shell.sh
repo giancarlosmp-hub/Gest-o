@@ -62,6 +62,9 @@ elif [[ $1 == -e ]]; then
 elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "unsuccessful" ]]; then
   echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful"
   exit 1
+elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "run_pr_missing" ]]; then
+  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=run_pr_correlation_missing"
+  exit 1
 elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "unexpected_fail" ]]; then
   echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=github_query_failed_500"
   exit 1
@@ -161,6 +164,28 @@ grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/unsuccess
 grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_remain pr=42' "$tmp/unsuccessful.out"
 # 100-1 compose down was never invoked; only 100-2 was dismantled.
 test "$(grep -c compose "$tmp/mutations")" -eq 1
+
+# A candidate preserved due to run_pr_correlation_missing must be preserved without Nginx route removal.
+rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+mkdir -p "$tmp/copied/scripts" "$tmp/preview/pr-42/gesto-pr-42-100-1"
+cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+: >"$tmp/copied/scripts/lifecycle.mjs"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+
+export FAKE_MODE="run_pr_missing"
+if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
+  CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+  PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/run_pr_missing.out" 2>"$tmp/run_pr_missing.err"; then
+  cat "$tmp/run_pr_missing.out" "$tmp/run_pr_missing.err" >&2
+  exit 1
+fi
+unset FAKE_MODE
+grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=run_pr_correlation_missing' "$tmp/run_pr_missing.out"
+grep -Fq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/run_pr_missing.out"
+grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_or_errors_remain pr=42' "$tmp/run_pr_missing.out"
 
 # An unexpected infrastructure failure must not be hidden in a success result.
 rm -f "$tmp/provenance"/*.json "$tmp/mutations"

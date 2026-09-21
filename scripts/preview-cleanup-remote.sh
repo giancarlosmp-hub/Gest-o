@@ -29,7 +29,10 @@ while IFS= read -r project; do
   case "$project" in "gesto-pr-${PR_NUMBER}-"*) ;; *) echo 'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT'; exit 1;; esac
   owner_id="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" | first_line)"
   manifest_path="${PREVIEW_PROVENANCE_DIR}/${project}.json"
-  manifest_facts="$(node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));if(m.format!==1||m.project!==process.argv[2]||!Array.isArray(m.images)||m.images.length!==2)process.exit(1);const v=m.images.map(x=>x.labels||{});for(const k of ["pr","run-id","run-attempt","workflow","commit"]){if(!v[0][k]||v.some(x=>x[k]!==v[0][k]))process.exit(1)}process.stdout.write([v[0].pr,v[0]["run-id"],v[0]["run-attempt"],v[0].workflow,v[0].commit].join("\t"))' "$manifest_path" "$project")"
+  manifest_facts=""
+  if [ -f "$manifest_path" ]; then
+    manifest_facts="$(node -e 'const fs=require("fs");const m=JSON.parse(fs.readFileSync(process.argv[1]));if(m.format!==1||m.project!==process.argv[2]||!Array.isArray(m.images)||m.images.length!==2)process.exit(1);const v=m.images.map(x=>x.labels||{});for(const k of ["pr","run-id","run-attempt","workflow","commit"]){if(!v[0][k]||v.some(x=>x[k]!==v[0][k]))process.exit(1)}process.stdout.write([v[0].pr,v[0]["run-id"],v[0]["run-attempt"],v[0].workflow,v[0].commit].join("\t"))' "$manifest_path" "$project" 2>/dev/null)" || manifest_facts=""
+  fi
   IFS=$'\t' read -r manifest_pr manifest_run manifest_attempt manifest_workflow owner_commit <<<"$manifest_facts"
   if [ -n "$owner_id" ]; then
     owner_pr="$(docker inspect -f '{{ index .Config.Labels "com.gesto.preview.pr" }}' "$owner_id")"
@@ -100,7 +103,7 @@ while IFS= read -r project; do
     printf '%s\n' "$auth_msg"
   fi
   if [ "$auth_rc" -ne 0 ]; then
-    if echo "$auth_msg" | grep -Eq 'reason=(producer_run_not_|pr_not_closed|authenticated_run_identity_diverged|container_reference_|production_container_reference|rollback_or_recovery_|concurrent_run_|references_diverged_|protected_tag_|manifest_|project_invalid|numeric_identity_invalid|identity_)'; then
+    if echo "$auth_msg" | grep -Eq 'reason=(producer_run_not_|pr_not_closed|run_pr_|authenticated_run_identity_diverged|container_reference_|production_container_reference|rollback_or_recovery_|concurrent_run_|references_diverged_|protected_tag_|manifest_|project_invalid|numeric_identity_invalid|identity_)'; then
       echo "PREVIEW_PROJECT_CLEANUP=PRESERVED project=${project}"
       preserved_projects=$((preserved_projects + 1))
     else
@@ -127,8 +130,8 @@ while IFS= read -r project; do
 done < "$projects_file"
 
 remaining_resources=$(( $(docker ps -aq --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) + $(docker network ls -q --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) + $(docker volume ls -q --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) ))
-if [ "$remaining_resources" -gt 0 ] || [ "$preserved_projects" -gt 0 ]; then
-  echo "PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_remain pr=${PR_NUMBER}"
+if [ "$remaining_resources" -gt 0 ] || [ "$preserved_projects" -gt 0 ] || [ "$unexpected_errors" -gt 0 ]; then
+  echo "PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_or_errors_remain pr=${PR_NUMBER}"
 else
   echo "PREVIEW_NGINX_ROUTE=REMOVED pr=${PR_NUMBER}"
   sudo rm -f "${NGINX_SITES_DIR}/sites-enabled/crm-preview-pr-${PR_NUMBER}" "${NGINX_SITES_DIR}/sites-available/crm-preview-pr-${PR_NUMBER}"
