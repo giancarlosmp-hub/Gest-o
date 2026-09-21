@@ -31,7 +31,7 @@ const server = http.createServer((request, response) => {
         run_attempt: mode === 'attempt' ? requested + 1 : requested,
         head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
-        event: 'pull_request', pull_requests: [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
+        event: 'pull_request', pull_requests: mode === 'empty_prs' ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
       };
     } else if (request.url.includes('/actions/workflows/7')) {
       body = { path: '.github/workflows/preview.yml' };

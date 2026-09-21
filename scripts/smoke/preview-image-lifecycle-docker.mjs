@@ -131,6 +131,10 @@ writeFileSync(modeFile, 'cancelled');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
 assert.notEqual(result.status, 0); assert.match(result.stderr, /producer_run_not_successful/);
 assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'cancelled producer preserves all images');
+writeFileSync(modeFile, 'empty_prs');
+result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
+assert.notEqual(result.status, 0); assert.match(result.stderr, /run_pr_correlation_missing/);
+assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'empty pull_requests preserves all images');
 writeFileSync(modeFile, 'ok');
 if (canCreateContainers) {
   const protectedContainer = docker('create', '--name', `gesto-synthetic-stopped-${process.pid}`, failureImages.find(image => image.labels.service === 'api').image_id);
