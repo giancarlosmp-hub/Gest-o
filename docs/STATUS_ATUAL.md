@@ -1,3 +1,12 @@
+# Correção da Correlação Run-PR Pós-Merge e Rotação de Logs (Setembro/2026)
+
+- **Causa da Ausência de Correlação na PR #880 (`run_pr_correlation_missing`):** No workflow pós-merge de cleanup (`preview-cleanup.yml`), o script `preview-image-lifecycle.mjs` autenticava a execução consultando unicamente a sub-rota de tentativa `/actions/runs/${run_id}/attempts/${run_attempt}`. Na API REST do GitHub Actions, essa sub-rota omite o array `pull_requests` (retornando `[]`), enquanto os vínculos com PRs pertencem ao objeto top-level da execução (`/actions/runs/${run_id}`).
+- **Correção Implementada (`scripts/preview-image-lifecycle.mjs`):** O script consulta tanto `/actions/runs/${run_id}` (top-level) quanto `/actions/runs/${run_id}/attempts/${run_attempt}` (tentativa). A propriedade `pull_requests` é obtida do objeto top-level, permitindo correlacionar perfeitamente a PR e o commit do build mesmo após o merge/fechamento da PR. Se `pull_requests` permanecer ausente em ambos os endpoints, o script mantém a proteção fail-closed (`run_pr_correlation_missing`) e preserva os recursos.
+- **Configuração de Rotação de Logs (`max-size: 25m`, `max-file: 4`):**
+  - Configurada rotação de logs para o Compose de produção (`docker-compose.production.yml`) para serviços `api` e `web`.
+  - Para containers de preview antigos na VPS, a rotação exige recriação manual controlada (`docker compose up -d --force-recreate`), preservando intactos os volumes PostgreSQL e todos os dados.
+- **Validação Local:** `npm run test:docker-cleanup-safety`, `npm run test:preview-images:docker` e `npm run test:preview-images:docker:repeated` executados com sucesso (PASS).
+
 # Correção do Registro de Proveniência de Imagens de Preview (Setembro/2026)
 
 - **Causa do Erro `compose_image_reference_api_missing`:** No workflow de Preview Deploy (`preview.yml`), o registro de proveniência (`preview-image-lifecycle.mjs record`) ocorre intencionalmente após o build (`docker compose build api web`) e antes do runtime (`docker compose up -d --no-build`). `docker compose images -q <service>` consulta containers existentes. Como no momento do `record` nenhum container do projeto foi criado ainda, a consulta retornava string vazia, fazendo o script emitir `compose_image_reference_api_missing` e abortar antes do `up -d`.

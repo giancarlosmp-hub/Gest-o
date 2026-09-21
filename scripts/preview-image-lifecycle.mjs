@@ -108,9 +108,9 @@ const identityDiverged = (field, detail = '') => die(`authenticated_run_identity
 const authenticateProducer = async () => {
   const pr = await github(`/pulls/${expectedBase.pr}`);
   if (pr.state !== 'closed') die('pr_not_closed');
-  // The unqualified run endpoint describes the latest attempt. A re-run keeps
-  // run_id and increments run_attempt, so authenticate the exact producer whose
-  // immutable attempt is recorded in the project, labels and manifest.
+  // Query both the top-level run resource (where GitHub Actions REST API attaches
+  // pull_requests associations) and the exact immutable attempt endpoint.
+  const topRun = await github(`/actions/runs/${expectedBase['run-id']}`);
   const run = await github(`/actions/runs/${expectedBase['run-id']}/attempts/${expectedBase['run-attempt']}`);
   if (run.status !== 'completed') die('producer_run_not_completed');
   if (run.conclusion !== 'success') die('producer_run_not_successful');
@@ -123,7 +123,10 @@ const authenticateProducer = async () => {
   const authenticatedWorkflow = await github(`/actions/workflows/${run.workflow_id}`);
   if (authenticatedWorkflow.path !== '.github/workflows/preview.yml') identityDiverged('workflow_id_path');
   if (typeof run.head_branch !== 'string' || run.head_branch !== pr.head?.ref) identityDiverged('head_ref');
-  const correlatedPull = Array.isArray(run.pull_requests) && run.pull_requests.find(x => String(x.number) === String(expectedBase.pr));
+  const pullRequests = (Array.isArray(topRun.pull_requests) && topRun.pull_requests.length > 0)
+    ? topRun.pull_requests
+    : (Array.isArray(run.pull_requests) ? run.pull_requests : []);
+  const correlatedPull = pullRequests.find(x => String(x.number) === String(expectedBase.pr));
   if (!correlatedPull) die('run_pr_correlation_missing');
   // The build checks out pull_request.head.sha, distinct from run.head_sha.
   if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
