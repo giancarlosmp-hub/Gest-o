@@ -161,7 +161,7 @@ unset FAKE_MODE
 grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=producer_run_not_successful' "$tmp/unsuccessful.out"
 grep -Fq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/unsuccessful.out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/unsuccessful.out"
-grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_remain pr=42' "$tmp/unsuccessful.out"
+grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_or_errors_remain pr=42' "$tmp/unsuccessful.out"
 # 100-1 compose down was never invoked; only 100-2 was dismantled.
 test "$(grep -c compose "$tmp/mutations")" -eq 1
 
