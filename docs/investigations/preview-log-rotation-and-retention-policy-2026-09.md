@@ -5,30 +5,40 @@
 
 ---
 
-## 1. Causa Raiz Comprovada (`run_pr_correlation_missing`)
+## 1. Causa Raiz Comprovada e Análise Específica da PR #881 (`run_pr_correlation_missing`)
 
-### Sintoma
-Na PR #880 (e workflows pós-merge de cleanup), o workflow `preview-cleanup.yml` executou com sucesso, porém o script `preview-image-lifecycle.mjs` retornou:
-```text
-PREVIEW_IMAGE_RESULT=PRESERVED reason=run_pr_correlation_missing
-PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-880-35529184912-1
-PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-880-35554756505-2
-...
-```
+### Análise Detalhada dos Endpoints e Run `35668904948` (Projeto `gesto-pr-881-35668904948-1`)
 
-### Causa Raiz
-1. O script `preview-image-lifecycle.mjs` autenticava o produtor consultando **exclusivamente** o endpoint de tentativa específica:
-   `GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{run_attempt}`.
-2. Na API REST do GitHub Actions, a sub-rota `/attempts/{attempt_number}` retorna metadados da tentativa (status, conclusão, run_attempt), mas omite ou retorna o array `pull_requests` vazio (`[]`), pois as associações de Pull Request pertencem ao objeto top-level da execução (`GET /repos/{owner}/{repo}/actions/runs/{run_id}`).
-3. Como a consulta era feita apenas no sub-recurso de tentativa, a propriedade `run.pull_requests` retornava vazia (`[]`), resultando em `correlatedPull = undefined`.
-4. O mecanismo fail-closed acionou `die('run_pr_correlation_missing')` preservando os recursos para evitar exclusão indevida.
+1. **Resposta real do endpoint top-level `/actions/runs/35668904948`:**
+   Retorna o objeto de workflow run contendo `id: 35668904948`, `name: "Preview Deploy"`, `path: ".github/workflows/preview.yml"`, `event: "pull_request"`, `head_branch: "fix/preview-run-pr-correlation-and-logging-13429101441148764393"`, `head_sha: "ef1bd1069cb23e1e887aef7154d94fae8879797e"`, `status: "completed"`, `conclusion: "failure"` (no run inicial devido ao preflight de capacidade de redes da VPS) e **`pull_requests: []`**.
+
+2. **Resposta do endpoint `/actions/runs/35668904948/attempts/1`:**
+   Retorna a tentativa imutável com `run_attempt: 1`, `status: "completed"`, `conclusion: "failure"`, `head_sha`, `head_branch`, `name: "Preview Deploy"`, `path: ".github/workflows/preview.yml"`, `event: "pull_request"` e **`pull_requests: []`**.
+
+3. **Valores dos campos de identidade:**
+   - `pull_requests`: `[]` (vazio na API REST do GitHub para PRs fechadas ou mescladas).
+   - `event`: `"pull_request"`.
+   - `head_branch`: ref exata da branch da PR #881 (`fix/preview-run-pr-correlation-and-logging-13429101441148764393`).
+   - `head_sha`: commit SHA da PR.
+   - `run_attempt`: 1.
+   - `conclusion`: `"failure"` na execução inicial de deploy (devido a `PREVIEW_NETWORK_CAPACITY=FAIL`), ou `"success"` em execuções de deploy com sucesso.
+
+4. **Confirmação do repositório e número da tentativa:**
+   - O código consulta o repositório correto `giancarlosmp-hub/Gest-o` via `https://api.github.com/repos/giancarlosmp-hub/Gest-o`.
+   - O código consulta a tentativa exata `1` registrada no manifesto e nas labels OCI.
+
+5. **Por que o fallback top-level ainda não autorizava a correlação após o merge:**
+   - Quando uma PR é mesclada ou fechada no GitHub, a API REST do GitHub limpa a propriedade `pull_requests` (retornando `[]`) em **ambos** os endpoints (`/actions/runs/{run_id}` e `/actions/runs/{run_id}/attempts/{attempt}`).
+   - Como a lógica procurava a PR dentro do array `pull_requests`, o resultado de `pullRequests.find(...)` retornava `undefined`, disparando `die('run_pr_correlation_missing')`.
 
 ### Solução Implementada
-1. No método `authenticateProducer()` de `scripts/preview-image-lifecycle.mjs`, o código passa a consultar **ambos** os endpoints:
-   - Objeto top-level: `GET /actions/runs/${run_id}` (de onde extrai `topRun.pull_requests`).
-   - Objeto da tentativa: `GET /actions/runs/${run_id}/attempts/${run_attempt}` (de onde valida `status === 'completed'`, `conclusion === 'success'`, `run_attempt`).
-2. Se `pull_requests` estiver presente no objeto top-level, ele é utilizado para correlacionar a PR com o commit da PR.
-3. Se o array `pull_requests` continuar ausente em ambos os endpoints, a proteção fail-closed aciona `run_pr_correlation_missing` e preserva o candidato.
+1. No método `authenticateProducer()` de `scripts/preview-image-lifecycle.mjs`:
+   - Quando a PR está fechada (`pr.state === 'closed'`) e o array `pull_requests` retorna vazio `[]` na API do GitHub, a correlação valida inequivocamente:
+     a) `topRun.event === 'pull_request'`
+     b) `topRun.head_branch === pr.head?.ref`
+     c) `pr.head?.sha === expectedBase.commit`
+     d) `run.status === 'completed'` e `run.conclusion === 'success'`
+2. Se qualquer um dos campos (`event`, `head_branch`, `commit` ou `workflow`) divergir, o script aciona a proteção fail-closed (`run_pr_correlation_missing` / `authenticated_run_identity_diverged`) e preserva os recursos.
 
 ---
 

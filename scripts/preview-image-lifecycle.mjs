@@ -127,9 +127,16 @@ const authenticateProducer = async () => {
     ? topRun.pull_requests
     : (Array.isArray(run.pull_requests) ? run.pull_requests : []);
   const correlatedPull = pullRequests.find(x => String(x.number) === String(expectedBase.pr));
-  if (!correlatedPull) die('run_pr_correlation_missing');
-  // The build checks out pull_request.head.sha, distinct from run.head_sha.
-  if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+  if (correlatedPull) {
+    // The build checks out pull_request.head.sha, distinct from run.head_sha.
+    if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+  } else {
+    // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
+    // For closed PRs, verify that the workflow run event and head branch match expected PR head ref.
+    if (topRun.event !== 'pull_request' || typeof topRun.head_branch !== 'string' || topRun.head_branch !== pr.head?.ref) {
+      die('run_pr_correlation_missing');
+    }
+  }
   if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
   for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
     for (let page = 1; ; page++) {

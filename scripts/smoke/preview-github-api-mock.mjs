@@ -36,9 +36,12 @@ const server = http.createServer((request, response) => {
       };
     } else if (topRunMatch) {
       body = {
-        id: 100, head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
+        id: 100, head_sha: 'a'.repeat(40),
+        head_branch: mode === 'empty_prs_divergent_branch' ? 'divergent-branch' : 'feature',
+        workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
-        event: 'pull_request', pull_requests: mode === 'empty_prs' ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
+        event: mode === 'empty_prs_push_event' ? 'push' : 'pull_request',
+        pull_requests: (mode === 'empty_prs' || mode === 'empty_prs_divergent_branch' || mode === 'empty_prs_push_event') ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
       };
     } else if (request.url.includes('/actions/workflows/7')) {
       body = { path: '.github/workflows/preview.yml' };
