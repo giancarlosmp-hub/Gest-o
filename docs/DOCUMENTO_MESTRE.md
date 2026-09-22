@@ -1254,3 +1254,21 @@ O buildx prune já concluído recuperou disco (8,589 GB informados; 98%→91%; 2
 O CI verde observado pertence ao HEAD remoto `03c7d3cba284825ff6ab87377f2f7ebb8fdbcc9f`; esta nova alteração precisa de checks próprios. Preview Deploy continua bloqueado no preflight de rede, e produção não depende de merge porque Deploy Production é exclusivamente `workflow_dispatch`. Em contraste, Preview Cleanup reage a `pull_request.closed` e poderia executar `compose down -v`, remover configuração Nginx e recarregá-lo.
 
 Enquanto o incidente estiver aberto, somente a PR numérica #877 é desviada para um job local explícito, sem checkout, secrets, SCP, SSH, Docker ou runner remoto. O resultado é `DEFERRED/EXECUTED=NO`, nunca PASS de limpeza. Outras PRs seguem pelo job normal, inclusive autenticação do attempt exato, autorização pré-teardown e pré-imagem e proteções produtivas. A pausa não é configurável e não ganhou dispatch/manual bypass. Sua retirada exige diff revisado removendo os dois lados da condição depois de inventário e autorização operacional; não remover apenas o job de aviso deixando a condição normal bloqueada, nem apenas a condição liberando #877 silenciosamente.
+# Diagnóstico manual de autorização do preview da PR #881 (22/09/2026)
+
+**Resumo executivo.** A correção de correlação da PR #882 está implementada e mesclada na `main`;
+as suítes locais/CI relatadas para aquele merge permanecem registradas. Esta entrega acrescenta, ainda
+aguardando merge, o workflow manual e read-only **Preview Authorization Diagnostic**, fixo no candidato
+PR `881`, run `35668904948`, attempt `1`. Ele usa o `GITHUB_TOKEN` temporário do Actions e executa
+somente `authorize` com código integrado à `main`; não oferece apply, teardown ou cleanup.
+
+O diagnóstico na VPS e qualquer limpeza operacional continuam pendentes. A retenção de commits
+anteriores ao HEAD final e a migração dos containers antigos para limites de logs são trabalhos
+separados, também pendentes. As medições históricas não são inventário atual e não permitem prometer
+espaço recuperado. O procedimento, interpretação dos resultados e consultas somente leitura estão em
+[Diagnóstico de Correlação Run-PR, Rotação de Logs e Política de Retenção de Previews](investigations/preview-log-rotation-and-retention-policy-2026-09.md#7-procedimento-manual--autorização-do-candidato-exato-da-pr-881).
+
+Uma medição read-only enviada pelo operador em 22/09/2026 confirmou que o candidato ainda possuía os
+três containers healthy, rede, volume e manifesto modo 600; produção permanecia running/healthy e o
+filesystem raiz estava em 91% de uso, com 8.9G disponíveis. Essa fotografia não mede espaço
+recuperável e não constitui autorização operacional: **autorização e limpeza da PR #881 pendentes**.

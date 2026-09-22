@@ -1127,3 +1127,22 @@ A aparência da barra foi ocultada exclusivamente em `.sidebar-scroll` com `scro
 ## Revisão de segurança da PR #873 (16/09/2026)
 
 O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não prova ownership, pois os recursos não têm labels PR/run nem outra correlação independente observada. Inventory agora exige igualdade exata dos conjuntos descobertos por label Compose, IDs completos, identidade/projeto/nome/topologia coerentes e protege produção e os volumes histórico/produtivo. Apply sempre falha antes de Docker; mais de uma linha falha como lote inválido. Não há remoção de container, rede, volume ou imagem nesta PR.
+# Diagnóstico de autorização do preview PR #881 — preparado, não executado (22/09/2026)
+
+- **Mesclado anteriormente:** a PR #882 (`46f4782c5af8cb30d9f24c08c6d385325791572b`)
+  preserva as validações estritas de associações explícitas e, no fallback, de PR fechada, evento,
+  branch, repositório de origem, três SHAs iguais, attempt concluído/sucesso e unicidade paginada.
+- **Nesta entrega:** workflow exclusivamente manual, fixo em PR/run/attempt/projeto/manifesto, com
+  permissões mínimas, token efêmero e execução exclusiva de `authorize`. A cópia temporária própria é
+  removida; recursos de preview e produção não são alterados.
+- **Evidência remota:** consultas sem credencial em 22/09/2026 responderam `401`; a divergência entre
+  `failure` documentado e relato anterior de `success` é **NOT_VERIFIED**, sem alterar a regra para
+  obter PASS. Checks remotos do SHA desta entrega ainda não foram observados.
+- **Operação:** diagnóstico na VPS pendente; cleanup não executado nem autorizado. Retenção de commits
+  anteriores ao HEAD final e migração de logs de containers antigos seguem pendentes e separadas.
+  Procedimento: [investigação de previews](investigations/preview-log-rotation-and-retention-policy-2026-09.md#7-procedimento-manual--autorização-do-candidato-exato-da-pr-881).
+- **Medição read-only do operador em 22/09/2026:** o candidato ainda tinha `api`, `web` e `db`
+  running/healthy, uma rede bridge, o volume `gesto_pgdata_pr_881_35668904948_1` e manifesto do owner `root`,
+  modo 600 com 1425 bytes. API/WEB de produção estavam running/healthy e o banco produtivo running.
+  `/dev/sda2` estava em 91% (`99G`, `86G` usados, `8.9G` disponíveis). É uma fotografia pontual, não
+  mede reclaimable e não registra ação mutativa. **autorização e limpeza da PR #881 pendentes**.
