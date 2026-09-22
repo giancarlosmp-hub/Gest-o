@@ -74,7 +74,7 @@ const server = http.createServer((request, response) => {
       body = {
         id: 100, head_sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40),
         head_branch: mode === 'empty_prs_divergent_branch' ? 'divergent-branch' : 'feature',
-        head_repository: { full_name: mode === 'divergent_head_repo' ? 'other/repo' : 'owner/repo', owner: { login: 'owner' } },
+        head_repository: mode === 'missing_head_repo_in_fallback' ? undefined : { full_name: mode === 'divergent_head_repo' ? 'other/repo' : 'owner/repo', owner: { login: 'owner' } },
         workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
         event: mode === 'empty_prs_push_event' ? 'push' : 'pull_request',
@@ -88,7 +88,7 @@ const server = http.createServer((request, response) => {
           ? [{ number: 42, head: { sha: 'c'.repeat(40) } }]
           : mode === 'explicit_sha_mismatch_attempt_divergent'
           ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
-          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo'].includes(mode)
+          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo', 'missing_head_repo_in_fallback'].includes(mode)
             ? []
             : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }])
       };

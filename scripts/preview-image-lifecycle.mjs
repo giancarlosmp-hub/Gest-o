@@ -131,11 +131,6 @@ const authenticateProducer = async () => {
     die('run_pr_correlation_missing');
   }
 
-  // Compare topRun head repository identity against PR head repository if present.
-  if (topRun.head_repository?.full_name && topRun.head_repository.full_name !== headRepoFull) {
-    identityDiverged('head_repository');
-  }
-
   // Extract explicit PR associations from topRun and attempt run.
   const topPRs = Array.isArray(topRun.pull_requests) ? topRun.pull_requests : [];
   const attemptPRs = Array.isArray(run.pull_requests) ? run.pull_requests : [];
@@ -158,6 +153,11 @@ const authenticateProducer = async () => {
     // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
     // Fallback for closed PRs with empty pull_requests arrays:
     if (topRun.event !== 'pull_request' || typeof topRun.head_branch !== 'string' || topRun.head_branch !== headRef) {
+      die('run_pr_correlation_missing');
+    }
+
+    // Require origin head repository metadata on topRun in fallback mode.
+    if (!topRun.head_repository?.full_name || topRun.head_repository.full_name !== headRepoFull) {
       die('run_pr_correlation_missing');
     }
 

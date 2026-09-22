@@ -173,8 +173,12 @@ assert.notEqual(result.status, 0); assert.match(result.stderr, /authenticated_ru
 assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'explicit attempt SHA mismatch preserves all images');
 writeFileSync(modeFile, 'divergent_head_repo');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
-assert.notEqual(result.status, 0); assert.match(result.stderr, /authenticated_run_identity_diverged field=head_repository/);
+assert.notEqual(result.status, 0); assert.match(result.stderr, /run_pr_correlation_missing/);
 assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'divergent head repo preserves all images');
+writeFileSync(modeFile, 'missing_head_repo_in_fallback');
+result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
+assert.notEqual(result.status, 0); assert.match(result.stderr, /run_pr_correlation_missing/);
+assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'missing head repo in fallback preserves all images');
 writeFileSync(modeFile, 'empty_prs');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'authorize', failureManifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
