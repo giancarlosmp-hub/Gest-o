@@ -1,0 +1,96 @@
+name: Preview Authorization Diagnostic
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: preview-pr-881
+  cancel-in-progress: false
+
+jobs:
+  authorize-exact-candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "PREVIEW_AUTH_DIAGNOSTIC_RESULT=ERROR reason=ref_must_be_main observed=${GITHUB_REF}"
+            exit 1
+          fi
+
+      - name: Checkout the dispatched main SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Record trusted code SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
+          echo "PREVIEW_AUTH_DIAGNOSTIC_CODE_SHA=${GITHUB_SHA}"
+
+      - name: Copy trusted authorization files to an isolated VPS directory
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          port: 22022
+          source: scripts/preview-image-lifecycle.mjs,scripts/preview-authorization-diagnostic-remote.sh
+          target: /tmp/gesto-preview-authorization-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Authorize exact PR 881 candidate (read-only)
+        id: authorize
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: giancarlosmp-hub/Gest-o
+          PREVIEW_OWNER_REPOSITORY: giancarlosmp-hub/Gest-o
+          PREVIEW_OWNER_PR: "881"
+          PREVIEW_OWNER_RUN_ID: "35668904948"
+          PREVIEW_OWNER_RUN_ATTEMPT: "1"
+          PREVIEW_OWNER_WORKFLOW: Preview-Deploy
+          EXPECTED_PREVIEW_SHA: ef1bd1069cb23e1e887aef7154d94fae8879797e
+          COMPOSE_PROJECT_NAME: gesto-pr-881-35668904948-1
+          DIAGNOSTIC_MANIFEST: /var/www/preview-provenance/gesto-pr-881-35668904948-1.json
+          DIAGNOSTIC_TEMP_DIR: /tmp/gesto-preview-authorization-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          DIAGNOSTIC_CODE_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_KEY }}
+          port: 22022
+          script_stop: true
+          capture_stdout: true
+          envs: GITHUB_TOKEN,GITHUB_REPOSITORY,PREVIEW_OWNER_REPOSITORY,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA,COMPOSE_PROJECT_NAME,DIAGNOSTIC_MANIFEST,DIAGNOSTIC_TEMP_DIR,DIAGNOSTIC_CODE_SHA
+          script: |
+            bash "${DIAGNOSTIC_TEMP_DIR}/scripts/preview-authorization-diagnostic-remote.sh"
+
+      - name: Publish non-destructive diagnostic summary
+        if: always()
+        shell: bash
+        env:
+          AUTHORIZATION_OUTCOME: ${{ steps.authorize.outcome }}
+          AUTHORIZATION_LOG: ${{ steps.authorize.outputs.stdout }}
+        run: |
+          result=$(printf '%s\n' "$AUTHORIZATION_LOG" | sed -n 's/^.*\(PREVIEW_AUTH_DIAGNOSTIC_RESULT=[A-Z]* reason=[A-Za-z0-9_.-]*\).*$/\1/p' | tail -n 1)
+          [ -n "$result" ] || result='PREVIEW_AUTH_DIAGNOSTIC_RESULT=ERROR reason=no_remote_result_marker'
+          {
+            echo '## Preview Authorization Diagnostic'
+            echo
+            echo "- Code SHA: \`${GITHUB_SHA}\`"
+            echo '- Project: `gesto-pr-881-35668904948-1`'
+            echo '- PR / run / attempt: `881 / 35668904948 / 1`'
+            echo "- Step outcome: \`${AUTHORIZATION_OUTCOME}\`"
+            echo "- Result and reason: \`${result}\`"
+            echo '- Cleanup executed: **NO**. No preview or production resource was changed; only this run attempt’s temporary diagnostic files were removed.'
+          } >> "$GITHUB_STEP_SUMMARY"
