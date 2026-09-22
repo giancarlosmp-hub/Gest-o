@@ -24,12 +24,19 @@ const server = http.createServer((request, response) => {
     body = { state: mode === 'open' ? 'open' : 'closed', head: { sha: 'b'.repeat(40), ref: 'feature' } };
   } else {
     const attemptMatch = request.url.match(/\/actions\/runs\/100\/attempts\/([0-9]+)$/);
+    const topRunMatch = request.url.endsWith('/actions/runs/100');
     if (attemptMatch) {
       const requested = Number(attemptMatch[1]);
       body = {
         status: 'completed', conclusion: mode === 'cancelled' ? 'cancelled' : 'success',
         run_attempt: mode === 'attempt' ? requested + 1 : requested,
         head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
+        name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
+        event: 'pull_request', pull_requests: []
+      };
+    } else if (topRunMatch) {
+      body = {
+        id: 100, head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
         event: 'pull_request', pull_requests: mode === 'empty_prs' ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
       };

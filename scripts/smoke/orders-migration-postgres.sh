@@ -14,8 +14,17 @@ cleanup(){ docker rm -f "$pg" >/dev/null 2>&1 || true; docker network rm "$net" 
 trap cleanup EXIT
 docker network create --internal "$net" >/dev/null
 docker run -d --rm --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWORD=test postgres:16 >/dev/null
-for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$pg" pg_isready -U postgres >/dev/null
+database_ready=false
+for _ in {1..60}; do
+  if database_name=$(docker exec "$pg" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
+    if [[ "$database_name" == postgres ]]; then
+      database_ready=true
+      break
+    fi
+  fi
+  sleep 1
+done
+[[ "$database_ready" == true ]]
 for db in fresh upgrade invalid historical; do docker exec "$pg" createdb -U postgres "$db"; done
 url(){ printf 'postgresql://postgres:test@%s:5432/%s?schema=public' "$pg" "$1"; }
 run_tooling(){ local db=$1; shift; docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$(url "$db")" "$image" "$@"; }

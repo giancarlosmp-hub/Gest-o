@@ -1,7 +1,14 @@
 name: gest-o-production
 
+x-production-logging: &production_logging
+  driver: json-file
+  options:
+    max-size: "25m"
+    max-file: "4"
+
 services:
   api:
+    logging: *production_logging
     image: "${API_IMAGE:?API_IMAGE is required and must identify the planned API release}"
     build:
       context: .
@@ -83,6 +90,7 @@ services:
       start_period: 90s
 
   web:
+    logging: *production_logging
     image: "${WEB_IMAGE:?WEB_IMAGE is required and must identify the planned WEB release}"
     build:
       context: .

@@ -35,6 +35,7 @@ assert.match(cleanupRunner, /preview-provenance[\s\S]*PREVIEW_RESOURCE_CLEANUP=A
 assert.match(cleanupRunner, /trusted_compose_files_missing/);
 assert.match(cleanupRunner, /node "\$CLEANUP_SCRIPT" authorize "\$manifest_path"[\s\S]*docker compose[\s\S]*node "\$CLEANUP_SCRIPT" cleanup/, 'authenticated authorization must precede teardown and be repeated before image deletion');
 assert.match(cleanupRunner, /actions\/runs\/\$\{owner_run\}\/attempts\/\$\{owner_attempt\}/, 'runner must authenticate the immutable producer attempt');
+assert.match(lifecycle, /actions\/runs\/\$\{expectedBase\['run-id'\]\}/, 'lifecycle must query top-level run for pull request correlation');
 assert.match(lifecycle, /actions\/runs\/\$\{expectedBase\['run-id'\]\}\/attempts\/\$\{expectedBase\['run-attempt'\]\}/, 'lifecycle must not resolve a re-run through the latest-attempt endpoint');
 assert.match(lifecycle, /field=\$\{field\} pr=\$\{expectedBase\.pr\} run_id=\$\{expectedBase\['run-id'\]\}/);
 assert.match(lifecycle, /expected=\$\{expectedBase\['run-attempt'\]\} observed=/);
