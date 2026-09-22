@@ -1141,3 +1141,8 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
 - **Operação:** diagnóstico na VPS pendente; cleanup não executado nem autorizado. Retenção de commits
   anteriores ao HEAD final e migração de logs de containers antigos seguem pendentes e separadas.
   Procedimento: [investigação de previews](investigations/preview-log-rotation-and-retention-policy-2026-09.md#7-procedimento-manual--autorização-do-candidato-exato-da-pr-881).
+- **Medição read-only do operador em 22/09/2026:** o candidato ainda tinha `api`, `web` e `db`
+  running/healthy, uma rede bridge, o volume `gesto_pgdata_pr_881_35668904948_1` e manifesto do owner `root`,
+  modo 600 com 1425 bytes. API/WEB de produção estavam running/healthy e o banco produtivo running.
+  `/dev/sda2` estava em 91% (`99G`, `86G` usados, `8.9G` disponíveis). É uma fotografia pontual, não
+  mede reclaimable e não registra ação mutativa. **autorização e limpeza da PR #881 pendentes**.

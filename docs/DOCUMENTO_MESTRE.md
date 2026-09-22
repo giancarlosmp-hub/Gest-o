@@ -1267,3 +1267,8 @@ anteriores ao HEAD final e a migração dos containers antigos para limites de l
 separados, também pendentes. As medições históricas não são inventário atual e não permitem prometer
 espaço recuperado. O procedimento, interpretação dos resultados e consultas somente leitura estão em
 [Diagnóstico de Correlação Run-PR, Rotação de Logs e Política de Retenção de Previews](investigations/preview-log-rotation-and-retention-policy-2026-09.md#7-procedimento-manual--autorização-do-candidato-exato-da-pr-881).
+
+Uma medição read-only enviada pelo operador em 22/09/2026 confirmou que o candidato ainda possuía os
+três containers healthy, rede, volume e manifesto modo 600; produção permanecia running/healthy e o
+filesystem raiz estava em 91% de uso, com 8.9G disponíveis. Essa fotografia não mede espaço
+recuperável e não constitui autorização operacional: **autorização e limpeza da PR #881 pendentes**.

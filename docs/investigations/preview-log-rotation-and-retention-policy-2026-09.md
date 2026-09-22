@@ -147,8 +147,25 @@ não usar `docker inspect` sem formato nem imprimir `env`.
 
 ## 8. Pendências preservadas
 
+### Medição read-only enviada pelo operador em 22/09/2026
+
+Esta é uma fotografia pontual do estado observado pelo operador, não um inventário contínuo nem uma
+execução deste workflow. O projeto `gesto-pr-881-35668904948-1` tinha três containers em execução e
+healthy (`api`, `web` e `db`), a rede bridge `gesto-pr-881-35668904948-1_default` e o volume local
+`gesto_pgdata_pr_881_35668904948_1`. O manifesto exato existia em
+`/var/www/preview-provenance/gesto-pr-881-35668904948-1.json`, pertencente a `root`, modo `600`, com
+`1425` bytes.
+
+Na mesma coleta, `gest-o-production-api-1` e `gest-o-production-web-1` estavam `running/healthy`, e
+`gest-o-db-clean-v2-20260717` estava `running`. O filesystem raiz `/dev/sda2` registrava `99G` de
+tamanho, `86G` usados, `8.9G` disponíveis e `91%` de uso. A coleta não executou `authorize`, não
+removeu recursos e não demonstra quanto espaço seria recuperável.
+
+**autorização e limpeza da PR #881 pendentes**. O fato de os recursos e o manifesto existirem não
+substitui as validações autenticadas do lifecycle e não autoriza teardown ou remoção posterior.
+
 - diagnóstico `authorize` na VPS: **pendente**, até execução manual pós-merge;
-- limpeza dos recursos da PR #881: **não executada e não autorizada nesta tarefa**;
+- limpeza dos recursos da PR #881: **pendente; não executada e não autorizada nesta tarefa**;
 - retenção de previews de commits anteriores ao HEAD final: requer solução própria; previews de PR
   aberta não devem ser excluídos apenas por idade;
 - containers antigos: migração/recriação para aplicar rotação de logs continua separada e pendente;
