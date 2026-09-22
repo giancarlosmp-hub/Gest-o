@@ -64,6 +64,10 @@ const server = http.createServer((request, response) => {
           ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
           : mode === 'explicit_contradiction_top_99_attempt_42'
           ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
+          : mode === 'explicit_sha_mismatch_top_divergent'
+          ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
+          : mode === 'explicit_sha_mismatch_attempt_divergent'
+          ? [{ number: 42, head: { sha: 'c'.repeat(40) } }]
           : []
       };
     } else if (topRunMatch) {
@@ -80,6 +84,10 @@ const server = http.createServer((request, response) => {
           ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
           : mode === 'explicit_contradiction_top_99_attempt_42'
           ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
+          : mode === 'explicit_sha_mismatch_top_divergent'
+          ? [{ number: 42, head: { sha: 'c'.repeat(40) } }]
+          : mode === 'explicit_sha_mismatch_attempt_divergent'
+          ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
           : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo'].includes(mode)
             ? []
             : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }])

@@ -141,21 +141,18 @@ const authenticateProducer = async () => {
   const attemptPRs = Array.isArray(run.pull_requests) ? run.pull_requests : [];
 
   if (topPRs.length > 0 || attemptPRs.length > 0) {
-    // Reject contradictions between top-level and attempt endpoints when both provide associations.
-    if (topPRs.length > 0 && attemptPRs.length > 0) {
-      const topNumbers = canonical(topPRs.map(x => String(x.number)));
-      const attemptNumbers = canonical(attemptPRs.map(x => String(x.number)));
-      if (!same(topNumbers, attemptNumbers)) {
-        die('run_pr_correlation_missing');
-      }
+    // Validate explicit associations on topRun if present.
+    if (topPRs.length > 0) {
+      const topCorrelated = topPRs.find(x => String(x.number) === String(expectedBase.pr));
+      if (!topCorrelated) die('run_pr_correlation_missing');
+      if (topCorrelated.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
     }
-    const explicitPRs = topPRs.length > 0 ? topPRs : attemptPRs;
-    const correlatedPull = explicitPRs.find(x => String(x.number) === String(expectedBase.pr));
-    if (!correlatedPull) {
-      // Explicit associations exist but NONE match expectedBase.pr.
-      die('run_pr_correlation_missing');
+    // Validate explicit associations on attempt run if present.
+    if (attemptPRs.length > 0) {
+      const attemptCorrelated = attemptPRs.find(x => String(x.number) === String(expectedBase.pr));
+      if (!attemptCorrelated) die('run_pr_correlation_missing');
+      if (attemptCorrelated.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
     }
-    if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
     if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
   } else {
     // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
