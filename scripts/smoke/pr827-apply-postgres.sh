@@ -20,10 +20,24 @@ cleanup(){
 emit_stage(){ local stage=$1 rc=$2 result=PASS; (( rc == 0 )) || result=FAIL; printf 'APPLY_STAGE=%s\nAPPLY_STAGE_RC=%s\nAPPLY_STAGE_RESULT=%s\n' "$stage" "$rc" "$result" >&3; }
 docker network create --internal "$net" >/dev/null
 docker run -d --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=salesforce_pro postgres:16 >/dev/null
-for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres -d salesforce_pro >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$pg" pg_isready -U postgres -d salesforce_pro >/dev/null
+for _ in {1..60}; do
+  if docker exec "$pg" psql -X -U postgres -d salesforce_pro -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null | grep -Fqx salesforce_pro; then
+    break
+  fi
+  sleep 1
+done
 psql(){ docker exec -i "$pg" psql -X -q -v ON_ERROR_STOP=1 -U postgres -d salesforce_pro "$@"; }
-reset_db(){ psql -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public; CREATE TYPE public."Role" AS ENUM ('\''diretor'\''); CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY); CREATE TABLE public."Opportunity" (id text PRIMARY KEY); CREATE TABLE public."User" (id text PRIMARY KEY);' >/dev/null; }
+reset_db(){
+  local rc=1
+  for _ in {1..30}; do
+    if psql -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public; CREATE TYPE public."Role" AS ENUM ('\''diretor'\''); CREATE TABLE public."ErpOrderSync" (id text PRIMARY KEY); CREATE TABLE public."Opportunity" (id text PRIMARY KEY); CREATE TABLE public."User" (id text PRIMARY KEY);' >/dev/null 2>&1; then
+      rc=0
+      break
+    fi
+    sleep 1
+  done
+  return "$rc"
+}
 assert_clean_worktree(){ local phase=$1 status line code path_class primary_status; primary_status=$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all); status=$(git -C "$HARNESS_EXECUTION_CHECKOUT" status --porcelain=v1 --untracked-files=all); [[ -z $primary_status ]] || status="${status}${status:+$'\n'}${primary_status}"; if [[ -n $status ]]; then printf 'HARNESS_WORKTREE_%s=FAIL\n' "$phase" >&3; while IFS= read -r line; do code=${line:0:2}; case "$code" in '??') path_class=UNTRACKED ;; ' M'|'M '|'MM') path_class=TRACKED_MODIFIED ;; ' A'|'A ') path_class=TRACKED_ADDED ;; ' D'|'D ') path_class=TRACKED_DELETED ;; *) path_class=TRACKED_OTHER ;; esac; printf 'HARNESS_DIRTY_PATH_CLASS=%s PATH=%s\n' "$path_class" "${line:3}" >&3; done <<<"$status"; return 1; fi; printf 'HARNESS_WORKTREE_%s=PASS\n' "$phase" >&3; }
 expected_main_sha=$head; HARNESS_EXECUTION_CHECKOUT="$HARNESS_TEMP_ROOT/checkout"
 primary_origin_main_before=ABSENT; if git -C "$ROOT" show-ref --verify --quiet refs/remotes/origin/main; then primary_origin_main_before=$(git -C "$ROOT" rev-parse refs/remotes/origin/main); fi
