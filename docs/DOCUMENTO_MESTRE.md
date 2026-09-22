@@ -1,3 +1,26 @@
+# Reconciliação Final dos Previews Restantes de PRs Abertas (Setembro/2026)
+
+- **Confirmação na API do GitHub:** Auditado o status de cada PR, confirmando que os 12 projetos pertencem a PRs abertas e ativas: `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820`.
+- **Inventário Read-Only e Preservação de PRs Abertas (`open_prs_preserved=verified`):**
+  - Todos os containers, redes e volumes das 12 PRs abertas foram preservados intactos.
+  - Mapeados os maiores arquivos `json.log` e volumes PostgreSQL de cada projeto.
+  - Nenhuma alteração mutável, `docker compose down`, `prune` ou truncamento manual executado sobre os previews de PRs abertas.
+- **Plano de Rotação de Logs (`log_rotation_apply=NOT_EXECUTED_PLAN_ONLY`):**
+  - Preparado plano de migração para aplicação futura do driver `json-file` com `max-size: 25m` e `max-file: 4` via `docker compose up -d --force-recreate` por projeto, preservando dados dos volumes PostgreSQL.
+- **Invariantes e Isolamento de Produção:**
+  - Confirmada a limpeza completa dos lotes de PRs mescladas anteriores (774, 821, 836, 874, 875, 876, 879, 880) (`merged_cleanup_batches=verified`).
+  - PR #881 (`gesto-pr-881-35668904948-1`) preservada intacta (`pr881_mutations=0`).
+  - Recursos de produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) mantidos sem alterações (`production_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_REMAINING_RECONCILIATION=PASS
+  open_prs_preserved=verified
+  merged_cleanup_batches=verified
+  production_mutations=0
+  pr881_mutations=0
+  log_rotation_apply=NOT_EXECUTED_PLAN_ONLY
+  ```
+
 # Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
 
 - **Inventário Read-Only e Verificação de PRs:** Consultadas as PRs na API do GitHub, confirmando que #874, #875, #876, #879 e #880 estão fechadas e mescladas.

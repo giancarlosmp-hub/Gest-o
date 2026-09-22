@@ -1,3 +1,31 @@
+# Reconciliação Final dos Previews Restantes de PRs Abertas (Setembro/2026)
+
+- **PRs Abertas Confirmadas (`open_prs_preserved=verified`):** Consultadas via API do GitHub e confirmadas como ativas/abertas:
+  - `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820`.
+- **Garantias de Preservação de PRs Abertas:**
+  - Nenhum container de PR aberta foi removido ou alterado.
+  - Nenhuma rede ou volume de PR aberta foi removido ou alterado.
+  - Nenhum comando `docker compose down`, `docker system prune` ou truncamento manual foi executado.
+- **Auditoria de Logs e Configuração de Logging:**
+  - Mapeados os maiores arquivos `json.log` por projeto para os previews de PRs abertas (ex. `gesto-pr-542-api-1`, `gesto-pr-604-api-1`, `gesto-pr-820-api-1`).
+  - Configuração de logging atual em containers legado: driver `json-file` padrão do daemon (sem limite `max-size`/`max-file` in-place).
+- **Plano de Migração Controlada para Rotação de Logs (`log_rotation_apply=NOT_EXECUTED_PLAN_ONLY`):**
+  - Configuração-alvo em `docker-compose.preview.yml`: `driver: json-file`, `max-size: "25m"`, `max-file: "4"`.
+  - Estratégia de aplicação futura: recriação controlada individual por projeto (`docker compose up -d --force-recreate`), preservando integralmente os volumes PostgreSQL montados. Nenhuma recriação foi executada nesta etapa.
+- **Confirmação de Lotes Anteriores e Produção:**
+  - **Lotes Mesclados Anteriormente Limpos:** Confirmada ausência de recursos residuais dos projetos `gesto-pr-774`, `gesto-pr-821`, `gesto-pr-836`, `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*` e `gesto-pr-880-*` (`merged_cleanup_batches=verified`).
+  - **PR #881:** `gesto-pr-881-35668904948-1` intocada (`pr881_mutations=0`).
+  - **Produção:** Containers `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, e volumes `gest-o_pgdata` / `gest-o_pgdata_clean_v2_20260717` mantidos `running/healthy` (`production_mutations=0`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_REMAINING_RECONCILIATION=PASS
+  open_prs_preserved=verified
+  merged_cleanup_batches=verified
+  production_mutations=0
+  pr881_mutations=0
+  log_rotation_apply=NOT_EXECUTED_PLAN_ONLY
+  ```
+
 # Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
 
 - **Projetos Processados:** `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*`, `gesto-pr-880-*` (PRs confirmadas fechadas e mescladas via API GitHub).
