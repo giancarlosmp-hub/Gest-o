@@ -1,3 +1,28 @@
+# Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
+
+- **Inventário Read-Only e Validação:** Identificados e confirmados os três projetos de preview de PRs já fechadas e mescladas: `gesto-pr-774`, `gesto-pr-821` e `gesto-pr-836`.
+- **Execução Controlada por Projeto:**
+  - **Containers Removidos:**
+    - `gesto-pr-774`: `gesto-pr-774-api-1`, `gesto-pr-774-web-1`, `gesto-pr-774-db-1`
+    - `gesto-pr-821`: `gesto-pr-821-api-1`, `gesto-pr-821-web-1`, `gesto-pr-821-db-1`
+    - `gesto-pr-836`: `gesto-pr-836-api-1`, `gesto-pr-836-web-1`, `gesto-pr-836-db-1`
+  - **Redes Docker Removidas:** `gesto-pr-774_default`, `gesto-pr-821_default`, `gesto-pr-836_default`.
+  - **Volumes PostgreSQL de Testes Removidos:** `gesto_pgdata_pr_774`, `gesto_pgdata_pr_821`, `gesto_pgdata_pr_836` (dados exclusivos de testes/validação de PRs mescladas, sem dados de produção).
+  - **Diretórios de Preview Removidos:** `/var/www/preview/pr-774`, `/var/www/preview/pr-821` e `/var/www/preview/pr-836`.
+  - **Imagens Exclusivas e Logs Removidos:** Imagens de API/WEB exclusivamente utilizadas por esses previews e logs associados eliminados.
+- **Isolamento e Invariantes de Produção:**
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) permaneceu running/healthy com 0 mutações (`production_mutations=0`).
+  - PRs abertas e a PR #881 preservadas intactas (`open_pr_mutations=0`, `pr881_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_MERGED_CLEANUP=PASS
+  projects=gesto-pr-774,gesto-pr-821,gesto-pr-836
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  network_capacity_reclaimed=verified
+  ```
+
 # Correção do Registro Pré-Runtime de Imagens de Preview (Setembro/2026)
 
 - **Correção Mínima de Proveniência:** No workflow de Preview Deploy, a gravação do manifesto de proveniência (`scripts/preview-image-lifecycle.mjs record`) ocorre intencionalmente pós-build e pré-runtime (`up -d --no-build`). O comando `docker compose images -q <service>` dependia da existência de containers criados para responder. Na ausência de containers no estágio pré-runtime, o script falhava com `compose_image_reference_api_missing`, impedindo a gravação do manifesto de proveniência e deixando as imagens do build salvaguardadas e acumuladas na VPS.

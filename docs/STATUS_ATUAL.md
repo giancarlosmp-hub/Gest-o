@@ -1,3 +1,26 @@
+# Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
+
+- **Projetos Limpos:** `gesto-pr-774`, `gesto-pr-821`, `gesto-pr-836` (PRs fechadas e mescladas).
+- **Recursos Removidos por Projeto:**
+  - **Containers:** `gesto-pr-774-api-1`, `gesto-pr-774-web-1`, `gesto-pr-774-db-1`, `gesto-pr-821-api-1`, `gesto-pr-821-web-1`, `gesto-pr-821-db-1`, `gesto-pr-836-api-1`, `gesto-pr-836-web-1`, `gesto-pr-836-db-1`.
+  - **Redes Docker:** `gesto-pr-774_default`, `gesto-pr-821_default`, `gesto-pr-836_default`.
+  - **Volumes PostgreSQL de Teste:** `gesto_pgdata_pr_774`, `gesto_pgdata_pr_821`, `gesto_pgdata_pr_836` (confirmados como volumes de validação/teste sem dados reais de produção; removidos como parte explícita da tarefa).
+  - **Diretórios de Preview:** `/var/www/preview/pr-774`, `/var/www/preview/pr-821`, `/var/www/preview/pr-836`.
+  - **Imagens e Logs:** Imagens exclusivas dos três projetos e logs Docker associados removidos.
+- **Garantias de Preservação (0 mutações):**
+  - **Produção:** Todos os containers de produção (`gest-o-production-*`), rede (`gest-o_default`), e volumes (`gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) permaneceram `running/healthy` e intocados (`production_mutations=0`).
+  - **PRs Abertas e PR #881:** Todos os containers e recursos de PRs abertas e o preview preservado da PR #881 permaneceram intocados (`open_pr_mutations=0`, `pr881_mutations=0`).
+- **Capacidade de Rede e Espaço Recuperado:** Capacidade de sub-redes recuperada e liberada no alocador IPAM Docker daemon (`network_capacity_reclaimed=verified`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_MERGED_CLEANUP=PASS
+  projects=gesto-pr-774,gesto-pr-821,gesto-pr-836
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  network_capacity_reclaimed=verified
+  ```
+
 # Correção da Correlação Run-PR Pós-Merge e Rotação de Logs (Setembro/2026)
 
 - **Causa da Ausência de Correlação na PR #880 (`run_pr_correlation_missing`):** No workflow pós-merge de cleanup (`preview-cleanup.yml`), o script `preview-image-lifecycle.mjs` autenticava a execução consultando unicamente a sub-rota de tentativa `/actions/runs/${run_id}/attempts/${run_attempt}`. Na API REST do GitHub Actions, essa sub-rota omite o array `pull_requests` (retornando `[]`), enquanto os vínculos com PRs pertencem ao objeto top-level da execução (`/actions/runs/${run_id}`).
