@@ -127,10 +127,42 @@ const authenticateProducer = async () => {
     ? topRun.pull_requests
     : (Array.isArray(run.pull_requests) ? run.pull_requests : []);
   const correlatedPull = pullRequests.find(x => String(x.number) === String(expectedBase.pr));
-  if (!correlatedPull) die('run_pr_correlation_missing');
-  // The build checks out pull_request.head.sha, distinct from run.head_sha.
-  if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
-  if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+  if (correlatedPull) {
+    // The build checks out pull_request.head.sha, distinct from run.head_sha.
+    if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+  } else {
+    // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
+    // For closed PRs, verify that the workflow run event and head branch match expected PR head ref,
+    // and that the candidate build commit matches either the workflow run head_sha or the PR head sha.
+    if (topRun.event !== 'pull_request' || typeof topRun.head_branch !== 'string' || topRun.head_branch !== pr.head?.ref) {
+      die('run_pr_correlation_missing');
+    }
+    if (topRun.head_sha !== expectedBase.commit && pr.head?.sha !== expectedBase.commit) {
+      identityDiverged('pull_request_head_sha');
+    }
+    // Event + branch + commit matching alone do not uniquely prove a specific PR number.
+    // Query GitHub API for all PRs on this head branch (supporting pagination & forks).
+    // If multiple PRs exist for the same branch/commit, correlation is ambiguous and must be preserved fail-closed.
+    const headUser = pr.head?.user?.login || expectedBase.repository.split('/')[0];
+    const headRef = pr.head?.ref;
+    if (!headRef) die('run_pr_correlation_missing');
+
+    const matchingPulls = [];
+    for (let page = 1; ; page++) {
+      const pagePulls = await github(`/pulls?head=${encodeURIComponent(`${headUser}:${headRef}`)}&state=all&per_page=100&page=${page}`);
+      if (!Array.isArray(pagePulls)) die('run_pr_correlation_missing');
+      for (const pull of pagePulls) {
+        if (pull.head?.ref === headRef && (pull.head?.sha === expectedBase.commit || pull.head?.sha === pr.head?.sha)) {
+          matchingPulls.push(pull);
+        }
+      }
+      if (pagePulls.length < 100) break;
+    }
+
+    if (matchingPulls.length !== 1 || String(matchingPulls[0].number) !== String(expectedBase.pr)) {
+      die('run_pr_correlation_missing');
+    }
+  }
   for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
     for (let page = 1; ; page++) {
       const pageData = await github(`/actions/runs?status=${status}&event=pull_request&per_page=100&page=${page}`);

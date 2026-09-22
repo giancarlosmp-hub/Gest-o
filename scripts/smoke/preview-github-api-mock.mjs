@@ -20,7 +20,11 @@ const server = http.createServer((request, response) => {
     return;
   }
   let body;
-  if (request.url.includes('/pulls/')) {
+  if (request.url.includes('/pulls?head=')) {
+    body = mode === 'ambiguous_multiple_prs'
+      ? [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature' } }, { number: 99, head: { sha: 'b'.repeat(40), ref: 'feature' } }]
+      : [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature' } }];
+  } else if (request.url.includes('/pulls/')) {
     body = { state: mode === 'open' ? 'open' : 'closed', head: { sha: 'b'.repeat(40), ref: 'feature' } };
   } else {
     const attemptMatch = request.url.match(/\/actions\/runs\/100\/attempts\/([0-9]+)$/);
@@ -36,9 +40,12 @@ const server = http.createServer((request, response) => {
       };
     } else if (topRunMatch) {
       body = {
-        id: 100, head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
+        id: 100, head_sha: 'a'.repeat(40),
+        head_branch: mode === 'empty_prs_divergent_branch' ? 'divergent-branch' : 'feature',
+        workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
-        event: 'pull_request', pull_requests: mode === 'empty_prs' ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
+        event: mode === 'empty_prs_push_event' ? 'push' : 'pull_request',
+        pull_requests: (mode === 'empty_prs' || mode === 'empty_prs_divergent_branch' || mode === 'empty_prs_push_event' || mode === 'ambiguous_multiple_prs') ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
       };
     } else if (request.url.includes('/actions/workflows/7')) {
       body = { path: '.github/workflows/preview.yml' };
