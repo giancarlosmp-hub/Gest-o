@@ -25,7 +25,17 @@ for _ in {1..60}; do
   sleep 1
 done
 [[ "$database_ready" == true ]]
-for db in fresh upgrade invalid historical; do docker exec "$pg" createdb -U postgres "$db"; done
+for db in fresh upgrade invalid historical; do
+  created=false
+  for _ in {1..30}; do
+    if docker exec "$pg" createdb -U postgres "$db" 2>/dev/null; then
+      created=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$created" == true ]]
+done
 url(){ printf 'postgresql://postgres:test@%s:5432/%s?schema=public' "$pg" "$1"; }
 run_tooling(){ local db=$1; shift; docker run --rm --pull=never --network "$net" -v "$tmp:/work" -w /app -e DATABASE_URL="$(url "$db")" "$image" "$@"; }
 run_observed() {
