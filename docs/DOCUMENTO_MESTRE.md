@@ -1,3 +1,23 @@
+# Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
+
+- **Inventário Read-Only e Verificação de PRs:** Consultadas as PRs na API do GitHub, confirmando que #874, #875, #876, #879 e #880 estão fechadas e mescladas.
+- **Autorização e Remoção Controlada:**
+  - Cadastrados e processados individualmente via lifecycle em `main`: todos obtiveram veredito `PASS`.
+  - **Containers e Redes Removidos:** Containers `api`, `web` e `db` e redes `default` dos projetos `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*` e `gesto-pr-880-*`.
+  - **Volumes PostgreSQL Sintéticos Removidos:** `gesto_pgdata_pr_874_*`, `gesto_pgdata_pr_875_*`, `gesto_pgdata_pr_876_*`, `gesto_pgdata_pr_879_*` e `gesto_pgdata_pr_880_*` (confirmados sem dados de produção).
+  - **Diretórios de Preview e Logs:** `/var/www/preview/pr-874`, `/var/www/preview/pr-875`, `/var/www/preview/pr-876`, `/var/www/preview/pr-879` e `/var/www/preview/pr-880` e logs Docker eliminados.
+- **Preservação Restrita de Candidatos e Produção:**
+  - **PR #881 (`gesto-pr-881-35668904948-1`):** Mantida intocada por divergência de commit (`pr881_mutations=0`).
+  - **Produção e PRs Abertas:** Containers `gest-o-production-*`, banco `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volume `gest-o_pgdata_clean_v2_20260717` e PRs abertas mantidos sem alterações (`production_mutations=0`, `open_pr_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_MERGED_CLEANUP_BATCH=PASS
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  preserved_candidates=documented
+  ```
+
 # Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
 
 - **Inventário Read-Only e Validação:** Identificados e confirmados os três projetos de preview de PRs já fechadas e mescladas: `gesto-pr-774`, `gesto-pr-821` e `gesto-pr-836`.

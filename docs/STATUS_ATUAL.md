@@ -1,3 +1,25 @@
+# Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
+
+- **Projetos Processados:** `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*`, `gesto-pr-880-*` (PRs confirmadas fechadas e mescladas via API GitHub).
+- **Projetos Removidos:** Todos os 5 projetos autorizados (`PASS` no lifecycle do manifesto) tiveram remoção completa:
+  - **Containers:** Containers de API, WEB e DB associados a `gesto-pr-874`, `gesto-pr-875`, `gesto-pr-876`, `gesto-pr-879` e `gesto-pr-880`.
+  - **Redes Docker:** Redes `default` de cada um dos 5 projetos liberadas no alocador IPAM do Docker daemon.
+  - **Volumes PostgreSQL de Teste:** `gesto_pgdata_pr_874_*`, `gesto_pgdata_pr_875_*`, `gesto_pgdata_pr_876_*`, `gesto_pgdata_pr_879_*`, `gesto_pgdata_pr_880_*` (confirmados como dados sintéticos de teste/preview e removidos explicitamente).
+  - **Diretórios de Preview:** `/var/www/preview/pr-874`, `/var/www/preview/pr-875`, `/var/www/preview/pr-876`, `/var/www/preview/pr-879`, `/var/www/preview/pr-880`.
+  - **Imagens Exclusivas e Logs:** Imagens de API/WEB e logs Docker associados removidos.
+- **Projetos Preservados:**
+  - **PR #881:** `gesto-pr-881-35668904948-1` integralmente preservada por divergência de correlação de commit (`authenticated_run_identity_diverged`).
+  - **PRs Abertas:** Todos os recursos de PRs abertas mantidos intactos (`open_pr_mutations=0`).
+  - **Produção:** `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, `gest-o_default`, `gest-o_pgdata` e `gest-o_pgdata_clean_v2_20260717` mantidos intactos e `running/healthy` (`production_mutations=0`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_MERGED_CLEANUP_BATCH=PASS
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  preserved_candidates=documented
+  ```
+
 # Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
 
 - **Projetos Limpos:** `gesto-pr-774`, `gesto-pr-821`, `gesto-pr-836` (PRs fechadas e mescladas).
