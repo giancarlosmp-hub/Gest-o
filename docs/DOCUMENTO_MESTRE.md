@@ -1256,19 +1256,20 @@ O CI verde observado pertence ao HEAD remoto `03c7d3cba284825ff6ab87377f2f7ebb8f
 Enquanto o incidente estiver aberto, somente a PR numérica #877 é desviada para um job local explícito, sem checkout, secrets, SCP, SSH, Docker ou runner remoto. O resultado é `DEFERRED/EXECUTED=NO`, nunca PASS de limpeza. Outras PRs seguem pelo job normal, inclusive autenticação do attempt exato, autorização pré-teardown e pré-imagem e proteções produtivas. A pausa não é configurável e não ganhou dispatch/manual bypass. Sua retirada exige diff revisado removendo os dois lados da condição depois de inventário e autorização operacional; não remover apenas o job de aviso deixando a condição normal bloqueada, nem apenas a condição liberando #877 silenciosamente.
 # Diagnóstico manual de autorização do preview da PR #881 (22/09/2026)
 
-**Resumo executivo.** A correção de correlação da PR #882 está implementada e mesclada na `main`;
-as suítes locais/CI relatadas para aquele merge permanecem registradas. Esta entrega acrescenta, ainda
-aguardando merge, o workflow manual e read-only **Preview Authorization Diagnostic**, fixo no candidato
-PR `881`, run `35668904948`, attempt `1`. Ele usa o `GITHUB_TOKEN` temporário do Actions e executa
-somente `authorize` com código integrado à `main`; não oferece apply, teardown ou cleanup.
+**Evidência executada.** O diagnóstico autenticado foi executado na `main` no run
+`35741389812`, job `106791760779`, código `d68cc981a3eefff3ec08212be2af7eeff608f4b1`. O
+`authorize` devolveu exit `1` e preservou o projeto `gesto-pr-881-35668904948-1` por
+`authenticated_run_identity_diverged`, campo `pull_request_head_sha`: o candidato esperado continua
+fixo em `ef1bd1069cb23e1e887aef7154d94fae8879797e`, enquanto o HEAD consultado da PR #881 era
+`8dfdfdb412dc0bfaddbfb312ad6c065f35ca6adf`. A autorização não passou e nenhum cleanup de recursos
+foi executado.
 
-O diagnóstico na VPS e qualquer limpeza operacional continuam pendentes. A retenção de commits
-anteriores ao HEAD final e a migração dos containers antigos para limites de logs são trabalhos
-separados, também pendentes. As medições históricas não são inventário atual e não permitem prometer
-espaço recuperado. O procedimento, interpretação dos resultados e consultas somente leitura estão em
-[Diagnóstico de Correlação Run-PR, Rotação de Logs e Política de Retenção de Previews](investigations/preview-log-rotation-and-retention-policy-2026-09.md#7-procedimento-manual--autorização-do-candidato-exato-da-pr-881).
-
-Uma medição read-only enviada pelo operador em 22/09/2026 confirmou que o candidato ainda possuía os
-três containers healthy, rede, volume e manifesto modo 600; produção permanecia running/healthy e o
-filesystem raiz estava em 91% de uso, com 8.9G disponíveis. Essa fotografia não mede espaço
-recuperável e não constitui autorização operacional: **autorização e limpeza da PR #881 pendentes**.
+Há dois problemas independentes. O resumo exibiu `ERROR reason=no_remote_result_marker` porque
+`appleboy/ssh-action@v1.2.0` não aceita `capture_stdout` e o workflow tentou consumir um output
+inexistente. Esta alteração corrige somente esse transporte: captura stdout como dados, interpreta
+marcadores estritos mesmo com exit remoto não zero e publica PASS/PRESERVED/ERROR, motivo, campo,
+exit real e estado comprovável dos temporários. Ela não muda candidato, manifesto, labels ou gates.
+A preservação real do preview de commit anterior ao HEAD final permanece sem solução operacional.
+Limpeza, retenção de commits antigos e recriação para rotação de logs seguem pendentes; capacidade de
+redes e consumo de disco não foram resolvidos. Após revisão e merge, a validação exige **nova**
+execução manual na `main`, nunca rerun do run antigo, para que o checkout use o código novo.

@@ -112,7 +112,7 @@ exatamente `node <lifecycle-confiável> authorize
 Actions; os secrets SSH continuam sendo `VPS_HOST`, `VPS_USER` e `VPS_KEY`. O workflow não possui
 modo apply e não chama o runner de cleanup.
 
-Após o merge: **Actions → Preview Authorization Diagnostic → Run workflow → main**. Abra o job
+Após o merge desta correção, faça uma **nova execução**: **Actions → Preview Authorization Diagnostic → Run workflow → main**. Não use rerun da execução antiga, pois ele manteria o SHA antigo. Abra o job
 `authorize-exact-candidate` e o passo **Authorize exact PR 881 candidate (read-only)**:
 
 - `PREVIEW_AUTH_DIAGNOSTIC_RESULT=PASS reason=authorization_approved`: todas as validações atuais
@@ -123,7 +123,7 @@ Após o merge: **Actions → Preview Authorization Diagnostic → Run workflow �
   inesperada; não interpretar como autorização.
 
 O log registra o exit code real de `authorize`, o SHA do código e a identidade fixa PR/run/attempt.
-Ao final há remoção **somente** da cópia temporária deste diagnóstico. Manifesto, containers, redes,
+Ao final o runner tenta remover **somente** a cópia temporária deste diagnóstico e o resumo só informa `REMOVED` quando recebe a comprovação; caso contrário informa `FAILED`, `REFUSED` ou `NOT_PROVEN`. Manifesto, containers, redes,
 volumes, imagens, rotas Nginx e produção permanecem inalterados. A limpeza operacional é uma decisão
 posterior e não está autorizada por este procedimento.
 
@@ -161,10 +161,25 @@ Na mesma coleta, `gest-o-production-api-1` e `gest-o-production-web-1` estavam `
 tamanho, `86G` usados, `8.9G` disponíveis e `91%` de uso. A coleta não executou `authorize`, não
 removeu recursos e não demonstra quanto espaço seria recuperável.
 
-**autorização e limpeza da PR #881 pendentes**. O fato de os recursos e o manifesto existirem não
-substitui as validações autenticadas do lifecycle e não autoriza teardown ou remoção posterior.
+### Resultado autenticado e defeito de apresentação
 
-- diagnóstico `authorize` na VPS: **pendente**, até execução manual pós-merge;
+O diagnóstico foi executado no run `35741389812`, job `106791760779`, SHA
+`d68cc981a3eefff3ec08212be2af7eeff608f4b1`. O resultado remoto foi `PRESERVED`, exit de authorize
+`1`, motivo `authenticated_run_identity_diverged`, campo `pull_request_head_sha`. O candidato fixo
+`ef1bd1069cb23e1e887aef7154d94fae8879797e` divergiu do HEAD da PR #881 consultado,
+`8dfdfdb412dc0bfaddbfb312ad6c065f35ca6adf`. Portanto a autorização não foi aprovada e o cleanup de
+recursos permaneceu `NO`.
+
+O resumo incorreto `ERROR reason=no_remote_result_marker` é um problema separado de transporte:
+`appleboy/ssh-action@v1.2.0` rejeitou o input `capture_stdout` e não forneceu o stdout consumido. A
+correção transporta stdout via OpenSSH como arquivo de dados e interpreta somente marcadores
+sanitizados; não atribui a divergência ao transporte e não altera nenhum gate para obter PASS.
+
+**autorização e limpeza da PR #881 pendentes**. O preview de commit anterior ao HEAD final continua
+preservado e requer solução operacional própria.
+
+- diagnóstico `authorize` na VPS: **executado; PRESERVED, autorização não aprovada**;
+- correção do transporte: requer nova execução manual na `main` após merge, não rerun antigo;
 - limpeza dos recursos da PR #881: **pendente; não executada e não autorizada nesta tarefa**;
 - retenção de previews de commits anteriores ao HEAD final: requer solução própria; previews de PR
   aberta não devem ser excluídos apenas por idade;

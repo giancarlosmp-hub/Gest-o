@@ -39,6 +39,8 @@ jobs:
           echo "PREVIEW_AUTH_DIAGNOSTIC_CODE_SHA=${GITHUB_SHA}"
 
       - name: Copy trusted authorization files to an isolated VPS directory
+        id: copy
+        continue-on-error: true
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -50,8 +52,13 @@ jobs:
 
       - name: Authorize exact PR 881 candidate (read-only)
         id: authorize
-        uses: appleboy/ssh-action@v1.2.0
+        if: always()
+        continue-on-error: true
+        shell: bash
         env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_KEY: ${{ secrets.VPS_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: giancarlosmp-hub/Gest-o
           PREVIEW_OWNER_REPOSITORY: giancarlosmp-hub/Gest-o
@@ -64,26 +71,48 @@ jobs:
           DIAGNOSTIC_MANIFEST: /var/www/preview-provenance/gesto-pr-881-35668904948-1.json
           DIAGNOSTIC_TEMP_DIR: /tmp/gesto-preview-authorization-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
           DIAGNOSTIC_CODE_SHA: ${{ github.sha }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_KEY }}
-          port: 22022
-          script_stop: true
-          capture_stdout: true
-          envs: GITHUB_TOKEN,GITHUB_REPOSITORY,PREVIEW_OWNER_REPOSITORY,PREVIEW_OWNER_PR,PREVIEW_OWNER_RUN_ID,PREVIEW_OWNER_RUN_ATTEMPT,PREVIEW_OWNER_WORKFLOW,EXPECTED_PREVIEW_SHA,COMPOSE_PROJECT_NAME,DIAGNOSTIC_MANIFEST,DIAGNOSTIC_TEMP_DIR,DIAGNOSTIC_CODE_SHA
-          script: |
-            bash "${DIAGNOSTIC_TEMP_DIR}/scripts/preview-authorization-diagnostic-remote.sh"
+        run: |
+          set -euo pipefail
+          key_file=$(mktemp)
+          request_file=$(mktemp)
+          remote_output=$(mktemp)
+          cleanup_local() { rm -f -- "$key_file" "$request_file" "$remote_output"; }
+          trap cleanup_local EXIT
+          chmod 600 "$key_file" "$request_file" "$remote_output"
+          printf '%s\n' "$VPS_KEY" > "$key_file"
+          {
+            for name in GITHUB_TOKEN GITHUB_REPOSITORY PREVIEW_OWNER_REPOSITORY PREVIEW_OWNER_PR PREVIEW_OWNER_RUN_ID PREVIEW_OWNER_RUN_ATTEMPT PREVIEW_OWNER_WORKFLOW EXPECTED_PREVIEW_SHA COMPOSE_PROJECT_NAME DIAGNOSTIC_MANIFEST DIAGNOSTIC_TEMP_DIR DIAGNOSTIC_CODE_SHA; do
+              printf 'export %s=%q\n' "$name" "${!name}"
+            done
+            printf '%s\n' 'bash "$DIAGNOSTIC_TEMP_DIR/scripts/preview-authorization-diagnostic-remote.sh"'
+          } > "$request_file"
+          set +e
+          ssh -i "$key_file" -p 22022 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -- "$VPS_USER@$VPS_HOST" 'bash -s' < "$request_file" > "$remote_output"
+          ssh_rc=$?
+          set -e
+          node scripts/preview-authorization-diagnostic-result.mjs "$remote_output" "$ssh_rc" "$GITHUB_OUTPUT"
+          exit "$ssh_rc"
 
       - name: Publish non-destructive diagnostic summary
         if: always()
         shell: bash
         env:
           AUTHORIZATION_OUTCOME: ${{ steps.authorize.outcome }}
-          AUTHORIZATION_LOG: ${{ steps.authorize.outputs.stdout }}
+          RESULT: ${{ steps.authorize.outputs.result }}
+          REASON: ${{ steps.authorize.outputs.reason }}
+          FIELD: ${{ steps.authorize.outputs.field }}
+          AUTHORIZE_EXIT_CODE: ${{ steps.authorize.outputs.authorize_exit_code }}
+          TEMPORARY_CLEANUP: ${{ steps.authorize.outputs.temporary_cleanup }}
+          SSH_EXIT_CODE: ${{ steps.authorize.outputs.ssh_exit_code }}
         run: |
-          result=$(printf '%s\n' "$AUTHORIZATION_LOG" | sed -n 's/^.*\(PREVIEW_AUTH_DIAGNOSTIC_RESULT=[A-Z]* reason=[A-Za-z0-9_.-]*\).*$/\1/p' | tail -n 1)
-          [ -n "$result" ] || result='PREVIEW_AUTH_DIAGNOSTIC_RESULT=ERROR reason=no_remote_result_marker'
+          result=${RESULT:-ERROR}
+          reason=${REASON:-transport_step_did_not_produce_result}
+          field=${FIELD:-NOT_AVAILABLE}
+          authorize_exit=${AUTHORIZE_EXIT_CODE:-NOT_EXECUTED}
+          temporary_cleanup=${TEMPORARY_CLEANUP:-NOT_PROVEN}
+          ssh_exit=${SSH_EXIT_CODE:-UNKNOWN}
           {
             echo '## Preview Authorization Diagnostic'
             echo
@@ -91,6 +120,11 @@ jobs:
             echo '- Project: `gesto-pr-881-35668904948-1`'
             echo '- PR / run / attempt: `881 / 35668904948 / 1`'
             echo "- Step outcome: \`${AUTHORIZATION_OUTCOME}\`"
-            echo "- Result and reason: \`${result}\`"
-            echo '- Cleanup executed: **NO**. No preview or production resource was changed; only this run attempt’s temporary diagnostic files were removed.'
+            echo "- Result: \`${result}\`"
+            echo "- Reason: \`${reason}\`"
+            echo "- Divergent field: \`${field}\`"
+            echo "- Authorize exit code: \`${authorize_exit}\`"
+            echo "- SSH exit code: \`${ssh_exit}\`"
+            echo '- Resource cleanup executed: **NO**.'
+            echo "- Temporary diagnostic files: \`${temporary_cleanup}\`"
           } >> "$GITHUB_STEP_SUMMARY"
