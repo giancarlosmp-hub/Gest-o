@@ -123,43 +123,57 @@ const authenticateProducer = async () => {
   const authenticatedWorkflow = await github(`/actions/workflows/${run.workflow_id}`);
   if (authenticatedWorkflow.path !== '.github/workflows/preview.yml') identityDiverged('workflow_id_path');
   if (typeof run.head_branch !== 'string' || run.head_branch !== pr.head?.ref) identityDiverged('head_ref');
-  const pullRequests = (Array.isArray(topRun.pull_requests) && topRun.pull_requests.length > 0)
-    ? topRun.pull_requests
-    : (Array.isArray(run.pull_requests) ? run.pull_requests : []);
-  const correlatedPull = pullRequests.find(x => String(x.number) === String(expectedBase.pr));
-  if (correlatedPull) {
-    // The build checks out pull_request.head.sha, distinct from run.head_sha.
-    if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
-  } else {
-    // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
-    // For closed PRs, verify that the workflow run event and head branch match expected PR head ref,
-    // and that the candidate build commit matches either the workflow run head_sha or the PR head sha.
-    if (topRun.event !== 'pull_request' || typeof topRun.head_branch !== 'string' || topRun.head_branch !== pr.head?.ref) {
+  // Validate origin repository and fork identity explicitly. Fail-closed if missing or divergent.
+  const headRef = pr.head?.ref;
+  const headUser = pr.head?.user?.login;
+  const headRepoFull = pr.head?.repo?.full_name;
+  if (!headRef || !headUser || !headRepoFull) {
+    die('run_pr_correlation_missing');
+  }
+
+  // Extract explicit PR associations from topRun and attempt run.
+  const topPRs = Array.isArray(topRun.pull_requests) ? topRun.pull_requests : [];
+  const attemptPRs = Array.isArray(run.pull_requests) ? run.pull_requests : [];
+  const explicitPRs = topPRs.length > 0 ? topPRs : attemptPRs;
+
+  if (explicitPRs.length > 0) {
+    // Explicit associations provided by GitHub REST API.
+    const correlatedPull = explicitPRs.find(x => String(x.number) === String(expectedBase.pr));
+    if (!correlatedPull) {
+      // Explicit associations exist but NONE match expectedBase.pr.
       die('run_pr_correlation_missing');
     }
-    if (topRun.head_sha !== expectedBase.commit && pr.head?.sha !== expectedBase.commit) {
-      identityDiverged('pull_request_head_sha');
+    if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
+    if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+    if (run.head_sha !== expectedBase.commit) identityDiverged('run_head_sha');
+  } else {
+    // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
+    // Fallback for closed PRs with empty pull_requests arrays:
+    if (topRun.event !== 'pull_request' || typeof topRun.head_branch !== 'string' || topRun.head_branch !== headRef) {
+      die('run_pr_correlation_missing');
     }
-    // Event + branch + commit matching alone do not uniquely prove a specific PR number.
-    // Query GitHub API for all PRs on this head branch (supporting pagination & forks).
-    // If multiple PRs exist for the same branch/commit, correlation is ambiguous and must be preserved fail-closed.
-    const headUser = pr.head?.user?.login || expectedBase.repository.split('/')[0];
-    const headRef = pr.head?.ref;
-    if (!headRef) die('run_pr_correlation_missing');
 
-    const matchingPulls = [];
+    // Prove exact 3-way commit linkage: candidate build commit == PR head SHA == Workflow run SHA.
+    if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+    if (topRun.head_sha !== expectedBase.commit || run.head_sha !== expectedBase.commit) {
+      identityDiverged('run_head_sha');
+    }
+
+    // Query GitHub API for ALL PRs on this head branch/user across all pages.
+    // If multiple PRs exist for this branch (e.g. branch reuse across PRs), correlation is ambiguous.
+    const pullsForBranch = [];
     for (let page = 1; ; page++) {
-      const pagePulls = await github(`/pulls?head=${encodeURIComponent(`${headUser}:${headRef}`)}&state=all&per_page=100&page=${page}`);
-      if (!Array.isArray(pagePulls)) die('run_pr_correlation_missing');
-      for (const pull of pagePulls) {
-        if (pull.head?.ref === headRef && (pull.head?.sha === expectedBase.commit || pull.head?.sha === pr.head?.sha)) {
-          matchingPulls.push(pull);
+      const pageData = await github(`/pulls?head=${encodeURIComponent(`${headUser}:${headRef}`)}&state=all&per_page=100&page=${page}`);
+      if (!Array.isArray(pageData)) die('run_pr_correlation_missing');
+      for (const pull of pageData) {
+        if (pull.head?.ref === headRef && pull.head?.user?.login === headUser) {
+          pullsForBranch.push(pull);
         }
       }
-      if (pagePulls.length < 100) break;
+      if (pageData.length < 100) break;
     }
 
-    if (matchingPulls.length !== 1 || String(matchingPulls[0].number) !== String(expectedBase.pr)) {
+    if (pullsForBranch.length !== 1 || String(pullsForBranch[0].number) !== String(expectedBase.pr)) {
       die('run_pr_correlation_missing');
     }
   }

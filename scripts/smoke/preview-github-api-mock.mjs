@@ -21,11 +21,34 @@ const server = http.createServer((request, response) => {
   }
   let body;
   if (request.url.includes('/pulls?head=')) {
-    body = mode === 'ambiguous_multiple_prs'
-      ? [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature' } }, { number: 99, head: { sha: 'b'.repeat(40), ref: 'feature' } }]
-      : [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature' } }];
+    if (mode === 'api_incomplete_response') {
+      body = {};
+    } else if (mode === 'paginated_ambiguous_page2') {
+      const isPage2 = request.url.includes('page=2');
+      body = isPage2
+        ? [{ number: 99, head: { sha: 'c'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }]
+        : Array.from({ length: 100 }, (_, i) => ({
+            number: i === 0 ? 42 : i + 1000,
+            head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } }
+          }));
+    } else if (mode === 'branch_reuse_different_shas') {
+      body = [
+        { number: 10, head: { sha: '0'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } },
+        { number: 42, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }
+      ];
+    } else if (mode === 'ambiguous_multiple_prs') {
+      body = [
+        { number: 42, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } },
+        { number: 99, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }
+      ];
+    } else {
+      body = [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }];
+    }
   } else if (request.url.includes('/pulls/')) {
-    body = { state: mode === 'open' ? 'open' : 'closed', head: { sha: 'b'.repeat(40), ref: 'feature' } };
+    body = {
+      state: mode === 'open' ? 'open' : 'closed',
+      head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } }
+    };
   } else {
     const attemptMatch = request.url.match(/\/actions\/runs\/100\/attempts\/([0-9]+)$/);
     const topRunMatch = request.url.endsWith('/actions/runs/100');
@@ -34,18 +57,22 @@ const server = http.createServer((request, response) => {
       body = {
         status: 'completed', conclusion: mode === 'cancelled' ? 'cancelled' : 'success',
         run_attempt: mode === 'attempt' ? requested + 1 : requested,
-        head_sha: 'a'.repeat(40), head_branch: 'feature', workflow_id: 7,
+        head_sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40), head_branch: 'feature', workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
         event: 'pull_request', pull_requests: []
       };
     } else if (topRunMatch) {
       body = {
-        id: 100, head_sha: 'a'.repeat(40),
+        id: 100, head_sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40),
         head_branch: mode === 'empty_prs_divergent_branch' ? 'divergent-branch' : 'feature',
         workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
         event: mode === 'empty_prs_push_event' ? 'push' : 'pull_request',
-        pull_requests: (mode === 'empty_prs' || mode === 'empty_prs_divergent_branch' || mode === 'empty_prs_push_event' || mode === 'ambiguous_multiple_prs') ? [] : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }]
+        pull_requests: mode === 'explicit_mismatched_pr'
+          ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
+          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response'].includes(mode)
+            ? []
+            : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }])
       };
     } else if (request.url.includes('/actions/workflows/7')) {
       body = { path: '.github/workflows/preview.yml' };
