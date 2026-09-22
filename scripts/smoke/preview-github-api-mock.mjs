@@ -59,18 +59,28 @@ const server = http.createServer((request, response) => {
         run_attempt: mode === 'attempt' ? requested + 1 : requested,
         head_sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40), head_branch: 'feature', workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
-        event: 'pull_request', pull_requests: []
+        event: 'pull_request',
+        pull_requests: mode === 'explicit_contradiction_top_42_attempt_99'
+          ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
+          : mode === 'explicit_contradiction_top_99_attempt_42'
+          ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
+          : []
       };
     } else if (topRunMatch) {
       body = {
         id: 100, head_sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40),
         head_branch: mode === 'empty_prs_divergent_branch' ? 'divergent-branch' : 'feature',
+        head_repository: { full_name: mode === 'divergent_head_repo' ? 'other/repo' : 'owner/repo', owner: { login: 'owner' } },
         workflow_id: 7,
         name: 'Preview Deploy', path: mode === 'path' ? '.github/workflows/other.yml' : '.github/workflows/preview.yml',
         event: mode === 'empty_prs_push_event' ? 'push' : 'pull_request',
         pull_requests: mode === 'explicit_mismatched_pr'
           ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
-          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response'].includes(mode)
+          : mode === 'explicit_contradiction_top_42_attempt_99'
+          ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
+          : mode === 'explicit_contradiction_top_99_attempt_42'
+          ? [{ number: 99, head: { sha: 'b'.repeat(40) } }]
+          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo'].includes(mode)
             ? []
             : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }])
       };

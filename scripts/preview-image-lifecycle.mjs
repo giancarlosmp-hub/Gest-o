@@ -131,13 +131,25 @@ const authenticateProducer = async () => {
     die('run_pr_correlation_missing');
   }
 
+  // Compare topRun head repository identity against PR head repository if present.
+  if (topRun.head_repository?.full_name && topRun.head_repository.full_name !== headRepoFull) {
+    identityDiverged('head_repository');
+  }
+
   // Extract explicit PR associations from topRun and attempt run.
   const topPRs = Array.isArray(topRun.pull_requests) ? topRun.pull_requests : [];
   const attemptPRs = Array.isArray(run.pull_requests) ? run.pull_requests : [];
-  const explicitPRs = topPRs.length > 0 ? topPRs : attemptPRs;
 
-  if (explicitPRs.length > 0) {
-    // Explicit associations provided by GitHub REST API.
+  if (topPRs.length > 0 || attemptPRs.length > 0) {
+    // Reject contradictions between top-level and attempt endpoints when both provide associations.
+    if (topPRs.length > 0 && attemptPRs.length > 0) {
+      const topNumbers = canonical(topPRs.map(x => String(x.number)));
+      const attemptNumbers = canonical(attemptPRs.map(x => String(x.number)));
+      if (!same(topNumbers, attemptNumbers)) {
+        die('run_pr_correlation_missing');
+      }
+    }
+    const explicitPRs = topPRs.length > 0 ? topPRs : attemptPRs;
     const correlatedPull = explicitPRs.find(x => String(x.number) === String(expectedBase.pr));
     if (!correlatedPull) {
       // Explicit associations exist but NONE match expectedBase.pr.
@@ -145,7 +157,6 @@ const authenticateProducer = async () => {
     }
     if (correlatedPull.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
     if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
-    if (run.head_sha !== expectedBase.commit) identityDiverged('run_head_sha');
   } else {
     // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
     // Fallback for closed PRs with empty pull_requests arrays:
@@ -166,7 +177,7 @@ const authenticateProducer = async () => {
       const pageData = await github(`/pulls?head=${encodeURIComponent(`${headUser}:${headRef}`)}&state=all&per_page=100&page=${page}`);
       if (!Array.isArray(pageData)) die('run_pr_correlation_missing');
       for (const pull of pageData) {
-        if (pull.head?.ref === headRef && pull.head?.user?.login === headUser) {
+        if (pull.head?.ref === headRef && pull.head?.user?.login === headUser && pull.head?.repo?.full_name === headRepoFull) {
           pullsForBranch.push(pull);
         }
       }
