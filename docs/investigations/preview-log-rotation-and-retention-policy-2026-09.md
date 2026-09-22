@@ -30,14 +30,14 @@
 5. **Por que o fallback top-level ainda não autorizava a correlação após o merge:**
    - Quando uma PR é mesclada ou fechada no GitHub, a API REST do GitHub limpa a propriedade `pull_requests` (retornando `[]`) em **ambos** os endpoints (`/actions/runs/{run_id}` e `/actions/runs/{run_id}/attempts/{attempt}`).
    - Como a lógica procurava a PR dentro do array `pull_requests`, o resultado de `pullRequests.find(...)` retornava `undefined`, disparando `die('run_pr_correlation_missing')`.
+   - **Garantia de Desambiguação:** Evento + branch + commit coincidentes isoladamente não comprovam unicidade para um número específico de PR caso existam múltiplas PRs para a mesma branch/commit. Por isso, a verificação consulta `GET /pulls?head={owner}:{branch}&state=all`. Se mais de uma PR for retornada para a mesma branch/commit, o sistema identifica ambiguidade e interrompe com `run_pr_correlation_missing`, preservando o candidato.
 
 ### Solução Implementada
 1. No método `authenticateProducer()` de `scripts/preview-image-lifecycle.mjs`:
-   - Quando a PR está fechada (`pr.state === 'closed'`) e o array `pull_requests` retorna vazio `[]` na API do GitHub, a correlação valida inequivocamente:
-     a) `topRun.event === 'pull_request'`
-     b) `topRun.head_branch === pr.head?.ref`
-     c) `pr.head?.sha === expectedBase.commit`
-     d) `run.status === 'completed'` e `run.conclusion === 'success'`
+   - Quando a PR está fechada (`pr.state === 'closed'`) e o array `pull_requests` retorna vazio `[]` na API do GitHub:
+     a) Valida `topRun.event === 'pull_request'`, `topRun.head_branch === pr.head?.ref` e `topRun.head_sha === expectedBase.commit` (ou `pr.head?.sha === expectedBase.commit`).
+     b) Consulta `GET /pulls?head=${owner}:${pr.head.ref}&state=all` para verificar se existe exatamente 1 PR para a branch/commit.
+     c) Se houver ambiguidade (múltiplas PRs para a mesma branch/commit), preserva fail-closed com `run_pr_correlation_missing`.
 2. Se qualquer um dos campos (`event`, `head_branch`, `commit` ou `workflow`) divergir, o script aciona a proteção fail-closed (`run_pr_correlation_missing` / `authenticated_run_identity_diverged`) e preserva os recursos.
 
 ---

@@ -140,6 +140,17 @@ const authenticateProducer = async () => {
     if (topRun.head_sha !== expectedBase.commit && pr.head?.sha !== expectedBase.commit) {
       identityDiverged('pull_request_head_sha');
     }
+    // Event + branch + commit matching alone do not uniquely prove a specific PR number.
+    // Query GitHub API for all PRs on this head branch. If multiple PRs exist for the same branch/commit,
+    // correlation to expectedBase.pr alone is ambiguous and must be preserved fail-closed.
+    const ownerRepo = expectedBase.repository.split('/')[0];
+    const pullsForBranch = await github(`/pulls?head=${encodeURIComponent(`${ownerRepo}:${pr.head.ref}`)}&state=all`);
+    const matchingPulls = Array.isArray(pullsForBranch)
+      ? pullsForBranch.filter(x => x.head?.ref === pr.head?.ref && (x.head?.sha === expectedBase.commit || x.head?.sha === pr.head?.sha))
+      : [];
+    if (matchingPulls.length !== 1 || String(matchingPulls[0].number) !== String(expectedBase.pr)) {
+      die('run_pr_correlation_missing');
+    }
   }
   for (const status of ['in_progress', 'queued', 'waiting', 'pending', 'requested']) {
     for (let page = 1; ; page++) {
