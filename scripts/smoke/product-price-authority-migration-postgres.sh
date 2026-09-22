@@ -12,8 +12,17 @@ cleanup(){ docker rm -f "$pg" >/dev/null 2>&1 || true; docker network rm "$net" 
 trap cleanup EXIT
 docker network create --internal "$net" >/dev/null
 docker run -d --rm --pull=never --name "$pg" --network "$net" -e POSTGRES_PASSWORD=synthetic -e POSTGRES_DB=gesto_test postgres:16 >/dev/null
-for _ in {1..60}; do docker exec "$pg" pg_isready -U postgres -d gesto_test >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$pg" pg_isready -U postgres -d gesto_test >/dev/null
+database_ready=false
+for _ in {1..60}; do
+  if database_name=$(docker exec "$pg" psql -X -U postgres -d gesto_test -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
+    if [[ "$database_name" == gesto_test ]]; then
+      database_ready=true
+      break
+    fi
+  fi
+  sleep 1
+done
+[[ "$database_ready" == true ]]
 url="postgresql://postgres:synthetic@$pg:5432/gesto_test?schema=public"
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
