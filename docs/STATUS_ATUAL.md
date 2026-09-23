@@ -1349,3 +1349,9 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
   3. **Estouro de Timeout e Indisponibilidade de Conectividade ERP (UltraFV3Rest / Tailscale):**
      - **Causa Raiz:** Indisponibilidade temporária ou latência do conector Windows `UltraFv3Rest` / Tailscale resultando em falhas de conexão/timeout.
      - **Resolução Implementada/Garantida:** Adicionada verificação preventiva de alcance (preflight read-only de 10s via `GET /salesmen`) antes de disparar o envio de pedidos ou sincronizações completas, bloqueando chamadas prematuras e evitando travamento de requisições.
+
+## Histórico de Manutenções e Otimizações de Infraestrutura & CRM/ERP (Setembro/2026)
+
+- **Mudança 1 (Infraestrutura):** Desalocação em lote de 16 redes legadas de PRs fechadas/mescladas, liberando as sub-redes do pool do Docker daemon na VPS (`vps_mutations=pass`).
+- **Mudança 2 (Sincronização CRM/ERP):** Injeção de trava de integridade em `ultraFv3SyncService.ts` forçando erro fail-closed caso o payload do ERP tente gravar um cliente sem `tenantId`.
+- **Mudança 3 (Performance):** Refatoração de `scheduler-controller.ts` para servir o status do agendador em uma projeção leve em memória, extinguindo o travamento por timeout HTTP 408 (15s).
