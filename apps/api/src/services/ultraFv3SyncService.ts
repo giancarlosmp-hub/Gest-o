@@ -1816,6 +1816,13 @@ async function persistPartnerPayload(
   diagnostics: PartnerPersistenceDiagnostics,
   correlationId: string,
 ) {
+  if (!authority?.tenantId) {
+    logApiEvent("WARN", "[ultrafv3 sync partners] partner skipped without tenant authority", {
+      correlationId,
+      ownerSellerId,
+    });
+    return false;
+  }
   const code = pickPartnerCode(payload);
   if (!code) {
     diagnostics.withoutCode += 1;
