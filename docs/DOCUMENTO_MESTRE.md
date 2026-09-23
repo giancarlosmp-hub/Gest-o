@@ -1,3 +1,94 @@
+# Execução do Segundo Lote de Rotação de Logs de Previews — PRs #546, #547, #549, #570 e #604 (Setembro/2026)
+
+- **Confirmação e Validação do Lote 2:**
+  - PRs 546, 547, 549, 570 e 604 reconfirmadas ativas na API do GitHub.
+  - Validada a especificação de logging em `docker-compose.preview.yml` (`json-file`, `max-size: 25m`, `max-file: 4`).
+- **Recriação Controlada Apenas de Aplicação (`containers_recreated=api,web_only`):**
+  - Executada a recriação pontual somente dos containers `api` e `web` dos 5 projetos (`up -d --no-deps --force-recreate api web`).
+  - Confirmada a aplicação do driver e opções de rotação de logs via `docker inspect`.
+- **Preservação do Banco e Invariantes:**
+  - Zero containers de banco de dados recriados (`database_containers_recreated=0`).
+  - Zero volumes de banco ou redes de preview removidos (`volumes_removed=0`).
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) e PR #881 mantidos sem alterações (`production_mutations=0`, `pr881_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_LOG_ROTATION_BATCH=PASS
+  projects=546,547,549,570,604
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  ```
+
+# Reconciliação Final dos Previews Restantes de PRs Abertas (Setembro/2026)
+
+- **Confirmação na API do GitHub:** Auditado o status de cada PR, confirmando que os 12 projetos pertencem a PRs abertas e ativas: `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820`.
+- **Inventário Read-Only e Preservação de PRs Abertas (`open_prs_preserved=verified`):**
+  - Todos os containers, redes e volumes das 12 PRs abertas foram preservados intactos.
+  - Mapeados os maiores arquivos `json.log` e volumes PostgreSQL de cada projeto.
+  - Nenhuma alteração mutável, `docker compose down`, `prune` ou truncamento manual executado sobre os previews de PRs abertas.
+- **Plano de Rotação de Logs (`log_rotation_apply=NOT_EXECUTED_PLAN_ONLY`):**
+  - Preparado plano de migração para aplicação futura do driver `json-file` com `max-size: 25m` e `max-file: 4` via `docker compose up -d --force-recreate` por projeto, preservando dados dos volumes PostgreSQL.
+- **Invariantes e Isolamento de Produção:**
+  - Confirmada a limpeza completa dos lotes de PRs mescladas anteriores (774, 821, 836, 874, 875, 876, 879, 880) (`merged_cleanup_batches=verified`).
+  - PR #881 (`gesto-pr-881-35668904948-1`) preservada intacta (`pr881_mutations=0`).
+  - Recursos de produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) mantidos sem alterações (`production_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_REMAINING_RECONCILIATION=PASS
+  open_prs_preserved=verified
+  merged_cleanup_batches=verified
+  production_mutations=0
+  pr881_mutations=0
+  log_rotation_apply=NOT_EXECUTED_PLAN_ONLY
+  ```
+
+# Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
+
+- **Inventário Read-Only e Verificação de PRs:** Consultadas as PRs na API do GitHub, confirmando que #874, #875, #876, #879 e #880 estão fechadas e mescladas.
+- **Autorização e Remoção Controlada:**
+  - Cadastrados e processados individualmente via lifecycle em `main`: todos obtiveram veredito `PASS`.
+  - **Containers e Redes Removidos:** Containers `api`, `web` e `db` e redes `default` dos projetos `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*` e `gesto-pr-880-*`.
+  - **Volumes PostgreSQL Sintéticos Removidos:** `gesto_pgdata_pr_874_*`, `gesto_pgdata_pr_875_*`, `gesto_pgdata_pr_876_*`, `gesto_pgdata_pr_879_*` e `gesto_pgdata_pr_880_*` (confirmados sem dados de produção).
+  - **Diretórios de Preview e Logs:** `/var/www/preview/pr-874`, `/var/www/preview/pr-875`, `/var/www/preview/pr-876`, `/var/www/preview/pr-879` e `/var/www/preview/pr-880` e logs Docker eliminados.
+- **Preservação Restrita de Candidatos e Produção:**
+  - **PR #881 (`gesto-pr-881-35668904948-1`):** Mantida intocada por divergência de commit (`pr881_mutations=0`).
+  - **Produção e PRs Abertas:** Containers `gest-o-production-*`, banco `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volume `gest-o_pgdata_clean_v2_20260717` e PRs abertas mantidos sem alterações (`production_mutations=0`, `open_pr_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_MERGED_CLEANUP_BATCH=PASS
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  preserved_candidates=documented
+  ```
+
+# Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
+
+- **Inventário Read-Only e Validação:** Identificados e confirmados os três projetos de preview de PRs já fechadas e mescladas: `gesto-pr-774`, `gesto-pr-821` e `gesto-pr-836`.
+- **Execução Controlada por Projeto:**
+  - **Containers Removidos:**
+    - `gesto-pr-774`: `gesto-pr-774-api-1`, `gesto-pr-774-web-1`, `gesto-pr-774-db-1`
+    - `gesto-pr-821`: `gesto-pr-821-api-1`, `gesto-pr-821-web-1`, `gesto-pr-821-db-1`
+    - `gesto-pr-836`: `gesto-pr-836-api-1`, `gesto-pr-836-web-1`, `gesto-pr-836-db-1`
+  - **Redes Docker Removidas:** `gesto-pr-774_default`, `gesto-pr-821_default`, `gesto-pr-836_default`.
+  - **Volumes PostgreSQL de Testes Removidos:** `gesto_pgdata_pr_774`, `gesto_pgdata_pr_821`, `gesto_pgdata_pr_836` (dados exclusivos de testes/validação de PRs mescladas, sem dados de produção).
+  - **Diretórios de Preview Removidos:** `/var/www/preview/pr-774`, `/var/www/preview/pr-821` e `/var/www/preview/pr-836`.
+  - **Imagens Exclusivas e Logs Removidos:** Imagens de API/WEB exclusivamente utilizadas por esses previews e logs associados eliminados.
+- **Isolamento e Invariantes de Produção:**
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) permaneceu running/healthy com 0 mutações (`production_mutations=0`).
+  - PRs abertas e a PR #881 preservadas intactas (`open_pr_mutations=0`, `pr881_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_MERGED_CLEANUP=PASS
+  projects=gesto-pr-774,gesto-pr-821,gesto-pr-836
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  network_capacity_reclaimed=verified
+  ```
+
 # Correção do Registro Pré-Runtime de Imagens de Preview (Setembro/2026)
 
 - **Correção Mínima de Proveniência:** No workflow de Preview Deploy, a gravação do manifesto de proveniência (`scripts/preview-image-lifecycle.mjs record`) ocorre intencionalmente pós-build e pré-runtime (`up -d --no-build`). O comando `docker compose images -q <service>` dependia da existência de containers criados para responder. Na ausência de containers no estágio pré-runtime, o script falhava com `compose_image_reference_api_missing`, impedindo a gravação do manifesto de proveniência e deixando as imagens do build salvaguardadas e acumuladas na VPS.

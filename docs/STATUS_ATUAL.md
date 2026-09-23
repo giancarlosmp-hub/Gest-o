@@ -1,3 +1,100 @@
+# Execução do Segundo Lote de Rotação de Logs de Previews — PRs #546, #547, #549, #570 e #604 (Setembro/2026)
+
+- **Projetos Executados (Lote 2):** `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604` (PRs abertas confirmadas via API do GitHub).
+- **Ações Executadas por Projeto:**
+  - Validada a configuração Compose com `driver: json-file`, `max-size: "25m"` e `max-file: "4"` para os serviços `api` e `web`.
+  - Recriados **exclusivamente** os containers `api` e `web` via `docker compose up -d --no-deps --force-recreate api web`.
+  - Verificada a aplicação efetiva da rotação de logs via `docker inspect` nos dois containers de cada projeto.
+- **Invariantes e Proteções Garantidas:**
+  - **Containers de Banco:** Nenhum container de banco de dados (`db`) foi recriado (`database_containers_recreated=0`).
+  - **Volumes e Redes:** Nenhum volume PostgreSQL de preview ou rede foi removido ou alterado (`volumes_removed=0`).
+  - **Produção e PR #881:** Recursos de produção e a PR #881 mantidos intactos com 0 mutações (`production_mutations=0`, `pr881_mutations=0`).
+  - **Logs e Prune:** Nenhum log foi truncado manualmente e nenhum `docker system prune` foi executado.
+- **Espaço Liberado:** Cessada a acumulação descontrolada de logs dos previews e liberado espaço em disco correspondente aos arquivos de log antigos reinicializados na recriação dos containers de aplicação.
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_LOG_ROTATION_BATCH=PASS
+  projects=546,547,549,570,604
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  ```
+
+# Reconciliação Final dos Previews Restantes de PRs Abertas (Setembro/2026)
+
+- **PRs Abertas Confirmadas (`open_prs_preserved=verified`):** Consultadas via API do GitHub e confirmadas como ativas/abertas:
+  - `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820`.
+- **Garantias de Preservação de PRs Abertas:**
+  - Nenhum container de PR aberta foi removido ou alterado.
+  - Nenhuma rede ou volume de PR aberta foi removido ou alterado.
+  - Nenhum comando `docker compose down`, `docker system prune` ou truncamento manual foi executado.
+- **Auditoria de Logs e Configuração de Logging:**
+  - Mapeados os maiores arquivos `json.log` por projeto para os previews de PRs abertas (ex. `gesto-pr-542-api-1`, `gesto-pr-604-api-1`, `gesto-pr-820-api-1`).
+  - Configuração de logging atual em containers legado: driver `json-file` padrão do daemon (sem limite `max-size`/`max-file` in-place).
+- **Plano de Migração Controlada para Rotação de Logs (`log_rotation_apply=NOT_EXECUTED_PLAN_ONLY`):**
+  - Configuração-alvo em `docker-compose.preview.yml`: `driver: json-file`, `max-size: "25m"`, `max-file: "4"`.
+  - Estratégia de aplicação futura: recriação controlada individual por projeto (`docker compose up -d --force-recreate`), preservando integralmente os volumes PostgreSQL montados. Nenhuma recriação foi executada nesta etapa.
+- **Confirmação de Lotes Anteriores e Produção:**
+  - **Lotes Mesclados Anteriormente Limpos:** Confirmada ausência de recursos residuais dos projetos `gesto-pr-774`, `gesto-pr-821`, `gesto-pr-836`, `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*` e `gesto-pr-880-*` (`merged_cleanup_batches=verified`).
+  - **PR #881:** `gesto-pr-881-35668904948-1` intocada (`pr881_mutations=0`).
+  - **Produção:** Containers `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, e volumes `gest-o_pgdata` / `gest-o_pgdata_clean_v2_20260717` mantidos `running/healthy` (`production_mutations=0`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_REMAINING_RECONCILIATION=PASS
+  open_prs_preserved=verified
+  merged_cleanup_batches=verified
+  production_mutations=0
+  pr881_mutations=0
+  log_rotation_apply=NOT_EXECUTED_PLAN_ONLY
+  ```
+
+# Limpeza Controlada Lote de Previews Mesclados — PRs #874, #875, #876, #879 e #880 (Setembro/2026)
+
+- **Projetos Processados:** `gesto-pr-874-*`, `gesto-pr-875-*`, `gesto-pr-876-*`, `gesto-pr-879-*`, `gesto-pr-880-*` (PRs confirmadas fechadas e mescladas via API GitHub).
+- **Projetos Removidos:** Todos os 5 projetos autorizados (`PASS` no lifecycle do manifesto) tiveram remoção completa:
+  - **Containers:** Containers de API, WEB e DB associados a `gesto-pr-874`, `gesto-pr-875`, `gesto-pr-876`, `gesto-pr-879` e `gesto-pr-880`.
+  - **Redes Docker:** Redes `default` de cada um dos 5 projetos liberadas no alocador IPAM do Docker daemon.
+  - **Volumes PostgreSQL de Teste:** `gesto_pgdata_pr_874_*`, `gesto_pgdata_pr_875_*`, `gesto_pgdata_pr_876_*`, `gesto_pgdata_pr_879_*`, `gesto_pgdata_pr_880_*` (confirmados como dados sintéticos de teste/preview e removidos explicitamente).
+  - **Diretórios de Preview:** `/var/www/preview/pr-874`, `/var/www/preview/pr-875`, `/var/www/preview/pr-876`, `/var/www/preview/pr-879`, `/var/www/preview/pr-880`.
+  - **Imagens Exclusivas e Logs:** Imagens de API/WEB e logs Docker associados removidos.
+- **Projetos Preservados:**
+  - **PR #881:** `gesto-pr-881-35668904948-1` integralmente preservada por divergência de correlação de commit (`authenticated_run_identity_diverged`).
+  - **PRs Abertas:** Todos os recursos de PRs abertas mantidos intactos (`open_pr_mutations=0`).
+  - **Produção:** `gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`, `gest-o_default`, `gest-o_pgdata` e `gest-o_pgdata_clean_v2_20260717` mantidos intactos e `running/healthy` (`production_mutations=0`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_MERGED_CLEANUP_BATCH=PASS
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  preserved_candidates=documented
+  ```
+
+# Limpeza Controlada de Previews de PRs Mescladas — gesto-pr-774, gesto-pr-821, gesto-pr-836 (Setembro/2026)
+
+- **Projetos Limpos:** `gesto-pr-774`, `gesto-pr-821`, `gesto-pr-836` (PRs fechadas e mescladas).
+- **Recursos Removidos por Projeto:**
+  - **Containers:** `gesto-pr-774-api-1`, `gesto-pr-774-web-1`, `gesto-pr-774-db-1`, `gesto-pr-821-api-1`, `gesto-pr-821-web-1`, `gesto-pr-821-db-1`, `gesto-pr-836-api-1`, `gesto-pr-836-web-1`, `gesto-pr-836-db-1`.
+  - **Redes Docker:** `gesto-pr-774_default`, `gesto-pr-821_default`, `gesto-pr-836_default`.
+  - **Volumes PostgreSQL de Teste:** `gesto_pgdata_pr_774`, `gesto_pgdata_pr_821`, `gesto_pgdata_pr_836` (confirmados como volumes de validação/teste sem dados reais de produção; removidos como parte explícita da tarefa).
+  - **Diretórios de Preview:** `/var/www/preview/pr-774`, `/var/www/preview/pr-821`, `/var/www/preview/pr-836`.
+  - **Imagens e Logs:** Imagens exclusivas dos três projetos e logs Docker associados removidos.
+- **Garantias de Preservação (0 mutações):**
+  - **Produção:** Todos os containers de produção (`gest-o-production-*`), rede (`gest-o_default`), e volumes (`gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) permaneceram `running/healthy` e intocados (`production_mutations=0`).
+  - **PRs Abertas e PR #881:** Todos os containers e recursos de PRs abertas e o preview preservado da PR #881 permaneceram intocados (`open_pr_mutations=0`, `pr881_mutations=0`).
+- **Capacidade de Rede e Espaço Recuperado:** Capacidade de sub-redes recuperada e liberada no alocador IPAM Docker daemon (`network_capacity_reclaimed=verified`).
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_MERGED_CLEANUP=PASS
+  projects=gesto-pr-774,gesto-pr-821,gesto-pr-836
+  production_mutations=0
+  open_pr_mutations=0
+  pr881_mutations=0
+  network_capacity_reclaimed=verified
+  ```
+
 # Correção da Correlação Run-PR Pós-Merge e Rotação de Logs (Setembro/2026)
 
 - **Causa da Ausência de Correlação na PR #880 (`run_pr_correlation_missing`):** No workflow pós-merge de cleanup (`preview-cleanup.yml`), o script `preview-image-lifecycle.mjs` autenticava a execução consultando unicamente a sub-rota de tentativa `/actions/runs/${run_id}/attempts/${run_attempt}`. Na API REST do GitHub Actions, essa sub-rota omite o array `pull_requests` (retornando `[]`), enquanto os vínculos com PRs pertencem ao objeto top-level da execução (`/actions/runs/${run_id}`).
