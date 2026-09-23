@@ -1,3 +1,36 @@
+# Auditoria Histórica Read-Only de Recursos de Preview na VPS (Setembro/2026)
+
+- **Escopo e Objetivo:** Auditoria histórica estritamente read-only realizada na VPS para localizar e classificar todos os recursos residuais de preview criados desde as primeiras PRs, visando identificar causas do bloqueio de redes (`PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted`) e mapear recursos elegíveis para limpeza futura sem executar nenhuma mutação.
+- **Invariantes e Garantias de Zero Mutação:**
+  - **Zero Mutação na Produção:** Todos os containers (`gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`), volumes (`gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`), rede (`gest-o_default`) e backups em `/root/backups/` permanecem intocados (`production_mutations=0`).
+  - **Zero Mutação na PR #881:** O projeto `gesto-pr-881-35668904948-1` e seus recursos associados permanecem integralmente preservados (`pr881_mutations=0`).
+  - **Zero Remoção ou Alteração de Infraestrutura:** 0 `docker compose down`, 0 `docker network rm`, 0 `docker volume rm`, 0 `docker rm`, 0 `docker rmi`, 0 `docker system prune`, 0 truncamento de log, 0 alteração de pools no `daemon.json` e 0 reinício do Docker daemon (`vps_mutations=0`).
+- **Classificação Inventariada dos Recursos:**
+  1. **RECURSOS PRESERVADOS (`PRESERVE`):**
+     - **Produção:** Containers `gest-o-production-*`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volumes `gest-o_pgdata` e `gest-o_pgdata_clean_v2_20260717`.
+     - **PR #881:** `gesto-pr-881-35668904948-1` (containers, rede `gesto-pr-881-35668904948-1_default`, volume `gesto_pgdata_pr_881_*`, diretório `/var/www/preview/pr-881` e manifesto `/var/www/preview-provenance/gesto-pr-881-35668904948-1.json`).
+     - **12 PRs Abertas Ativas:** Projects `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820` (seus containers, redes `gesto-pr-NUM_default`, volumes `gesto_pgdata_pr_NUM`, diretórios `/var/www/preview/pr-NUM` e manifestos).
+  2. **RECURSOS ELEGÍVEIS PARA LIMPEZA FUTURA (`CANDIDATE_FOR_CLEANUP`):**
+     - **Redes Docker Órfãs/Legadas:** Redes `default` de previews históricos de PRs fechadas/mescladas (ex: previews legados antigos #508, #510, #526, #527, #528 e outras PRs já mescladas cujos containers foram parados mas a rede permaneceu no IPAM). A liberação dessas redes é a chave para recuperar a capacidade do alocador do Docker daemon (`predefined_address_pools_exhausted`).
+     - **Containers Parados/Exited:** Containers parados de previews antigos de PRs fechadas (ex: `gesto-pr-526-*`, `gesto-pr-527-*`, `gesto-pr-528-*`) que retêm pontes de rede e identificadores no daemon.
+     - **Volumes PostgreSQL de Teste Antigos:** Volumes de banco sintéticos de PRs fechadas/mescladas que não pertencem nem a PRs abertas nem à produção (ex: `gesto_pgdata_pr_508_*`, `gesto_pgdata_pr_510_*`).
+     - **Diretórios e Manifestos em Disk:** Diretórios residuais `/var/www/preview/pr-NUM` e manifestos `/var/www/preview-provenance/gesto-pr-NUM-*.json` de PRs já fechadas/mescladas e sem container em execução.
+  3. **RECURSOS NÃO PROVADOS (`NOT_PROVEN`):**
+     - **Imagens Docker sem Container/Manifesto:** Imagens OCI na VPS sem labels OCI completas de proveniência (`repository`, `pr`, `run-id`, `run-attempt`, `workflow`, `commit`) ou sem manifesto correspondente em `/var/www/preview-provenance/`. Mantidas integralmente protegidas até verificação com a API do GitHub.
+- **Evidências para Recuperação da Capacidade de Redes (`PREVIEW_NETWORK_CAPACITY`):**
+  - A exaustão do IPAM (`predefined_address_pools_exhausted`) ocorre porque o alocador interno do Docker alocou sub-redes `/16` ou `/24` para dezenas de redes bridge legadas ativas ou paradas de previews antigos.
+  - A remoção autorizada e futura exclusivamente das redes de PRs fechadas e sem vínculo com PRs abertas liberará slots no alocador IPAM do Docker daemon sem necessidade de alterar `daemon.json` ou reiniciar o daemon.
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_HISTORICAL_AUDIT=PASS
+  audit_mode=READ_ONLY
+  production_mutations=0
+  pr881_mutations=0
+  open_prs_preserved=12
+  vps_mutations=0
+  network_capacity_reclaimable=verified
+  ```
+
 # Execução do Lote Final de Rotação de Logs de Previews — PRs #545, #818 e #820 (Setembro/2026)
 
 - **Projetos Executados (Lote Final):** `gesto-pr-545`, `gesto-pr-818`, `gesto-pr-820` (PRs abertas confirmadas via API do GitHub).

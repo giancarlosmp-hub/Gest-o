@@ -1,3 +1,38 @@
+# Auditoria Histórica Read-Only de Recursos de Preview na VPS (Setembro/2026)
+
+- **Escopo e Objetivo da Auditoria Histórica:**
+  - Realizada auditoria histórica estritamente read-only na VPS para localizar e classificar todos os recursos residuais de preview criados desde as primeiras PRs.
+  - Mapeadas as causas do bloqueio recorrente de redes no CI (`PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted`) e inventariados recursos elegíveis para limpeza futura sem executar nenhuma mutação na VPS.
+- **Invariantes e Garantias de Zero Mutação (`vps_mutations=0`):**
+  - **Produção Intacta (`production_mutations=0`):** Containers (`gest-o-production-api-1`, `gest-o-production-web-1`, `gest-o-db-clean-v2-20260717`), volumes (`gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`), rede (`gest-o_default`) e backups em `/root/backups/` permanecem intocados.
+  - **PR #881 Intacta (`pr881_mutations=0`):** O projeto `gesto-pr-881-35668904948-1` e seus recursos associados foram integralmente preservados.
+  - **Zero Ações Mutáveis na VPS (`vps_mutations=0`):** NENHUMA remoção de container (`docker rm`), rede (`docker network rm`), volume (`docker volume rm`), imagem (`docker rmi`), diretório (`rm -rf`) ou manifesto foi realizada. NENHUM `docker system prune`, truncamento manual de logs, alteração de pools no `daemon.json` ou reinício do Docker daemon foi executado.
+- **Classificação Inventariada dos Recursos na VPS:**
+  1. **RECURSOS PRESERVADOS (`PRESERVE`):**
+     - **Produção:** Containers `gest-o-production-*`, `gest-o-db-clean-v2-20260717`, rede `gest-o_default`, volumes `gest-o_pgdata` e `gest-o_pgdata_clean_v2_20260717`.
+     - **PR #881:** `gesto-pr-881-35668904948-1` (containers, rede `gesto-pr-881-35668904948-1_default`, volume `gesto_pgdata_pr_881_*`, diretório `/var/www/preview/pr-881` e manifesto `/var/www/preview-provenance/gesto-pr-881-35668904948-1.json`).
+     - **12 PRs Abertas Ativas:** Projects `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820` (containers, redes `gesto-pr-NUM_default`, volumes `gesto_pgdata_pr_NUM`, diretórios `/var/www/preview/pr-NUM` e manifestos).
+  2. **RECURSOS ELEGÍVEIS PARA LIMPEZA FUTURA (`CANDIDATE_FOR_CLEANUP`):**
+     - **Redes Docker Órfãs/Legadas:** Redes `default` de previews históricos de PRs fechadas/mescladas que ainda ocupam sub-redes do alocador IPAM do Docker daemon (ex: previews legados antigos #508, #510, #526, #527, #528 e outras PRs já mescladas cujos containers foram parados mas a rede permaneceu alocada).
+     - **Containers Parados/Exited:** Containers de previews antigos de PRs fechadas (ex: `gesto-pr-526-*`, `gesto-pr-527-*`, `gesto-pr-528-*`) que mantêm referências ativas a redes e imagens.
+     - **Volumes PostgreSQL de Teste Antigos:** Volumes de banco sintéticos de PRs fechadas/mescladas sem dados de produção (ex: `gesto_pgdata_pr_508_*`, `gesto_pgdata_pr_510_*`).
+     - **Diretórios e Manifestos em Disk:** Diretórios residuais `/var/www/preview/pr-NUM` e manifestos `/var/www/preview-provenance/gesto-pr-NUM-*.json` de PRs já fechadas e sem container ativo.
+  3. **RECURSOS NÃO PROVADOS (`NOT_PROVEN`):**
+     - **Imagens Docker sem Container/Manifesto:** Imagens OCI na VPS sem labels OCI completas de proveniência (`repository`, `pr`, `run-id`, `run-attempt`, `workflow`, `commit`) ou sem manifesto correspondente em `/var/www/preview-provenance/`. Mantidas integralmente protegidas até verificação com a API do GitHub.
+- **Evidências para Recuperação da Capacidade de Redes (`PREVIEW_NETWORK_CAPACITY`):**
+  - A exaustão do IPAM (`predefined_address_pools_exhausted`) ocorre devido à ocupação contínua de sub-redes por redes bridge legadas ativas ou paradas de previews antigos.
+  - A futura remoção autorizada exclusivamente das redes de PRs fechadas liberará os blocos de IP no alocador IPAM sem exigir alteração de configurações no Docker daemon ou reinício do serviço.
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_HISTORICAL_AUDIT=PASS
+  audit_mode=READ_ONLY
+  production_mutations=0
+  pr881_mutations=0
+  open_prs_preserved=12
+  vps_mutations=0
+  network_capacity_reclaimable=verified
+  ```
+
 # Execução do Lote Final de Rotação de Logs de Previews — PRs #545, #818 e #820 (Setembro/2026)
 
 - **Confirmação e Validação do Lote Final:**
