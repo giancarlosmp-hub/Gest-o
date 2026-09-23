@@ -1,3 +1,52 @@
+# Execução do Lote Final de Rotação de Logs de Previews — PRs #545, #818 e #820 (Setembro/2026)
+
+- **Confirmação e Validação do Lote Final:**
+  - PRs 545, 818 e 820 reconfirmadas ativas e abertas na API do GitHub.
+  - Validada a especificação de logging em `docker-compose.preview.yml` (`json-file`, `max-size: 25m`, `max-file: 4`).
+- **Recriação Controlada Apenas de Aplicação (`containers_recreated=api,web_only`):**
+  - Executada a recriação pontual somente dos containers `api` e `web` dos 3 projetos (`up -d --no-deps --force-recreate api web`).
+  - Confirmada a aplicação efetiva do driver e opções de rotação de logs via `docker inspect`.
+- **Preservação do Banco e Invariantes:**
+  - Zero containers de banco de dados recriados (`database_containers_recreated=0`).
+  - Zero volumes de banco, redes, containers, imagens ou diretórios de preview removidos (`volumes_removed=0`).
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`), PR #881 e demais PRs abertas mantidos sem alterações (`production_mutations=0`, `pr881_mutations=0`, `open_pr_mutations=0`).
+- **Bloqueio de Infraestrutura Conhecido (VPS):**
+  - O erro `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted` do CI `deploy-preview` permanece registrado como limitação de sub-redes da VPS (IPAM do Docker daemon), sem alterações de pools, restarts do daemon ou limpezas globais.
+- **Verificação Final:**
+  ```text
+  PREVIEW_LOG_ROTATION_FINAL_BATCH=PASS
+  projects=545,818,820
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  open_pr_mutations=0
+  ```
+
+# Execução do Terceiro Lote de Rotação de Logs de Previews — PRs #535, #538, #539 e #542 (Setembro/2026)
+
+- **Confirmação e Validação do Lote 3:**
+  - PRs 535, 538, 539 e 542 reconfirmadas ativas na API do GitHub.
+  - Validada a especificação de logging em `docker-compose.preview.yml` (`json-file`, `max-size: 25m`, `max-file: 4`).
+- **Recriação Controlada Apenas de Aplicação (`containers_recreated=api,web_only`):**
+  - Executada a recriação pontual somente dos containers `api` e `web` dos 4 projetos (`up -d --no-deps --force-recreate api web`).
+  - Confirmada a aplicação do driver e opções de rotação de logs via `docker inspect`.
+- **Preservação do Banco e Invariantes:**
+  - Zero containers de banco de dados recriados (`database_containers_recreated=0`).
+  - Zero volumes de banco ou redes de preview removidos (`volumes_removed=0`).
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) e PR #881 mantidos sem alterações (`production_mutations=0`, `pr881_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_LOG_ROTATION_BATCH=PASS
+  projects=535,538,539,542
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  ```
+
 # Execução do Segundo Lote de Rotação de Logs de Previews — PRs #546, #547, #549, #570 e #604 (Setembro/2026)
 
 - **Confirmação e Validação do Lote 2:**
