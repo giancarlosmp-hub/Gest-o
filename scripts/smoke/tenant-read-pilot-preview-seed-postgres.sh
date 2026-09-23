@@ -43,7 +43,9 @@ docker run -d --name "$name" --network "$network" -e POSTGRES_PASSWORD=preview_e
 set_failure_context database_readiness wait_for_postgres
 ready=false
 for _ in {1..60}; do
-  if docker exec "$name" pg_isready -U postgres -d "$db" >/dev/null 2>&1; then ready=true; break; fi
+  if database_name=$(docker exec "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
+    if [[ "$database_name" == "$db" ]]; then ready=true; break; fi
+  fi
   sleep 1
 done
 if [[ "$ready" != true ]]; then
@@ -51,7 +53,8 @@ if [[ "$ready" != true ]]; then
   exit 1
 fi
 set_failure_context database_readiness verify_postgres_ready
-docker exec "$name" pg_isready -U postgres -d "$db" >/dev/null
+database_name=$(docker exec "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()')
+[[ "$database_name" == "$db" ]]
 url="postgresql://postgres:preview_ephemeral@${name}:5432/${db}?schema=public"
 run_api() { docker run --rm --network "$network" -e DATABASE_URL="$url" -e NODE_ENV=test -e DEPLOYMENT_ENV=preview -e ENABLE_PREVIEW_SEED=true -e DEFAULT_TENANT_ID="$tenant_id" -e PREVIEW_SEED_PASSWORD="$preview_seed_password" --entrypoint sh "$image" -c "$1"; }
 
