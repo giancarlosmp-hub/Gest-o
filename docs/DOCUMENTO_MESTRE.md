@@ -1,3 +1,26 @@
+# Execução do Segundo Lote de Rotação de Logs de Previews — PRs #546, #547, #549, #570 e #604 (Setembro/2026)
+
+- **Confirmação e Validação do Lote 2:**
+  - PRs 546, 547, 549, 570 e 604 reconfirmadas ativas na API do GitHub.
+  - Validada a especificação de logging em `docker-compose.preview.yml` (`json-file`, `max-size: 25m`, `max-file: 4`).
+- **Recriação Controlada Apenas de Aplicação (`containers_recreated=api,web_only`):**
+  - Executada a recriação pontual somente dos containers `api` e `web` dos 5 projetos (`up -d --no-deps --force-recreate api web`).
+  - Confirmada a aplicação do driver e opções de rotação de logs via `docker inspect`.
+- **Preservação do Banco e Invariantes:**
+  - Zero containers de banco de dados recriados (`database_containers_recreated=0`).
+  - Zero volumes de banco ou redes de preview removidos (`volumes_removed=0`).
+  - Produção (`gest-o-production-*`, `gest-o_default`, `gest-o_pgdata`, `gest-o_pgdata_clean_v2_20260717`) e PR #881 mantidos sem alterações (`production_mutations=0`, `pr881_mutations=0`).
+- **Verificação Final:**
+  ```text
+  PREVIEW_LOG_ROTATION_BATCH=PASS
+  projects=546,547,549,570,604
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  ```
+
 # Reconciliação Final dos Previews Restantes de PRs Abertas (Setembro/2026)
 
 - **Confirmação na API do GitHub:** Auditado o status de cada PR, confirmando que os 12 projetos pertencem a PRs abertas e ativas: `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542`, `gesto-pr-545`, `gesto-pr-546`, `gesto-pr-547`, `gesto-pr-549`, `gesto-pr-570`, `gesto-pr-604`, `gesto-pr-818`, `gesto-pr-820`.
