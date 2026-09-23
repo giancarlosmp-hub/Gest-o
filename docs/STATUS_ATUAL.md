@@ -1324,3 +1324,15 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
 - **Pendências:** o preview de commit anterior ao HEAD final segue preservado e sem solução operacional
   nesta tarefa. Limpeza, retenção/migração, capacidade de redes e consumo de disco não foram resolvidos.
   Após merge, testar com uma **nova** execução manual na `main`; não repetir o run antigo.
+
+## Registro de Manutenção de Previews (Setembro/2026)
+
+- **O que foi feito:**
+  - **Fase 1 (Limpeza Controlada de Containers Parados):** Removidos exclusivamente os containers parados (`exited`) das PRs fechadas/mescladas (#508, #510, #526, #527, #528) para desvincular as pontes de rede do alocador IPAM Docker daemon (`EXIT_CODE=0`).
+  - **Fase 2 (Reclaim de Capacidade de Redes):** Removidas cirurgicamente as 5 redes órfãs/legadas associadas a essas PRs fechadas (`gesto-pr-508_default`, `gesto-pr-510_default`, `gesto-pr-526_default`, `gesto-pr-527_default`, `gesto-pr-528_default`), liberando 5 slots de sub-redes `/16` no alocador IPAM (`EXIT_CODE=0`).
+  - **Fase 3 (Aplicação da Rotação de Logs em PRs Abertas):** Executada a recriação controlada e isolada **exclusivamente** dos containers de aplicação (`api` e `web` com `--no-deps`) para as 12 PRs abertas/ativas (#535, #538, #539, #542, #545, #546, #547, #549, #570, #604, #818, #820). O limite declarativo `max-size: 25m` / `max-file: 4` foi ativado e verificado via `docker inspect` (`EXIT_CODE=0`).
+  - **Garantias de Preservação:** Todos os volumes PostgreSQL de dados produtivos (`gest-o_pgdata_clean_v2_20260717`) e de teste de previews (`gesto_pgdata_pr_*`), containers de banco de dados, a PR #881 e os recursos de produção permaneceram 100% intocados e intactos (`production_mutations=0`, `pr881_mutations=0`).
+
+- **O que precisa ser feito:**
+  - Monitorar se a liberação das sub-redes órfãs eliminou definitivamente o bloqueio de infraestrutura `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted` nas novas execuções de Preview Deploy no GitHub Actions.
+  - Iniciar o diagnóstico e a resolução dos erros pendentes do CRM em ambiente de preview validado.
