@@ -1,3 +1,29 @@
+# Execução do Lote Final de Rotação de Logs de Previews — PRs #545, #818 e #820 (Setembro/2026)
+
+- **Projetos Executados (Lote Final):** `gesto-pr-545`, `gesto-pr-818`, `gesto-pr-820` (PRs abertas confirmadas via API do GitHub).
+- **Ações Executadas por Projeto:**
+  - Validada a configuração Compose com `driver: json-file`, `max-size: "25m"` e `max-file: "4"` para os serviços `api` e `web` (`docker compose -p gesto-pr-NUMERO -f docker-compose.yml -f docker-compose.preview.yml config`).
+  - Recriados **exclusivamente** os containers `api` e `web` via `docker compose -p gesto-pr-NUMERO -f docker-compose.yml -f docker-compose.preview.yml up -d --no-deps --force-recreate api web`.
+  - Verificada a aplicação efetiva da rotação de logs via `docker inspect gesto-pr-NUMERO-api-1 gesto-pr-NUMERO-web-1 --format 'NAME={{.Name}} DRIVER={{.HostConfig.LogConfig.Type}} OPTIONS={{json .HostConfig.LogConfig.Config}}'` nos dois containers de cada projeto.
+- **Invariantes e Proteções Garantidas:**
+  - **Containers de Banco:** Nenhum container de banco de dados (`db`) foi recriado (`database_containers_recreated=0`).
+  - **Volumes, Redes e Diretórios:** Nenhum container, rede, volume, imagem ou diretório de preview foi removido (`volumes_removed=0`).
+  - **Produção, PR #881 e Demais PRs Abertas:** Produção, PR #881 e demais PRs abertas mantidas intactas com 0 mutações (`production_mutations=0`, `pr881_mutations=0`, `open_pr_mutations=0`).
+  - **Logs e Prune:** Nenhum log foi truncado manualmente e nenhum `docker system prune` foi executado.
+- **Bloqueio de Infraestrutura Conhecido (VPS):**
+  - O erro `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted` registrado no CI `deploy-preview` permanece documentado como um bloqueio de infraestrutura da VPS (alocador IPAM do Docker daemon), mantido intacto sem tentativas de alteração de pools, reinício do daemon ou limpeza global.
+- **Resultado Sintético:**
+  ```text
+  PREVIEW_LOG_ROTATION_FINAL_BATCH=PASS
+  projects=545,818,820
+  containers_recreated=api,web_only
+  database_containers_recreated=0
+  volumes_removed=0
+  production_mutations=0
+  pr881_mutations=0
+  open_pr_mutations=0
+  ```
+
 # Execução do Terceiro Lote de Rotação de Logs de Previews — PRs #535, #538, #539 e #542 (Setembro/2026)
 
 - **Projetos Executados (Lote 3):** `gesto-pr-535`, `gesto-pr-538`, `gesto-pr-539`, `gesto-pr-542` (PRs abertas confirmadas via API do GitHub).
