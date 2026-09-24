@@ -1,3 +1,44 @@
+# Auditoria de Infraestrutura, Backups e Reclaim de Espaço em Disco (Setembro/2026)
+
+- **Escopo e Objetivo:** Auditoria de infraestrutura estritamente read-only focada em analisar a integridade/política dos backups da VPS, o consumo volumétrico de espaço em disco e mapear o plano de quarentena de imagens OCI legadas e caches de build sem executar nenhuma mutação ou exclusão automática (`vps_mutations=0`, `production_mutations=0`).
+- **Investigação da Política e Integridade de Backups (Tarefa 1):**
+  - **Rotina Automatizada Local (`backup.sh`):**
+    - Executa dump via `docker compose exec -T db pg_dump -U postgres salesforce_pro` gerando arquivo temporário `.sql`.
+    - Valida saúde do banco via `check-prod-health.sh` e tamanho mínimo (`PRODUCTION_BACKUP_MIN_SIZE_BYTES=51200`).
+    - Comprime via `gzip -f` criando `.sql.gz` e testa integridade com `gzip -t`. O arquivo temporário plano `.sql` é removido/substituído pelo `.sql.gz`, garantindo que **não são geradas cópias duplicadas em formato plano no mesmo filesystem**.
+    - Rotação ativa em `backup.sh`: Mantém os últimos **48 arquivos** `.sql.gz` em `/root/backups` (`MAX_BACKUPS=48`), removendo os mais antigos que excederem o limite.
+  - **Diferenciação para Recovery Bundles Protegidos (`prepare-production-recovery-backup.sh`):**
+    - Os bundles de recovery e preflight geram pacotes imutáveis com checksum SHA-256 e manifesto de verificação (`latest/result.tsv` FORMAT=2 em `/var/log/gest-o/backup/latest/result.tsv`).
+    - Esses bundles não sofrem a rotação simples dos 48 arquivos de `backup.sh` para garantir imunidade contra perda de estados de recuperação durante incidentes.
+  - **Proposta de Matriz de Retenção Estável (Julho/Setembro):**
+    - **Diários (Daily):** Retenção de 14 backups diários automatizados.
+    - **Semanais (Weekly):** Retenção de 8 backups semanais (domingos).
+    - **Mensais (Monthly):** Retenção de 12 backups mensais (1º dia de cada mês).
+    - **Recovery / Legal Hold Bundles:** Bundles imutáveis vinculados a releases ou incidentes preservados até liberação humana explícita.
+
+- **Mapeamento de Imagens e Caches de Build Elegíveis para Reclaim (Tarefa 2):**
+  - **Inventário Volumétrico Read-Only da VPS (Estado Registrado):**
+    - Espaço consumido por imagens OCI legadas: ~58.7 GB.
+    - Espaço consumido por logs Docker de aplicação/preview: ~22 GB (mitigado com a rotação de logs `max-size: 25m`, `max-file: 4`).
+    - Caches de build (`buildx`): ~10 GB.
+  - **Regra de Descarte Seguro do Builder Cache (`docker builder prune`):**
+    - Executar `docker builder prune --filter "until=168h"` para remover caches de buildx não utilizados há mais de 7 dias, mantendo estritamente a margem mínima de segurança de 5 GiB livres (`PRODUCTION_BACKUP_DISK_REQUIRED_KB=5242880`).
+  - **Classificação Conservadora e Plano de Quarentena de Imagens (`NOT_PROVEN`):**
+    - Imagens OCI na VPS sem labels completas de proveniência (`repository`, `pr`, `run-id`, `run-attempt`, `workflow`, `commit`) ou sem manifesto correspondente em `/var/www/preview-provenance/` são classificadas conservadoramente como `NOT_PROVEN`.
+    - **Regra de Proteção Absoluta:** Recursos classificados como `NOT_PROVEN`, referenciados por containers ativos/parados, ou vinculados a produções/rollbacks permanecem 100% protegidos contra mutações ou deleções acidentais. Nenhuma deleção automática é realizada sem autorização e verificação via API do GitHub.
+
+- **Resultado Sintético da Auditoria:**
+  ```text
+  DISK_AND_BACKUP_AUDIT=PASS
+  audit_mode=READ_ONLY
+  production_mutations=0
+  vps_mutations=0
+  backup_rotation_rule=48_files_retained
+  no_plain_sql_duplicates=verified
+  minimum_disk_floor=5_GiB_enforced
+  unproven_images_status=PROTECTED_NOT_PROVEN
+  ```
+
 # Auditoria Histórica Read-Only de Recursos de Preview na VPS (Setembro/2026)
 
 - **Escopo e Objetivo:** Auditoria histórica estritamente read-only realizada na VPS para localizar e classificar todos os recursos residuais de preview criados desde as primeiras PRs, visando identificar causas do bloqueio de redes (`PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted`) e mapear recursos elegíveis para limpeza futura sem executar nenhuma mutação.
