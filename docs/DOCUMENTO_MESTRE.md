@@ -1,3 +1,9 @@
+# Registro de Manutenção Histórica — Infraestrutura e Integração CRM/ERP (Setembro/2026)
+
+- **Mudança 1 (Infraestrutura & Redes):** Desalocação e limpeza cirúrgica em lote de 16 redes Docker legadas associadas a PRs fechadas/mescladas. IPAM liberado sem reiniciar Docker daemon nem alterar pools de sub-redes (`vps_mutations=pass`, `production_mutations=0`).
+- **Mudança 2 (Sincronização CRM/ERP & Integridade):** Implementação de trava de validação de autoridade de tenant em `apps/api/src/services/ultraFv3SyncService.ts`. Tentativas de gravar ou sincronizar parceiros sem `tenantId` comprovado são rejeitadas em modo fail-closed, impedindo a criação de clientes sem tenant ("Tenant não comprovado").
+- **Mudança 3 (Performance & Timeout HTTP 408):** Refatoração do endpoint de status do agendador (`GET /erp/ultrafv3/scheduler/status`) para operar como uma projeção leve em memória, eliminando contenção no banco de dados e travamentos por timeout HTTP 408 durante rajadas de sincronização.
+
 # Auditoria Histórica Read-Only de Recursos de Preview na VPS (Setembro/2026)
 
 - **Escopo e Objetivo da Auditoria Histórica:**

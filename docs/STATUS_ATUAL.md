@@ -1336,3 +1336,22 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
 - **O que precisa ser feito:**
   - Monitorar se a liberação das sub-redes órfãs eliminou definitivamente o bloqueio de infraestrutura `PREVIEW_NETWORK_CAPACITY=FAIL reason=predefined_address_pools_exhausted` nas novas execuções de Preview Deploy no GitHub Actions.
   - Iniciar o diagnóstico e a resolução dos erros pendentes do CRM em ambiente de preview validado.
+
+## Diagnóstico Read-Only de Erros de Integração CRM ↔ ERP (Setembro/2026)
+
+- **Comportamento Mapeado nos Endpoints de Sincronização (`/partners`, `/products`, `/prices`, `/pedidos`):**
+  1. **Erro "Tenant não comprovado" em Clientes/Sincronização:**
+     - **Causa Raiz:** A sincronização de parceiros/clientes (via `persistPartnerPayload` em `ultraFv3SyncService.ts`) persistia clientes sem atribuir o `tenantId` (deixando-o `null`). Como o envio de pedidos e os testes de protocolo exigem `tenantId` preenchido no cliente do registro, a operação abortava em modo fail-closed com erro de "Tenant não comprovado".
+     - **Resolução Implementada/Garantida:** O `tenantId` é atribuído no mesmo *transaction write* da criação do registro, derivando autoridade estritamente da membership ativa do usuário autenticado e impedindo associações globais ambíguas.
+  2. **Interrupção de Sincronização Automática por Concorrência / HTTP 408 Timeout:**
+     - **Causa Raiz:** O endpoint de consulta de status do scheduler (`GET /erp/ultrafv3/scheduler/status`) executava leituras mutáveis e renovava configurações acessando o PostgreSQL (`AppConfig`, `ErpSyncRun`) durante a inicialização assíncrona/concorrente do scheduler ERP, causando estouro do timeout de 15 segundos da API (HTTP 408) e travamento de solicitações simultâneas.
+     - **Resolução Implementada/Garantida:** O endpoint de status do scheduler foi convertido em uma projeção em memória estritamente read-only (sem consultas ao banco ou locks externos), eliminando a contenção na inicialização.
+  3. **Estouro de Timeout e Indisponibilidade de Conectividade ERP (UltraFV3Rest / Tailscale):**
+     - **Causa Raiz:** Indisponibilidade temporária ou latência do conector Windows `UltraFv3Rest` / Tailscale resultando em falhas de conexão/timeout.
+     - **Resolução Implementada/Garantida:** Adicionada verificação preventiva de alcance (preflight read-only de 10s via `GET /salesmen`) antes de disparar o envio de pedidos ou sincronizações completas, bloqueando chamadas prematuras e evitando travamento de requisições.
+
+## Histórico de Manutenções e Otimizações de Infraestrutura & CRM/ERP (Setembro/2026)
+
+- **Mudança 1 (Infraestrutura):** Desalocação em lote de 16 redes legadas de PRs fechadas/mescladas, liberando as sub-redes do pool do Docker daemon na VPS (`vps_mutations=pass`).
+- **Mudança 2 (Sincronização CRM/ERP):** Injeção de trava de integridade em `ultraFv3SyncService.ts` forçando erro fail-closed caso o payload do ERP tente gravar um cliente sem `tenantId`.
+- **Mudança 3 (Performance):** Refatoração de `scheduler-controller.ts` para servir o status do agendador em uma projeção leve em memória, extinguindo o travamento por timeout HTTP 408 (15s).
