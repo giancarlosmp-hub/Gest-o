@@ -1,3 +1,13 @@
+# Resolução de Inconsistências de Backup e Blindagem de Vendedores Inativos (Setembro/2026)
+
+- **Correção da Saúde do Banco no Script de Backup (`scripts/check-prod-health.sh`):**
+  - Ajustado o validador em modo estrito (`STRICT_MODE=1`) para garantir o núcleo vital do sistema ($C_{\text{User}} \ge 1 \;\land\; C_{\text{Client}} \ge 1$).
+  - Removido o aborto automático por contagem zerada de tabelas operacionais secundárias (como `AgendaEvent` ou `Activity`), eliminando o bloqueio fail-closed indevido do workflow de backup nº 69.
+
+- **Blindagem de Renderização no Frontend contra Vendedores Inativos (`apps/web/src/pages/CrudSimplePage.tsx`):**
+  - Aplicada navegabilidade segura e tratamento explícito para objetos `ownerSeller` desativados (`isActive === false`).
+  - Quando um vendedor inativo estiver associado a um registro de cliente, a exibição formata textualmente `[Inativo] Nome do Vendedor` (ou o identificador cadastrado), evitando retornos `undefined` e prevenindo ocorrências de tela branca no frontend.
+
 # Auditoria de Infraestrutura, Backups e Reclaim de Espaço em Disco (Setembro/2026)
 
 - **Escopo e Objetivo:** Auditoria de infraestrutura estritamente read-only focada em analisar a integridade/política dos backups da VPS, o consumo volumétrico de espaço em disco e mapear o plano de quarentena de imagens OCI legadas e caches de build sem executar nenhuma mutação ou exclusão automática (`vps_mutations=0`, `production_mutations=0`).

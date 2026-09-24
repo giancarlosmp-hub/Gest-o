@@ -68,6 +68,7 @@ type ClientListItem = {
   ownerSeller?: {
     id: string;
     name: string;
+    isActive?: boolean;
   };
   [key: string]: unknown;
 };
@@ -487,7 +488,13 @@ export default function CrudSimplePage({
 
   const getCellValue = (item: ClientListItem, fieldKey: string) => {
     if (isClientsPage && fieldKey === "ownerSellerId") {
-      return item.ownerSeller?.name || item.ownerSellerName || "—";
+      if (item.ownerSeller) {
+        if (item.ownerSeller.isActive === false) {
+          return `[Inativo] ${item.ownerSeller.name || item.ownerSellerId || "—"}`;
+        }
+        return item.ownerSeller.name || item.ownerSellerName || "—";
+      }
+      return item.ownerSellerName || (item.ownerSellerId ? `[Inativo] ${item.ownerSellerId}` : "—");
     }
     if (isUsersPage && fieldKey === "isActive") {
       return item.isActive === false ? "Inativo" : "Ativo";

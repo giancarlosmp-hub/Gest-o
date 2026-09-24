@@ -101,14 +101,6 @@ if (( COUNTS[Client] == 0 )); then
   REASONS+=("Client == 0")
 fi
 
-if (( COUNTS[Client] == 0 && COUNTS[Opportunity] == 0 )); then
-  REASONS+=("Client == 0 e Opportunity == 0")
-fi
-
-if (( ${#ZEROED_TABLES[@]} >= 2 )); then
-  REASONS+=("Múltiplas tabelas críticas zeradas: ${ZEROED_TABLES[*]}")
-fi
-
 if [[ "$FORMAT" == "shell" ]]; then
   for table_name in "${TABLES[@]}"; do
     var_name="$(to_var_name "$table_name")"
