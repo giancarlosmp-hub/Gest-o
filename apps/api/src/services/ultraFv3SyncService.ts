@@ -2978,6 +2978,198 @@ export const syncPriceTables = (options?: RunSyncOptions) =>
   syncReferenceData("priceTables", "/price-tables", options, ["/priceTables"]);
 export const syncPriceVariations = (options?: RunSyncOptions) =>
   syncReferenceData("priceVariations", "/priceVariations", options);
+
+export async function reconcileCalculatedVariationPrices(correlationId: string, tenantId?: string) {
+  const diagnostics = {
+    tablesProcessed: 0,
+    derivedVariationPricesCreated: 0,
+    derivedVariationPricesUpdated: 0,
+    derivedVariationPricesInvalidated: 0,
+    explicitPricesPreserved: 0,
+    explicitZerosPreserved: 0,
+  };
+
+  const [tablesConfig, variationsConfig] = await Promise.all([
+    prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.priceTables" } }),
+    prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.priceVariations" } }),
+  ]);
+
+  const priceTableRows = parseCachedRows(tablesConfig?.value);
+  const priceVariationRows = parseCachedRows(variationsConfig?.value);
+
+  if (!priceTableRows.length && !priceVariationRows.length) {
+    return diagnostics;
+  }
+
+  const activeTableCodes = new Set<string>();
+  for (const row of priceTableRows) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const code = pickFirstString(record, ["CODTABELA", "COD_TABELA", "TABELA", "priceTableCode", "code", "id", "tabela"]);
+    if (code && code !== "1") activeTableCodes.add(code);
+  }
+  for (const row of priceVariationRows) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const code = pickFirstString(record, ["CODTABELA", "COD_TABELA", "TABELA", "priceTableCode", "tabela", "code"]);
+    if (code && code !== "1") activeTableCodes.add(code);
+  }
+  if (!activeTableCodes.size) activeTableCodes.add("2");
+
+  const products = await prisma.product.findMany({
+    where: { isActive: true, ...(tenantId ? { tenantId } : {}) },
+    include: { prices: true },
+  });
+
+  for (const targetTableCode of activeTableCodes) {
+    diagnostics.tablesProcessed += 1;
+    for (const product of products) {
+      const existingDerivedRow = product.prices.find((p) =>
+        p.erpPriceId === targetTableCode &&
+        p.source === "calculated_from_variation"
+      );
+
+      const baseTable1PriceRow = product.prices.find((p) =>
+        (p.erpPriceId === "1" || p.erpPriceId === null || (p.source === "products" && (!p.erpPriceId || p.erpPriceId === "1"))) &&
+        p.availabilityState === "available" &&
+        Number(p.price) > 0
+      );
+      const basePrice = baseTable1PriceRow ? Number(baseTable1PriceRow.price) : Number(product.defaultPrice || 0);
+      if (basePrice <= 0) {
+        if (existingDerivedRow && existingDerivedRow.availabilityState === "available") {
+          await prisma.productPrice.update({
+            where: { id: existingDerivedRow.id },
+            data: { price: 0, availabilityState: "absent" },
+          });
+          diagnostics.derivedVariationPricesInvalidated += 1;
+        }
+        continue;
+      }
+
+      const explicitPriceRow = product.prices.find((p) =>
+        p.erpPriceId === targetTableCode &&
+        (p.source === "prices" || p.source === "products") &&
+        p.availabilityState === "available" &&
+        Number(p.price) > 0
+      );
+      if (explicitPriceRow) {
+        diagnostics.explicitPricesPreserved += 1;
+        if (existingDerivedRow && existingDerivedRow.availabilityState === "available") {
+          await prisma.productPrice.update({
+            where: { id: existingDerivedRow.id },
+            data: { price: 0, availabilityState: "absent" },
+          });
+          diagnostics.derivedVariationPricesInvalidated += 1;
+        }
+        continue;
+      }
+
+      const explicitZeroRow = product.prices.find((p) =>
+        p.erpPriceId === targetTableCode &&
+        p.availabilityState === "explicit_zero"
+      );
+      if (explicitZeroRow) {
+        diagnostics.explicitZerosPreserved += 1;
+        if (existingDerivedRow && existingDerivedRow.availabilityState === "available") {
+          await prisma.productPrice.update({
+            where: { id: existingDerivedRow.id },
+            data: { price: 0, availabilityState: "explicit_zero" },
+          });
+          diagnostics.derivedVariationPricesInvalidated += 1;
+        }
+        continue;
+      }
+
+      const productRaw = product.rawErpPayload && typeof product.rawErpPayload === "object"
+        ? product.rawErpPayload as Record<string, unknown>
+        : {};
+      const productGroupCode = normalizeErpLookupCode(
+        pickFirstString(productRaw, ["CODGRUPO", "COD_GRUPO", "groupCode", "codigoGrupo", "grupo"])
+      );
+
+      let variationPercent: number | null = null;
+      for (const varRow of priceVariationRows) {
+        if (!varRow || typeof varRow !== "object") continue;
+        const varRecord = varRow as Record<string, unknown>;
+        const rowTable = pickFirstString(varRecord, ["CODTABELA", "COD_TABELA", "TABELA", "priceTableCode", "tabela", "code"]);
+        if (rowTable && normalizeErpLookupCode(rowTable) !== normalizeErpLookupCode(targetTableCode)) continue;
+        const rowGroup = normalizeErpLookupCode(
+          pickFirstString(varRecord, ["CODGRUPO", "COD_GRUPO", "groupCode", "codigoGrupo", "grupo"])
+        );
+        if (productGroupCode && rowGroup && rowGroup !== productGroupCode) continue;
+
+        const perc = parseNumber(
+          pickFirstValue(varRecord, ["PER_VARIACAO", "PERC_VARIACAO", "PERCENTUAL", "percent", "variationPercent", "VARIACAO"])
+        );
+        if (perc !== null) {
+          variationPercent = perc;
+          break;
+        }
+      }
+
+      if (variationPercent === null && targetTableCode === "2") {
+        const directVar = parseNumber(
+          pickFirstValue(productRaw, [
+            "PERC_ACRESCIMO_TABELA_2",
+            "PERCENTUAL_TABELA_2",
+            "VARIACAO_TABELA_2",
+            "VARIACAO_PRECO_TABELA_2",
+            "ACRESCIMO_TABELA_2",
+          ])
+        );
+        if (directVar !== null) variationPercent = directVar;
+      }
+
+      if (variationPercent !== null && basePrice > 0) {
+        const percentDecimal = Math.abs(variationPercent) < 1 ? variationPercent : variationPercent / 100;
+        const multiplier = 1 + percentDecimal;
+        const calculatedPrice = Number((basePrice * multiplier).toFixed(2));
+
+        if (calculatedPrice > 0) {
+          if (existingDerivedRow) {
+            await prisma.productPrice.update({
+              where: { id: existingDerivedRow.id },
+              data: { price: calculatedPrice, availabilityState: "available" },
+            });
+            diagnostics.derivedVariationPricesUpdated += 1;
+          } else {
+            await prisma.productPrice.create({
+              data: {
+                productId: product.id,
+                erpPriceId: targetTableCode,
+                branchCode: null,
+                price: calculatedPrice,
+                source: "calculated_from_variation",
+                availabilityState: "available",
+              },
+            });
+            diagnostics.derivedVariationPricesCreated += 1;
+          }
+        } else if (existingDerivedRow) {
+          await prisma.productPrice.update({
+            where: { id: existingDerivedRow.id },
+            data: { price: 0, availabilityState: "explicit_zero" },
+          });
+          diagnostics.derivedVariationPricesInvalidated += 1;
+        }
+      } else if (existingDerivedRow && existingDerivedRow.availabilityState === "available") {
+        await prisma.productPrice.update({
+          where: { id: existingDerivedRow.id },
+          data: { price: 0, availabilityState: "absent" },
+        });
+        diagnostics.derivedVariationPricesInvalidated += 1;
+      }
+    }
+  }
+
+  logApiEvent("INFO", "[ultrafv3 sync prices] reconciled calculated variation prices (Camada 2)", {
+    correlationId,
+    diagnostics,
+  });
+
+  return diagnostics;
+}
+
 export async function syncPrices(options?: RunSyncOptions) {
   const resolved = await resolveReferenceCredentials();
   return runSync(
@@ -2994,13 +3186,48 @@ export async function syncPrices(options?: RunSyncOptions) {
         update: { value: JSON.stringify(result.rows) },
         create: { key: "erp.ultrafv3.prices", value: JSON.stringify(result.rows) },
       });
-      const productPriceDiagnostics = await upsertProductPricesFromRows(result.rows, correlationId, result.snapshotComplete, options?.authenticatedTenantId);
+
+      const tablesConfig = await prisma.appConfig.findUnique({ where: { key: "erp.ultrafv3.priceTables" } });
+      const activeTables = parseCachedRows(tablesConfig?.value);
+      let priceTableParamSupported = false;
+      const extraTableRows: unknown[] = [];
+
+      for (const tableRow of activeTables) {
+        if (!tableRow || typeof tableRow !== "object") continue;
+        const tableCode = pickFirstString(tableRow as Record<string, unknown>, ["CODTABELA", "COD_TABELA", "TABELA", "priceTableCode", "code", "id", "tabela"]);
+        if (!tableCode || tableCode === "1") continue;
+
+        try {
+          const paramResult = resolved.credentials
+            ? await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(`/prices?tabela=${encodeURIComponent(tableCode)}`, resolved.credentials, correlationId)
+            : await requestUltraFv3ReadOnlyWithRetry<unknown>(`/prices?tabela=${encodeURIComponent(tableCode)}`, correlationId);
+          const pRows = toArray(paramResult);
+          const matchingTableRows = pRows.filter((row) => {
+            if (!row || typeof row !== "object") return false;
+            const rowTable = pickFirstString(row as Record<string, unknown>, ["TABELA", "CODTABELA", "COD_TABELA", "TABELA_PRECO", "priceTableCode", "tabela"]);
+            return rowTable && normalizeErpLookupCode(rowTable) === normalizeErpLookupCode(tableCode);
+          });
+          if (matchingTableRows.length) {
+            priceTableParamSupported = true;
+            extraTableRows.push(...matchingTableRows);
+          }
+        } catch {
+          // Non-fatal if parameterized call is not supported
+        }
+      }
+
+      const allPriceRows = [...result.rows, ...extraTableRows];
+      const productPriceDiagnostics = await upsertProductPricesFromRows(allPriceRows, correlationId, result.snapshotComplete, options?.authenticatedTenantId);
+      const variationDiagnostics = await reconcileCalculatedVariationPrices(correlationId, options?.authenticatedTenantId);
+
       return {
-        syncedCount: result.rows.length,
+        syncedCount: allPriceRows.length,
         diagnostics: {
           endpointUsed: 1,
           aliasFallbackUsed: result.aliasFallbackUsed,
+          priceTableParamSupported: priceTableParamSupported ? 1 : 0,
           ...productPriceDiagnostics,
+          ...variationDiagnostics,
         },
       };
     },
