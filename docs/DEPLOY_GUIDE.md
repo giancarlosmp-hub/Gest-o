@@ -783,3 +783,11 @@ Critérios de rollback: regressão de autorização/tenant, emissão de `POST /o
 A alteração reutiliza API, autenticação, Territórios, Timeline e sincronização UltraFV3 existentes; não cria workflow/environment. Não há migration: a auditoria usa Timeline existente e a transferência atualiza `SellerTerritoryCity` dentro de transação. Após merge, executar build/cutover canônico sem schema apply adicional e seguir exclusivamente o procedimento de `OPERACAO.md`.
 
 Gates pós-cutover: inativo visível em Territórios; prévia antes da confirmação; destino ativo/mesmo tenant; conflito de terceiro bloqueado; segunda execução idempotente; KML sinalizando origem inativa; histórico sem reatribuição; oportunidade aberta ainda em Edirlei até ação; cliente ERP sem duplicação; token antigo HTTP 401; status histórico GET-only funcionando. Reverter a aplicação se qualquer gate de tenant, autoria, idempotência ou autenticação falhar. Não executar merge, deploy ou cutover nesta entrega.
+# Gate de deploy — autoridade de preços ERP (26/09/2026)
+
+Esta correção não exige migration. Antes do deploy, exigir typecheck e regressões de
+disponibilidade, sincronização completa e scheduler. Depois do cutover canônico, a validação
+operacional deve exercitar manual, automático e Atualizar estoque conforme `OPERACAO.md`,
+sem pedido real e sem saneamento de tenant no mesmo change. Rollback da aplicação é exigido
+se preço legado/derivado reaparecer, se uma resposta parcial invalidar preços ou se houver
+acesso cruzado entre tenants. Nenhuma execução produtiva foi feita durante a implementação.

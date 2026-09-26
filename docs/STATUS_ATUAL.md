@@ -1418,3 +1418,26 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
 - **Mudança 1 (Infraestrutura):** Desalocação em lote de 16 redes legadas de PRs fechadas/mescladas, liberando as sub-redes do pool do Docker daemon na VPS (`vps_mutations=pass`).
 - **Mudança 2 (Sincronização CRM/ERP):** Injeção de trava de integridade em `ultraFv3SyncService.ts` forçando erro fail-closed caso o payload do ERP tente gravar um cliente sem `tenantId`.
 - **Mudança 3 (Performance):** Refatoração de `scheduler-controller.ts` para servir o status do agendador em uma projeção leve em memória, extinguindo o travamento por timeout HTTP 408 (15s).
+# Correção local da autoridade de preços ERP — manual e automática (26/09/2026)
+
+- **Fluxos afetados e corrigidos no código:** Sincronização Completa ERP manual e
+  Sincronização Automática executavam a mesma combinação `syncProducts`/`syncPrices`; ambas
+  permitiam que preço legado de `/products` reaparecesse após zero explícito de `/prices`.
+  Atualizar estoque foi incluído na regressão por usar as mesmas funções compartilhadas.
+- **Causa/correção:** o tombstone autoritativo agora bloqueia a fonte `products` mesmo se ela
+  for mais recente, invalida derivados e impede que reconciliação use `defaultPrice`. Manual
+  e automática atualizam `priceVariations` antes de materializar preços, sem fallback fixo
+  para Tabela 2. Ausência só invalida com snapshot integral e filtros de tenant permanecem.
+- **Limites:** testes são locais; nenhuma sincronização real, VPS, deploy, migration ou SQL
+  mutativo foi executado. Validação operacional manual/automática, contrato real de sinal e
+  arredondamento e eventual saneamento de `tenantId=null` permanecem pendentes. Ver
+  [investigação](investigations/erp-price-authority-manual-automatic-2026-09-26.md).
+
+- **Revisão concluída:** o smoke de CRM falha também no SHA inicial após transpor duas
+  expectativas antigas que o impediam de alcançar a checagem de pedidos. A checagem de
+  pedidos estava obsoleta: o contrato atual prefere `NUM_PEDIDO` confirmado pelo ERP e usa o
+  sequencial reservado como fallback, sem aceitar `PEDIDO_ID_IMPORTACAO`. O teste foi
+  corrigido sem mudança em pedidos e agora passa. Também passam regressões comportamentais
+  de Tabelas 2/3/4 com percentuais ERP distintos e alterados, tombstone/restauração,
+  ausência/resposta parcial, ordem manual/automática e tenant. Produção segue não acessada;
+  procedimento pós-deploy e pendências permanecem na investigação.

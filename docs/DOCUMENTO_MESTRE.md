@@ -1508,3 +1508,24 @@ A preservação real do preview de commit anterior ao HEAD final permanece sem s
 Limpeza, retenção de commits antigos e recriação para rotação de logs seguem pendentes; capacidade de
 redes e consumo de disco não foram resolvidos. Após revisão e merge, a validação exige **nova**
 execução manual na `main`, nunca rerun do run antigo, para que o checkout use o código novo.
+# Autoridade de preços nos ciclos manual e automático (26/09/2026)
+
+A Sincronização Completa ERP e a Sincronização Automática compartilhavam uma violação de
+precedência: `/products` podia publicar novamente um preço legado depois de `/prices` tê-lo
+invalidado explicitamente, e a reconciliação podia derivar novas tabelas dessa base residual.
+A correção torna o zero explícito de `/prices` um tombstone sobre fontes legadas e derivadas,
+remove `defaultPrice` da base de cálculo e atualiza as regras ERP antes dos preços nos dois
+fluxos. Atualizar estoque usa a mesma política; snapshots parciais não fazem sweep e limites
+de tenant foram preservados. Não há percentual codificado por número de tabela. Evidências,
+mapa de chamadas, testes e pendências estão na
+[investigação](investigations/erp-price-authority-manual-automatic-2026-09-26.md). A mudança é
+local e não comprova correção em produção.
+
+Revisão posterior confirmou em worktree isolado que a falha do smoke de pedidos já existia
+no SHA inicial. A asserção exigia literalmente `erpOrderNumber = numPedido`, embora o contrato
+vigente aceite o `NUM_PEDIDO` devolvido pelo ERP e use o reservado como fallback; a proteção
+contra `PEDIDO_ID_IMPORTACAO` continua explícita. Apenas o teste foi atualizado. A suíte final
+agora passa e inclui comportamento para regras ERP distintas nas Tabelas 2/3/4, alteração de
+percentual entre ciclos, repetição de `/products`, restauração autoritativa, resposta parcial,
+ordem manual/automática e isolamento de tenant. A validação produtiva permanece pendente e
+deve seguir `OPERACAO.md`; nenhuma sincronização ou mutação produtiva foi executada.

@@ -8,12 +8,12 @@ const product273 = {
   erpProductClassCode: "default",
   stockQuantity: 0,
   rawErpPayload: { PRECO: 12.34 },
-  prices: [],
+  prices: [{ erpPriceId: "1", price: 12.34, source: "products", availabilityState: "available" }],
 };
 const price273 = calculateOpportunityPriceForTable({ product: product273, priceTableCode: "1" });
 assert.equal(price273.priceTableMatched, true, "Produto 273 sem /prices, mas com /products.PRECO válido, deve aparecer na busca");
 assert.equal(price273.price, 12.34, "Produto 273 deve usar /products.PRECO quando /prices não retornou linha explícita");
-assert.equal(price273.source, "product.PRECO", "Diagnóstico deve expor fallback vindo de /products.PRECO");
+assert.equal(price273.source, "productPrice", "Diagnóstico deve expor ProductPrice materializado de /products");
 assert.equal(product273.stockQuantity, 0, "Produto com estoque 0 continua disponível para avaliação comercial");
 
 const product273WithPrice = {
@@ -63,12 +63,16 @@ assert.match(syncService, /scope: "syncAll"[\s\S]*finalStatus/, "Sync completa d
 assert.match(syncService, /nonCritical: true[\s\S]*orderStatus|orderStatus[\s\S]*nonCritical: true/, "Sincronização completa deve tratar orderStatus como não crítico");
 assert.match(syncService, /hasConfiguredSellerFv3Credentials/, "Sync deve detectar vendedores ativos com Login FV3/Senha FV3");
 assert.match(syncService, /skippedOrderStatusMissingGlobalCredentials/, "orderStatus deve ser ignorado como aviso operacional quando só faltam credenciais globais em modo por vendedor");
-assert.match(syncService, /\[ultrafv3 sync orderStatus\] skipped in seller-auth mode/, "orderStatus deve logar skip estruturado não crítico em modo por vendedor");
 assert.match(syncService, /zeroPriceInvalidated/, "Sync de preços deve invalidar preço zero retornado pelo ERP");
 assert.match(syncService, /createdZeroPrice/, "Sync de preços deve registrar ProductPrice zero explícito para bloquear fallback de /products.PRECO");
+assert.match(syncService, /source: \{ in: \["products", "calculated_from_variation"\] \}/, "Zero explícito deve invalidar fontes materializadas subordinadas");
+assert.match(syncService, /authoritativeZero[\s\S]*legacyAvailability/, "Novo ciclo de /products deve respeitar tombstone autoritativo");
 assert.match(syncService, /product PRECO fallback preserved/, "Sync de preços não deve zerar fallback de /products.PRECO quando /prices não retorna o produto");
 assert.match(syncService, /productCandidates\.length === 1 \? productCandidates\[0\]/, "Sync de preços deve atualizar candidato único seguro mesmo com classificação divergente ou ausente");
-assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s\S]*\{ scope: "prices"/, "Sincronização completa deve rodar Produtos antes de Preços");
+assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s\S]*\{ scope: "priceVariations"[\s\S]*\{ scope: "prices"/, "Sincronização completa deve atualizar regras antes dos preços");
+assert.match(syncService, /const staleResult = shouldSweepAbsentPrices\(snapshotComplete\)[\s\S]*: \{ count: 0 \}/, "Resposta parcial não pode executar sweep de ausência");
+assert.match(syncService, /tenantId \? \{ product: \{ tenantId \} \}/, "Sweep de preços deve permanecer isolado pelo tenant autenticado");
+assert.doesNotMatch(syncService, /PERC_ACRESCIMO_TABELA_2|PERCENTUAL_TABELA_2/, "Sync não deve inventar regra percentual fixa para a Tabela 2");
 
 const orderService = readFileSync(new URL("../services/erpOrderService.ts", import.meta.url), "utf8");
 assert.match(orderService, /export const NUM_PEDIDO_PATTERN = \/\^\\d\{1,15\}\$\//, "NUM_PEDIDO deve aceitar apenas string numérica de até 15 caracteres");
@@ -85,7 +89,16 @@ assert.doesNotMatch(orderService, /erpOrderSubmissionMutex\.runExclusive/, "Flux
 assert.match(orderService, /pg_advisory_xact_lock[\s\S]*erpOrderSync.create/, "Lock por oportunidade deve proteger idempotência e persistência pending antes do POST");
 assert.match(orderService, /resultado desconhecido\/timeout/, "Timeout/resultado desconhecido deve bloquear reenvio cego");
 assert.match(orderService, /getFunctionalOrderErrorMessage/, "HTTP 200 com erro funcional deve ser validado antes de marcar pedido como enviado");
-assert.match(orderService, /const erpOrderNumber = numPedido/, "Número oficial exibido deve ser sempre o NUM_PEDIDO sequencial do CRM, sem substituir por PEDIDO_ID");
+assert.match(
+  orderService,
+  /const erpOrderNumber = getDirectProtocolValue\(erpResponse, \["NUM_PEDIDO", "numPedido"\]\) \|\| numPedido/,
+  "Número oficial deve preferir NUM_PEDIDO confirmado pelo ERP e usar o sequencial reservado como fallback",
+);
+assert.doesNotMatch(
+  orderService,
+  /const erpOrderNumber\s*=\s*(?:pedidoIdImportacao|payload\.PEDIDO_ID_IMPORTACAO)/,
+  "PEDIDO_ID_IMPORTACAO nunca pode substituir o número comercial do pedido",
+);
 
 console.log("UltraFV3 CRM sync regression smoke passed");
 

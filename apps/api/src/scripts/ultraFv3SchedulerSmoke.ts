@@ -25,6 +25,13 @@ assert.match(scheduler, /lastTickAt/, "Status deve expor lastTickAt");
 assert.match(scheduler, /authConfigured/, "Status deve expor authConfigured sem credenciais");
 assert.match(scheduler, /referenceSellerConfigured/, "Status deve expor se há vendedor de referência");
 assert.match(scheduler, /runAutomaticErpSyncNow/, "Run-now deve reutilizar a execução do scheduler");
+const automaticSteps = scheduler.match(/const AUTOMATIC_SYNC_STEPS[\s\S]*?\n\]\);/)?.[0] ?? "";
+assert.ok(
+  automaticSteps.indexOf('scope: "priceVariations"') < automaticSteps.indexOf('scope: "prices"'),
+  "Automática deve atualizar regras ERP antes de materializar preços derivados",
+);
+assert.match(scheduler, /run:\s*syncProducts/, "Automática deve passar pelo mesmo syncProducts compartilhado");
+assert.match(scheduler, /run:\s*syncPrices/, "Automática deve passar pelo mesmo syncPrices autoritativo");
 assert.match(scheduler, /saveAutomaticSyncPersistedConfig\(\{ enabled: false \}\)/, "Ausência de AppConfig deve criar default seguro enabled=false");
 assert.match(bootstrap, /startErpSyncScheduler/, "Bootstrap de produção deve inicializar scheduler explicitamente");
 assert.match(bootstrap, /BOOTSTRAP_SMOKE_EXIT/, "Bootstrap deve ter saída controlada para smoke sem prender servidor");

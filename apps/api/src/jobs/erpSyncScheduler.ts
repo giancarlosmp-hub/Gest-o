@@ -20,6 +20,7 @@ import {
 import { ultraFv3Client } from "../services/ultraFv3Client.js";
 import { prisma } from "../config/prisma.js";
 import { logApiEvent } from "../utils/logger.js";
+import { orderPriceAuthoritySteps } from "../services/erpPriceVariationPolicy.js";
 
 const AUTOMATIC_SYNC_INTERVAL_MS = 60 * 60 * 1000;
 const AUTOMATIC_SYNC_CONFIG_KEY = "erp.automaticSync.config";
@@ -33,18 +34,18 @@ const AUTOMATIC_SYNC_STEPS: Array<{
   scope: string;
   label: string;
   run: (options?: RunSyncOptions) => Promise<unknown>;
-}> = [
+}> = orderPriceAuthoritySteps([
   { scope: "connection", label: "Conexão", run: syncConnection },
   { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
   { scope: "partners", label: "Clientes/parceiros", run: syncPartners },
   { scope: "products", label: "Produtos", run: syncProducts },
   { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
-  { scope: "prices", label: "Preços calculados", run: syncPrices },
   {
     scope: "priceVariations",
     label: "Variações por tabela",
     run: syncPriceVariations,
   },
+  { scope: "prices", label: "Preços calculados", run: syncPrices },
   {
     scope: "receivingConditions",
     label: "Condições de pagamento",
@@ -62,7 +63,7 @@ const AUTOMATIC_SYNC_STEPS: Array<{
     label: "Status de pedidos",
     run: (options) => syncOrderStatus(() => syncErpOrderStatuses(), options),
   },
-];
+]);
 
 type AutomaticSyncPanelStatus =
   | "scheduled"

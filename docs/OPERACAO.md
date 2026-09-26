@@ -1352,3 +1352,13 @@ Esse resultado significa “cleanup adiado”, não cleanup aprovado ou concluí
 6. Exigir todos os checks no novo HEAD e aprovação operacional antes de qualquer novo evento de fechamento aplicável.
 
 A integração do código da PR não satisfaz esses gates, não valida Preview Deploy e não autoriza merge. Limpeza histórica e recriação de previews antigos para receber rotação de logs permanecem atividades futuras separadas.
+# Validação pós-deploy da autoridade de preços ERP (26/09/2026)
+
+Após merge, checks e deploy canônico autorizados, validar separadamente: (1) Sincronização
+Completa ERP; (2) dois ciclos da Sincronização Automática; e (3) Atualizar estoque. Em cada
+ciclo, usar produtos de teste com Tabela 1 positiva e explicitamente zerada e Tabelas 2/3/4
+com percentuais ERP distintos. Confirmar que zero da base oculta as derivadas, mudança de
+percentual é refletida no ciclo seguinte e tenants não se cruzam. Não emitir pedido real.
+Falha parcial de `/prices` não autoriza sweep nem saneamento. Dados `tenantId=null` devem ser
+auditados em procedimento separado, sem remover filtros. Esta entrega não executou esses
+passos em produção. Detalhes: [investigação](investigations/erp-price-authority-manual-automatic-2026-09-26.md).

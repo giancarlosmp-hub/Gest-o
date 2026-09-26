@@ -56,9 +56,18 @@ assert.equal(explicitZeroWins.price, 0);
 
 const laterPositiveRestoresAvailability = price(product({ prices: [
   { erpPriceId: "1", branchCode: "1", price: 0, source: "prices", availabilityState: "explicit_zero", updatedAt: new Date("2026-09-11T10:00:00Z") },
-  { erpPriceId: "1", branchCode: "1", price: 296, source: "products", availabilityState: "available", updatedAt: new Date("2026-09-11T10:01:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 296, source: "prices", availabilityState: "available", updatedAt: new Date("2026-09-11T10:01:00Z") },
 ] }));
 assert.equal(laterPositiveRestoresAvailability.price, 296);
+
+// A legacy catalogue observation can be newer because /products runs before
+// /prices in every cycle. It still cannot override an authoritative tombstone.
+const laterLegacyCannotRestoreAuthoritativeZero = price(product({ prices: [
+  { erpPriceId: "1", branchCode: "1", price: 0, source: "prices", availabilityState: "explicit_zero", updatedAt: new Date("2026-09-11T10:00:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 296, source: "products", availabilityState: "available", updatedAt: new Date("2026-09-11T11:00:00Z") },
+] }));
+assert.equal(laterLegacyCannotRestoreAuthoritativeZero.price, 0);
+assert.equal(laterLegacyCannotRestoreAuthoritativeZero.source, "missing");
 
 // Missing selected-table price is unavailable; a price from another table or
 // branch cannot cross the commercial boundary.
