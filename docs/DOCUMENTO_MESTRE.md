@@ -1,3 +1,16 @@
+# Incidente de Drift e Worktree Sujo na VPS — Resolução e Proteções (26/09/2026)
+
+- **Ocorrência e Causa Raiz:** Em 23-24/09/2026, comandos sugeridos por uma IA externa (Gemini) foram executados diretamente na VPS fora do processo auditado de limpeza em lotes (`docker builder prune -a -f` e `docker image prune -a -f`), acompanhados da edição/sobrescrita sem commit de três arquivos em `/apps/gest-o` (`ultraFv3SyncService.ts`, `CrudSimplePage.tsx`, `check-prod-health.sh`) e criação do arquivo não rastreado `scheduler-controller.ts`. A verificação genérica existente (`test -z "$(git status --porcelain)"`) abortava o workflow **Prepare Production Recovery Backup** com `exit 1` genérico e `BACKUP_FAILURE_STAGE=checkout`, sem imprimir a lista de arquivos alterados.
+- **Impacto Comprovado:** Nenhum impacto na aplicação em produção (containers mantiveram-se ativos e saudáveis a partir das imagens OCI previamente construídas). O bloqueio afetou exclusivamente a execução automatizada do workflow de backup de recuperação.
+- **Correção Efetuada (26/09/2026):** Salvo patch forense em `/root/forensic/` na VPS, seguido por `git stash push -u` para remoção das modificações não commitadas e `git pull --ff-only origin main` para sincronização com a `main` aprovada (SHA `9aba4df`).
+- **Proteções de Código Implementadas:**
+  - **Proteção 1:** Em `scripts/prepare-production-recovery-backup.sh` e `.github/workflows/prepare-production-recovery-backup.yml`, quando `git status --porcelain` for não vazio, o processo imprime `[CRITICAL] Working tree em /apps/gest-o não está limpo. Backup abortado.`, a lista de arquivos alterados/não rastreados e o apontamento para o runbook em `docs/OPERACAO.md` antes de falhar.
+  - **Proteção 2:** Criado o workflow somente-leitura `.github/workflows/vps-drift-detection.yml` (agendado diariamente às 06:00 BRT / 09:00 UTC e via `workflow_dispatch`). Conecta na VPS via SSH, consulta `git status --porcelain` e os SHAs de HEAD e `origin/main`, marcando a Action vermelha no GitHub se houver drift ou alteração não commitada.
+- **Recomendações Operacionais:**
+  - Nunca executar comandos sugeridos por IA externa diretamente na VPS de produção sem antes auditar e revisar fora do ambiente produtivo.
+  - Nunca utilizar comandos globais de limpeza Docker (`docker system prune -a`, `docker image prune -a`, `docker builder prune -a`) na VPS — manter o processo de limpeza auditada em lotes pequenos documentado.
+  - Nunca editar arquivos diretamente no disco da VPS — toda mudança de código deve ser feita via Pull Request revisada e mesclada na `main`.
+
 # Auditoria de Infraestrutura, Backups e Reclaim de Espaço em Disco (Setembro/2026)
 
 - **Escopo e Objetivo:** Auditoria de infraestrutura estritamente read-only focada em analisar a integridade/política dos backups da VPS, o consumo volumétrico de espaço em disco e mapear o plano de quarentena de imagens OCI legadas e caches de build sem executar nenhuma mutação ou exclusão automática (`vps_mutations=0`, `production_mutations=0`).
