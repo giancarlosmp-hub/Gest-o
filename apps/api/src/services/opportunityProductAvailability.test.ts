@@ -86,4 +86,34 @@ assert.equal(price(product({ erpProductClassCode: "19", prices: [{ erpPriceId: "
 assert.equal(price(product({ erpProductClassCode: "12", prices: [{ erpPriceId: "1", branchCode: "1", price: 0 }] })).price, 0);
 assert.equal(price(product({ erpProductClassCode: "13", prices: [{ erpPriceId: "1", branchCode: "1", price: 0 }] })).price, 0);
 
+// Derived prices from priceVariations (Camada 2) match for Table 2 and are selectable
+const calculatedVariationPrice = price(product({
+  prices: [
+    { erpPriceId: "1", branchCode: "1", price: 100, source: "prices", availabilityState: "available" },
+    { erpPriceId: "2", branchCode: null, price: 115, source: "calculated_from_variation", availabilityState: "available" },
+  ],
+}), "2");
+assert.equal(calculatedVariationPrice.priceTableMatched, true);
+assert.equal(calculatedVariationPrice.price, 115);
+assert.equal(calculatedVariationPrice.source, "productPrice");
+
+// Explicit price from /prices for Table 2 wins over calculated_from_variation if present
+const explicitOverDerived = price(product({
+  prices: [
+    { erpPriceId: "2", branchCode: null, price: 115, source: "calculated_from_variation", availabilityState: "available", updatedAt: new Date("2026-09-11T10:00:00Z") },
+    { erpPriceId: "2", branchCode: null, price: 120, source: "prices", availabilityState: "available", updatedAt: new Date("2026-09-11T10:05:00Z") },
+  ],
+}), "2");
+assert.equal(explicitOverDerived.price, 120);
+
+// Explicit zero for Table 2 blocks calculated variation
+const zeroBlocksDerived = price(product({
+  prices: [
+    { erpPriceId: "2", branchCode: null, price: 0, source: "prices", availabilityState: "explicit_zero", updatedAt: new Date("2026-09-11T10:05:00Z") },
+    { erpPriceId: "2", branchCode: null, price: 115, source: "calculated_from_variation", availabilityState: "available", updatedAt: new Date("2026-09-11T10:00:00Z") },
+  ],
+}), "2");
+assert.equal(zeroBlocksDerived.priceTableMatched, false);
+assert.equal(zeroBlocksDerived.price, 0);
+
 console.log("opportunity product availability regression: PASS");
