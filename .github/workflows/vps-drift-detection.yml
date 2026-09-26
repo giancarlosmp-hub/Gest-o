@@ -53,11 +53,11 @@ jobs:
             if [[ "$has_dirty_worktree" == true || "$has_sha_drift" == true ]]; then
               printf '[CRITICAL] Drift detectado na VPS em /apps/gest-o!\n\n' >&2
               if [[ "$has_dirty_worktree" == true ]]; then
-                printf '--- Working tree em /apps/gest-o não está limpo ---\n' >&2
+                printf '%s\n' '--- Working tree em /apps/gest-o não está limpo ---' >&2
                 printf '%s\n\n' "$worktree_status" >&2
               fi
               if [[ "$has_sha_drift" == true ]]; then
-                printf '--- Divergência de SHA entre HEAD local e origin/main ---\n' >&2
+                printf '%s\n' '--- Divergência de SHA entre HEAD local e origin/main ---' >&2
                 printf 'HEAD local:  %s\n' "$local_sha" >&2
                 printf 'origin/main: %s\n\n' "$remote_sha" >&2
               fi
