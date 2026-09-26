@@ -55,6 +55,7 @@
     "smoke:ultrafv3-partner-identity": "tsx src/scripts/ultraFv3PartnerIdentityMatchingSmoke.ts",
     "test:ultrafv3-partner-tenancy": "tsx src/services/ultraFv3PartnerTenantSafety.test.ts",
     "test:opportunity-product-availability": "tsx src/services/opportunityProductAvailability.test.ts",
+    "test:erp-price-variation-policy": "tsx src/services/erpPriceVariationPolicy.test.ts",
     "crm:audit-erp-client": "tsx src/scripts/crmAuditErpClient.ts",
     "crm:audit-erp-client:prod": "node dist/scripts/crmAuditErpClient.js",
     "crm:repair-erp-client": "tsx src/scripts/crmRepairErpClient.ts",

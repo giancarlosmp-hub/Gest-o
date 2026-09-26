@@ -188,6 +188,18 @@ export const calculateOpportunityPriceForTable = ({
     const rowBranch = normalizeOptionalString((item as { branchCode?: string | null }).branchCode);
     return !normalizedBranchCode || rowBranch === normalizedBranchCode;
   });
+  // `/prices` is the commercial authority.  An explicit invalidation is a
+  // tombstone, not just another dated observation: a later `/products` row is
+  // legacy catalogue data and must never resurrect it.  A later positive row
+  // from `/prices` restores the same authoritative row during synchronization.
+  const byNewestObservation = (left: typeof selectedTableRows[number], right: typeof selectedTableRows[number]) =>
+    new Date(right.updatedAt || right.validFrom || 0).getTime()
+      - new Date(left.updatedAt || left.validFrom || 0).getTime();
+  const newestAuthoritative = selectedTableRows
+    .filter((item) => item.source === "prices" && item.availabilityState !== "absent")
+    .sort(byNewestObservation)[0];
+  const hasAuthoritativeExplicitZero = newestAuthoritative?.availabilityState === "explicit_zero"
+    || (Boolean(newestAuthoritative) && Number(newestAuthoritative.price) <= 0);
   const explicitRows = selectedTableRows
     .filter((item) => (item.availabilityState || (Number(item.price) > 0 ? "available" : "explicit_zero")) !== "absent")
     .sort((left, right) => {
@@ -198,8 +210,9 @@ export const calculateOpportunityPriceForTable = ({
       // zero wins a tie rather than resurrecting an old positive.
       return Number(left.price) <= 0 ? -1 : Number(right.price) <= 0 ? 1 : 0;
     });
-  const newestExplicit = explicitRows[0];
-  const hasExplicitInvalidSelectedTablePrice = Boolean(newestExplicit) && Number(newestExplicit.price) <= 0;
+  const newestExplicit = hasAuthoritativeExplicitZero
+    ? undefined
+    : Number(newestAuthoritative?.price) > 0 ? newestAuthoritative : explicitRows[0];
   const tablePrice = newestExplicit && Number(newestExplicit.price) > 0 ? newestExplicit : undefined;
   // ProductPrice is the sole availability authority. Product/default/min prices,
   // cached payloads and calculated-price caches are deliberately not fallbacks:
