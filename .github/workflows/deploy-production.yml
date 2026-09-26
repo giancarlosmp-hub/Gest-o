@@ -28,6 +28,7 @@ jobs:
           port: ${{ secrets.SSH_PORT || '22022' }}
           envs: EXPECTED_SHA,DEPLOY_MODE
           script_stop: true
+          debug: true
           script: |
             set -Eeuo pipefail
             bootstrap_stage=bootstrap_repository_access
