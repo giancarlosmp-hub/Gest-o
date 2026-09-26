@@ -1,3 +1,15 @@
+# Incidente de Drift na VPS e Implementação de Proteções (26/09/2026)
+
+- **Restabelecimento do Workflow de Backup:**
+  - O workflow **Prepare Production Recovery Backup** voltou a rodar com sucesso em `main` (run nº 76, SHA `9aba4df`), após a remoção via `git stash push -u` das alterações não commitadas na VPS e ressincronização via `git pull --ff-only origin main`.
+- **Implementação de Proteções de Drift e Transparência:**
+  - **Proteção 1 (`PROTECTION_1_IMPLEMENTED=SIM`):** O script `scripts/prepare-production-recovery-backup.sh` e o workflow `.github/workflows/prepare-production-recovery-backup.yml` foram atualizados. Se o diretório de trabalho em `/apps/gest-o` estiver sujo (`git status --porcelain` não vazio), o processo imprime mensagem explicativa `[CRITICAL] Working tree em /apps/gest-o não está limpo. Backup abortado.`, exibe todos os arquivos alterados/não rastreados e aponta para o runbook em `docs/OPERACAO.md` antes de falhar.
+  - **Proteção 2 (`PROTECTION_2_IMPLEMENTED=SIM`, `PROTECTION_2_IS_READ_ONLY_CONFIRMED=SIM`):** Criado o workflow somente-leitura `.github/workflows/vps-drift-detection.yml` (diariamente às 06:00 BRT / 09:00 UTC e via `workflow_dispatch`). Executa diagnósticos read-only (`git fetch origin main`, `git status --porcelain`, `git rev-parse HEAD`, `git rev-parse origin/main`) e reprova o run no GitHub com detalhes se houver drift local de código ou de SHA.
+- **Recomendações Operacionais:**
+  - Nunca executar comandos sugeridos por uma IA externa diretamente na VPS de produção sem antes auditar e revisar fora do ambiente produtivo.
+  - Nunca utilizar comandos globais de limpeza Docker (`docker system prune -a`, `docker image prune -a`, `docker builder prune -a`) na VPS — manter estritamente o processo de limpeza auditada em lotes pequenos documentado.
+  - Nunca editar arquivos diretamente no disco da VPS — toda mudança de código passa por Pull Request revisada e mesclada na `main`.
+
 # Resolução de Inconsistências de Backup e Blindagem de Vendedores Inativos (Setembro/2026)
 
 - **Correção da Saúde do Banco no Script de Backup (`scripts/check-prod-health.sh`):**

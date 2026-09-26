@@ -51,7 +51,13 @@ STAGE=prerequisites; COMMAND=validate_required_commands
 for c in awk bash chown cp date docker df flock git grep gzip install mktemp mv node python3 readlink sha256sum stat sync; do need "$c"; done
 STAGE=checkout; COMMAND=validate_main_checkout
 cd "$APP_DIR"
-[[ "$(git branch --show-current 2>/dev/null)" == main && "$(git rev-parse HEAD 2>/dev/null)" == "$EXPECTED_SHA" && -z "$(git status --porcelain 2>/dev/null)" ]]
+[[ "$(git branch --show-current 2>/dev/null)" == main && "$(git rev-parse HEAD 2>/dev/null)" == "$EXPECTED_SHA" ]]
+if worktree_status="$(git status --porcelain 2>/dev/null)" && [[ -n "$worktree_status" ]]; then
+  printf '[CRITICAL] Working tree em %s não está limpo. Backup abortado.\n' "$APP_DIR" >&2
+  printf '%s\n' "$worktree_status" >&2
+  printf 'Investigue antes de descartar. Ver runbook: docs/OPERACAO.md\n' >&2
+  false
+fi
 git show-ref --verify --quiet refs/remotes/origin/main >/dev/null 2>&1
 [[ "$(git rev-parse HEAD 2>/dev/null)" == "$(git rev-parse origin/main 2>/dev/null)" ]]
 

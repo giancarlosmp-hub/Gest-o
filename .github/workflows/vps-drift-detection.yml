@@ -1,0 +1,68 @@
+name: VPS Drift Detection
+
+on:
+  schedule:
+    # 06:00 BRT (UTC-3) = 09:00 UTC
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-drift-detection
+  cancel-in-progress: false
+
+jobs:
+  check-drift:
+    environment: production-backup-recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verificação de Drift e Worktree na VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          script_stop: true
+          command_timeout: 10m
+          debug: true
+          script: |
+            set -Eeuo pipefail
+            cd /apps/gest-o
+
+            # Atualiza referências do origin/main de forma estritamente somente-leitura
+            git fetch origin main >/dev/null 2>&1 || true
+
+            worktree_status="$(git status --porcelain 2>/dev/null || true)"
+            local_sha="$(git rev-parse HEAD 2>/dev/null || echo 'UNKNOWN_LOCAL_SHA')"
+            remote_sha="$(git rev-parse origin/main 2>/dev/null || echo 'UNKNOWN_REMOTE_SHA')"
+
+            has_dirty_worktree=false
+            has_sha_drift=false
+
+            if [[ -n "$worktree_status" ]]; then
+              has_dirty_worktree=true
+            fi
+
+            if [[ "$local_sha" != "$remote_sha" ]]; then
+              has_sha_drift=true
+            fi
+
+            if [[ "$has_dirty_worktree" == true || "$has_sha_drift" == true ]]; then
+              printf '[CRITICAL] Drift detectado na VPS em /apps/gest-o!\n\n' >&2
+              if [[ "$has_dirty_worktree" == true ]]; then
+                printf '--- Working tree em /apps/gest-o não está limpo ---\n' >&2
+                printf '%s\n\n' "$worktree_status" >&2
+              fi
+              if [[ "$has_sha_drift" == true ]]; then
+                printf '--- Divergência de SHA entre HEAD local e origin/main ---\n' >&2
+                printf 'HEAD local:  %s\n' "$local_sha" >&2
+                printf 'origin/main: %s\n\n' "$remote_sha" >&2
+              fi
+              printf 'Investigue antes de descartar. Ver runbook: docs/OPERACAO.md\n' >&2
+              exit 1
+            else
+              printf '[OK] VPS working tree limpo e sincronizado com origin/main (%s).\n' "$local_sha"
+            fi
