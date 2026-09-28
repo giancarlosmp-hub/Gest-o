@@ -17,6 +17,7 @@ import { isUltraFv3TimeoutError, ULTRAFV3_ORDER_REQUEST_TIMEOUT_MS, ULTRAFV3_REQ
 import { decryptErpCredential } from "./erpCredentialCrypto.js";
 import { requestUltraFv3ReadOnlyWithCredentialsRetry, requestUltraFv3ReadOnlyWithRetry } from "./ultraFv3SyncService.js";
 import { reserveNextErpOrderNumber } from "./erpOrderNumberSequenceService.js";
+import { isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
 
 const SALESMEN_CONFIG_KEY = "erp.ultrafv3.salesmen";
 const SALESMEN_ORDER_SEQUENCE_ENDPOINT = "/salesmen";
@@ -545,9 +546,10 @@ export const normalizeOperationalOrderStatus = (raw: string | null): ErpOperatio
 const referenceCodeKeys: Record<string, string[]> = {
   priceTables: ["TABELA", "CODTABELA", "COD_TABELA", "ID_TABELA", "TABELA_PRECO", "code", "codigo", "CODIGO", "id", "ID", "value"],
   operations: ["CODOPER", "OPERACAO", "COD_OPERACAO", "code", "codigo", "CODIGO", "id", "ID", "value"],
+  receivingConditions: ["CODCONDREC", "CONDICAO", "COD_CONDICAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
 };
 
-async function assertReferenceCode(scope: "priceTables" | "operations", code: string, message: string) {
+async function assertReferenceCode(scope: "priceTables" | "operations" | "receivingConditions", code: string, message: string) {
   const normalizedCode = normalizeErpParameterCode(code);
   const stored = await prisma.appConfig.findUnique({
     where: { key: `erp.ultrafv3.${scope}` },
@@ -557,11 +559,22 @@ async function assertReferenceCode(scope: "priceTables" | "operations", code: st
   try {
     const rows = toArray(JSON.parse(stored.value));
     if (!rows.length) return;
-    const exists = rows.some((row) => {
+    const matchedRow = rows.find((row) => {
       if (!row || typeof row !== "object") return false;
       return normalizeErpParameterCode(pickFirstString(row as Record<string, unknown>, referenceCodeKeys[scope])) === normalizedCode;
-    });
-    if (!exists) throw Object.assign(new Error(message), { status: 400 });
+    }) as Record<string, unknown> | undefined;
+
+    if (!matchedRow) {
+      throw Object.assign(new Error(message), { status: 400 });
+    }
+
+    if (!isErpReferenceEligible(scope, matchedRow)) {
+      const scopeLabel = scope === "operations" ? "Operação" : scope === "receivingConditions" ? "Condição de recebimento" : "Referência";
+      throw Object.assign(
+        new Error(`${scopeLabel} não autorizada para uso no CRM (código ${code}).`),
+        { status: 400 }
+      );
+    }
   } catch (error) {
     if (error instanceof Error && (error as any).status) throw error;
   }
@@ -1232,6 +1245,7 @@ async function createErpOrderFromOpportunityUnsafe(
   try {
     await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
     await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
+    await assertReferenceCode("receivingConditions", params.receivingConditionCode, "Condição de recebimento inválida para emissão ERP.");
   } catch (error) {
     if (error instanceof Error) Object.assign(error, { parameterDiagnostics });
     throw error;
@@ -1947,6 +1961,7 @@ const buildProtocolTestOrderPayload = async (
     throw Object.assign(new Error("Payload inválido: pedido ERP bloqueado por item com preço zerado."), { status: 400 });
   await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
   await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
+  await assertReferenceCode("receivingConditions", params.receivingConditionCode, "Condição de recebimento inválida para emissão ERP.");
 
   const now = new Date();
   const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);

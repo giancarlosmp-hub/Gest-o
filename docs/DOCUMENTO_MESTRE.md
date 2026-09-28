@@ -1631,13 +1631,14 @@ explícita sem adotar `tenantId=NULL`. Deploy de schema usa `prisma db push`, n�
 harness descartável comprova preservação quando houver Docker. Merge segue bloqueado pelas lacunas
 Firebird/tabela/filial/grupo/identidade e pela validação PostgreSQL ainda não executada.
 
-### Trabalho separado: elegibilidade ERP `LIBERAR_INTERNET`
+### Validação e Aplicação da Elegibilidade ERP `LIBERAR_INTERNET` (Setembro/2026)
 
-O contrato operacional confirmado é `N` bloqueado e `S` elegível, nunca autorização isolada. A
-operação 99 demonstra o defeito atual de listagem; o backend também não revalida o campo antes do
-pedido. Condições de recebimento seguem o mesmo contrato, pendentes do JSON completo. A correção deve
-ser isolada da PR de preços, cobrir UI e backend, mudança S→N, manual/automático e preservar histórico.
-Fonte e critérios: [evidência sanitizada](investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md).
+A regra `LIBERAR_INTERNET = "S"` (combinada com `ATIVO = "S"` e `VENDAS = "S"` para operações) foi
+implementada e aplicada tanto nas rotas de listagem (`GET /erp/ultrafv3/operations` e `GET /erp/ultrafv3/receiving-conditions`)
+quanto no backend na criação e envio de pedidos (`assertReferenceCode`). Opções não elegíveis (como a Operação 99
+que tem `LIBERAR_INTERNET = "N"`, e as Operações 320/340 que possuem `VENDAS = "N"`) são omitidas na UI e rejeitadas pela API.
+Submissões com valores nulos, ausentes ou inválidos falham fechados, enquanto os pedidos históricos já salvos
+permanecem preservados. Ver [investigação e resolução completa](investigations/ultrafv3-liberar-internet-enforcement-2026-09.md).
 
 ### Precedência Firebird de preço e estado CI (28/09/2026)
 
