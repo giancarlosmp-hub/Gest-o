@@ -285,3 +285,40 @@ operacional.
 ### Complemento de evidência: solicitações e NF-e (2026-09-04)
 
 A “Legenda Solicitações” do ERP desktop é separada dos status comercial, operacional e de sincronização: branco/nenhuma solicitação ou restrição; amarelo/parcialmente autorizadas; vermelho/nenhuma autorizada; verde/todas autorizadas. A regra de cores do aplicativo móvel não foi comprovada como equivalente. O Gest-o mantém `requestAuthorizationStatus` independente e inicia em `UNKNOWN` enquanto não houver campo contratual. Embora uma NF seja visualmente observável na lista móvel, `POST /orders` e `GET /orderStatus` não comprovam número de NF, rota, chave ou cardinalidade; por isso NF-e permanece não instrumentada, sem inferência por finalização ou quantidade faturada.
+
+## 28. Catálogo, estoque e preços UltraFV3 (27/09/2026)
+
+```mermaid
+flowchart LR
+  FB[(Firebird)] -->|WS_PRECOS e procedimentos relacionados| UF[UltraFv3Rest externo]
+  UF -->|GET /products| NP[Normalização de produto e estoque]
+  UF -->|GET /prices| NPV[Observação de preço]
+  NP --> P[(Product)]
+  NPV --> PP[(ProductPrice)]
+  PP --> SEL[Seleção por contexto e versão]
+  P --> SEL
+  SEL --> API[Busca da Nova oportunidade]
+  API --> WEB[Interface]
+```
+
+**[CÓDIGO]** `Product` preserva identidade código+classificação e estoque; `ProductPrice` preserva
+contexto de tabela/filial, valor, fonte, estado de disponibilidade, identidade e relógios da origem.
+`validFrom`/`sourceChangedAt` são comerciais; `observedAt` é coleta; `updatedAt` é manutenção local e
+não decide versão ERP. **[OPERACIONAL]** o botão Atualizar estoque executa `/products` e `/prices`,
+nesta ordem, e não é atomicamente distribuído.
+
+**[CONFIG]** produção documentada usa `TENANCY_MODE=disabled`: o catálogo ERP é global e
+`tenantId=NULL` não deve ser filtrado por uma associação do usuário. Em `default-only`, a associação
+é fronteira explícita e registros nulos não são adotados implicitamente. O schema ainda tem unicidade
+global código+classe; multi-tenancy de catálogo completo permanece não implementada.
+
+**[NÃO COMPROVADO]** tabela ausente, filial nula, grupo/agrupamento e identidade autenticada não têm
+precedência universal. Contextos diferentes não são ordenados apenas por vigência. A política
+bloqueada e suas evidências estão na investigação pós-PR #898.
+
+### Referências comerciais e autorização de pedido
+
+Caches de operações/condições são dados externos, não autorização. `LIBERAR_INTERNET` deve ser
+aplicado tanto na projeção de opções quanto novamente na fronteira de `POST /orders`; hoje essa
+política ainda não está implementada. A futura mudança deve preservar pedidos históricos e não
+misturar elegibilidade de referência com a correção de preços.

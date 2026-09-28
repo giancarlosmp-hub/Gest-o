@@ -551,8 +551,11 @@ model ProductPrice {
   productId  String
   product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   erpPriceId String?
+  erpSourcePriceId String?
   branchCode String?
   validFrom  DateTime?
+  sourceChangedAt DateTime?
+  observedAt DateTime?
   price      Float
   source     String    @default("legacy")
   availabilityState String @default("available")
@@ -561,6 +564,7 @@ model ProductPrice {
 
   @@index([productId])
   @@index([branchCode])
+  @@index([erpSourcePriceId])
   @@index([source, availabilityState])
 }
 

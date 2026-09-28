@@ -9,6 +9,8 @@ export type OpportunityPriceProduct = {
     erpPriceId?: string | null;
     price: number;
     validFrom?: Date | null;
+    sourceChangedAt?: Date | null;
+    observedAt?: Date | null;
     updatedAt?: Date | null;
     source?: string | null;
     availabilityState?: string | null;
@@ -183,18 +185,30 @@ export const calculateOpportunityPriceForTable = ({
   const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
   const productPrices = product.prices || [];
   const normalizedBranchCode = normalizeOptionalString(branchCode);
-  const selectedTableRows = productPrices.filter((item) => {
-    if (!priceTableMatches(item.erpPriceId, normalizedPriceTableCode)) return false;
-    const rowBranch = normalizeOptionalString((item as { branchCode?: string | null }).branchCode);
-    return !normalizedBranchCode || rowBranch === normalizedBranchCode;
+  // Only an explicit table identifier establishes table equivalence. The ERP
+  // contract for a missing table is not documented, so an unscoped row must
+  // neither override nor invalidate a row explicitly assigned to Table 1.
+  const tableRows = productPrices.filter((item) =>
+    normalizeOptionalString(item.erpPriceId) !== ""
+    && priceTableMatches(item.erpPriceId, normalizedPriceTableCode)
+    && (!item.validFrom || new Date(item.validFrom).getTime() <= Date.now())
+  );
+  // Likewise, a missing branch is merely the same no-branch context requested
+  // by opportunity search; it is not labelled TODAS here. An explicit branch
+  // requires an exact match until the ERP contract defines a fallback.
+  const selectedTableRows = tableRows.filter((item) => {
+    const rowBranch = normalizeOptionalString(item.branchCode);
+    return normalizedBranchCode ? rowBranch === normalizedBranchCode : rowBranch === "";
   });
   // `/prices` is the commercial authority.  An explicit invalidation is a
   // tombstone, not just another dated observation: a later `/products` row is
   // legacy catalogue data and must never resurrect it.  A later positive row
   // from `/prices` restores the same authoritative row during synchronization.
-  const byNewestObservation = (left: typeof selectedTableRows[number], right: typeof selectedTableRows[number]) =>
-    new Date(right.updatedAt || right.validFrom || 0).getTime()
-      - new Date(left.updatedAt || left.validFrom || 0).getTime();
+  const byNewestObservation = (left: typeof selectedTableRows[number], right: typeof selectedTableRows[number]) => {
+    const validDifference = new Date(right.validFrom || 0).getTime() - new Date(left.validFrom || 0).getTime();
+    if (validDifference) return validDifference;
+    return new Date(right.sourceChangedAt || 0).getTime() - new Date(left.sourceChangedAt || 0).getTime();
+  };
   const newestAuthoritative = selectedTableRows
     .filter((item) => item.source === "prices" && item.availabilityState !== "absent")
     .sort(byNewestObservation)[0];
@@ -203,8 +217,7 @@ export const calculateOpportunityPriceForTable = ({
   const explicitRows = selectedTableRows
     .filter((item) => (item.availabilityState || (Number(item.price) > 0 ? "available" : "explicit_zero")) !== "absent")
     .sort((left, right) => {
-      const timeDifference = new Date(right.updatedAt || right.validFrom || 0).getTime()
-        - new Date(left.updatedAt || left.validFrom || 0).getTime();
+      const timeDifference = byNewestObservation(left, right);
       if (timeDifference) return timeDifference;
       // Legacy duplicate rows have no observation timestamp. Fail closed: a
       // zero wins a tie rather than resurrecting an old positive.

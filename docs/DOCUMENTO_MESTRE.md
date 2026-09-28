@@ -1529,3 +1529,93 @@ agora passa e inclui comportamento para regras ERP distintas nas Tabelas 2/3/4, 
 percentual entre ciclos, repetição de `/products`, restauração autoritativa, resposta parcial,
 ordem manual/automática e isolamento de tenant. A validação produtiva permanece pendente e
 deve seguir `OPERACAO.md`; nenhuma sincronização ou mutação produtiva foi executada.
+# Complemento — preço pós-PR #898 (26/09/2026)
+
+O identificador exibido `1 / 9` é `erpProductCode / erpProductClassCode`. A imagem implantada foi
+comprovada pelo operador, mas a cadeia ERP → UI ainda não foi observada ponta a ponta. O código atual
+permite múltiplas filiais na mesma tabela e a busca sem filial escolhe entre elas; adicionalmente, o
+refresh manual combina catálogo global com filtro de tenant na persistência de preços. Essas são
+divergências comprovadas no código, não confirmação da causa produtiva. O endpoint de diagnóstico e
+o [roteiro read-only](investigations/post-pr898-product-1-class-9-price-trace-2026-09-26.md) passam a
+expor classificação, tenant, fonte/estado, filial e timestamps. Produção continua não declarada
+corrigida e eventual saneamento permanece separado da correção de código.
+
+## Resultado da coleta e contrato corrigido (27/09/2026)
+
+O caso real provou, no print ERP, Tabela 1=128 e Tabela 2=160 com regra de variação marcada TODAS,
+enquanto uma observação persistida sem tabela e de
+filial 1 continha 252,08. Ausência de código de tabela não constitui atribuição explícita à Tabela 1;
+ausência de filial na requisição não autoriza escolher uma filial. O contrato passa a priorizar
+tabela explícita e exige igualdade do contexto de filial; `NULL` não é rotulado TODAS nem usado como
+fallback de filial. `tenantId=NULL` não é promovido a compartilhado: o filtro autenticado permanece
+estrito até decisão arquitetural. Runs preservam recebidos, produto encontrado, positivos, zeros
+explícitos, inválidos, ausentes, persistidos, atualizados/criados e rejeitados. Não se compara
+`matchedProducts` a `received`: no SHA produtivo aquele contador excluía zeros processados. Produto
+ausente ou rejeição bloqueia sweep e sinaliza erro.
+A origem ERP de 252,08 permanece pendente da consulta allowlisted do cache. Registros antigos permanecem para auditoria; reconstrução destrutiva
+não é requisito inicial. Ver investigação pós-PR #898 para causa, testes e plano controlado.
+
+O fluxo não é transacional de ponta a ponta: erro final pode deixar cache/upserts parciais já
+confirmados, embora impeça reconciliação posterior e sucesso na interface. `tenantId=NULL` autenticado,
+origem/normalização de tabela ausente e payload real permanecem pendentes; testes locais não os provam.
+
+### Proveniência confirmada do cache `/prices`
+
+Em 27/09/2026, o cache atualizado às `13:00:54.765` mostrou duas linhas 1/9 sem tabela: 128 sem
+filial e 252,08 na filial 1. `syncPrices` grava por substituição o array extraído da resposta do GET
+base `/prices`; `toArray` remove somente o envelope e o cliente faz apenas parse JSON. As chamadas
+parametrizadas de outras tabelas ocorrem depois e não entram no cache. Logo, 252,08 veio da resposta
+JSON extraída, mas endpoint base, identidade global versus `seller_reference`, claims e filtros
+implícitos ainda precisam ser confrontados com a tela ERP. SQL allowlisted preservando aliases e
+run/authMode foi acrescentado à investigação. Probe HTTP direto só será preparado se necessário,
+com redaction específica: o login atual por vendedor pode registrar `ultraResponse`. Nenhuma chamada
+ERP, sincronização, mutação ou deploy foi executada. `tenantId=NULL` permanece uma pendência separada.
+
+A projeção posterior preservou os nomes: a linha 252,08 possui `CODFILIAL=1`; a linha 128 não possui
+campo de filial; ambas têm `CODPRODUTO=1`, `CODPRODUTO_CLAS=9` e nenhum alias de tabela observado.
+O run correspondente usou `seller_reference` com o mesmo sellerId opaco dos dois runs anteriores.
+Um probe direto foi preparado para execução humana: lê somente essa configuração local, autentica por
+POST (explicitamente, portanto não é “GET-only”) e consulta GET `/prices`; não importa sync/logger,
+não escreve Prisma/cache e emite somente base/contexto e aliases allowlisted com presença/nulo. Não
+foi executado nesta tarefa. Divergência com a tela só será atribuída à API após comparar identidade,
+ambiente, empresa, filial e vendedor. `tenantId=NULL` permanece fora desse diagnóstico.
+
+O probe direto posterior confirmou HTTP 200/501 no GET base: sob token vendedor 6611, operador 43,
+filial 1, a API devolveu `CODFILIAL=null/PRECO=128` e `CODFILIAL=1/PRECO=252.08`, ambas sem tabela.
+A referência visual usa vendedor 7081/filial 1. O cálculo interno do endpoint é externo ao repositório;
+o CRM contém somente proxy/cliente. O relato sanitizado ao fornecedor solicita fonte, joins, filtros,
+vigência, precedência, semântica do nulo e contrato de tabela. A correção que exige tabela explícita
+fica bloqueada: com o payload comprovado ela descarta tanto 252,08 quanto 128 e tombstones sem tabela.
+Não há autorização para inferir tabela/filial, escolher menor preço ou trocar credencial persistida.
+`READY_TO_MERGE_PRICE_FIX=NO`; incidente, comparação autorizada com 7081 e `tenantId=NULL` seguem
+pendentes e independentes.
+
+## Evidência de origem e política pendente (27/09/2026)
+
+O mapa observado é **CRM → GET UltraFV3 `/prices` → `WS_PRECOS(date)` → Firebird**. A versão externa analisada do controlador só encaminha `date` (padrão 1900); parâmetros ad hoc de tabela não filtram essa rota. `/prices/changed-products` possui contrato distinto e não pode substituí-la sem validação de completude e regras.
+
+A resposta direta comprovou 128 (filial nula) e 252,08 (filial 1), mas não tabela. O log histórico, separadamente, dá `PRECOS_ID` 2776/vigência 2026 ao primeiro e 2166/vigência 2022 ao segundo. A persistência anterior retinha valor/contexto parcial e renovava apenas o relógio local. A proposta adiciona `erpSourcePriceId`, `validFrom`, `sourceChangedAt` e `observedAt`; registros antigos ficam com observação nula até serem realmente observados. IDs e datas da origem não são substituídos por `updatedAt`.
+
+A consulta encontrada no Gestao.exe favoreceria a vigência 2026, mas não é adotada como contrato universal até a confirmação dos metadados Firebird e do caminho da tela. Também seguem abertas a equivalência entre vendedores 6611/7081, filial nula, tabela ausente e `CODGRUPO=24` versus `CODAGRUPAMENTO=11`.
+
+O comando **Atualizar estoque** é contratualmente composto: sincroniza produtos/estoque e depois preços. Não há transação distribuída comprovada; erro na segunda etapa pode deixar a primeira persistida e deve ser apresentado como resultado parcial. Completa, automática e atualização da oportunidade devem usar a mesma política quando ela for validada.
+
+Critérios de merge: contrato Firebird confirmado; política de versão/tabela/filial codificada sem heurística; tenancy nula validada; testes comportamentais e migration em banco isolado; e plano pós-deploy para os três fluxos. Até lá: `READY_TO_MERGE_PRICE_FIX=NO`.
+
+### Contrato permanente de catálogo/preço (27/09/2026)
+
+A arquitetura detalhada está em [ARQUITETURA.md](ARQUITETURA.md) e o contrato de borda em
+[erp-ultrafv3-integration-technical.md](erp-ultrafv3-integration-technical.md). Atualizar estoque
+continua composto por produto/estoque e preço; completa e scheduler reutilizam os mesmos serviços.
+Produção `TENANCY_MODE=disabled` usa catálogo global, enquanto `default-only` mantém fronteira
+explícita sem adotar `tenantId=NULL`. Deploy de schema usa `prisma db push`, não a cadeia SQL; o novo
+harness descartável comprova preservação quando houver Docker. Merge segue bloqueado pelas lacunas
+Firebird/tabela/filial/grupo/identidade e pela validação PostgreSQL ainda não executada.
+
+### Trabalho separado: elegibilidade ERP `LIBERAR_INTERNET`
+
+O contrato operacional confirmado é `N` bloqueado e `S` elegível, nunca autorização isolada. A
+operação 99 demonstra o defeito atual de listagem; o backend também não revalida o campo antes do
+pedido. Condições de recebimento seguem o mesmo contrato, pendentes do JSON completo. A correção deve
+ser isolada da PR de preços, cobrir UI e backend, mudança S→N, manual/automático e preservar histórico.
+Fonte e critérios: [evidência sanitizada](investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md).

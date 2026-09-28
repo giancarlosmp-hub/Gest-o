@@ -114,6 +114,9 @@ jobs:
           echo "POSTGRES_IMAGE_PULL_RESULT=FAIL"
           exit 1
 
+      - name: Prove price provenance through the real Prisma db push path
+        run: npm run test:product-price-provenance-db-push:postgres
+
       - name: Execute every PR827 preview diagnostic on PostgreSQL 16
         run: |
           lock_hash=$(sha256sum package-lock.json | cut -d' ' -f1)

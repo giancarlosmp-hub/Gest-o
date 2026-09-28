@@ -1362,3 +1362,42 @@ percentual é refletida no ciclo seguinte e tenants não se cruzam. Não emitir 
 Falha parcial de `/prices` não autoriza sweep nem saneamento. Dados `tenantId=null` devem ser
 auditados em procedimento separado, sem remover filtros. Esta entrega não executou esses
 passos em produção. Detalhes: [investigação](investigations/erp-price-authority-manual-automatic-2026-09-26.md).
+# Validação de preços após correção pós-PR #898
+
+Após deploy, não sanear previamente. Registrar o SHA e, em ordem, validar a busca das Tabelas 1 e 2,
+executar uma vez “Atualizar estoque”, executar a Sincronização Completa e aguardar um ciclo automático
+posterior ao deploy. Para cada execução preservar `correlationId`, `received`, `productFoundRows`,
+`matchedProducts`, `positivePriceRows`, `explicitZeroRows`, `invalidPrice`, `missingProduct`,
+`persistedPriceRows`, `rejectedRows`, `updatedPrices`, `createdPrices` e erros. Não comparar
+`matchedProducts` com `received`, pois zeros explícitos processados não são positivos. Produto ausente
+ou linha rejeitada deve ser erro e bloqueia sweep. Somente considerar reconstrução se uma linha inválida continuar selecionável; exigir
+backup restaurável, locks, dry-run por IDs, clone isolado, transação/timeout, reposição e rollback.
+Não excluir `Product`, alterar IDs, reescrever itens históricos ou mapear grupo/agrupamento por
+semelhança nominal.
+
+## Atualizar estoque + preços e falhas parciais (27/09/2026)
+
+Na Nova oportunidade, **Atualizar estoque** deve executar produtos/estoque e preços. Não interpretar sucesso da primeira etapa como sucesso comercial integral. Se preços falharem depois da gravação de produtos, registrar e exibir que estoque/produtos foram processados e que preços falharam; não anunciar rollback, pois as etapas não têm atomicidade distribuída comprovada. Não usar `updatedAt` do CRM como vigência ERP.
+
+A coleta Firebird pendente começa somente por metadados (`RDB$PROCEDURES`, parâmetros e dependências), usando o arquivo sanitizado `docs/investigations/evidence/firebird-price-metadata-read-only.sql`. Antes de formar comando executável, confirmar caminho real do `isql.exe`, conexão/alias autorizado e banco correto. Senha não deve ser enviada no chat ou gravada em log.
+
+## Coleta Firebird de metadados de preço
+
+Artefato versionado: `docs/investigations/evidence/firebird-price-metadata-read-only.sql`. Ele lê
+somente definições, parâmetros e dependências de `PRECO_VENDA`, `WS_PRECOS`,
+`WS_PRECOS_ECOMMERCE`, `WS_PRECOS_VARIACAO` e as colunas de `AGRUPAMENTOS`; não chama procedures.
+Antes de montar o comando, confirmar `isql.exe`, conexão/alias autorizado e banco correto. Usar
+prompt/arquivo protegido local para autenticação; nunca colocar senha no comando, chat ou log.
+A relação grupo 24/agrupamento 11 só deve ser consultada depois que os metadados revelarem os nomes
+reais de coluna.
+
+Para validar Atualizar estoque, registrar separadamente contagens de produto/estoque e preço. Uma
+resposta de erro após a primeira etapa significa persistência potencialmente parcial. Para completa e
+automática, conferir `ErpSyncRun`, correlation ID, lock e métricas; processo saudável não prova ciclo.
+
+## Diagnóstico de `LIBERAR_INTERNET` (sem enviar pedido)
+
+Para operações e condições, coletar somente envelope, código, `ATIVO`, `LIBERAR_INTERNET` e filtros
+comerciais necessários, removendo credenciais e PII. Comparar contagem do cache, resposta local de
+opções e seletor. Não usar `POST /orders` como teste. Até a correção própria, presença no seletor ou no
+cache não prova autorização comercial.

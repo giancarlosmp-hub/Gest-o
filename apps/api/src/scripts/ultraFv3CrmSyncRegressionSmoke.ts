@@ -65,13 +65,17 @@ assert.match(syncService, /hasConfiguredSellerFv3Credentials/, "Sync deve detect
 assert.match(syncService, /skippedOrderStatusMissingGlobalCredentials/, "orderStatus deve ser ignorado como aviso operacional quando só faltam credenciais globais em modo por vendedor");
 assert.match(syncService, /zeroPriceInvalidated/, "Sync de preços deve invalidar preço zero retornado pelo ERP");
 assert.match(syncService, /createdZeroPrice/, "Sync de preços deve registrar ProductPrice zero explícito para bloquear fallback de /products.PRECO");
+assert.match(crudRoutes, /classCodes: z\.string\(\).*optional\(\)/, "Diagnóstico deve permitir desambiguar código pela classificação exibida após a barra");
+assert.match(crudRoutes, /source: price\.source, availabilityState: price\.availabilityState/, "Diagnóstico deve expor autoridade e estado de cada ProductPrice");
+assert.match(crudRoutes, /matchingTableBranches/, "Diagnóstico deve revelar ambiguidade entre filiais na tabela consultada");
 assert.match(syncService, /source: \{ in: \["products", "calculated_from_variation"\] \}/, "Zero explícito deve invalidar fontes materializadas subordinadas");
 assert.match(syncService, /authoritativeZero[\s\S]*legacyAvailability/, "Novo ciclo de /products deve respeitar tombstone autoritativo");
 assert.match(syncService, /product PRECO fallback preserved/, "Sync de preços não deve zerar fallback de /products.PRECO quando /prices não retorna o produto");
-assert.match(syncService, /productCandidates\.length === 1 \? productCandidates\[0\]/, "Sync de preços deve atualizar candidato único seguro mesmo com classificação divergente ou ausente");
+assert.match(syncService, /selectProductCandidateForTenant/, "Sync de preços deve exigir candidato único com código, classificação e tenant equivalentes");
 assert.match(syncService, /\{ scope: "products"[\s\S]*\{ scope: "priceTables"[\s\S]*\{ scope: "priceVariations"[\s\S]*\{ scope: "prices"/, "Sincronização completa deve atualizar regras antes dos preços");
-assert.match(syncService, /const staleResult = shouldSweepAbsentPrices\(snapshotComplete\)[\s\S]*: \{ count: 0 \}/, "Resposta parcial não pode executar sweep de ausência");
-assert.match(syncService, /tenantId \? \{ product: \{ tenantId \} \}/, "Sweep de preços deve permanecer isolado pelo tenant autenticado");
+assert.match(syncService, /matchedCompleteSnapshot = snapshotComplete[\s\S]*diagnostics\.productFoundRows === diagnostics\.received[\s\S]*diagnostics\.rejectedRows === 0[\s\S]*shouldSweepAbsentPrices\(matchedCompleteSnapshot\)/, "Resposta incompleta, produto ausente ou linha rejeitada não pode executar sweep de ausência");
+assert.match(syncService, /product: productCatalogTenantWhere\(tenantId\)/, "Sweep deve permanecer limitado ao tenant autenticado");
+assert.match(syncService, /assertUsefulProductPriceSync/, "Fluxos compartilhados não podem registrar sucesso comercial com zero produtos processados");
 assert.doesNotMatch(syncService, /PERC_ACRESCIMO_TABELA_2|PERCENTUAL_TABELA_2/, "Sync não deve inventar regra percentual fixa para a Tabela 2");
 
 const orderService = readFileSync(new URL("../services/erpOrderService.ts", import.meta.url), "utf8");
