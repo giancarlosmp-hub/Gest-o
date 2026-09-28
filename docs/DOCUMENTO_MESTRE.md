@@ -1,3 +1,22 @@
+# Resolução do Bloqueio de Cutover da Implantação da Produção nº 188 (28/09/2026)
+
+- **Análise da Causa Raiz:**
+  - O deploy no commit `244cd1f` (merge da PR #899) concluiu a etapa de build das imagens OCI com sucesso, mas o cutover foi interrompido pelo gate de segurança antes de parar qualquer container: `[deploy-production] ERRO: cutover bloqueado: nenhuma evidência equivalente de schema foi validada`.
+  - A PR #899 introduziu a migration `20260927160000_product_price_source_observation` e alterou `schema.prisma`. O validador de equivalência Git (`schema_prisma_trees_equivalent`) comparou a árvore `apps/api/prisma` do commit produtor anterior e o commit `244cd1f`, detectando corretamente as alterações de schema e recusando o reuso de evidência legada.
+  - Adicionalmente, a migration `20260927160000_product_price_source_observation` ainda não havia sido cadastrada no registro imutável de migrations (`scripts/production-schema-migrations.mjs`), nas bibliotecas de validação de evidência (`scripts/schema-evidence-validation.sh`), no script de aplicação (`scripts/production-schema-apply.sh`), no filtro de diff pre-apply (`scripts/schema-diff-filter.mjs`) e no workflow de disparo (`.github/workflows/production-schema-pr827.yml`).
+
+- **Correções Efetuadas:**
+  - Cadastrada a migration `20260927160000_product_price_source_observation` com seu SHA-256 (`5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70`), mapa de colunas (`erpSourcePriceId`, `sourceChangedAt`, `observedAt`) e índice (`ProductPrice_erpSourcePriceId_idx`) no registro `production-schema-migrations.mjs`.
+  - Integrada a migration em `schema-evidence-validation.sh` (`SCHEMA_MIGRATION_PRODUCT_PRICE_SOURCE_OBSERVATION`) para validação de bundles protegidos em `validate_schema_evidence`.
+  - Implementadas pré-checagem, pós-condições e verificação de idempotência para `20260927160000_product_price_source_observation` em `production-schema-apply.sh`.
+  - Atualizado `schema-diff-filter.mjs` para autorizar a adição das colunas de observação de origem e o índice `ProductPrice_erpSourcePriceId_idx` em modo pre-apply.
+  - Atualizado `.github/workflows/production-schema-pr827.yml` para expor a opção `20260927160000_product_price_source_observation` na seleção de dispatch.
+  - Atualizadas as suítes de teste de fumaça (`production-schema-safety.mjs`, `schema-evidence-validation.sh` e `pr827-workflow-remote-script-syntax.mjs`).
+
+- **Condições para o Próximo Deploy:**
+  - O gate fail-closed permanece 100% preservado e ativo; nenhum bypass manual é permitido.
+  - O próximo deploy de produção na `main` poderá ser liberado somente após a execução do workflow **Production Schema PR827** para a migration `20260927160000_product_price_source_observation` (primeiro em `mode=preview`, e após revisão, em `mode=apply` com `CONFIRM=PRODUCTION_SCHEMA_APPLY`). Uma vez gerada a evidência protegida na VPS para o novo SHA, a **Deploy Production** em `phase=cutover` executará com sucesso.
+
 # Incidente de Drift e Worktree Sujo na VPS — Resolução e Proteções (26/09/2026)
 
 - **Ocorrência e Causa Raiz:** Em 23-24/09/2026, comandos sugeridos por uma IA externa (Gemini) foram executados diretamente na VPS fora do processo auditado de limpeza em lotes (`docker builder prune -a -f` e `docker image prune -a -f`), acompanhados da edição/sobrescrita sem commit de três arquivos em `/apps/gest-o` (`ultraFv3SyncService.ts`, `CrudSimplePage.tsx`, `check-prod-health.sh`) e criação do arquivo não rastreado `scheduler-controller.ts`. A verificação genérica existente (`test -z "$(git status --porcelain)"`) abortava o workflow **Prepare Production Recovery Backup** com `exit 1` genérico e `BACKUP_FAILURE_STAGE=checkout`, sem imprimir a lista de arquivos alterados.

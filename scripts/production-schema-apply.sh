@@ -106,6 +106,11 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20260911190000_product_price_authority ]]; th
   [[ "$product_price_columns" == 0 || "$product_price_columns" == 2 ]] || die "migration ProductPrice parcialmente aplicada"
   admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.before.tsv"
 fi
+if [[ "$MIGRATION_ID_REQUESTED" == 20260927160000_product_price_source_observation ]]; then
+  product_price_obs_columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND column_name IN ('erpSourcePriceId','sourceChangedAt','observedAt')")
+  [[ "$product_price_obs_columns" == 0 || "$product_price_obs_columns" == 3 ]] || die "migration ProductPrice observação de origem parcialmente aplicada"
+  admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.before.tsv"
+fi
 
 # Repeat every mutable safety gate immediately before granting the migration its short-lived
 # administrative authority. The runtime URL remains in use for Prisma and incident reads.
@@ -120,6 +125,8 @@ if [[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view && "$o
   log "migration de Pedidos já presente; DDL ignorado e pós-condições serão revalidadas"
 elif [[ "$MIGRATION_ID_REQUESTED" == 20260911190000_product_price_authority && "$product_price_columns" == 2 ]]; then
   log "migration de autoridade ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
+elif [[ "$MIGRATION_ID_REQUESTED" == 20260927160000_product_price_source_observation && "$product_price_obs_columns" == 3 ]]; then
+  log "migration de observação de origem ProductPrice já presente; DDL ignorado e pós-condições serão revalidadas"
 else
   log "aplicando migration versionada isoladamente; containers da aplicação não serão iniciados"
   admin_psql --single-transaction -f - < "$MIGRATION"
@@ -161,6 +168,14 @@ case "$MIGRATION_ID_REQUESTED" in
     invalid_defaults=$(admin_psql -Atc 'SELECT count(*) FROM "ProductPrice" WHERE "source" IS NULL OR "availabilityState" IS NULL')
     [[ "$columns:$authority_index:$invalid_defaults" == 2:1:0 ]] || die "pós-condições da migration de autoridade ProductPrice divergentes"
     printf 'columns_not_null_with_defaults\t%s\nauthority_index\t%s\nnull_authority_rows\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$authority_index" "$invalid_defaults" >"$evidence/post-validation.tsv"
+    ;;
+  20260927160000_product_price_source_observation)
+    admin_psql -Atc 'SELECT count(*) FROM "ProductPrice"' >"$evidence/product-price-counts.after.tsv"
+    cmp "$evidence/product-price-counts.before.tsv" "$evidence/product-price-counts.after.tsv" || die "registros ProductPrice foram alterados pela migration"
+    columns=$(admin_psql -Atc "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ProductPrice' AND is_nullable='YES' AND column_name IN ('erpSourcePriceId','sourceChangedAt','observedAt')")
+    obs_index=$(admin_psql -Atc "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND tablename='ProductPrice' AND indexname='ProductPrice_erpSourcePriceId_idx'")
+    [[ "$columns:$obs_index" == 3:1 ]] || die "pós-condições da migration de observação ProductPrice divergentes"
+    printf 'columns_nullable\t%s\nobs_index\t%s\nexisting_rows_preserved\tPASS\nold_api_compatible\tPASS\n' "$columns" "$obs_index" >"$evidence/post-validation.tsv"
     ;;
   *) die "migration sem pós-condições cadastradas" ;;
 esac

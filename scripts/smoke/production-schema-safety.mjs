@@ -77,6 +77,9 @@ assert.match(unknownEntry.stderr, /UNKNOWN_MIGRATION_ID/);
 const authorityEntry = spawnSync("node", [registry, "20260911190000_product_price_authority"], { cwd: root, encoding: "utf8" });
 assert.equal(authorityEntry.status, 0, authorityEntry.stderr);
 assert.equal(JSON.parse(authorityEntry.stdout).sha256, "52101c9cee86211717bac9ba444735fd8f4120723f64988f1f32211dee56c024");
+const sourceObsEntry = spawnSync("node", [registry, "20260927160000_product_price_source_observation"], { cwd: root, encoding: "utf8" });
+assert.equal(sourceObsEntry.status, 0, sourceObsEntry.stderr);
+assert.equal(JSON.parse(sourceObsEntry.stdout).sha256, "5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70");
 
 const apply = readFileSync(resolve(root, "scripts/production-schema-apply.sh"), "utf8");
 const productPricePostgres = readFileSync(resolve(root, "scripts/smoke/product-price-authority-migration-postgres.sh"), "utf8");

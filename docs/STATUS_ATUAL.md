@@ -1,3 +1,22 @@
+# Resolução do Bloqueio de Schema no Cutover da Implantação da Produção nº 188 (28/09/2026)
+
+- **Análise da Causa Raiz:**
+  - O deploy da release no commit `244cd1f` (merge da PR #899) teve o build concluído com sucesso, mas o cutover foi bloqueado pelo gate fail-closed: `[deploy-production] ERRO: cutover bloqueado: nenhuma evidência equivalente de schema foi validada`.
+  - A PR #899 adicionou a migration `20260927160000_product_price_source_observation` e alterou `schema.prisma`. Como a evidência em `/var/log/gest-o/schema/` na VPS pertencia a um commit produtor anterior, a verificação de equivalência Git da árvore `apps/api/prisma` (`schema_prisma_trees_equivalent`) rejeitou legitimamente a reutilização de evidências legadas, garantindo que alterações estruturais de banco não sejam ignoradas.
+  - Além disso, a migration `20260927160000_product_price_source_observation` não estava cadastrada nos manipuladores e leitores de evidência (`scripts/production-schema-migrations.mjs`, `scripts/schema-evidence-validation.sh`, `scripts/production-schema-apply.sh`, `scripts/schema-diff-filter.mjs` e `.github/workflows/production-schema-pr827.yml`).
+
+- **Correção Implementada:**
+  - Cadastrada a migration `20260927160000_product_price_source_observation` com seu SHA-256 (`5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70`), definição de colunas (`erpSourcePriceId`, `sourceChangedAt`, `observedAt`) e índice (`ProductPrice_erpSourcePriceId_idx`) em `production-schema-migrations.mjs`.
+  - Atualizado `schema-evidence-validation.sh` para reconhecer `SCHEMA_MIGRATION_PRODUCT_PRICE_SOURCE_OBSERVATION` na validação de bundles de evidência protegidos.
+  - Atualizado `production-schema-apply.sh` com suporte a pré-checagem, verificação de idempotência (DDL ignorado se colunas já existirem) e pós-condições da nova migration.
+  - Atualizado `schema-diff-filter.mjs` para autorizar a adição das novas colunas e índice em modo pre-apply.
+  - Atualizado o workflow `.github/workflows/production-schema-pr827.yml` para disponibilizar a opção `20260927160000_product_price_source_observation` no dispatch.
+  - Atualizadas as suítes de teste de fumaça (`production-schema-safety.mjs`, `schema-evidence-validation.sh` e `pr827-workflow-remote-script-syntax.mjs`).
+
+- **Garantia de Segurança Fail-Closed e Próximos Passos Operacionais:**
+  - O gate de cutover de schema **permanece 100% ativo e protegido** sem qualquer bypass manual.
+  - O próximo deploy na `main` poderá prosseguir **somente após** a execução prévia do workflow **Production Schema PR827** para a migration `20260927160000_product_price_source_observation` (primeiro em `mode=preview`, e em seguida em `mode=apply` com `CONFIRM=PRODUCTION_SCHEMA_APPLY`). Após a geração e validação da evidência protegida na VPS para o novo SHA, a **Deploy Production** em `phase=cutover` poderá ser executada com sucesso.
+
 # Incidente de Drift na VPS e Implementação de Proteções (26/09/2026)
 
 - **Restabelecimento do Workflow de Backup:**
