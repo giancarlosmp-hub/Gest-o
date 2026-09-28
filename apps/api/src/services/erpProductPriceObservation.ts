@@ -64,3 +64,33 @@ export const selectCurrentErpPriceObservation = <T extends Pick<ErpProductPriceO
 ) => observations
   .filter((observation) => isErpPriceCurrentlyValid(observation.sourceValidFrom, now))
   .sort(compareErpPriceCommercialVersion)[0];
+
+/**
+ * Mirrors the proven PRECO_VENDA candidate order for one already-equivalent
+ * commercial context: current vigência first, exact branch only as a tie-break
+ * over the null branch, then the ERP change clock. An absent requested branch
+ * is not enough context and therefore fails closed.
+ */
+export const selectCurrentErpPriceObservationForBranch = <T extends Pick<
+  ErpProductPriceObservation,
+  "branchCode" | "sourceValidFrom" | "sourceChangedAt" | "sourcePriceId"
+>>(
+  observations: T[],
+  requestedBranchCode: string | null | undefined,
+  now = new Date(),
+) => {
+  const branch = text(requestedBranchCode);
+  if (!branch) return undefined;
+  return observations
+    .filter((observation) => isErpPriceCurrentlyValid(observation.sourceValidFrom, now))
+    .filter((observation) => !observation.branchCode || text(observation.branchCode) === branch)
+    .sort((left, right) => {
+      const validDifference = (right.sourceValidFrom?.getTime() ?? 0) - (left.sourceValidFrom?.getTime() ?? 0);
+      if (validDifference) return validDifference;
+      const branchDifference = Number(text(right.branchCode) === branch) - Number(text(left.branchCode) === branch);
+      if (branchDifference) return branchDifference;
+      const changedDifference = (right.sourceChangedAt?.getTime() ?? 0) - (left.sourceChangedAt?.getTime() ?? 0);
+      if (changedDifference) return changedDifference;
+      return String(right.sourcePriceId ?? "").localeCompare(String(left.sourcePriceId ?? ""));
+    })[0];
+};

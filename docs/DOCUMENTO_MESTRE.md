@@ -1619,3 +1619,15 @@ operação 99 demonstra o defeito atual de listagem; o backend também não reva
 pedido. Condições de recebimento seguem o mesmo contrato, pendentes do JSON completo. A correção deve
 ser isolada da PR de preços, cobrir UI e backend, mudança S→N, manual/automático e preservar histórico.
 Fonte e critérios: [evidência sanitizada](investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md).
+
+### Precedência Firebird de preço e estado CI (28/09/2026)
+
+A definição coletada de `PRECO_VENDA` confirma vigência antes da especificidade de filial: candidatos
+da filial solicitada ou nulos são comparados por `DATA_VIGENCIA`, depois filial e `DTAALTER`. Isso
+explica por que 252,08/2022 não pode vencer 128/2026 no caso 1/9. `WS_PRECOS` não identifica tabela;
+Tabelas 2/3/4 dependem das regras condicionais de `PRECO_DIFERENCIADO`, não de percentual fixo.
+
+No Actions `36425672343`/job `108938893118`, compose, Orders e o `db push` dedicado passaram. O harness
+de autoridade falhou legitimamente por omitir a migration posterior de proveniência antes do diff
+final e foi corrigido. Merge continua bloqueado até rerun verde, vínculo grupo/agrupamento e contrato
+de materialização das tabelas sem todos os parâmetros comerciais.

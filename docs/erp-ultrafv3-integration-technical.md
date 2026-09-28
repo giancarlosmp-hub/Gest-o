@@ -273,3 +273,30 @@ o frontend o descarta e o backend de pedidos valida apenas a existência da oper
 recebimento não tem essa validação de cache. Assim, há falha de listagem e falha independente de
 autorização backend. A correção pertence a trabalho próprio e não está implementada nesta mudança de
 preços. Evidência e aceite: [LIBERAR_INTERNET](investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md).
+
+## Contrato Firebird de preços coletado (28/09/2026)
+
+`PRECO_VENDA(CODPRODUTO, CODPRODUTO_CLAS, DTACOMP, CODFILIAL_IN)` filtra vigência até a data de
+comparação, aceita filial solicitada ou nula e ordena `DATA_VIGENCIA DESC`, `CODFILIAL DESC`,
+`DTAALTER DESC`. Também pode resolver classificação/produto, `CODPRECO`, `TABELA_PRECOS`, fator e
+índice, sob os parâmetros `PRECOS_CLASSIF_MAIS_ATUAL` e `CUSTO_REPOSICAO_FILIAL_PC`. A precedência de
+filial só desempata a mesma vigência; não supera uma vigência posterior.
+
+Para data inicial próxima de 1900, `WS_PRECOS` chama `WS_PRECOS_TOTAL`. O resultado inclui produto,
+classificação, `DATA_VIGENCIA`, `PRECOS_ID`, preço, filial e alteração, e pode incluir vigências
+futuras; não inclui tabela. A seleção corrente exclui futuro, preserva histórico e nunca usa
+`updatedAt` local como versão ERP.
+
+`WS_PRECOS_VARIACAO` expõe tabela, grupo, produto/classe, percentual/preço, vigências, filial, prazo,
+forma, condição, grupo fiscal, parceiro/localidade/marca e outros filtros. `WS_PRECOS_ECOMMERCE`
+combina `WS_PRECOS`, variações, ofertas e tabelas; com `RETURN_PRICE`, chama `PRECO_DIFERENCIADO`.
+Este começa em `PRECO_VENDA`, aplica variações de filial/produto/classe/grupo/níveis, credencial ou
+categoria, fatores, índice, quantidade, peso, taxa e arredondamento do produto.
+
+Dependências confirmadas de `PRECO_DIFERENCIADO`: `PRECO_VENDA`, `PRECOS_VARIACAO`,
+`PRECOS_VARIACAO_FILIAL`, `PRECOS_VARIACAO_CREDENCIAL`, `PRECOS_VARIACAO_CATEG`,
+`PRECOS_TABELA_PM`, `PRECOS_PRODUTOS_PM`, `PRODUTOS`, `PRODUTOS_CLAS` e `NIVEL_AGRUPAMENTO`.
+Consequentemente, a reconciliação local só aceita regra com tabela e grupo explícitos, sem filtro
+condicional não disponível no contexto; aceita percentuais positivos/negativos, escolhe a vigência
+aplicável mais nova e rejeita futuro. Isso não equipara grupo 24 a agrupamento 11 nem reproduz o motor
+completo.

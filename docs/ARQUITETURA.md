@@ -322,3 +322,14 @@ Caches de operações/condições são dados externos, não autorização. `LIBE
 aplicado tanto na projeção de opções quanto novamente na fronteira de `POST /orders`; hoje essa
 política ainda não está implementada. A futura mudança deve preservar pedidos históricos e não
 misturar elegibilidade de referência com a correção de preços.
+
+### Precedência comercial confirmada no Firebird
+
+No contexto já identificado de produto/classificação e filial solicitada, `PRECO_VENDA` admite
+candidato da filial exata ou com filial nula e ordena por vigência decrescente antes da filial e da
+alteração de origem. Filial nula é descrita somente como candidato admitido, não como “TODAS”. O
+PostgreSQL preserva `PRECOS_ID`, vigência, alteração e filial; relógios locais não determinam preço.
+
+A API base `WS_PRECOS` não fornece tabela. Tabelas derivadas dependem de `PRECO_DIFERENCIADO` e suas
+fontes condicionais. O CRM não replica esse motor: somente materializa regra inequivocamente
+identificada e falha fechado quando faltam tabela, grupo ou contexto exigido.

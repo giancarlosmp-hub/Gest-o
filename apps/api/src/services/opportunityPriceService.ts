@@ -193,12 +193,13 @@ export const calculateOpportunityPriceForTable = ({
     && priceTableMatches(item.erpPriceId, normalizedPriceTableCode)
     && (!item.validFrom || new Date(item.validFrom).getTime() <= Date.now())
   );
-  // Likewise, a missing branch is merely the same no-branch context requested
-  // by opportunity search; it is not labelled TODAS here. An explicit branch
-  // requires an exact match until the ERP contract defines a fallback.
+  // PRECO_VENDA proves that a requested branch admits both that exact branch
+  // and a null branch candidate. Vigência is compared before branch
+  // specificity; null is not renamed to TODAS. Without a requested branch we
+  // retain only the null context and do not infer a branch.
   const selectedTableRows = tableRows.filter((item) => {
     const rowBranch = normalizeOptionalString(item.branchCode);
-    return normalizedBranchCode ? rowBranch === normalizedBranchCode : rowBranch === "";
+    return normalizedBranchCode ? rowBranch === normalizedBranchCode || rowBranch === "" : rowBranch === "";
   });
   // `/prices` is the commercial authority.  An explicit invalidation is a
   // tombstone, not just another dated observation: a later `/products` row is
@@ -207,6 +208,11 @@ export const calculateOpportunityPriceForTable = ({
   const byNewestObservation = (left: typeof selectedTableRows[number], right: typeof selectedTableRows[number]) => {
     const validDifference = new Date(right.validFrom || 0).getTime() - new Date(left.validFrom || 0).getTime();
     if (validDifference) return validDifference;
+    if (normalizedBranchCode) {
+      const branchDifference = Number(normalizeOptionalString(right.branchCode) === normalizedBranchCode)
+        - Number(normalizeOptionalString(left.branchCode) === normalizedBranchCode);
+      if (branchDifference) return branchDifference;
+    }
     return new Date(right.sourceChangedAt || 0).getTime() - new Date(left.sourceChangedAt || 0).getTime();
   };
   const newestAuthoritative = selectedTableRows

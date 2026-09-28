@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { calculateOpportunityPriceForTable, isOpportunityProductSelectable } from "./opportunityPriceService.js";
 import { assertUsefulProductPriceSync, opportunityProductRefreshFailureMessage, runProductAndPriceRefresh } from "./productPriceSyncOutcome.js";
 import { catalogTenantIdForMode, isProductOwnedByTenant, productCatalogTenantWhere, selectProductCandidateForTenant } from "./productCatalogTenancy.js";
-import { normalizeErpProductPriceObservation, selectCurrentErpPriceObservation } from "./erpProductPriceObservation.js";
+import { normalizeErpProductPriceObservation, selectCurrentErpPriceObservation, selectCurrentErpPriceObservationForBranch } from "./erpProductPriceObservation.js";
 
 const product = (overrides: Record<string, unknown> = {}) => ({
   erpProductCode: "1",
@@ -72,11 +72,11 @@ const laterLegacyCannotRestoreAuthoritativeZero = price(product({ prices: [
 assert.equal(laterLegacyCannotRestoreAuthoritativeZero.price, 0);
 assert.equal(laterLegacyCannotRestoreAuthoritativeZero.source, "missing");
 
-// Missing selected-table price is unavailable; a price from another table or
-// branch cannot cross the commercial boundary.
+// Missing selected-table price is unavailable. PRECO_VENDA proves that an
+// explicit requested branch may use the null-branch candidate.
 assert.equal(price(product(), "2").priceTableMatched, false);
-assert.equal(price(product(), "1", "2").price, 0);
-assert.equal(price(product(), "1", "1").price, 0);
+assert.equal(price(product(), "1", "2").price, 128);
+assert.equal(price(product(), "1", "1").price, 128);
 
 // Production regression: an unscoped /prices row for one branch cannot
 // override the explicit table/global row when opportunity search has no
@@ -89,7 +89,7 @@ const maranduPost898 = product({ prices: [
 ] });
 assert.equal(price(maranduPost898, "1").price, 128);
 assert.equal(price(maranduPost898, "2").price, 160);
-assert.equal(price(maranduPost898, "1", "1").price, 0, "Filial explícita não pode herdar contexto sem filial sem contrato ERP");
+assert.equal(price(maranduPost898, "1", "1").price, 128, "Vigência aplicável sem filial pode atender filial explícita segundo PRECO_VENDA");
 
 const branchPolicy = product({ prices: [
   { erpPriceId: "1", branchCode: null, price: 128, source: "products", availabilityState: "available" },
@@ -97,7 +97,13 @@ const branchPolicy = product({ prices: [
 ] });
 assert.equal(price(branchPolicy, "1").price, 128, "Sem filial, somente o mesmo contexto sem filial é comparável");
 assert.equal(price(branchPolicy, "1", "2").price, 140, "Filial explícita deve preferir correspondência exata");
-assert.equal(price(branchPolicy, "1", "3").price, 0, "Filial sem preço próprio deve falhar fechada sem regra ERP de fallback");
+assert.equal(price(branchPolicy, "1", "3").price, 128, "Filial solicitada admite candidato de filial nula segundo PRECO_VENDA");
+const validityBeforeBranch = product({ prices: [
+  { erpPriceId: "1", branchCode: null, price: 128, source: "prices", availabilityState: "available", validFrom: new Date("2026-06-09T00:00:00Z") },
+  { erpPriceId: "1", branchCode: "1", price: 252.08, source: "prices", availabilityState: "available", validFrom: new Date("2022-08-26T00:00:00Z") },
+] });
+assert.equal(price(validityBeforeBranch, "1", "1").price, 128,
+  "Preço histórico da filial não pode vencer preço geral de vigência posterior");
 
 const explicitTableAuthority = product({ prices: [
   { erpPriceId: "1", branchCode: null, price: 128, source: "products", availabilityState: "available", sourceChangedAt: new Date("2026-09-26T22:00:00Z") },
@@ -177,6 +183,16 @@ for (const ordered of [[historical252, historical128], [historical128, historica
   assert.equal(selectCurrentErpPriceObservation(ordered, new Date("2026-09-27T00:00:00Z"))?.sourcePriceId, "2776",
     "Ordem de recebimento/coleta não pode substituir vigência e alteração da origem");
 }
+for (const ordered of [[historical252, historical128], [historical128, historical252]]) {
+  assert.equal(selectCurrentErpPriceObservationForBranch(ordered, "1", new Date("2026-09-27T00:00:00Z"))?.sourcePriceId, "2776",
+    "PRECO_VENDA ordena vigência antes da preferência pela filial exata");
+}
+assert.equal(selectCurrentErpPriceObservationForBranch([historical252, historical128], null), undefined,
+  "Sem filial solicitada não há contexto suficiente para aplicar a precedência PRECO_VENDA");
+const sameValidityGlobal = { ...historical128, sourcePriceId: "global-same", sourceValidFrom: new Date("2026-06-09T00:00:00Z"), branchCode: null };
+const sameValidityBranch = { ...historical128, sourcePriceId: "branch-same", sourceValidFrom: new Date("2026-06-09T00:00:00Z"), branchCode: "1" };
+assert.equal(selectCurrentErpPriceObservationForBranch([sameValidityGlobal, sameValidityBranch], "1")?.sourcePriceId, "branch-same",
+  "Filial exata só desempata observações com a mesma vigência");
 const future = { ...historical128, sourcePriceId: "future", sourceValidFrom: new Date("2027-01-01T00:00:00Z") };
 assert.equal(selectCurrentErpPriceObservation([future, historical128], new Date("2026-09-27T00:00:00Z"))?.sourcePriceId, "2776");
 const olderZero = { ...historical252, sourcePriceId: "zero-old", price: 0 };

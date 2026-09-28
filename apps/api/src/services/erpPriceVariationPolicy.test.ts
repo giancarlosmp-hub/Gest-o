@@ -11,6 +11,18 @@ assert.equal(calculatePriceFromErpVariation(100, resolveErpPriceVariationPercent
 assert.equal(calculatePriceFromErpVariation(100, resolveErpPriceVariationPercent(rules, "3", "10")!), 125);
 assert.equal(calculatePriceFromErpVariation(100, resolveErpPriceVariationPercent(rules, "4", "10")!), 95);
 assert.equal(resolveErpPriceVariationPercent(rules, "5", "10"), null, "Tabela sem regra ERP não recebe percentual inventado");
+assert.equal(resolveErpPriceVariationPercent([{ CODGRUPO: "10", PER_VARIACAO: 25 }], "2", "10"), null,
+  "Regra sem tabela explícita não pode ser aplicada como Tabela 2");
+assert.equal(resolveErpPriceVariationPercent([{ CODTABELA: "2", PER_VARIACAO: 25 }], "2", "10"), null,
+  "Regra sem grupo identificado deve falhar fechada");
+assert.equal(resolveErpPriceVariationPercent([{ CODTABELA: "2", CODGRUPO: "10", CODFILIAL: "1", PER_VARIACAO: 25 }], "2", "10"), null,
+  "Reconciliação sem contexto de filial não pode aplicar regra condicional");
+assert.equal(resolveErpPriceVariationPercent([
+  { CODTABELA: "2", CODGRUPO: "10", DATA_VIGENCIA: "2026-01-01", PER_VARIACAO: 10 },
+  { CODTABELA: "2", CODGRUPO: "10", DATA_VIGENCIA: "2026-09-01", PER_VARIACAO: 15 },
+  { CODTABELA: "2", CODGRUPO: "10", DATA_VIGENCIA: "2027-01-01", PER_VARIACAO: 99 },
+], "2", "10", new Date("2026-09-28T00:00:00Z")), 15,
+"Regra vigente mais nova vence e vigência futura não participa");
 
 const changedRules = rules.map((rule) => rule.CODTABELA === "3" ? { ...rule, PER_VARIACAO: "30" } : rule);
 assert.equal(calculatePriceFromErpVariation(100, resolveErpPriceVariationPercent(changedRules, "3", "10")!), 130,

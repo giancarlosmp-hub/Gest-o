@@ -595,3 +595,25 @@ textualmente as duas expansões antes do diff final. O harness dedicado de `pris
 ser um job CI independente, sem dependência do job de Orders; retorno 77 continua não sendo sucesso.
 Neste checkout sem Docker foram validados sintaxe, testes estáticos e workflow, não a execução
 PostgreSQL. O resultado real de banco deve ser registrado apenas quando o CI terminar verde.
+
+## Metadados Firebird confirmados e Actions 36425672343 (28/09/2026)
+
+A coleta executada pelo operador confirmou o corpo das procedures. `PRECO_VENDA` recebe produto,
+classe, data e filial; limita `DATA_VIGENCIA` à data comparada, admite filial exata ou nula e ordena
+vigência antes de filial e `DTAALTER`. Para 1/9, 128/2026 precede 252,08/2022 mesmo ao solicitar filial
+1. A filial nula é candidato admitido, não foi rebatizada como TODAS. Fator, índice, código de preço e
+parâmetros de classificação/custo também podem alterar o caminho.
+
+`WS_PRECOS` usa `WS_PRECOS_TOTAL` no carregamento histórico, retorna identidade completa da observação
+e também linhas futuras, porém não tabela. `WS_PRECOS_VARIACAO` carrega tabela e filtros extensos.
+`WS_PRECOS_ECOMMERCE` combina preços, variações, ofertas e tabelas; `PRECO_DIFERENCIADO` depende das
+dez fontes listadas no contrato técnico e aplica condições, fatores e arredondamento. Logo, o CRM não
+pode reconstruir genericamente Tabelas 2–4 apenas com base+percentual. A política local foi limitada a
+regra explícita e incondicional dentro dos campos disponíveis; o restante falha fechado. Permanecem
+sem prova o vínculo grupo 24/agrupamento 11 e a identificação de tabela das linhas `WS_PRECOS`.
+
+No run `36425672343`, job `108938893118`, `compose-smoke`, o job dedicado de proveniência e Orders
+passaram. A prova de autoridade falhou com `EXIT_2`: seu banco tinha `source`/`availabilityState`, mas
+não os campos/índice da migration posterior de proveniência exigidos pelo schema atual. A migration
+foi adicionada antes do diff final; a verificação de drift foi preservada. Resultado da correção é
+pendente de rerun CI, portanto `READY_TO_MERGE_PRICE_FIX=NO`.

@@ -1544,3 +1544,23 @@ O teste dedicado de `prisma db push` foi movido para job independente
 Os testes estáticos locais passaram, mas os dois testes PostgreSQL reais permanecem `NOT_VERIFIED`
 neste ambiente sem Docker e precisam ficar verdes no CI. `READY_TO_MERGE_PRICE_FIX=NO` e a coleta
 Firebird continuam pendentes.
+
+### Firebird confirmado e segundo ajuste de harness — PR #899 (28/09/2026)
+
+A coleta de metadados Firebird confirmou que `PRECO_VENDA` recebe produto, classificação, data de
+comparação e filial. Dentro do mesmo contexto comercial, considera filial solicitada ou nula e ordena
+primeiro por `DATA_VIGENCIA DESC`, depois `CODFILIAL DESC` e `DTAALTER DESC`. Assim, para 1/9, o preço
+128 vigente em 2026 precede 252,08 da filial 1 vigente em 2022; `updatedAt` do CRM não participa.
+A seleção com filial explícita foi alinhada a essa ordem, sem chamar filial nula de TODAS. Sem tabela
+identificada, as linhas continuam inelegíveis para uma tabela específica.
+
+`WS_PRECOS`/`WS_PRECOS_TOTAL` fornecem identidade, vigência, preço e filial, inclusive vigências
+futuras, mas não tabela. `PRECO_DIFERENCIADO` combina base, variações e numerosas condições; portanto
+o CRM só materializa uma variação simples quando tabela e grupo são explícitos e nenhum filtro que o
+reconciliador não possua está preenchido. Regras futuras e condicionais falham fechadas.
+
+Actions run `36425672343`, job `108938893118`: compose, prova dedicada de `db push` e Orders passaram.
+A prova histórica `ProductPrice authority` falhou com `EXIT_2` porque aplicava apenas autoridade antes
+de comparar com o schema corrente, omitindo a expansão posterior de proveniência. O harness agora
+aplica também `20260927160000_product_price_source_observation` antes do diff, sem suprimir
+`--exit-code`. O resultado corrigido ainda requer novo run CI. `READY_TO_MERGE_PRICE_FIX=NO`.

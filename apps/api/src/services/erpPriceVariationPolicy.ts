@@ -22,18 +22,35 @@ export const resolveErpPriceVariationPercent = (
   rows: unknown[],
   tableCode: string,
   productGroupCode: string,
+  now = new Date(),
 ) => {
+  const requestedTable = normalizeCode(tableCode);
+  const requestedGroup = normalizeCode(productGroupCode);
+  if (!requestedTable || !requestedGroup) return null;
+  const unsupportedConstraintKeys = [
+    "PRODUTO", "CODPRODUTO", "PRODUTO_CLAS", "CODPRODUTO_CLAS", "CODFILIAL",
+    "PRAZO_MEDIO", "FORMA", "CODCONDREC", "GRUPO_FISCAL", "PARCEIRO", "CIDADE",
+    "UF", "MARCA", "CATEGORIA", "CREDENCIAL", "NIVEL_AGRUPAMENTO",
+  ];
+  const candidates: Array<{ percent: number; validFrom: number; changedAt: number }> = [];
   for (const row of rows) {
     if (!row || typeof row !== "object" || Array.isArray(row)) continue;
     const record = row as Record<string, unknown>;
     const rowTable = normalizeCode(firstValue(record, ["CODTABELA", "COD_TABELA", "TABELA", "priceTableCode", "tabela", "code"]));
-    if (rowTable && rowTable !== normalizeCode(tableCode)) continue;
+    if (!rowTable || rowTable !== requestedTable) continue;
     const rowGroup = normalizeCode(firstValue(record, ["CODGRUPO", "COD_GRUPO", "groupCode", "codigoGrupo", "grupo"]));
-    if (productGroupCode && rowGroup && rowGroup !== normalizeCode(productGroupCode)) continue;
+    if (!rowGroup || rowGroup !== requestedGroup) continue;
+    if (unsupportedConstraintKeys.some((key) => firstValue(record, [key]) !== null)) continue;
+    const validRaw = firstValue(record, ["DATA_VIGENCIA", "DTA_VIGENCIA", "DTAVIGENCIA", "validFrom"]);
+    const validFrom = validRaw ? new Date(String(validRaw)).getTime() : 0;
+    if (validRaw && (Number.isNaN(validFrom) || validFrom > now.getTime())) continue;
     const percent = parseNumber(firstValue(record, ["PER_VARIACAO", "PERC_VARIACAO", "PERCENTUAL", "percent", "variationPercent", "VARIACAO"]));
-    if (percent !== null) return percent;
+    if (percent === null) continue;
+    const changedRaw = firstValue(record, ["DTAALTER", "DTA_ALTER", "sourceChangedAt"]);
+    const changedAt = changedRaw ? new Date(String(changedRaw)).getTime() : 0;
+    candidates.push({ percent, validFrom, changedAt: Number.isNaN(changedAt) ? 0 : changedAt });
   }
-  return null;
+  return candidates.sort((left, right) => right.validFrom - left.validFrom || right.changedAt - left.changedAt)[0]?.percent ?? null;
 };
 
 export const calculatePriceFromErpVariation = (basePrice: number, percent: number) => {

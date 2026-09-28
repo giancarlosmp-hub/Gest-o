@@ -826,3 +826,9 @@ corrente antes de `final_schema_diff`: `20260911190000_product_price_authority` 
 `20260927160000_product_price_source_observation`. `EXIT_2` do Prisma significa drift e nunca pode ser
 convertido em sucesso. A prova dedicada de `db push` roda em job CI independente para não ser pulada
 por falha anterior no harness de Orders.
+
+No run `36425672343`/job `108938893118`, o harness dedicado de `prisma db push` e Orders passaram; a
+prova de autoridade retornou `EXIT_2` porque não aplicou a expansão posterior de proveniência antes
+do diff contra o schema corrente. O harness foi corrigido para aplicar ambas. Não liberar enquanto o
+rerun de `test:product-price-authority-migration:postgres` não terminar verde; `EXIT_2` continua sendo
+drift fatal.

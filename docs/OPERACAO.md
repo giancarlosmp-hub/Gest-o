@@ -1401,3 +1401,14 @@ Para operações e condições, coletar somente envelope, código, `ATIVO`, `LIB
 comerciais necessários, removendo credenciais e PII. Comparar contagem do cache, resposta local de
 opções e seletor. Não usar `POST /orders` como teste. Até a correção própria, presença no seletor ou no
 cache não prova autorização comercial.
+
+## Interpretação da precedência Firebird de preços
+
+Ao comparar observações do mesmo produto/classificação e contexto, primeiro descarte vigências
+futuras para a data comercial. Com filial solicitada, mantenha candidatos da filial exata e nula;
+ordene por vigência, depois filial e alteração ERP. Não use `updatedAt`/`observedAt`, não chame nulo de
+TODAS e não aplique essa ordem entre tabelas ou regras condicionais diferentes.
+
+A validação pós-deploy deve cobrir Tabelas 1–4, variação positiva/negativa e falha fechada para regra
+com filtro não disponível, além de Completa, Automática posterior ao deploy e Atualizar estoque
+(estoque + preços). Preservar contadores e resultado parcial já documentados.
