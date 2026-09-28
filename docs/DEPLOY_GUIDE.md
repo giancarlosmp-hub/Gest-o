@@ -2,6 +2,23 @@
 
 Na Implantação da Produção nº 188 (commit `244cd1f`), o cutover foi bloqueado fail-closed pelo gate de evidência de schema porque a PR #899 adicionou a migration `20260927160000_product_price_source_observation`. A verificação de equivalência Git da árvore `apps/api/prisma` detectou legitimamente a alteração de schema em relação ao commit produtor de evidências anterior e impediu o cutover sem a aplicação da nova migration em produção.
 
+### Ordem de Sequenciamento do Deploy e Validação de Imagem API (28/09/2026)
+
+Para evitar o erro `[production-schema-apply] ERRO: imagem API do SHA ausente` (ocorrido na Run 36469364250), o fluxo de implantação em produção exige estritamente a seguinte ordem sequencial de execuções na VPS:
+
+1. **Deploy Production (phase=build):**
+   - Executar o workflow **Deploy Production** no disparo `phase=build` para o SHA da `main` a ser implantado.
+   - Esse passo constrói as imagens OCI locais na VPS (`gest-o-api:$EXPECTED_SHA` e `gest-o-web:$EXPECTED_SHA`) com o rótulo `org.opencontainers.image.revision=$EXPECTED_SHA`.
+2. **Production Schema PR827 (mode=preview):**
+   - Executar o workflow **Production Schema PR827** no disparo `mode=preview` selecionando a migration cadastrada (ex: `20260927160000_product_price_source_observation`).
+   - Valida a ausência de DDL destrutivo em modo 100% read-only.
+3. **Production Schema PR827 (mode=apply):**
+   - Executar o workflow **Production Schema PR827** no disparo `mode=apply` selecionando a migration cadastrada e preenchendo o campo `confirm` com a string de confirmação exata: `PRODUCTION_SCHEMA_APPLY`.
+   - O runner valida fail-closed a presença da imagem local `gest-o-api:$EXPECTED_SHA` E a correspondência do rótulo `org.opencontainers.image.revision == $EXPECTED_SHA`, aplica a migration e grava o bundle de evidência imutável em `/var/log/gest-o/schema/$EXPECTED_SHA/applied.tsv`.
+4. **Deploy Production (phase=cutover):**
+   - Executar o workflow **Deploy Production** no disparo `phase=cutover` para o mesmo SHA.
+   - O gate de deploy valida a evidência protegida de schema para o SHA atual e realiza a troca graciosa de contêineres (cutover).
+
 A migration `20260927160000_product_price_source_observation` está devidamente cadastrada no registro imutável `scripts/production-schema-migrations.mjs` (SHA-256 `5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70`), com suporte completo no leitor `scripts/schema-evidence-validation.sh`, no aplicador `scripts/production-schema-apply.sh`, no filtro pre-apply `scripts/schema-diff-filter.mjs` e no workflow `.github/workflows/production-schema-pr827.yml`.
 
 **Procedimento para liberação do próximo cutover:**

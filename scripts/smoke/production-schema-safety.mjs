@@ -128,6 +128,143 @@ const unconfirmed = spawnSync("bash", [resolve(root, "scripts/production-schema-
 });
 assert.notEqual(unconfirmed.status, 0, "apply must fail without explicit confirmation");
 assert.match(unconfirmed.stdout + unconfirmed.stderr, /CONFIRM=PRODUCTION_SCHEMA_APPLY/);
+
+// Verify fail-closed image validation in production-schema-apply.sh:
+// 1) Absent API image
+// 2) Image present but with divergent OCI revision label
+// 3) Image present with correct matching OCI revision label
+const testSha = "1234567890abcdef1234567890abcdef12345678";
+const scratch = mkdtempSync(resolve(tmpdir(), "gesto-schema-apply-image-test-"));
+const fakeBin = resolve(scratch, "bin");
+const fakeEnvFile = resolve(scratch, "production.env");
+writeFileSync(fakeEnvFile, "DATABASE_URL=postgresql://user:pass@localhost:5432/salesforce_pro\n");
+const mockAppDir = resolve(scratch, "app");
+const mockScriptsDir = resolve(mockAppDir, "scripts");
+const mockNodeModulesDir = resolve(mockAppDir, "node_modules/.bin");
+import { mkdirSync, chmodSync } from "node:fs";
+mkdirSync(fakeBin, { recursive: true });
+mkdirSync(mockScriptsDir, { recursive: true });
+mkdirSync(mockNodeModulesDir, { recursive: true });
+
+// Minimal mocks for scripts invoked before image inspection
+writeFileSync(resolve(mockScriptsDir, "production-schema-migrations.mjs"), `
+console.log(JSON.stringify({ path: "${resolve(mockScriptsDir, "migration.sql")}" }));
+`);
+writeFileSync(resolve(mockScriptsDir, "migration.sql"), "-- test migration\n");
+writeFileSync(resolve(mockScriptsDir, "postgres-connection-url.mjs"), `
+console.log("postgresql://user:pass@localhost:5432/salesforce_pro");
+`);
+writeFileSync(resolve(mockScriptsDir, "production-preflight.sh"), "#!/usr/bin/env bash\nexit 0\n");
+chmodSync(resolve(mockScriptsDir, "production-preflight.sh"), 0o755);
+
+// Fake git
+writeFileSync(resolve(fakeBin, "git"), `#!/usr/bin/env bash
+if [[ "$*" == *"rev-parse HEAD"* || "$*" == *"rev-parse origin/main"* ]]; then
+  echo "${testSha}"
+  exit 0
+fi
+if [[ "$*" == *"status --porcelain"* ]]; then
+  exit 0
+fi
+exit 0
+`);
+chmodSync(resolve(fakeBin, "git"), 0o755);
+
+// Case 1: Absent API image (fake docker returns 1 on docker image inspect)
+writeFileSync(resolve(fakeBin, "docker"), `#!/usr/bin/env bash
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  exit 1
+fi
+exit 0
+`);
+chmodSync(resolve(fakeBin, "docker"), 0o755);
+
+const missingImageRes = spawnSync("bash", [resolve(root, "scripts/production-schema-apply.sh")], {
+  cwd: mockAppDir,
+  env: {
+    ...process.env,
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    APP_DIR: mockAppDir,
+    PRODUCTION_ENV_FILE: fakeEnvFile,
+    MODE: "preview",
+    EXPECTED_SHA: testSha,
+    PRODUCTION_DB_CONTAINER_EXPECTED: "gest-o-db-clean-v2-20260717",
+    MIGRATION_ID_REQUESTED: "20260927160000_product_price_source_observation"
+  },
+  encoding: "utf8"
+});
+assert.notEqual(missingImageRes.status, 0, "missing image must fail-close");
+assert.match(missingImageRes.stderr, /imagem API do SHA ausente/);
+
+// Case 2: Divergent image revision label
+writeFileSync(resolve(fakeBin, "docker"), `#!/usr/bin/env bash
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  if [[ "$*" == *".Config.Labels"* ]]; then
+    echo "wrong_sha_0000000000000000000000000000000"
+    exit 0
+  fi
+  exit 0
+fi
+exit 0
+`);
+chmodSync(resolve(fakeBin, "docker"), 0o755);
+
+const divergentImageRes = spawnSync("bash", [resolve(root, "scripts/production-schema-apply.sh")], {
+  cwd: mockAppDir,
+  env: {
+    ...process.env,
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    APP_DIR: mockAppDir,
+    PRODUCTION_ENV_FILE: fakeEnvFile,
+    MODE: "preview",
+    EXPECTED_SHA: testSha,
+    PRODUCTION_DB_CONTAINER_EXPECTED: "gest-o-db-clean-v2-20260717",
+    MIGRATION_ID_REQUESTED: "20260927160000_product_price_source_observation"
+  },
+  encoding: "utf8"
+});
+assert.notEqual(divergentImageRes.status, 0, "divergent image revision label must fail-close");
+assert.match(divergentImageRes.stderr, /imagem API com SHA divergente/);
+
+// Case 3: Correct matching image revision label (passes image check and reaches preview step)
+writeFileSync(resolve(fakeBin, "docker"), `#!/usr/bin/env bash
+if [[ "$1" == "image" && "$2" == "inspect" ]]; then
+  if [[ "$*" == *".Config.Labels"* ]]; then
+    echo "${testSha}"
+    exit 0
+  fi
+  exit 0
+fi
+if [[ "$1" == "run" ]]; then
+  echo "mock prisma diff"
+  exit 0
+fi
+exit 0
+`);
+chmodSync(resolve(fakeBin, "docker"), 0o755);
+
+writeFileSync(resolve(mockScriptsDir, "production-schema-preview.sh"), "#!/usr/bin/env bash\nexit 0\n");
+chmodSync(resolve(mockScriptsDir, "production-schema-preview.sh"), 0o755);
+writeFileSync(resolve(mockScriptsDir, "schema-diff-filter.mjs"), "import fs from 'node:fs'; fs.writeFileSync(process.argv[3] || 'out.sql', ''); process.exit(0);\n");
+
+const correctImageRes = spawnSync("bash", [resolve(root, "scripts/production-schema-apply.sh")], {
+  cwd: mockAppDir,
+  env: {
+    ...process.env,
+    PATH: `${fakeBin}:${process.env.PATH}`,
+    APP_DIR: mockAppDir,
+    PRODUCTION_ENV_FILE: fakeEnvFile,
+    MODE: "preview",
+    EXPECTED_SHA: testSha,
+    PRODUCTION_DB_CONTAINER_EXPECTED: "gest-o-db-clean-v2-20260717",
+    MIGRATION_ID_REQUESTED: "20260927160000_product_price_source_observation"
+  },
+  encoding: "utf8"
+});
+assert.equal(correctImageRes.status, 0, `matching image revision label must pass image check; failed with: ${correctImageRes.stderr}`);
+assert.match(correctImageRes.stdout + correctImageRes.stderr, /preview validado em modo estritamente read-only/);
+
+rmSync(scratch, { recursive: true, force: true });
 assert.match(apply, /pre-apply-diff\.raw\.sql[\s\S]*schema-diff-filter\.mjs[\s\S]*--single-transaction/);
 assert.match(apply, /MODE.*preview[\s\S]*schema-diff-filter\.mjs[\s\S]*preview validado em modo estritamente read-only[\s\S]*exit 0[\s\S]*prepare_schema_evidence_directory/, "preview must exit before evidence preparation and DDL");
 assert.match(apply, /schema-diff-filter\.mjs "\$evidence\/pre-apply-diff\.raw\.sql"[\s\S]*pre "\$MIGRATION_ID_REQUESTED"/, "pre-diff authorization must be migration-bound");
