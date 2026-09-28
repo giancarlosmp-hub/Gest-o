@@ -17,6 +17,8 @@ assert.match(step.with.script, /PRODUCTION_DB_CONTAINER_EXPECTED=gest-o-db-clean
 assert.match(step.with.script, /20260904120000_orders_operational_view:apply:PRODUCTION_SCHEMA_APPLY/, "Orders apply must retain its exact confirmation");
 assert.match(step.with.script, /20260911190000_product_price_authority:preview:\*/, "ProductPrice preview must be selectable");
 assert.match(step.with.script, /20260911190000_product_price_authority:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice apply must retain its exact confirmation");
+assert.match(step.with.script, /20260927160000_product_price_source_observation:preview:\*/, "ProductPrice source observation preview must be selectable");
+assert.match(step.with.script, /20260927160000_product_price_source_observation:apply:PRODUCTION_SCHEMA_APPLY/, "ProductPrice source observation apply must retain its exact confirmation");
 
 const expression = /\$\{\{ inputs\.mode == 'apply' && format\('API_IMAGE=gest-o-api:\{0\}', github\.sha\) \|\| '' \}\}/g;
 const cases = [

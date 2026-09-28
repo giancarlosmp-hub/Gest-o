@@ -6,6 +6,23 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 export const migrations = Object.freeze({
+  "20260927160000_product_price_source_observation": Object.freeze({
+    id: "20260927160000_product_price_source_observation",
+    path: "apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql",
+    sha256: "5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70",
+    objects: Object.freeze({
+      columns: Object.freeze({
+        erpSourcePriceId: "TEXT",
+        sourceChangedAt: "TIMESTAMP(3)",
+        observedAt: "TIMESTAMP(3)"
+      }),
+      indexes: Object.freeze({
+        ProductPrice_erpSourcePriceId_idx: Object.freeze(["erpSourcePriceId"])
+      })
+    }),
+    postconditions: Object.freeze(["existing-rows-preserved", "columns-nullable", "index-present", "managed-diff-empty", "old-api-compatible"]),
+    evidenceVersion: 1
+  }),
   "20260911190000_product_price_authority": Object.freeze({
     id: "20260911190000_product_price_authority",
     path: "apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql",

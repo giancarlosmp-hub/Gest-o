@@ -81,7 +81,7 @@ function isApprovedContactAddition(statement) {
   return true;
 }
 const statements = meaningful.split(/;\s*/).map((s) => s.replace(/^\s*--.*$/gm, "").trim()).filter(Boolean);
-if (migrationId === "20260911190000_product_price_authority") {
+if (migrationId === "20260911190000_product_price_authority" || migrationId === "20260927160000_product_price_source_observation") {
   const migration = resolveMigration(migrationId);
   // An empty diff is the only acceptable idempotent pre-apply result. The runner
   // independently proves the complete catalog before treating it as applied.
@@ -96,7 +96,7 @@ if (migrationId === "20260911190000_product_price_authority") {
     if (alter) {
       const clauses = alter[1].split(",").map((clause) => clause.trim());
       for (const clause of clauses) {
-        const addition = clause.match(/^ADD\s+COLUMN\s+"(availabilityState|source)"\s+([\s\S]+)$/i);
+        const addition = clause.match(/^ADD\s+COLUMN\s+"(availabilityState|source|erpSourcePriceId|sourceChangedAt|observedAt)"\s+([\s\S]+)$/i);
         if (!addition) throw new Error(`unapproved or partially-compatible pre-apply drift: ${statement.slice(0, 180)}`);
         const [, column, definition] = addition;
         const normalizedDefinition = definition.replace(/\s+/g, " ").trim();

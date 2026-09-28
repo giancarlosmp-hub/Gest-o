@@ -1,3 +1,16 @@
+## Cadastramento e gate da migration `20260927160000_product_price_source_observation` (28/09/2026)
+
+Na Implantação da Produção nº 188 (commit `244cd1f`), o cutover foi bloqueado fail-closed pelo gate de evidência de schema porque a PR #899 adicionou a migration `20260927160000_product_price_source_observation`. A verificação de equivalência Git da árvore `apps/api/prisma` detectou legitimamente a alteração de schema em relação ao commit produtor de evidências anterior e impediu o cutover sem a aplicação da nova migration em produção.
+
+A migration `20260927160000_product_price_source_observation` está devidamente cadastrada no registro imutável `scripts/production-schema-migrations.mjs` (SHA-256 `5f15e0ec506452ee9f341fa836ad9857baf1bf523f5dd1c7e21bea8f93079e70`), com suporte completo no leitor `scripts/schema-evidence-validation.sh`, no aplicador `scripts/production-schema-apply.sh`, no filtro pre-apply `scripts/schema-diff-filter.mjs` e no workflow `.github/workflows/production-schema-pr827.yml`.
+
+**Procedimento para liberação do próximo cutover:**
+1. Acessar o GitHub Actions e selecionar o workflow **Production Schema PR827**.
+2. Executar primeiro em `mode=preview` com `migration=20260927160000_product_price_source_observation` e `confirm` vazio.
+3. Revisar o relatório do preview read-only.
+4. Executar em `mode=apply` com `migration=20260927160000_product_price_source_observation` e `confirm=PRODUCTION_SCHEMA_APPLY`.
+5. Após o término com sucesso do apply e a publicação da evidência em `/var/log/gest-o/schema/`, disparar o **Deploy Production** com `phase=cutover`.
+
 ## Imagens de preview após fechamento de PR (16/09/2026)
 
 O `Preview Deploy` incorpora labels de proveniência na imagem final API/WEB e publica manifesto com IMAGE IDs completos. O `Preview Cleanup` é a única automação de encerramento: possui concorrência por PR, valida metadados autenticados do GitHub, executa o `compose down -v` escopado e revalida imediatamente containers, tags, digests, labels e evidências protegidas antes da remoção sem force. Qualquer falha preserva. Não criar cleanup paralelo, não usar prune e não usar imagens de preview como rollback produtivo. Imagens legadas continuam fora do apply automático.
