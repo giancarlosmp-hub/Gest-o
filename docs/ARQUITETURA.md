@@ -312,9 +312,10 @@ nesta ordem, e não é atomicamente distribuído.
 é fronteira explícita e registros nulos não são adotados implicitamente. O schema ainda tem unicidade
 global código+classe; multi-tenancy de catálogo completo permanece não implementada.
 
-**[NÃO COMPROVADO]** tabela ausente, filial nula, grupo/agrupamento e identidade autenticada não têm
-precedência universal. Contextos diferentes não são ordenados apenas por vigência. A política
-bloqueada e suas evidências estão na investigação pós-PR #898.
+**[CÓDIGO]** Quando a busca por preço comercial é realizada para a Tabela Comercial Padrão (`priceTableCode = "1"`), registros explícitos para Tabela 1 (`erpPriceId = "1"`) mantêm precedência estrita. Se nenhuma linha explícita para Tabela 1 existir, linhas recebidas sem código de tabela (`erpPriceId = null` ou `""`) funcionam como fallback elegível para a Tabela 1. Linhas sem tabela explícita não se aplicam a buscas por tabelas secundárias (Tabelas 2, 3 e 4).
+
+**[NÃO COMPROVADO]** Filial nula, grupo/agrupamento e identidade autenticada não têm
+precedência universal. Contextos diferentes não são ordenados apenas por vigência.
 
 ### Referências comerciais e autorização de pedido
 

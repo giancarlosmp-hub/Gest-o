@@ -1,3 +1,21 @@
+# Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
+
+- **Sintoma e Causa Raiz Comprovada:**
+  - Após a Sincronização Completa ERP (`syncAll`), a busca de produtos (`/products/search`) com `priceTableCode=1` retornava 0 itens e ocultava 56 produtos recuperados do banco como `hiddenReason: invalid_price`.
+  - O endpoint `/prices` do ERP UltraFV3 retorna linhas de preço sem código de tabela explícito (`TABELA`/`CODTABELA` ausentes no JSON do payload), persistidas na tabela `ProductPrice` com `erpPriceId = null`.
+  - O serviço `calculateOpportunityPriceForTable` em `opportunityPriceService.ts` filtrava estritamente `item.erpPriceId !== null`, fazendo com que a busca pela Tabela 1 ficasse com `tableRows` vazio para preços originados de `/prices`, tratando os preços como ausentes e ocultando os produtos.
+
+- **Solução Implementada e Garantias de Precedência:**
+  - Atualizada a função `calculateOpportunityPriceForTable` em `apps/api/src/services/opportunityPriceService.ts`:
+    1. Registros explícitos de Tabela 1 (`erpPriceId = "1"`) mantêm precedência absoluta.
+    2. Na busca por Tabela 1 (`priceTableCode = "1"`), caso não exista linha explícita `erpPriceId = "1"`, as linhas sem tabela explícita (`erpPriceId = null` ou `""`) são utilizadas como fallback autorizativo para a Tabela 1.
+    3. Linhas sem tabela explícita NÃO são utilizadas como fallback para tabelas secundárias (Tabelas 2, 3 e 4).
+    4. Zeros explícitos (`price = 0`) mantêm precedência sobre fallbacks não escopados.
+  - Adicionadas 8 suítes de regressão em `apps/api/src/services/opportunityProductAvailability.test.ts` cobrindo preços sem tabela, Tabela 1 explícita, Tabelas 2-4, vigência histórica, preços zero, filiais, busca da Nova Oportunidade e assertions para Sincronização Completa, Automática e Atualizar Estoque. Todos os testes validados localmente com sucesso.
+
+- **Relatório do Incidente:**
+  - Documentação detalhada registrada em `docs/investigations/incident-hidden-products-unscoped-price-table-2026-09-28.md`.
+
 # Investigação do Erro de Imagem API Ausente no Workflow Production Schema PR827 (Run 36469364250) — 28/09/2026
 
 - **Evidências e Causa Raiz Auditadas:**

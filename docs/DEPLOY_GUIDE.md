@@ -1,3 +1,8 @@
+## Pós-Deploy da Correção do Incidente de Preços Sem Tabela (28/09/2026)
+
+A correção em `opportunityPriceService.ts` não exige NENHUMA alteração de banco de dados ou migration adicional. O deploy deve seguir o fluxo canônico de deploy em duas fases (**phase=build** $\rightarrow$ **phase=cutover**).
+Após a conclusão do cutover, executar os passos de validação pós-deploy descritos em `docs/OPERACAO.md` sem disparar novas sincronizações produtivas ou alterar dados no banco.
+
 ## Cadastramento e gate da migration `20260927160000_product_price_source_observation` (28/09/2026)
 
 Na Implantação da Produção nº 188 (commit `244cd1f`), o cutover foi bloqueado fail-closed pelo gate de evidência de schema porque a PR #899 adicionou a migration `20260927160000_product_price_source_observation`. A verificação de equivalência Git da árvore `apps/api/prisma` detectou legitimamente a alteração de schema em relação ao commit produtor de evidências anterior e impediu o cutover sem a aplicação da nova migration em produção.
