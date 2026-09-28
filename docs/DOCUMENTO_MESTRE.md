@@ -1,3 +1,16 @@
+# Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
+
+- **Causa Raiz Comprovada:**
+  - A consulta `/products/search` para `priceTableCode=1` ocultava produtos com `hiddenReason: invalid_price` porque o endpoint `/prices` do ERP UltraFV3 retorna linhas de preço sem código de tabela explícito (`TABELA`/`CODTABELA` ausentes no payload), que são persistidas com `ProductPrice.erpPriceId = null`.
+  - O cálculo de preço comercial em `opportunityPriceService.ts` (`calculateOpportunityPriceForTable`) filtrava rigorosamente `item.erpPriceId !== null`, fazendo com que preços sem tabela explícita fossem desconsiderados na seleção da Tabela 1.
+
+- **Correção Implementada:**
+  - Atualizado `calculateOpportunityPriceForTable` para que, em consultas para Tabela 1 (`priceTableCode = "1"`), na ausência de registro explícito para Tabela 1 (`erpPriceId = "1"`), registros de `ProductPrice` com `erpPriceId = null` ou `""` sejam considerados fallback válido para a Tabela 1.
+  - Linhas explícitas de Tabela 1 e zeros explícitos mantêm precedência sobre fallbacks não escopados.
+  - Linhas sem tabela não são aplicadas a tabelas secundárias (2, 3, 4).
+  - Adicionadas suítes completas de regressão em `opportunityProductAvailability.test.ts` (100% PASS).
+  - Relatório completo em `docs/investigations/incident-hidden-products-unscoped-price-table-2026-09-28.md`.
+
 # Investigação de Ausência de Imagem API no Workflow Production Schema PR827 (Run 36469364250) — 28/09/2026
 
 - **Análise Detalhada da Falha (Run 36469364250, Job 109087426885):**

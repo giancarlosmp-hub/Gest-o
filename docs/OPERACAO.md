@@ -1,3 +1,11 @@
+# Validação Pós-Deploy — Incidente de Preços Sem Tabela Explícita (28/09/2026)
+
+1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.
+2. No ambiente pós-deploy, realizar requisição de busca `/products/search` utilizando `priceTableCode=1`.
+3. Confirmar que produtos cadastrados com `ProductPrice` originados de `/prices` (possuindo `erpPriceId = null`) são retornados normalmente na busca da Tabela Comercial Padrão (Tabela 1).
+4. Verificar se a resposta de `/products/search` para Tabela 1 traz os contadores de filtro e status esperados sem ocultar indevidamente os produtos com `hiddenReason: invalid_price`.
+5. Confirmar que buscas direcionadas às tabelas secundárias (`priceTableCode=2`, `3` ou `4`) mantêm o comportamento de exigir tabelas explícitas / derivações configuradas e não utilizam erroneamente fallbacks sem tabela.
+
 # Validação complementar da PR #875 (16/09/2026)
 
 1. No Docker Compose CI do novo HEAD, exigir `PREVIEW_CLEANUP_TRUSTED_SCRIPT_CONTRACT=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS`, `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS`. `SKIP`/77 não aprova.

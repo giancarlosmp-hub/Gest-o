@@ -270,4 +270,100 @@ const zeroBlocksDerived = price(product({
 assert.equal(zeroBlocksDerived.priceTableMatched, false);
 assert.equal(zeroBlocksDerived.price, 0);
 
+// --- INCIDENT REGRESSION TESTS: Unscoped Prices & Fallback Rules ---
+
+// 1. Unscoped price (erpPriceId = null) for Table 1 search
+const unscopedPriceProduct = product({
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 181.50, source: "prices", availabilityState: "available" }
+  ]
+});
+const unscopedResult = price(unscopedPriceProduct, "1");
+assert.equal(unscopedResult.price, 181.50);
+assert.equal(unscopedResult.priceTableMatched, true);
+assert.equal(unscopedResult.source, "productPrice");
+assert.equal(isOpportunityProductSelectable({
+  isActive: true,
+  isSuspended: false,
+  isSynchronized: true,
+  price: unscopedResult.price,
+  priceTableMatched: unscopedResult.priceTableMatched
+}), true, "Produto com preço sem tabela sincronizado de /prices deve ficar visível na busca de Nova Oportunidade para Tabela 1");
+
+// 2. Unscoped price (erpPriceId = null) does not match secondary tables (Table 2)
+const unscopedTable2Result = price(unscopedPriceProduct, "2");
+assert.equal(unscopedTable2Result.priceTableMatched, false);
+assert.equal(unscopedTable2Result.price, 0);
+assert.equal(unscopedTable2Result.source, "missing");
+
+// 3. Precedence: Explicit Table 1 takes precedence over unscoped fallback
+const explicitOverUnscopedProduct = product({
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 181.50, source: "prices", availabilityState: "available" },
+    { erpPriceId: "1", branchCode: null, price: 128.00, source: "products", availabilityState: "available" }
+  ]
+});
+const explicitOverUnscopedResult = price(explicitOverUnscopedProduct, "1");
+assert.equal(explicitOverUnscopedResult.price, 128.00, "Preço explícito de Tabela 1 deve ter precedência sobre fallback de preço sem tabela");
+
+// 4. Precedence: Explicit Table 1 zero takes precedence over unscoped positive fallback
+const explicitZeroOverUnscopedPositiveProduct = product({
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 181.50, source: "prices", availabilityState: "available" },
+    { erpPriceId: "1", branchCode: null, price: 0, source: "prices", availabilityState: "explicit_zero" }
+  ]
+});
+const explicitZeroOverUnscopedResult = price(explicitZeroOverUnscopedPositiveProduct, "1");
+assert.equal(explicitZeroOverUnscopedResult.price, 0, "Zero explícito da Tabela 1 não pode ser substituído por fallback de preço sem tabela");
+assert.equal(explicitZeroOverUnscopedResult.priceTableMatched, false);
+
+// 5. Explicit table matching for Tables 1, 2, 3, and 4
+const multiTableProduct = product({
+  prices: [
+    { erpPriceId: "1", branchCode: null, price: 100, source: "prices", availabilityState: "available" },
+    { erpPriceId: "2", branchCode: null, price: 110, source: "prices", availabilityState: "available" },
+    { erpPriceId: "3", branchCode: null, price: 120, source: "calculated_from_variation", availabilityState: "available" },
+    { erpPriceId: "4", branchCode: null, price: 130, source: "prices", availabilityState: "available" },
+  ]
+});
+assert.equal(price(multiTableProduct, "1").price, 100);
+assert.equal(price(multiTableProduct, "2").price, 110);
+assert.equal(price(multiTableProduct, "3").price, 120);
+assert.equal(price(multiTableProduct, "4").price, 130);
+
+// 6. Historical vigência vs future validity filtering
+const futureValidityProduct = product({
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 500, source: "prices", availabilityState: "available", validFrom: new Date("2099-01-01T00:00:00Z") },
+    { erpPriceId: null, branchCode: null, price: 180, source: "prices", availabilityState: "available", validFrom: new Date("2026-01-01T00:00:00Z") }
+  ]
+});
+assert.equal(price(futureValidityProduct, "1").price, 180, "Vigência futura deve ser ignorada em favor da vigência atual válida");
+
+// 7. Branch matching with unscoped prices
+const branchUnscopedProduct = product({
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 181.50, source: "prices", availabilityState: "available" },
+    { erpPriceId: null, branchCode: "FILIAL-02", price: 200.00, source: "prices", availabilityState: "available" }
+  ]
+});
+assert.equal(price(branchUnscopedProduct, "1").price, 181.50, "Busca sem filial deve selecionar linha com filial nula");
+assert.equal(price(branchUnscopedProduct, "1", "FILIAL-02").price, 200.00, "Busca com filial específica deve preferir a filial correspondente");
+assert.equal(price(branchUnscopedProduct, "1", "FILIAL-99").price, 181.50, "Filial solicitada sem correspondência exata admite candidato de filial nula");
+
+// 8. Full Sync, Automatic Sync, and Update Stock outcome assertions
+const unscopedSyncDiagnostics = {
+  received: 501,
+  productFoundRows: 501,
+  matchedProducts: 181,
+  explicitZeroRows: 320,
+  invalidPrice: 0,
+  missingProduct: 0,
+  persistedPriceRows: 501,
+  rejectedRows: 0,
+  updatedPrices: 181,
+  createdPrices: 0,
+};
+assert.equal(assertUsefulProductPriceSync(unscopedSyncDiagnostics), 501, "Sincronização com 501 linhas (incluindo preços sem tabela e zeros explícitos) deve ser validada com sucesso");
+
 console.log("opportunity product availability regression: PASS");
