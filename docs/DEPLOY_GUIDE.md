@@ -791,3 +791,44 @@ operacional deve exercitar manual, automático e Atualizar estoque conforme `OPE
 sem pedido real e sem saneamento de tenant no mesmo change. Rollback da aplicação é exigido
 se preço legado/derivado reaparecer, se uma resposta parcial invalidar preços ou se houver
 acesso cruzado entre tenants. Nenhuma execução produtiva foi feita durante a implementação.
+# Gate pós-deploy — autoridade de preços pós-PR #898
+
+O deploy não resolve sozinho o incidente. Antes de declarar sucesso, validar no mesmo SHA: busca nas
+Tabelas 1/2 sem filial arbitrária; Atualizar estoque sem produto ausente ou linha rejeitada, conferindo
+separadamente positivos e zeros explícitos; sync
+completa; e um ciclo automático iniciado depois do deploy. Guardar correlação e métricas. Não rodar
+saneamento antes dessa prova. Se reconstrução for aprovada separadamente, ela requer backup validado,
+controle de concorrência, dry-run, ensaio em banco isolado, reposição íntegra e plano de rollback.
+
+## Gate da correção de preços com metadados de origem (27/09/2026)
+
+Não implantar enquanto `READY_TO_MERGE_PRICE_FIX=NO`. A mudança inclui migration aditiva de `ProductPrice`; validar primeiro em banco isolado, com backup e contagens. Pós-deploy exige validar separadamente: (1) sincronização completa, (2) ciclo automático posterior ao deploy e (3) Atualizar estoque, comprovando estoque **e** preços e mensagens parciais. Validar preservação de `PRECOS_ID`, vigência/alteração ERP e `observedAt`; não sanear preços nem apagar produtos como parte do deploy.
+
+## Expansão de proveniência de preço — caminho real de schema
+
+O script denominado `prisma:migrate` executa `prisma db push`; a pasta SQL de migration é revisão e
+não implica execução em produção. O harness
+`scripts/smoke/product-price-provenance-db-push-postgres.sh` reproduz o caminho real em PostgreSQL 16
+descartável: cria o schema predecessor, insere preço anterior, executa `db push`, verifica preservação,
+campos novos nulos e índice. Ele recusa URLs herdadas e nunca aponta para produção.
+
+A expansão é aditiva, porém rollback de imagem não remove colunas/índice. Não executar `db push` ou
+DROP como rollback improvisado. Antes de aprovação: backup validado, preview/diff, harness verde e
+contagens. Depois: validar completa, Atualizar estoque (estoque + preços) e ao menos um ciclo
+automático iniciado após o deploy. Nenhuma dessas validações autoriza saneamento de preços.
+
+O teste de proveniência do schema integra `docker-compose-ci.yml` após a disponibilização da imagem
+PostgreSQL 16. Exit 77 falha o job: skip local não constitui gate verde. A liberação continua exigindo
+a execução CI real de `npm run test:product-price-provenance-db-push:postgres`.
+
+A prova agregada de Orders deve aplicar todas as expansões posteriores que já fazem parte do schema
+corrente antes de `final_schema_diff`: `20260911190000_product_price_authority` e
+`20260927160000_product_price_source_observation`. `EXIT_2` do Prisma significa drift e nunca pode ser
+convertido em sucesso. A prova dedicada de `db push` roda em job CI independente para não ser pulada
+por falha anterior no harness de Orders.
+
+No run `36425672343`/job `108938893118`, o harness dedicado de `prisma db push` e Orders passaram; a
+prova de autoridade retornou `EXIT_2` porque não aplicou a expansão posterior de proveniência antes
+do diff contra o schema corrente. O harness foi corrigido para aplicar ambas. Não liberar enquanto o
+rerun de `test:product-price-authority-migration:postgres` não terminar verde; `EXIT_2` continua sendo
+drift fatal.

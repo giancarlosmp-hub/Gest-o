@@ -1441,3 +1441,126 @@ O modo apply dos previews legados foi desabilitado: a PR declarada no TSV não p
   de Tabelas 2/3/4 com percentuais ERP distintos e alterados, tombstone/restauração,
   ausência/resposta parcial, ordem manual/automática e tenant. Produção segue não acessada;
   procedimento pós-deploy e pendências permanecem na investigação.
+# Incidente de preços pós-PR #898 — coleta dirigida pendente (26/09/2026)
+
+O operador comprovou checkout e imagens API/WEB no merge `281e205` antes do sintoma; drift de SHA
+não é a hipótese principal. `1 / 9` foi confirmado pelo código da tela como produto/classificação.
+A inspeção estática encontrou duas divergências que a evidência produtiva deve discriminar: a busca
+sem filial disputa linhas `ProductPrice` de filiais diferentes; e “Atualizar estoque” atualiza o
+catálogo global, mas filtra a persistência de `/prices` por tenant, podendo terminar com zero matches
+para produtos legados `tenantId=NULL`. O diagnóstico administrativo foi ampliado, e a investigação
+traz SQL estritamente read-only para produto, preços, caches e runs. Incidente permanece aberto; sem
+sync, saneamento ou deploy nesta etapa. Ver
+[rastreamento pós-PR #898](investigations/post-pr898-product-1-class-9-price-trace-2026-09-26.md).
+
+**Atualização de 27/09/2026:** a coleta confirmou que a busca equiparava `erpPriceId=NULL` à Tabela
+1 e, sem filial no contrato da Nova oportunidade, deixava uma linha específica de filial competir
+com uma linha sem filial; por isso `prices/null/1=252,08` vencia `products/1/null=128`. O refresh manual também
+recebia 501 linhas, filtrava o único produto global por tenant e registrava sucesso com zero matches.
+A revisão pré-merge retirou premissas não demonstradas: `NULL` não significa TODAS, tabela ausente
+não é fallback da Tabela 1 e produto `tenantId=NULL` não é compartilhado por presunção. Comparações
+exigem tabela e contexto de filial equivalentes; o filtro autenticado continua estrito. A soma real
+181 `matchedProducts` + 320 `invalidPrice` = 501 não provava parcialidade: no SHA produtivo, zeros
+eram invalidados e classificados como inválidos antes do incremento de matches. Os contadores agora
+separam produto encontrado, positivo, zero explícito, inválido, ausente, persistido e rejeitado, sem
+exigir `matchedProducts=received`. Produto ausente/rejeição não autoriza sweep. A origem ERP de R$ 252,08 ainda
+depende da consulta allowlisted do cache documentada. Não há regra fixa nem saneamento. Produção permanece
+aberta até validação manual, completa e automática pós-deploy.
+
+As gravações não são atômicas: cache e upserts anteriores a um erro permanecem, embora a reconciliação
+seguinte não execute e o run/interface indiquem erro. O tratamento autenticado de produtos
+`tenantId=NULL` continua pendente. Ignorar tabela ausente na seleção não prova origem nem garante que
+a normalização esteja correta; os testes não substituem a leitura do cache/payload real.
+
+**Coleta do cache concluída em 27/09/2026:** `erp.ultrafv3.prices`, atualizado em
+`2026-09-27 13:00:54.765`, contém para produto 1/classificação 9 as linhas sem tabela
+`branch=NULL/price=128` e `branch=1/price=252,08`. O cache é substituído pelos objetos extraídos do
+GET base `/prices`; não contém as consultas parametrizadas posteriores nem merge com versão anterior.
+Isso comprova presença na resposta JSON extraída, mas não equivalência de identidade/parâmetros com a
+tela ERP. Foi documentado SQL read-only adicional que preserva cada nome de campo sem `coalesce` e
+correlaciona o run/authMode. Leitura HTTP direta permanece condicional e exige probe redigido, pois o
+login por vendedor atual pode registrar corpo de autenticação. Pendência `tenantId=NULL` segue separada.
+
+**Aliases/identidade confirmados:** as linhas projetadas são literalmente
+`CODPRODUTO=1,CODPRODUTO_CLAS=9,CODFILIAL=1,PRECO=252.08` e
+`CODPRODUTO=1,CODPRODUTO_CLAS=9,PRECO=128`, sem campo de tabela na allowlist. O run sobre o timestamp
+foi `seller_reference`, sellerId opaco `cmmqokl8d0003qu9f6bngo667`, correlação
+`5840e359-b182-4297-ad1c-cc470ef44f8c`; os dois runs anteriores listados usaram a mesma identidade.
+Foi preparado, mas não executado, probe isolado que faz um SELECT local, explicita o POST de login e
+faz GET `/prices`, sem logger/sync/Prisma write e com projeção campo a campo ausente/nulo. Ele deve
+comparar base/claims/filial/empresa/vendedor com a tela antes de atribuir erro à API UltraFV3.
+
+**Probe direto concluído:** em `2026-09-27T13:40:41Z`, o GET `/prices` respondeu 200/501 sob vendedor
+6611, operador 43, filial 1 e devolveu 1/9 com `CODFILIAL=null, PRECO=128` e
+`CODFILIAL=1, PRECO=252.08`, sem alias de tabela. A tela ERP confirmada usava vendedor 7081/filial 1;
+logo, 252,08 é resposta direta comprovada, mas não se demonstrou equivalência de contexto nem origem
+interna. O produtor do endpoint/SQL não existe neste repositório; foi preparado relato sanitizado ao
+integrador. A exigência proposta de tabela explícita descartaria ambas as linhas, inclusive zeros
+autoritativos sem tabela, e está bloqueada para merge (`READY_TO_MERGE_PRICE_FIX=NO`) até contrato ou
+comparação autorizada com 7081. Falha de seleção CRM, contrato externo e `tenantId=NULL` permanecem
+três frentes separadas. Nenhum deploy ou saneamento foi executado.
+
+## Atualização 27/09/2026 — identidade e vigência do preço (PR aberta)
+
+- **Fato (GET atual):** `/prices`, às 13:40:41Z, retornou 501 linhas; para produto 1/classificação 9 havia `CODFILIAL=null, PRECO=128` e `CODFILIAL=1, PRECO=252.08`, sem alias de tabela. A identidade era vendedor 6611, operador 43 e filial 1. A tela comercial comparada usava vendedor 7081 e filial 1 (Tabela 1=128; Tabela 2=160); os contextos ainda não foram demonstrados como equivalentes.
+- **Fato histórico, não atribuído automaticamente ao GET atual:** o log de 03/09 associa 128 a `PRECOS_ID=2776`, vigência/alteração em 2026, filial nula; e 252,08 a `PRECOS_ID=2166`, vigência/alteração em 2022, filial 1. O CRM perdia esses metadados e um novo `updatedAt` local fazia a reobservação parecer uma mudança comercial recente.
+- **Evidência externa recebida:** análise estática do executável UltraFV3 (SHA-256 `94799c64a008d5165811327d45b70e67af95b8fdee99c44f36650105e723cba3`, ainda não comparado ao binário em execução) indica `GET /prices` → `WS_PRECOS(date)`, sem parâmetro de tabela/vendedor/filial. Análise estática do Gestao.exe encontrou uma consulta que ordena por vigência antes da filial e uma chamada a `PRECO_VENDA`; isso ainda não prova o caminho integral da tela.
+- **Alteração preparada, não implantada:** `ProductPrice` passa a preservar identificador, vigência, alteração da origem e horário de observação separadamente. A seleção ignora vigência futura e não usa `updatedAt` local como relógio comercial. `PRECOS_ID` não foi assumido globalmente único.
+- **Atualizar estoque:** permanece um fluxo composto de produtos/estoque **e** preços. A implementação preparada relata sucesso integral apenas após as duas etapas; se preços falharem após produtos, informa explicitamente a parcialidade e não promete rollback/atomicidade.
+- **Bloqueadores:** `READY_TO_MERGE_PRICE_FIX=NO`. Falta confirmar no Firebird o contrato de `PRECO_VENDA`, `WS_PRECOS`, `WS_PRECOS_ECOMMERCE`, `WS_PRECOS_VARIACAO`, a relação grupo 24/agrupamento 11, a semântica de filial nula e de tabela ausente, e a arquitetura de atualização autenticada de produtos `tenantId=NULL`. Exigir tabela explícita descarta as duas linhas reais e não é solução comercial liberável.
+
+### Consolidação arquitetural da correção (27/09/2026)
+
+O contrato permanente foi incorporado em `ARQUITETURA.md` e
+`erp-ultrafv3-integration-technical.md`. Produção documentada opera com tenancy desabilitada; por isso
+o Atualizar estoque não deve aplicar o tenant da associação ao catálogo global `tenantId=NULL`. O
+modo `default-only` continua fail-closed e não adota nulos. Foi adicionado harness do `prisma db push`
+real, mas sua execução local está `NOT_VERIFIED` porque este ambiente não possui Docker/PostgreSQL.
+`READY_TO_MERGE_PRICE_FIX=NO` permanece até metadados Firebird e teste PostgreSQL isolado.
+
+### Tarefa pendente — `LIBERAR_INTERNET` (28/09/2026)
+
+Evidência do operador comprova que operação 99 (`ATIVO=S`, `LIBERAR_INTERNET=N`) aparece no seletor.
+O cache preserva a linha bruta, mas API/UI ignoram a elegibilidade e o backend só verifica existência
+da operação; condições nem possuem validação equivalente. Não foi implementado neste ajuste de
+preços. Próxima tarefa deve filtrar a lista e revalidar antes do pedido, tratar ausente/nulo/inválido
+sem autorização silenciosa, respeitar filtros adicionais e mudanças S→N, preservando pedidos
+históricos. Ver `investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md`.
+
+A nova evidência de preço das 18:00:55 é screenshot: 128 agora aparece com `PRECOS_ID=2878` e vigência
+24/09, enquanto 252,08 conserva ID 2166/vigência 2022. Ela não substitui o log anterior (ID 2776) nem
+foi correlacionada ao GET direto das 13:40. `READY_TO_MERGE_PRICE_FIX=NO` permanece.
+
+### PR #899 — correção do `orders-migration-postgres` (28/09/2026)
+
+**Causa comprovada pelo log do CI:** o harness aplicava a migration de Orders e
+`20260911190000_product_price_authority`, mas executava `final_schema_diff` contra o schema atual sem
+aplicar `20260927160000_product_price_source_observation`. O `EXIT_2` era drift real dos três campos
+de proveniência e do índice; não foi ignorado. A sequência fresh e upgrade agora aplica também a
+expansão de observação antes do diff final, preservando a verificação `--exit-code`.
+
+O teste dedicado de `prisma db push` foi movido para job independente
+`price-provenance-db-push-postgres`; assim ele é agendado mesmo se `orders-migration-postgres` falhar.
+Os testes estáticos locais passaram, mas os dois testes PostgreSQL reais permanecem `NOT_VERIFIED`
+neste ambiente sem Docker e precisam ficar verdes no CI. `READY_TO_MERGE_PRICE_FIX=NO` e a coleta
+Firebird continuam pendentes.
+
+### Firebird confirmado e segundo ajuste de harness — PR #899 (28/09/2026)
+
+A coleta de metadados Firebird confirmou que `PRECO_VENDA` recebe produto, classificação, data de
+comparação e filial. Dentro do mesmo contexto comercial, considera filial solicitada ou nula e ordena
+primeiro por `DATA_VIGENCIA DESC`, depois `CODFILIAL DESC` e `DTAALTER DESC`. Assim, para 1/9, o preço
+128 vigente em 2026 precede 252,08 da filial 1 vigente em 2022; `updatedAt` do CRM não participa.
+A seleção com filial explícita foi alinhada a essa ordem, sem chamar filial nula de TODAS. Sem tabela
+identificada, as linhas continuam inelegíveis para uma tabela específica.
+
+`WS_PRECOS`/`WS_PRECOS_TOTAL` fornecem identidade, vigência, preço e filial, inclusive vigências
+futuras, mas não tabela. `PRECO_DIFERENCIADO` combina base, variações e numerosas condições; portanto
+o CRM só materializa uma variação simples quando tabela e grupo são explícitos e nenhum filtro que o
+reconciliador não possua está preenchido. Regras futuras e condicionais falham fechadas.
+
+Actions run `36425672343`, job `108938893118`: compose, prova dedicada de `db push` e Orders passaram.
+A prova histórica `ProductPrice authority` falhou com `EXIT_2` porque aplicava apenas autoridade antes
+de comparar com o schema corrente, omitindo a expansão posterior de proveniência. O harness agora
+aplica também `20260927160000_product_price_source_observation` antes do diff, sem suprimir
+`--exit-code`. O resultado corrigido ainda requer novo run CI. `READY_TO_MERGE_PRICE_FIX=NO`.

@@ -302,3 +302,28 @@ jobs:
 
       - name: Prove ProductPrice authority migration preserves existing rows
         run: npm run test:product-price-authority-migration:postgres
+
+  price-provenance-db-push-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pinned dependencies
+        run: |
+          npm install --global npm@11.4.2
+          npm ci
+
+      - name: Cache PostgreSQL 16 image
+        run: docker pull postgres:16
+
+      - name: Prove price provenance through the real Prisma db push path
+        run: npm run test:product-price-provenance-db-push:postgres

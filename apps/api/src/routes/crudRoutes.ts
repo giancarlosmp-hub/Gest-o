@@ -8860,6 +8860,7 @@ router.post("/erp/sync-all", authorize("diretor", "gerente"), async (_req, res) 
 
 const priceDiagnosticsQuerySchema = z.object({
   codes: z.string().trim().min(1).max(200).default("273,228"),
+  classCodes: z.string().trim().min(1).max(200).optional(),
   priceTableCode: z.string().trim().min(1).max(60).optional(),
 });
 
@@ -8889,6 +8890,8 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
   const correlationId = randomUUID();
   const requestedCodes = parsed.data.codes.split(",").map((code) => code.trim()).filter(Boolean);
   const normalizedCodes = requestedCodes.map((code) => code.replace(/^0+(?=\d)/, ""));
+  const requestedClassCodes = parsed.data.classCodes?.split(",").map((code) => code.trim()).filter(Boolean) || [];
+  const normalizedClassCodes = requestedClassCodes.map((code) => code.replace(/^0+(?=\d)/, ""));
   const priceTableCode = normalizeOpportunityPriceTableCode(parsed.data.priceTableCode || "1");
   const priceRules = await loadOpportunityPriceRules();
   const parseDiagnosticRows = (value: string | undefined) => {
@@ -8926,12 +8929,13 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
     return null;
   };
   const appConfigs = await prisma.appConfig.findMany({
-    where: { key: { in: ["erp.ultrafv3.products", "erp.ultrafv3.prices", "erp.ultrafv3.priceVariations"] } },
+    where: { key: { in: ["erp.ultrafv3.products", "erp.ultrafv3.prices", "erp.ultrafv3.priceTables", "erp.ultrafv3.priceVariations"] } },
     select: { key: true, value: true, updatedAt: true },
   });
   const configByKey = new Map(appConfigs.map((config) => [config.key, config]));
   const productRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.products")?.value);
   const priceRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.prices")?.value);
+  const priceTableRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.priceTables")?.value);
   const priceVariationRows = parseDiagnosticRows(configByKey.get("erp.ultrafv3.priceVariations")?.value);
   const [products, syncRuns] = await Promise.all([
     prisma.product.findMany({
@@ -8949,7 +8953,10 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
 
   const diagnostics = requestedCodes.map((requestedCode) => {
     const normalizedCode = requestedCode.replace(/^0+(?=\d)/, "");
-    const matches = products.filter((product) => product.erpProductCode.replace(/^0+(?=\d)/, "") === normalizedCode);
+    const matches = products.filter((product) =>
+      product.erpProductCode.replace(/^0+(?=\d)/, "") === normalizedCode
+      && (!normalizedClassCodes.length || normalizedClassCodes.includes(product.erpProductClassCode.replace(/^0+(?=\d)/, "")))
+    );
     const productRowsForCode = productRows.filter((row) => getCodeFromDiagnosticRow(row) === normalizedCode);
     const priceRowsForCode = priceRows.filter((row) => getCodeFromDiagnosticRow(row) === normalizedCode);
     const variationRowsForCode = priceVariationRows.filter((row) => {
@@ -8978,6 +8985,7 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
       return {
         product: {
           id: product.id,
+          tenantId: product.tenantId,
           erpProductCode: product.erpProductCode,
           erpProductClassCode: product.erpProductClassCode,
           name: product.name,
@@ -8989,10 +8997,11 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
           minPrice: product.minPrice,
           updatedAt: product.updatedAt,
         },
-        productPrices: product.prices.map((price) => ({ id: price.id, erpPriceId: price.erpPriceId, branchCode: price.branchCode, price: price.price, validFrom: price.validFrom, updatedAt: price.updatedAt })),
+        productPrices: product.prices.map((price) => ({ id: price.id, erpPriceId: price.erpPriceId, erpSourcePriceId: price.erpSourcePriceId, branchCode: price.branchCode, price: price.price, source: price.source, availabilityState: price.availabilityState, validFrom: price.validFrom, sourceChangedAt: price.sourceChangedAt, observedAt: price.observedAt, createdAt: price.createdAt, updatedAt: price.updatedAt })),
         rawErpPayloadSummary: summarizeRawErpPayloadForPriceDiagnostics(product.rawErpPayload),
         opportunitySearchForTable: { selectable, reason: selectable ? "visible" : divergences[0] || "hidden_invalid_or_inactive", ...searchPrice },
-        priceSource: searchPrice.source === "product.PRECO" ? "/products.PRECO" : searchPrice.source === "productPrice" ? "ProductPrice (/prices or /products table field)" : searchPrice.source,
+        priceSource: searchPrice.source === "product.PRECO" ? "/products.PRECO" : searchPrice.source === "productPrice" ? "ProductPrice (consultar source da linha selecionada)" : searchPrice.source,
+        matchingTableBranches: [...new Set(product.prices.filter((price) => normalizeOpportunityPriceTableCode(price.erpPriceId) === priceTableCode).map((price) => price.branchCode))],
         divergences,
       };
     });
@@ -9005,6 +9014,11 @@ router.get("/erp/ultrafv3/price-diagnostics", authorize("diretor", "gerente"), a
       pricesEndpointRows: priceRowsForCode,
       appearedInPriceVariationsEndpoint: variationRowsForCode.length > 0,
       priceVariationRows: variationRowsForCode,
+      priceTablesCache: {
+        updatedAt: configByKey.get("erp.ultrafv3.priceTables")?.updatedAt || null,
+        rows: priceTableRows,
+      },
+      cacheTimestamps: Object.fromEntries(appConfigs.map((config) => [config.key, config.updatedAt])),
       crmProductFound: matches.length > 0,
       candidateCount: matches.length,
       products: productDiagnostics,

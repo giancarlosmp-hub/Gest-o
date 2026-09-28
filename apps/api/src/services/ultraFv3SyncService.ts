@@ -15,6 +15,10 @@ import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./par
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
 import { calculatePriceFromErpVariation, orderPriceAuthoritySteps, resolveErpPriceVariationPercent, shouldSweepAbsentPrices } from "./erpPriceVariationPolicy.js";
 import { sanitizeUltraFv3PayloadForLog } from "./ultraFv3PayloadSanitization.js";
+import { assertUsefulProductPriceSync, runProductAndPriceRefresh } from "./productPriceSyncOutcome.js";
+import { catalogTenantIdForMode, productCatalogTenantWhere, selectProductCandidateForTenant } from "./productCatalogTenancy.js";
+import { normalizeErpProductPriceObservation } from "./erpProductPriceObservation.js";
+import { readTenancyMode } from "../tenancy/tenancyMode.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -2662,7 +2666,12 @@ const normalizeErpLookupCode = (value: unknown) => String(value ?? "").trim().re
 export async function upsertProductPricesFromRows(rows: unknown[], correlationId: string, snapshotComplete = false, tenantId?: string) {
   const diagnostics = {
     received: rows.length,
+    productFoundRows: 0,
     matchedProducts: 0,
+    positivePriceRows: 0,
+    explicitZeroRows: 0,
+    persistedPriceRows: 0,
+    rejectedRows: 0,
     updatedPrices: 0,
     createdPrices: 0,
     missingProduct: 0,
@@ -2679,21 +2688,25 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
   const touchedProductIds = new Set<string>();
 
   for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
+    if (!row || typeof row !== "object") {
+      diagnostics.invalidPrice += 1;
+      diagnostics.rejectedRows += 1;
+      continue;
+    }
     const payload = row as Record<string, unknown>;
-    const productCode = pickFirstString(payload, ["CODPRODUTO", "COD_PRODUTO", "productCode", "erpProductCode", "produto"]);
-    const productClassCode = pickFirstString(payload, ["CODPRODUTO_CLAS", "COD_PRODUTO_CLAS", "productClassCode", "erpProductClassCode", "classificacao"]);
-    const priceTableCode = pickFirstString(payload, ["TABELA", "CODTABELA", "COD_TABELA", "TABELA_PRECO", "priceTableCode", "tabela"]);
-    const branchCode = pickFirstString(payload, ["CODFILIAL", "COD_FILIAL", "branchCode", "filial"]);
-    const rawPriceValue = pickFirstValue(payload, ["PRECO", "PRECO_LISTA", "VALOR", "price", "preco", "valor"]);
-    const parsedPrice = parseNumber(rawPriceValue);
+    const observation = normalizeErpProductPriceObservation(payload);
+    const productCode = observation.productCode;
+    const productClassCode = observation.productClassCode;
+    const priceTableCode = observation.priceTableCode || "";
+    const branchCode = observation.branchCode || "";
+    const parsedPrice = observation.price;
     const price = parsedPrice !== null && parsedPrice > 0 ? parsedPrice : null;
     const isDiagnosticProduct = normalizeErpLookupCode(productCode) === DIAGNOSTIC_PRODUCT_CODE;
     const isZeroPriceDiagnosticProduct = normalizeErpLookupCode(productCode) === ZERO_PRICE_DIAGNOSTIC_PRODUCT_CODE;
     if (isDiagnosticProduct) diagnostics.product273Received += 1;
     if (isZeroPriceDiagnosticProduct) diagnostics.product228Received += 1;
-    if (!productCode || parsedPrice === null) {
-      if (parsedPrice === null) diagnostics.invalidPrice += 1;
+    if (!productCode) {
+      diagnostics.rejectedRows += 1;
       if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
         logApiEvent("INFO", `[ultrafv3 sync prices] product ${normalizeErpLookupCode(productCode)} price row ignored`, {
           correlationId,
@@ -2701,7 +2714,7 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
           productClassCode,
           priceTableCode,
           branchCode,
-          reason: !productCode ? "missing_product_code" : "invalid_price",
+          reason: "missing_product_code",
           price: parsedPrice ?? 0,
           payload: sanitizePayloadForLog(payload),
         });
@@ -2714,15 +2727,18 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
     const productCandidates = await prisma.product.findMany({
       where: {
         erpProductCode: { in: Array.from(new Set([productCode, normalizedProductCode].filter(Boolean))) },
-        ...(tenantId ? { tenantId } : {}),
+        ...productCatalogTenantWhere(tenantId),
       },
     });
-    const product = productCandidates.find((candidate) =>
-      normalizeErpLookupCode(candidate.erpProductCode) === normalizedProductCode &&
-      (normalizeErpLookupCode(candidate.erpProductClassCode) || "default") === normalizedProductClassCode
-    ) ?? (productCandidates.length === 1 ? productCandidates[0] : null);
+    const product = selectProductCandidateForTenant(
+      productCandidates,
+      tenantId,
+      normalizedProductCode,
+      normalizedProductClassCode,
+    );
     if (!product) {
       diagnostics.missingProduct += 1;
+      diagnostics.rejectedRows += 1;
       if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
         logApiEvent("INFO", `[ultrafv3 sync prices] product ${normalizedProductCode} price row has no matching CRM product`, {
           correlationId,
@@ -2738,6 +2754,7 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
     }
 
     touchedProductIds.add(product.id);
+    diagnostics.productFoundRows += 1;
     const previousDefaultPrice = product.defaultPrice;
     const previousMinPrice = product.minPrice;
     if (isDiagnosticProduct || isZeroPriceDiagnosticProduct) {
@@ -2757,17 +2774,24 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
         productFound: true,
       });
     }
-    if (!price) {
+    if (parsedPrice === null || parsedPrice < 0) {
       diagnostics.invalidPrice += 1;
+      diagnostics.rejectedRows += 1;
+      continue;
+    }
+    if (parsedPrice === 0) {
+      diagnostics.explicitZeroRows += 1;
       const explicitZeroWhere = {
         productId: product.id,
         erpPriceId: priceTableCode || null,
         branchCode: branchCode || null,
         source: "prices",
+        ...(observation.sourcePriceId ? { erpSourcePriceId: observation.sourcePriceId } : {}),
       };
       const existingZeroPrice = await prisma.productPrice.findFirst({ where: explicitZeroWhere });
       if (existingZeroPrice) {
-        await prisma.productPrice.update({ where: { id: existingZeroPrice.id }, data: { price: 0, availabilityState: "explicit_zero" } });
+        await prisma.productPrice.update({ where: { id: existingZeroPrice.id }, data: { price: 0, availabilityState: "explicit_zero", erpSourcePriceId: observation.sourcePriceId, validFrom: observation.sourceValidFrom, sourceChangedAt: observation.sourceChangedAt, observedAt: new Date() } });
+        diagnostics.persistedPriceRows += 1;
         seenProductPriceIds.add(existingZeroPrice.id);
         if (isDiagnosticProduct) {
           logApiEvent("INFO", "product 273 ProductPrice invalidated", {
@@ -2790,9 +2814,14 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
             price: 0,
             source: "prices",
             availabilityState: "explicit_zero",
+            erpSourcePriceId: observation.sourcePriceId,
+            validFrom: observation.sourceValidFrom,
+            sourceChangedAt: observation.sourceChangedAt,
+            observedAt: new Date(),
           },
         });
         seenProductPriceIds.add(createdZeroPrice.id);
+        diagnostics.persistedPriceRows += 1;
         if (isDiagnosticProduct) {
           logApiEvent("INFO", "product 273 ProductPrice created", {
             step: "ProductPrice created",
@@ -2807,7 +2836,14 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
         }
       }
       const updateResult = await prisma.productPrice.updateMany({
-        where: { productId: product.id, source: "prices", ...(priceTableCode ? { erpPriceId: priceTableCode } : {}), ...(branchCode ? { branchCode } : {}), price: { gt: 0 } },
+        where: {
+          productId: product.id,
+          source: "prices",
+          erpPriceId: priceTableCode || null,
+          branchCode: branchCode || null,
+          ...(observation.sourcePriceId ? { erpSourcePriceId: observation.sourcePriceId } : {}),
+          price: { gt: 0 },
+        },
         data: { price: 0, availabilityState: "explicit_zero" },
       });
       if (isDiagnosticProduct && updateResult.count > 0) {
@@ -2835,7 +2871,9 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
         },
         data: { price: 0, availabilityState: "explicit_zero" },
       });
-      await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: 0, minPrice: 0 } });
+      if (normalizeErpLookupCode(priceTableCode) === "1" && !branchCode) {
+        await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: 0, minPrice: 0 } });
+      }
       if (isZeroPriceDiagnosticProduct) {
         diagnostics.product228Zeroed += 1;
         logApiEvent("INFO", "[ultrafv3 sync prices] product 228 zero price invalidated", {
@@ -2856,9 +2894,11 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
     }
 
     diagnostics.matchedProducts += 1;
+    diagnostics.positivePriceRows += 1;
+    const positivePrice = parsedPrice;
     if (isDiagnosticProduct) {
       diagnostics.product273Matched += 1;
-      diagnostics.product273Price = price;
+      diagnostics.product273Price = positivePrice;
     }
     const existingPrice = await prisma.productPrice.findFirst({
       where: {
@@ -2866,10 +2906,11 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
         erpPriceId: priceTableCode || null,
         branchCode: branchCode || null,
         source: "prices",
+        ...(observation.sourcePriceId ? { erpSourcePriceId: observation.sourcePriceId } : {}),
       },
     });
     if (existingPrice) {
-      await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price, availabilityState: "available" } });
+      await prisma.productPrice.update({ where: { id: existingPrice.id }, data: { price: positivePrice, availabilityState: "available", erpSourcePriceId: observation.sourcePriceId, validFrom: observation.sourceValidFrom, sourceChangedAt: observation.sourceChangedAt, observedAt: new Date() } });
       seenProductPriceIds.add(existingPrice.id);
       if (isDiagnosticProduct) {
         logApiEvent("INFO", "product 273 ProductPrice created", {
@@ -2880,21 +2921,30 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
           productPriceId: existingPrice.id,
           erpPriceId: priceTableCode || null,
           branchCode: branchCode || null,
-          price,
+          price: positivePrice,
           source: "prices",
           availabilityState: "available",
+          erpSourcePriceId: observation.sourcePriceId,
+          validFrom: observation.sourceValidFrom,
+          sourceChangedAt: observation.sourceChangedAt,
+          observedAt: new Date(),
         });
       }
       diagnostics.updatedPrices += 1;
+      diagnostics.persistedPriceRows += 1;
     } else {
       const createdPrice = await prisma.productPrice.create({
         data: {
           productId: product.id,
           erpPriceId: priceTableCode || null,
           branchCode: branchCode || null,
-          price,
+          price: positivePrice,
           source: "prices",
           availabilityState: "available",
+          erpSourcePriceId: observation.sourcePriceId,
+          validFrom: observation.sourceValidFrom,
+          sourceChangedAt: observation.sourceChangedAt,
+          observedAt: new Date(),
         },
       });
       seenProductPriceIds.add(createdPrice.id);
@@ -2907,13 +2957,15 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
           productPriceId: createdPrice.id,
           erpPriceId: priceTableCode || null,
           branchCode: branchCode || null,
-          price,
+          price: positivePrice,
         });
       }
       diagnostics.createdPrices += 1;
+      diagnostics.persistedPriceRows += 1;
     }
-    if (!product.defaultPrice || product.defaultPrice <= 0 || !priceTableCode || normalizeErpLookupCode(priceTableCode) === "1") {
-      await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: price, minPrice: product.minPrice && product.minPrice > 0 ? product.minPrice : price } });
+    const isExplicitGlobalBasePrice = normalizeErpLookupCode(priceTableCode) === "1" && !branchCode;
+    if (isExplicitGlobalBasePrice) {
+      await prisma.product.update({ where: { id: product.id }, data: { defaultPrice: positivePrice, minPrice: product.minPrice && product.minPrice > 0 ? product.minPrice : positivePrice } });
       if (isDiagnosticProduct) {
         logApiEvent("INFO", "[ultrafv3 sync prices] product 273 default price updated", {
           correlationId,
@@ -2944,9 +2996,12 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
     availabilityState: "available",
     ...(seenProductPriceIds.size ? { id: { notIn: [...seenProductPriceIds] } } : {}),
     ...(observedContexts.size ? { OR: [...observedContexts.values()] } : { id: "__no_proven_scope__" }),
-    ...(tenantId ? { product: { tenantId } } : {}),
+    ...(tenantId ? { product: productCatalogTenantWhere(tenantId) } : {}),
   };
-  const staleResult = shouldSweepAbsentPrices(snapshotComplete)
+  const matchedCompleteSnapshot = snapshotComplete
+    && diagnostics.productFoundRows === diagnostics.received
+    && diagnostics.rejectedRows === 0;
+  const staleResult = shouldSweepAbsentPrices(matchedCompleteSnapshot)
     ? await prisma.productPrice.updateMany({ where: staleWhere, data: { price: 0, availabilityState: "absent" } })
     : { count: 0 };
   diagnostics.absentPriceInvalidated = staleResult.count;
@@ -2975,6 +3030,7 @@ export async function upsertProductPricesFromRows(rows: unknown[], correlationId
     diagnostics,
     touchedProductCount: touchedProductIds.size,
     snapshotComplete,
+    matchedCompleteSnapshot,
   });
   return diagnostics;
 }
@@ -3020,7 +3076,7 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
     if (code && code !== "1") activeTableCodes.add(code);
   }
   const products = await prisma.product.findMany({
-    where: { isActive: true, ...(tenantId ? { tenantId } : {}) },
+    where: { isActive: true, ...productCatalogTenantWhere(tenantId) },
     include: { prices: true },
   });
 
@@ -3032,17 +3088,25 @@ export async function reconcileCalculatedVariationPrices(correlationId: string, 
         p.source === "calculated_from_variation"
       );
 
-      const newestAuthoritativeBase = product.prices
+      const now = Date.now();
+      const commercialVersionOrder = (left: typeof product.prices[number], right: typeof product.prices[number]) => {
+        const validDifference = (right.validFrom?.getTime() ?? 0) - (left.validFrom?.getTime() ?? 0);
+        if (validDifference) return validDifference;
+        return (right.sourceChangedAt?.getTime() ?? 0) - (left.sourceChangedAt?.getTime() ?? 0);
+      };
+      const explicitGlobalBaseRows = product.prices
+        .filter((p) => p.erpPriceId === "1" && !p.branchCode && (!p.validFrom || p.validFrom.getTime() <= now))
+        .sort(commercialVersionOrder);
+      const eligibleGlobalBaseRows = explicitGlobalBaseRows;
+      const newestAuthoritativeBase = eligibleGlobalBaseRows
         .filter((p) =>
-          (p.erpPriceId === "1" || p.erpPriceId === null) &&
           p.source === "prices" &&
           p.availabilityState !== "absent"
         )
-        .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime())[0];
+        .sort(commercialVersionOrder)[0];
       const baseExplicitlyInvalid = newestAuthoritativeBase?.availabilityState === "explicit_zero"
         || (Boolean(newestAuthoritativeBase) && Number(newestAuthoritativeBase.price) <= 0);
-      const baseTable1PriceRow = !baseExplicitlyInvalid && product.prices.find((p) =>
-        (p.erpPriceId === "1" || p.erpPriceId === null || (p.source === "products" && (!p.erpPriceId || p.erpPriceId === "1"))) &&
+      const baseTable1PriceRow = !baseExplicitlyInvalid && eligibleGlobalBaseRows.find((p) =>
         p.availabilityState === "available" &&
         Number(p.price) > 0
       );
@@ -3201,10 +3265,11 @@ export async function syncPrices(options?: RunSyncOptions) {
 
       const allPriceRows = [...result.rows, ...extraTableRows];
       const productPriceDiagnostics = await upsertProductPricesFromRows(allPriceRows, correlationId, result.snapshotComplete, options?.authenticatedTenantId);
+      const processedPriceCount = assertUsefulProductPriceSync(productPriceDiagnostics);
       const variationDiagnostics = await reconcileCalculatedVariationPrices(correlationId, options?.authenticatedTenantId);
 
       return {
-        syncedCount: allPriceRows.length,
+        syncedCount: processedPriceCount,
         diagnostics: {
           endpointUsed: 1,
           aliasFallbackUsed: result.aliasFallbackUsed,
@@ -3228,14 +3293,30 @@ export async function syncPrices(options?: RunSyncOptions) {
  */
 export async function syncOpportunityProductAvailability(options?: RunSyncOptions) {
   const correlationId = options?.correlationId || randomUUID();
-  const products = await syncProducts({ ...options, correlationId, lockScope: "opportunity-products" });
-  const prices = await syncPrices({ ...options, correlationId, lockScope: "opportunity-products" });
-  return {
-    syncedCount: products.syncedCount,
-    correlationId,
-    products,
-    prices,
-  };
+  const catalogTenantId = catalogTenantIdForMode(
+    options?.authenticatedTenantId,
+    readTenancyMode(process.env.TENANCY_MODE ?? "disabled"),
+  );
+  const catalogOptions = { ...options, authenticatedTenantId: catalogTenantId, correlationId, lockScope: "opportunity-products" };
+  try {
+    const { products, prices } = await runProductAndPriceRefresh(
+      () => syncProducts(catalogOptions),
+      () => syncPrices(catalogOptions),
+    );
+    return {
+      syncedCount: products.syncedCount,
+      correlationId,
+      products,
+      prices,
+    };
+  } catch (error) {
+    throw Object.assign(error instanceof Error ? error : new Error(String(error)), {
+      status: typeof (error as { cause?: { status?: unknown }; status?: unknown }).cause?.status === "number"
+        ? (error as { cause: { status: number } }).cause.status
+        : typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502,
+      correlationId,
+    });
+  }
 }
 export const syncPaymentMethods = (options?: RunSyncOptions) =>
   syncReferenceData("paymentMethods", "/payment-methods", options, [

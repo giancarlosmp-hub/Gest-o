@@ -11,7 +11,8 @@ assert.match(harness, /20260904120000_orders_operational_view\/migration\.sql/);
 for (const proof of ["final_schema_diff", "migration-backfill", "ambiguous_tenant_fail_closed", "historical_seller_removed", "ErpOrderSync_tenantId_fkey", "ErpOrderStatusHistory_erpOrderSyncId_fkey"]) assert.ok(harness.includes(proof), proof);
 for (const marker of ["ORDERS_MIGRATION_STEP=", "ORDERS_MIGRATION_PHASE=", "ORDERS_MIGRATION_NAME=", "ORDERS_MIGRATION_COMMAND_KIND=", "ORDERS_MIGRATION_ERROR_CODE=", "ORDERS_MIGRATION_ERROR_MESSAGE=", "ORDERS_MIGRATION_RESULT="]) assert.ok(harness.includes(marker) || readFileSync("scripts/smoke/orders-migration-diagnostics.sh", "utf8").includes(marker), marker);
 assert.match(harness, /apply_orders_migration fresh fresh_sequence/, "fresh proof must reach the orders migration");
-assert.match(harness, /orders_schema_diff orders_schema[\s\S]*apply_product_price_authority_migration fresh complete_relevant_sequence[\s\S]*final_schema_diff current_schema/, "Orders must be compared with its own target before the complete relevant sequence reaches current schema");
+assert.match(harness, /orders_schema_diff orders_schema[\s\S]*apply_product_price_authority_migration fresh complete_relevant_sequence[\s\S]*apply_product_price_source_observation_migration fresh complete_relevant_sequence[\s\S]*final_schema_diff current_schema/, "Orders must be compared with its own target before every later ProductPrice expansion reaches current schema");
+assert.match(harness, /apply_product_price_authority_migration upgrade complete_relevant_sequence[\s\S]*apply_product_price_source_observation_migration upgrade complete_relevant_sequence[\s\S]*upgrade_from_previous final_schema_diff/, "upgrade proof must apply both ProductPrice expansions before final drift comparison");
 assert.match(harness, /orders_schema_commit=e7590d0a03fbf1b137e0e88c5f2b7c429594c29f[\s\S]*merge-base --is-ancestor[\s\S]*tenantId \+String\$/, "Orders target must be the historical required-tenant schema, not its nullable introduction snapshot");
 const dbPushCommands = harness.split("\n").filter((line) => line.includes("prisma db push"));
 assert.equal(dbPushCommands.length, 2, "only the two predecessor-materialization commands may use db push");
@@ -23,6 +24,8 @@ execFileSync("bash", ["scripts/smoke/orders-migration-destructive-sql.test.sh"],
 for (const marker of ["POSTGRES_IMAGE_PULL_ATTEMPT=", "POSTGRES_IMAGE_PULL_RESULT="]) assert.ok(workflow.includes(marker), marker);
 assert.match(workflow, /for attempt in 1 2 3;/, "PostgreSQL pull retry must be bounded to three attempts");
 assert.match(workflow, /POSTGRES_IMAGE_PULL_RESULT=FAIL[\s\S]*exit 1/, "exhausted pulls must fail closed");
+assert.match(workflow, /^  price-provenance-db-push-postgres:\n(?:(?!^  [a-z]).)*test:product-price-provenance-db-push:postgres/ms,
+  "provenance db-push proof must be an independent job, not a later step blocked by Orders");
 assert.match(migration, /^BEGIN;/);
 assert.match(migration, /COMMIT;\s*$/);
 assert.doesNotMatch(migration, /^\s*(?:DELETE|TRUNCATE|DROP\s+TABLE)\b/im);

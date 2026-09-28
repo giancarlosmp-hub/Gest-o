@@ -1390,6 +1390,11 @@ export default function OpportunitiesPage() {
       await searchProducts(productSearch);
       toast.success("Catálogo, preços e estoque atualizados com sucesso.");
     } catch (error) {
+      // The backend deliberately reports a partial failure when /products
+      // (including stock) persisted before /prices failed. Refresh the query
+      // even on error so the drawer does not keep showing stale stock. This
+      // read must never hide the original synchronization error.
+      await searchProducts(productSearch).catch(() => undefined);
       toast.error(getApiErrorMessage(error, "Não foi possível atualizar catálogo, preços e estoque."));
     } finally {
       setIsSyncingProducts(false);

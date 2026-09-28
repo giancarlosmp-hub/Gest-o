@@ -214,3 +214,89 @@ Consulta individual (`POST /orders/:id/status-consultation`), consulta na oportu
 
 ### Valor em múltiplos pedidos
 `PARCIAL` é situação de atendimento, não cancelamento. Quando coexistem pedidos `CANCELADO` e válidos, somente valores `VALOR_LIQUIDO` explicitamente ligados aos pedidos válidos formam a contribuição remanescente; não há rateio proporcional do valor da oportunidade. Ausência ou divergência é exposta como inconsistência, nunca convertida em estimativa confirmada.
+
+## Contrato de produtos, estoque e preços (revisão 27/09/2026)
+
+### Rotas e fluxo
+
+| Fluxo | Entrada | Persistência | Condição de sucesso |
+|---|---|---|---|
+| Completa | etapas `/products`, `/prices`, variações e referências | incremental por etapa | todas as etapas requeridas concluídas |
+| Automática | mesmos serviços sob scheduler/lock | incremental; sem transação distribuída | run automático posterior ao deploy em `success` |
+| Atualizar estoque | `/products` seguido de `/prices` | estoque/produto pode persistir antes de preço | ambas as etapas; falha da segunda é parcial |
+
+`/products` continua responsável pelo estoque e por observações legadas do catálogo. `/prices` é a
+fonte de observações explícitas de preço. Os contadores são independentes: `received`,
+`productFoundRows`, positivos, zeros explícitos, inválidos/ausentes, `rejectedRows` e
+`persistedPriceRows`. O caso 181 positivos + 320 zeros = 501 processadas não é parcialidade.
+Sweep de ausência exige snapshot completo, nenhuma rejeição e contexto de catálogo compatível.
+
+### Campos e relógios
+
+`CODPRODUTO`, `CODPRODUTO_CLAS`, alias explícito de tabela, `CODFILIAL`, `PRECO`, `PRECOS_ID`,
+`DATA_VIGENCIA` e `DTAALTER` são normalizados sem substituir ausência por uma regra comercial.
+`PRECOS_ID` é indexado, mas não declarado globalmente único. `observedAt` registra coleta; registros
+anteriores à expansão permanecem nulos. `updatedAt` nunca substitui vigência/alteração ERP. Versões
+futuras não são correntes; vigência só ordena observações já demonstradas como pertencentes ao mesmo
+contexto comercial.
+
+### Evidência externa e lacunas contratuais
+
+**[OPERACIONAL]** o GET direto de 27/09 retornou 128/filial nula e 252,08/filial 1, sem tabela.
+**[ESTÁTICA EXTERNA, NÃO REVALIDADA LOCALMENTE]** a versão examinada de UltraFv3Rest chama
+`WS_PRECOS(date)`, padrão 1900, sem tabela/vendedor/filial como argumentos; rotas distintas usam
+`WS_PRECOS_ECOMMERCE`, `WS_PRECOS_VARIACAO` e `WS_PRECOS_TABELA`. O Gestao examinado contém
+`PRECOS_CLASSIF_MAIS_ATUAL` e `PRECO_VENDA`, mas não se provou equivalência com os binários ativos
+ou com a tela.
+
+Até confirmação Firebird: tabela nula não é Tabela 1; filial nula não é TODAS; grupo 24 não é
+agrupamento 11; menor preço não é precedência. Zeros são tombstones apenas no contexto e versão
+comercial identificados. Uma linha sem contexto indispensável não pode invalidar silenciosamente
+outros contextos nem ser descartada como se nunca tivesse existido.
+
+### Tenancy do catálogo
+
+Com `TENANCY_MODE=disabled`, os três fluxos operam o catálogo global, incluindo produtos históricos
+`tenantId=NULL`. Com `default-only`, o tenant autenticado delimita preços e uma colisão/ausência falha
+fechada; não há atribuição automática de tenant. Essa distinção não autoriza acesso cruzado e não
+transforma `NULL` em catálogo compartilhado em modos multi-tenant futuros.
+
+## `LIBERAR_INTERNET` — contrato confirmado, implementação pendente
+
+O operador confirmou `N` como não autorizado no CRM e `S` como apenas elegível, ainda sujeito a
+`ATIVO`, `VENDAS` e demais regras. Em operações, o envelope informado é `response.data.data`; a
+amostra tem 51 linhas (47 N/4 S). A operação 99 está ativa mas é `N` e hoje aparece no seletor; 100 é
+ativa e `S`; 320/340 são `S`, porém `VENDAS=N`, logo `S` não é autorização suficiente.
+
+O pipeline atual preserva a linha bruta no cache `AppConfig`, mas a API de opções não filtra o campo,
+o frontend o descarta e o backend de pedidos valida apenas a existência da operação. Condição de
+recebimento não tem essa validação de cache. Assim, há falha de listagem e falha independente de
+autorização backend. A correção pertence a trabalho próprio e não está implementada nesta mudança de
+preços. Evidência e aceite: [LIBERAR_INTERNET](investigations/evidence/ultrafv3-liberar-internet-2026-09-27.md).
+
+## Contrato Firebird de preços coletado (28/09/2026)
+
+`PRECO_VENDA(CODPRODUTO, CODPRODUTO_CLAS, DTACOMP, CODFILIAL_IN)` filtra vigência até a data de
+comparação, aceita filial solicitada ou nula e ordena `DATA_VIGENCIA DESC`, `CODFILIAL DESC`,
+`DTAALTER DESC`. Também pode resolver classificação/produto, `CODPRECO`, `TABELA_PRECOS`, fator e
+índice, sob os parâmetros `PRECOS_CLASSIF_MAIS_ATUAL` e `CUSTO_REPOSICAO_FILIAL_PC`. A precedência de
+filial só desempata a mesma vigência; não supera uma vigência posterior.
+
+Para data inicial próxima de 1900, `WS_PRECOS` chama `WS_PRECOS_TOTAL`. O resultado inclui produto,
+classificação, `DATA_VIGENCIA`, `PRECOS_ID`, preço, filial e alteração, e pode incluir vigências
+futuras; não inclui tabela. A seleção corrente exclui futuro, preserva histórico e nunca usa
+`updatedAt` local como versão ERP.
+
+`WS_PRECOS_VARIACAO` expõe tabela, grupo, produto/classe, percentual/preço, vigências, filial, prazo,
+forma, condição, grupo fiscal, parceiro/localidade/marca e outros filtros. `WS_PRECOS_ECOMMERCE`
+combina `WS_PRECOS`, variações, ofertas e tabelas; com `RETURN_PRICE`, chama `PRECO_DIFERENCIADO`.
+Este começa em `PRECO_VENDA`, aplica variações de filial/produto/classe/grupo/níveis, credencial ou
+categoria, fatores, índice, quantidade, peso, taxa e arredondamento do produto.
+
+Dependências confirmadas de `PRECO_DIFERENCIADO`: `PRECO_VENDA`, `PRECOS_VARIACAO`,
+`PRECOS_VARIACAO_FILIAL`, `PRECOS_VARIACAO_CREDENCIAL`, `PRECOS_VARIACAO_CATEG`,
+`PRECOS_TABELA_PM`, `PRECOS_PRODUTOS_PM`, `PRODUTOS`, `PRODUTOS_CLAS` e `NIVEL_AGRUPAMENTO`.
+Consequentemente, a reconciliação local só aceita regra com tabela e grupo explícitos, sem filtro
+condicional não disponível no contexto; aceita percentuais positivos/negativos, escolhe a vigência
+aplicável mais nova e rejeita futuro. Isso não equipara grupo 24 a agrupamento 11 nem reproduz o motor
+completo.

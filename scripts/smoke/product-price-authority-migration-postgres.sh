@@ -82,5 +82,9 @@ WHERE id = 'old-api-write';
 SQL
 )
 [[ "$old_api_authority" == 'legacy|available' ]]
+# The final comparison targets the current schema, not merely the historical
+# authority migration. Apply every later ProductPrice expansion first; EXIT_2
+# must continue to mean real drift.
+psql <apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql
 docker run --rm --pull=never --network "$net" -e DATABASE_URL="$url" "$image" ./node_modules/.bin/prisma migrate diff --from-url "$url" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 printf '%s\n' PRODUCT_PRICE_AUTHORITY_PREDECESSOR_SCHEMA=PASS PRODUCT_PRICE_AUTHORITY_EXISTING_ROWS=PRESERVED PRODUCT_PRICE_AUTHORITY_OLD_API_COMPATIBILITY=PASS PRODUCT_PRICE_AUTHORITY_FINAL_SCHEMA_DIFF=PASS PRODUCT_PRICE_AUTHORITY_MIGRATION_POSTGRES=PASS

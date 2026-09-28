@@ -60,6 +60,7 @@
     "test:tenancy-expand:postgres": "bash scripts/smoke/tenancy-expand-postgres.sh",
     "test:orders-migration:postgres": "bash scripts/smoke/orders-migration-postgres.sh",
     "test:product-price-authority-migration:postgres": "bash scripts/smoke/product-price-authority-migration-postgres.sh",
+    "test:product-price-provenance-db-push:postgres": "bash scripts/smoke/product-price-provenance-db-push-postgres.sh",
     "test:tenancy-backfill": "npm run test:tenancy-backfill -w @salesforce-pro/api && node scripts/smoke/tenancy-backfill-safety.mjs",
     "test:tenancy-backfill:postgres": "bash scripts/smoke/tenancy-backfill-postgres.sh",
     "test:tenant-context-auth": "npm run test:tenant-context-auth -w @salesforce-pro/api",
