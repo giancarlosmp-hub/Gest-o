@@ -54,6 +54,10 @@ apply_product_price_authority_migration() {
   local db=$1 phase=$2
   run_observed "$phase" "$phase" 20260911190000_product_price_authority psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260911190000_product_price_authority/migration.sql
 }
+apply_product_price_source_observation_migration() {
+  local db=$1 phase=$2
+  run_observed "$phase" "$phase" 20260927160000_product_price_source_observation psql docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d "$db" <apps/api/prisma/migrations/20260927160000_product_price_source_observation/migration.sql
+}
 
 intro=$(git log --all --format=%H --diff-filter=A -- apps/api/prisma/migrations/20260904120000_orders_operational_view/migration.sql)
 [[ -n "$intro" && "$intro" != *$'\n'* ]]
@@ -74,6 +78,7 @@ run_observed fresh_sequence fresh_sequence predecessor_baseline prisma_db_push r
 apply_orders_migration fresh fresh_sequence
 run_observed fresh_sequence orders_schema_diff orders_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /work/orders-target.prisma --exit-code
 apply_product_price_authority_migration fresh complete_relevant_sequence
+apply_product_price_source_observation_migration fresh complete_relevant_sequence
 run_observed fresh_sequence final_schema_diff current_schema prisma_diff run_tooling fresh ./node_modules/.bin/prisma migrate diff --from-url "$(url fresh)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 for db in upgrade invalid historical; do run_tooling "$db" ./node_modules/.bin/prisma db push --schema /work/previous/schema.prisma --skip-generate >/dev/null; done
@@ -101,6 +106,7 @@ if docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d upgrade <apps/
 [[ $(docker exec "$pg" psql -X -U postgres -d upgrade -qAt -c "SELECT count(*) FROM pg_indexes WHERE indexname IN ('ErpOrderSync_tenantId_createdAt_idx','ErpOrderSync_tenantId_sellerId_createdAt_idx','ErpOrderStatusHistory_erpOrderSyncId_occurredAt_idx','ErpOrderStatusHistory_opportunityId_occurredAt_idx')") == 4 ]]
 run_observed upgrade_from_previous orders_schema_diff orders_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /work/orders-target.prisma --exit-code
 apply_product_price_authority_migration upgrade complete_relevant_sequence
+apply_product_price_source_observation_migration upgrade complete_relevant_sequence
 run_observed upgrade_from_previous final_schema_diff current_schema prisma_diff run_tooling upgrade ./node_modules/.bin/prisma migrate diff --from-url "$(url upgrade)" --to-schema-datamodel /app/apps/api/prisma/schema.prisma --exit-code
 
 printf '%s\n' "$fixture_sql" | docker exec -i "$pg" psql -X -v ON_ERROR_STOP=1 -U postgres -d invalid >/dev/null

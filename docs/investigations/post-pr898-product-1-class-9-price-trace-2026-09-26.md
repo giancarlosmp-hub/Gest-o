@@ -580,3 +580,18 @@ Os pacotes `FirebirdSql.Data.FirebirdClient(1).zip` e `(2).zip` já foram compar
 arquivos internos têm hashes correspondentes iguais. Eles contêm driver, configuração e logs, não as
 definições das procedures comerciais. Não repetir pesquisa na pasta do driver: o próximo passo é a
 leitura dos metadados Firebird pelo script já versionado.
+
+## Falha de schema da PR #899 e sequência corrigida (28/09/2026)
+
+O job `orders-migration-postgres` chegou a `final_schema_diff` com a expansão
+`20260911190000_product_price_authority` aplicada, mas sem
+`20260927160000_product_price_source_observation`. Por isso o Prisma retornou `EXIT_2` e listou
+`erpSourcePriceId`, `observedAt`, `sourceChangedAt` e o índice como drift. A comparação estava correta;
+a sequência de preparação do banco estava incompleta.
+
+O harness agora aplica, tanto em `fresh_sequence` quanto em `upgrade_from_previous`: Orders →
+autoridade de preço → proveniência/observação → `migrate diff --exit-code`. O teste de segurança exige
+textualmente as duas expansões antes do diff final. O harness dedicado de `prisma db push` passou a
+ser um job CI independente, sem dependência do job de Orders; retorno 77 continua não sendo sucesso.
+Neste checkout sem Docker foram validados sintaxe, testes estáticos e workflow, não a execução
+PostgreSQL. O resultado real de banco deve ser registrado apenas quando o CI terminar verde.

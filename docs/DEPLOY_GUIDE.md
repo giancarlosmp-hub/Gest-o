@@ -820,3 +820,9 @@ automático iniciado após o deploy. Nenhuma dessas validações autoriza saneam
 O teste de proveniência do schema integra `docker-compose-ci.yml` após a disponibilização da imagem
 PostgreSQL 16. Exit 77 falha o job: skip local não constitui gate verde. A liberação continua exigindo
 a execução CI real de `npm run test:product-price-provenance-db-push:postgres`.
+
+A prova agregada de Orders deve aplicar todas as expansões posteriores que já fazem parte do schema
+corrente antes de `final_schema_diff`: `20260911190000_product_price_authority` e
+`20260927160000_product_price_source_observation`. `EXIT_2` do Prisma significa drift e nunca pode ser
+convertido em sucesso. A prova dedicada de `db push` roda em job CI independente para não ser pulada
+por falha anterior no harness de Orders.

@@ -1530,3 +1530,17 @@ históricos. Ver `investigations/evidence/ultrafv3-liberar-internet-2026-09-27.m
 A nova evidência de preço das 18:00:55 é screenshot: 128 agora aparece com `PRECOS_ID=2878` e vigência
 24/09, enquanto 252,08 conserva ID 2166/vigência 2022. Ela não substitui o log anterior (ID 2776) nem
 foi correlacionada ao GET direto das 13:40. `READY_TO_MERGE_PRICE_FIX=NO` permanece.
+
+### PR #899 — correção do `orders-migration-postgres` (28/09/2026)
+
+**Causa comprovada pelo log do CI:** o harness aplicava a migration de Orders e
+`20260911190000_product_price_authority`, mas executava `final_schema_diff` contra o schema atual sem
+aplicar `20260927160000_product_price_source_observation`. O `EXIT_2` era drift real dos três campos
+de proveniência e do índice; não foi ignorado. A sequência fresh e upgrade agora aplica também a
+expansão de observação antes do diff final, preservando a verificação `--exit-code`.
+
+O teste dedicado de `prisma db push` foi movido para job independente
+`price-provenance-db-push-postgres`; assim ele é agendado mesmo se `orders-migration-postgres` falhar.
+Os testes estáticos locais passaram, mas os dois testes PostgreSQL reais permanecem `NOT_VERIFIED`
+neste ambiente sem Docker e precisam ficar verdes no CI. `READY_TO_MERGE_PRICE_FIX=NO` e a coleta
+Firebird continuam pendentes.
