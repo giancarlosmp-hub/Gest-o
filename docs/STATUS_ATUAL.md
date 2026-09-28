@@ -1,3 +1,27 @@
+# Investigação do Erro de Imagem API Ausente no Workflow Production Schema PR827 (Run 36469364250) — 28/09/2026
+
+- **Evidências e Causa Raiz Auditadas:**
+  - O workflow **Production Schema PR827** (Run 36469364250, Job 109087426885, migration `20260927160000_product_price_source_observation`, modo `apply`, ambiente `canonical`) falhou no passo de validação pré-aplicação com o erro: `[production-schema-apply] ERRO: imagem API do SHA ausente`.
+  - **Motivo da Ausência da Imagem:** O runner `production-schema-apply.sh` e o Prisma utilizam a imagem OCI local `gest-o-api:$EXPECTED_SHA` na VPS para executar a comparação de schema e geração de diffs via `docker run`. As imagens OCI são construídas e armazenadas localmente no Docker Engine da VPS pelo workflow **Deploy Production** em `phase=build` e não são transportadas por registry externo nem construídas pelo workflow de schema. Como a etapa de build (`Deploy Production` phase=build) não havia sido executada previamente na VPS para o SHA exato da run, a imagem OCI não foi encontrada localmente no Docker Engine.
+  - **SHA Esperado vs Imagem Presente:** O workflow espera `EXPECTED_SHA=${{ github.sha }}`. Se a imagem `gest-o-api:$EXPECTED_SHA` estiver ausente ou possuir rótulo de revisão OCI (`org.opencontainers.image.revision`) divergente, o processo falha fechado imediatamente.
+  - **Evidência de Imagem:** A imagem OCI é construída localmente na VPS pelo script de deploy. O workflow de schema valida fail-closed e consome a imagem OCI do SHA esperado.
+  - **String de Confirmação Exigida para Mode Apply:** Para a migration selecionada (`20260927160000_product_price_source_observation`) e para as demais migrations padrão do runner, a string de confirmação exata exigida pelo formulário do GitHub Actions é `PRODUCTION_SCHEMA_APPLY` (para a migration legada `20260827190000_add_erp_order_manual_resolution`, a string era `APPLY_PR827_SCHEMA`).
+
+- **Melhorias de Blindagem e Testes Implementados:**
+  - **Reforço em `scripts/production-schema-apply.sh`:** Adicionada validação estrita da variável `API_IMAGE` (padrão `gest-o-api:$APP_COMMIT`). O script agora exige a existência da imagem OCI E valida se o rótulo `org.opencontainers.image.revision` é estritamente igual ao `$APP_COMMIT` (`imagem API com SHA divergente`). Além disso, todas as chamadas de `docker run` no script foram atualizadas para utilizar `$API_IMAGE`.
+  - **Reforço em `.github/workflows/production-schema-pr827.yml`:** Passagem explícita da variável `API_IMAGE="gest-o-api:$EXPECTED_SHA"` ao chamar `scripts/production-schema-apply.sh`.
+  - **Cobertura em `scripts/smoke/production-schema-safety.mjs`:** Adicionada suíte de testes de fumaça validando os três cenários do runner:
+    1. Imagem API ausente no Docker (rejeita com `imagem API do SHA ausente`).
+    2. Imagem API presente com rótulo OCI divergente (rejeita com `imagem API com SHA divergente`).
+    3. Imagem API presente com rótulo OCI correspondente ao SHA (aprova e avança).
+
+- **Ordem Obrigatória de Execução para Produção (Sem Aplicação Efetuada):**
+  1. Executar **Deploy Production** com `phase=build` para o SHA desejado (constrói e rotula `gest-o-api:$SHA` na VPS).
+  2. Executar **Production Schema PR827** com `mode=preview` para a migration `20260927160000_product_price_source_observation`.
+  3. Executar **Production Schema PR827** com `mode=apply` e `confirm=PRODUCTION_SCHEMA_APPLY` para a migration `20260927160000_product_price_source_observation`.
+  4. Executar **Deploy Production** com `phase=cutover` para o mesmo SHA.
+  - *Nenhuma aplicação produtiva, migration, deploy ou cutover foi executada nesta investigação.*
+
 # Resolução do Bloqueio de Schema no Cutover da Implantação da Produção nº 188 (28/09/2026)
 
 - **Análise da Causa Raiz:**

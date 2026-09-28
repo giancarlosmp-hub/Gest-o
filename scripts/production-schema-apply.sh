@@ -28,7 +28,10 @@ APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"; export APP_COMMIT
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
 # This performs backup/SHA, origin/main, expected PostgreSQL/network/volume and runtime checks.
 PRODUCTION_PREFLIGHT_MODE=cutover bash scripts/production-preflight.sh
-docker image inspect "gest-o-api:$APP_COMMIT" >/dev/null 2>&1 || die "imagem API do SHA ausente"
+API_IMAGE="${API_IMAGE:-gest-o-api:$APP_COMMIT}"; export API_IMAGE
+docker image inspect "$API_IMAGE" >/dev/null 2>&1 || die "imagem API do SHA ausente"
+image_revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$API_IMAGE" 2>/dev/null) || die "imagem API com SHA divergente"
+[[ "$image_revision" == "$APP_COMMIT" ]] || die "imagem API com SHA divergente"
 MODE=validate SQL_FILE="$MIGRATION" \
   ALLOW_DATA_BACKFILL="$([[ "$MIGRATION_ID_REQUESTED" == 20260904120000_orders_operational_view ]] && printf orders-tenant-authority-v1)" \
   bash scripts/production-schema-preview.sh
@@ -37,7 +40,7 @@ if [[ "$MODE" == preview ]]; then
   preview_tmp=$(mktemp -d)
   trap 'rm -rf "$preview_tmp"' EXIT
   docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
-    "gest-o-api:$APP_COMMIT" ./node_modules/.bin/prisma migrate diff \
+    "$API_IMAGE" ./node_modules/.bin/prisma migrate diff \
     --from-schema-datasource apps/api/prisma/schema.prisma \
     --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$preview_tmp/pre.raw.sql"
   node scripts/schema-diff-filter.mjs "$preview_tmp/pre.raw.sql" "$preview_tmp/pre.sql" pre "$MIGRATION_ID_REQUESTED"
@@ -74,7 +77,7 @@ admin_identity(){
 }
 prisma_diff(){
   docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
-    "gest-o-api:$APP_COMMIT" ./node_modules/.bin/prisma migrate diff \
+    "$API_IMAGE" ./node_modules/.bin/prisma migrate diff \
     --from-schema-datasource apps/api/prisma/schema.prisma \
     --to-schema-datamodel apps/api/prisma/schema.prisma --script
 }

@@ -1,3 +1,19 @@
+# Investigação de Ausência de Imagem API no Workflow Production Schema PR827 (Run 36469364250) — 28/09/2026
+
+- **Análise Detalhada da Falha (Run 36469364250, Job 109087426885):**
+  - O workflow **Production Schema PR827** executado no modo `apply` para a migration `20260927160000_product_price_source_observation` falhou no preflight com o erro `[production-schema-apply] ERRO: imagem API do SHA ausente`.
+  - **Origem e Localização da Imagem OCI:** O runner de aplicação de schema (`production-schema-apply.sh`) exige que o utilitário Prisma execute via contêiner OCI `gest-o-api:$EXPECTED_SHA` conectado à rede interna do banco. As imagens OCI da aplicação são geradas e mantidas localmente no Docker Engine da VPS pela fase de build do **Deploy Production** (`phase=build`), não sendo enviadas para registries públicos ou externos. Como o disparo do schema apply ocorreu antes da fase de build do deploy para o SHA selecionado, a imagem local `gest-o-api:$EXPECTED_SHA` não estava presente na VPS.
+  - **Confirmação Exigida para Aplicação:** A string de confirmação exata configurada no workflow `.github/workflows/production-schema-pr827.yml` para autorizar a aplicação em modo `apply` é `PRODUCTION_SCHEMA_APPLY`.
+
+- **Ações Corretivas e Hardening Efetuados:**
+  - **Script `production-schema-apply.sh`:** Atualizado para parametrizar explicitamente a imagem OCI via `API_IMAGE` (padrão `gest-o-api:$APP_COMMIT`). Adicionada verificação estrita do rótulo OCI `org.opencontainers.image.revision`, garantindo que a imagem seja rejeitada se a revisão do rótulo não coincidir exatamente com o SHA esperado (`imagem API com SHA divergente`).
+  - **Workflow `production-schema-pr827.yml`:** Atualizado para injetar explicitamente a variável `API_IMAGE="gest-o-api:$EXPECTED_SHA"` durante a invocação de `production-schema-apply.sh`.
+  - **Testes Automatizados de Fumaça (`scripts/smoke/production-schema-safety.mjs`):** Incluída cobertura unitária simulando os três estados possíveis: imagem ausente (rejeição), imagem com SHA divergente (rejeição) e imagem válida com rótulo OCI correspondente (aprovação).
+
+- **Sequência Operacional e Regras de Segurança:**
+  - A ordem sequencial obrigatória de deploy quando houver alteração de schema é: **Deploy Production (phase=build)** $\rightarrow$ **Production Schema PR827 (mode=preview)** $\rightarrow$ **Production Schema PR827 (mode=apply, confirm=PRODUCTION_SCHEMA_APPLY)** $\rightarrow$ **Deploy Production (phase=cutover)**.
+  - *Nenhuma aplicação produtiva, migration, deploy ou cutover foi realizada durante esta investigação.*
+
 # Resolução do Bloqueio de Cutover da Implantação da Produção nº 188 (28/09/2026)
 
 - **Análise da Causa Raiz:**
