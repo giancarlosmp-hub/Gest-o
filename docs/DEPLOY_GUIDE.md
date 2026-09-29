@@ -33,8 +33,9 @@ Quando a imagem anterior do container em execução no host (ex: artefato `31019
    - Gera um backup tarball OCI imutável (`docker save`) em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/` com hashes SHA-256 calculados para garantir capacidade de rollback futuro.
    - Registra o bundle de evidências em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` e `manifest.tsv`, documentando a indisponibilidade do artefato legado `310198...` (`sha256:f4dcc...`) e estabelecendo a nova baseline.
    - **Garantias Absolutas:** Não remove ou para nenhum container, não altera imagens em execução, proíbe `docker commit`/`docker export` e **NÃO executa o cutover**.
-4. **Execução Posteriordo Cutover Reautorizado:**
-   - Após a verificação da evidência de rebaseline, o cutover do **Deploy Production** (`phase=cutover`) reconhecerá o baseline aprovado para `$APP_COMMIT` e efetuará a transição dos containers com segurança.
+4. **Execução Posterior do Cutover Reautorizado:**
+   - Após a verificação da evidência de rebaseline, o cutover do **Deploy Production** (`phase=cutover`) reconhecerá o baseline aprovado para `$APP_COMMIT` (`validate_rebaseline_evidence`).
+   - Se o artefato OCI verificado do rebaseline não estiver carregado na memória do Docker Engine, o script executa `docker load -i "$tar_path"` a partir do backup OCI imutável, revalida o rótulo OCI `org.opencontainers.image.revision == $APP_COMMIT` e efetua a transição dos containers com segurança.
 
 ## Reautorização do Cutover do Production Deploy (`cutover-started`) (29/09/2026)
 

@@ -220,9 +220,21 @@ for spec in api:4000 web:5173; do
     log "rollback_image role=$role method=$ROLLBACK_RESOLUTION_METHOD verified_identity=$ROLLBACK_VERIFIED_IDENTITY artifact_id=$ROLLBACK_ARTIFACT_ID pinned_reference=$ROLLBACK_ARTIFACT_ID"
   elif validate_rebaseline_evidence "$APP_COMMIT"; then
     eval "artifact_id=\$REBASELINE_VERIFIED_${role^^}_ID"
+    eval "tar_path=\$REBASELINE_VERIFIED_${role^^}_TAR"
     ROLLBACK_RESOLUTION_METHOD="authorized-rebaseline"
     ROLLBACK_VERIFIED_IDENTITY="$image_id"
     ROLLBACK_ARTIFACT_ID="$artifact_id"
+
+    if ! docker image inspect "$ROLLBACK_ARTIFACT_ID" >/dev/null 2>&1; then
+      log "artefato OCI de rebaseline $ROLLBACK_ARTIFACT_ID não presente no Docker Engine para $role; restaurando a partir do backup OCI $tar_path"
+      [[ -n "$tar_path" && -f "$tar_path" && ! -L "$tar_path" ]] || die "backup OCI $tar_path para $role ausente ou inválido"
+      docker load -i "$tar_path" || die "falha ao restaurar backup OCI $tar_path para $role no Docker Engine"
+      docker image inspect "$ROLLBACK_ARTIFACT_ID" >/dev/null 2>&1 || die "artefato OCI $ROLLBACK_ARTIFACT_ID não disponível no Docker Engine mesmo após carregar backup OCI"
+    fi
+
+    target_rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null) || die "não foi possível ler rótulo de revisão do artefato de rebaseline $ROLLBACK_ARTIFACT_ID de $role"
+    [[ "$target_rev" == "$APP_COMMIT" ]] || die "artefato OCI de rebaseline $ROLLBACK_ARTIFACT_ID de $role possui rótulo org.opencontainers.image.revision ($target_rev) divergente de $APP_COMMIT"
+
     tag="gest-o-${role}-rebaseline:$APP_COMMIT"
     docker tag "$ROLLBACK_ARTIFACT_ID" "$tag"
     pinned_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null) || die "referência fixada de rebaseline inválida para $role"
@@ -235,8 +247,8 @@ for spec in api:4000 web:5173; do
   fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$ROLLBACK_ARTIFACT_ID" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" "$ROLLBACK_RESOLUTION_METHOD" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/previous-runtime.tsv"
   if [[ "$role" == api && "$rollback_mode" == image ]]; then
-    if previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null); then :; else previous_version=""; fi
-    if previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null); then :; else previous_built_at=""; fi
+    if previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null); then :; else previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null || echo ""); fi
+    if previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null); then :; else previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null || echo ""); fi
     printf 'ROLLBACK_APP_COMMIT=%q\nROLLBACK_APP_VERSION=%q\nROLLBACK_APP_BUILT_AT=%q\n' "${previous_commit:-unknown}" "${previous_version:-unknown}" "${previous_built_at:-unknown}" >>"$evidence/rollback-images.env"
   fi
 done

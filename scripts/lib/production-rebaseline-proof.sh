@@ -46,5 +46,9 @@ validate_rebaseline_evidence() {
   REBASELINE_VERIFIED_COMMIT=$rec_commit
   REBASELINE_VERIFIED_API_ID=$rec_api_id
   REBASELINE_VERIFIED_WEB_ID=$rec_web_id
+  REBASELINE_VERIFIED_API_TAR=$rec_api_tar
+  REBASELINE_VERIFIED_API_TAR_SHA=$rec_api_tar_sha
+  REBASELINE_VERIFIED_WEB_TAR=$rec_web_tar
+  REBASELINE_VERIFIED_WEB_TAR_SHA=$rec_web_tar_sha
   return 0
 }
