@@ -19,6 +19,10 @@ assert.doesNotMatch(rebaselineScript, /docker rm|docker rmi|docker stop/);
 assert.match(rebaselineScript, /unavailable_legacy_artifact/);
 assert.match(rebaselineScript, /cutover_executed\\tNO/);
 
+// Syntax validation for scripts/production-rebaseline.sh
+const scriptSyntaxCheck = spawnSync("bash", ["-n", "scripts/production-rebaseline.sh"], { encoding: "utf8" });
+assert.equal(scriptSyntaxCheck.status, 0, `scripts/production-rebaseline.sh syntax check failed: ${scriptSyntaxCheck.stderr}`);
+
 assert.match(deployScript, /validate_rebaseline_evidence/);
 assert.match(deployScript, /method=authorized-rebaseline/);
 
@@ -30,7 +34,8 @@ assert.match(rebaselineWorkflow, /description:.*PRODUCTION_REBASELINE_APPROVED/)
 assert.match(rebaselineWorkflow, /required:\s*true/);
 assert.doesNotMatch(rebaselineWorkflow, /confirm:\s*[\s\S]*?default:/);
 assert.match(rebaselineWorkflow, /PRODUCTION_REBASELINE_APPROVED/);
-assert.match(rebaselineWorkflow, /CONFIRM="\$REBASELINE_CONFIRM"[\s\S]*?EXPECTED_SHA="\$EXPECTED_MAIN_SHA"[\s\S]*?scripts\/production-rebaseline\.sh/);
+assert.match(rebaselineWorkflow, /envs:\s*REBASELINE_CONFIRM,EXPECTED_MAIN_SHA/);
+assert.match(rebaselineWorkflow, /CONFIRM="\$REBASELINE_CONFIRM" EXPECTED_SHA="\$EXPECTED_MAIN_SHA" \\\s*bash scripts\/production-rebaseline\.sh/);
 assert.match(rebaselineWorkflow, /REBASELINE_TARGET_SHA/);
 assert.match(rebaselineWorkflow, /REBASELINE_VERIFIED_API_IMAGE/);
 assert.match(rebaselineWorkflow, /REBASELINE_VERIFIED_WEB_IMAGE/);
@@ -39,6 +44,29 @@ assert.match(rebaselineWorkflow, /REBASELINE_EVIDENCE_FILE/);
 assert.match(rebaselineWorkflow, /REBASELINE_RESULT/);
 assert.doesNotMatch(rebaselineWorkflow, /MODE=cutover/);
 assert.doesNotMatch(rebaselineWorkflow, /deploy-production\.sh/);
+
+// Extract remote SSH script block from workflow for analysis
+const remoteScriptMatch = rebaselineWorkflow.match(/uses:\s*appleboy\/ssh-action@v1\.2\.0[\s\S]*?script:\s*\|([\s\S]*?)(?=\n\s*- name:|\n\s*$)/);
+assert.ok(remoteScriptMatch, "Must find appleboy/ssh-action script block in workflow");
+const remoteScript = remoteScriptMatch[1];
+
+// Disallow complex syntax / functions / cases / nested bash -c / eval in remote script
+assert.doesNotMatch(remoteScript, /case\b|function\b|\b\w+\(\)/, "remote script must be linear without functions or case statements");
+assert.doesNotMatch(remoteScript, /bash -c|eval/, "remote script must not use nested bash -c or eval");
+
+// Syntax validation for remote script directly
+const remoteSyntaxCheck = spawnSync("bash", ["-n"], { input: remoteScript, encoding: "utf8" });
+assert.equal(remoteSyntaxCheck.status, 0, `workflow remote script syntax check failed: ${remoteSyntaxCheck.stderr}`);
+
+// Simulate appleboy/ssh-action script_stop line processing (appending status check or semicolon after lines)
+const simulatedAppleboyScript = remoteScript
+  .split("\n")
+  .map(line => line.trim())
+  .filter(line => line.length > 0 && !line.startsWith("#"))
+  .join(";\n");
+
+const simulatedAppleboyCheck = spawnSync("bash", ["-n"], { input: simulatedAppleboyScript, encoding: "utf8" });
+assert.equal(simulatedAppleboyCheck.status, 0, `simulated appleboy ssh-action remote script syntax check failed: ${simulatedAppleboyCheck.stderr}`);
 
 // Static assertions ensuring no invalid Bash expansion of inputs
 assert.doesNotMatch(rebaselineWorkflow, /\$\{#inputs\./, "workflow must not contain \${#inputs.");

@@ -1,3 +1,36 @@
+# Correção do Erro de Parsing Remoto SSH no Production Rebaseline (Run 36630401825) — 29/09/2026
+
+- **Diagnóstico do Erro de Parsing Remoto (`unexpected token ';'`):**
+  - No workflow `.github/workflows/production-rebaseline.yml` (Run 36630401825), após a validação local dos inputs no runner ser aprovada com sucesso (`CONFIRM=PRODUCTION_REBASELINE_APPROVED` e `EXPECTED_MAIN_SHA=3d1f17f8b699c1a53d890df8443934c671c3b551`), a execução no `appleboy/ssh-action@v1.2.0` falhava na VPS com:
+    `bash: -c: line 16: syntax error near unexpected token ';'`
+    `Process exited with status 2`
+  - **Causa Raiz:** O bloco `script` multilinha enviado à action SSH continha declarações de funções (`log()`, `die()`), estruturas `case ... in ... esac` e blocos condicionais inline. O `appleboy/ssh-action` concatena ou transforma as linhas do script em uma única string `bash -c "..."` delimitando comandos com ponto e vírgula `;`, o que corrompe a sintaxe de cabeçalhos `case` (produzindo `case ... in;`) e de blocos de funções em subshells remotas.
+  - **Confirmação de Não Mutação Produtiva:** NENHUM backup OCI (`/var/log/gest-o/oci-backups/`), registro de rebaseline (`/var/log/gest-o/rebaseline/`) ou alteração nos containers/banco foi concluído ou executado na VPS. A falha ocorreu no momento da interpretação sintática do script remoto antes de qualquer execução de comando no servidor.
+
+- **Correção do Script Inline SSH e Blindagem de Testes:**
+  - **Script Remoto Mínimo e Linear:** Removida a duplicação de validações Bash (funções e cases) do script inline remoto. O script SSH foi refatorado para ser estritamente linear, chamando diretamente o script versionado e testado no repositório (`scripts/production-rebaseline.sh`):
+    ```yaml
+    script: |
+      set -Eeuo pipefail
+      cd /apps/gest-o
+      git fetch origin main
+      git switch main
+      git pull --ff-only origin main
+      CONFIRM="$REBASELINE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+        bash scripts/production-rebaseline.sh
+      printf 'REBASELINE_TARGET_SHA=%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_VERIFIED_API_IMAGE=gest-o-api:%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_VERIFIED_WEB_IMAGE=gest-o-web:%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_OCI_BACKUP_DIR=/var/log/gest-o/oci-backups/%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_EVIDENCE_FILE=/var/log/gest-o/rebaseline/%s/result.tsv\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_RESULT=PASS\n'
+    ```
+  - **Manutenção dos Envs SSH:** A propriedade `envs` da action foi mantida exatamente como `REBASELINE_CONFIRM,EXPECTED_MAIN_SHA`.
+  - **Atualização dos Testes Estáticos (`scripts/smoke/production-rebaseline-safety.mjs`):**
+    - Adicionado teste de sintaxe `bash -n` para `scripts/production-rebaseline.sh`.
+    - Adicionada verificação `bash -n` do script remoto extraído do workflow e simulação do processamento de linhas do `appleboy/ssh-action` (delimitando linhas por `;`).
+    - Adicionada asserção garantindo ausência de funções (`function`, `()`), `case`, `eval` e `bash -c` aninhados no script remoto.
+
 # Correção da Expressão GitHub Actions no Workflow de Rebaseline (Run 36629537190) — 29/09/2026
 
 - **Diagnóstico do Erro `bad substitution`:**
