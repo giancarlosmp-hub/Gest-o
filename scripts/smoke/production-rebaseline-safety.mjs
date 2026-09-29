@@ -8,8 +8,9 @@ const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 const rebaselineScript = read("scripts/production-rebaseline.sh");
 const rebaselineProofLib = read("scripts/lib/production-rebaseline-proof.sh");
 const deployScript = read("scripts/deploy-production.sh");
+const rebaselineWorkflow = read(".github/workflows/production-rebaseline.yml");
 
-// Static Assertions & Safety Checks
+// Static Assertions & Safety Checks for Script
 assert.match(rebaselineScript, /PRODUCTION_REBASELINE_APPROVED/);
 assert.match(rebaselineScript, /EXPECTED_SHA/);
 assert.match(rebaselineScript, /docker save/);
@@ -20,6 +21,24 @@ assert.match(rebaselineScript, /cutover_executed\\tNO/);
 
 assert.match(deployScript, /validate_rebaseline_evidence/);
 assert.match(deployScript, /method=authorized-rebaseline/);
+
+// Static Assertions & Safety Checks for Workflow
+assert.match(rebaselineWorkflow, /name:\s*Production Rebaseline/);
+assert.match(rebaselineWorkflow, /workflow_dispatch:/);
+assert.match(rebaselineWorkflow, /confirm:/);
+assert.match(rebaselineWorkflow, /description:.*PRODUCTION_REBASELINE_APPROVED/);
+assert.match(rebaselineWorkflow, /required:\s*true/);
+assert.doesNotMatch(rebaselineWorkflow, /confirm:\s*[\s\S]*?default:/);
+assert.match(rebaselineWorkflow, /PRODUCTION_REBASELINE_APPROVED/);
+assert.match(rebaselineWorkflow, /CONFIRM="\$REBASELINE_CONFIRM"[\s\S]*?EXPECTED_SHA="\$EXPECTED_MAIN_SHA"[\s\S]*?scripts\/production-rebaseline\.sh/);
+assert.match(rebaselineWorkflow, /REBASELINE_TARGET_SHA/);
+assert.match(rebaselineWorkflow, /REBASELINE_VERIFIED_API_IMAGE/);
+assert.match(rebaselineWorkflow, /REBASELINE_VERIFIED_WEB_IMAGE/);
+assert.match(rebaselineWorkflow, /REBASELINE_OCI_BACKUP_DIR/);
+assert.match(rebaselineWorkflow, /REBASELINE_EVIDENCE_FILE/);
+assert.match(rebaselineWorkflow, /REBASELINE_RESULT/);
+assert.doesNotMatch(rebaselineWorkflow, /MODE=cutover/);
+assert.doesNotMatch(rebaselineWorkflow, /deploy-production\.sh/);
 
 // Behavioral Unit / Mock Tests for Rebaseline Logic & Proof Verification
 const testDir = join(tmpdir(), `gest-o-rebaseline-test-${Date.now()}`);
