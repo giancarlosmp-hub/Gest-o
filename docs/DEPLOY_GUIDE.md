@@ -896,9 +896,28 @@ mas somente aceita essa candidata quando config ID, descriptor digest ou manifes
 o vínculo. O label `org.opencontainers.image.revision` e a tag não bastam. O inventário registra o
 método e o config ID imutável que o rollback efetivamente fornecerá ao Compose.
 
-Se qualquer papel falhar, não há cutover. Preserve os containers e siga o procedimento de recuperação
-separado em `investigations/production-cutover-rollback-image-identity-2026-09-29.md`; não use
-commit/export do container. Schema preview/apply não deve ser repetido quando a evidência protegida
-Prisma-equivalente e o diff live já passam. Reautorização só vale para marcador `cutover-started`
-revisado: o workflow encaminha `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` pelo entrypoint, e o script
-revalida baseline, imagens, backup, schema, portas e banco.
+### Fontes Autorizadas de Recuperação e Bloqueio Operacional
+
+Quando o cutover falha com o erro `api sem imagem anterior verificável; nenhuma imagem local demonstra vínculo criptográfico; fallback por container proibido`:
+
+1. **Investigação de Fontes Autorizadas:**
+   - **Registry (Registro OCI):** Inexistente no projeto (as imagens são construídas diretamente no Docker Engine da VPS host em `MODE=build`).
+   - **Backup OCI:** Inexistente (as rotinas de backup preservam dumps PostgreSQL `.sql.gz` e arquivos env, mas não criam tarballs OCI `docker save`).
+   - **Rebuild reproduzível do commit:** Reconstruir o commit anterior (ex: `310198...`) gera um novo OCI Config ID (`0e5c...`), que difere da hash criptográfica da imagem em execução (`f4dcc...`). Aplicar tags ou rótulos Git não altera o Config ID da imagem reconstruída e é rejeitado por design.
+
+2. **Declaração de Bloqueio Operacional:**
+   - Se nenhuma das três fontes autorizadas fornecer uma imagem local que coincida com o digest do runtime em execução (`sha256:f4dcc...`), é declarado o **Bloqueio Operacional do Cutover**.
+   - **Proibição de Soluções Improvisadas:** É estritamente proibido usar `docker commit`, `docker export`, criação de tags falsas ou enfraquecer as verificações fail-closed de `scripts/lib/production-rollback-image.sh`.
+   - Os containers baseline anteriores devem permanecer ativos, saudáveis e atendendo requisições enquanto o bloqueio persistir.
+
+3. **Procedimento de Recuperação e Validação do Artefato:**
+   - **Se um arquivo de backup OCI externo existir (`.tar`):**
+     1. Importar o artefato: `docker load -i gest-o-api-f4dcccfb.tar`
+     2. Validar a hash criptográfica: `docker image inspect sha256:f4dcccfb2c25004a61f117c022fb5028d16ac891a3d7648a05b3168939a6dda2`
+     3. Confirmar que o Config ID inspecionado coincide com `.Image` do container rodando.
+     4. Executar o cutover autorizadamente: `MODE=cutover CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED bash scripts/deploy-production.sh`
+   - **Se o artefato for irrecuperável:**
+     Exige-se um procedimento formal de re-baselining em janela de manutenção aprovada pela liderança técnica, onde um novo baseline validado (`MODE=build`) é estabelecido como referência de rollback sem violar as travas de segurança do deploy.
+
+Detalhes completos da investigação em `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
+Reautorização de marcador stale só vale para `cutover-started` revisado: o workflow encaminha `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` pelo entrypoint, e o script revalida baseline, imagens, backup, schema, portas e banco.

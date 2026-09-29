@@ -403,7 +403,7 @@ pinada, identidades aprovadas e revisão das evidências são gates. Runtime con
 O preflight corrige um falso negativo sem alterar a produção: como o hostname do PostgreSQL existe somente no DNS da rede Docker, a sondagem usa um container efêmero local `postgres:16`, sem pull automático, dentro de `gest-o_default`. Ela não consulta o DNS do host, não fixa IP e não recebe senha nem a `DATABASE_URL`. Nenhum deploy foi realizado; o estágio permanece 🔵 PR.
 
 
-**Rollback:** nomes de containers não são artefatos de release. Antes de cada cutover, as imagens anteriores de API e WEB são etiquetadas separadamente e inventariadas. O rollback remove somente API/WEB novas e recria os serviços com as tags salvas; não depende de o container anterior existir e não administra o PostgreSQL. Consulte `DEPLOY_GUIDE.md`.
+**Rollback e Bloqueio Operacional do Cutover:** Nomes de contêineres não são artefatos de release. Antes de cada cutover, as imagens anteriores de API e WEB são verificadas por vínculo criptográfico local e etiquetadas separadamente. Caso a imagem anterior do runtime não seja verificável localmente (devido à ausência de registry OCI externo, ausência de tarball de backup OCI e incompatibilidade de digests de rebuilds), o cutover entra em **Bloqueio Operacional fail-closed**. É estritamente proibido usar `docker commit` ou `docker export` improvisados. A recuperação do cutover exige restauração/importação de arquivo OCI de backup (`docker load`) e validação via `docker image inspect` antes do cutover, ou procedimento formal de re-baselining operacional. Consulte [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md) e `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
 
 ---
 
