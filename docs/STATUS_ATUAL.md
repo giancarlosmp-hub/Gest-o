@@ -1,3 +1,19 @@
+# Investigação das Fontes Autorizadas e Declaração de Bloqueio Operacional do Cutover — 29/09/2026
+
+- **Confirmação da Trava Fail-Closed:**
+  - O cutover bloqueia corretamente quando o container em execução possui `.Image = sha256:f4dcccfb...` / `.Config.Image = gest-o-api:310198aea...` e nenhuma imagem OCI local possui vínculo criptográfico comprovado (`resolve_rollback_image`).
+  - O erro `api sem imagem anterior verificável; nenhuma imagem local demonstra vínculo criptográfico; fallback por container proibido` é a resposta esperada e autoritativa do sistema.
+
+- **Conclusões da Investigação das 3 Fontes Autorizadas de Recuperação:**
+  1. **Registry (Registro OCI):** **Inexistente.** O pipeline do Gest-o constrói imagens localmente na VPS host em `MODE=build`. Não existe registry OCI externo configurado ou utilizado.
+  2. **Backup OCI:** **Inexistente.** As rotinas de backup (`backup.sh`, `prepare-production-recovery-backup.sh`) geram dumps lógicos PostgreSQL (`.sql.gz`) e arquivos env, mas não criam tarballs OCI (`docker save`).
+  3. **Rebuild reproduzível do commit 310198...:** **Incompatível Criptograficamente.** Reconstruir o commit `310198...` gera um novo digest OCI (`sha256:0e5c...`), que difere do runtime `f4dcc...`. O validador ignora deliberadamente nomes de tags e rótulos de revisão, exigindo correspondência exata de digest criptográfico.
+
+- **Declaração de Bloqueio Operacional e Procedimento de Recuperação:**
+  - **Bloqueio Operacional Declarado:** O cutover permanece **bloqueado**. É estritamente proibido relaxar a trava fail-closed ou utilizar `docker commit`/`docker export` improvisados.
+  - **Recuperação e Validação:** Caso exista backup OCI externo (`.tar`), ele deve ser importado via `docker load` e validado por `docker image inspect sha256:f4dcc...` antes de acionar `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`. Caso o artefato seja irrecuperável, exige-se procedimento formal de re-baselining operacional em janela de manutenção aprovada.
+  - **Detalhes e Relatório de Investigação:** `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
+
 # Correção do gate da imagem anterior de rollback — 29/09/2026
 
 - O cutover agora resolve `.Image` diretamente ou comprova vínculo OCI da candidata `.Config.Image`
