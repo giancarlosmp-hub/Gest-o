@@ -1,3 +1,11 @@
+## Validação de Imagens OCI Alvo e Container Anterior no Cutover (29/09/2026)
+
+Durante a fase `cutover` em `scripts/deploy-production.sh`:
+1. **Validação Estrita de Imagem Alvo:**
+   - O runner valida fail-closed a presença local das imagens OCI `gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT` e reconfirma que o rótulo OCI `org.opencontainers.image.revision` é estritamente igual a `$APP_COMMIT`.
+2. **Inspeção de Imagem Anterior para Rollback:**
+   - O runner inspeciona o container em execução na porta 4000 e obtém seu `image_id` anterior. Se essa imagem anterior estiver ausente/untagged no Docker Engine, a tentativa é rejeitada fail-closed (`fallback por container proibido`), garantindo que o rollback permaneça 100% ancorado em imagens versionadas.
+
 ## Reautorização do Cutover do Production Deploy (`cutover-started`) (29/09/2026)
 
 Quando um deploy na fase `cutover` falhar ou for interrompido após a gravação do marcador `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started`, o próximo disparo em `phase=cutover` falhará por padrão com a mensagem:

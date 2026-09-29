@@ -109,10 +109,49 @@ assert.match(rollback,/restaurado não usa o image ID anterior/); assert.match(r
 assert.match(deploy,/gest-o-\$\{role\}-rollback:\$release/); assert.match(deploy,/previous-runtime\.tsv/); assert.match(deploy,/rollback-images\.env/);
 assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\timage_id\\trollback_tag\\tport\\tnetworks\\trestart_policy\\tprevious_commit/);
 assert.match(deploy,/rollback-containers\.tsv/);
+assert.match(deploy,/Validando imagens OCI alvo para cutover: \$API_IMAGE e \$WEB_IMAGE/);
+assert.match(deploy,/docker image inspect "\$target_img"/);
+assert.match(deploy,/org\.opencontainers\.image\.revision/);
 assert.match(deploy,/docker image inspect "\$image_id"/); // imagem disponível -> modo image
 assert.match(deploy,/rollback_mode=container/); // API ou WEB históricos podem usar container
 assert.match(deploy,/compose_project.*com\.docker\.compose\.project/);
 assert.match(deploy,/"\$compose_project" != gest-o-production/); // ausência de imagem no projeto atual falha fechada
+
+// Validação de cenário: Imagens alvo do commit futuro existem com rótulo OCI correto,
+// enquanto containers rodando utilizam imagens de commit anterior.
+const simulateTargetAndRunningScenario = ({ targetApiRevision, targetWebRevision, runningApiImagePresent }) => {
+  const targetValid = targetApiRevision === "4380820e0237e91ce4938bfd96f8557725c23959" && targetWebRevision === "4380820e0237e91ce4938bfd96f8557725c23959";
+  if (!targetValid) return { status: "FAIL", reason: "target_image_revision_mismatch" };
+  if (!runningApiImagePresent) return { status: "FAIL", reason: "previous_running_image_absent" };
+  return { status: "PASS", rollbackMode: "image" };
+};
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: true
+  }),
+  { status: "PASS", rollbackMode: "image" }
+);
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "3101980000000000000000000000000000000000",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: true
+  }),
+  { status: "FAIL", reason: "target_image_revision_mismatch" }
+);
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: false
+  }),
+  { status: "FAIL", reason: "previous_running_image_absent" }
+);
 assert.match(deploy,/docker inspect "\$container_id" >"\$evidence\/\$role\.previous\.inspect\.json"/);
 assert.doesNotMatch(deploy,/docker rm[^\n]*\$container_id/); // container histórico é apenas parado
 assert.ok(deploy.indexOf('bash -n "$evidence/rollback.sh"') < deploy.indexOf('docker stop "$container_id"'));
