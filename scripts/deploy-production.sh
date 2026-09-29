@@ -93,6 +93,8 @@ done
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
+# shellcheck source=scripts/lib/production-rollback-image.sh
+source scripts/lib/production-rollback-image.sh
 
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
 tenancy_bundle="$schema_evidence_root/$APP_COMMIT/migrations/$TENANCY_EXPAND_ROOTS_ID"
@@ -182,7 +184,7 @@ if [[ -e "$evidence" ]]; then
 fi
 install -d -m 700 "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
-printf 'role\trollback_mode\tcontainer_name\tcontainer_id\timage_id\trollback_tag\tport\tnetworks\trestart_policy\tprevious_commit\n' >"$evidence/previous-runtime.tsv"
+printf 'role\trollback_mode\tcontainer_name\tcontainer_id\truntime_identity\trollback_reference\tport\tnetworks\trestart_policy\tprevious_commit\tresolution_method\tartifact_id\n' >"$evidence/previous-runtime.tsv"
 printf 'role\tcontainer_name\tcontainer_id\n' >"$evidence/rollback-containers.tsv"
 : >"$evidence/rollback-images.env"
 chmod 600 "$evidence/previous-runtime.tsv" "$evidence/rollback-containers.tsv" "$evidence/rollback-images.env"
@@ -197,26 +199,28 @@ for spec in api:4000 web:5173; do
   docker inspect "$container_id" >"$evidence/$role.previous.inspect.json"
   chmod 600 "$evidence/$role.previous.inspect.json"
   image_id=$(docker inspect -f '{{.Image}}' "$name")
+  config_image=$(docker inspect -f '{{.Config.Image}}' "$name")
   networks=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}}' "$container_id")
   [[ ",$networks" == *,gest-o_default,* ]] || die "container anterior de $role fora da rede esperada"
   restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container_id")
   case "$restart_policy" in no|on-failure|always|unless-stopped) ;; *) die "restart policy desconhecida para $role";; esac
   if previous_commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id" 2>/dev/null); then :; else previous_commit=""; fi
   [[ -n "$previous_commit" && "$previous_commit" != '<no value>' ]] || previous_commit=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" | sed -n 's/^APP_COMMIT=//p' | head -1)
-  rollback_mode=container; tag="-"
-  if docker image inspect "$image_id" >/dev/null 2>&1; then
-    rollback_mode=image
+  rollback_mode=image; tag="-"
+  if resolve_rollback_image "$role" "$image_id" "$config_image"; then
     release=$(printf '%s' "${previous_commit:-${image_id#sha256:}}" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40)
     [[ -n "$release" ]] || die "não foi possível identificar release anterior de $role"
     tag="gest-o-${role}-rollback:$release"
-    docker tag "$image_id" "$tag"
-    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
+    docker tag "$ROLLBACK_ARTIFACT_ID" "$tag"
+    pinned_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null) || die "referência fixada de rollback inválida para $role"
+    [[ "$pinned_id" == "$ROLLBACK_ARTIFACT_ID" ]] || die "referência fixada de rollback mudou para $role"
+    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$ROLLBACK_ARTIFACT_ID" "${role^^}" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/rollback-images.env"
+    log "rollback_image role=$role method=$ROLLBACK_RESOLUTION_METHOD verified_identity=$ROLLBACK_VERIFIED_IDENTITY artifact_id=$ROLLBACK_ARTIFACT_ID pinned_reference=$ROLLBACK_ARTIFACT_ID"
   else
-    if compose_project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$container_id" 2>/dev/null); then :; else compose_project=""; fi
-    [[ "$compose_project" != gest-o-production ]] || die "$role pertence a gest-o-production e sua imagem anterior $image_id está ausente no catálogo local; fallback por container proibido"
-    printf '%s\t%s\t%s\n' "$role" "$name" "$container_id" >>"$evidence/rollback-containers.tsv"
+    log "rollback_image role=$role method=unresolved verified_identity=none block_reason=$ROLLBACK_BLOCK_REASON"
+    die "$role sem imagem anterior verificável: $ROLLBACK_BLOCK_REASON; fallback por container proibido"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$ROLLBACK_ARTIFACT_ID" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" "$ROLLBACK_RESOLUTION_METHOD" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/previous-runtime.tsv"
   if [[ "$role" == api && "$rollback_mode" == image ]]; then
     if previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null); then :; else previous_version=""; fi
     if previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null); then :; else previous_built_at=""; fi

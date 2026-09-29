@@ -105,17 +105,17 @@ for (const variable of ["OPENAI_ENABLED","OPENAI_API_KEY","OPENAI_MODEL","FEATUR
 assert.match(rollback,/docker start "\$container_id"/); assert.match(rollback,/API_ROLLBACK_IMAGE/); assert.match(rollback,/WEB_ROLLBACK_IMAGE/);
 assert.ok(rollback.indexOf('stop api web') < rollback.indexOf('up -d --no-build'),"rollback deve parar novos antes de recriar antigos");
 assert.match(rollback,/rm -f api web/); assert.match(rollback,/--force-recreate "\$role"/); assert.match(rollback,/4000 5173/); assert.match(rollback,/\/health/);
-assert.match(rollback,/restaurado não usa o image ID anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
+assert.match(rollback,/restaurado não usa o artefato verificado anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
 assert.match(deploy,/gest-o-\$\{role\}-rollback:\$release/); assert.match(deploy,/previous-runtime\.tsv/); assert.match(deploy,/rollback-images\.env/);
-assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\timage_id\\trollback_tag\\tport\\tnetworks\\trestart_policy\\tprevious_commit/);
+assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\truntime_identity\\trollback_reference\\tport\\tnetworks\\trestart_policy\\tprevious_commit\\tresolution_method\\tartifact_id/);
 assert.match(deploy,/rollback-containers\.tsv/);
 assert.match(deploy,/Validando imagens OCI alvo para cutover: \$API_IMAGE e \$WEB_IMAGE/);
 assert.match(deploy,/docker image inspect "\$target_img"/);
 assert.match(deploy,/org\.opencontainers\.image\.revision/);
-assert.match(deploy,/docker image inspect "\$image_id"/); // imagem disponível -> modo image
-assert.match(deploy,/rollback_mode=container/); // API ou WEB históricos podem usar container
-assert.match(deploy,/compose_project.*com\.docker\.compose\.project/);
-assert.match(deploy,/"\$compose_project" != gest-o-production/); // ausência de imagem no projeto atual falha fechada
+assert.match(deploy,/resolve_rollback_image "\$role" "\$image_id" "\$config_image"/);
+assert.doesNotMatch(deploy,/rollback_mode=container/); // produção nunca aceita snapshot implícito do container
+assert.match(deploy,/block_reason=\$ROLLBACK_BLOCK_REASON/);
+assert.match(deploy,/fallback por container proibido/);
 
 // Validação de cenário: Imagens alvo do commit futuro existem com rótulo OCI correto,
 // enquanto containers rodando utilizam imagens de commit anterior.

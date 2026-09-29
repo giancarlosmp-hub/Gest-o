@@ -9,6 +9,7 @@ cp "$ROOT/scripts/production-deploy-entrypoint.sh" "$ROOT/scripts/deploy-product
   "$ROOT/scripts/production-preflight.sh" "$ROOT/scripts/schema-evidence-validation.sh" \
   "$ROOT/scripts/schema-diff-filter.mjs" "$APP/scripts/"
 cp "$ROOT/scripts/lib/production-backup-common.sh" "$ROOT/scripts/lib/pr827-backup-proof.sh" "$ROOT/scripts/lib/production-preflight-proof.sh" "$APP/scripts/lib/"
+cp "$ROOT/scripts/lib/production-rollback-image.sh" "$APP/scripts/lib/"
 printf '{"version":"1.0.0"}\n' >"$APP/package.json"
 
 cat >"$APP/scripts/resolve-production-env.sh" <<EOF
@@ -107,7 +108,9 @@ EOF
 chmod +x "$BIN/"*
 
 export PATH="$BIN:$PATH" COMMAND_LOG="$TMP/commands" PRODUCTION_LEGACY_ENV_FILE="$TMP/legacy.env"
-APP_DIR="$APP" DEPLOY_MODE=build EXPECTED_SHA="$SHA" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/out" 2>"$TMP/err"
+APP_DIR="$APP" DEPLOY_MODE=build EXPECTED_SHA="$SHA" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/out" 2>"$TMP/err" || {
+  cat "$TMP/out"; cat "$TMP/err" >&2; exit 1
+}
 grep -qx 'LEGACY_VALUES_LOADED=PASS' "$TMP/out"
 grep -qx 'PRODUCTION_BACKUP_AUTHORITATIVE_RESOLUTION=PASS' "$TMP/out"
 grep -qx 'PRODUCTION_BACKUP_HINTS_OVERRIDDEN=PASS' "$TMP/out"

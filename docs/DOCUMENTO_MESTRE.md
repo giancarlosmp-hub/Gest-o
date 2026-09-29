@@ -1703,3 +1703,12 @@ No Actions `36425672343`/job `108938893118`, compose, Orders e o `db push` dedic
 de autoridade falhou legitimamente por omitir a migration posterior de proveniência antes do diff
 final e foi corrigido. Merge continua bloqueado até rerun verde, vínculo grupo/agrupamento e contrato
 de materialização das tabelas sem todos os parâmetros comerciais.
+# Adendo operacional: identidade de rollback no cutover (29/09/2026)
+
+O gate anterior ao cutover exige que API e WEB tenham imagens anteriores localmente disponíveis e
+criptograficamente ligadas à identidade registrada pelo container. Mesmo SHA Git ou tag não prova
+igualdade do artefato. A referência de rollback é fixada pelo config ID verificado antes da parada.
+Schema preview/apply só é necessário quando o Prisma mudou ou não existe evidência protegida
+equivalente; este incidente não autoriza reaplicação. `CONFIRM` nasce no dispatch protegido, passa
+pelo entrypoint e chega ao deploy como `PRODUCTION_CUTOVER`; tentativas com marcador stale exigem
+explicitamente `PRODUCTION_CUTOVER_REAUTHORIZED`, sem alterar os demais gates.
