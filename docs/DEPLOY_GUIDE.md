@@ -6,6 +6,14 @@ Durante a fase `cutover` em `scripts/deploy-production.sh`:
 2. **Inspeção de Imagem Anterior para Rollback:**
    - O runner inspeciona o container em execução na porta 4000 e obtém seu `image_id` anterior. Se essa imagem anterior estiver ausente/untagged no Docker Engine, a tentativa é rejeitada fail-closed (`fallback por container proibido`), garantindo que o rollback permaneça 100% ancorado em imagens versionadas.
 
+## Correção de Expressão de Inputs no Workflow Production Rebaseline (Run 36629537190) (29/09/2026)
+
+A execução do workflow **Production Rebaseline** (Run 36629537190) falhou no runner do GitHub Actions com o erro `line 12: ${#inputs.expected_main_sha}: bad substitution`.
+- **Causa Raiz:** O bloco `run:` do YAML do workflow tentava usar `${#inputs.expected_main_sha}` diretamente como se fosse uma expansão de tamanho de variável Bash. O interpretador Bash da subshell rejeitou a sintaxe contendo ponto `.`.
+- **Evidência da Run 36629537190:** NENHUM backup, evidência OCI ou alteração em produção foi realizada nessa execução, pois o erro ocorreu no primeiro step local de validação de entradas antes de qualquer conexão SSH com a VPS.
+- **Correção Mapeada por `env`:**
+  Inputs são mapeados explicitamente no bloco `env:` do step e validados com variáveis de ambiente Bash puras (`$CONFIRM` e `${#EXPECTED_MAIN_SHA}`).
+
 ## Procedimento Formal de Rebaseline de Produção (`scripts/production-rebaseline.sh`) (29/09/2026)
 
 Quando a imagem anterior do container em execução no host (ex: artefato `310198...` / `sha256:f4dcc...`) não possui vínculo OCI local no Docker Engine e não há registro externo ou tarball OCI preservado, o cutover é bloqueado em modo fail-closed (`api sem imagem anterior verificável`). Nesses cenários onde o rollback do container legado é comprovadamente irrecuperável, exige-se o procedimento formal de **Rebaseline de Produção**.

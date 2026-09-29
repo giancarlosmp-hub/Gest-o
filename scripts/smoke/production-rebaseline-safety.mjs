@@ -40,6 +40,76 @@ assert.match(rebaselineWorkflow, /REBASELINE_RESULT/);
 assert.doesNotMatch(rebaselineWorkflow, /MODE=cutover/);
 assert.doesNotMatch(rebaselineWorkflow, /deploy-production\.sh/);
 
+// Static assertions ensuring no invalid Bash expansion of inputs
+assert.doesNotMatch(rebaselineWorkflow, /\$\{#inputs\./, "workflow must not contain \${#inputs.");
+assert.doesNotMatch(rebaselineWorkflow, /\$\{\{#inputs\./, "workflow must not contain \${{#inputs.");
+assert.doesNotMatch(rebaselineWorkflow, /\$\{inputs\./, "workflow must not contain invalid bash expansion \${inputs.");
+
+// Extract and test workflow local validation script behavior
+const validSha = "a".repeat(40);
+const workflowLocalValidationScript = `
+  set -euo pipefail
+  if [ "$CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+    printf '%s\\n' "::error::Confirmação inválida: $CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
+    exit 1
+  fi
+  if [ "\${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+    printf '%s\\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+    exit 1
+  fi
+  case "$EXPECTED_MAIN_SHA" in
+    *[!0-9a-f]*|'')
+      printf '%s\\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
+      exit 1
+      ;;
+  esac
+`;
+
+// Test 1: Accepts valid 40-character hex SHA and correct confirmation
+const testValid = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "PRODUCTION_REBASELINE_APPROVED", EXPECTED_MAIN_SHA: validSha },
+  encoding: "utf8"
+});
+assert.equal(testValid.status, 0, "Workflow validation script must accept valid SHA and confirmation");
+
+// Test 2: Rejects empty SHA
+const testEmptySha = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "PRODUCTION_REBASELINE_APPROVED", EXPECTED_MAIN_SHA: "" },
+  encoding: "utf8"
+});
+assert.notEqual(testEmptySha.status, 0, "Workflow validation script must reject empty SHA");
+
+// Test 3: Rejects incorrect length SHA (39 chars)
+const testShortSha = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "PRODUCTION_REBASELINE_APPROVED", EXPECTED_MAIN_SHA: "a".repeat(39) },
+  encoding: "utf8"
+});
+assert.notEqual(testShortSha.status, 0, "Workflow validation script must reject short SHA");
+
+// Test 4: Rejects incorrect length SHA (41 chars)
+const testLongSha = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "PRODUCTION_REBASELINE_APPROVED", EXPECTED_MAIN_SHA: "a".repeat(41) },
+  encoding: "utf8"
+});
+assert.notEqual(testLongSha.status, 0, "Workflow validation script must reject long SHA");
+
+// Test 5: Rejects non-hex characters
+const testNonHexSha = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "PRODUCTION_REBASELINE_APPROVED", EXPECTED_MAIN_SHA: "g".repeat(40) },
+  encoding: "utf8"
+});
+assert.notEqual(testNonHexSha.status, 0, "Workflow validation script must reject non-hex SHA");
+
+// Test 6: Rejects wrong confirmation string
+const testWrongConfirm = spawnSync("bash", ["-c", workflowLocalValidationScript], {
+  env: { CONFIRM: "INVALID_CONFIRMATION", EXPECTED_MAIN_SHA: validSha },
+  encoding: "utf8"
+});
+assert.notEqual(testWrongConfirm.status, 0, "Workflow validation script must reject wrong confirmation string");
+
+// Test 7: Job Summary preserves REBASELINE_RESULT=FAIL on error (evaluated via job.status)
+assert.match(rebaselineWorkflow, /REBASELINE_RESULT.*job\.status == 'success' && 'PASS' || 'FAIL'/);
+
 // Behavioral Unit / Mock Tests for Rebaseline Logic & Proof Verification
 const testDir = join(tmpdir(), `gest-o-rebaseline-test-${Date.now()}`);
 mkdirSync(testDir, { recursive: true });

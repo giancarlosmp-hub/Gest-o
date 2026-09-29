@@ -1,3 +1,14 @@
+# Correção da Integração de Entradas no Workflow Production Rebaseline (Run 36629537190) — 29/09/2026
+
+- **Análise do Erro `bad substitution` na Run 36629537190:**
+  - A execução do workflow `Production Rebaseline` (Run 36629537190) falhou no step de validação local com o erro `line 12: ${#inputs.expected_main_sha}: bad substitution`.
+  - **Causa Raiz:** O YAML continha a expressão `${#inputs.expected_main_sha}`, misturando a interpolação de inputs do GitHub Actions com a sintaxe de expansão de tamanho de string do Bash (`${#var}`). O interpretador do shell interpretou a expressão como uma substituição de variável Bash com nome inválido.
+  - **Efeito e Preservação de Produção:** O step de validação local falhou fechado na máquina virtual do GitHub Actions runner antes de efetuar qualquer conexão SSH ou execução na VPS. Nenhum backup, evidência ou alteração em produção foi gerado na Run 36629537190.
+- **Correção e Blindagem Aplicadas:**
+  - **Mapeamento via `env`:** No file `.github/workflows/production-rebaseline.yml`, as variáveis de entrada `${{ inputs.confirm }}` e `${{ inputs.expected_main_sha }}` foram mapeadas para variáveis de ambiente `CONFIRM` e `EXPECTED_MAIN_SHA` no bloco `env:` do step.
+  - **Validação Bash Pura:** O script de validação utiliza unicamente `$CONFIRM` e `${#EXPECTED_MAIN_SHA}` com sintaxe Shell POSIX/Bash nativa.
+  - **Garantias de Teste e Fumaça:** A suíte `scripts/smoke/production-rebaseline-safety.mjs` valida estaticamente a ausência de expressões `${#inputs.` e testa o comportamento do script com entradas válidas e inválidas.
+
 # Procedimento Formal de Rebaseline de Produção — 29/09/2026
 
 - **Diagnóstico do Bloqueio de Imagem Imutável:**

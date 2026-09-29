@@ -25,22 +25,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Validar entradas locais
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
         run: |
           set -euo pipefail
-          if [ "${{ inputs.confirm }}" != "PRODUCTION_REBASELINE_APPROVED" ]; then
-            printf '%s\n' "::error::Confirmação inválida: ${{ inputs.confirm }}. Exigido PRODUCTION_REBASELINE_APPROVED."
+          if [ "$CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+            printf '%s\n' "::error::Confirmação inválida: $CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
             exit 1
           fi
-          case "${{ inputs.expected_main_sha }}" in
+          if [ "${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+            printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+            exit 1
+          fi
+          case "$EXPECTED_MAIN_SHA" in
             *[!0-9a-f]*|'')
               printf '%s\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
               exit 1
               ;;
           esac
-          if [ "${#inputs.expected_main_sha}" -ne 40 ]; then
-            printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
-            exit 1
-          fi
 
       - name: Executar Rebaseline de Produção na VPS
         uses: appleboy/ssh-action@v1.2.0
