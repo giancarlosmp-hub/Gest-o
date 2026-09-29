@@ -1,0 +1,117 @@
+name: Production Rebaseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Digite PRODUCTION_REBASELINE_APPROVED"
+        required: true
+        type: string
+      expected_main_sha:
+        description: "SHA completo da main aprovada"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-rebaseline
+  cancel-in-progress: false
+
+jobs:
+  rebaseline:
+    environment: production-cutover
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar entradas locais
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+            printf '%s\n' "::error::Confirmação inválida: ${{ inputs.confirm }}. Exigido PRODUCTION_REBASELINE_APPROVED."
+            exit 1
+          fi
+          case "${{ inputs.expected_main_sha }}" in
+            *[!0-9a-f]*|'')
+              printf '%s\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
+              exit 1
+              ;;
+          esac
+          if [ "${#inputs.expected_main_sha}" -ne 40 ]; then
+            printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+            exit 1
+          fi
+
+      - name: Executar Rebaseline de Produção na VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REBASELINE_CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          envs: REBASELINE_CONFIRM,EXPECTED_MAIN_SHA
+          script_stop: true
+          command_timeout: 1h
+          debug: true
+          script: |
+            set -Eeuo pipefail
+
+            log() { printf '[production-rebaseline-workflow] %s\n' "$*"; }
+            die() { log "ERRO: $*" >&2; exit 1; }
+
+            if [ "$REBASELINE_CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+              die "Confirmação inválida: $REBASELINE_CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
+            fi
+
+            case "$EXPECTED_MAIN_SHA" in
+              *[!0-9a-f]*|'') die "expected_main_sha inválido: $EXPECTED_MAIN_SHA" ;;
+            esac
+            if [ "${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+              die "expected_main_sha deve ter exatamente 40 caracteres"
+            fi
+
+            cd /apps/gest-o
+
+            if worktree_status="$(git status --porcelain 2>/dev/null)" && [ -n "$worktree_status" ]; then
+              die "Working tree em /apps/gest-o não está limpa."
+            fi
+
+            git fetch origin main
+            git switch main
+            git pull --ff-only origin main
+
+            actual_sha="$(git rev-parse HEAD)"
+            if [ "$actual_sha" != "$EXPECTED_MAIN_SHA" ]; then
+              die "HEAD em /apps/gest-o ($actual_sha) difere de expected_main_sha ($EXPECTED_MAIN_SHA)"
+            fi
+
+            CONFIRM="$REBASELINE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+              bash scripts/production-rebaseline.sh
+
+            api_img="gest-o-api:$EXPECTED_MAIN_SHA"
+            web_img="gest-o-web:$EXPECTED_MAIN_SHA"
+            backup_dir="/var/log/gest-o/oci-backups/$EXPECTED_MAIN_SHA"
+            evidence_file="/var/log/gest-o/rebaseline/$EXPECTED_MAIN_SHA/result.tsv"
+
+            log "REBASELINE_TARGET_SHA=$EXPECTED_MAIN_SHA"
+            log "REBASELINE_VERIFIED_API_IMAGE=$api_img"
+            log "REBASELINE_VERIFIED_WEB_IMAGE=$web_img"
+            log "REBASELINE_OCI_BACKUP_DIR=$backup_dir"
+            log "REBASELINE_EVIDENCE_FILE=$evidence_file"
+            log "REBASELINE_RESULT=PASS"
+
+      - name: Registrar Job Summary
+        if: always()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ### Production Rebaseline Summary
+          - **REBASELINE_TARGET_SHA**: `${{ inputs.expected_main_sha }}`
+          - **REBASELINE_VERIFIED_API_IMAGE**: `gest-o-api:${{ inputs.expected_main_sha }}`
+          - **REBASELINE_VERIFIED_WEB_IMAGE**: `gest-o-web:${{ inputs.expected_main_sha }}`
+          - **REBASELINE_OCI_BACKUP_DIR**: `/var/log/gest-o/oci-backups/${{ inputs.expected_main_sha }}`
+          - **REBASELINE_EVIDENCE_FILE**: `/var/log/gest-o/rebaseline/${{ inputs.expected_main_sha }}/result.tsv`
+          - **REBASELINE_RESULT**: `${{ job.status == 'success' && 'PASS' || 'FAIL' }}`
+          EOF
