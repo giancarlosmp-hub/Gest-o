@@ -1,3 +1,29 @@
+# Procedimento de Rebaseline de Produção para Imagens OCI Irrecuperáveis (29/09/2026)
+
+Quando o cutover no `Deploy Production` falhar com o erro:
+`[deploy-production] ERRO: api sem imagem anterior verificável: nenhuma imagem local demonstra vínculo criptográfico com sha256:f4dcc...`
+
+Significa que o container em execução utiliza uma imagem cuja identidade OCI/digest não possui cópia local no catálogo do Docker Engine e não há registry externo ou backup OCI (`.tar`). Para estabelecer uma nova referência de baseline com segurança e capacidade de rollback para os próximos deploys, siga o procedimento abaixo:
+
+### Passo 1: Construção das Imagens do Novo Commit (`phase=build`)
+Disparar o workflow **Deploy Production** no disparo `phase=build` para o SHA desejado da `main`. As imagens `gest-o-api:$SHA` e `gest-o-web:$SHA` serão construídas e rotuladas com `org.opencontainers.image.revision=$SHA` no Docker Engine da VPS sem afetar os containers em execução.
+
+### Passo 2: Execução do Rebaseline Autorizado (Sem Cutover)
+Na VPS, executar em janela de manutenção aprovada:
+```bash
+cd /apps/gest-o
+git fetch origin main && git checkout main && git pull --ff-only origin main
+EXPECTED_SHA="$(git rev-parse HEAD)" CONFIRM=PRODUCTION_REBASELINE_APPROVED bash scripts/production-rebaseline.sh
+```
+
+### Passo 3: Verificação dos Artefatos Gerados
+1. Confirmar que a evidência de rebaseline foi gravada em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` com `result PASS` e `cutover_executed NO`.
+2. Confirmar que o backup tarball OCI imutável foi gerado em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/gest-o-api.tar` e `gest-o-web.tar`.
+3. Confirmar que **nenhum container foi parado ou alterado** e que a API continua operando normalmente.
+
+### Passo 4: Execução do Cutover Reautorizado
+Executar o workflow **Deploy Production** no disparo `phase=cutover` (ou pelo shell `MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh`). O runner detectará o rebaseline aprovado para `$APP_COMMIT` e efetuará o cutover de forma segura.
+
 # Validação Pós-Deploy — Incidente de Preços Sem Tabela Explícita (28/09/2026)
 
 1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.

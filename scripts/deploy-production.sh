@@ -95,6 +95,8 @@ schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 source scripts/schema-evidence-validation.sh
 # shellcheck source=scripts/lib/production-rollback-image.sh
 source scripts/lib/production-rollback-image.sh
+# shellcheck source=scripts/lib/production-rebaseline-proof.sh
+source scripts/lib/production-rebaseline-proof.sh
 
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
 tenancy_bundle="$schema_evidence_root/$APP_COMMIT/migrations/$TENANCY_EXPAND_ROOTS_ID"
@@ -216,6 +218,17 @@ for spec in api:4000 web:5173; do
     [[ "$pinned_id" == "$ROLLBACK_ARTIFACT_ID" ]] || die "referência fixada de rollback mudou para $role"
     printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$ROLLBACK_ARTIFACT_ID" "${role^^}" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/rollback-images.env"
     log "rollback_image role=$role method=$ROLLBACK_RESOLUTION_METHOD verified_identity=$ROLLBACK_VERIFIED_IDENTITY artifact_id=$ROLLBACK_ARTIFACT_ID pinned_reference=$ROLLBACK_ARTIFACT_ID"
+  elif validate_rebaseline_evidence "$APP_COMMIT"; then
+    eval "artifact_id=\$REBASELINE_VERIFIED_${role^^}_ID"
+    ROLLBACK_RESOLUTION_METHOD="authorized-rebaseline"
+    ROLLBACK_VERIFIED_IDENTITY="$image_id"
+    ROLLBACK_ARTIFACT_ID="$artifact_id"
+    tag="gest-o-${role}-rebaseline:$APP_COMMIT"
+    docker tag "$ROLLBACK_ARTIFACT_ID" "$tag"
+    pinned_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null) || die "referência fixada de rebaseline inválida para $role"
+    [[ "$pinned_id" == "$ROLLBACK_ARTIFACT_ID" ]] || die "referência fixada de rebaseline mudou para $role"
+    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$ROLLBACK_ARTIFACT_ID" "${role^^}" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/rollback-images.env"
+    log "rollback_image role=$role method=authorized-rebaseline rebaseline_commit=$APP_COMMIT verified_target_id=$ROLLBACK_ARTIFACT_ID (legacy running image $image_id unverified)"
   else
     log "rollback_image role=$role method=unresolved verified_identity=none block_reason=$ROLLBACK_BLOCK_REASON"
     die "$role sem imagem anterior verificável: $ROLLBACK_BLOCK_REASON; fallback por container proibido"

@@ -1,3 +1,28 @@
+# Procedimento Formal de Rebaseline de Produção — 29/09/2026
+
+- **Diagnóstico e Contexto Comprovado:**
+  - Runtime em execução na VPS utiliza a revisão API `310198...` (`.Image sha256:f4dcc...`).
+  - Não existe registro OCI externo (pipeline de build é local no Docker Engine da VPS).
+  - Não existe backup de tarball OCI em disco (`docker save`).
+  - Reconstrução reproduzível do commit `310198...` gera digest criptográfico distinto (`sha256:0e5c...`).
+  - O pipeline de deploy permanece corretamente travado em modo **fail-closed** (`resolve_rollback_image` bloqueia o cutover por ausência de vínculo criptográfico comprovado para o container anterior).
+
+- **Fluxo de Rebaseline Aprovado e Ferramental Criado (`scripts/production-rebaseline.sh`):**
+  - **Script de Rebaseline:** Criado `scripts/production-rebaseline.sh` com validador de biblioteca `scripts/lib/production-rebaseline-proof.sh`.
+  - **Confirmação Explicita Exigida:** Requer parâmetro explícito `CONFIRM=PRODUCTION_REBASELINE_APPROVED` e `EXPECTED_SHA` igual ao HEAD do repositório.
+  - **Invariantes e Proteções Garantidas:**
+    1. Zero exclusão/interrupção de containers ou imagens em execução.
+    2. Proibição absoluta de `docker commit` e `docker export`.
+    3. Tags e rótulos de revisão Git NÃO são aceitos isoladamente como prova de identidade (validação estrita por digests/config OCI via `docker image inspect`).
+    4. Nenhuma execução automática de cutover (o script registra formalmente `cutover_executed = NO`).
+  - **Geração de Backups OCI Persistentes (`docker save`):** Exporta tarballs OCI imutáveis para as imagens `gest-o-api:$EXPECTED_SHA` e `gest-o-web:$EXPECTED_SHA` em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/` com checksums SHA-256 no manifesto.
+  - **Registro de Evidência Protegida:** Grava o bundle de evidência em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` e `manifest.tsv` registrando explicitamente que o artefato legado `310198...` / `sha256:f4dcc...` é irrecuperável para rollback.
+  - **Suíte de Fumaça Executável:** Criado `scripts/smoke/production-rebaseline-safety.mjs` testando ausência de baseline, baseline válido, baseline divergente e rebaseline autorizado.
+
+- **Status da Operação Produtiva:**
+  - **Nenhuma operação produtiva de cutover foi executada.**
+  - Os containers de produção permanecem ativos, saudáveis e atendendo 100% do tráfego.
+
 # Investigação das Fontes Autorizadas e Declaração de Bloqueio Operacional do Cutover — 29/09/2026
 
 - **Confirmação da Trava Fail-Closed:**
