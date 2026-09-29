@@ -1,3 +1,13 @@
+# Investigação e Validação de Imagem OCI Alvo no Cutover do Production Deploy — 29/09/2026
+
+- **Análise da Causa Raiz:**
+  - O cutover falhava com a mensagem: `“api pertence a gest-o-production e sua imagem está ausente; fallback por container proibido”` mesmo após a conclusão com sucesso do build da imagem OCI alvo `gest-o-api:4380820e...`.
+  - A verificação de rollback em `scripts/deploy-production.sh` inspecionava o container ativo em execução na porta 4000 e buscava o ID da imagem do container anterior (`image_id`). Caso essa imagem do container anterior estivesse desvinculada ou untagged no Docker Engine, a verificação do rollback de `gest-o-production` rejeitava a operação com a mensagem de imagem ausente.
+- **Validação Fail-Closed do Target Image Implementada:**
+  - Adicionada verificação estrita em `scripts/deploy-production.sh` para inspecionar `API_IMAGE` (`gest-o-api:$APP_COMMIT`) e `WEB_IMAGE` (`gest-o-web:$APP_COMMIT`) antes de iniciar a etapa de cutover/rollback.
+  - O script exige a existência local das imagens OCI alvo E a validação do rótulo `org.opencontainers.image.revision=$APP_COMMIT`.
+  - Refinadas as mensagens de log de diagnostico para diferenciar claramente a verificação do contêiner anterior (`$image_id`) da validação da imagem OCI alvo (`$API_IMAGE`).
+
 # Investigação e Reconciliação do Bloqueio de Cutover no Production Deploy (`cutover-started`) — 29/09/2026
 
 - **Análise da Causa Raiz e Respostas às 6 Perguntas do Bloqueio:**

@@ -1,3 +1,15 @@
+# Investigação e Validação de Imagem OCI Alvo no Cutover do Production Deploy — 29/09/2026
+
+- **Diagnóstico da Divergência:**
+  - No build do SHA `4380820e0237e91ce4938bfd96f8557725c23959` na VPS, a imagem OCI `gest-o-api:4380820e...` foi construída com sucesso. No entanto, o cutover falhava com: `“api pertence a gest-o-production e sua imagem está ausente; fallback por container proibido”`.
+  - **Causa Raiz Identificada no Código:** O script `scripts/deploy-production.sh` inspeccionava o container anterior rodando no host (`name=$owners`) para determinar a imagem anterior do container em execução (`image_id`). Quando essa imagem anterior do container no host estava sem tag ou ausente do catálogo, a verificação de rollback do container em execução falhava no gate de proteção do projeto `gest-o-production`. A mensagem indicava a ausência da imagem do container anterior rodando (para fins de rollback), enquanto as imagens OCI alvo do novo commit (`gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT`) já estavam construídas e presentes no Docker Engine.
+  - **Validação Fail-Closed do Target Image Implementada:** Antes de prosseguir para a verificação do runtime atual e evidências de rollback, `scripts/deploy-production.sh` agora valida explicitamente a presença local de `gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT` E a correspondência do rótulo OCI `org.opencontainers.image.revision=$APP_COMMIT`. Se qualquer imagem OCI alvo estiver ausente ou tiver SHA divergente, o cutover falha fechado imediatamente.
+  - **Clareza do Diagnóstico de Rollback:** A mensagem de erro ao verificar a imagem do container anterior em execução foi ajustada para explicitar que a imagem ausente refere-se à imagem anterior (`$image_id`) do container em execução no host, e não à imagem alvo do novo commit.
+
+- **Atualizações no Código e Suíte de Fumaça:**
+  - Atualizado `scripts/deploy-production.sh` com validação de `API_IMAGE` e `WEB_IMAGE` alvo e log explicativo para `$image_id` anterior.
+  - Atualizado `scripts/smoke/production-deploy-safety.mjs` com teste reproduzindo a validação da imagem alvo e contêineres rodando em SHA anterior. Testes validados com sucesso (`node scripts/smoke/production-deploy-safety.mjs`).
+
 # Investigação e Reconciliação do Bloqueio de Cutover no Production Deploy (`cutover-started`) — 29/09/2026
 
 - **Diagnóstico do Bloqueio das 6 Perguntas:**

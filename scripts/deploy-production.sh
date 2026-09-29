@@ -82,6 +82,14 @@ docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require
 log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 [[ "$MODE" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
 [[ "${CONFIRM:-}" == PRODUCTION_CUTOVER || "${CONFIRM:-}" == PRODUCTION_CUTOVER_REAUTHORIZED ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER ou CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
+
+log "Validando imagens OCI alvo para cutover: $API_IMAGE e $WEB_IMAGE"
+for target_img in "$API_IMAGE" "$WEB_IMAGE"; do
+  docker image inspect "$target_img" >/dev/null 2>&1 || die "imagem OCI alvo $target_img ausente"
+  target_rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_img" 2>/dev/null) || die "não foi possível ler rótulo de revisão de $target_img"
+  [[ "$target_rev" == "$APP_COMMIT" ]] || die "imagem OCI alvo $target_img possui rótulo org.opencontainers.image.revision ($target_rev) divergente de $APP_COMMIT"
+done
+
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -205,7 +213,7 @@ for spec in api:4000 web:5173; do
     printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
   else
     if compose_project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$container_id" 2>/dev/null); then :; else compose_project=""; fi
-    [[ "$compose_project" != gest-o-production ]] || die "$role pertence a gest-o-production e sua imagem está ausente; fallback por container proibido"
+    [[ "$compose_project" != gest-o-production ]] || die "$role pertence a gest-o-production e sua imagem anterior $image_id está ausente no catálogo local; fallback por container proibido"
     printf '%s\t%s\t%s\n' "$role" "$name" "$container_id" >>"$evidence/rollback-containers.tsv"
   fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
