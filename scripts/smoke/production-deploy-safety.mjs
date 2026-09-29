@@ -82,6 +82,12 @@ assert.match(deploy,/schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "
 assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_SEED"/);
 assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_VALIDATOR"/);
 assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
+assert.match(deploy, /cutover-started/);
+assert.match(deploy, /running_commit=\$\(curl -fsS --max-time 3 http:\/\/127\.0\.0\.1:4000\/health\/version/);
+assert.match(deploy, /Cutover já concluído anteriormente para \$APP_COMMIT; runtime ativo já serve a versão esperada/);
+assert.match(deploy, /CONFIRM.*PRODUCTION_CUTOVER_REAUTHORIZED/);
+assert.match(deploy, /reautorização bloqueada/);
+assert.match(deploy, /\.reauthorized-\$\(date -u/);
 const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
 for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {
   const result = sanitizeRelease(input); assert.equal(result.status, 0); assert.equal(result.stdout, `${expected}\n`);
