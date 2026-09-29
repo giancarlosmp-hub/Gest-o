@@ -1,3 +1,13 @@
+# Correção do gate da imagem anterior de rollback — 29/09/2026
+
+- O cutover agora resolve `.Image` diretamente ou comprova vínculo OCI da candidata `.Config.Image`
+  por config/descriptor/manifest digest; tag e label Git iguais, isoladamente, são rejeitados.
+- O rollback usa o config ID imutável comprovado e API/WEB precisam passar antes de qualquer parada.
+- Para os valores produtivos coletados, a tag que aponta a `0e5c...` não substitui automaticamente a
+  identidade em execução `f4dcc...`; a disponibilidade/vínculo na VPS permanece **NOT_VERIFIED**.
+- Evidências, cenários descartados e recuperação estão em
+  `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
+
 # Investigação e Validação de Imagem OCI Alvo no Cutover do Production Deploy — 29/09/2026
 
 - **Diagnóstico da Divergência:**

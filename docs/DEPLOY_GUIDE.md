@@ -888,3 +888,17 @@ prova de autoridade retornou `EXIT_2` porque não aplicou a expansão posterior 
 do diff contra o schema corrente. O harness foi corrigido para aplicar ambas. Não liberar enquanto o
 rerun de `test:product-price-authority-migration:postgres` não terminar verde; `EXIT_2` continua sendo
 drift fatal.
+# Gate da imagem anterior e rollback verificável
+
+Antes de parar API ou WEB, o deploy compara a identidade `.Image` do container com identidades
+criptográficas locais. Primeiro tenta a própria identidade; depois pode consultar `.Config.Image`,
+mas somente aceita essa candidata quando config ID, descriptor digest ou manifest digest demonstra
+o vínculo. O label `org.opencontainers.image.revision` e a tag não bastam. O inventário registra o
+método e o config ID imutável que o rollback efetivamente fornecerá ao Compose.
+
+Se qualquer papel falhar, não há cutover. Preserve os containers e siga o procedimento de recuperação
+separado em `investigations/production-cutover-rollback-image-identity-2026-09-29.md`; não use
+commit/export do container. Schema preview/apply não deve ser repetido quando a evidência protegida
+Prisma-equivalente e o diff live já passam. Reautorização só vale para marcador `cutover-started`
+revisado: o workflow encaminha `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` pelo entrypoint, e o script
+revalida baseline, imagens, backup, schema, portas e banco.

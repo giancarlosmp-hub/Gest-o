@@ -25,7 +25,7 @@ for role in api web; do
   line=$(awk -F'\t' -v r="$role" '$1==r{print; n++} END{if(n!=1)exit 1}' "$EVIDENCE_DIR/previous-runtime.tsv") || die "evidência incompleta para $role"
   IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous <<<"$line"
   case "$mode" in
-    image) [[ -n "$tag" ]] && docker image inspect "$tag" >/dev/null 2>&1 || die "imagem rollback de $role ausente" ;;
+    image) [[ "$tag" =~ ^sha256:[0-9a-f]{64}$ ]] && [[ "$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null)" == "$tag" ]] || die "imagem rollback de $role ausente ou identidade divergente" ;;
     container)
       recorded=$(awk -F'\t' -v r="$role" '$1==r{print $2"|"$3; n++} END{if(n!=1)exit 1}' "$EVIDENCE_DIR/rollback-containers.tsv") || die "registro de container de $role ausente"
       [[ "$recorded" == "$name|$container_id" ]] || die "identidade histórica de $role divergente"
@@ -44,7 +44,7 @@ for port in 4000 5173; do
 done
 
 for role in api web; do
-  IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous < <(awk -F'\t' -v r="$role" '$1==r' "$EVIDENCE_DIR/previous-runtime.tsv")
+  IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous resolution_method artifact_id < <(awk -F'\t' -v r="$role" '$1==r' "$EVIDENCE_DIR/previous-runtime.tsv")
   if [[ "$mode" == container ]]; then
     docker start "$container_id" >/dev/null
   else
@@ -58,12 +58,12 @@ for _ in {1..30}; do curl -fsS http://127.0.0.1:5173/ >/dev/null && break; sleep
 curl -fsS http://127.0.0.1:5173/ >/dev/null || die "WEB de rollback sem resposta"
 
 for role in api web; do
-  IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous < <(awk -F'\t' -v r="$role" '$1==r' "$EVIDENCE_DIR/previous-runtime.tsv")
+  IFS=$'\t' read -r _ mode name container_id image_id tag port networks restart previous resolution_method artifact_id < <(awk -F'\t' -v r="$role" '$1==r' "$EVIDENCE_DIR/previous-runtime.tsv")
   if [[ "$mode" == container ]]; then
     [[ "$(docker inspect -f '{{.Id}}|{{.State.Running}}' "$name")" == "$container_id|true" ]] || die "$role histórico não voltou com o ID exato"
   else
     id=$("${COMPOSE[@]}" ps -q "$role")
-    [[ "$(docker inspect -f '{{.Image}}' "$id")" == "$image_id" ]] || die "$role restaurado não usa o image ID anterior"
+    [[ "$(docker inspect -f '{{.Image}}' "$id")" == "$artifact_id" ]] || die "$role restaurado não usa o artefato verificado anterior"
   fi
   docker inspect "${id:-$container_id}" >"$EVIDENCE_DIR/$role.rollback.inspect.json"
   unset id
