@@ -6,6 +6,28 @@ Durante a fase `cutover` em `scripts/deploy-production.sh`:
 2. **Inspeção de Imagem Anterior para Rollback:**
    - O runner inspeciona o container em execução na porta 4000 e obtém seu `image_id` anterior. Se essa imagem anterior estiver ausente/untagged no Docker Engine, a tentativa é rejeitada fail-closed (`fallback por container proibido`), garantindo que o rollback permaneça 100% ancorado em imagens versionadas.
 
+## Procedimento Formal de Rebaseline de Produção (`scripts/production-rebaseline.sh`) (29/09/2026)
+
+Quando a imagem anterior do container em execução no host (ex: artefato `310198...` / `sha256:f4dcc...`) não possui vínculo OCI local no Docker Engine e não há registro externo ou tarball OCI preservado, o cutover é bloqueado em modo fail-closed (`api sem imagem anterior verificável`). Nesses cenários onde o rollback do container legado é comprovadamente irrecuperável, exige-se o procedimento formal de **Rebaseline de Produção**.
+
+### Execução do Rebaseline de Produção (Sem Cutover Automatizado)
+
+1. **Construção das Imagens Alvo (`phase=build`):**
+   - Executar o workflow **Deploy Production** no disparo `phase=build` para o SHA desejado da `main`.
+2. **Execução do Comando de Rebaseline na VPS:**
+   - Executar o script de rebaseline com o token de confirmação e SHA esperado:
+     ```bash
+     EXPECTED_SHA="$(git rev-parse HEAD)" CONFIRM=PRODUCTION_REBASELINE_APPROVED bash scripts/production-rebaseline.sh
+     ```
+3. **Ações Executadas pelo Script de Rebaseline:**
+   - Valida que `EXPECTED_SHA` corresponde ao HEAD e que a working tree está limpa.
+   - Revalida a presença local e o rótulo OCI `org.opencontainers.image.revision == $EXPECTED_SHA` de `gest-o-api:$EXPECTED_SHA` e `gest-o-web:$EXPECTED_SHA`.
+   - Gera um backup tarball OCI imutável (`docker save`) em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/` com hashes SHA-256 calculados para garantir capacidade de rollback futuro.
+   - Registra o bundle de evidências em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` e `manifest.tsv`, documentando a indisponibilidade do artefato legado `310198...` (`sha256:f4dcc...`) e estabelecendo a nova baseline.
+   - **Garantias Absolutas:** Não remove ou para nenhum container, não altera imagens em execução, proíbe `docker commit`/`docker export` e **NÃO executa o cutover**.
+4. **Execução Posteriordo Cutover Reautorizado:**
+   - Após a verificação da evidência de rebaseline, o cutover do **Deploy Production** (`phase=cutover`) reconhecerá o baseline aprovado para `$APP_COMMIT` e efetuará a transição dos containers com segurança.
+
 ## Reautorização do Cutover do Production Deploy (`cutover-started`) (29/09/2026)
 
 Quando um deploy na fase `cutover` falhar ou for interrompido após a gravação do marcador `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started`, o próximo disparo em `phase=cutover` falhará por padrão com a mensagem:

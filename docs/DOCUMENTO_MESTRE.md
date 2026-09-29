@@ -1,3 +1,19 @@
+# Procedimento Formal de Rebaseline de Produção — 29/09/2026
+
+- **Diagnóstico do Bloqueio de Imagem Imutável:**
+  - O cutover bloqueia em modo fail-closed quando a imagem do container anterior em execução na VPS (`.Image = sha256:f4dcc...` / `.Config.Image = gest-o-api:310198...`) não possui vínculo OCI criptográfico comprovado em catálogo local, backup de tarball OCI (`docker save`) ou registry externo.
+  - Reconstruir o commit `310198...` gera um digest OCI distinto (`sha256:0e5c...`), que é legitimamente rejeitado pelo validador criptográfico (`resolve_rollback_image`).
+- **Solução de Rebaseline Aprovada (`scripts/production-rebaseline.sh`):**
+  - **Requisitos de Execução:** Requer confirmação explícita `CONFIRM=PRODUCTION_REBASELINE_APPROVED` e `EXPECTED_SHA` correspondente ao HEAD limpo da `main`.
+  - **Garantias e Invariantes:**
+    1. Zero exclusão/interrupção de containers ou imagens em execução.
+    2. Proibição estrita de `docker commit` e `docker export`.
+    3. Validação do rótulo OCI `org.opencontainers.image.revision` e digests em `docker image inspect`.
+    4. Nenhuma execução de cutover automático (grava `cutover_executed = NO`).
+  - **Geração de Backups OCI Persistentes:** Salva tarballs OCI (`docker save`) de `gest-o-api:$EXPECTED_SHA` e `gest-o-web:$EXPECTED_SHA` em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/`.
+  - **Gravação de Evidência Protegida:** Registra o resultado em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` e `manifest.tsv`, documentando a irrecuperabilidade do artefato `310198...` (`sha256:f4dcc...`).
+  - **Autorização do Cutover:** O runner do deploy reconhece a evidência de rebaseline validada para `$APP_COMMIT` (`validate_rebaseline_evidence`), autorizando a transição graciosa de containers sem contornar as travas de segurança.
+
 # Investigação e Validação de Imagem OCI Alvo no Cutover do Production Deploy — 29/09/2026
 
 - **Análise da Causa Raiz:**
