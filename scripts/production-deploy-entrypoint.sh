@@ -83,7 +83,7 @@ printf 'DEPLOY_SCRIPT_STARTING=%s\n' "$DEPLOY_MODE"
 failure_stage=deploy_script
 failure_command=run_deploy_script
 if [[ "$DEPLOY_MODE" == cutover ]]; then
-  MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
+  MODE=cutover CONFIRM="${CONFIRM:-PRODUCTION_CUTOVER}" EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
 elif [[ "$DEPLOY_MODE" == build ]]; then
   MODE=build EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh
 else

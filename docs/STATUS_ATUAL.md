@@ -1,3 +1,21 @@
+# Investigação e Reconciliação do Bloqueio de Cutover no Production Deploy (`cutover-started`) — 29/09/2026
+
+- **Diagnóstico do Bloqueio das 6 Perguntas:**
+  1. **Arquivo/Manifesto de Marcador:** O marcador de início do cutover é mantido em `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started` (`EXPECTED_SHA=310198aea1f09177e158bf85b89a6b9ecd356f9a`).
+  2. **Momento de Criação:** É criado em `scripts/deploy-production.sh` na fase de cutover imediatamente antes do comando de parada (`docker stop`) dos contêineres baseline em execução.
+  3. **Correspondência de SHA:** Corresponde exatamente ao SHA do deploy em andamento (`310198aea1f09177e158bf85b89a6b9ecd356f9a`), estando localizado em `/var/log/gest-o/deploy/310198aea1f09177e158bf85b89a6b9ecd356f9a/cutover-started`.
+  4. **Classificação do Estado:** Trata-se de uma tentativa interrompida com marcador stale no filesystem, na qual os contêineres produtivos anteriores permaneceram ativos, saudáveis e atendendo 100% das requisições na versão baseline sem sofrerem parada ou troca.
+  5. **Confirmação Manual Exigida:** Para o fluxo normal de cutover, o parâmetro exige `CONFIRM=PRODUCTION_CUTOVER`. Para reautorização explícita de uma tentativa interrompida com baseline intacto após revisão manual, o sistema passa a exigir `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`.
+  6. **Procedimento Seguro de Reautorização e Reconciliação:**
+     - Se o marcador `cutover-started` estiver presente para o SHA atual:
+       - **Se já concluído:** Se a API em `http://127.0.0.1:4000/health/version` já responder com `$APP_COMMIT` e estiver saudável, o script registra log de idempotência e encerra com sucesso (exit 0).
+       - **Se parcialmente parado / danificado:** Se os contêineres anteriores não estiverem ativos ou a porta não possuir proprietário único, a reautorização é bloqueada fail-closed com erro e instrução de rollback manual.
+       - **Se marcador stale com baseline intacto:** Se os contêineres baseline permanecerem ativos/saudáveis e `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` for fornecido, a evidência parcial anterior é arquivada em `$evidence.reauthorized-<timestamp>` e o cutover prossegue de forma limpa. Caso seja fornecido apenas `CONFIRM=PRODUCTION_CUTOVER`, o script falha intencionalmente exigindo revisão e a confirmação de reautorização.
+
+- **Atualizações de Código e Suíte de Testes:**
+  - Atualizados `scripts/deploy-production.sh` e `scripts/production-deploy-entrypoint.sh` para suporte fail-closed a `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`.
+  - Atualizadas as suítes de fumaça em `scripts/smoke/production-deploy-safety.mjs` e `scripts/smoke/production-deploy-real-call-graph-safety.sh` cobrindo todos os cenários de marcador ausente, marcador stale, cutover parcial, idempotência pós-conclusão e reautorização explícita. Todos os testes validados com sucesso (`npm run test:production-deploy`).
+
 # Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
 
 - **Sintoma e Causa Raiz Comprovada:**

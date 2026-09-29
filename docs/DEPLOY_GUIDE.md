@@ -1,3 +1,16 @@
+## Reautorização do Cutover do Production Deploy (`cutover-started`) (29/09/2026)
+
+Quando um deploy na fase `cutover` falhar ou for interrompido após a gravação do marcador `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started`, o próximo disparo em `phase=cutover` falhará por padrão com a mensagem:
+`[deploy-production] ERRO: evidência do SHA indica cutover iniciado; revisão manual obrigatória.`
+
+### Procedimento de Reautorização Manual
+1. **Revisar o Runtime da VPS:**
+   - Verificar se a versão ativa em `http://127.0.0.1:4000/health/version` já serve o novo commit (se sim, o deploy já estava concluído e o próximo disparo encerrará com sucesso de forma idempotente).
+   - Verificar se os contêineres baseline (`api:4000` e `web:5173`) continuam rodando e operacionais.
+2. **Reautorizar o Cutover:**
+   - Se os contêineres baseline permanecerem 100% saudáveis e a troca de contêineres não tiver ocorrido, disparar o workflow **Deploy Production** com `phase=cutover` e passar o parâmetro de confirmação `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` (ou pela variável de ambiente `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`).
+   - O script arquivará o diretório de evidência stale em `$evidence.reauthorized-<timestamp>` e efetuará o cutover com segurança.
+
 ## Pós-Deploy da Correção do Incidente de Preços Sem Tabela (28/09/2026)
 
 A correção em `opportunityPriceService.ts` não exige NENHUMA alteração de banco de dados ou migration adicional. O deploy deve seguir o fluxo canônico de deploy em duas fases (**phase=build** $\rightarrow$ **phase=cutover**).

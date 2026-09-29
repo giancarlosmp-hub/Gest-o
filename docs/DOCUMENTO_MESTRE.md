@@ -1,3 +1,17 @@
+# Investigação e Reconciliação do Bloqueio de Cutover no Production Deploy (`cutover-started`) — 29/09/2026
+
+- **Análise da Causa Raiz e Respostas às 6 Perguntas do Bloqueio:**
+  1. **Arquivo/Manifesto do Marcador:** O marcador de início de cutover reside no caminho `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started` na VPS (`EXPECTED_SHA=310198aea1f09177e158bf85b89a6b9ecd356f9a`).
+  2. **Momento de Criação:** É criado em `scripts/deploy-production.sh` na fase de cutover imediatamente antes de executar o comando `docker stop` dos contêineres em execução.
+  3. **Correspondência de SHA:** O marcador pertence ao diretório de evidência da própria SHA `310198aea1f09177e158bf85b89a6b9ecd356f9a`.
+  4. **Classificação do Estado:** Trata-se de uma tentativa interrompida com marcador stale no filesystem, na qual a marcação de início de cutover foi gravada, mas os contêineres produtivos anteriores mantiveram-se 100% operacionais, ativos e saudáveis atendendo na versão baseline.
+  5. **Confirmação Manual Exigida pelo Workflow:** Para deploys normais, exige-se `CONFIRM=PRODUCTION_CUTOVER`. Para reautorização explícita de um marcador stale com contêineres baseline intactos, o workflow passa a aceitar e exigir `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`.
+  6. **Procedimento Seguro de Reautorização e Reconciliação:**
+     - Se `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started` for encontrado:
+       - **Caso Concluído:** Se `/health/version` já responder com `$APP_COMMIT` e estiver saudável, o script registra a conclusão e encerra com sucesso (idempotente, exit 0).
+       - **Caso Parcial / Danificado:** Se os contêineres anteriores tiverem sido parados ou estiverem indisponíveis, a reautorização falha fechada exigindo intervenção/rollback manual.
+       - **Caso Stale / Tentativa Interrompida com Baseline Intacto:** Se os contêineres baseline anteriores permanecerem ativos/saudáveis e a confirmação for `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`, o script preserva/arquiva a evidência parcial em `$evidence.reauthorized-<timestamp>` e realiza o cutover com segurança. Caso a confirmação seja apenas `PRODUCTION_CUTOVER`, o script falha exigindo revisão e o uso do parâmetro de reautorização.
+
 # Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
 
 - **Causa Raiz Comprovada:**

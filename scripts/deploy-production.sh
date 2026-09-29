@@ -81,7 +81,7 @@ log "Build começa enquanto os containers atuais permanecem atendendo"
 docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require('./apps/api/dist/build-info.json');if(b.commit!=='$APP_COMMIT'||!b.builtAt)process.exit(1)"
 log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 [[ "$MODE" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
-[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER"
+[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER || "${CONFIRM:-}" == PRODUCTION_CUTOVER_REAUTHORIZED ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER ou CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
@@ -139,11 +139,38 @@ evidence_root="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}"
 evidence="$evidence_root/$APP_COMMIT"
 if [[ -e "$evidence" ]]; then
   [[ -d "$evidence" ]] || die "caminho de evidência existente não é diretório"
-  [[ ! -e "$evidence/cutover-started" ]] || die "evidência do SHA indica cutover iniciado; revisão manual obrigatória"
-  aborted="$evidence_root/$APP_COMMIT.aborted-$(date -u +%Y%m%dT%H%M%SZ)"
-  [[ ! -e "$aborted" ]] || die "destino da tentativa abortada já existe"
-  mv "$evidence" "$aborted"
-  log "evidência parcial anterior preservada em $aborted"
+  if [[ -e "$evidence/cutover-started" ]]; then
+    if running_commit=$(curl -fsS --max-time 3 http://127.0.0.1:4000/health/version 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0)).commit' 2>/dev/null) && [[ "$running_commit" == "$APP_COMMIT" ]]; then
+      log "Cutover já concluído anteriormente para $APP_COMMIT; runtime ativo já serve a versão esperada"
+      exit 0
+    fi
+
+    if [[ "${CONFIRM:-}" != PRODUCTION_CUTOVER_REAUTHORIZED ]]; then
+      die "evidência do SHA indica cutover iniciado; revisão manual obrigatória. Para reautorizar após revalidar o estado do runtime, execute com CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
+    fi
+
+    for spec in api:4000 web:5173; do
+      role=${spec%%:*}; port=${spec##*:}
+      owners=$(docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | awk -F'|' -v p=":$port->" '$2~p{print $1}')
+      if [[ "$(printf '%s\n' "$owners" | sed '/^$/d' | wc -l)" -ne 1 ]]; then
+        die "reautorização bloqueada: porta $port não possui proprietário único ou container foi parado"
+      fi
+      container_id=$(docker inspect -f '{{.Id}}' "$owners" 2>/dev/null || true)
+      if [[ -z "$container_id" || "$(docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null)" != true ]]; then
+        die "reautorização bloqueada: container anterior de $role não está em execução"
+      fi
+    done
+
+    reauthorized="$evidence_root/$APP_COMMIT.reauthorized-$(date -u +%Y%m%dT%H%M%SZ)"
+    [[ ! -e "$reauthorized" ]] || die "destino da evidência reautorizada já existe"
+    mv "$evidence" "$reauthorized"
+    log "cutover reautorizado manualmente para $APP_COMMIT; evidência anterior salva em $reauthorized"
+  else
+    aborted="$evidence_root/$APP_COMMIT.aborted-$(date -u +%Y%m%dT%H%M%SZ)"
+    [[ ! -e "$aborted" ]] || die "destino da tentativa abortada já existe"
+    mv "$evidence" "$aborted"
+    log "evidência parcial anterior preservada em $aborted"
+  fi
 fi
 install -d -m 700 "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
