@@ -200,7 +200,7 @@ web\tgest-o-web:${dummySha}\tsha256:${"2".repeat(64)}\tsha256:${"2".repeat(64)}\
   const testProofLibScript2 = `
     source scripts/lib/production-rebaseline-proof.sh
     if validate_rebaseline_evidence "${dummySha}" "${join(testDir, "rebaseline")}"; then
-      echo "REBASELINE_VERIFIED_COMMIT=$REBASELINE_VERIFIED_COMMIT REBASELINE_VERIFIED_API_ID=$REBASELINE_VERIFIED_API_ID REBASELINE_VERIFIED_WEB_ID=$REBASELINE_VERIFIED_WEB_ID"
+      echo "REBASELINE_VERIFIED_COMMIT=$REBASELINE_VERIFIED_COMMIT REBASELINE_VERIFIED_API_ID=$REBASELINE_VERIFIED_API_ID REBASELINE_VERIFIED_WEB_ID=$REBASELINE_VERIFIED_WEB_ID REBASELINE_VERIFIED_API_TAR=$REBASELINE_VERIFIED_API_TAR REBASELINE_VERIFIED_WEB_TAR=$REBASELINE_VERIFIED_WEB_TAR"
     else
       echo "FAILED_VERIFICATION"
     fi
@@ -209,9 +209,30 @@ web\tgest-o-web:${dummySha}\tsha256:${"2".repeat(64)}\tsha256:${"2".repeat(64)}\
   assert.ok(run2.stdout.includes(`REBASELINE_VERIFIED_COMMIT=${dummySha}`));
   assert.ok(run2.stdout.includes(`REBASELINE_VERIFIED_API_ID=sha256:${"1".repeat(64)}`));
   assert.ok(run2.stdout.includes(`REBASELINE_VERIFIED_WEB_ID=sha256:${"2".repeat(64)}`));
+  assert.ok(run2.stdout.includes(`REBASELINE_VERIFIED_API_TAR=${dummyApiTar}`));
+  assert.ok(run2.stdout.includes(`REBASELINE_VERIFIED_WEB_TAR=${dummyWebTar}`));
 
-  // Scenario 3: Divergent Baseline (e.g., checksum mismatch or wrong SHA)
+  // Scenario 3: Divergent SHA query (querying a different SHA must fail)
+  const divergentSha = "b".repeat(40);
+  const testProofDivergentSha = `
+    source scripts/lib/production-rebaseline-proof.sh
+    if validate_rebaseline_evidence "${divergentSha}" "${join(testDir, "rebaseline")}"; then
+      echo "UNEXPECTED_PASS"
+    else
+      echo "EXPECTED_FAIL"
+    fi
+  `;
+  const runDivergentSha = spawnSync("bash", ["-c", testProofDivergentSha], { encoding: "utf8" });
+  assert.equal(runDivergentSha.stdout.trim(), "EXPECTED_FAIL");
+
+  // Scenario 4: Missing OCI Backup Tarball File
+  rmSync(dummyApiTar);
+  const runMissingTar = spawnSync("bash", ["-c", testProofLibScript], { encoding: "utf8" });
+  assert.equal(runMissingTar.stdout.trim(), "EXPECTED_FAIL");
+
+  // Restore OCI tarball for corrupt checksum test
   writeFileSync(dummyApiTar, "corrupted-tar-content");
+  // Scenario 5: Corrupted Checksum
   const run3 = spawnSync("bash", ["-c", testProofLibScript], { encoding: "utf8" });
   assert.equal(run3.stdout.trim(), "EXPECTED_FAIL");
 

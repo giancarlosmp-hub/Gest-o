@@ -1,3 +1,35 @@
+# Correção da Resolução do Digest Legado Ausente no Cutover com Rebaseline Válido — 29/09/2026
+
+- **Diagnóstico e Causa Raiz:**
+  - Após a execução bem-sucedida do Production Rebaseline para o SHA `5be2e0e63d32994c0e41a685fb134ef40402b7cf`, o Cutover do Production Deploy falhou com:
+    `Error response from daemon: No such image: sha256:38fc843ba67330fc12a63c306891028e9912817c1c578f77aee9b5d089ece6d4`
+    `DEPLOY_FAILURE_STAGE=deploy_script` `DEPLOY_FAILURE_COMMAND=run_deploy_script` `DEPLOY_FAILURE_EXIT_CODE=1`
+  - **Identificação das Imagens:**
+    1. *Imagem Antiga em Execução:* Container ativo com ID OCI `sha256:38fc843...` (cujo objeto foi purgado do repositório local do Docker Engine).
+    2. *Referência Histórica de Rollback:* Imagem legada ausente do Docker Engine.
+    3. *Backup OCI do Rebaseline:* Tarballs `/var/log/gest-o/oci-backups/$APP_COMMIT/gest-o-api.tar` e `gest-o-web.tar`, registrados em `/var/log/gest-o/rebaseline/$APP_COMMIT/result.tsv` com SHA-256 verificado.
+    4. *Imagem Alvo:* `gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT`.
+  - **Causa do Erro:** Quando a imagem do container legado (`sha256:38fc843...`) estava ausente do Docker Engine, `resolve_rollback_image` falhava legitimamente. Em seguida, o fluxo de fallback do rebaseline (`validate_rebaseline_evidence`) identificava os IDs verificados do rebaseline (`REBASELINE_VERIFIED_API_ID` / `WEB_ID`), mas tentava executar `docker tag` antes de garantir a presença desses artefatos OCI na engine local. Quando a imagem OCI do rebaseline havia sido purgada do cache do Docker, o comando `docker tag` falhava com "No such image".
+
+- **Correção Implementada e Garantias de Segurança:**
+  - **Restauração Transparente via `docker load` (`scripts/deploy-production.sh`):**
+    - No caminho de rebaseline autorizado (`validate_rebaseline_evidence "$APP_COMMIT"`), o script verifica a presença do artefato OCI na engine local via `docker image inspect "$ROLLBACK_ARTIFACT_ID"`.
+    - Se ausente da engine local, o script carrega o tarball OCI de backup previamente validado via `docker load -i "$tar_path"`.
+    - Valida criptograficamente que a imagem carregada corresponde exatamente ao `$ROLLBACK_ARTIFACT_ID` e possui o rótulo `org.opencontainers.image.revision == $APP_COMMIT`.
+  - **Preservação de Criptografia e Regras Fail-Closed:**
+    - Não aceita tags, rótulos Git ou nomes de imagem como prova suficiente de identidade.
+    - Se a evidência de rebaseline estiver ausente, com SHA divergente, tarball inexistente/corrompido, o Cutover falha fechado mantendo os containers anteriores ativos.
+    - Proibição absoluta mantida para `docker commit`, `docker export`, remoção prematura de containers, alteração de banco de dados ou bypasses.
+  - **Biblioteca de Evidência Atualizada (`scripts/lib/production-rebaseline-proof.sh`):**
+    - `validate_rebaseline_evidence` passa a exportar `REBASELINE_VERIFIED_API_TAR`, `REBASELINE_VERIFIED_API_TAR_SHA`, `REBASELINE_VERIFIED_WEB_TAR` e `REBASELINE_VERIFIED_WEB_TAR_SHA`.
+
+- **Testes de Fumaça Adicionados (`scripts/smoke/production-rebaseline-safety.mjs` e `scripts/smoke/production-deploy-real-call-graph-safety.sh`):**
+  - Digest legado existente (resolve via `resolve_rollback_image`);
+  - Digest legado ausente com rebaseline válida e restaurável via `docker load` (conclui cutover com `method=authorized-rebaseline`);
+  - Digest legado ausente sem rebaseline (bloqueia fail-closed com `die "sem imagem anterior verificável"`);
+  - Rebaseline com SHA divergente (bloqueia fail-closed);
+  - Backup OCI ausente ou com SHA-256 corrompido (bloqueia fail-closed).
+
 # Correção do Erro de Parsing Remoto SSH no Production Rebaseline (Run 36630401825) — 29/09/2026
 
 - **Diagnóstico do Erro de Parsing Remoto (`unexpected token ';'`):**

@@ -74,11 +74,17 @@ docker run -d --rm --pull=never \
   postgres:16 >/dev/null
 pg_created=true
 
+database_ready=false
 for _ in {1..60}; do
-  docker exec "$PG_NAME" pg_isready -U postgres -d gesto_test >/dev/null 2>&1 && break
+  if database_name=$(docker exec "$PG_NAME" psql -X -U postgres -d gesto_test -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
+    if [[ "$database_name" == gesto_test ]]; then
+      database_ready=true
+      break
+    fi
+  fi
   sleep 1
 done
-docker exec "$PG_NAME" pg_isready -U postgres -d gesto_test >/dev/null
+[[ "$database_ready" == true ]]
 
 docker exec "$PG_NAME" psql -U postgres -d gesto_test -v ON_ERROR_STOP=1 -c \
   "CREATE ROLE runtime LOGIN PASSWORD '${RUNTIME_PASSWORD}'; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE gesto_test TO runtime; GRANT USAGE ON SCHEMA public TO runtime" >/dev/null

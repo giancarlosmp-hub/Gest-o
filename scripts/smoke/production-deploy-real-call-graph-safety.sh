@@ -238,4 +238,94 @@ touch "$EVIDENCE_DIR/$SHA/cutover-started"
 APP_DIR="$APP" DEPLOY_MODE=cutover EXPECTED_SHA="$SHA" CONFIRM=PRODUCTION_CUTOVER DEPLOY_EVIDENCE_DIR="$EVIDENCE_DIR" SCHEMA_EVIDENCE_DIR="$SCHEMA_ROOT" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/done.out" 2>"$TMP/done.err"
 grep -q "Cutover já concluído anteriormente para $SHA" "$TMP/done.out"
 
+# 5. Digest legado ausente com rebaseline válida deve restaurar OCI backup e concluir o cutover
+REBASELINE_DIR="$TMP/rebaseline"
+OCI_DIR="$TMP/oci-backups"
+mkdir -p "$REBASELINE_DIR/$SHA" "$OCI_DIR/$SHA"
+api_tar="$OCI_DIR/$SHA/gest-o-api.tar"
+web_tar="$OCI_DIR/$SHA/gest-o-web.tar"
+printf 'mock api tar' >"$api_tar"
+printf 'mock web tar' >"$web_tar"
+api_tar_sha=$(sha256sum "$api_tar" | cut -d' ' -f1)
+web_tar_sha=$(sha256sum "$web_tar" | cut -d' ' -f1)
+api_id="sha256:1111111111111111111111111111111111111111111111111111111111111111"
+web_id="sha256:2222222222222222222222222222222222222222222222222222222222222222"
+
+cat >"$REBASELINE_DIR/$SHA/result.tsv" <<EOF
+result	PASS
+rebaseline_commit	$SHA
+rebaselined_at	2026-09-29T12:00:00Z
+api_image_tag	gest-o-api:$SHA
+api_image_id	$api_id
+api_image_digest	$api_id
+api_tar_path	$api_tar
+api_tar_sha256	$api_tar_sha
+web_image_tag	gest-o-web:$SHA
+web_image_id	$web_id
+web_image_digest	$web_id
+web_tar_path	$web_tar
+web_tar_sha256	$web_tar_sha
+unavailable_legacy_artifact	310198...
+unavailable_legacy_reason	no_local_oci_digest_link
+cutover_executed	NO
+EOF
+cat >"$REBASELINE_DIR/$SHA/manifest.tsv" <<EOF
+role	image_tag	image_id	digest	tar_path	tar_sha256
+api	gest-o-api:$SHA	$api_id	$api_id	$api_tar	$api_tar_sha
+web	gest-o-web:$SHA	$web_id	$web_id	$web_tar	$web_tar_sha
+EOF
+
+# Mock docker para simular imagem legada ausente (sha256:38fc843...), mas imagens de rebaseline disponíveis após docker load
+cat >"$BIN/docker" <<EOF
+#!/usr/bin/env bash
+printf 'docker %s\n' "\$*" >>"$COMMAND_LOG"
+[[ "\$1 \$2 \$3" == 'compose --env-file '* ]] && [[ "\$*" == *'config --services'* ]] && { printf 'api\nweb\n'; exit; }
+case "\$1 \$2" in
+ 'network inspect'|'volume inspect') exit 0;;
+ 'image inspect')
+  if [[ "\$*" == *"sha256:38fc843"* ]]; then exit 1; fi
+  exit 0;;
+ 'inspect -f')
+  case "\$3" in
+   '{{.Image}}') printf 'sha256:38fc843ba67330fc12a63c306891028e9912817c1c578f77aee9b5d089ece6d4\n';;
+   '{{.State.Running}}') printf 'true\n';;
+   '{{json .NetworkSettings.Networks}}') printf '{"gest-o_default":{}}\n';;
+   '{{range .Mounts}}{{println .Name .Destination}}{{end}}') printf 'production-pgdata /var/lib/postgresql/data\n';;
+  esac;;
+ 'ps --format')
+  printf 'api-container|:4000->4000\nweb-container|:5173->5173\n';;
+ *) exit 0;;
+esac
+EOF
+chmod +x "$BIN/docker"
+
+# Mock curl para simular servidor ainda não atualizado
+cat >"$BIN/curl" <<EOF
+#!/usr/bin/env bash
+if [[ "\$*" == *'/health/version'* ]]; then
+  printf '{"commit":"old-commit-1234"}\n'
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$BIN/curl"
+
+# Remove evidência anterior para forçar novo cutover
+rm -rf "$EVIDENCE_DIR/$SHA"*
+
+APP_DIR="$APP" DEPLOY_MODE=cutover EXPECTED_SHA="$SHA" CONFIRM=PRODUCTION_CUTOVER DEPLOY_EVIDENCE_DIR="$EVIDENCE_DIR" SCHEMA_EVIDENCE_DIR="$SCHEMA_ROOT" REBASELINE_EVIDENCE_DIR="$REBASELINE_DIR" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/rebaseline_cutover.out" 2>"$TMP/rebaseline_cutover.err" || {
+  cat "$TMP/rebaseline_cutover.out"; cat "$TMP/rebaseline_cutover.err" >&2; exit 1
+}
+grep -q "method=authorized-rebaseline" "$TMP/rebaseline_cutover.out"
+grep -q "verified_target_id=$api_id" "$TMP/rebaseline_cutover.out"
+
+# 6. Digest legado ausente e sem rebaseline evidência deve falhar closed
+rm -rf "$REBASELINE_DIR" "$EVIDENCE_DIR/$SHA"*
+set +e
+APP_DIR="$APP" DEPLOY_MODE=cutover EXPECTED_SHA="$SHA" CONFIRM=PRODUCTION_CUTOVER DEPLOY_EVIDENCE_DIR="$EVIDENCE_DIR" SCHEMA_EVIDENCE_DIR="$SCHEMA_ROOT" REBASELINE_EVIDENCE_DIR="$REBASELINE_DIR" bash "$APP/scripts/production-deploy-entrypoint.sh" >"$TMP/no_rebaseline.out" 2>"$TMP/no_rebaseline.err"
+no_rebaseline_rc=$?
+set -e
+[[ "$no_rebaseline_rc" -ne 0 ]]
+grep -q "sem imagem anterior verificável" "$TMP/no_rebaseline.err"
+
 printf 'production deploy real call graph safety passed\n'
