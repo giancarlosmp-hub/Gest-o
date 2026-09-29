@@ -1,3 +1,36 @@
+# Correção da Expressão GitHub Actions no Workflow de Rebaseline (Run 36629537190) — 29/09/2026
+
+- **Diagnóstico do Erro `bad substitution`:**
+  - O workflow `.github/workflows/production-rebaseline.yml` (Run 36629537190) falhava com o erro `line 12: ${#inputs.expected_main_sha}: bad substitution`.
+  - **Causa Raiz:** O workflow utilizava a expressão `${#inputs.expected_main_sha}` diretamente no bloco shell `run:`. O interpretador Bash da subshell tentava avaliar `${#inputs...}` como uma expansão de variável Bash inválida contendo um ponto `.`, gerando erro de sintaxe.
+  - **Confirmação de Não Mutação Produtiva:** NENHUM backup ou alteração na produção foi criado/executado nessa tentativa (Run 36629537190 falhou no primeiro step local de validação de entradas, antes de disparar a etapa SSH).
+
+- **Correção por Variáveis de Ambiente (`env`) e Validação Bash:**
+  - Os inputs do GitHub Actions são agora injetados no bloco `env` do step de validação local:
+    ```yaml
+    env:
+      CONFIRM: ${{ inputs.confirm }}
+      EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+    ```
+  - A validação de formato e comprimento ocorre via Bash puro usando variáveis de ambiente:
+    ```bash
+    if [ "$CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+      printf '%s\n' "::error::Confirmação inválida: $CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
+      exit 1
+    fi
+    if [ "${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+      printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+      exit 1
+    fi
+    case "$EXPECTED_MAIN_SHA" in
+      *[!0-9a-f]*|'')
+        printf '%s\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
+        exit 1
+        ;;
+    esac
+    ```
+  - Atualizada a suíte `scripts/smoke/production-rebaseline-safety.mjs` com testes estáticos e comportamentais (verificando aceitação de SHA válido de 40 caracteres, rejeição de SHA vazio, tamanho incorreto, não-hexadecimal e confirmação divergente).
+
 # Procedimento Formal de Rebaseline de Produção — 29/09/2026
 
 - **Diagnóstico e Contexto Comprovado:**
