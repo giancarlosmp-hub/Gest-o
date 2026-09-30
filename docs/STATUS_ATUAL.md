@@ -1,3 +1,18 @@
+# Correção do Ocultamento de Produtos por Zero Estrutural de Catálogo — 30/09/2026
+
+- **Sintoma e Causa Raiz:**
+  - Na tela Nova Oportunidade, ao pesquisar por produtos (ex: "Mara"), a busca retornava "Nenhum produto encontrado para essa busca" apesar de o produto MARANDU estar ativo e sincronizado.
+  - A materialização do catálogo `/products` cria uma linha em `ProductPrice` com `source = "products"`, `erpPriceId = "1"`, `branchCode = null` e `price = 0` (zero estrutural de catálogo).
+  - Em `calculateOpportunityPriceForTable` (`opportunityPriceService.ts`), a verificação de registros explícitos da Tabela 1 considerava essa linha de zero estrutural do `/products` como se fosse um preço comercial explícito.
+  - Como `explicitTableRows.length` ficava em 1 (pela presença do zero estrutural de `/products`), o fallback `unscopedFallbackRows` era bloqueado, impedindo que o preço comercial sem tabela recebido do `/prices` (R$ 128,00 vigente) fosse utilizado para a Tabela 1.
+
+- **Correção Implementada:**
+  - Atualizado `calculateOpportunityPriceForTable` em `apps/api/src/services/opportunityPriceService.ts`:
+    - Filtrados os zeros estruturais do catálogo (`isStructuralZeroFromProducts(item)`) para formar `explicitCommercialTableRows`.
+    - Apenas observações comerciais explícitas passam a bloquear o fallback de preços sem tabela para a Tabela 1. Zeros comerciais explícitos de `/prices` (`source = "prices"`, `availabilityState = "explicit_zero"`) permanecem respeitados como tombstones autoritativos e continuam ocultando o produto.
+    - Para as Tabelas 2, 3 e 4, a seleção aplica estritamente as regras de variação percentual sincronizadas do ERP (`priceVariations`). No caso do Marandu (`1 / 9`), a regra de 25% sobre a base da Tabela 1 (R$ 128,00) resulta em R$ 160,00 para a Tabela 2.
+  - Adicionadas suítes de testes automatizados em `apps/api/src/services/opportunityProductAvailability.test.ts` cobrindo o produto MARANDU, vigência comercial (2026 vs 2022 histórico), zero comercial explícito e regras de variação ERP.
+
 # Correção da Resolução do Digest Legado Ausente no Cutover com Rebaseline Válido — 29/09/2026
 
 - **Diagnóstico e Causa Raiz:**

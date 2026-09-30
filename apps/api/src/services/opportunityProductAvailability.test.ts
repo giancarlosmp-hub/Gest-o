@@ -366,4 +366,82 @@ const unscopedSyncDiagnostics = {
 };
 assert.equal(assertUsefulProductPriceSync(unscopedSyncDiagnostics), 501, "Sincronização com 501 linhas (incluindo preços sem tabela e zeros explícitos) deve ser validada com sucesso");
 
+// --- REPRODUCTION & INTEGRATION TESTS FOR MARANDU 1/9 & PRICE POLICY RULES ---
+
+// 1. MARANDU Product (Code 1, Class 9) - Structural Zero from /products does not block unscoped /prices Table 1
+const maranduIncidentProduct = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  name: "MARANDU VITALSEED 10KG",
+  isActive: true,
+  isSuspended: false,
+  rawErpPayload: { PRECO: 0, CODGRUPO: "24" },
+  prices: [
+    // /prices unscoped (2026-09-24)
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" },
+    // /prices unscoped branch 1 (2022-08-26 historical)
+    { erpPriceId: null, branchCode: "1", price: 252.08, source: "prices", availabilityState: "available", validFrom: new Date("2022-08-26T00:00:00Z"), erpSourcePriceId: "2166" },
+    // /products catalog structural zero for Table 1
+    { erpPriceId: "1", branchCode: null, price: 0, source: "products", availabilityState: "explicit_zero", validFrom: null, sourceChangedAt: null, erpSourcePriceId: null },
+  ],
+};
+
+const maranduTable1 = calculateOpportunityPriceForTable({ product: maranduIncidentProduct, priceTableCode: "1" });
+assert.equal(maranduTable1.price, 128.00, "Tabela 1 deve selecionar o valor vigente R$ 128,00 de /prices");
+assert.equal(maranduTable1.priceTableMatched, true, "priceTableMatched deve ser true para Tabela 1");
+assert.equal(maranduTable1.source, "productPrice");
+assert.equal(isOpportunityProductSelectable({
+  isActive: maranduIncidentProduct.isActive,
+  isSuspended: maranduIncidentProduct.isSuspended,
+  isSynchronized: true,
+  price: maranduTable1.price,
+  priceTableMatched: maranduTable1.priceTableMatched,
+}), true, "Produto MARANDU com R$ 128,00 deve ficar visível na busca de Nova Oportunidade");
+
+// 2. Table 2 calculated from ERP variation rules (e.g. 25% for Group 24 / Table 2)
+const erpPriceVariations = [
+  { TABELA: "2", CODGRUPO: "24", PER_VARIACAO: 25 },
+  { TABELA: "3", CODGRUPO: "24", PER_VARIACAO: 10 },
+];
+const maranduTable2 = calculateOpportunityPriceForTable({
+  product: {
+    ...maranduIncidentProduct,
+    prices: [
+      ...maranduIncidentProduct.prices,
+      { erpPriceId: "2", branchCode: null, price: 160.00, source: "calculated_from_variation", availabilityState: "available" },
+    ],
+  },
+  priceTableCode: "2",
+  priceVariations: erpPriceVariations,
+});
+assert.equal(maranduTable2.price, 160.00, "Tabela 2 deve calcular R$ 160,00 aplicando a regra recebida do ERP (128 + 25%)");
+assert.equal(maranduTable2.priceTableMatched, true);
+
+// 3. Authoritative Commercial Zero from /prices DOES block unscoped fallbacks
+const commercialZeroProduct = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  isActive: true,
+  rawErpPayload: { PRECO: 0 },
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z") },
+    { erpPriceId: "1", branchCode: null, price: 0, source: "prices", availabilityState: "explicit_zero", sourceChangedAt: new Date("2026-09-28T00:00:00Z") },
+  ],
+};
+const commercialZeroResult = calculateOpportunityPriceForTable({ product: commercialZeroProduct, priceTableCode: "1" });
+assert.equal(commercialZeroResult.price, 0, "Zero comercial explícito de /prices deve ser mantido como tombstone e ocultar o produto");
+assert.equal(commercialZeroResult.priceTableMatched, false);
+
+// 4. Future validity date vs current valid date
+const futureDateProduct = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 500.00, source: "prices", availabilityState: "available", validFrom: new Date("2099-01-01T00:00:00Z") },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z") },
+  ],
+};
+const futureDateResult = calculateOpportunityPriceForTable({ product: futureDateProduct, priceTableCode: "1" });
+assert.equal(futureDateResult.price, 128.00, "Preço com vigência futura (2099) deve ser ignorado em favor da vigência atual válida (2026-09-24)");
+
 console.log("opportunity product availability regression: PASS");
