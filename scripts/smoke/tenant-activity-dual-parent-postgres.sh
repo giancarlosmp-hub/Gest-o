@@ -23,8 +23,11 @@ database_ready=false
 for _ in {1..60}; do
   if database_name=$(docker exec "$pg" psql -X -U postgres -d proof -v ON_ERROR_STOP=1 -Atc 'SELECT current_database()' 2>/dev/null); then
     if [[ "$database_name" == proof ]]; then
-      database_ready=true
-      break
+      sleep 1
+      if docker exec "$pg" psql -X -U postgres -d proof -v ON_ERROR_STOP=1 -Atc 'SELECT 1' >/dev/null 2>&1; then
+        database_ready=true
+        break
+      fi
     fi
   fi
   sleep 1
