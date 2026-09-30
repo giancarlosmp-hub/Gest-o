@@ -547,9 +547,10 @@ const referenceCodeKeys: Record<string, string[]> = {
   priceTables: ["TABELA", "CODTABELA", "COD_TABELA", "ID_TABELA", "TABELA_PRECO", "code", "codigo", "CODIGO", "id", "ID", "value"],
   operations: ["CODOPER", "OPERACAO", "COD_OPERACAO", "code", "codigo", "CODIGO", "id", "ID", "value"],
   receivingConditions: ["CODCONDREC", "CONDICAO", "COD_CONDICAO", "CODIGO", "code", "codigo", "id", "ID", "value"],
+  paymentMethods: ["FORMA", "CODFORMA", "COD_FORMA", "CODIGO", "code", "codigo", "id", "ID", "value"],
 };
 
-async function assertReferenceCode(scope: "priceTables" | "operations" | "receivingConditions", code: string, message: string) {
+async function assertReferenceCode(scope: "priceTables" | "operations" | "receivingConditions" | "paymentMethods", code: string, message: string) {
   const normalizedCode = normalizeErpParameterCode(code);
   const stored = await prisma.appConfig.findUnique({
     where: { key: `erp.ultrafv3.${scope}` },
@@ -569,7 +570,7 @@ async function assertReferenceCode(scope: "priceTables" | "operations" | "receiv
     }
 
     if (!isErpReferenceEligible(scope, matchedRow)) {
-      const scopeLabel = scope === "operations" ? "Operação" : scope === "receivingConditions" ? "Condição de recebimento" : "Referência";
+      const scopeLabel = scope === "operations" ? "Operação" : scope === "receivingConditions" ? "Condição de recebimento" : scope === "paymentMethods" ? "Forma de pagamento" : "Referência";
       throw Object.assign(
         new Error(`${scopeLabel} não autorizada para uso no CRM (código ${code}).`),
         { status: 400 }
@@ -1246,6 +1247,7 @@ async function createErpOrderFromOpportunityUnsafe(
     await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
     await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
     await assertReferenceCode("receivingConditions", params.receivingConditionCode, "Condição de recebimento inválida para emissão ERP.");
+    await assertReferenceCode("paymentMethods", params.paymentMethodCode, "Forma de pagamento inválida para emissão ERP.");
   } catch (error) {
     if (error instanceof Error) Object.assign(error, { parameterDiagnostics });
     throw error;
@@ -1962,6 +1964,7 @@ const buildProtocolTestOrderPayload = async (
   await assertReferenceCode("priceTables", params.priceTableCode, "Tabela preço inválida para emissão ERP.");
   await assertReferenceCode("operations", params.operationCode, "Operação inválida para emissão ERP.");
   await assertReferenceCode("receivingConditions", params.receivingConditionCode, "Condição de recebimento inválida para emissão ERP.");
+  await assertReferenceCode("paymentMethods", params.paymentMethodCode, "Forma de pagamento inválida para emissão ERP.");
 
   const now = new Date();
   const expectedDeliveryDate = parseIsoDateOnlyAsUtc(params.expectedDeliveryDate);
