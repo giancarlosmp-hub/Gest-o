@@ -24,6 +24,15 @@ EXPECTED_SHA="$(git rev-parse HEAD)" CONFIRM=PRODUCTION_REBASELINE_APPROVED bash
 ### Passo 4: Execução do Cutover Reautorizado
 Executar o workflow **Deploy Production** no disparo `phase=cutover` (ou pelo shell `MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh`). O runner detectará o rebaseline aprovado para `$APP_COMMIT` e efetuará o cutover de forma segura.
 
+# Validação Pós-Deploy — Incidente de Produtos Ocultos por Zero Estrutural Legado (30/09/2026)
+
+1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.
+2. No ambiente pós-deploy, realizar requisição de busca `/products/search` utilizando `q=Marandu` e `priceTableCode=1`.
+3. Confirmar que o produto MARANDU (e demais produtos com registros legados de zero estrutural de catálogo `source = "legacy"`) é retornado normalmente com o preço comercial válido (ex: R$ 128,00 para Tabela 1).
+4. Verificar se a resposta de `/products/search` traz `hiddenReason: null` e `priceTableMatched: true` para o produto, confirmando que registros de zero estrutural do catálogo (`source = "products"` ou `"legacy"`) não bloqueiam o fallback comercial.
+5. Confirmar que tombstones explícitos de zero comercial (`source = "prices"`, `availabilityState = "explicit_zero"`) continuam sendo respeitados e ocultam o produto com `hiddenReason: "invalid_price"`.
+6. Confirmar que buscas direcionadas às tabelas secundárias (`priceTableCode=2`, `3` ou `4`) aplicam corretamente as regras de variação percentual sincronizadas do ERP (ex: R$ 160,00 para Tabela 2 do Marandu com regra de 25%).
+
 # Validação Pós-Deploy — Incidente de Preços Sem Tabela Explícita (28/09/2026)
 
 1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.
