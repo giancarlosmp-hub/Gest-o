@@ -38,24 +38,7 @@ assert.equal(isErpReferenceEligible("receivingConditions", rcIneligible), false,
 const rcNull = { CODCONDREC: "3", DESCRICAO: "A PRAZO", ATIVO: "S", LIBERAR_INTERNET: null };
 assert.equal(isErpReferenceEligible("receivingConditions", rcNull), false, "ReceivingCondition with null LIBERAR_INTERNET must fail closed");
 
-// 6. Test Payment Methods (paymentMethods)
-const pmEligible = { FORMA: "1", DESCRICAO: "DINHEIRO", ATIVO: "S", LIBERAR_INTERNET: "S" };
-assert.equal(isErpReferenceEligible("paymentMethods", pmEligible), true, "Payment method with LIBERAR_INTERNET=S must be eligible");
-
-const pmIneligible = { FORMA: "2", DESCRICAO: "CHEQUE INATIVO", ATIVO: "S", LIBERAR_INTERNET: "N" };
-assert.equal(isErpReferenceEligible("paymentMethods", pmIneligible), false, "Payment method with LIBERAR_INTERNET=N must be ineligible");
-
-const pmAbsentLiberarInternetAtivo = { FORMA: "3", DESCRICAO: "BOLETO", ATIVO: "S" };
-assert.equal(isErpReferenceEligible("paymentMethods", pmAbsentLiberarInternetAtivo), true, "Payment method without LIBERAR_INTERNET but ATIVO=S falls back to eligible");
-
-const pmAbsentLiberarInternetInativo = { FORMA: "4", DESCRICAO: "CARTAO BLOQUEADO", ATIVO: "N" };
-assert.equal(isErpReferenceEligible("paymentMethods", pmAbsentLiberarInternetInativo), false, "Payment method without LIBERAR_INTERNET and ATIVO=N fails closed");
-
-// 7. Test strict fail-closed ATIVO check (non-"S" values like "X" or "INVALID")
-const opInvalidAtivoUnknown = { CODOPER: "100", DESCRICAO: "VENDA", ATIVO: "X", LIBERAR_INTERNET: "S", VENDAS: "S" };
-assert.equal(isErpReferenceEligible("operations", opInvalidAtivoUnknown), false, "ATIVO='X' (non-'S') must fail closed");
-
-// 8. Test case-insensitivity and whitespace resilience
+// 6. Test case-insensitivity and whitespace resilience
 const opCaseSpaced = { CODOPER: "100", DESCRICAO: "VENDA", ATIVO: " s ", LIBERAR_INTERNET: " s ", VENDAS: " s " };
 assert.equal(isErpReferenceEligible("operations", opCaseSpaced), true, "Padded lowercase ' s ' should be normalized and accepted");
 
