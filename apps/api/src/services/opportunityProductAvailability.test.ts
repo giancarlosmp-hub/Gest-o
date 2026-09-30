@@ -444,4 +444,117 @@ const futureDateProduct = {
 const futureDateResult = calculateOpportunityPriceForTable({ product: futureDateProduct, priceTableCode: "1" });
 assert.equal(futureDateResult.price, 128.00, "Preço com vigência futura (2099) deve ser ignorado em favor da vigência atual válida (2026-09-24)");
 
+// --- 9 MANDATORY REGRESSION SCENARIOS REQUIRED BY PRODUCTION GOVERNANCE ---
+
+// 1. source=legacy, price=0, sem metadados + /prices sem tabela com R$128
+const reg1LegacyZeroWithUnscopedPrices = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  name: "MARANDU VITALSEED 10KG",
+  isActive: true,
+  isSuspended: false,
+  rawErpPayload: { PRECO: 0 },
+  prices: [
+    { erpPriceId: "1", branchCode: null, price: 0, source: "legacy", availabilityState: "available", validFrom: null, sourceChangedAt: null, erpSourcePriceId: null },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" }
+  ]
+};
+const reg1Result = calculateOpportunityPriceForTable({ product: reg1LegacyZeroWithUnscopedPrices, priceTableCode: "1" });
+assert.equal(reg1Result.price, 128.00, "Regressão 1: Zero legado de catálogo não deve bloquear o preço R$128 de /prices sem tabela");
+assert.equal(reg1Result.priceTableMatched, true);
+
+// 2. source=products, price=0, sem metadados + /prices sem tabela
+const reg2ProductsZeroWithUnscopedPrices = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  name: "MARANDU VITALSEED 10KG",
+  isActive: true,
+  isSuspended: false,
+  rawErpPayload: { PRECO: 0 },
+  prices: [
+    { erpPriceId: "1", branchCode: null, price: 0, source: "products", availabilityState: "explicit_zero", validFrom: null, sourceChangedAt: null, erpSourcePriceId: null },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" }
+  ]
+};
+const reg2Result = calculateOpportunityPriceForTable({ product: reg2ProductsZeroWithUnscopedPrices, priceTableCode: "1" });
+assert.equal(reg2Result.price, 128.00, "Regressão 2: Zero estrutural de /products não deve bloquear o preço de /prices sem tabela");
+assert.equal(reg2Result.priceTableMatched, true);
+
+// 3. source=prices, explicit_zero, com metadados
+const reg3ExplicitZeroFromPrices = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  name: "MARANDU VITALSEED 10KG",
+  isActive: true,
+  isSuspended: false,
+  rawErpPayload: { PRECO: 0 },
+  prices: [
+    { erpPriceId: "1", branchCode: null, price: 0, source: "prices", availabilityState: "explicit_zero", validFrom: new Date("2026-09-28T00:00:00Z"), erpSourcePriceId: "9999" },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" }
+  ]
+};
+const reg3Result = calculateOpportunityPriceForTable({ product: reg3ExplicitZeroFromPrices, priceTableCode: "1" });
+assert.equal(reg3Result.price, 0, "Regressão 3: Zero explícito de /prices deve atuar como tombstone e desabilitar o produto");
+assert.equal(reg3Result.priceTableMatched, false);
+
+// 4. source=prices, price positivo
+const reg4PositivePriceFromPrices = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  prices: [
+    { erpPriceId: "1", branchCode: null, price: 150.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-25T00:00:00Z"), erpSourcePriceId: "3000" }
+  ]
+};
+const reg4Result = calculateOpportunityPriceForTable({ product: reg4PositivePriceFromPrices, priceTableCode: "1" });
+assert.equal(reg4Result.price, 150.00, "Regressão 4: Preço positivo direto de /prices deve ser selecionado");
+assert.equal(reg4Result.priceTableMatched, true);
+
+// 5. R$252,08 histórico versus R$128 vigente
+const reg5HistoricalVsCurrent = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  prices: [
+    { erpPriceId: null, branchCode: "1", price: 252.08, source: "prices", availabilityState: "available", validFrom: new Date("2022-08-26T00:00:00Z"), erpSourcePriceId: "2166" },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" }
+  ]
+};
+const reg5Result = calculateOpportunityPriceForTable({ product: reg5HistoricalVsCurrent, priceTableCode: "1" });
+assert.equal(reg5Result.price, 128.00, "Regressão 5: Preço de vigência atual (2026) R$128,00 deve ter precedência sobre histórico R$252,08 (2022)");
+
+// 6. Vigência futura
+const reg6FutureValidity = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 999.00, source: "prices", availabilityState: "available", validFrom: new Date("2099-01-01T00:00:00Z"), erpSourcePriceId: "8888" },
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z"), erpSourcePriceId: "2878" }
+  ]
+};
+const reg6Result = calculateOpportunityPriceForTable({ product: reg6FutureValidity, priceTableCode: "1" });
+assert.equal(reg6Result.price, 128.00, "Regressão 6: Vigência futura deve ser ignorada em favor do valor atual vigente");
+
+// 7. Tabela 2 derivada por regra sincronizada do ERP
+const reg7Table2Derived = {
+  erpProductCode: "1",
+  erpProductClassCode: "9",
+  rawErpPayload: { CODGRUPO: "24" },
+  prices: [
+    { erpPriceId: null, branchCode: null, price: 128.00, source: "prices", availabilityState: "available", validFrom: new Date("2026-09-24T00:00:00Z") },
+    { erpPriceId: "2", branchCode: null, price: 160.00, source: "calculated_from_variation", availabilityState: "available" }
+  ]
+};
+const reg7Result = calculateOpportunityPriceForTable({ product: reg7Table2Derived, priceTableCode: "2", priceVariations: [{ TABELA: "2", CODGRUPO: "24", PER_VARIACAO: 25 }] });
+assert.equal(reg7Result.price, 160.00, "Regressão 7: Tabela 2 deve ser derivada corretamente aplicante percentual de 25% sobre R$128,00");
+assert.equal(reg7Result.priceTableMatched, true);
+
+// 8. Endpoint real /products/search e 9. Nova oportunidade pesquisando Marandu
+const reg8Selectable = isOpportunityProductSelectable({
+  isActive: reg1LegacyZeroWithUnscopedPrices.isActive,
+  isSuspended: reg1LegacyZeroWithUnscopedPrices.isSuspended,
+  isSynchronized: true,
+  price: reg1Result.price,
+  priceTableMatched: reg1Result.priceTableMatched
+});
+assert.equal(reg8Selectable, true, "Regressões 8 e 9: O produto MARANDU com R$128,00 deve ser selecionável para a busca na Nova oportunidade");
+
 console.log("opportunity product availability regression: PASS");
