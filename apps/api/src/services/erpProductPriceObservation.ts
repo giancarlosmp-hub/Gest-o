@@ -104,17 +104,16 @@ export type PriceObservationRecord = {
   source?: string | null;
   availabilityState?: string | null;
   erpSourcePriceId?: string | null;
-  sourcePriceId?: string | null;
 };
 
 export const isAuthoritativePriceObservation = (row: PriceObservationRecord): boolean =>
   row.source === "prices"
-  || Boolean(row.validFrom || row.sourceChangedAt || row.erpSourcePriceId || row.sourcePriceId);
+  || Boolean(row.validFrom || row.sourceChangedAt || row.erpSourcePriceId);
 
 export const authoritativePriceObservation = isAuthoritativePriceObservation;
 
 export const isCatalogMaterialization = (row: PriceObservationRecord): boolean =>
-  row.source === "products";
+  row.source === "products" || row.source === "legacy";
 
 export const catalogMaterialization = isCatalogMaterialization;
 
@@ -124,12 +123,11 @@ export const isExplicitZeroFromPrices = (row: PriceObservationRecord): boolean =
 export const explicitZeroFromPrices = isExplicitZeroFromPrices;
 
 export const isStructuralZeroFromProducts = (row: PriceObservationRecord): boolean =>
-  row.source === "products"
+  (row.source === "products" || row.source === "legacy")
   && (row.price === null || row.price === undefined || Number(row.price) === 0)
   && !row.validFrom
   && !row.sourceChangedAt
-  && !row.erpSourcePriceId
-  && !row.sourcePriceId;
+  && !row.erpSourcePriceId;
 
 export const structuralZeroFromProducts = isStructuralZeroFromProducts;
 

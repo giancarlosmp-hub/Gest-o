@@ -49,6 +49,18 @@
        - **Caso Parcial / Danificado:** Se os contêineres anteriores tiverem sido parados ou estiverem indisponíveis, a reautorização falha fechada exigindo intervenção/rollback manual.
        - **Caso Stale / Tentativa Interrompida com Baseline Intacto:** Se os contêineres baseline anteriores permanecerem ativos/saudáveis e a confirmação for `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`, o script preserva/arquiva a evidência parcial em `$evidence.reauthorized-<timestamp>` e realiza o cutover com segurança. Caso a confirmação seja apenas `PRODUCTION_CUTOVER`, o script falha exigindo revisão e o uso do parâmetro de reautorização.
 
+# Correção do Ocultamento de Produtos por Zero Estrutural Legado em Catálogo — 30/09/2026
+
+- **Sintoma e Causa Raiz:**
+  - Na tela Nova Oportunidade, ao pesquisar por produtos (ex: "Marandu"), o resultado indicava "Nenhum produto encontrado para essa busca".
+  - A investigação comprovou que registros legados de `ProductPrice` criados antes da migration `20260911190000_product_price_authority` possuem `source = "legacy"` (em vez de `"products"`), com `price = 0`, `erpPriceId = "1"`, `validFrom = null` e `erpSourcePriceId = null`.
+  - A função `isStructuralZeroFromProducts` em `erpProductPriceObservation.ts` verificava estritamente `row.source === "products"`.
+  - Como resultado, essas linhas legadas de zero estrutural do catálogo não eram desconsideradas e entravam em `explicitCommercialTableRows` para a Tabela 1, bloqueando o fallback não escopado (`unscopedFallbackRows`) contendo o preço comercial válido (R$ 128,00).
+
+- **Correção Implementada:**
+  - Atualizadas as funções `isStructuralZeroFromProducts` e `isCatalogMaterialization` em `apps/api/src/services/erpProductPriceObservation.ts` para tratar como zero estrutural de catálogo tanto `source = "products"` quanto `source = "legacy"` quando `price = 0` (ou nulo/undefined), `validFrom = null`, `sourceChangedAt = null` e `erpSourcePriceId = null`.
+  - Adicionados 9 cenários de testes de regressão em `apps/api/src/services/opportunityProductAvailability.test.ts` cobrindo zero estrutural legado, zero estrutural `products`, tombstone explícito `source = "prices"` (`availabilityState = "explicit_zero"`), zero com vigência/sourceChangedAt, vigência futura, vigência histórica, Tabela 1 e regras de variação ERP para Tabelas 2, 3 e 4 (100% PASS).
+
 # Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
 
 - **Causa Raiz Comprovada:**

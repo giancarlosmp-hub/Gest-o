@@ -22,9 +22,9 @@
 - Permanece como hipótese contratual pendente a ser confirmada com a equipe de integração do ERP se futuras versões do UltraFV3 passarão a incluir o campo de tabela explícito (ex.: `TABELA: "1"`) na resposta do `/prices` ou se o parâmetro `/prices?tabela=1` passará a retornar essas mesmas linhas envelopadas.
 
 ## 4. Distinção entre Zero Estrutural de Catálogo e Zero Comercial Autoritativo
-- **Zero Estrutural de Catálogo:**
-  - Origem: `source = "products"`, `price = 0`, sem `validFrom`, sem `sourceChangedAt`, sem `erpSourcePriceId`.
-  - Semântica: Representa a inicialização do item no catálogo, não uma decisão comercial de preço.
+- **Zero Estrutural de Catálogo (Legado e Atual):**
+  - Origem: `source = "products"` ou `source = "legacy"`, `price = 0` (ou nulo/undefined), sem `validFrom`, sem `sourceChangedAt`, sem `erpSourcePriceId`.
+  - Semântica: Representa a inicialização do item no catálogo (incluindo dados criados antes da migration `20260911190000_product_price_authority` gravados com `source = "legacy"`), não uma decisão comercial de preço.
   - Regra: **NÃO bloqueia** o fallback de preços comerciais positivos recebidos de `/prices` sem tabela para a Tabela 1.
 - **Zero Comercial Autoritativo:**
   - Origem: `source = "prices"`, `availabilityState = "explicit_zero"`, com metadados/relógio comercial do ERP.
