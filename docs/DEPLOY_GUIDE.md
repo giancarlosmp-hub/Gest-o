@@ -1,3 +1,13 @@
+## Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
+
+A alteração para impor a regra `LIBERAR_INTERNET` em Operações e Condições de Recebimento no CRM
+é puramente lógica no código (API backend e Frontend web). **Não exige migration de banco de dados.**
+Após o deploy normal da aplicação:
+1. Executar o teste de fumaça de validação: `npx tsx scripts/smoke/liberar-internet-safety.mjs`.
+2. Verificar se a listagem de operações de oportunidade omite opções com `LIBERAR_INTERNET != "S"` (ex.: Operação 99) e Operações com `VENDAS != "S"` (ex.: Operações 320 e 340).
+3. Confirmar que requisições diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas com erro HTTP 400.
+4. Confirmar que pedidos históricos gravados em `ErpOrderSync` continuam 100% legíveis e inalterados.
+
 ## Validação de Imagens OCI Alvo e Container Anterior no Cutover (29/09/2026)
 
 Durante a fase `cutover` em `scripts/deploy-production.sh`:

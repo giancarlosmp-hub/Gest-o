@@ -1,3 +1,20 @@
+# Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
+
+- **Aviso de Canal de Recuperação:** O workflow manual **ERP Production Recovery** permanece como o canal auditável de recuperação.
+- **Escopo e Objetivo:**
+  - Aplicação estrita da regra de elegibilidade `LIBERAR_INTERNET` do ERP UltraFV3 para Operações e Condições de Recebimento no CRM.
+  - Bloqueio de opções não autorizadas na interface do usuário (listagens da API) e revalidação fail-closed no backend no momento da criação/edição e envio de pedidos (`assertReferenceCode`), impedindo bypass por requisições HTTP diretas.
+
+- **Fatos Comprovados e Regras Aplicadas:**
+  - **Operações ERP:**
+    - Das 51 operações do ERP: 47 possuem `LIBERAR_INTERNET = "N"` e 4 possuem `LIBERAR_INTERNET = "S"`.
+    - `LIBERAR_INTERNET = "N"` indica que a operação não está liberada para uso no CRM (ex.: Operação 99 possui `ATIVO = "S"`, `VENDAS = "S"`, mas `LIBERAR_INTERNET = "N"`, sendo totalmente filtrada da UI e rejeitada pela API).
+    - `LIBERAR_INTERNET = "S"` é condição necessária, mas não suficiente: a operação permanece sujeita às demais regras comerciais (`ATIVO = "S"` e `VENDAS = "S"`). Operações 320 e 340 possuem `LIBERAR_INTERNET = "S"`, porém `VENDAS = "N"`, sendo rejeitadas. Operação 100 possui `LIBERAR_INTERNET = "S"`, `ATIVO = "S"` e `VENDAS = "S"`, sendo autorizada.
+  - **Condições de Recebimento:**
+    - Aplicada a mesma regra de proteção fail-closed (`LIBERAR_INTERNET = "S"` e `ATIVO = "S"`).
+  - **Preservação de Históricos:**
+    - Pedidos históricos já salvos em `ErpOrderSync` continuam 100% consultáveis e legíveis.
+
 # Correção do Ocultamento de Produtos por Zero Estrutural Legado em Catálogo — 30/09/2026
 
 - **Sintoma e Causa Raiz:**

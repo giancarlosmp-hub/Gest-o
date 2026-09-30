@@ -883,7 +883,7 @@ export default function OpportunityDetailsPage() {
       const nextOperations = toErpOptions(operationsResponse.data);
       const defaultSalesOperationCode =
         findDefaultSalesOperationCode(nextOperations);
-      const missingDefaultSalesOperationMessage = `Operação padrão ${DEFAULT_ERP_OPERATION_LABEL} não foi encontrada na lista sincronizada. Sincronize Operações no ERP antes de gerar o pedido; a operação ficará vazia para evitar selecionar 99 · VENDA CONDICIONAL automaticamente.`;
+      const missingDefaultSalesOperationMessage = `Operação padrão ${DEFAULT_ERP_OPERATION_LABEL} não foi encontrada ou não está autorizada (LIBERAR_INTERNET=S, VENDAS=S). Sincronize Operações no ERP antes de gerar o pedido; a operação ficará vazia para evitar selecionar operações não autorizadas automaticamente.`;
 
       setOpportunityItems(
         Array.isArray(itemsResponse.data?.items)
@@ -1755,7 +1755,7 @@ export default function OpportunityDetailsPage() {
                           value={erpOrderForm.receivingConditionCode}
                           options={receivingConditions}
                           loading={loadingErpOrderData}
-                          emptyMessage="Não há condições de recebimento sincronizadas. Vá em Configurações > Integração ERP e sincronize Condições de recebimento."
+                          emptyMessage="Não há condições de recebimento autorizadas (LIBERAR_INTERNET=S). Vá em Configurações > Integração ERP e sincronize Condições de recebimento."
                           onChange={(value) =>
                             setErpOrderField("receivingConditionCode", value)
                           }
@@ -1786,7 +1786,7 @@ export default function OpportunityDetailsPage() {
                             value={erpOrderForm.operationCode}
                             options={operations}
                             loading={loadingErpOrderData}
-                            emptyMessage="Não há operações sincronizadas. Vá em Configurações > Integração ERP e sincronize Operações."
+                            emptyMessage="Não há operações autorizadas (LIBERAR_INTERNET=S, VENDAS=S). Vá em Configurações > Integração ERP e sincronize Operações."
                             onChange={(value) =>
                               setErpOrderField("operationCode", value)
                             }

@@ -317,12 +317,14 @@ global código+classe; multi-tenancy de catálogo completo permanece não implem
 **[NÃO COMPROVADO]** Filial nula, grupo/agrupamento e identidade autenticada não têm
 precedência universal. Contextos diferentes não são ordenados apenas por vigência.
 
-### Referências comerciais e autorização de pedido
+### Referências comerciais e autorização de pedido (Setembro/2026)
 
-Caches de operações/condições são dados externos, não autorização. `LIBERAR_INTERNET` deve ser
-aplicado tanto na projeção de opções quanto novamente na fronteira de `POST /orders`; hoje essa
-política ainda não está implementada. A futura mudança deve preservar pedidos históricos e não
-misturar elegibilidade de referência com a correção de preços.
+Caches de operações/condições são dados externos e exigem validação de elegibilidade e autorização.
+A regra `LIBERAR_INTERNET = "S"` (além de `ATIVO = "S"` e `VENDAS = "S"` para operações) é aplicada
+tanto na projeção de opções das rotas `GET /erp/ultrafv3/operations` e `GET /erp/ultrafv3/receiving-conditions`
+quanto na revalidação backend antes de enviar pedidos ao ERP (`assertReferenceCode`). Opções não elegíveis
+são filtradas da interface e chamadas diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas em modo
+fail-closed, enquanto pedidos históricos já salvos permanecem preservados e consultáveis.
 
 ### Precedência comercial confirmada no Firebird
 

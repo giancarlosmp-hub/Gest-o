@@ -5,6 +5,7 @@ import { logApiEvent } from "../utils/logger.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { authorize } from "../middlewares/authorize.js";
 import { normalizeErpParameterCode } from "@salesforce-pro/shared";
+import { isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
 
 const router = Router();
 
@@ -93,6 +94,9 @@ const toReferenceOptions = (scope: ErpReferenceScope, payload: unknown): ErpRefe
     .map((row) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
+      if ((scope === "operations" || scope === "receivingConditions") && !isErpReferenceEligible(scope, record)) {
+        return null;
+      }
       const rawCode = readFirstText(record, keys.code);
       const code = normalizeErpParameterCode(rawCode);
       if (!code) return null;

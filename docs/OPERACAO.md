@@ -1438,12 +1438,16 @@ Para validar Atualizar estoque, registrar separadamente contagens de produto/est
 resposta de erro após a primeira etapa significa persistência potencialmente parcial. Para completa e
 automática, conferir `ErpSyncRun`, correlation ID, lock e métricas; processo saudável não prova ciclo.
 
-## Diagnóstico de `LIBERAR_INTERNET` (sem enviar pedido)
+### Diagnóstico e Execução da Validação de `LIBERAR_INTERNET`
 
-Para operações e condições, coletar somente envelope, código, `ATIVO`, `LIBERAR_INTERNET` e filtros
-comerciais necessários, removendo credenciais e PII. Comparar contagem do cache, resposta local de
-opções e seletor. Não usar `POST /orders` como teste. Até a correção própria, presença no seletor ou no
-cache não prova autorização comercial.
+Para operações e condições de recebimento, a validação de elegibilidade `LIBERAR_INTERNET` é aplicada
+automaticamente em tempo de execução nas rotas de listagem (`GET /erp/ultrafv3/operations` e `GET /erp/ultrafv3/receiving-conditions`)
+e na transmissão/criação de pedidos (`assertReferenceCode`).
+Para testar/validar o comportamento sem afetar o ERP:
+- Execute a suíte de fumaça: `npx tsx scripts/smoke/liberar-internet-safety.mjs`.
+- Verifique se a Operação 99 (`LIBERAR_INTERNET=N`) e as Operações 320/340 (`VENDAS=N`) são devidamente filtradas na interface e rejeitadas com erro HTTP 400 em caso de submissão direta.
+- Opções válidas como a Operação 100 (`LIBERAR_INTERNET=S`, `ATIVO=S`, `VENDAS=S`) são exibidas e aceitas normalmente.
+- Pedidos históricos pré-existentes permanecem legíveis e inalterados em `ErpOrderSync`.
 
 ## Interpretação da precedência Firebird de preços
 
