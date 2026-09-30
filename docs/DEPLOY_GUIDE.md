@@ -1,3 +1,13 @@
+## Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
+
+A alteração para impor a regra `LIBERAR_INTERNET` em Operações e Condições de Recebimento no CRM
+é puramente lógica no código (API backend e Frontend web). **Não exige migration de banco de dados.**
+Após o deploy normal da aplicação:
+1. Executar o teste de fumaça de validação: `npx tsx scripts/smoke/liberar-internet-safety.mjs`.
+2. Verificar se a listagem de operações de oportunidade omite opções com `LIBERAR_INTERNET != "S"` (ex.: Operação 99) e Operações com `VENDAS != "S"` (ex.: Operações 320 e 340).
+3. Confirmar que requisições diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas com erro HTTP 400.
+4. Confirmar que pedidos históricos gravados em `ErpOrderSync` continuam 100% legíveis e inalterados.
+
 ## Validação de Imagens OCI Alvo e Container Anterior no Cutover (29/09/2026)
 
 Durante a fase `cutover` em `scripts/deploy-production.sh`:
@@ -84,16 +94,6 @@ A migration `20260927160000_product_price_source_observation` está devidamente 
 3. Revisar o relatório do preview read-only.
 4. Executar em `mode=apply` com `migration=20260927160000_product_price_source_observation` e `confirm=PRODUCTION_SCHEMA_APPLY`.
 5. Após o término com sucesso do apply e a publicação da evidência em `/var/log/gest-o/schema/`, disparar o **Deploy Production** com `phase=cutover`.
-
-## Validação e aplicação da regra LIBERAR_INTERNET no CRM (Setembro/2026)
-
-A alteração para impor a regra `LIBERAR_INTERNET` em Operações e Condições de Recebimento no CRM
-é puramente lógica no código (API backend e Frontend web). **Não exige migration de banco de dados.**
-Após o deploy normal da aplicação:
-1. Executar o teste de fumaça de validação: `npx tsx scripts/smoke/liberar-internet-safety.mjs`.
-2. Verificar se a listagem de operações de oportunidade omite opções com `LIBERAR_INTERNET != "S"` (ex.: Operação 99) e Operações com `VENDAS != "S"` (ex.: Operações 320 e 340).
-3. Confirmar que requisições diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas com erro HTTP 400.
-4. Confirmar que pedidos históricos gravados em `ErpOrderSync` continuam 100% legíveis e inalterados.
 
 ## Imagens de preview após fechamento de PR (16/09/2026)
 
@@ -288,76 +288,54 @@ A correção propõe a política explícita `recovery_legacy`: ela preserva a fo
 
 Estados: `ERP_RECOVERY_AUTH_INPUT=AVAILABLE`; `ERP_RECOVERY_PREFLIGHT=NOT_PROVEN`; `ERP_PRODUCTION_RECOVERY_WORKFLOW=FAILED_PRE_COMMIT`; `PRODUCTION_ENV_MODIFIED=NO`; `CONTAINERS_RECREATED=NO`; `ERP_AUTOMATIC_SYNC=NOT_PROVEN`; `ERP_SYNC_ENV_PERSISTENCE=NOT_PROVEN`; `ERP_SCHEDULER_INITIALIZED=NOT_PROVEN`; `ERP_NEXT_RUN_AT=NOT_PROVEN`; `INC_ERP_5050=INVESTIGATING`; `READY_FOR_1_0B_2_O=NO`.
 
-# Exceção operacional temporária e restrita ao build (13/08/2026)
+# Resolução do env no build de recuperação
 
-O run `31707019441` confirmou a circularidade: Deploy Production precisava do canônico ausente para construir `gest-o-api:<SHA>`, enquanto ERP Production Recovery precisava dessa imagem para instalar o canônico e ativar o scheduler. A resolução autorizada é read-only e determinística: canônico válido; se ausente, legado válido somente para `MODE=build`; caso contrário, falha fechada. Presença inválida do canônico proíbe fallback e as fontes nunca são combinadas. `MODE=cutover` e Recovery continuam canonical-only após a instalação controlada. Esta PR não executou produção/recovery; repetir o build depois do merge e manter Recovery pendente.
+O run `31707019441` falhou exatamente ao iniciar `scripts/deploy-production.sh`, após checkout e SHA validados, pois o arquivo canônico estava ausente. `MODE=build` agora seleciona exclusivamente um caminho técnico, sem exibir valores: canônico root:root/600 regular e não-symlink; ou, somente se o canônico não existir, o legado autorizado com os mesmos metadados; senão falha. Se o canônico existe mas é inválido, não há fallback. A fase não copia/edita env nem liga o scheduler. `MODE=cutover` continua exigindo exclusivamente `/root/demetra-env/.env`. Depois do merge, repetir `phase=build`; o ERP Production Recovery ainda deverá instalar o canônico e provar a automação. Nenhum deploy ou recovery foi executado por esta mudança.
 
-# Contrato semântico vigente da Saúde ERP — PR #799 (13/08/2026)
+# Contrato de deploy — observabilidade ERP (12/08/2026)
 
-A unidade executiva é a execução-pai: `manual/syncAll` ou `scheduler/automatic`. Filhos ligados por
-`correlationId` são etapas e não participam das taxas, duração média, retries ou quantidade
-executiva. Etapa sem pai não prova sync completa. Vendedor inativo é consultável; ausência de
-vendedor e carteira são não instrumentadas no schema atual. Testes locais não são evidência de
-automação produtiva, e a 1.0B.2-O permanece bloqueada.
+Esta estabilização não inclui migration, DDL, backfill, recovery ou deploy. O gate
+`test:platform-health-erp-observability` deve anteceder os smokes gerais no Compose CI. Em rollback,
+reverter o commit e recriar API/WEB pelo fluxo oficial, preservando banco, env e os literais
+`TENANCY_MODE=disabled` e `TENANT_READ_PILOT_ENABLED=false`. Uma execução manual nunca satisfaz o
+gate produtivo do scheduler.
 
-# Prioridade vigente — estabilização da observabilidade ERP (12/08/2026)
+# AVISO CANÔNICO — SCHEMA EXTERNO EM PRODUÇÃO (07/08/2026)
 
-Antes da Sprint 1.0B.2-O, a prioridade é reconciliar `ErpSyncRun`, scheduler, API e Saúde. A sync
-manual fornecida permanece manual; automática, inicialização e `nextRunAt` não estão comprovados.
-A causa local, fontes, estados e rollback estão no [contrato técnico](platform-health-erp-observability.md).
-Produção não foi acessada; recovery não foi executado; tenancy permanece disabled.
+> O contrato vigente é `DATABASE_SCHEMA_MODE=external` e `TENANCY_MODE=disabled`. Bootstrap e
+> deploy da API **não** executam `prisma db push`, seed, sequence setup, DDL ou preparação do tenant.
+> Use somente o fluxo futuro, administrativo e autorizado do
+> [Brief OP-EXEC](sprints/SPRINT_1_0B_1_OP_EXEC_CONTROL_PLANE_CERTIFICATION.md). As seções abaixo que
+> narram `db push` preservam o histórico do procedimento anterior; não são instruções vigentes. A PR
+> #774 está **🟡 Merge**, sem evidência de deploy/produção; a revisão operacional comprovada segue
+> `a08a626`.
 
-# Sprint 1.0B.2-K — observação bounded do shadow preview
+# ADENDO CANÔNICO — deploy pós-recuperação (31/07/2026)
 
-O contrato adiciona 40 amostras sintéticas (10 ciclos de quatro GET `/clients` concorrentes), com correlação exclusiva por IDs internos retornados, janela de logs limitada e rollback `disabled/false`. Rerun com volume reutilizado não pode contar eventos antigos nem alterar cardinalidades. A amostra curta não comprova estabilidade temporal/produtiva; rate limit, timeout e atraso de logs permanecem riscos. Sem checks reais verdes: `READY_FOR_1_0B_2_K_REVIEW = NO`, `TENANT_READ_PREVIEW_STABILITY = NOT_PROVEN`; sem produção, mutation, backfill ou cutover. Consulte o [Sprint Brief](sprints/SPRINT_1_0B_2_K_PREVIEW_SHADOW_STABILITY.md).
+> 🔵 **PR, não produção.** O incidente permanece aberto. A topologia canônica candidata é `docker-compose.production.yml`, somente API/WEB na rede externa `gest-o_default`. O Compose genérico é legado/local e é proibido na VPS porque seu `depends_on` e fallback podem iniciar/apontar ao PostgreSQL padrão.
 
-# Sprint 1.0B.2-H — descendentes de Agenda
+A divergência Git × runtime ocorreu porque o checkout chegou à `main`, mas containers históricos sem metadados continuaram nas portas. O banco vigente até migração formal é o recuperado `gest-o-db-clean-v2-20260717`, volume `gest-o_pgdata_clean_v2_20260717`, administrado separadamente. Fluxo: GitHub → workflow manual → SSH `/apps/gest-o` → preflight → build com SHA → aprovação `production-cutover` → troca só de API/WEB → Nginx host → domínio. Segredos ficam apenas em `/root/demetra-env/.env`.
 
-Após a PR #789 verde, AgendaStop e o canal restrito Activity somente-Agenda possuem prova isolada tenant-scoped. Multi-parent não foi liberado; adapters seguem fora do runtime, sem DDL ou produção.
+```bash
+# Futuro, na VPS, após aprovação; não executado nesta PR
+cd /apps/gest-o
+git fetch origin main && git switch main && git pull --ff-only origin main
+MODE=build EXPECTED_SHA="$(git rev-parse HEAD)" bash scripts/deploy-production.sh
+set -a; . /root/demetra-env/.env; set +a
+bash scripts/production-schema-preview.sh > /var/log/gest-o/schema-preview.sql
+MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$(git rev-parse HEAD)" bash scripts/deploy-production.sh
+```
 
-# Sprint 1.0B.2-E — ownership relacional tenant-scoped aditivo
+A matriz completa e auditável de configuração está em [`PRODUCTION_ENV_MATRIX.md`](PRODUCTION_ENV_MATRIX.md). O preflight exige URL/host/container/volume esperados, database `salesforce_pro`, rede/mount, Git, disco e backup recente com SHA256, sem imprimir a URL. Como hostnames de containers são resolvidos dentro da rede Docker, a disponibilidade do PostgreSQL é testada por `pg_isready` em um container efêmero `postgres:16` conectado a `gest-o_default`, com timeout, sem senha, porta publicada, volume ou IP fixo; o DNS do host não participa. A imagem deve existir localmente e nunca é baixada pelo preflight. Isso corrige somente o falso negativo operacional do teste anterior. O build precede toda parada. O cutover registra inspect, etiqueta imagens e gera rollback; em falha reinicia os containers anteriores e nunca administra PostgreSQL. Depois, comparar `/health/version` local/público ao SHA, assets local/público, login/menu sem escrita e scheduler somente por consulta.
 
-O estágio E adiciona, sem ligação ao runtime, repositories de Opportunity e Activity cujo ownership
-deriva de Client. Activity aceita somente Client XOR Opportunity. Como Prisma não compara com
-segurança `Activity.clientId` e `Activity.opportunity.clientId`, todo dual-parent é negado, mesmo se
-aparentemente convergente; suporte futuro exige enforcement comprovado no banco. Órfãos,
-cross-tenant e `tenantId=NULL` falham fechados. Inventário, matriz e rollback:
-[Sprint Brief](sprints/SPRINT_1_0B_2_E_TENANT_RELATIONAL_OWNERSHIP.md).
+Containers são descartáveis: a unidade real de rollback é a imagem versionada, nunca o nome do container. Antes do cutover, API e WEB anteriores recebem tags distintas (`gest-o-api-rollback:<release>` e `gest-o-web-rollback:<release>`), e image IDs, nomes, portas, redes, restart policy e commit disponível são gravados nas evidências. O rollback persistido carrega o env seguro, remove somente os novos `api`/`web`, aguarda as portas e recria ambos via Compose com `API_IMAGE`/`WEB_IMAGE` apontando às tags salvas. Depois valida image IDs, API/WEB e reconfirma que o PostgreSQL segue running com o mesmo mount. Isso funciona tanto para containers históricos externos quanto para containers de um cutover Compose posterior, mesmo que os containers anteriores já não existam. O preview de schema executa `./node_modules/.bin/prisma` dentro de `gest-o-api:$APP_COMMIT`, sem download no host.
 
-O gate `test:tenant-relational-ownership` sucede o estágio D no CI. `READY_FOR_TENANT_AWARE_RUNTIME = NO`; `TENANCY_MODE=disabled`; não houve produção.
-
-## Predecessor preservado — Sprint 1.0B.2-D
-
-# Sprint 1.0B.2-D — data access tenant-scoped aditivo
-
-Um piloto isolado de Client prova predicados Prisma A×B; controllers, JWT, jobs, webhooks e
-`TENANCY_MODE=disabled` permanecem preservados. A camada não está ativa no runtime. Consulte o
-[Sprint Brief](sprints/SPRINT_1_0B_2_D_TENANT_DATA_ACCESS_PROPAGATION.md).
-
-# Sprint 1.0B.2-B — tooling de backfill em desenvolvimento
-
-Plan/dry-run, ledger imutável, batches, hashes, quarentena e reconciliação dos 11 roots foram
-preparados com apply exclusivamente sintético. Produção, runtime, backfill e cutover permanecem
-inalterados e bloqueados. Consulte o
-[Sprint Brief](sprints/SPRINT_1_0B_2_B_BACKFILL_TOOLING_LEDGER.md).
-O harness prova exclusão de escopo somente no banco descartável; o arquivo imutável não fornece lock
-distribuído produtivo. A 1.0B.2-C permanece dedicada a TenantContext/Auth compatibility, enquanto
-ledger/lock produtivo exige decisão operacional futura anterior a qualquer backfill de produção.
-
-# ADENDO HISTÓRICO — segurança de deploy pós-recuperação
-
-> 🔵 Entrega em PR (31/07/2026), sem VPS ou produção. A topologia isolada API/WEB exige identidade do banco recuperado, separa build/preflight do cutover humano, permite rollback dos containers históricos e prova o SHA. O banco recuperado segue vigente até migração formal e o incidente continua aberto. Consulte `DEPLOY_GUIDE.md`.
-
-> Este adendo preserva o estado intermediário de 31/07. O estado vigente após o cutover de 01/08
-> está no painel [Estado Atual da Produção](#estado-atual-da-produção).
-
-> O preflight de PostgreSQL deve resolver o hostname interno por um container efêmero na rede `gest-o_default`, nunca pelo DNS do host ou por IP fixo. A imagem `postgres:16` precisa existir localmente e não pode ser baixada automaticamente durante a janela.
+O bootstrap ainda executa `prisma db push`, prepara a sequence e somente então abre HTTP/scheduler; conexão/schema falhos fecham o processo. Backup e preview são gates. Uma futura adoção de `prisma migrate deploy` é recomendada, mas não integra esta correção emergencial. Para instalar o unit após aprovação: `sudo install -m 0644 docs/ops/gest-o.service /etc/systemd/system/gest-o.service && sudo systemctl daemon-reload`.
 
 ---
 
-# Guia de deploy do Gest-o
+# Guia oficial de deploy e auditoria de produção — Gest-o
 
-<<<<<<< Updated upstream
 > **Escopo:** este documento descreve o que está versionado no repositório em 31/07/2026 e os comandos para comprovar o estado real da VPS. Ele não afirma ter observado a VPS, o DNS ou uma execução do GitHub Actions. Onde a configuração não está no repositório, a validação operacional é obrigatória.
 
 ## 1. Resumo executivo
@@ -984,6 +962,3 @@ Quando o cutover falha com o erro `api sem imagem anterior verificável; nenhuma
 
 Detalhes completos da investigação em `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
 Reautorização de marcador stale só vale para `cutover-started` revisado: o workflow encaminha `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` pelo entrypoint, e o script revalida baseline, imagens, backup, schema, portas e banco.
-=======
-Consulte o [Documento Mestre](DOCUMENTO_MESTRE.md) para o estado oficial e a prioridade. Este guia guarda a arquitetura, os riscos e a execução dos procedimentos.
->>>>>>> Stashed changes
