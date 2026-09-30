@@ -81,10 +81,22 @@ log "Build começa enquanto os containers atuais permanecem atendendo"
 docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require('./apps/api/dist/build-info.json');if(b.commit!=='$APP_COMMIT'||!b.builtAt)process.exit(1)"
 log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
 [[ "$MODE" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
-[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER"
+[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER || "${CONFIRM:-}" == PRODUCTION_CUTOVER_REAUTHORIZED ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER ou CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
+
+log "Validando imagens OCI alvo para cutover: $API_IMAGE e $WEB_IMAGE"
+for target_img in "$API_IMAGE" "$WEB_IMAGE"; do
+  docker image inspect "$target_img" >/dev/null 2>&1 || die "imagem OCI alvo $target_img ausente"
+  target_rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_img" 2>/dev/null) || die "não foi possível ler rótulo de revisão de $target_img"
+  [[ "$target_rev" == "$APP_COMMIT" ]] || die "imagem OCI alvo $target_img possui rótulo org.opencontainers.image.revision ($target_rev) divergente de $APP_COMMIT"
+done
+
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
+# shellcheck source=scripts/lib/production-rollback-image.sh
+source scripts/lib/production-rollback-image.sh
+# shellcheck source=scripts/lib/production-rebaseline-proof.sh
+source scripts/lib/production-rebaseline-proof.sh
 
 schema_evidence="$schema_evidence_root/$APP_COMMIT/applied.tsv"
 tenancy_bundle="$schema_evidence_root/$APP_COMMIT/migrations/$TENANCY_EXPAND_ROOTS_ID"
@@ -139,15 +151,42 @@ evidence_root="${DEPLOY_EVIDENCE_DIR:-/var/log/gest-o/deploy}"
 evidence="$evidence_root/$APP_COMMIT"
 if [[ -e "$evidence" ]]; then
   [[ -d "$evidence" ]] || die "caminho de evidência existente não é diretório"
-  [[ ! -e "$evidence/cutover-started" ]] || die "evidência do SHA indica cutover iniciado; revisão manual obrigatória"
-  aborted="$evidence_root/$APP_COMMIT.aborted-$(date -u +%Y%m%dT%H%M%SZ)"
-  [[ ! -e "$aborted" ]] || die "destino da tentativa abortada já existe"
-  mv "$evidence" "$aborted"
-  log "evidência parcial anterior preservada em $aborted"
+  if [[ -e "$evidence/cutover-started" ]]; then
+    if running_commit=$(curl -fsS --max-time 3 http://127.0.0.1:4000/health/version 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0)).commit' 2>/dev/null) && [[ "$running_commit" == "$APP_COMMIT" ]]; then
+      log "Cutover já concluído anteriormente para $APP_COMMIT; runtime ativo já serve a versão esperada"
+      exit 0
+    fi
+
+    if [[ "${CONFIRM:-}" != PRODUCTION_CUTOVER_REAUTHORIZED ]]; then
+      die "evidência do SHA indica cutover iniciado; revisão manual obrigatória. Para reautorizar após revalidar o estado do runtime, execute com CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
+    fi
+
+    for spec in api:4000 web:5173; do
+      role=${spec%%:*}; port=${spec##*:}
+      owners=$(docker ps --format '{{.Names}}|{{.Ports}}' 2>/dev/null | awk -F'|' -v p=":$port->" '$2~p{print $1}')
+      if [[ "$(printf '%s\n' "$owners" | sed '/^$/d' | wc -l)" -ne 1 ]]; then
+        die "reautorização bloqueada: porta $port não possui proprietário único ou container foi parado"
+      fi
+      container_id=$(docker inspect -f '{{.Id}}' "$owners" 2>/dev/null || true)
+      if [[ -z "$container_id" || "$(docker inspect -f '{{.State.Running}}' "$container_id" 2>/dev/null)" != true ]]; then
+        die "reautorização bloqueada: container anterior de $role não está em execução"
+      fi
+    done
+
+    reauthorized="$evidence_root/$APP_COMMIT.reauthorized-$(date -u +%Y%m%dT%H%M%SZ)"
+    [[ ! -e "$reauthorized" ]] || die "destino da evidência reautorizada já existe"
+    mv "$evidence" "$reauthorized"
+    log "cutover reautorizado manualmente para $APP_COMMIT; evidência anterior salva em $reauthorized"
+  else
+    aborted="$evidence_root/$APP_COMMIT.aborted-$(date -u +%Y%m%dT%H%M%SZ)"
+    [[ ! -e "$aborted" ]] || die "destino da tentativa abortada já existe"
+    mv "$evidence" "$aborted"
+    log "evidência parcial anterior preservada em $aborted"
+  fi
 fi
 install -d -m 700 "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
-printf 'role\trollback_mode\tcontainer_name\tcontainer_id\timage_id\trollback_tag\tport\tnetworks\trestart_policy\tprevious_commit\n' >"$evidence/previous-runtime.tsv"
+printf 'role\trollback_mode\tcontainer_name\tcontainer_id\truntime_identity\trollback_reference\tport\tnetworks\trestart_policy\tprevious_commit\tresolution_method\tartifact_id\n' >"$evidence/previous-runtime.tsv"
 printf 'role\tcontainer_name\tcontainer_id\n' >"$evidence/rollback-containers.tsv"
 : >"$evidence/rollback-images.env"
 chmod 600 "$evidence/previous-runtime.tsv" "$evidence/rollback-containers.tsv" "$evidence/rollback-images.env"
@@ -162,29 +201,54 @@ for spec in api:4000 web:5173; do
   docker inspect "$container_id" >"$evidence/$role.previous.inspect.json"
   chmod 600 "$evidence/$role.previous.inspect.json"
   image_id=$(docker inspect -f '{{.Image}}' "$name")
+  config_image=$(docker inspect -f '{{.Config.Image}}' "$name")
   networks=$(docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}},{{end}}' "$container_id")
   [[ ",$networks" == *,gest-o_default,* ]] || die "container anterior de $role fora da rede esperada"
   restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container_id")
   case "$restart_policy" in no|on-failure|always|unless-stopped) ;; *) die "restart policy desconhecida para $role";; esac
   if previous_commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id" 2>/dev/null); then :; else previous_commit=""; fi
   [[ -n "$previous_commit" && "$previous_commit" != '<no value>' ]] || previous_commit=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" | sed -n 's/^APP_COMMIT=//p' | head -1)
-  rollback_mode=container; tag="-"
-  if docker image inspect "$image_id" >/dev/null 2>&1; then
-    rollback_mode=image
+  rollback_mode=image; tag="-"
+  if resolve_rollback_image "$role" "$image_id" "$config_image"; then
     release=$(printf '%s' "${previous_commit:-${image_id#sha256:}}" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40)
     [[ -n "$release" ]] || die "não foi possível identificar release anterior de $role"
     tag="gest-o-${role}-rollback:$release"
-    docker tag "$image_id" "$tag"
-    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$tag" "${role^^}" "$image_id" >>"$evidence/rollback-images.env"
+    docker tag "$ROLLBACK_ARTIFACT_ID" "$tag"
+    pinned_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null) || die "referência fixada de rollback inválida para $role"
+    [[ "$pinned_id" == "$ROLLBACK_ARTIFACT_ID" ]] || die "referência fixada de rollback mudou para $role"
+    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$ROLLBACK_ARTIFACT_ID" "${role^^}" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/rollback-images.env"
+    log "rollback_image role=$role method=$ROLLBACK_RESOLUTION_METHOD verified_identity=$ROLLBACK_VERIFIED_IDENTITY artifact_id=$ROLLBACK_ARTIFACT_ID pinned_reference=$ROLLBACK_ARTIFACT_ID"
+  elif validate_rebaseline_evidence "$APP_COMMIT"; then
+    eval "artifact_id=\$REBASELINE_VERIFIED_${role^^}_ID"
+    eval "tar_path=\$REBASELINE_VERIFIED_${role^^}_TAR"
+    ROLLBACK_RESOLUTION_METHOD="authorized-rebaseline"
+    ROLLBACK_VERIFIED_IDENTITY="$image_id"
+    ROLLBACK_ARTIFACT_ID="$artifact_id"
+
+    if ! docker image inspect "$ROLLBACK_ARTIFACT_ID" >/dev/null 2>&1; then
+      log "artefato OCI de rebaseline $ROLLBACK_ARTIFACT_ID não presente no Docker Engine para $role; restaurando a partir do backup OCI $tar_path"
+      [[ -n "$tar_path" && -f "$tar_path" && ! -L "$tar_path" ]] || die "backup OCI $tar_path para $role ausente ou inválido"
+      docker load -i "$tar_path" || die "falha ao restaurar backup OCI $tar_path para $role no Docker Engine"
+      docker image inspect "$ROLLBACK_ARTIFACT_ID" >/dev/null 2>&1 || die "artefato OCI $ROLLBACK_ARTIFACT_ID não disponível no Docker Engine mesmo após carregar backup OCI"
+    fi
+
+    target_rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null) || die "não foi possível ler rótulo de revisão do artefato de rebaseline $ROLLBACK_ARTIFACT_ID de $role"
+    [[ "$target_rev" == "$APP_COMMIT" ]] || die "artefato OCI de rebaseline $ROLLBACK_ARTIFACT_ID de $role possui rótulo org.opencontainers.image.revision ($target_rev) divergente de $APP_COMMIT"
+
+    tag="gest-o-${role}-rebaseline:$APP_COMMIT"
+    docker tag "$ROLLBACK_ARTIFACT_ID" "$tag"
+    pinned_id=$(docker image inspect --format '{{.Id}}' "$tag" 2>/dev/null) || die "referência fixada de rebaseline inválida para $role"
+    [[ "$pinned_id" == "$ROLLBACK_ARTIFACT_ID" ]] || die "referência fixada de rebaseline mudou para $role"
+    printf '%s_ROLLBACK_IMAGE=%q\n%s_ROLLBACK_IMAGE_ID=%q\n' "${role^^}" "$ROLLBACK_ARTIFACT_ID" "${role^^}" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/rollback-images.env"
+    log "rollback_image role=$role method=authorized-rebaseline rebaseline_commit=$APP_COMMIT verified_target_id=$ROLLBACK_ARTIFACT_ID (legacy running image $image_id unverified)"
   else
-    if compose_project=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$container_id" 2>/dev/null); then :; else compose_project=""; fi
-    [[ "$compose_project" != gest-o-production ]] || die "$role pertence a gest-o-production e sua imagem está ausente; fallback por container proibido"
-    printf '%s\t%s\t%s\n' "$role" "$name" "$container_id" >>"$evidence/rollback-containers.tsv"
+    log "rollback_image role=$role method=unresolved verified_identity=none block_reason=$ROLLBACK_BLOCK_REASON"
+    die "$role sem imagem anterior verificável: $ROLLBACK_BLOCK_REASON; fallback por container proibido"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$tag" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" >>"$evidence/previous-runtime.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$ROLLBACK_ARTIFACT_ID" "$port" "$networks" "$restart_policy" "${previous_commit:-unknown}" "$ROLLBACK_RESOLUTION_METHOD" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/previous-runtime.tsv"
   if [[ "$role" == api && "$rollback_mode" == image ]]; then
-    if previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null); then :; else previous_version=""; fi
-    if previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null); then :; else previous_built_at=""; fi
+    if previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$image_id" 2>/dev/null); then :; else previous_version=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null || echo ""); fi
+    if previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$image_id" 2>/dev/null); then :; else previous_built_at=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.created"}}' "$ROLLBACK_ARTIFACT_ID" 2>/dev/null || echo ""); fi
     printf 'ROLLBACK_APP_COMMIT=%q\nROLLBACK_APP_VERSION=%q\nROLLBACK_APP_BUILT_AT=%q\n' "${previous_commit:-unknown}" "${previous_version:-unknown}" "${previous_built_at:-unknown}" >>"$evidence/rollback-images.env"
   fi
 done

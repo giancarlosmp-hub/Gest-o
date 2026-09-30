@@ -1,0 +1,88 @@
+name: Production Rebaseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Digite PRODUCTION_REBASELINE_APPROVED"
+        required: true
+        type: string
+      expected_main_sha:
+        description: "SHA completo da main aprovada"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-rebaseline
+  cancel-in-progress: false
+
+jobs:
+  rebaseline:
+    environment: production-cutover
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar entradas locais
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+            printf '%s\n' "::error::Confirmação inválida: $CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
+            exit 1
+          fi
+          if [ "${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+            printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+            exit 1
+          fi
+          case "$EXPECTED_MAIN_SHA" in
+            *[!0-9a-f]*|'')
+              printf '%s\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
+              exit 1
+              ;;
+          esac
+
+      - name: Executar Rebaseline de Produção na VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REBASELINE_CONFIRM: ${{ inputs.confirm }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        with:
+          host: ${{ secrets.SSH_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
+          key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
+          port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
+          envs: REBASELINE_CONFIRM,EXPECTED_MAIN_SHA
+          script_stop: true
+          command_timeout: 1h
+          debug: true
+          script: |
+            set -Eeuo pipefail
+            cd /apps/gest-o
+            git fetch origin main
+            git switch main
+            git pull --ff-only origin main
+            CONFIRM="$REBASELINE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+              bash scripts/production-rebaseline.sh
+            printf 'REBASELINE_TARGET_SHA=%s\n' "$EXPECTED_MAIN_SHA"
+            printf 'REBASELINE_VERIFIED_API_IMAGE=gest-o-api:%s\n' "$EXPECTED_MAIN_SHA"
+            printf 'REBASELINE_VERIFIED_WEB_IMAGE=gest-o-web:%s\n' "$EXPECTED_MAIN_SHA"
+            printf 'REBASELINE_OCI_BACKUP_DIR=/var/log/gest-o/oci-backups/%s\n' "$EXPECTED_MAIN_SHA"
+            printf 'REBASELINE_EVIDENCE_FILE=/var/log/gest-o/rebaseline/%s/result.tsv\n' "$EXPECTED_MAIN_SHA"
+            printf 'REBASELINE_RESULT=PASS\n'
+
+      - name: Registrar Job Summary
+        if: always()
+        run: |
+          cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+          ### Production Rebaseline Summary
+          - **REBASELINE_TARGET_SHA**: `${{ inputs.expected_main_sha }}`
+          - **REBASELINE_VERIFIED_API_IMAGE**: `gest-o-api:${{ inputs.expected_main_sha }}`
+          - **REBASELINE_VERIFIED_WEB_IMAGE**: `gest-o-web:${{ inputs.expected_main_sha }}`
+          - **REBASELINE_OCI_BACKUP_DIR**: `/var/log/gest-o/oci-backups/${{ inputs.expected_main_sha }}`
+          - **REBASELINE_EVIDENCE_FILE**: `/var/log/gest-o/rebaseline/${{ inputs.expected_main_sha }}/result.tsv`
+          - **REBASELINE_RESULT**: `${{ job.status == 'success' && 'PASS' || 'FAIL' }}`
+          EOF

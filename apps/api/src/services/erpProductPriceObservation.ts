@@ -94,3 +94,70 @@ export const selectCurrentErpPriceObservationForBranch = <T extends Pick<
       return String(right.sourcePriceId ?? "").localeCompare(String(left.sourcePriceId ?? ""));
     })[0];
 };
+
+export type PriceObservationRecord = {
+  price?: number | null;
+  validFrom?: Date | null;
+  sourceChangedAt?: Date | null;
+  observedAt?: Date | null;
+  updatedAt?: Date | null;
+  source?: string | null;
+  availabilityState?: string | null;
+  erpSourcePriceId?: string | null;
+};
+
+export const isAuthoritativePriceObservation = (row: PriceObservationRecord): boolean =>
+  row.source === "prices"
+  || Boolean(row.validFrom || row.sourceChangedAt || row.erpSourcePriceId);
+
+export const authoritativePriceObservation = isAuthoritativePriceObservation;
+
+export const isCatalogMaterialization = (row: PriceObservationRecord): boolean =>
+  row.source === "products" || row.source === "legacy";
+
+export const catalogMaterialization = isCatalogMaterialization;
+
+export const isExplicitZeroFromPrices = (row: PriceObservationRecord): boolean =>
+  row.source === "prices" && (row.availabilityState === "explicit_zero" || (row.price !== null && row.price !== undefined && Number(row.price) <= 0));
+
+export const explicitZeroFromPrices = isExplicitZeroFromPrices;
+
+export const isStructuralZeroFromProducts = (row: PriceObservationRecord): boolean =>
+  (row.source === "products" || row.source === "legacy")
+  && (row.price === null || row.price === undefined || Number(row.price) === 0)
+  && !row.validFrom
+  && !row.sourceChangedAt
+  && !row.erpSourcePriceId;
+
+export const structuralZeroFromProducts = isStructuralZeroFromProducts;
+
+export const isValidCommercialObservation = (row: PriceObservationRecord, now = new Date()): boolean =>
+  !row.validFrom || new Date(row.validFrom).getTime() <= now.getTime();
+
+export const validCommercialObservation = isValidCommercialObservation;
+
+export const isFutureObservation = (row: PriceObservationRecord, now = new Date()): boolean =>
+  Boolean(row.validFrom && new Date(row.validFrom).getTime() > now.getTime());
+
+export const futureObservation = isFutureObservation;
+
+export const isHistoricalObservation = (
+  row: PriceObservationRecord,
+  compareAgainst: PriceObservationRecord,
+): boolean => {
+  const rowTime = new Date(row.validFrom || row.sourceChangedAt || row.observedAt || row.updatedAt || 0).getTime();
+  const compareTime = new Date(compareAgainst.validFrom || compareAgainst.sourceChangedAt || compareAgainst.observedAt || compareAgainst.updatedAt || 0).getTime();
+  return rowTime < compareTime;
+};
+
+export const historicalObservation = isHistoricalObservation;
+
+export const isPositiveCurrentObservation = (row: PriceObservationRecord, now = new Date()): boolean =>
+  isValidCommercialObservation(row, now)
+  && row.price !== null
+  && row.price !== undefined
+  && Number(row.price) > 0
+  && row.availabilityState !== "explicit_zero"
+  && row.availabilityState !== "absent";
+
+export const positiveCurrentObservation = isPositiveCurrentObservation;

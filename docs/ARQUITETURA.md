@@ -312,9 +312,10 @@ nesta ordem, e não é atomicamente distribuído.
 é fronteira explícita e registros nulos não são adotados implicitamente. O schema ainda tem unicidade
 global código+classe; multi-tenancy de catálogo completo permanece não implementada.
 
-**[NÃO COMPROVADO]** tabela ausente, filial nula, grupo/agrupamento e identidade autenticada não têm
-precedência universal. Contextos diferentes não são ordenados apenas por vigência. A política
-bloqueada e suas evidências estão na investigação pós-PR #898.
+**[CÓDIGO]** Quando a busca por preço comercial é realizada para a Tabela Comercial Padrão (`priceTableCode = "1"`), registros comerciais explícitos para Tabela 1 (`erpPriceId = "1"`) mantêm precedência estrita. Zeros estruturais da materialização de catálogo (`source = "products"` ou `source = "legacy"`, `price = 0` ou nulo/undefined, sem metadados de vigência `validFrom`, `sourceChangedAt` ou ID da origem `erpSourcePriceId`) **não** contam como observação comercial explícita (`isStructuralZeroFromProducts`) e não bloqueiam o fallback de preços sem tabela recebidos do `/prices`. Se nenhuma linha comercial explícita para Tabela 1 existir, linhas recebidas sem código de tabela (`erpPriceId = null` ou `""`) funcionam como fallback elegível para a Tabela 1. Zeros comerciais explícitos de `/prices` (`source = "prices"`, `availabilityState = "explicit_zero"`) permanecem respeitados como tombstones autoritativos e bloqueiam o fallback. Linhas sem tabela explícita não se aplicam a buscas por tabelas secundárias (Tabelas 2, 3 e 4), cujas regras percentuais derivam estritamente da sincronização do ERP (`priceVariations`).
+
+**[NÃO COMPROVADO]** Filial nula, grupo/agrupamento e identidade autenticada não têm
+precedência universal. Contextos diferentes não são ordenados apenas por vigência.
 
 ### Referências comerciais e autorização de pedido (Setembro/2026)
 

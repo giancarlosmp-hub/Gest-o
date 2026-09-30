@@ -1,3 +1,5 @@
+import { isStructuralZeroFromProducts } from "./erpProductPriceObservation.js";
+
 const DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE = "1";
 
 export type OpportunityPriceProduct = {
@@ -185,14 +187,26 @@ export const calculateOpportunityPriceForTable = ({
   const normalizedPriceTableCode = normalizeOpportunityPriceTableCode(priceTableCode);
   const productPrices = product.prices || [];
   const normalizedBranchCode = normalizeOptionalString(branchCode);
-  // Only an explicit table identifier establishes table equivalence. The ERP
-  // contract for a missing table is not documented, so an unscoped row must
-  // neither override nor invalidate a row explicitly assigned to Table 1.
-  const tableRows = productPrices.filter((item) =>
+  // Explicit table rows matching the requested table code.
+  const explicitTableRows = productPrices.filter((item) =>
     normalizeOptionalString(item.erpPriceId) !== ""
     && priceTableMatches(item.erpPriceId, normalizedPriceTableCode)
     && (!item.validFrom || new Date(item.validFrom).getTime() <= Date.now())
   );
+  // Structural zeros from /products (catalog materialization) do not count as explicit commercial Table 1 observations.
+  const explicitCommercialTableRows = explicitTableRows.filter(
+    (item) => !isStructuralZeroFromProducts(item)
+  );
+  // Unscoped rows (where erpPriceId is null/empty) received from /prices represent default commercial
+  // prices. They serve as fallback for default table queries (Table 1) ONLY when no explicit Table 1
+  // row exists, ensuring unscoped rows never override or invalidate explicit Table 1 rows.
+  const unscopedFallbackRows = (normalizedPriceTableCode === DEFAULT_OPPORTUNITY_PRICE_TABLE_CODE && explicitCommercialTableRows.length === 0)
+    ? productPrices.filter((item) =>
+        normalizeOptionalString(item.erpPriceId) === ""
+        && (!item.validFrom || new Date(item.validFrom).getTime() <= Date.now())
+      )
+    : [];
+  const tableRows = explicitCommercialTableRows.length > 0 ? explicitCommercialTableRows : unscopedFallbackRows;
   // PRECO_VENDA proves that a requested branch admits both that exact branch
   // and a null branch candidate. Vigência is compared before branch
   // specificity; null is not renamed to TODAS. Without a requested branch we

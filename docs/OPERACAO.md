@@ -1,3 +1,46 @@
+# Procedimento de Rebaseline de Produção para Imagens OCI Irrecuperáveis (29/09/2026)
+
+Quando o cutover no `Deploy Production` falhar com o erro:
+`[deploy-production] ERRO: api sem imagem anterior verificável: nenhuma imagem local demonstra vínculo criptográfico com sha256:f4dcc...`
+
+Significa que o container em execução utiliza uma imagem cuja identidade OCI/digest não possui cópia local no catálogo do Docker Engine e não há registry externo ou backup OCI (`.tar`). Para estabelecer uma nova referência de baseline com segurança e capacidade de rollback para os próximos deploys, siga o procedimento abaixo:
+
+### Passo 1: Construção das Imagens do Novo Commit (`phase=build`)
+Disparar o workflow **Deploy Production** no disparo `phase=build` para o SHA desejado da `main`. As imagens `gest-o-api:$SHA` e `gest-o-web:$SHA` serão construídas e rotuladas com `org.opencontainers.image.revision=$SHA` no Docker Engine da VPS sem afetar os containers em execução.
+
+### Passo 2: Execução do Rebaseline Autorizado (Sem Cutover)
+Na VPS, executar em janela de manutenção aprovada:
+```bash
+cd /apps/gest-o
+git fetch origin main && git checkout main && git pull --ff-only origin main
+EXPECTED_SHA="$(git rev-parse HEAD)" CONFIRM=PRODUCTION_REBASELINE_APPROVED bash scripts/production-rebaseline.sh
+```
+
+### Passo 3: Verificação dos Artefatos Gerados
+1. Confirmar que a evidência de rebaseline foi gravada em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` com `result PASS` e `cutover_executed NO`.
+2. Confirmar que o backup tarball OCI imutável foi gerado em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/gest-o-api.tar` e `gest-o-web.tar`.
+3. Confirmar que **nenhum container foi parado ou alterado** e que a API continua operando normalmente.
+
+### Passo 4: Execução do Cutover Reautorizado
+Executar o workflow **Deploy Production** no disparo `phase=cutover` (ou pelo shell `MODE=cutover CONFIRM=PRODUCTION_CUTOVER EXPECTED_SHA="$EXPECTED_SHA" bash scripts/deploy-production.sh`). O runner detectará o rebaseline aprovado para `$APP_COMMIT` e efetuará o cutover de forma segura.
+
+# Validação Pós-Deploy — Incidente de Produtos Ocultos por Zero Estrutural Legado (30/09/2026)
+
+1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.
+2. No ambiente pós-deploy, realizar requisição de busca `/products/search` utilizando `q=Marandu` e `priceTableCode=1`.
+3. Confirmar que o produto MARANDU (e demais produtos com registros legados de zero estrutural de catálogo `source = "legacy"`) é retornado normalmente com o preço comercial válido (ex: R$ 128,00 para Tabela 1).
+4. Verificar se a resposta de `/products/search` traz `hiddenReason: null` e `priceTableMatched: true` para o produto, confirmando que registros de zero estrutural do catálogo (`source = "products"` ou `"legacy"`) não bloqueiam o fallback comercial.
+5. Confirmar que tombstones explícitos de zero comercial (`source = "prices"`, `availabilityState = "explicit_zero"`) continuam sendo respeitados e ocultam o produto com `hiddenReason: "invalid_price"`.
+6. Confirmar que buscas direcionadas às tabelas secundárias (`priceTableCode=2`, `3` ou `4`) aplicam corretamente as regras de variação percentual sincronizadas do ERP (ex: R$ 160,00 para Tabela 2 do Marandu com regra de 25%).
+
+# Validação Pós-Deploy — Incidente de Preços Sem Tabela Explícita (28/09/2026)
+
+1. Após o deploy do código corrigido, **NÃO** executar nova sincronização produtiva e **NÃO** executar mutação SQL em produção.
+2. No ambiente pós-deploy, realizar requisição de busca `/products/search` utilizando `priceTableCode=1`.
+3. Confirmar que produtos cadastrados com `ProductPrice` originados de `/prices` (possuindo `erpPriceId = null`) são retornados normalmente na busca da Tabela Comercial Padrão (Tabela 1).
+4. Verificar se a resposta de `/products/search` para Tabela 1 traz os contadores de filtro e status esperados sem ocultar indevidamente os produtos com `hiddenReason: invalid_price`.
+5. Confirmar que buscas direcionadas às tabelas secundárias (`priceTableCode=2`, `3` ou `4`) mantêm o comportamento de exigir tabelas explícitas / derivações configuradas e não utilizam erroneamente fallbacks sem tabela.
+
 # Validação complementar da PR #875 (16/09/2026)
 
 1. No Docker Compose CI do novo HEAD, exigir `PREVIEW_CLEANUP_TRUSTED_SCRIPT_CONTRACT=PASS`, `PREVIEW_CONCURRENT_RUN_ISOLATION=PASS`, `PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS`, `PREVIEW_IMAGE_DOCKER=PASS` e `ORDERS_MIGRATION_POSTGRES=PASS`. `SKIP`/77 não aprova.
@@ -395,7 +438,7 @@ pinada, identidades aprovadas e revisão das evidências são gates. Runtime con
 O preflight corrige um falso negativo sem alterar a produção: como o hostname do PostgreSQL existe somente no DNS da rede Docker, a sondagem usa um container efêmero local `postgres:16`, sem pull automático, dentro de `gest-o_default`. Ela não consulta o DNS do host, não fixa IP e não recebe senha nem a `DATABASE_URL`. Nenhum deploy foi realizado; o estágio permanece 🔵 PR.
 
 
-**Rollback:** nomes de containers não são artefatos de release. Antes de cada cutover, as imagens anteriores de API e WEB são etiquetadas separadamente e inventariadas. O rollback remove somente API/WEB novas e recria os serviços com as tags salvas; não depende de o container anterior existir e não administra o PostgreSQL. Consulte `DEPLOY_GUIDE.md`.
+**Rollback e Bloqueio Operacional do Cutover:** Nomes de contêineres não são artefatos de release. Antes de cada cutover, as imagens anteriores de API e WEB são verificadas por vínculo criptográfico local e etiquetadas separadamente. Caso a imagem anterior do runtime não seja verificável localmente (devido à ausência de registry OCI externo, ausência de tarball de backup OCI e incompatibilidade de digests de rebuilds), o cutover entra em **Bloqueio Operacional fail-closed**. É estritamente proibido usar `docker commit` ou `docker export` improvisados. A recuperação do cutover exige restauração/importação de arquivo OCI de backup (`docker load`) e validação via `docker image inspect` antes do cutover, ou procedimento formal de re-baselining operacional. Consulte [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md) e `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
 
 ---
 

@@ -1,3 +1,237 @@
+<<<<<<< Updated upstream
+# Correção do Ocultamento de Produtos por Zero Estrutural Legado em Catálogo — 30/09/2026
+
+- **Sintoma e Causa Raiz:**
+  - Na tela Nova Oportunidade, mesmo após a implantação da PR #916, a pesquisa por produtos (ex: "Marandu") continuava exibindo "Nenhum produto encontrado para essa busca".
+  - A investigação dos dados reais comprovou que registros legados de `ProductPrice` criados antes da migration `20260911190000_product_price_authority` possuem `source = "legacy"` (em vez de `"products"`), com `price = 0`, `erpPriceId = "1"`, `validFrom = null` e `erpSourcePriceId = null`.
+  - A função `isStructuralZeroFromProducts` em `erpProductPriceObservation.ts` verificava estritamente `row.source === "products"`.
+  - Consequentemente, as linhas legadas de zero estrutural do catálogo não eram desconsideradas e eram incluídas em `explicitCommercialTableRows` para a Tabela 1, bloqueando o fallback não escopado (`unscopedFallbackRows`) contendo o preço comercial válido (R$ 128,00).
+
+- **Correção Implementada:**
+  - Atualizadas as funções `isStructuralZeroFromProducts` e `isCatalogMaterialization` em `apps/api/src/services/erpProductPriceObservation.ts` para tratar como zero estrutural de catálogo tanto `source = "products"` quanto `source = "legacy"` quando `price = 0` (ou nulo/undefined), `validFrom = null`, `sourceChangedAt = null` e `erpSourcePriceId = null`.
+  - Adicionados 9 cenários de testes de regressão em `apps/api/src/services/opportunityProductAvailability.test.ts` cobrindo zero estrutural legado, zero estrutural `products`, tombstone explícito `source = "prices"` (`availabilityState = "explicit_zero"`), zero com vigência/sourceChangedAt, vigência futura, vigência histórica, Tabela 1 e regras de variação ERP para Tabelas 2, 3 e 4.
+
+# Correção da Resolução do Digest Legado Ausente no Cutover com Rebaseline Válido — 29/09/2026
+
+- **Diagnóstico e Causa Raiz:**
+  - Após a execução bem-sucedida do Production Rebaseline para o SHA `5be2e0e63d32994c0e41a685fb134ef40402b7cf`, o Cutover do Production Deploy falhou com:
+    `Error response from daemon: No such image: sha256:38fc843ba67330fc12a63c306891028e9912817c1c578f77aee9b5d089ece6d4`
+    `DEPLOY_FAILURE_STAGE=deploy_script` `DEPLOY_FAILURE_COMMAND=run_deploy_script` `DEPLOY_FAILURE_EXIT_CODE=1`
+  - **Identificação das Imagens:**
+    1. *Imagem Antiga em Execução:* Container ativo com ID OCI `sha256:38fc843...` (cujo objeto foi purgado do repositório local do Docker Engine).
+    2. *Referência Histórica de Rollback:* Imagem legada ausente do Docker Engine.
+    3. *Backup OCI do Rebaseline:* Tarballs `/var/log/gest-o/oci-backups/$APP_COMMIT/gest-o-api.tar` e `gest-o-web.tar`, registrados em `/var/log/gest-o/rebaseline/$APP_COMMIT/result.tsv` com SHA-256 verificado.
+    4. *Imagem Alvo:* `gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT`.
+  - **Causa do Erro:** Quando a imagem do container legado (`sha256:38fc843...`) estava ausente do Docker Engine, `resolve_rollback_image` falhava legitimamente. Em seguida, o fluxo de fallback do rebaseline (`validate_rebaseline_evidence`) identificava os IDs verificados do rebaseline (`REBASELINE_VERIFIED_API_ID` / `WEB_ID`), mas tentava executar `docker tag` antes de garantir a presença desses artefatos OCI na engine local. Quando a imagem OCI do rebaseline havia sido purgada do cache do Docker, o comando `docker tag` falhava com "No such image".
+
+- **Correção Implementada e Garantias de Segurança:**
+  - **Restauração Transparente via `docker load` (`scripts/deploy-production.sh`):**
+    - No caminho de rebaseline autorizado (`validate_rebaseline_evidence "$APP_COMMIT"`), o script verifica a presença do artefato OCI na engine local via `docker image inspect "$ROLLBACK_ARTIFACT_ID"`.
+    - Se ausente da engine local, o script carrega o tarball OCI de backup previamente validado via `docker load -i "$tar_path"`.
+    - Valida criptograficamente que a imagem carregada corresponde exatamente ao `$ROLLBACK_ARTIFACT_ID` e possui o rótulo `org.opencontainers.image.revision == $APP_COMMIT`.
+  - **Preservação de Criptografia e Regras Fail-Closed:**
+    - Não aceita tags, rótulos Git ou nomes de imagem como prova suficiente de identidade.
+    - Se a evidência de rebaseline estiver ausente, com SHA divergente, tarball inexistente/corrompido, o Cutover falha fechado mantendo os containers anteriores ativos.
+    - Proibição absoluta mantida para `docker commit`, `docker export`, remoção prematura de containers, alteração de banco de dados ou bypasses.
+  - **Biblioteca de Evidência Atualizada (`scripts/lib/production-rebaseline-proof.sh`):**
+    - `validate_rebaseline_evidence` passa a exportar `REBASELINE_VERIFIED_API_TAR`, `REBASELINE_VERIFIED_API_TAR_SHA`, `REBASELINE_VERIFIED_WEB_TAR` e `REBASELINE_VERIFIED_WEB_TAR_SHA`.
+
+- **Testes de Fumaça Adicionados (`scripts/smoke/production-rebaseline-safety.mjs` e `scripts/smoke/production-deploy-real-call-graph-safety.sh`):**
+  - Digest legado existente (resolve via `resolve_rollback_image`);
+  - Digest legado ausente com rebaseline válida e restaurável via `docker load` (conclui cutover com `method=authorized-rebaseline`);
+  - Digest legado ausente sem rebaseline (bloqueia fail-closed com `die "sem imagem anterior verificável"`);
+  - Rebaseline com SHA divergente (bloqueia fail-closed);
+  - Backup OCI ausente ou com SHA-256 corrompido (bloqueia fail-closed).
+
+# Correção do Erro de Parsing Remoto SSH no Production Rebaseline (Run 36630401825) — 29/09/2026
+
+- **Diagnóstico do Erro de Parsing Remoto (`unexpected token ';'`):**
+  - No workflow `.github/workflows/production-rebaseline.yml` (Run 36630401825), após a validação local dos inputs no runner ser aprovada com sucesso (`CONFIRM=PRODUCTION_REBASELINE_APPROVED` e `EXPECTED_MAIN_SHA=3d1f17f8b699c1a53d890df8443934c671c3b551`), a execução no `appleboy/ssh-action@v1.2.0` falhava na VPS com:
+    `bash: -c: line 16: syntax error near unexpected token ';'`
+    `Process exited with status 2`
+  - **Causa Raiz:** O bloco `script` multilinha enviado à action SSH continha declarações de funções (`log()`, `die()`), estruturas `case ... in ... esac` e blocos condicionais inline. O `appleboy/ssh-action` concatena ou transforma as linhas do script em uma única string `bash -c "..."` delimitando comandos com ponto e vírgula `;`, o que corrompe a sintaxe de cabeçalhos `case` (produzindo `case ... in;`) e de blocos de funções em subshells remotas.
+  - **Confirmação de Não Mutação Produtiva:** NENHUM backup OCI (`/var/log/gest-o/oci-backups/`), registro de rebaseline (`/var/log/gest-o/rebaseline/`) ou alteração nos containers/banco foi concluído ou executado na VPS. A falha ocorreu no momento da interpretação sintática do script remoto antes de qualquer execução de comando no servidor.
+
+- **Correção do Script Inline SSH e Blindagem de Testes:**
+  - **Script Remoto Mínimo e Linear:** Removida a duplicação de validações Bash (funções e cases) do script inline remoto. O script SSH foi refatorado para ser estritamente linear, chamando diretamente o script versionado e testado no repositório (`scripts/production-rebaseline.sh`):
+    ```yaml
+    script: |
+      set -Eeuo pipefail
+      cd /apps/gest-o
+      git fetch origin main
+      git switch main
+      git pull --ff-only origin main
+      CONFIRM="$REBASELINE_CONFIRM" EXPECTED_SHA="$EXPECTED_MAIN_SHA" \
+        bash scripts/production-rebaseline.sh
+      printf 'REBASELINE_TARGET_SHA=%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_VERIFIED_API_IMAGE=gest-o-api:%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_VERIFIED_WEB_IMAGE=gest-o-web:%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_OCI_BACKUP_DIR=/var/log/gest-o/oci-backups/%s\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_EVIDENCE_FILE=/var/log/gest-o/rebaseline/%s/result.tsv\n' "$EXPECTED_MAIN_SHA"
+      printf 'REBASELINE_RESULT=PASS\n'
+    ```
+  - **Manutenção dos Envs SSH:** A propriedade `envs` da action foi mantida exatamente como `REBASELINE_CONFIRM,EXPECTED_MAIN_SHA`.
+  - **Atualização dos Testes Estáticos (`scripts/smoke/production-rebaseline-safety.mjs`):**
+    - Adicionado teste de sintaxe `bash -n` para `scripts/production-rebaseline.sh`.
+    - Adicionada verificação `bash -n` do script remoto extraído do workflow e simulação do processamento de linhas do `appleboy/ssh-action` (delimitando linhas por `;`).
+    - Adicionada asserção garantindo ausência de funções (`function`, `()`), `case`, `eval` e `bash -c` aninhados no script remoto.
+
+# Correção da Expressão GitHub Actions no Workflow de Rebaseline (Run 36629537190) — 29/09/2026
+
+- **Diagnóstico do Erro `bad substitution`:**
+  - O workflow `.github/workflows/production-rebaseline.yml` (Run 36629537190) falhava com o erro `line 12: ${#inputs.expected_main_sha}: bad substitution`.
+  - **Causa Raiz:** O workflow utilizava a expressão `${#inputs.expected_main_sha}` diretamente no bloco shell `run:`. O interpretador Bash da subshell tentava avaliar `${#inputs...}` como uma expansão de variável Bash inválida contendo um ponto `.`, gerando erro de sintaxe.
+  - **Confirmação de Não Mutação Produtiva:** NENHUM backup ou alteração na produção foi criado/executado nessa tentativa (Run 36629537190 falhou no primeiro step local de validação de entradas, antes de disparar a etapa SSH).
+
+- **Correção por Variáveis de Ambiente (`env`) e Validação Bash:**
+  - Os inputs do GitHub Actions são agora injetados no bloco `env` do step de validação local:
+    ```yaml
+    env:
+      CONFIRM: ${{ inputs.confirm }}
+      EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+    ```
+  - A validação de formato e comprimento ocorre via Bash puro usando variáveis de ambiente:
+    ```bash
+    if [ "$CONFIRM" != "PRODUCTION_REBASELINE_APPROVED" ]; then
+      printf '%s\n' "::error::Confirmação inválida: $CONFIRM. Exigido PRODUCTION_REBASELINE_APPROVED."
+      exit 1
+    fi
+    if [ "${#EXPECTED_MAIN_SHA}" -ne 40 ]; then
+      printf '%s\n' "::error::expected_main_sha deve ter exatamente 40 caracteres."
+      exit 1
+    fi
+    case "$EXPECTED_MAIN_SHA" in
+      *[!0-9a-f]*|'')
+        printf '%s\n' "::error::expected_main_sha deve ser um SHA-1 hexadecimal de 40 caracteres."
+        exit 1
+        ;;
+    esac
+    ```
+  - Atualizada a suíte `scripts/smoke/production-rebaseline-safety.mjs` com testes estáticos e comportamentais (verificando aceitação de SHA válido de 40 caracteres, rejeição de SHA vazio, tamanho incorreto, não-hexadecimal e confirmação divergente).
+
+# Procedimento Formal de Rebaseline de Produção — 29/09/2026
+
+- **Diagnóstico e Contexto Comprovado:**
+  - Runtime em execução na VPS utiliza a revisão API `310198...` (`.Image sha256:f4dcc...`).
+  - Não existe registro OCI externo (pipeline de build é local no Docker Engine da VPS).
+  - Não existe backup de tarball OCI em disco (`docker save`).
+  - Reconstrução reproduzível do commit `310198...` gera digest criptográfico distinto (`sha256:0e5c...`).
+  - O pipeline de deploy permanece corretamente travado em modo **fail-closed** (`resolve_rollback_image` bloqueia o cutover por ausência de vínculo criptográfico comprovado para o container anterior).
+
+- **Fluxo de Rebaseline Aprovado e Ferramental Criado (`scripts/production-rebaseline.sh`):**
+  - **Script de Rebaseline:** Criado `scripts/production-rebaseline.sh` com validador de biblioteca `scripts/lib/production-rebaseline-proof.sh`.
+  - **Confirmação Explicita Exigida:** Requer parâmetro explícito `CONFIRM=PRODUCTION_REBASELINE_APPROVED` e `EXPECTED_SHA` igual ao HEAD do repositório.
+  - **Invariantes e Proteções Garantidas:**
+    1. Zero exclusão/interrupção de containers ou imagens em execução.
+    2. Proibição absoluta de `docker commit` e `docker export`.
+    3. Tags e rótulos de revisão Git NÃO são aceitos isoladamente como prova de identidade (validação estrita por digests/config OCI via `docker image inspect`).
+    4. Nenhuma execução automática de cutover (o script registra formalmente `cutover_executed = NO`).
+  - **Geração de Backups OCI Persistentes (`docker save`):** Exporta tarballs OCI imutáveis para as imagens `gest-o-api:$EXPECTED_SHA` e `gest-o-web:$EXPECTED_SHA` em `/var/log/gest-o/oci-backups/$EXPECTED_SHA/` com checksums SHA-256 no manifesto.
+  - **Registro de Evidência Protegida:** Grava o bundle de evidência em `/var/log/gest-o/rebaseline/$EXPECTED_SHA/result.tsv` e `manifest.tsv` registrando explicitamente que o artefato legado `310198...` / `sha256:f4dcc...` é irrecuperável para rollback.
+  - **Suíte de Fumaça Executável:** Criado `scripts/smoke/production-rebaseline-safety.mjs` testando ausência de baseline, baseline válido, baseline divergente e rebaseline autorizado.
+
+- **Status da Operação Produtiva:**
+  - **Nenhuma operação produtiva de cutover foi executada.**
+  - Os containers de produção permanecem ativos, saudáveis e atendendo 100% do tráfego.
+
+# Investigação das Fontes Autorizadas e Declaração de Bloqueio Operacional do Cutover — 29/09/2026
+
+- **Confirmação da Trava Fail-Closed:**
+  - O cutover bloqueia corretamente quando o container em execução possui `.Image = sha256:f4dcccfb...` / `.Config.Image = gest-o-api:310198aea...` e nenhuma imagem OCI local possui vínculo criptográfico comprovado (`resolve_rollback_image`).
+  - O erro `api sem imagem anterior verificável; nenhuma imagem local demonstra vínculo criptográfico; fallback por container proibido` é a resposta esperada e autoritativa do sistema.
+
+- **Conclusões da Investigação das 3 Fontes Autorizadas de Recuperação:**
+  1. **Registry (Registro OCI):** **Inexistente.** O pipeline do Gest-o constrói imagens localmente na VPS host em `MODE=build`. Não existe registry OCI externo configurado ou utilizado.
+  2. **Backup OCI:** **Inexistente.** As rotinas de backup (`backup.sh`, `prepare-production-recovery-backup.sh`) geram dumps lógicos PostgreSQL (`.sql.gz`) e arquivos env, mas não criam tarballs OCI (`docker save`).
+  3. **Rebuild reproduzível do commit 310198...:** **Incompatível Criptograficamente.** Reconstruir o commit `310198...` gera um novo digest OCI (`sha256:0e5c...`), que difere do runtime `f4dcc...`. O validador ignora deliberadamente nomes de tags e rótulos de revisão, exigindo correspondência exata de digest criptográfico.
+
+- **Declaração de Bloqueio Operacional e Procedimento de Recuperação:**
+  - **Bloqueio Operacional Declarado:** O cutover permanece **bloqueado**. É estritamente proibido relaxar a trava fail-closed ou utilizar `docker commit`/`docker export` improvisados.
+  - **Recuperação e Validação:** Caso exista backup OCI externo (`.tar`), ele deve ser importado via `docker load` e validado por `docker image inspect sha256:f4dcc...` antes de acionar `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`. Caso o artefato seja irrecuperável, exige-se procedimento formal de re-baselining operacional em janela de manutenção aprovada.
+  - **Detalhes e Relatório de Investigação:** `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
+
+# Correção do gate da imagem anterior de rollback — 29/09/2026
+
+- O cutover agora resolve `.Image` diretamente ou comprova vínculo OCI da candidata `.Config.Image`
+  por config/descriptor/manifest digest; tag e label Git iguais, isoladamente, são rejeitados.
+- O rollback usa o config ID imutável comprovado e API/WEB precisam passar antes de qualquer parada.
+- Para os valores produtivos coletados, a tag que aponta a `0e5c...` não substitui automaticamente a
+  identidade em execução `f4dcc...`; a disponibilidade/vínculo na VPS permanece **NOT_VERIFIED**.
+- Evidências, cenários descartados e recuperação estão em
+  `docs/investigations/production-cutover-rollback-image-identity-2026-09-29.md`.
+
+# Investigação e Validação de Imagem OCI Alvo no Cutover do Production Deploy — 29/09/2026
+
+- **Diagnóstico da Divergência:**
+  - No build do SHA `4380820e0237e91ce4938bfd96f8557725c23959` na VPS, a imagem OCI `gest-o-api:4380820e...` foi construída com sucesso. No entanto, o cutover falhava com: `“api pertence a gest-o-production e sua imagem está ausente; fallback por container proibido”`.
+  - **Causa Raiz Identificada no Código:** O script `scripts/deploy-production.sh` inspeccionava o container anterior rodando no host (`name=$owners`) para determinar a imagem anterior do container em execução (`image_id`). Quando essa imagem anterior do container no host estava sem tag ou ausente do catálogo, a verificação de rollback do container em execução falhava no gate de proteção do projeto `gest-o-production`. A mensagem indicava a ausência da imagem do container anterior rodando (para fins de rollback), enquanto as imagens OCI alvo do novo commit (`gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT`) já estavam construídas e presentes no Docker Engine.
+  - **Validação Fail-Closed do Target Image Implementada:** Antes de prosseguir para a verificação do runtime atual e evidências de rollback, `scripts/deploy-production.sh` agora valida explicitamente a presença local de `gest-o-api:$APP_COMMIT` e `gest-o-web:$APP_COMMIT` E a correspondência do rótulo OCI `org.opencontainers.image.revision=$APP_COMMIT`. Se qualquer imagem OCI alvo estiver ausente ou tiver SHA divergente, o cutover falha fechado imediatamente.
+  - **Clareza do Diagnóstico de Rollback:** A mensagem de erro ao verificar a imagem do container anterior em execução foi ajustada para explicitar que a imagem ausente refere-se à imagem anterior (`$image_id`) do container em execução no host, e não à imagem alvo do novo commit.
+
+- **Atualizações no Código e Suíte de Fumaça:**
+  - Atualizado `scripts/deploy-production.sh` com validação de `API_IMAGE` e `WEB_IMAGE` alvo e log explicativo para `$image_id` anterior.
+  - Atualizado `scripts/smoke/production-deploy-safety.mjs` com teste reproduzindo a validação da imagem alvo e contêineres rodando em SHA anterior. Testes validados com sucesso (`node scripts/smoke/production-deploy-safety.mjs`).
+
+# Investigação e Reconciliação do Bloqueio de Cutover no Production Deploy (`cutover-started`) — 29/09/2026
+
+- **Diagnóstico do Bloqueio das 6 Perguntas:**
+  1. **Arquivo/Manifesto de Marcador:** O marcador de início do cutover é mantido em `/var/log/gest-o/deploy/$APP_COMMIT/cutover-started` (`EXPECTED_SHA=310198aea1f09177e158bf85b89a6b9ecd356f9a`).
+  2. **Momento de Criação:** É criado em `scripts/deploy-production.sh` na fase de cutover imediatamente antes do comando de parada (`docker stop`) dos contêineres baseline em execução.
+  3. **Correspondência de SHA:** Corresponde exatamente ao SHA do deploy em andamento (`310198aea1f09177e158bf85b89a6b9ecd356f9a`), estando localizado em `/var/log/gest-o/deploy/310198aea1f09177e158bf85b89a6b9ecd356f9a/cutover-started`.
+  4. **Classificação do Estado:** Trata-se de uma tentativa interrompida com marcador stale no filesystem, na qual os contêineres produtivos anteriores permaneceram ativos, saudáveis e atendendo 100% das requisições na versão baseline sem sofrerem parada ou troca.
+  5. **Confirmação Manual Exigida:** Para o fluxo normal de cutover, o parâmetro exige `CONFIRM=PRODUCTION_CUTOVER`. Para reautorização explícita de uma tentativa interrompida com baseline intacto após revisão manual, o sistema passa a exigir `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`.
+  6. **Procedimento Seguro de Reautorização e Reconciliação:**
+     - Se o marcador `cutover-started` estiver presente para o SHA atual:
+       - **Se já concluído:** Se a API em `http://127.0.0.1:4000/health/version` já responder com `$APP_COMMIT` e estiver saudável, o script registra log de idempotência e encerra com sucesso (exit 0).
+       - **Se parcialmente parado / danificado:** Se os contêineres anteriores não estiverem ativos ou a porta não possuir proprietário único, a reautorização é bloqueada fail-closed com erro e instrução de rollback manual.
+       - **Se marcador stale com baseline intacto:** Se os contêineres baseline permanecerem ativos/saudáveis e `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` for fornecido, a evidência parcial anterior é arquivada em `$evidence.reauthorized-<timestamp>` e o cutover prossegue de forma limpa. Caso seja fornecido apenas `CONFIRM=PRODUCTION_CUTOVER`, o script falha intencionalmente exigindo revisão e a confirmação de reautorização.
+
+- **Atualizações de Código e Suíte de Testes:**
+  - Atualizados `scripts/deploy-production.sh` e `scripts/production-deploy-entrypoint.sh` para suporte fail-closed a `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED`.
+  - Atualizadas as suítes de fumaça em `scripts/smoke/production-deploy-safety.mjs` e `scripts/smoke/production-deploy-real-call-graph-safety.sh` cobrindo todos os cenários de marcador ausente, marcador stale, cutover parcial, idempotência pós-conclusão e reautorização explícita. Todos os testes validados com sucesso (`npm run test:production-deploy`).
+
+# Resolução do Incidente de Produtos Ocultos por Preço Sem Tabela Explícita (28/09/2026)
+
+- **Sintoma e Causa Raiz Comprovada:**
+  - Após a Sincronização Completa ERP (`syncAll`), a busca de produtos (`/products/search`) com `priceTableCode=1` retornava 0 itens e ocultava 56 produtos recuperados do banco como `hiddenReason: invalid_price`.
+  - O endpoint `/prices` do ERP UltraFV3 retorna linhas de preço sem código de tabela explícito (`TABELA`/`CODTABELA` ausentes no JSON do payload), persistidas na tabela `ProductPrice` com `erpPriceId = null`.
+  - O serviço `calculateOpportunityPriceForTable` em `opportunityPriceService.ts` filtrava estritamente `item.erpPriceId !== null`, fazendo com que a busca pela Tabela 1 ficasse com `tableRows` vazio para preços originados de `/prices`, tratando os preços como ausentes e ocultando os produtos.
+
+- **Solução Implementada e Garantias de Precedência:**
+  - Atualizada a função `calculateOpportunityPriceForTable` em `apps/api/src/services/opportunityPriceService.ts`:
+    1. Registros explícitos de Tabela 1 (`erpPriceId = "1"`) mantêm precedência absoluta.
+    2. Na busca por Tabela 1 (`priceTableCode = "1"`), caso não exista linha explícita `erpPriceId = "1"`, as linhas sem tabela explícita (`erpPriceId = null` ou `""`) são utilizadas como fallback autorizativo para a Tabela 1.
+    3. Linhas sem tabela explícita NÃO são utilizadas como fallback para tabelas secundárias (Tabelas 2, 3 e 4).
+    4. Zeros explícitos (`price = 0`) mantêm precedência sobre fallbacks não escopados.
+  - Adicionadas 8 suítes de regressão em `apps/api/src/services/opportunityProductAvailability.test.ts` cobrindo preços sem tabela, Tabela 1 explícita, Tabelas 2-4, vigência histórica, preços zero, filiais, busca da Nova Oportunidade e assertions para Sincronização Completa, Automática e Atualizar Estoque. Todos os testes validados localmente com sucesso.
+
+- **Relatório do Incidente:**
+  - Documentação detalhada registrada em `docs/investigations/incident-hidden-products-unscoped-price-table-2026-09-28.md`.
+
+# Investigação do Erro de Imagem API Ausente no Workflow Production Schema PR827 (Run 36469364250) — 28/09/2026
+
+- **Evidências e Causa Raiz Auditadas:**
+  - O workflow **Production Schema PR827** (Run 36469364250, Job 109087426885, migration `20260927160000_product_price_source_observation`, modo `apply`, ambiente `canonical`) falhou no passo de validação pré-aplicação com o erro: `[production-schema-apply] ERRO: imagem API do SHA ausente`.
+  - **Motivo da Ausência da Imagem:** O runner `production-schema-apply.sh` e o Prisma utilizam a imagem OCI local `gest-o-api:$EXPECTED_SHA` na VPS para executar a comparação de schema e geração de diffs via `docker run`. As imagens OCI são construídas e armazenadas localmente no Docker Engine da VPS pelo workflow **Deploy Production** em `phase=build` e não são transportadas por registry externo nem construídas pelo workflow de schema. Como a etapa de build (`Deploy Production` phase=build) não havia sido executada previamente na VPS para o SHA exato da run, a imagem OCI não foi encontrada localmente no Docker Engine.
+  - **SHA Esperado vs Imagem Presente:** O workflow espera `EXPECTED_SHA=${{ github.sha }}`. Se a imagem `gest-o-api:$EXPECTED_SHA` estiver ausente ou possuir rótulo de revisão OCI (`org.opencontainers.image.revision`) divergente, o processo falha fechado imediatamente.
+  - **Evidência de Imagem:** A imagem OCI é construída localmente na VPS pelo script de deploy. O workflow de schema valida fail-closed e consome a imagem OCI do SHA esperado.
+  - **String de Confirmação Exigida para Mode Apply:** Para a migration selecionada (`20260927160000_product_price_source_observation`) e para as demais migrations padrão do runner, a string de confirmação exata exigida pelo formulário do GitHub Actions é `PRODUCTION_SCHEMA_APPLY` (para a migration legada `20260827190000_add_erp_order_manual_resolution`, a string era `APPLY_PR827_SCHEMA`).
+
+- **Melhorias de Blindagem e Testes Implementados:**
+  - **Reforço em `scripts/production-schema-apply.sh`:** Adicionada validação estrita da variável `API_IMAGE` (padrão `gest-o-api:$APP_COMMIT`). O script agora exige a existência da imagem OCI E valida se o rótulo `org.opencontainers.image.revision` é estritamente igual ao `$APP_COMMIT` (`imagem API com SHA divergente`). Além disso, todas as chamadas de `docker run` no script foram atualizadas para utilizar `$API_IMAGE`.
+  - **Reforço em `.github/workflows/production-schema-pr827.yml`:** Passagem explícita da variável `API_IMAGE="gest-o-api:$EXPECTED_SHA"` ao chamar `scripts/production-schema-apply.sh`.
+  - **Cobertura em `scripts/smoke/production-schema-safety.mjs`:** Adicionada suíte de testes de fumaça validando os três cenários do runner:
+    1. Imagem API ausente no Docker (rejeita com `imagem API do SHA ausente`).
+    2. Imagem API presente com rótulo OCI divergente (rejeita com `imagem API com SHA divergente`).
+    3. Imagem API presente com rótulo OCI correspondente ao SHA (aprova e avança).
+
+- **Ordem Obrigatória de Execução para Produção (Sem Aplicação Efetuada):**
+  1. Executar **Deploy Production** com `phase=build` para o SHA desejado (constrói e rotula `gest-o-api:$SHA` na VPS).
+  2. Executar **Production Schema PR827** com `mode=preview` para a migration `20260927160000_product_price_source_observation`.
+  3. Executar **Production Schema PR827** com `mode=apply` e `confirm=PRODUCTION_SCHEMA_APPLY` para a migration `20260927160000_product_price_source_observation`.
+  4. Executar **Deploy Production** com `phase=cutover` para o mesmo SHA.
+  - *Nenhuma aplicação produtiva, migration, deploy ou cutover foi executada nesta investigação.*
+=======
 # Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
 
 - **Aviso de Canal de Recuperação:** O workflow manual **ERP Production Recovery** permanece como o canal auditável de recuperação.
@@ -14,6 +248,7 @@
     - Aplicada a mesma regra de proteção fail-closed (`LIBERAR_INTERNET = "S"` e `ATIVO = "S"`).
   - **Preservação de Históricos:**
     - Pedidos históricos já salvos em `ErpOrderSync` continuam 100% consultáveis e legíveis.
+>>>>>>> Stashed changes
 
 # Resolução do Bloqueio de Schema no Cutover da Implantação da Produção nº 188 (28/09/2026)
 

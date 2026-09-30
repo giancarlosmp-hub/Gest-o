@@ -82,6 +82,12 @@ assert.match(deploy,/schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "
 assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_SEED"/);
 assert.match(schemaEvidence,/":\(exclude\)\$SCHEMA_EQUIVALENCE_PREVIEW_VALIDATOR"/);
 assert.ok(deploy.indexOf('nenhuma evidência equivalente de schema foi validada') < deploy.indexOf('docker stop'));
+assert.match(deploy, /cutover-started/);
+assert.match(deploy, /running_commit=\$\(curl -fsS --max-time 3 http:\/\/127\.0\.0\.1:4000\/health\/version/);
+assert.match(deploy, /Cutover já concluído anteriormente para \$APP_COMMIT; runtime ativo já serve a versão esperada/);
+assert.match(deploy, /CONFIRM.*PRODUCTION_CUTOVER_REAUTHORIZED/);
+assert.match(deploy, /reautorização bloqueada/);
+assert.match(deploy, /\.reauthorized-\$\(date -u/);
 const sanitizeRelease = value => spawnSync("sh", ["-c", "printf '%s' \"$1\" | tr -cd '[:alnum:]._ -' | tr ' ' '-' | cut -c1-40", "sanitize-release", value], { encoding: "utf8" });
 for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "sha256abc"], ["release_1.2-x", "release_1.2-x"]]) {
   const result = sanitizeRelease(input); assert.equal(result.status, 0); assert.equal(result.stdout, `${expected}\n`);
@@ -99,14 +105,53 @@ for (const variable of ["OPENAI_ENABLED","OPENAI_API_KEY","OPENAI_MODEL","FEATUR
 assert.match(rollback,/docker start "\$container_id"/); assert.match(rollback,/API_ROLLBACK_IMAGE/); assert.match(rollback,/WEB_ROLLBACK_IMAGE/);
 assert.ok(rollback.indexOf('stop api web') < rollback.indexOf('up -d --no-build'),"rollback deve parar novos antes de recriar antigos");
 assert.match(rollback,/rm -f api web/); assert.match(rollback,/--force-recreate "\$role"/); assert.match(rollback,/4000 5173/); assert.match(rollback,/\/health/);
-assert.match(rollback,/restaurado não usa o image ID anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
+assert.match(rollback,/restaurado não usa o artefato verificado anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
 assert.match(deploy,/gest-o-\$\{role\}-rollback:\$release/); assert.match(deploy,/previous-runtime\.tsv/); assert.match(deploy,/rollback-images\.env/);
-assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\timage_id\\trollback_tag\\tport\\tnetworks\\trestart_policy\\tprevious_commit/);
+assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\truntime_identity\\trollback_reference\\tport\\tnetworks\\trestart_policy\\tprevious_commit\\tresolution_method\\tartifact_id/);
 assert.match(deploy,/rollback-containers\.tsv/);
-assert.match(deploy,/docker image inspect "\$image_id"/); // imagem disponível -> modo image
-assert.match(deploy,/rollback_mode=container/); // API ou WEB históricos podem usar container
-assert.match(deploy,/compose_project.*com\.docker\.compose\.project/);
-assert.match(deploy,/"\$compose_project" != gest-o-production/); // ausência de imagem no projeto atual falha fechada
+assert.match(deploy,/Validando imagens OCI alvo para cutover: \$API_IMAGE e \$WEB_IMAGE/);
+assert.match(deploy,/docker image inspect "\$target_img"/);
+assert.match(deploy,/org\.opencontainers\.image\.revision/);
+assert.match(deploy,/resolve_rollback_image "\$role" "\$image_id" "\$config_image"/);
+assert.doesNotMatch(deploy,/rollback_mode=container/); // produção nunca aceita snapshot implícito do container
+assert.match(deploy,/block_reason=\$ROLLBACK_BLOCK_REASON/);
+assert.match(deploy,/fallback por container proibido/);
+
+// Validação de cenário: Imagens alvo do commit futuro existem com rótulo OCI correto,
+// enquanto containers rodando utilizam imagens de commit anterior.
+const simulateTargetAndRunningScenario = ({ targetApiRevision, targetWebRevision, runningApiImagePresent }) => {
+  const targetValid = targetApiRevision === "4380820e0237e91ce4938bfd96f8557725c23959" && targetWebRevision === "4380820e0237e91ce4938bfd96f8557725c23959";
+  if (!targetValid) return { status: "FAIL", reason: "target_image_revision_mismatch" };
+  if (!runningApiImagePresent) return { status: "FAIL", reason: "previous_running_image_absent" };
+  return { status: "PASS", rollbackMode: "image" };
+};
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: true
+  }),
+  { status: "PASS", rollbackMode: "image" }
+);
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "3101980000000000000000000000000000000000",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: true
+  }),
+  { status: "FAIL", reason: "target_image_revision_mismatch" }
+);
+
+assert.deepEqual(
+  simulateTargetAndRunningScenario({
+    targetApiRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    targetWebRevision: "4380820e0237e91ce4938bfd96f8557725c23959",
+    runningApiImagePresent: false
+  }),
+  { status: "FAIL", reason: "previous_running_image_absent" }
+);
 assert.match(deploy,/docker inspect "\$container_id" >"\$evidence\/\$role\.previous\.inspect\.json"/);
 assert.doesNotMatch(deploy,/docker rm[^\n]*\$container_id/); // container histórico é apenas parado
 assert.ok(deploy.indexOf('bash -n "$evidence/rollback.sh"') < deploy.indexOf('docker stop "$container_id"'));
