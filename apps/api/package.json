@@ -65,7 +65,8 @@
     "test:platform-health": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/platformHealthService.test.ts && tsx src/services/platformHealthProjection.test.ts",
     "test:orders-module": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/ordersModule.test.ts",
     "test:seller-offboarding": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/sellerOffboarding.test.ts",
-    "test:inactive-user-auth": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/inactiveUserAuth.test.ts"
+    "test:inactive-user-auth": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/inactiveUserAuth.test.ts",
+    "test:route-authorization": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/routeAuthorization.http.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
