@@ -5074,8 +5074,30 @@ router.put("/companies/:id", validateBody(companySchema.partial()), async (req, 
   }
 });
 
+const resolveRequestTenantId = async (req: Request, res: express.Response) => {
+  try {
+    return await resolveUniqueActiveTenantForUser(req.user!.id);
+  } catch (error) {
+    if ((error as { status?: number })?.status !== 403) throw error;
+    res.status(403).json({ message: "Contexto de tenant ausente ou ambíguo." });
+    return null;
+  }
+};
+
+const contactTenantWhere = (tenantId: string) => ({
+  OR: [
+    { client: { tenantId } },
+    { clientId: null, ownerSeller: { tenantMemberships: { some: { tenantId, status: "active" as const } } } }
+  ]
+});
+
 router.delete("/companies/:id", async (req, res) => {
-  await prisma.client.delete({ where: { id: req.params.id } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.client.findFirst({ where: { id: req.params.id, tenantId, ...sellerWhere(req) }, select: { id: true } });
+  if (!old) return res.status(404).json({ message: "Não encontrado" });
+
+  await prisma.client.delete({ where: { id: old.id } });
   res.status(204).send();
 });
 
@@ -5095,12 +5117,31 @@ router.post("/contacts", validateBody(contactSchema), async (req, res) =>
     .json(await prisma.contact.create({ data: { ...req.body, ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } }))
 );
 
-router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) =>
-  res.json(await prisma.contact.update({ where: { id: req.params.id }, data: req.body }))
-);
+router.put("/contacts/:id", validateBody(contactSchema.partial()), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true } });
+  if (!old) return res.status(404).json({ message: "Não encontrado" });
+
+  if (req.body.clientId !== undefined) {
+    const targetClient = await prisma.client.findFirst({ where: { id: req.body.clientId, tenantId, ...sellerWhere(req) }, select: { id: true } });
+    if (!targetClient) return res.status(404).json({ message: "Cliente não encontrado" });
+  }
+
+  const data = {
+    ...req.body,
+    ...(req.body.ownerSellerId !== undefined ? { ownerSellerId: resolveOwnerId(req, req.body.ownerSellerId) } : {})
+  };
+  res.json(await prisma.contact.update({ where: { id: old.id }, data }));
+});
 
 router.delete("/contacts/:id", async (req, res) => {
-  await prisma.contact.delete({ where: { id: req.params.id } });
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.contact.findFirst({ where: { id: req.params.id, ...sellerWhere(req), ...contactTenantWhere(tenantId) }, select: { id: true } });
+  if (!old) return res.status(404).json({ message: "Não encontrado" });
+
+  await prisma.contact.delete({ where: { id: old.id } });
   res.status(204).send();
 });
 
@@ -5111,8 +5152,10 @@ router.post("/ai/opportunity-insight", async (req, res) => {
     return res.status(400).json({ message: "Payload inválido", errors: parsed.error.issues });
   }
 
-  const opportunity = await prisma.opportunity.findUnique({
-    where: { id: parsed.data.opportunityId },
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: parsed.data.opportunityId, ...sellerWhere(req), client: { tenantId } },
     select: {
       id: true,
       stage: true,
@@ -5326,8 +5369,10 @@ router.get("/ai/opportunity-message", async (req, res) => {
     return res.status(400).json({ message: "Query inválida", errors: parsed.error.issues });
   }
 
-  const opportunity = await prisma.opportunity.findUnique({
-    where: { id: parsed.data.opportunityId },
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const opportunity = await prisma.opportunity.findFirst({
+    where: { id: parsed.data.opportunityId, ...sellerWhere(req), client: { tenantId } },
     select: {
       id: true,
       title: true,
@@ -6337,10 +6382,12 @@ router.get("/products/search", async (req, res) => {
   return res.json(visibleProducts);
 });
 
-router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
+router.get("/clients/diagnostics/duplicate-documents", authorize("diretor", "gerente"), async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
   const duplicatedDocuments = await prisma.client.groupBy({
     by: ["cnpjNormalized"],
-    where: { cnpjNormalized: { not: null }, isArchived: false },
+    where: { tenantId, cnpjNormalized: { not: null }, isArchived: false },
     _count: { cnpjNormalized: true },
     having: {
       cnpjNormalized: {
@@ -6352,7 +6399,7 @@ router.get("/clients/diagnostics/duplicate-documents", async (_req, res) => {
   const details = await Promise.all(duplicatedDocuments.map(async (duplicate) => {
     const normalized = duplicate.cnpjNormalized;
     const clients = await prisma.client.findMany({
-      where: { cnpjNormalized: normalized || undefined, isArchived: false },
+      where: { tenantId, cnpjNormalized: normalized || undefined, isArchived: false },
       orderBy: [{ createdAt: "asc" }],
       select: {
         id: true,
@@ -7933,7 +7980,15 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 
   return res.json(data);
 });
-router.delete("/opportunities/:id", async (req, res) => { await prisma.opportunity.delete({ where: { id: req.params.id } }); res.status(204).send(); });
+router.delete("/opportunities/:id", async (req, res) => {
+  const tenantId = await resolveRequestTenantId(req, res);
+  if (!tenantId) return;
+  const old = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req), client: { tenantId } }, select: { id: true } });
+  if (!old) return res.status(404).json({ message: "Não encontrado" });
+
+  await prisma.opportunity.delete({ where: { id: old.id } });
+  res.status(204).send();
+});
 
 const resolveStatus = (payload: { done: boolean; endAt: Date }) => {
   if (payload.done) return "realizado";
