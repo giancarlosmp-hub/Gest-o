@@ -16,8 +16,14 @@ assert.match(rebaselineScript, /EXPECTED_SHA/);
 assert.match(rebaselineScript, /docker save/);
 assert.doesNotMatch(rebaselineScript, /docker commit|docker export/);
 assert.doesNotMatch(rebaselineScript, /docker rm|docker rmi|docker stop/);
-assert.match(rebaselineScript, /unavailable_legacy_artifact/);
+assert.match(rebaselineScript, /unavailable_legacy_%s_artifact/);
 assert.match(rebaselineScript, /cutover_executed\\tNO/);
+// The legacy runtime is detected, never hardcoded from a past incident.
+assert.doesNotMatch(rebaselineScript, /310198|f4dcc/, "rebaseline must not hardcode the 310198/f4dcc legacy artifact");
+for (const field of ["container_id", "identity", "config_image", "commit", "inspectable"]) {
+  assert.match(rebaselineScript, new RegExp(`legacy_runtime_%s_${field}\\\\t`));
+}
+assert.match(rebaselineScript, /awk -F'\|' -v p=":\$port->"/, "rebaseline must use the cutover port-owner criterion");
 
 // Syntax validation for scripts/production-rebaseline.sh
 const scriptSyntaxCheck = spawnSync("bash", ["-n", "scripts/production-rebaseline.sh"], { encoding: "utf8" });
@@ -184,8 +190,18 @@ web_image_id\tsha256:${"2".repeat(64)}
 web_image_digest\tsha256:${"2".repeat(64)}
 web_tar_path\t${dummyWebTar}
 web_tar_sha256\t${dummyWebTarSha}
-unavailable_legacy_artifact\t310198aea1f09177e158bf85b89a6b9ecd356f9a (sha256:f4dcccfb...)
-unavailable_legacy_reason\tno_local_oci_digest_link_and_no_external_registry
+legacy_runtime_api_container_id\tapi-container-id
+legacy_runtime_api_identity\tsha256:${"a".repeat(64)}
+legacy_runtime_api_config_image\tgest-o-api:${"d".repeat(40)}
+legacy_runtime_api_commit\t${"d".repeat(40)}
+legacy_runtime_api_inspectable\tno
+unavailable_legacy_api_artifact\t${"d".repeat(40)} (sha256:${"a".repeat(64)})
+unavailable_legacy_api_reason\truntime_image_not_inspectable_in_local_engine
+legacy_runtime_web_container_id\tweb-container-id
+legacy_runtime_web_identity\tsha256:${"b".repeat(64)}
+legacy_runtime_web_config_image\tgest-o-web:${"d".repeat(40)}
+legacy_runtime_web_commit\t${"d".repeat(40)}
+legacy_runtime_web_inspectable\tyes
 cutover_executed\tNO
 `;
 
@@ -243,6 +259,96 @@ web\tgest-o-web:${dummySha}\tsha256:${"2".repeat(64)}\tsha256:${"2".repeat(64)}\
   });
   assert.notEqual(runScriptNoConfirm.status, 0);
   assert.ok(runScriptNoConfirm.stderr.includes("CONFIRM=PRODUCTION_REBASELINE_APPROVED"));
+
+  // Scenario 6: Rebaseline records the runtime that actually owns ports 4000/5173
+  const runtimeBin = join(testDir, "runtime-bin");
+  const runtimeApp = join(testDir, "runtime-app");
+  const runtimeEvidence = join(testDir, "runtime-rebaseline");
+  const runtimeOci = join(testDir, "runtime-oci");
+  mkdirSync(runtimeBin, { recursive: true });
+  mkdirSync(runtimeApp, { recursive: true });
+  const legacyApi = `sha256:${"a".repeat(64)}`;
+  const legacyWeb = `sha256:${"b".repeat(64)}`;
+  const legacyCommit = "c".repeat(40);
+  writeFileSync(join(runtimeBin, "git"), "#!/usr/bin/env bash\nexit 1\n", { mode: 0o755 });
+  writeFileSync(join(runtimeBin, "docker"), `#!/usr/bin/env bash
+case "$1" in
+  ps) printf 'old-api|0.0.0.0:4000->4000/tcp\\nold-web|0.0.0.0:5173->5173/tcp\\nproduction-postgres|5432/tcp\\n';;
+  save) printf 'tar for %s\\n' "$2" >"$4";;
+  inspect)
+    case "$3:$4" in
+      '{{.Id}}:old-api') echo api-container-id;; '{{.Id}}:old-web') echo web-container-id;;
+      '{{.Image}}:api-container-id') echo ${legacyApi};; '{{.Image}}:web-container-id') echo ${legacyWeb};;
+      '{{.Config.Image}}:api-container-id') echo gest-o-api:${legacyCommit};; '{{.Config.Image}}:web-container-id') echo gest-o-web:${legacyCommit};;
+      *Config.Env*:api-container-id) echo APP_COMMIT=${legacyCommit};;
+      *) exit 1;;
+    esac;;
+  image)
+    ref=\${!#}
+    case "$ref" in
+      gest-o-api:${dummySha}) id=sha256:${"1".repeat(64)}; rev=${dummySha};;
+      gest-o-web:${dummySha}) id=sha256:${"2".repeat(64)}; rev=${dummySha};;
+      ${legacyWeb}) id=${legacyWeb}; rev=${legacyCommit};;
+      *) exit 1;;
+    esac
+    case "\${4:-}" in *revision*) echo "$rev";; '') ;; *) echo "$id";; esac;;
+  *) exit 1;;
+esac
+`, { mode: 0o755 });
+  const runtimeRun = spawnSync("bash", ["scripts/production-rebaseline.sh"], {
+    env: {
+      ...process.env,
+      PATH: `${runtimeBin}:${process.env.PATH}`,
+      CONFIRM: "PRODUCTION_REBASELINE_APPROVED",
+      EXPECTED_SHA: dummySha,
+      APP_DIR: runtimeApp,
+      REBASELINE_EVIDENCE_DIR: runtimeEvidence,
+      OCI_BACKUP_DIR: runtimeOci
+    },
+    encoding: "utf8"
+  });
+  assert.equal(runtimeRun.status, 0, `rebaseline with detected runtime failed: ${runtimeRun.stderr}`);
+  const runtimeResult = readFileSync(join(runtimeEvidence, dummySha, "result.tsv"), "utf8");
+  const field = key => runtimeResult.split("\n").find(line => line.startsWith(`${key}\t`))?.split("\t")[1];
+  assert.equal(field("legacy_runtime_api_container_id"), "api-container-id");
+  assert.equal(field("legacy_runtime_api_identity"), legacyApi);
+  assert.equal(field("legacy_runtime_api_config_image"), `gest-o-api:${legacyCommit}`);
+  assert.equal(field("legacy_runtime_api_commit"), legacyCommit, "non-inspectable runtime falls back to the container APP_COMMIT");
+  assert.equal(field("legacy_runtime_api_inspectable"), "no");
+  assert.equal(field("unavailable_legacy_api_artifact"), `${legacyCommit} (${legacyApi})`);
+  assert.equal(field("unavailable_legacy_api_reason"), "runtime_image_not_inspectable_in_local_engine");
+  assert.equal(field("legacy_runtime_web_identity"), legacyWeb);
+  assert.equal(field("legacy_runtime_web_commit"), legacyCommit);
+  assert.equal(field("legacy_runtime_web_inspectable"), "yes");
+  assert.equal(field("unavailable_legacy_web_artifact"), undefined, "inspectable runtime must not be recorded as unavailable");
+  assert.doesNotMatch(runtimeResult, /310198|f4dcc/);
+  assert.equal(field("cutover_executed"), "NO");
+
+  // Scenario 7: Ambiguous port ownership fails closed before any docker save
+  writeFileSync(join(runtimeBin, "docker"), `#!/usr/bin/env bash
+case "$1" in
+  ps) printf 'a|0.0.0.0:4000->4000/tcp\\nb|0.0.0.0:4000->4000/tcp\\n';;
+  save) echo SAVE_CALLED >&2; exit 1;;
+  image) case "\${4:-}" in *revision*) echo ${dummySha};; '') ;; *) echo sha256:${"1".repeat(64)};; esac;;
+  *) exit 1;;
+esac
+`, { mode: 0o755 });
+  const ambiguousRun = spawnSync("bash", ["scripts/production-rebaseline.sh"], {
+    env: {
+      ...process.env,
+      PATH: `${runtimeBin}:${process.env.PATH}`,
+      CONFIRM: "PRODUCTION_REBASELINE_APPROVED",
+      EXPECTED_SHA: dummySha,
+      APP_DIR: runtimeApp,
+      REBASELINE_EVIDENCE_DIR: join(testDir, "ambiguous-rebaseline"),
+      OCI_BACKUP_DIR: join(testDir, "ambiguous-oci")
+    },
+    encoding: "utf8"
+  });
+  assert.notEqual(ambiguousRun.status, 0);
+  assert.ok(ambiguousRun.stderr.includes("porta 4000 não possui proprietário único"));
+  assert.ok(!ambiguousRun.stderr.includes("SAVE_CALLED"));
+  assert.ok(!existsSync(join(testDir, "ambiguous-rebaseline")));
 
 } finally {
   rmSync(testDir, { recursive: true, force: true });

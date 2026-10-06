@@ -4,7 +4,8 @@ set -euo pipefail
 # Formal Production Rebaseline Script
 #
 # Creates an authorized rebaseline record for target OCI images when legacy
-# runtime image identity cannot be verified for rollback (e.g., artifact 310198... / sha256:f4dcc...).
+# runtime image identity cannot be verified for rollback.  The runtime serving
+# ports 4000/5173 is detected and recorded per role (legacy_runtime_<role>_*).
 #
 # Requirements:
 # - Requires CONFIRM=PRODUCTION_REBASELINE_APPROVED
@@ -73,6 +74,38 @@ if [[ ! "$web_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
   die "ID da imagem WEB inválido: $web_id"
 fi
 
+tsv_value() { printf '%s' "$1" | tr -d '\t\r\n'; }
+
+# Record the runtime actually serving each role, using the same port-owner
+# criterion as the cutover inventory.  Nothing about the legacy artifact is
+# assumed: identity and commit are read from the running container.
+legacy_runtime_records=""
+for spec in api:4000 web:5173; do
+  role=${spec%%:*}; port=${spec##*:}
+  owners=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1}')
+  [[ "$(printf '%s\n' "$owners" | sed '/^$/d' | wc -l)" -eq 1 ]] || die "porta $port não possui proprietário único; runtime atual de $role não identificado"
+  legacy_container_id=$(docker inspect -f '{{.Id}}' "$owners" 2>/dev/null) || die "não foi possível inspecionar o container $owners de $role"
+  legacy_identity=$(docker inspect -f '{{.Image}}' "$legacy_container_id")
+  legacy_config_image=$(docker inspect -f '{{.Config.Image}}' "$legacy_container_id")
+  legacy_commit=""
+  if docker image inspect "$legacy_identity" >/dev/null 2>&1; then
+    legacy_inspectable=yes
+    legacy_commit=$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$legacy_identity" 2>/dev/null || true)
+  else
+    legacy_inspectable=no
+  fi
+  [[ -n "$legacy_commit" && "$legacy_commit" != '<no value>' ]] || legacy_commit=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$legacy_container_id" | sed -n 's/^APP_COMMIT=//p' | head -1)
+  legacy_commit=${legacy_commit:-unknown}
+  log "runtime atual role=$role container=$legacy_container_id identity=$legacy_identity config_image=$legacy_config_image commit=$legacy_commit inspectable=$legacy_inspectable"
+  legacy_runtime_records+=$(printf 'legacy_runtime_%s_container_id\t%s\nlegacy_runtime_%s_identity\t%s\nlegacy_runtime_%s_config_image\t%s\nlegacy_runtime_%s_commit\t%s\nlegacy_runtime_%s_inspectable\t%s' \
+    "$role" "$(tsv_value "$legacy_container_id")" "$role" "$(tsv_value "$legacy_identity")" "$role" "$(tsv_value "$legacy_config_image")" \
+    "$role" "$(tsv_value "$legacy_commit")" "$role" "$legacy_inspectable")$'\n'
+  if [[ "$legacy_inspectable" == no ]]; then
+    legacy_runtime_records+=$(printf 'unavailable_legacy_%s_artifact\t%s (%s)\nunavailable_legacy_%s_reason\truntime_image_not_inspectable_in_local_engine' \
+      "$role" "$(tsv_value "$legacy_commit")" "$(tsv_value "$legacy_identity")" "$role")$'\n'
+  fi
+done
+
 api_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{else}}{{.Id}}{{end}}' "$API_IMAGE" 2>/dev/null || echo "$api_id")
 web_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{else}}{{.Id}}{{end}}' "$WEB_IMAGE" 2>/dev/null || echo "$web_id")
 
@@ -115,8 +148,7 @@ manifest_file="$evidence_dir/manifest.tsv"
   printf 'web_image_digest\t%s\n' "$web_digest"
   printf 'web_tar_path\t%s\n' "$web_tar"
   printf 'web_tar_sha256\t%s\n' "$web_tar_sha"
-  printf 'unavailable_legacy_artifact\t310198aea1f09177e158bf85b89a6b9ecd356f9a (sha256:f4dcccfb...)\n'
-  printf 'unavailable_legacy_reason\tno_local_oci_digest_link_and_no_external_registry\n'
+  printf '%s' "$legacy_runtime_records"
   printf 'cutover_executed\tNO\n'
 } > "$result_file"
 
