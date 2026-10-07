@@ -1,3 +1,18 @@
+# Deploy em duas fases com artefato de release e primeiro cutover sem rebaseline — 07/10/2026
+
+- **Produção em `b3a662a95771b8c76ff5d84ef3de80c114be664f`** (merge da PR #921):
+  - Cutover pelo GitHub Actions run `37662560135` (**Deploy Production**, `phase=cutover`), em 07/10/2026.
+  - No log: `rollback_image method=runtime-identity` para api e web e `DEPLOY_RELEASE_ARTIFACT=PASS` para api e web.
+  - Conferido pelo operador: containers healthy com imagens api `sha256:c290794d…` e web `sha256:77b1d5d8…`; `/health/version` responde `commit=b3a662a95771b8c76ff5d84ef3de80c114be664f`.
+  - Primeiro cutover sem rebaseline: a imagem anterior foi resolvida pela identidade criptográfica do runtime, sem `authorized-rebaseline`.
+- **Build e cutover separados (PRs #920 e #921):**
+  - `phase=build` constrói, valida (ID, rótulos, `build-info.json`), fixa as tags imutáveis `gest-o-<role>-release:sha256-<hex>` e grava `/var/log/gest-o/deploy-builds/<sha>/build.tsv`. Nunca para containers.
+  - `phase=cutover` não reconstrói: sobe exatamente os image IDs do `build.tsv` (`--no-build --pull never`) e exige `.Image` e `/health/version` iguais à evidência.
+- **Artefatos de release:** `/var/log/gest-o/oci-backups/<commit>/<role>.<hex>.tar.gz` mais `<role>.<hex>.release.tsv` (gravado por último), salvos após o cutover saudável. O sha256 do tar é conferido antes de qualquer `docker load`.
+- **Causa raiz do Docker 29:** o CLI renderiza `.Id` só a partir do JSON bruto e `.Descriptor.Digest` só a partir da struct tipada. Um template de `docker inspect` que misture os dois falha nos dois modos. A resolução de identidade de rollback passou a fazer uma consulta por campo, e `production-deploy-safety.mjs` reprova templates mistos em `scripts/` e `.github/workflows/`.
+- **Retenção só em modo relatório** (`RELEASE_RETENTION=report`): mantém por papel as 2 releases mais recentes, as em uso, as do rollback atual e as do `build.tsv` mais recente que aguardam cutover; o restante aparece como `would_delete`. Nada é removido. A remoção real é dívida técnica (ver `TECH_DEBT.md`).
+- **Procedimento:** [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md), seção “Cutover sem rebuild, artefato de release e retenção em modo relatório (07/10/2026)”.
+
 # Validação e Aplicação da Regra LIBERAR_INTERNET no CRM (Setembro/2026)
 
 - **Aviso de Canal de Recuperação:** O workflow manual **ERP Production Recovery** permanece como o canal auditável de recuperação.
