@@ -176,3 +176,46 @@ da prova descartável.
 - **Escala não provada:** faltam volume, contenção, WAL, timeout, pool, restore e crash de host.
 - **Auditoria de rejeição:** conflito abortado não pode persistir evento na mesma transação;
   qualquer trilha autônoma futura exige desenho próprio sem payload empresarial.
+
+# Pendências do deploy em duas fases e do repositório (07/10/2026)
+
+Registradas após o primeiro cutover sem rebaseline em `b3a662a` (run `37662560135`). Nenhuma foi
+corrigida neste registro.
+
+### TD-DEPLOY-RETENTION-DELETE — retenção real de releases
+
+**Aberto.** A retenção só emite relatório (`RELEASE_RETENTION=report`, itens `would_delete`); imagens
+de release e tars em `/var/log/gest-o/oci-backups/` crescem sem remoção. A remoção exige PR próprio,
+com proteção explícita de imagens em uso, do rollback atual e do `build.tsv` pendente: `docker rmi`
+sem `-f` só recusa a última tag de uma imagem em uso e não pode ser a proteção.
+
+### TD-DEPLOY-RELEASE-PIN-LOG — `RELEASE_PIN` duplicado no log do cutover
+
+**Aberto, baixo.** No cutover, `release_pin` roda ao validar a imagem alvo
+(`scripts/deploy-production.sh`) e de novo dentro de `release_save`
+(`scripts/lib/production-release-artifact.sh`), gerando duas linhas por papel (a segunda com
+`state=existing`). O comportamento é idempotente; o ruído atrapalha a leitura da evidência.
+
+### TD-NPM-AUDIT-CRITICAL — vulnerabilidade crítica em dependência
+
+**Aberto.** `npm audit` em 07/10/2026: 17 vulnerabilidades (1 crítica, 7 altas, 9 moderadas).
+- **Crítica:** `proxy-addr` 2.0.7, transitiva via `express` 4.22.2 em `apps/api`
+  ([GHSA-jqcg-44mw-7w3h](https://github.com/advisories/GHSA-jqcg-44mw-7w3h), IP spoofing via
+  IPv6 mapeado em IPv4 em trust subnet).
+- **Altas:** `vite` e `tailwindcss` (diretas na web) e as transitivas `braces`, `micromatch`,
+  `fast-glob`, `chokidar` e `source-map-js`.
+Critério: atualização em PR próprio, com `npm audit` sem críticas e CI verde.
+
+### TD-MAIN-FAILING-TESTS — 4 testes relatados como falhando na `main`
+
+**Aberto, a identificar.** Relatado pelo operador: 4 testes falhando na `main`. Não reproduzido no CI
+da `main` em `b3a662a`: Docker Compose CI `37654389601` e Production Deploy Safety `37654389855`
+estão verdes, com `# fail 0` em todas as suítes. Identificar quais testes e em que ambiente falham
+antes de corrigir.
+
+### TD-REPO-ROOT-STRAY-FILES — arquivos soltos na raiz
+
+**Aberto.** A raiz rastreia 37 arquivos vazios com nomes de fragmentos de código (restos de
+redirecionamento de shell, por exemplo `(`, `void`, `setForm(initialForm)`) e dois arquivos com
+conteúdo, `build-web-log.txt` e `row.status`, que contêm identificação de usuário/host de terminal.
+Remoção em PR separado; avaliar tornar o repositório privado.
