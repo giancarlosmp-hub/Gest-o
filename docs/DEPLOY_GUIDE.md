@@ -8,6 +8,17 @@ Após o deploy normal da aplicação:
 3. Confirmar que requisições diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas com erro HTTP 400.
 4. Confirmar que pedidos históricos gravados em `ErpOrderSync` continuam 100% legíveis e inalterados.
 
+## Regra do `script_stop` no `appleboy/ssh-action` (07/10/2026)
+
+Com `script_stop: true`, o `drone-ssh` (1.8.0, usado pelo `appleboy/ssh-action@v1.2.0`) injeta depois de **cada linha não vazia** do script inline (exceto as terminadas em `\`):
+`DRONE_SSH_PREV_COMMAND_EXIT_CODE=$? ; if [ $DRONE_SSH_PREV_COMMAND_EXIT_CODE -ne 0 ]; then exit $DRONE_SSH_PREV_COMMAND_EXIT_CODE; fi;`
+
+- Logo depois de um `else`/`elif` em linha própria, `$?` ainda é o status da condição falsa: o script sai com esse status (1 no caso comum) sem executar o ramo e sem imprimir nada. Isso vale também dentro de funções e de handlers de `trap`.
+- Um `case` multi-linha quebra a sintaxe.
+- São seguros: `if …; then …; fi` e `case … esac` numa linha só, e `if` multi-linha sem `else`.
+
+Foi a causa de o **VPS Drift Detection** falhar em todos os runs desde a criação: no caso limpo ele entrava no `else` e saía com 1. O workflow deixou de usar `script_stop` e depende do `set -Eeuo pipefail` no início do script inline, que continua sem depender de arquivos do checkout que ele verifica. `scripts/smoke/production-deploy-safety.mjs` reprova `else`/`elif` em linha própria e `case` multi-linha em qualquer step com `script_stop: true` (os 4 `else` conhecidos do `preview.yml` estão numa allowlist contada; ver `TECH_DEBT.md`) e executa a lógica do drift em repositórios git temporários.
+
 ## Cutover sem rebuild, artefato de release e retenção em modo relatório (07/10/2026)
 
 O cutover não reconstrói mais as imagens: ele sobe exatamente os image IDs que `phase=build` produziu, validou e registrou para o mesmo SHA.

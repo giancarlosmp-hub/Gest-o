@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 
 // Docker 29 CLI: `.Id` renders only from the raw JSON map (Go field `ID`) and
@@ -19,6 +21,97 @@ const inspectTemplateOffenders = [...listFiles("scripts/"), ...listFiles(".githu
   .filter(path => /\.(?:sh|bash|mjs|cjs|js|ts|ya?ml)$/.test(path))
   .flatMap(path => read(path).split("\n").flatMap((line, index) => mixesIdAndDescriptor(line) ? [`${path}:${index + 1}`] : []));
 assert.deepEqual(inspectTemplateOffenders, [], "template de inspect mistura .Id com .Descriptor (quebra no CLI do Docker 29)");
+
+// drone-ssh (behind appleboy/ssh-action) with `script_stop: true` appends an exit-code check after
+// every non-empty line of the inline script.  Right after `else`/`elif`, `$?` is still the false
+// condition's status, so the check exits 1 silently; a multi-line `case` breaks the syntax.
+// One-line `if ...; fi`/`case ... esac` and multi-line `if` without else stay safe (the check sees
+// 0 after `then` and after `fi`).
+const workflowSteps = (text, path) => {
+  const lines = text.split(/\r?\n/), steps = [];
+  let step = null;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*- (?:name|uses|run|id):/.test(lines[i])) { step = { path, line: i + 1, scriptStop: false, script: null }; steps.push(step); continue; }
+    if (!step) continue;
+    if (/^\s+script_stop:\s*true\s*$/.test(lines[i])) step.scriptStop = true;
+    const block = lines[i].match(/^(\s+)script:\s*\|\s*$/);
+    if (!block) continue;
+    const body = [];
+    let indent = null;
+    while (i + 1 < lines.length) {
+      const next = lines[i + 1], width = next.match(/^\s*/)[0].length;
+      if (next.trim() !== "" && (width <= block[1].length || (indent !== null && width < indent))) break;
+      if (next.trim() !== "" && indent === null) indent = width;
+      body.push(next.trim() === "" ? "" : next.slice(indent));
+      i++;
+    }
+    step.script = body.join("\n").trimEnd();
+  }
+  return steps;
+};
+const scriptStopHazards = script => script.split("\n").map(line => line.trim())
+  .filter(line => /^(?:else|elif)\b/.test(line) || (/^case\b/.test(line) && !/\besac\b/.test(line)));
+const scriptStopOffenders = steps => steps.filter(step => step.scriptStop && step.script !== null)
+  .flatMap(step => scriptStopHazards(step.script).map(line => `${step.path}: ${line}`));
+const reintroduced = "    steps:\n      - name: ssh\n        uses: appleboy/ssh-action@v1.2.0\n        with:\n          script_stop: true\n          script: |\n            set -Eeuo pipefail\n            if [[ -n \"$x\" ]]; then\n              exit 1\n            else\n              printf ok\n            fi\n            case \"$y\" in\n              a) : ;;\n            esac\n            case \"$y\" in a) : ;; esac\n            if true; then :; fi\n";
+assert.deepEqual(scriptStopOffenders(workflowSteps(reintroduced, "fixture.yml")), ["fixture.yml: else", 'fixture.yml: case "$y" in']);
+assert.deepEqual(scriptStopOffenders(workflowSteps(reintroduced.replace("          script_stop: true\n", ""), "fixture.yml")), []);
+// Known debt (TECH_DEBT.md, TD-WORKFLOW-SCRIPT-STOP-ELSE): failure-path `else` branches of preview.yml.
+// Counted, so any new occurrence there still fails.
+const scriptStopAllowlist = { ".github/workflows/preview.yml: else": 4 };
+const scriptStopFound = scriptStopOffenders(listFiles(".github/workflows/").filter(path => /\.ya?ml$/.test(path))
+  .flatMap(path => workflowSteps(read(path), path)));
+const scriptStopCounts = scriptStopFound.reduce((counts, found) => ({ ...counts, [found]: (counts[found] ?? 0) + 1 }), {});
+assert.deepEqual(scriptStopCounts, scriptStopAllowlist,
+  "script inline com script_stop: true não pode ter else/elif em linha própria nem case multi-linha (o drone-ssh injeta checagem de $? por linha)");
+
+// VPS Drift Detection runs inline (it must not depend on the checkout it verifies).  Run that exact
+// logic against throwaway git repositories: clean+synced, dirty worktree and HEAD != origin/main.
+const driftPath = ".github/workflows/vps-drift-detection.yml";
+const driftSteps = workflowSteps(read(driftPath), driftPath).filter(step => step.script !== null);
+assert.equal(driftSteps.length, 1);
+const [drift] = driftSteps;
+assert.equal(drift.scriptStop, false, "VPS Drift Detection não pode usar script_stop (o else do caso limpo sairia com 1)");
+assert.equal(drift.script.split("\n")[0], "set -Eeuo pipefail");
+const driftCd = "cd /apps/gest-o";
+assert.equal(drift.script.split("\n").filter(line => line === driftCd).length, 1);
+const driftTmp = mkdtempSync(join(tmpdir(), "vps-drift-"));
+try {
+  const git = (cwd, ...args) => {
+    const result = spawnSync("git", ["-c", "user.name=drift-test", "-c", "user.email=drift-test@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+    assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+  };
+  const commit = (repo, name) => { writeFileSync(join(repo, name), `${name}\n`); git(repo, "add", name); git(repo, "commit", "-q", "-m", name); };
+  git(driftTmp, "init", "-q", "--bare", "origin.git");
+  git(join(driftTmp, "origin.git"), "symbolic-ref", "HEAD", "refs/heads/main");
+  const vps = join(driftTmp, "vps"), other = join(driftTmp, "other");
+  git(driftTmp, "clone", "-q", "origin.git", "vps");
+  git(vps, "symbolic-ref", "HEAD", "refs/heads/main");
+  commit(vps, "README");
+  git(vps, "push", "-q", "origin", "main");
+  const runDrift = () => spawnSync("bash", ["-s"], { input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"'), env: { ...process.env, DRIFT_REPO: vps }, encoding: "utf8" });
+
+  const clean = runDrift();
+  assert.equal(clean.status, 0, `drift limpo: ${clean.stderr}`);
+  assert.match(clean.stdout, /^\[OK\] VPS working tree limpo e sincronizado com origin\/main \([0-9a-f]{40}\)\.$/m);
+
+  writeFileSync(join(vps, "stray.txt"), "x\n");
+  const dirty = runDrift();
+  assert.equal(dirty.status, 1);
+  assert.match(dirty.stderr, /Working tree em \/apps\/gest-o não está limpo/);
+  assert.doesNotMatch(dirty.stdout, /\[OK\]/);
+  rmSync(join(vps, "stray.txt"));
+
+  git(driftTmp, "clone", "-q", "origin.git", "other");
+  commit(other, "next");
+  git(other, "push", "-q", "origin", "main");
+  const behind = runDrift();
+  assert.equal(behind.status, 1);
+  assert.match(behind.stderr, /Divergência de SHA entre HEAD local e origin\/main/);
+  assert.doesNotMatch(behind.stderr, /não está limpo/);
+} finally {
+  rmSync(driftTmp, { recursive: true, force: true });
+}
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), schemaEvidence=read("scripts/schema-evidence-validation.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
 const envResolver=read("scripts/resolve-production-env.sh");

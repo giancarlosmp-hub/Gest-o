@@ -212,6 +212,22 @@ Critério: atualização em PR próprio, com `npm audit` sem críticas e CI verd
 da `main` em `b3a662a`: Docker Compose CI `37654389601` e Production Deploy Safety `37654389855`
 estão verdes, com `# fail 0` em todas as suítes. Identificar quais testes e em que ambiente falham
 antes de corrigir.
+Hipótese: falhas só no Windows por CRLF (core.autocrlf=true) em scripts .sh; avaliar .gitattributes com eol=lf no PR de limpeza.
+
+### TD-WORKFLOW-SCRIPT-STOP-ELSE — `else` sob `script_stop` no `preview.yml`
+
+**Aberto.** O step SSH do `preview.yml` usa `script_stop: true` e tem 4 `else` em linha própria. É o
+mesmo defeito do VPS Drift Detection (regra em `DEPLOY_GUIDE.md`): quando a condição é falsa, a
+checagem que o `drone-ssh` injeta logo depois do `else` encerra o script com o status não zero da
+condição (exit 1 no caso comum), sem executar o ramo. Alcançabilidade, só pela leitura do código:
+
+- `cleanup_current_run_on_failure` (trap EXIT, linha ~231, sem nginx anterior): **alcançável** no primeiro preview de uma PR que falha depois de gravar o site nginx; pula a remoção do site, o `nginx -t`/reload e o `rm -rf` do diretório do preview.
+- login do shadow proof (linha ~481, `curl` falhou): **alcançável** quando a API não responde (o `curl` sem `-f` só falha por conexão/timeout); pula o marcador de login e o `fail_shadow_proof login`, mas o trap `emergency_shadow_cleanup` ainda faz o rollback do piloto.
+- extração do token (linha ~491): **pouco provável**, só com login HTTP 200 sem `accessToken` (regressão de contrato da API); pula `fail_shadow_proof token_extraction`, e o trap ainda faz o rollback.
+- `wait` das requisições (linha ~512): **alcançável** quando um `curl` em background falha por conexão/timeout durante os ciclos; pula o registro do exit code e a classificação, e o trap ainda faz o rollback.
+
+Os 4 estão numa allowlist contada em `scripts/smoke/production-deploy-safety.mjs`; uma ocorrência
+nova falha. Correção em PR separado (tirar `script_stop` do step ou reescrever os ramos sem `else`).
 
 ### TD-REPO-ROOT-STRAY-FILES — arquivos soltos na raiz
 
