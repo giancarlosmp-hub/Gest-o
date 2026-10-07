@@ -106,8 +106,12 @@ for spec in api:4000 web:5173; do
   fi
 done
 
-api_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{else}}{{.Id}}{{end}}' "$API_IMAGE" 2>/dev/null || echo "$api_id")
-web_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{else}}{{.Id}}{{end}}' "$WEB_IMAGE" 2>/dev/null || echo "$web_id")
+# `.Descriptor.Digest` and `.Id` must not share a template (Docker 29 CLI renders
+# them in different modes); the image ID is the fallback when no descriptor exists.
+api_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{end}}' "$API_IMAGE" 2>/dev/null) || api_digest=''
+web_digest=$(docker image inspect --format '{{if .Descriptor}}{{.Descriptor.Digest}}{{end}}' "$WEB_IMAGE" 2>/dev/null) || web_digest=''
+[[ "$api_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || api_digest=$api_id
+[[ "$web_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || web_digest=$web_id
 
 timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 

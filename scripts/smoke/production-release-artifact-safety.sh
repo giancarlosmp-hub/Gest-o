@@ -13,6 +13,7 @@ ENGINE=(bash "$ROOT/scripts/smoke/lib/fake-oci-engine.sh")
 RELEASE_ARTIFACT_EXPECTED_OWNER="$(id -un):$(id -gn)"
 export RELEASE_ARTIFACT_EXPECTED_OWNER RELEASE_ARTIFACT_ROOT="$TMP/oci-backups" RELEASE_ARTIFACT_MIN_FREE_BYTES=0
 export REBASELINE_EVIDENCE_DIR="$TMP/rebaseline" DEPLOY_EVIDENCE_DIR="$TMP/deploy" RELEASE_RETENTION_REPORT_DIR="$TMP/release-retention"
+export BUILD_EVIDENCE_DIR="$TMP/deploy-builds"
 # shellcheck source=scripts/lib/production-rollback-image.sh
 source "$ROOT/scripts/lib/production-rollback-image.sh"
 # shellcheck source=scripts/lib/production-release-artifact.sh
@@ -197,6 +198,26 @@ grep -qx 'RELEASE_RETENTION=SKIPPED reason=rollback_set_unreadable' "$TMP/retent
 release_retention_report >"$TMP/retention-skip2.out"
 grep -qx 'RELEASE_RETENTION=SKIPPED reason=containers_unreadable' "$TMP/retention-skip2.out"
 "${ENGINE[@]}" clear ps-fail
+
+# I2. Images of the newest build evidence (built and pinned, waiting for the
+# cutover, no artifact yet) are kept; an older, superseded build is not.
+reset
+write_build(){ mkdir -p "$BUILD_EVIDENCE_DIR/$1"; printf 'format\t1\ncommit\t%s\napi_image_id\t%s\nweb_image_id\t%s\nrecorded_at\t%s\n' "$1" "$2" "$3" "$4" >"$BUILD_EVIDENCE_DIR/$1/build.tsv"; }
+OLD_BUILD=$("${ENGINE[@]}" image "gest-o-api:$(printf 'e%.0s' {1..40})" "$(printf 'e%.0s' {1..40})" 1.0.0 x api)
+NEW_BUILD_API=$("${ENGINE[@]}" image "gest-o-api:$NEW" "$NEW" 1.0.0 x api)
+NEW_BUILD_WEB=$("${ENGINE[@]}" image "gest-o-web:$NEW" "$NEW" 1.0.0 x web)
+for pin in "api $OLD_BUILD" "api $NEW_BUILD_API" "web $NEW_BUILD_WEB"; do release_pin ${pin% *} "${pin#* }" >/dev/null; done
+write_build "$(printf 'e%.0s' {1..40})" "$OLD_BUILD" "$OLD_BUILD" 2026-10-06T10:00:00Z
+write_build "$NEW" "$NEW_BUILD_API" "$NEW_BUILD_WEB" 2026-10-07T10:00:00Z
+release_retention_report >"$TMP/retention.out"
+report_line image_tag "gest-o-api-release:sha256-${NEW_BUILD_API#sha256:}" | grep -q 'decision=keep reason=build_evidence$' || fail 'imagem do build pendente marcada para remoção'
+report_line image_tag "gest-o-web-release:sha256-${NEW_BUILD_WEB#sha256:}" | grep -q 'decision=keep reason=build_evidence$' || fail 'imagem web do build pendente marcada para remoção'
+report_line image_tag "gest-o-api-release:sha256-${OLD_BUILD#sha256:}" | grep -q 'decision=would_delete reason=unreferenced$' || fail 'build superado deveria ser candidato'
+# Unreadable build evidence: the report is skipped, never guessed.
+printf 'recorded_at\tontem\n' >"$BUILD_EVIDENCE_DIR/$NEW/build.tsv"
+release_retention_report >"$TMP/retention-build-skip.out"
+grep -qx 'RELEASE_RETENTION=SKIPPED reason=build_evidence_unreadable' "$TMP/retention-build-skip.out"
+rm -rf "${BUILD_EVIDENCE_DIR:?}"
 
 # J. Static guarantees.
 lib="$ROOT/scripts/lib/production-release-artifact.sh"

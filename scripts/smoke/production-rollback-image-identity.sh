@@ -7,6 +7,11 @@ cat >"$TMP/docker" <<'EOF'
 #!/usr/bin/env bash
 [[ "$1 $2" == 'image inspect' ]] || exit 90
 ref=${!#}
+# Docker 29 CLI: `.Id` renders only from the raw JSON map and `.Descriptor.Digest`
+# only from the typed struct, so a template mixing both fails in both modes.
+if [[ "${4:-}" =~ \.Id([^A-Za-z0-9_]|$) && "${4:-}" == *.Descriptor.Digest* ]]; then
+  printf 'template parsing error: map has no entry for key "Digest"\n' >&2; exit 1
+fi
 if [[ "${4:-}" == '{{.Id}}' ]]; then
   case "$SCENARIO:$ref" in direct:sha256:a*) printf '%s\n' "$RUNTIME";; linked:gest-o-api:old) printf '%s\n' "$CONFIG";; *) exit 1;; esac
   exit
