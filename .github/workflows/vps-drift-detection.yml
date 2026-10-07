@@ -25,7 +25,8 @@ jobs:
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
-          script_stop: true
+          # Sem script_stop: o drone-ssh injetaria uma checagem de $? depois do `else`, que
+          # sairia com 1 no caso limpo. O `set -Eeuo pipefail` abaixo cobre a parada em erro.
           command_timeout: 10m
           debug: true
           script: |
