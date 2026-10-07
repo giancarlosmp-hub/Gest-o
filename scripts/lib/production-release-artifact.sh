@@ -342,6 +342,26 @@ release_current_rollback_ids() {
   awk -F'\t' '$1=="api"||$1=="web"{print $5; print $12; n++} END{if(n!=2) exit 1}' "$latest/previous-runtime.tsv"
 }
 
+# Image IDs of the newest phase=build evidence (by recorded_at): built, pinned and
+# waiting for the cutover.  Parsed here (not via production-build-evidence.sh)
+# to keep this library self-contained.
+release_pending_build_ids() {
+  local root=${BUILD_EVIDENCE_DIR:-/var/log/gest-o/deploy-builds} file recorded latest='' latest_at=''
+  for file in "$root"/*/build.tsv; do
+    [[ -e "$file" ]] || break
+    [[ -f "$file" && ! -L "$file" ]] || return 1
+    recorded=$(awk -F'\t' '$1=="recorded_at"{print $2; exit}' "$file") || return 1
+    [[ "$recorded" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || return 1
+    if [[ -z "$latest" || "$recorded" > "$latest_at" ]]; then latest=$file; latest_at=$recorded; fi
+  done
+  [[ -n "$latest" ]] || return 0
+  # IDs are validated in bash: mawk (Debian/Ubuntu default awk) has no {n} intervals.
+  local key value
+  while IFS=$'\t' read -r key value; do
+    if [[ ( "$key" == api_image_id || "$key" == web_image_id ) && "$value" =~ ^sha256:[0-9a-f]{64}$ ]]; then printf '%s\n' "$value"; fi
+  done <"$latest"
+}
+
 release_bytes() {
   local bytes
   bytes=$(du -sb -- "$1" 2>/dev/null | cut -f1)
@@ -358,7 +378,7 @@ release_report_emit() {
 # release_retention_report: lists what a future retention would keep and what
 # it would delete.  Report only: it never removes anything and always returns 0.
 release_retention_report() {
-  local mode=${RELEASE_RETENTION:-report} keep=${RELEASE_RETENTION_KEEP:-2} root cids cid img in_use rollback_ids
+  local mode=${RELEASE_RETENTION:-report} keep=${RELEASE_RETENTION_KEEP:-2} root cids cid img in_use rollback_ids pending_ids
   local meta rows dir f rank decision reasons role row_role id released tag tag_id keep_ids report_dir report avail_kb used
   root=$(release_artifact_root)
   [[ "$mode" == report ]] || printf 'RELEASE_RETENTION_WARN mode=%s unsupported_in_this_version using=report\n' "$mode"
@@ -371,6 +391,7 @@ release_retention_report() {
     in_use+="$img"$'\n'
   done
   if ! rollback_ids=$(release_current_rollback_ids); then printf 'RELEASE_RETENTION=SKIPPED reason=rollback_set_unreadable\n'; return 0; fi
+  if ! pending_ids=$(release_pending_build_ids); then printf 'RELEASE_RETENTION=SKIPPED reason=build_evidence_unreadable\n'; return 0; fi
   RELEASE_REPORT_ROWS=''
 
   rows=''
@@ -391,6 +412,7 @@ release_retention_report() {
       if (( rank <= keep )); then reasons+="recent_${rank},"; fi
       if grep -Fxq "$id" <<<"$in_use"; then reasons+="in_use,"; fi
       if grep -Fxq "$id" <<<"$rollback_ids"; then reasons+="current_rollback,"; fi
+      if grep -Fxq "$id" <<<"$pending_ids"; then reasons+="build_evidence,"; fi
       if [[ -n "$reasons" ]]; then decision=keep; keep_ids+="$id"$'\n'; else decision=would_delete; reasons=superseded,; fi
       release_report_emit release "${meta%.release.tsv}.tar.gz" "$id" "$(release_bytes "${meta%.release.tsv}.tar.gz")" "$decision" "${reasons%,}"
     done < <(awk -F'\t' -v r="$role" '$2==r' <<<"$rows" | sort -r)
@@ -422,11 +444,12 @@ release_retention_report() {
     if grep -Fxq "$tag_id" <<<"$in_use"; then reasons+="in_use,"; fi
     if grep -Fxq "$tag_id" <<<"$rollback_ids"; then reasons+="current_rollback,"; fi
     if grep -Fxq "$tag_id" <<<"$keep_ids"; then reasons+="kept_release,"; fi
+    if grep -Fxq "$tag_id" <<<"$pending_ids"; then reasons+="build_evidence,"; fi
     if [[ -n "$reasons" ]]; then decision=keep; else decision=would_delete; reasons=unreferenced,; fi
     release_report_emit image_tag "$tag" "$tag_id" - "$decision" "${reasons%,}"
   done < <(docker image ls --no-trunc --format '{{.Repository}}:{{.Tag}}{{"\t"}}{{.ID}}' 2>/dev/null | grep -E '^gest-o-(api|web)-(release|rollback|rebaseline):')
-  avail_kb=$(df -Pk -- "$root" 2>/dev/null | awk 'NR==2{print $4}')
-  used=$(df -Pk -- "$root" 2>/dev/null | awk 'NR==2{print $5}')
+  avail_kb=$(df -Pk -- "$root" 2>/dev/null | awk 'NR==2{print $4}') || avail_kb=''
+  used=$(df -Pk -- "$root" 2>/dev/null | awk 'NR==2{print $5}') || used=''
   if [[ "$avail_kb" =~ ^[0-9]+$ ]]; then avail_kb=$((avail_kb * 1024)); else avail_kb=unknown; fi
   printf 'RELEASE_RETENTION_REPORT kind=disk path=%s avail_bytes=%s used=%s\n' "$root" "$avail_kb" "${used:-unknown}"
 

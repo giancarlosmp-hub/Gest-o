@@ -37,6 +37,9 @@ grep -qx "RELEASE_ARTIFACT_BOOTSTRAP=PASS role=api id=$OLD_API commit=$OLD_SHA" 
 grep -qx "RELEASE_ARTIFACT_BOOTSTRAP=PASS role=web id=$OLD_WEB commit=$OLD_SHA" "$out"
 [[ -f "$RELEASE_ARTIFACT_ROOT/$OLD_SHA/api.${OLD_API#sha256:}.tar.gz" && -f "$RELEASE_ARTIFACT_ROOT/$OLD_SHA/web.${OLD_WEB#sha256:}.release.tsv" ]]
 grep -q '^RELEASE_RETENTION_MODE=report' "$out"; grep -q '^RELEASE_RETENTION=REPORTED' "$out"
+# The images this build produced (no artifact yet) are kept for the cutover.
+grep -q "^RELEASE_RETENTION_REPORT kind=image_tag path=gest-o-api-release:sha256-${NEW_API#sha256:} .* decision=keep reason=build_evidence$" "$out" || fail 'tag da imagem api recém-construída marcada para remoção'
+grep -q "^RELEASE_RETENTION_REPORT kind=image_tag path=gest-o-web-release:sha256-${NEW_WEB#sha256:} .* decision=keep reason=build_evidence$" "$out" || fail 'tag da imagem web recém-construída marcada para remoção'
 no_runtime_change
 [[ "$(container_image gest-o-production-api-1)" == "$OLD_API" ]]
 
