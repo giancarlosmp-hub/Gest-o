@@ -11,6 +11,7 @@ assert.match(deploy, /validate_tenancy_expand_roots_evidence "\$candidate" "\$ca
 assert.match(deploy, /schema_prisma_trees_equivalent "\$SCHEMA_EVIDENCE_COMMIT" "\$APP_COMMIT"/);
 assert.match(deploy, /if ENV_FILE="\$\(MODE="\$MODE" bash scripts\/resolve-production-env\.sh\)"/);
 assert.match(workflow, /production-deploy-entrypoint\.sh/);
+assert.match(workflow, /^\s+command_timeout: 60m\s*$/m, "build + save do artefato excedem o padrão de 10 min do ssh-action");
 assert.doesNotMatch(workflow, /test "\$\(git rev-parse HEAD\)"/);
 for (const marker of ["DEPLOY_GIT_FETCH", "DEPLOY_GIT_SWITCH", "DEPLOY_GIT_FAST_FORWARD", "DEPLOY_EXPECTED_SHA_FORMAT", "DEPLOY_CHECKOUT_SHA_MATCH", "DEPLOY_WORKTREE_CLEAN", "DEPLOY_SCRIPT_PRESENT", "DEPLOY_SCRIPT_STARTING"]) assert.ok(entrypoint.includes(marker));
 for (const text of [entrypoint, workflow]) {
