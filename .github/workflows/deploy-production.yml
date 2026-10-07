@@ -26,6 +26,7 @@ jobs:
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || '22022' }}
+          command_timeout: 60m
           envs: EXPECTED_SHA,DEPLOY_MODE
           script_stop: true
           debug: true
