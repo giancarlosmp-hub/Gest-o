@@ -157,9 +157,12 @@ if [[ "$MODE" == build ]]; then
   record_build_evidence
   log "Build, rótulos e build-info validados para $APP_COMMIT; nenhum container foi parado"
   # Pins and saves the runtime that is serving now, while nothing is stopped.
-  # Reported only: the cutover re-checks it before stopping anything.
-  if ! ensure_runtime_release_artifact build; then log "AVISO: artefato de release do runtime atual não garantido"; fi
-  if ! release_retention_report; then log "AVISO: relatório de retenção indisponível"; fi
+  # Both calls only report (RELEASE_ARTIFACT_BOOTSTRAP=..., RELEASE_RETENTION...)
+  # and return 0 in build mode; the cutover re-checks before stopping anything.
+  # They run as `if` conditions on purpose: there `set -e` does not apply inside
+  # the functions, so an internal command failure is reported, never fatal.
+  if ensure_runtime_release_artifact build; then :; fi
+  if release_retention_report; then :; fi
   log "Fase build/preflight concluída; cutover não executado"
   exit 0
 fi
@@ -418,7 +421,9 @@ for target_spec in "api:$API_IMAGE" "web:$WEB_IMAGE"; do
     release_failed=yes
   fi
 done
-if ! release_retention_report; then log "AVISO: relatório de retenção indisponível"; fi
+# Report only (always returns 0); run as a condition so `set -e` cannot make a
+# report problem fatal after a healthy cutover.
+if release_retention_report; then :; fi
 if [[ "$release_failed" == yes ]]; then
   log "Runtime $APP_COMMIT saudável, mas o artefato de release não foi concluído. NÃO execute rollback: o próximo phase=build recria o artefato."
   exit 3

@@ -19,6 +19,12 @@
 # Every function returns non-zero on the first failed step and is meant to be
 # called from `if`/`||` contexts, where `set -e` does not apply.  Retention only
 # reports in this version: nothing here deletes files, tags or images.
+#
+# This library is deliberately self-contained: the cutover freezes a copy of it
+# into the deploy evidence and production-rollback.sh sources only that copy.
+# release_label and release_file_safe therefore repeat logic that also exists in
+# production-build-evidence.sh (build_image_label, build_evidence_protected_file)
+# instead of depending on it.
 
 release_artifact_root() { printf '%s' "${RELEASE_ARTIFACT_ROOT:-/var/log/gest-o/oci-backups}"; }
 release_artifact_owner() { printf '%s' "${RELEASE_ARTIFACT_EXPECTED_OWNER:-root:root}"; }
