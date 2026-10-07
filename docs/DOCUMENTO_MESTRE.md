@@ -1,3 +1,11 @@
+# Deploy em duas fases com artefato de release e primeiro cutover sem rebaseline — 07/10/2026
+
+- **Estado:** produção em `b3a662a95771b8c76ff5d84ef3de80c114be664f` (PR #921), cutover pelo run `37662560135` com `method=runtime-identity` para api e web e `DEPLOY_RELEASE_ARTIFACT=PASS`. É o primeiro cutover concluído sem rebaseline.
+- **Build e cutover separados:** `phase=build` grava a evidência `build.tsv` com os image IDs validados e fixados em tags de release imutáveis; `phase=cutover` não reconstrói e sobe exatamente esses IDs.
+- **Artefatos de release:** cada cutover saudável salva `<role>.<hex>.tar.gz` mais `<role>.<hex>.release.tsv` em `/var/log/gest-o/oci-backups/<commit>/`, que o rollback pode recarregar após conferir o sha256.
+- **Causa raiz do Docker 29:** templates de `docker inspect` que misturam `.Id` (JSON bruto) com `.Descriptor.Digest` (struct tipada) falham; a resolução de identidade usa uma consulta por campo e o smoke test reprova templates mistos.
+- **Retenção:** somente relatório (`would_delete`); nenhuma imagem ou artefato é removido. Remoção real, pendências e riscos estão em [`TECH_DEBT.md`](TECH_DEBT.md); procedimento em [`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md).
+
 # Correção da Integração de Entradas no Workflow Production Rebaseline (Run 36629537190) — 29/09/2026
 
 - **Análise do Erro `bad substitution` na Run 36629537190:**
@@ -472,9 +480,9 @@ Esta seção é o procedimento autoritativo. **Merge em `main` não implanta pro
 
 1. Confirme que todos os checks da `main` estão verdes e registre o SHA completo.
 2. Execute **Prepare Production Recovery Backup**, com o SHA confirmado, e exija a prova protegida verde. Isso prepara backup; não é Recovery.
-3. Execute **Deploy Production** com `phase=build`. Esse modo roda preflight/build e constrói as imagens enquanto os containers atuais continuam atendendo; a mensagem “Fase build/preflight concluída; cutover não executado” significa exatamente que produção **não** foi implantada.
-4. Confira o SHA, o build-info e o resultado do build.
-5. Execute **Deploy Production** com `phase=cutover`, aprove o environment `production-cutover` e aguarde a conclusão. Esse modo faz a troca controlada somente depois de todos os gates.
+3. Execute **Deploy Production** com `phase=build`. Esse modo roda preflight/build e constrói as imagens enquanto os containers atuais continuam atendendo; a mensagem “Fase build/preflight concluída; cutover não executado” significa exatamente que produção **não** foi implantada. Desde 07/10/2026 o build também grava a evidência `build.tsv` com os image IDs validados.
+4. Confira o SHA, o build-info, o `build.tsv` e o resultado do build.
+5. Execute **Deploy Production** com `phase=cutover`, aprove o environment `production-cutover` e aguarde a conclusão. Esse modo faz a troca controlada somente depois de todos os gates, sem rebuild: sobe exatamente os image IDs do `build.tsv` do mesmo SHA.
 6. Valide API (`/health` e `/health/version`), WEB, conectividade read-only do banco e o SHA efetivamente servido.
 
 ## Gates e resposta correta
@@ -867,12 +875,12 @@ incidentes. Persistem confirmação pública por SHA, estabilidade prolongada, r
 | Campo | Estado comprovado |
 |---|---|
 | **Versão implantada** | **Não comprovada.** A versão declarada no repositório é `1.0.0`, mas ainda precisa ser conferida no runtime. |
-| **Commit implantado** | Cutover local associado a `a08a62670c4940322ce037d0c86c54959db32f71`; falta consolidar prova pública por `/health/version` e `build-info.json`, caso não preservada. |
-| **Último deploy** | 01/08/2026: schema aplicado, cutover local concluído e containers API/WEB iniciados. Horário UTC e operador não constam desta reconciliação. |
-| **Última PR publicada** | Revisão operacional conhecida da PR #763 (`a08a626`); publicação pública por SHA ainda requer evidência técnica preservada. |
-| **Última PR apenas mesclada** | PR #764 (`e2a41a7`) no histórico local; publicação não inferida. PR #765 segue em 🔵 PR. |
-| **Última PR aguardando deploy** | PR #765, exclusivamente documental; seu merge/deploy não é inferido. |
-| **Última validação operacional** | Usuário confirmou CRM, login, navegação, sync de clientes, ERP 5050 e Saúde da Plataforma; estabilidade prolongada, restore e prova pública completa por SHA permanecem pendentes. |
+| **Commit implantado** | `b3a662a95771b8c76ff5d84ef3de80c114be664f`, comprovado pelo operador em `/health/version` após o cutover de 07/10/2026. |
+| **Último deploy** | 07/10/2026: **Deploy Production** `phase=cutover`, run `37662560135`. Rollback resolvido por `method=runtime-identity` (api e web), `DEPLOY_RELEASE_ARTIFACT=PASS` (api e web); containers healthy com imagens api `sha256:c290794d…` e web `sha256:77b1d5d8…`. |
+| **Última PR publicada** | PR #921 (merge `b3a662a`). |
+| **Última PR apenas mesclada** | Nenhuma além da PR #921 no momento desta atualização. |
+| **Última PR aguardando deploy** | Nenhuma. |
+| **Última validação operacional** | 07/10/2026: operador conferiu containers healthy, image IDs e commit servido; estabilidade prolongada e restore permanecem pendentes. |
 
 Uma mesma PR pode aparecer como “apenas mesclada” e “aguardando deploy”: ela só sai desses campos
 quando a publicação for comprovada. Depois do deploy, mas antes dos testes, seu estágio é
