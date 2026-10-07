@@ -20,6 +20,22 @@ export API_IMAGE="${API_ROLLBACK_IMAGE:-rollback-placeholder-api}" WEB_IMAGE="${
 export APP_COMMIT="${ROLLBACK_APP_COMMIT:-${api_previous:-unknown}}" APP_VERSION="${ROLLBACK_APP_VERSION:-unknown}" APP_BUILT_AT="${ROLLBACK_APP_BUILT_AT:-unknown}"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 
+# Imagem de rollback que o Docker Engine perdeu volta do artefato de release
+# registrado no cutover (lib congelada na evidência): o sha256 do tar é conferido
+# antes do load e o ID exato depois; a validação abaixo continua decidindo.
+if [[ -s "$EVIDENCE_DIR/rollback-artifacts.tsv" && -f "$EVIDENCE_DIR/production-release-artifact.sh" ]]; then
+  # shellcheck source=scripts/lib/production-release-artifact.sh
+  source "$EVIDENCE_DIR/production-release-artifact.sh"
+  while IFS=$'\t' read -r artifact_role artifact_image artifact_tag artifact_tar artifact_sha; do
+    [[ "$artifact_role" != role ]] || continue
+    if ! docker image inspect "$artifact_image" >/dev/null 2>&1; then
+      log "imagem de rollback $artifact_image de $artifact_role ausente do Docker Engine; restaurando do artefato $artifact_tar"
+      release_restore_tar "$artifact_image" "$artifact_tag" "$artifact_tar" "$artifact_sha" ||
+        die "artefato de release de $artifact_role não restaurou $artifact_image: $RELEASE_ERROR"
+    fi
+  done <"$EVIDENCE_DIR/rollback-artifacts.tsv"
+fi
+
 # Valida integralmente a evidência antes de alterar o runtime novo.
 for role in api web; do
   line=$(awk -F'\t' -v r="$role" '$1==r{print; n++} END{if(n!=1)exit 1}' "$EVIDENCE_DIR/previous-runtime.tsv") || die "evidência incompleta para $role"
@@ -48,7 +64,7 @@ for role in api web; do
   if [[ "$mode" == container ]]; then
     docker start "$container_id" >/dev/null
   else
-    "${COMPOSE[@]}" up -d --no-build --no-deps --force-recreate "$role"
+    "${COMPOSE[@]}" up -d --no-build --no-deps --pull never --force-recreate "$role"
   fi
 done
 

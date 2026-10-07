@@ -156,4 +156,24 @@ grep -q 'sem imagem anterior verificável' "$TMP/artifact_tampered.err"
 if grep -q '^docker load' "$COMMAND_LOG"; then fail 'tar adulterado foi carregado'; fi
 no_runtime_change
 
+# M. Manual rollback after a successful cutover when the engine lost the previous image:
+# rollback.sh restores it from the recorded artifact using the frozen lib copy.
+run_rollback(){ EVIDENCE_DIR="$DEPLOY_EVIDENCE_DIR/$SHA" APP_DIR="$APP" PRODUCTION_ENV_FILE="$TMP/canonical.env" bash "$DEPLOY_EVIDENCE_DIR/$SHA/rollback.sh" >"$TMP/$1.out" 2>&1; }
+fresh_build
+expect_deploy_ok cutover cutover_for_rollback
+"${ENGINE[@]}" forget "$OLD_API"; : >"$COMMAND_LOG"
+run_rollback manual_rollback || { cat "$TMP/manual_rollback.out"; fail 'rollback manual falhou'; }
+grep -q "imagem de rollback $OLD_API de api ausente do Docker Engine; restaurando do artefato" "$TMP/manual_rollback.out"
+grep -q "^RELEASE_RESTORE id=$OLD_API .* state=loaded$" "$TMP/manual_rollback.out"
+grep -q '^docker compose .* up -d --no-build --no-deps --pull never --force-recreate api$' "$COMMAND_LOG"
+[[ "$(container_image gest-o-production-api-1)" == "$OLD_API" && "$(container_image gest-o-production-web-1)" == "$OLD_WEB" ]]
+# M2. Tampered artifact: rollback refuses before loading and before touching the runtime.
+fresh_build
+expect_deploy_ok cutover cutover_for_rollback2
+"${ENGINE[@]}" forget "$OLD_API"; printf 'x' >>"$RELEASE_ARTIFACT_ROOT/$OLD_SHA/api.${OLD_API#sha256:}.tar.gz"; : >"$COMMAND_LOG"
+if run_rollback tampered_rollback; then fail 'rollback aceitou artefato adulterado'; fi
+grep -q 'não restaurou .*: tar_digest_mismatch' "$TMP/tampered_rollback.out"
+if grep -Eq '^docker load|^docker compose .* (stop|rm|up) ' "$COMMAND_LOG"; then fail 'rollback alterou o runtime com artefato adulterado'; fi
+[[ "$(container_image gest-o-production-api-1)" == "$NEW_API" ]]
+
 printf 'production cutover no-rebuild safety passed\n'

@@ -127,6 +127,10 @@ assert.match(rollback,/docker start "\$container_id"/); assert.match(rollback,/A
 assert.ok(rollback.indexOf('stop api web') < rollback.indexOf('up -d --no-build'),"rollback deve parar novos antes de recriar antigos");
 assert.match(rollback,/rm -f api web/); assert.match(rollback,/--force-recreate "\$role"/); assert.match(rollback,/4000 5173/); assert.match(rollback,/\/health/);
 assert.match(rollback,/restaurado não usa o artefato verificado anterior/); assert.match(rollback,/PRODUCTION_DB_VOLUME_EXPECTED/);
+assert.match(rollback,/up -d --no-build --no-deps --pull never --force-recreate "\$role"/);
+assert.match(rollback,/source "\$EVIDENCE_DIR\/production-release-artifact\.sh"/);
+assert.ok(rollback.indexOf("release_restore_tar") < rollback.indexOf("stop api web"), "restauração do artefato precede qualquer alteração do runtime");
+assert.match(deploy,/install -m 600 scripts\/lib\/production-release-artifact\.sh "\$evidence\/production-release-artifact\.sh"/);
 assert.match(deploy,/gest-o-\$\{role\}-rollback:\$release/); assert.match(deploy,/previous-runtime\.tsv/); assert.match(deploy,/rollback-images\.env/);
 assert.match(deploy,/role\\trollback_mode\\tcontainer_name\\tcontainer_id\\truntime_identity\\trollback_reference\\tport\\tnetworks\\trestart_policy\\tprevious_commit\\tresolution_method\\tartifact_id/);
 assert.match(deploy,/rollback-containers\.tsv/);
