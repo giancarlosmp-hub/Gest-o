@@ -86,3 +86,49 @@ O mecanismo de segurança em `scripts/lib/production-rollback-image.sh` e `scrip
 - Valida o `.Image` do container rodando contra Config ID, Descriptor Digest e RepoDigests.
 - Exige `CONFIRM=PRODUCTION_CUTOVER` ou `CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED` após revisão de marcador.
 - Impede qualquer cutover se a imagem de rollback não possuir comprovação criptográfica local.
+
+---
+
+## Acompanhamento (07/10/2026): cutover sem rebuild e artefato de release
+
+### Estado do runtime antes do PR 2 (conferido na VPS, somente leitura)
+- Docker Engine 29.3.0, Docker Compose v5.1.0, image store do containerd (`driver-type io.containerd.snapshotter.v1`).
+- Containers em produção: api `sha256:fa57de45f01d8bf69985df4f78b4ab36b117752ad631d92ad83bc2d65cdea3dc`, web `sha256:9968b1d8b6d9c76fbbe3bacc01c3ff1d91df8ffd3764c8131ad8feb592983cd5`. As duas imagens são inspecionáveis e têm `org.opencontainers.image.revision=6e03c9ae2f78d08d05a8041b6b94b01f45eaa55b`.
+- Esses IDs são iguais aos registrados em `/var/log/gest-o/rebaseline/6e03c9ae…/result.tsv`, e os tars de `/var/log/gest-o/oci-backups/6e03c9ae…/` são válidos. A suspeita de que o rebuild do cutover nº 223 teria desalinhado o runtime do rebaseline não se confirmou.
+
+### Causa do `.Image` não inspecionável (`f4dcc…`)
+Reproduzida em 06/10/2026 no Docker Desktop 29.2.1 com containerd: quando a única tag de uma imagem em uso por um container é movida por um novo build, a imagem deixa de ser inspecionável, embora o container continue rodando. Uma imagem com uma segunda tag que não se move (tag de release) continua inspecionável. Também confirmado: no containerd, o `.Id` é o digest do index OCI; `docker save` → remoção → `docker load` preserva o ID; e `docker compose up` com `image: sha256:…` e `--pull never` funciona.
+
+### Proteção manual aplicada antes do merge do PR 2
+Tags de release criadas na VPS em **Wed Oct 7 12:21:10 AM UTC 2026** para fixar o runtime atual. Elas só acrescentam um nome à imagem: nenhum container foi parado ou recriado. O `release_pin` do PR 2 as aceita como `state=existing`. Saída registrada:
+
+```
+date -u
+API=sha256:fa57de45f01d8bf69985df4f78b4ab36b117752ad631d92ad83bc2d65cdea3dc
+WEB=sha256:9968b1d8b6d9c76fbbe3bacc01c3ff1d91df8ffd3764c8131ad8feb592983cd5
+for pair in "api $API" "web $WEB"; do
+  role=${pair%% *}; id=${pair#* }; T="gest-o-$role-release:sha256-${id#sha256:}"
+  cur=$(docker image inspect -f '{{.Id}}' "$T" 2>/dev/null || true)
+  if [ -z "$cur" ]; then
+    docker image inspect -f '{{.Id}}' "$id" >/dev/null && docker tag "$id" "$T" && echo "CRIADA $T"
+  elif [ "$cur" = "$id" ]; then
+    echo "JA EXISTE (mesmo ID) $T"
+  else
+    echo "PARE: $T aponta para $cur"
+  fi
+  docker image inspect -f '{{.Id}} {{json .RepoTags}}' "$T"
+done
+docker ps --format '{{.Names}}  {{.Status}}' | grep -i production
+Wed Oct  7 12:21:10 AM UTC 2026
+CRIADA gest-o-api-release:sha256-fa57de45f01d8bf69985df4f78b4ab36b117752ad631d92ad83bc2d65cdea3dc
+sha256:fa57de45f01d8bf69985df4f78b4ab36b117752ad631d92ad83bc2d65cdea3dc ["gest-o-api-rebaseline:6e03c9ae2f78d08d05a8041b6b94b01f45eaa55b","gest-o-api-release:sha256-fa57de45f01d8bf69985df4f78b4ab36b117752ad631d92ad83bc2d65cdea3dc","gest-o-api:6e03c9ae2f78d08d05a8041b6b94b01f45eaa55b"]
+CRIADA gest-o-web-release:sha256-9968b1d8b6d9c76fbbe3bacc01c3ff1d91df8ffd3764c8131ad8feb592983cd5
+sha256:9968b1d8b6d9c76fbbe3bacc01c3ff1d91df8ffd3764c8131ad8feb592983cd5 ["gest-o-web-rebaseline:6e03c9ae2f78d08d05a8041b6b94b01f45eaa55b","gest-o-web-release:sha256-9968b1d8b6d9c76fbbe3bacc01c3ff1d91df8ffd3764c8131ad8feb592983cd5","gest-o-web:6e03c9ae2f78d08d05a8041b6b94b01f45eaa55b"]
+gest-o-production-api-1  Up 3 hours (healthy)
+gest-o-production-web-1  Up 3 hours (healthy)
+```
+
+### O que o PR 2 muda (resumo; procedimento em `docs/DEPLOY_GUIDE.md`)
+- `phase=build` recusa reconstruir um SHA que está em produção, fixa as imagens novas em tags `gest-o-<role>-release:sha256-<hex>`, grava `deploy-builds/<sha>/build.tsv` e cria o artefato verificado (`docker save | gzip -1`) do runtime em execução.
+- `phase=cutover` não reconstrói: sobe os IDs da evidência com `--pull never`, prova `.Image` e `/health/version` (`commit`/`builtAt`) depois de subir, executa o rollback em qualquer rejeição dentro da janela stop/start e salva o artefato da release nova sem nunca reverter um runtime saudável (falha de artefato = exit 3).
+- O inventário de rollback ganha o caminho `release-artifact-load` antes do rebaseline. O predicado de `scripts/lib/production-rollback-image.sh` continua sendo a única prova aceita.

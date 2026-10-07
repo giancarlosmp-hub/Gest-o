@@ -56,8 +56,15 @@ git pull --ff-only origin main
 bash scripts/deploy-production.sh
 ```
 
-O entrypoint confere SHA e worktree; o script executa preflight e build. Apenas
-quando `phase=cutover`, depois da aprovação e dos gates, ele troca API/WEB:
+O entrypoint confere SHA e worktree. Em `phase=build`, o script executa
+preflight e build, valida as imagens, fixa as tags de release
+`gest-o-<role>-release:sha256-<hex>` e grava a evidência
+`/var/log/gest-o/deploy-builds/<sha>/build.tsv`. Apenas quando
+`phase=cutover`, depois da aprovação e dos gates, ele troca API/WEB, **sem
+rebuild**: sobe os image IDs registrados no build (`--pull never`). Sem
+evidência válida do mesmo SHA, o cutover falha antes de qualquer parada. O
+`command_timeout` do workflow é de 60 min. Detalhes em
+[`DEPLOY_GUIDE.md`](DEPLOY_GUIDE.md), seção "Cutover sem rebuild".
 
 ```bash
 cd /apps/gest-o
@@ -71,7 +78,8 @@ APP_DIR=/apps/gest-o bash scripts/production-deploy-entrypoint.sh
 - O script não roda `git reset --hard`.
 - A API executa o bootstrap de schema no startup (`prisma db push` + garantia da sequence de pedidos) antes de abrir o servidor; se essa etapa falhar, o container encerra e o healthcheck não libera a API.
 - O script falha se houver alterações locais rastreadas e não commitadas em `/apps/gest-o`, evitando sobrescrever arquivos versionados do servidor sem bloquear arquivos locais ignorados como `.env`.
-- O script reconstrói e sobe apenas `api` e `web`, sem derrubar volumes e sem mexer no Firebird.
+- `phase=build` constrói apenas `api` e `web` e recusa reconstruir um SHA que já está em produção; `phase=cutover` não constrói nada e sobe apenas `api` e `web`, sem derrubar volumes e sem mexer no Firebird.
+- Cada release ganha um artefato verificado (`docker save | gzip -1`) em `/var/log/gest-o/oci-backups/<commit>/`, usado pelo rollback se o Docker Engine perder a imagem. A retenção apenas gera relatório; nada é apagado automaticamente.
 - A integração ERP permanece dependente da API UltraFV3 e das variáveis já configuradas no ambiente da API.
 
 ## Como verificar uma produção presa em commit antigo

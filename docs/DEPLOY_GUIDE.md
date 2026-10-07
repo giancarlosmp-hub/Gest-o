@@ -8,7 +8,38 @@ Após o deploy normal da aplicação:
 3. Confirmar que requisições diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas com erro HTTP 400.
 4. Confirmar que pedidos históricos gravados em `ErpOrderSync` continuam 100% legíveis e inalterados.
 
+## Cutover sem rebuild, artefato de release e retenção em modo relatório (07/10/2026)
+
+O cutover não reconstrói mais as imagens: ele sobe exatamente os image IDs que `phase=build` produziu, validou e registrou para o mesmo SHA.
+
+**`phase=build`** (nunca para containers):
+1. Recusa o build (`DEPLOY_FAILURE_STAGE=build_sha_in_production`) quando produção já executa o SHA (`/health/version` ou rótulo `org.opencontainers.image.revision` dos donos das portas 4000/5173), ou quando `gest-o-{api,web}:<sha>` aponta para uma imagem em uso por algum container ou que já tem artefato de release. Refazer o build moveria a tag da imagem em execução; com o image store do containerd ela deixa de ser inspecionável (mesmo mecanismo do incidente de 29/09).
+2. Executa `docker compose build api web` com um único `APP_BUILT_AT`.
+3. Valida cada imagem: ID, rótulos `revision`/`created` e o `build-info.json` interno (`/app/apps/api/dist/build-info.json` e `/usr/share/nginx/html/build-info.json`), sem pull.
+4. Fixa as imagens em tags imutáveis `gest-o-<role>-release:sha256-<hex>`. Uma tag que já existe só é aceita se apontar para o mesmo ID (`RELEASE_PIN … state=existing`); com outro ID, o build aborta.
+5. Grava `/var/log/gest-o/deploy-builds/<sha>/build.tsv` (diretórios 700, arquivo 600, escrita atômica, sem symlink): `DEPLOY_BUILD_EVIDENCE=PASS`.
+6. Fixa e salva o runtime que está servindo (`RELEASE_ARTIFACT_BOOTSTRAP=PASS|EXISTS|FAIL|UNAVAILABLE`). Só reporta: nunca falha o build.
+7. Emite o relatório de retenção (`RELEASE_RETENTION_REPORT …`), sem apagar nada.
+
+**`phase=cutover`**:
+- Exige `build.tsv` válido do mesmo SHA; sem ele, falha com `DEPLOY_FAILURE_STAGE=build_evidence` ("rode phase=build para este SHA") antes de qualquer outra etapa. `API_IMAGE`/`WEB_IMAGE` passam a ser os IDs `sha256:…` da evidência, e `APP_BUILT_AT`/`APP_VERSION` vêm dela; não existe `compose build` no cutover.
+- Revalida as imagens alvo (ID, rótulos, build-info, tag de release) antes de qualquer parada.
+- Inventário de rollback, nesta ordem: identidade criptográfica (`resolve_rollback_image`) → artefato de release (`method=release-artifact-load`: sha256 do tar conferido antes do `docker load`, ID exato e predicado criptográfico depois) → rebaseline autorizado → bloqueio sem parar nada.
+- Sobe com `docker compose up -d --no-build --no-deps --pull never api web` e então exige `.Image` de cada serviço igual ao ID da evidência e `/health/version` com `commit` e `builtAt` da evidência. Qualquer rejeição dentro da janela stop/start executa o rollback. Antes, `die` encerrava com `exit`, que não dispara o trap `ERR`: um serviço que não ficava healthy deixava os containers antigos parados sem rollback.
+- Com o runtime novo saudável, salva o artefato de cada papel (`DEPLOY_RELEASE_ARTIFACT=PASS`). Se falhar: `DEPLOY_RELEASE_ARTIFACT=FAIL` e exit 3. **Não faça rollback nesse caso**: o runtime está correto, e o próximo `phase=build` recria o artefato.
+- A evidência do cutover inclui `rollback-artifacts.tsv` e uma cópia da lib de artefatos. O `rollback.sh` usa as duas para recarregar a imagem anterior se o engine a perder, sempre conferindo o sha256 antes do load.
+
+**Artefatos**: `/var/log/gest-o/oci-backups/<commit>/<role>.<hex>.tar.gz` mais `<role>.<hex>.release.tsv`, gravado por último. Verificação offline: `index.json` com um único descritor cujo digest é o ID (no containerd, o ID é o digest do index OCI) e cujo ref name é a tag de release; o blob de topo precisa ter esse sha256. Comportamento confirmado com Docker 29.2.1 / Compose 5.0.2 e containerd: save/load preserva o ID, o compose sobe por ID com `--pull never`, e uma imagem em uso sem tag fixa deixa de ser inspecionável quando sua tag se move. Com containerd as camadas já saem comprimidas: o `gzip -1` reduz cerca de 0,3%. A checagem de disco exige `.Size × 1,1 + RELEASE_ARTIFACT_MIN_FREE_BYTES` (padrão 2 GiB).
+
+**Retenção**: só relatório (`RELEASE_RETENTION=report`; qualquer outro valor vira aviso). Mantém por papel as 2 releases mais recentes, as que estão em uso e as do rollback atual (último cutover concluído); o restante aparece como `would_delete`. Diretórios de rebaseline e tars legados aparecem como `report_only`. O relatório também vai para `/var/log/gest-o/release-retention/<UTC>.tsv`. A remoção fica para outro PR. Atenção: `docker rmi` sem `-f` só recusa a **última** tag de uma imagem em uso, então não pode ser a proteção da remoção futura.
+
+**Primeiro deploy depois do merge**: rodar apenas `phase=build` e conferir o `build.tsv`, `RELEASE_ARTIFACT_BOOTSTRAP=PASS` (ou `EXISTS`) para o runtime `6e03c9ae…` (`sha256:fa57…`/`sha256:9968…`), os tars verificados e o relatório de retenção. Só então rodar `phase=cutover` no mesmo SHA.
+
+**Testes**: `npm run test:production-deploy` (Docker falso, roda no CI). Opcional, contra o Docker real com containerd: `npm run test:production-release:docker`. Ele sai com 77 (pulado) sem engine containerd ou sem a imagem base local (`PRODUCTION_RELEASE_DOCKER_BASE`, padrão `busybox:1.36`) e nunca faz pull.
+
 ## Validação de Imagens OCI Alvo e Container Anterior no Cutover (29/09/2026)
+
+> Desde 07/10/2026 as imagens alvo são identificadas pelos IDs da evidência de build; ver a seção acima.
 
 Durante a fase `cutover` em `scripts/deploy-production.sh`:
 1. **Validação Estrita de Imagem Alvo:**
