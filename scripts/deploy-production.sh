@@ -22,7 +22,10 @@ else
   exit "$resolver_exit"
 fi
 log(){ printf '[deploy-production] %s\n' "$*"; }
-die(){ log "ERRO: $*" >&2; exit 1; }
+# Inside the stop/start window (CUTOVER_WINDOW=yes) every rejection rolls back:
+# `exit` does not fire the ERR trap, so die has to do it itself.
+CUTOVER_WINDOW=no
+die(){ log "ERRO: $*" >&2; [[ "$CUTOVER_WINDOW" != yes ]] || rollback; exit 1; }
 cd "$APP_DIR"
 
 LEGACY_SOURCE_FILE=""
@@ -58,10 +61,32 @@ COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.production.yml)
 set -a; source "$ENV_FILE"; set +a
 export APP_COMMIT="${EXPECTED_SHA:-$(git rev-parse HEAD)}"
 [[ "$APP_COMMIT" == "$(git rev-parse HEAD)" ]] || die "EXPECTED_SHA difere do HEAD"
-export APP_BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-export APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version")}"
-export API_IMAGE="gest-o-api:$APP_COMMIT"
-export WEB_IMAGE="gest-o-web:$APP_COMMIT"
+# shellcheck source=scripts/lib/production-rollback-image.sh
+source scripts/lib/production-rollback-image.sh
+# shellcheck source=scripts/lib/production-build-evidence.sh
+source scripts/lib/production-build-evidence.sh
+# shellcheck source=scripts/lib/production-release-artifact.sh
+source scripts/lib/production-release-artifact.sh
+BUILD_EVIDENCE_ROOT="${BUILD_EVIDENCE_DIR:-/var/log/gest-o/deploy-builds}"
+if [[ "$MODE" == build ]]; then
+  APP_BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  APP_VERSION="${APP_VERSION:-$(node -p "require('./package.json').version")}"
+  API_IMAGE="gest-o-api:$APP_COMMIT"
+  WEB_IMAGE="gest-o-web:$APP_COMMIT"
+else
+  # The cutover never rebuilds: it starts exactly the images phase=build
+  # produced and verified for this SHA, identified by image ID.
+  if ! build_evidence_load "$BUILD_EVIDENCE_ROOT" "$APP_COMMIT"; then
+    printf 'DEPLOY_FAILURE_STAGE=build_evidence\nDEPLOY_FAILURE_COMMAND=load_build_evidence\nDEPLOY_FAILURE_EXIT_CODE=1\n' >&2
+    die "evidência de build ausente ou inválida para $APP_COMMIT ($BUILD_EVIDENCE_ERROR); rode phase=build para este SHA"
+  fi
+  APP_BUILT_AT=$BUILD_EVIDENCE_BUILT_AT
+  APP_VERSION=$BUILD_EVIDENCE_APP_VERSION
+  API_IMAGE=$BUILD_EVIDENCE_API_IMAGE_ID
+  WEB_IMAGE=$BUILD_EVIDENCE_WEB_IMAGE_ID
+  printf 'DEPLOY_BUILD_EVIDENCE=LOADED path=%s api_image_id=%s web_image_id=%s built_at=%s\n' "$BUILD_EVIDENCE_FILE" "$API_IMAGE" "$WEB_IMAGE" "$APP_BUILT_AT"
+fi
+export APP_BUILT_AT APP_VERSION API_IMAGE WEB_IMAGE
 
 if [[ -n "$LEGACY_SOURCE_FILE" ]]; then
   ERP_ENV_SCHEDULER_POLICY=disabled_build_only PRODUCTION_ENV_FILE="$ENV_FILE" bash scripts/erp-production-env-preflight.sh
@@ -76,25 +101,82 @@ PRODUCTION_PREFLIGHT_MODE="$MODE" bash "$APP_DIR/scripts/production-preflight.sh
 actual_services="$("${COMPOSE[@]}" config --services | sort)"
 expected_services="$(printf 'api\nweb\n' | sort)"
 [[ "$actual_services" == "$expected_services" ]] || die "topologia contém serviços inesperados"
-log "Build começa enquanto os containers atuais permanecem atendendo"
-"${COMPOSE[@]}" build api web
-docker run --rm --network none "gest-o-api:$APP_COMMIT" node -e "const b=require('./apps/api/dist/build-info.json');if(b.commit!=='$APP_COMMIT'||!b.builtAt)process.exit(1)"
-log "Build e build-info validados para $APP_COMMIT; nenhum container foi parado"
-[[ "$MODE" == cutover ]] || { log "Fase build/preflight concluída; cutover não executado"; exit 0; }
+
+# Rebuilding a SHA that production already runs would move gest-o-<role>:<sha>
+# away from the running image; with the containerd image store that image
+# then stops being inspectable (Sept/2026 incident), so it is refused.
+refuse_build_if_in_production(){
+  local spec role port owners identity revision running_commit cids cid img in_use='' tag_id reason=''
+  running_commit=$(curl -fsS --max-time 3 http://127.0.0.1:4000/health/version 2>/dev/null | node -pe 'JSON.parse(require("fs").readFileSync(0)).commit' 2>/dev/null) || running_commit=''
+  [[ "$running_commit" != "$APP_COMMIT" ]] || reason="/health/version já serve $APP_COMMIT"
+  cids=$(docker ps -aq) || die "não foi possível listar containers para validar o build"
+  for cid in $cids; do
+    # A container removed between `ps` and `inspect` (e.g. a preview) uses nothing.
+    if img=$(docker inspect -f '{{.Image}}' "$cid" 2>/dev/null); then in_use+="$img"$'\n'; fi
+  done
+  for spec in api:4000 web:5173; do
+    role=${spec%%:*}; port=${spec##*:}
+    owners=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1}')
+    revision=''
+    if [[ "$(printf '%s\n' "$owners" | sed '/^$/d' | wc -l)" -eq 1 ]] && identity=$(docker inspect -f '{{.Image}}' "$owners" 2>/dev/null); then
+      revision=$(build_image_label "$identity" org.opencontainers.image.revision 2>/dev/null) || revision=''
+    fi
+    [[ "$revision" != "$APP_COMMIT" ]] || reason="container $owners ($role) já executa $APP_COMMIT"
+  done
+  for role in api web; do
+    tag_id=$(docker image inspect -f '{{.Id}}' "gest-o-$role:$APP_COMMIT" 2>/dev/null) || tag_id=''
+    if [[ -n "$tag_id" ]] && grep -Fxq "$tag_id" <<<"$in_use"; then reason="gest-o-$role:$APP_COMMIT aponta para $tag_id, em uso por um container"; fi
+    if [[ -n "$tag_id" ]] && release_find_for_identity "$role" "$tag_id"; then reason="gest-o-$role:$APP_COMMIT aponta para $tag_id, que já possui artefato de release"; fi
+  done
+  if [[ -n "$reason" ]]; then
+    printf 'DEPLOY_FAILURE_STAGE=build_sha_in_production\nDEPLOY_FAILURE_COMMAND=refuse_build_if_in_production\nDEPLOY_FAILURE_EXIT_CODE=1\n' >&2
+    die "build recusado: $reason; refazer o build moveria a tag de uma imagem de produção"
+  fi
+  printf 'DEPLOY_BUILD_REFUSAL_CHECK=PASS\n'
+}
+
+# Records which images this build produced, after checking identity, labels and
+# build-info, and pins them under immutable release tags until the cutover.
+record_build_evidence(){
+  local role id ids=()
+  for role in api web; do
+    id=$(docker image inspect -f '{{.Id}}' "gest-o-$role:$APP_COMMIT") || die "imagem gest-o-$role:$APP_COMMIT ausente após o build"
+    build_image_validate "$role" "$id" "$APP_COMMIT" "$APP_BUILT_AT" || die "imagem $role recém-construída inválida: $BUILD_EVIDENCE_ERROR"
+    release_pin "$role" "$id" || die "não foi possível fixar a tag de release de $role: $RELEASE_ERROR"
+    ids+=("$id")
+  done
+  build_evidence_write "$BUILD_EVIDENCE_ROOT" "$APP_COMMIT" "$APP_BUILT_AT" "$APP_VERSION" "${ids[0]}" "${ids[1]}" "$APP_COMMIT" "$APP_COMMIT" ||
+    die "evidência de build não gravada: $BUILD_EVIDENCE_ERROR"
+  printf 'DEPLOY_BUILD_EVIDENCE=PASS path=%s api_image_id=%s web_image_id=%s built_at=%s\n' "$BUILD_EVIDENCE_FILE" "${ids[0]}" "${ids[1]}" "$APP_BUILT_AT"
+}
+
+if [[ "$MODE" == build ]]; then
+  refuse_build_if_in_production
+  log "Build começa enquanto os containers atuais permanecem atendendo"
+  "${COMPOSE[@]}" build api web
+  record_build_evidence
+  log "Build, rótulos e build-info validados para $APP_COMMIT; nenhum container foi parado"
+  # Pins and saves the runtime that is serving now, while nothing is stopped.
+  # Reported only: the cutover re-checks it before stopping anything.
+  if ! ensure_runtime_release_artifact build; then log "AVISO: artefato de release do runtime atual não garantido"; fi
+  if ! release_retention_report; then log "AVISO: relatório de retenção indisponível"; fi
+  log "Fase build/preflight concluída; cutover não executado"
+  exit 0
+fi
 [[ "${CONFIRM:-}" == PRODUCTION_CUTOVER || "${CONFIRM:-}" == PRODUCTION_CUTOVER_REAUTHORIZED ]] || die "cutover exige CONFIRM=PRODUCTION_CUTOVER ou CONFIRM=PRODUCTION_CUTOVER_REAUTHORIZED"
 
 log "Validando imagens OCI alvo para cutover: $API_IMAGE e $WEB_IMAGE"
-for target_img in "$API_IMAGE" "$WEB_IMAGE"; do
-  docker image inspect "$target_img" >/dev/null 2>&1 || die "imagem OCI alvo $target_img ausente"
-  target_rev=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_img" 2>/dev/null) || die "não foi possível ler rótulo de revisão de $target_img"
-  [[ "$target_rev" == "$APP_COMMIT" ]] || die "imagem OCI alvo $target_img possui rótulo org.opencontainers.image.revision ($target_rev) divergente de $APP_COMMIT"
+for target_spec in "api:$API_IMAGE" "web:$WEB_IMAGE"; do
+  target_role=${target_spec%%:*}; target_img=${target_spec#*:}
+  docker image inspect "$target_img" >/dev/null 2>&1 || die "imagem OCI alvo $target_img ausente; rode phase=build para este SHA"
+  build_image_validate "$target_role" "$target_img" "$APP_COMMIT" "$APP_BUILT_AT" ||
+    die "imagem OCI alvo $target_img ($target_role) diverge da evidência de build: $BUILD_EVIDENCE_ERROR"
+  release_pin "$target_role" "$target_img" || die "tag de release da imagem alvo de $target_role inválida: $RELEASE_ERROR"
 done
 
 schema_evidence_root="${SCHEMA_EVIDENCE_DIR:-/var/log/gest-o/schema}"
 # shellcheck source=scripts/schema-evidence-validation.sh
 source scripts/schema-evidence-validation.sh
-# shellcheck source=scripts/lib/production-rollback-image.sh
-source scripts/lib/production-rollback-image.sh
 # shellcheck source=scripts/lib/production-rebaseline-proof.sh
 source scripts/lib/production-rebaseline-proof.sh
 rollback_artifact_label(){
@@ -145,7 +227,7 @@ fi
 schema_validation_tmp=$(mktemp -d)
 trap 'rm -rf "$schema_validation_tmp"' EXIT
 docker run --rm --pull=never --network gest-o_default -e DATABASE_URL \
-  "gest-o-api:$APP_COMMIT" ./node_modules/.bin/prisma migrate diff \
+  "$API_IMAGE" ./node_modules/.bin/prisma migrate diff \
   --from-schema-datasource apps/api/prisma/schema.prisma \
   --to-schema-datamodel apps/api/prisma/schema.prisma --script >"$schema_validation_tmp/raw.sql"
 node scripts/schema-diff-filter.mjs "$schema_validation_tmp/raw.sql" "$schema_validation_tmp/managed.sql" post
@@ -190,12 +272,21 @@ if [[ -e "$evidence" ]]; then
     log "evidência parcial anterior preservada em $aborted"
   fi
 fi
+# Pins the runtime about to be stopped and makes sure it has a verified release
+# artifact (idempotent: normally phase=build already created it).  It does not
+# decide by itself: the rollback inventory below still requires a verifiable
+# image (identity, release artifact or authorized rebaseline) before any stop.
+if ! ensure_runtime_release_artifact cutover; then
+  log "AVISO: runtime atual sem artefato de release e sem imagem inspecionável; o inventário de rollback decide"
+fi
 install -d -m 700 "$evidence"
 install -m 700 scripts/production-rollback.sh "$evidence/rollback.sh"
+install -m 600 scripts/lib/production-release-artifact.sh "$evidence/production-release-artifact.sh"
 printf 'role\trollback_mode\tcontainer_name\tcontainer_id\truntime_identity\trollback_reference\tport\tnetworks\trestart_policy\tprevious_commit\tresolution_method\tartifact_id\n' >"$evidence/previous-runtime.tsv"
 printf 'role\tcontainer_name\tcontainer_id\n' >"$evidence/rollback-containers.tsv"
+printf 'role\timage_id\trelease_tag\ttar\ttar_sha256\n' >"$evidence/rollback-artifacts.tsv"
 : >"$evidence/rollback-images.env"
-chmod 600 "$evidence/previous-runtime.tsv" "$evidence/rollback-containers.tsv" "$evidence/rollback-images.env"
+chmod 600 "$evidence/previous-runtime.tsv" "$evidence/rollback-containers.tsv" "$evidence/rollback-artifacts.tsv" "$evidence/rollback-images.env"
 for spec in api:4000 web:5173; do
   role=${spec%%:*}; port=${spec##*:}
   owners=$(docker ps --format '{{.Names}}|{{.Ports}}' | awk -F'|' -v p=":$port->" '$2~p{print $1}')
@@ -212,8 +303,19 @@ for spec in api:4000 web:5173; do
   [[ ",$networks" == *,gest-o_default,* ]] || die "container anterior de $role fora da rede esperada"
   restart_policy=$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$container_id")
   case "$restart_policy" in no|on-failure|always|unless-stopped) ;; *) die "restart policy desconhecida para $role";; esac
-  rollback_mode=image; tag="-"
+  rollback_mode=image; tag="-"; rollback_resolved=no
   if resolve_rollback_image "$role" "$image_id" "$config_image"; then
+    rollback_resolved=yes
+  elif release_restore "$role" "$image_id"; then
+    # The engine lost the running image but a verified release artifact holds
+    # it: the tar digest was checked before loading, and the same cryptographic
+    # predicate must accept the loaded image.  The artifact is never the proof.
+    resolve_rollback_image "$role" "$image_id" "$config_image" ||
+      die "artefato de release de $role carregado, mas a identidade $image_id não foi comprovada: $ROLLBACK_BLOCK_REASON"
+    ROLLBACK_RESOLUTION_METHOD="release-artifact-load"
+    rollback_resolved=yes
+  fi
+  if [[ "$rollback_resolved" == yes ]]; then
     # Commit, version and build time describe the image that rollback actually
     # starts, so they are read from the resolved artifact, never the runtime.
     previous_commit=$(rollback_artifact_label org.opencontainers.image.revision)
@@ -255,6 +357,10 @@ for spec in api:4000 web:5173; do
     die "$role sem imagem anterior verificável: $ROLLBACK_BLOCK_REASON; fallback por container proibido"
   fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$role" "$rollback_mode" "$name" "$container_id" "$image_id" "$ROLLBACK_ARTIFACT_ID" "$port" "$networks" "$restart_policy" "$previous_commit" "$ROLLBACK_RESOLUTION_METHOD" "$ROLLBACK_ARTIFACT_ID" >>"$evidence/previous-runtime.tsv"
+  # Lets rollback.sh reload the image if the engine loses it after this point.
+  if release_find_for_identity "$role" "$ROLLBACK_ARTIFACT_ID"; then
+    printf '%s\t%s\t%s\t%s\t%s\n' "$role" "$RELEASE_FOUND_IMAGE_ID" "$RELEASE_FOUND_TAG" "$RELEASE_FOUND_TAR" "$RELEASE_FOUND_TAR_SHA256" >>"$evidence/rollback-artifacts.tsv"
+  fi
   if [[ "$role" == api && "$rollback_mode" == image ]]; then
     previous_version=$(rollback_artifact_label org.opencontainers.image.version)
     previous_built_at=$(rollback_artifact_label org.opencontainers.image.created)
@@ -276,17 +382,44 @@ for role in api web; do
 done
 [[ "$(docker inspect -f '{{.State.Running}}' "$PRODUCTION_DB_CONTAINER_EXPECTED")" == true ]] || die "PostgreSQL deixou de executar antes do cutover"
 docker inspect -f '{{range .Mounts}}{{println .Name .Destination}}{{end}}' "$PRODUCTION_DB_CONTAINER_EXPECTED" | awk -v v="$PRODUCTION_DB_VOLUME_EXPECTED" '$1==v && $2=="/var/lib/postgresql/data"{ok=1} END{exit !ok}' || die "volume PostgreSQL divergente antes do cutover"
-rollback(){ trap - ERR; log "Falha: executando rollback persistido de API/WEB"; EVIDENCE_DIR="$evidence" APP_DIR="$APP_DIR" PRODUCTION_ENV_FILE="$ENV_FILE" bash "$evidence/rollback.sh"; }
+rollback(){ trap - ERR; CUTOVER_WINDOW=no; log "Falha: executando rollback persistido de API/WEB"; EVIDENCE_DIR="$evidence" APP_DIR="$APP_DIR" PRODUCTION_ENV_FILE="$ENV_FILE" bash "$evidence/rollback.sh"; }
 trap rollback ERR
+CUTOVER_WINDOW=yes
 : >"$evidence/cutover-started"; chmod 600 "$evidence/cutover-started"
 while IFS=$'\t' read -r role mode name container_id _; do [[ "$role" == role ]] || docker stop "$container_id"; done <"$evidence/previous-runtime.tsv"
-"${COMPOSE[@]}" up -d --no-build --no-deps api web
+"${COMPOSE[@]}" up -d --no-build --no-deps --pull never api web
 for service in api web; do
   id=$("${COMPOSE[@]}" ps -q "$service"); for _ in {1..36}; do [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")" == healthy ]] && break; sleep 5; done
   [[ "$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$id")" == healthy ]] || die "$service não ficou healthy"
 done
-actual=$(curl -fsS http://127.0.0.1:4000/health/version | node -pe 'JSON.parse(require("fs").readFileSync(0)).commit')
+for target_spec in "api:$API_IMAGE" "web:$WEB_IMAGE"; do
+  service=${target_spec%%:*}; id=$("${COMPOSE[@]}" ps -q "$service")
+  [[ "$(docker inspect -f '{{.Image}}' "$id")" == "${target_spec#*:}" ]] || die "$service não executa a imagem da evidência de build (${target_spec#*:})"
+done
+version_json=$(curl -fsS http://127.0.0.1:4000/health/version)
+actual=$(node -pe 'JSON.parse(require("fs").readFileSync(0)).commit' <<<"$version_json")
 [[ "$actual" == "$APP_COMMIT" ]] || die "commit local divergente"
+actual_built_at=$(node -pe 'JSON.parse(require("fs").readFileSync(0)).builtAt' <<<"$version_json")
+[[ "$actual_built_at" == "$APP_BUILT_AT" ]] || die "builtAt local ($actual_built_at) divergente da evidência de build ($APP_BUILT_AT)"
 curl -fsS http://127.0.0.1:5173/ >"$evidence/index.local.html"
 log "Cutover concluído localmente; validações públicas/read-only manuais continuam obrigatórias"
 trap - ERR
+CUTOVER_WINDOW=no
+
+# The new runtime is healthy from here on: a release artifact problem is
+# reported (exit 3) but never rolls it back.
+release_failed=no
+for target_spec in "api:$API_IMAGE" "web:$WEB_IMAGE"; do
+  role=${target_spec%%:*}; id=${target_spec#*:}
+  if release_find_for_identity "$role" "$id" || release_save "$role" "$id" "$APP_COMMIT" "$APP_BUILT_AT" "$id"; then
+    printf 'DEPLOY_RELEASE_ARTIFACT=PASS role=%s id=%s\n' "$role" "$id"
+  else
+    printf 'DEPLOY_RELEASE_ARTIFACT=FAIL role=%s id=%s reason=%s\n' "$role" "$id" "$RELEASE_ERROR" >&2
+    release_failed=yes
+  fi
+done
+if ! release_retention_report; then log "AVISO: relatório de retenção indisponível"; fi
+if [[ "$release_failed" == yes ]]; then
+  log "Runtime $APP_COMMIT saudável, mas o artefato de release não foi concluído. NÃO execute rollback: o próximo phase=build recria o artefato."
+  exit 3
+fi

@@ -93,6 +93,27 @@ for (const [input, expected] of [["abc/def ghi", "abcdef-ghi"], ["sha256:abc", "
   const result = sanitizeRelease(input); assert.equal(result.status, 0); assert.equal(result.stdout, `${expected}\n`);
 }
 assert.match(deploy,/"\$\{COMPOSE\[@\]\}" build api web/); assert.doesNotMatch(deploy,/"\$\{COMPOSE\[@\]\}" build (?:db|worker)/);
+// Cutover sem rebuild: o único build vive no ramo phase=build, que termina em exit 0
+// antes da confirmação do cutover; o cutover sobe os IDs da evidência com --pull never.
+const buildBranch = deploy.slice(deploy.indexOf('if [[ "$MODE" == build ]]; then\n  refuse_build_if_in_production'), deploy.indexOf('[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ||'));
+assert.ok(buildBranch.includes('"${COMPOSE[@]}" build api web') && /\n  exit 0\nfi\n$/.test(buildBranch), "build deve existir só no ramo phase=build");
+assert.equal(deploy.split('"${COMPOSE[@]}" build').length, 2, "deploy deve ter exatamente um compose build");
+const cutoverPath = deploy.slice(deploy.indexOf('[[ "${CONFIRM:-}" == PRODUCTION_CUTOVER ||'));
+assert.doesNotMatch(cutoverPath, /\bbuild api web\b|docker build/);
+assert.ok(deploy.indexOf("refuse_build_if_in_production\n") < deploy.indexOf('"${COMPOSE[@]}" build api web'));
+assert.match(deploy, /build_evidence_load "\$BUILD_EVIDENCE_ROOT" "\$APP_COMMIT"/);
+assert.match(deploy, /API_IMAGE=\$BUILD_EVIDENCE_API_IMAGE_ID/); assert.match(deploy, /APP_BUILT_AT=\$BUILD_EVIDENCE_BUILT_AT/);
+assert.match(cutoverPath, /"\$\{COMPOSE\[@\]\}" up -d --no-build --no-deps --pull never api web/);
+assert.match(cutoverPath, /não executa a imagem da evidência de build/);
+assert.match(cutoverPath, /builtAt local .* divergente da evidência de build/);
+// `exit` não dispara o trap ERR: dentro da janela stop/start, die precisa executar o rollback.
+assert.match(deploy, /die\(\)\{ log "ERRO: \$\*" >&2; \[\[ "\$CUTOVER_WINDOW" != yes \]\] \|\| rollback; exit 1; \}/);
+assert.equal(deploy.split("die(){").length, 2, "die deve ter uma única definição");
+assert.ok(deploy.indexOf("trap rollback ERR\nCUTOVER_WINDOW=yes\n") > 0 && deploy.indexOf("trap rollback ERR\nCUTOVER_WINDOW=yes\n") < deploy.indexOf('docker stop "$container_id"'));
+assert.ok(deploy.indexOf("trap - ERR\nCUTOVER_WINDOW=no\n") > deploy.indexOf("Cutover concluído localmente"));
+assert.ok(deploy.lastIndexOf("trap - ERR") < deploy.indexOf("DEPLOY_RELEASE_ARTIFACT=PASS"), "artefato pós-cutover nunca pode disparar rollback");
+assert.match(deploy, /exit 3\n/);
+assert.ok(deploy.indexOf("release_restore \"$role\" \"$image_id\"") < deploy.indexOf("validate_rebaseline_evidence \"$APP_COMMIT\""), "artefato de release vem antes do rebaseline");
 assert.match(compose,/APP_COMMIT/); assert.match(compose,/APP_BUILT_AT/); assert.doesNotMatch(api,/environment: env\.nodeEnv/);
 assert.match(compose,/image:\s*"\$\{API_IMAGE:\?/); assert.match(compose,/image:\s*"\$\{WEB_IMAGE:\?/);
 assert.match(unit,/docker-compose\.production\.yml/); assert.doesNotMatch(workflow,/docker-compose\.yml/);

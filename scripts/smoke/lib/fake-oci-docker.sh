@@ -127,6 +127,7 @@ ps_cmd(){
   fault ps-fail && die "simulated ps failure"
   if [[ "$*" == *-aq* ]]; then cut -f2 "$S/containers"; return; fi
   if [[ "$*" == *'{{.ID}}'* ]]; then awk -F'\t' '$5=="true" && $6!="-"{print substr($2,1,12)"|"$6}' "$S/containers"
+  elif [[ "$*" == *'{{.Image}}'* ]]; then awk -F'\t' '$5=="true" && $6!="-"{print $1"|"$4"|"$6}' "$S/containers"
   else awk -F'\t' '$5=="true" && $6!="-"{print $1"|"$6}' "$S/containers"; fi
 }
 
@@ -140,7 +141,7 @@ container_inspect(){
     '{{.Image}}') printf '%s\n' "$image" ;;
     '{{.Config.Image}}') printf '%s\n' "$config" ;;
     '{{.State.Running}}') printf '%s\n' "$running" ;;
-    *State.Health*) if [[ "$running" == true ]]; then printf 'healthy\n'; else printf 'unhealthy\n'; fi ;;
+    *State.Health*) if [[ "$running" == true && ! -e "$S/unhealthy-$cid" ]]; then printf 'healthy\n'; else printf 'unhealthy\n'; fi ;;
     '{{.Id}}|{{.State.Running}}') printf '%s|%s\n' "$cid" "$running" ;;
     *Mounts*) printf 'production-pgdata /var/lib/postgresql/data\n' ;;
     '{{json .NetworkSettings.Networks}}') printf '{"gest-o_default":{}}\n' ;;
@@ -172,12 +173,12 @@ compose(){
         port=$([[ $svc == api ]] && printf '127.0.0.1:4000->4000/tcp' || printf '127.0.0.1:5173->80/tcp')
         awk -F'\t' -v n="gest-o-production-$svc-1" '$1!=n' "$S/containers" >"$S/containers.tmp"; mv "$S/containers.tmp" "$S/containers"
         cid=$(printf '%s-%s-%s' "$svc" "$id" "$RANDOM" | sha256sum | cut -d' ' -f1)
-        if fault "up-unhealthy-$svc"; then
-          printf 'gest-o-production-%s-1\t%s\t%s\t%s\tfalse\t%s\t%s\t%s\n' "$svc" "$cid" "$id" "$ref" "$port" "${APP_COMMIT:-}" "${APP_BUILT_AT:-}" >>"$S/containers"
-        else
-          printf 'gest-o-production-%s-1\t%s\t%s\t%s\ttrue\t%s\t%s\t%s\n' "$svc" "$cid" "$id" "$ref" "$port" "${APP_COMMIT:-}" "${APP_BUILT_AT:-}" >>"$S/containers"
+        printf 'gest-o-production-%s-1\t%s\t%s\t%s\ttrue\t%s\t%s\t%s\n' "$svc" "$cid" "$id" "$ref" "$port" "${APP_COMMIT:-}" "${APP_BUILT_AT:-}" >>"$S/containers"
+        # One-shot faults: the next `up` (e.g. the rollback) behaves normally.
+        if fault "up-unhealthy-$svc"; then : >"$S/unhealthy-$cid"; rm -f "$S/faults/up-unhealthy-$svc"; fi
+        if fault "up-other-image-$svc"; then
+          set_container_field "gest-o-production-$svc-1" 3 "sha256:$(printf '9%.0s' {1..64})"; rm -f "$S/faults/up-other-image-$svc"
         fi
-        fault "up-other-image-$svc" && set_container_field "gest-o-production-$svc-1" 3 "sha256:$(printf '9%.0s' {1..64})"
       done ;;
     *' ps -q api'*) container_field gest-o-production-api-1 2 ;;
     *' ps -q web'*) container_field gest-o-production-web-1 2 ;;
