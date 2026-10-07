@@ -59,13 +59,22 @@ image_inspect(){
   local fmt='' ref='' id
   while (($#)); do case "$1" in -f|--format) fmt=$2; shift 2;; *) ref=$1; shift;; esac; done
   id=$(resolve "$ref") || die "No such image: $ref"
+  # Docker 29 CLI: a template is executed on the typed struct and, on failure,
+  # on the raw JSON map.  `.Id` exists only in the map (Go field `ID`) and
+  # `.Descriptor.Digest` only in the struct (JSON key `digest`): mixing them
+  # fails in both modes, exactly like the real CLI.
+  if [[ "$fmt" =~ \.Id([^A-Za-z0-9_]|$) && "$fmt" == *.Descriptor.Digest* ]]; then
+    printf 'template parsing error: template: :1: executing "" at <.Descriptor.Digest>: map has no entry for key "Digest"\n' >&2
+    exit 1
+  fi
   case "$fmt" in
     '') printf '[{"Id":"%s"}]\n' "$id" ;;
     *org.opencontainers.image.revision*) meta "$id" revision ;;
     *org.opencontainers.image.version*) meta "$id" version ;;
     *org.opencontainers.image.created*) meta "$id" created ;;
     *.Size*) meta "$id" size ;;
-    *.Descriptor*) printf '%s\n%s\n' "$id" "$id" ;;
+    *.Descriptor.Digest*) printf '%s\n' "$id" ;;
+    *.RepoDigests*) printf '%s@%s\n' "${ref%%:*}" "$id" ;;
     *.Id*) printf '%s\n' "$id" ;;
     *) printf '\n' ;;
   esac

@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
+
+// Docker 29 CLI: `.Id` renders only from the raw JSON map (Go field `ID`) and
+// `.Descriptor.Digest` only from the typed struct (JSON key `digest`).  A -f/--format
+// template mixing `.Id` with `.Descriptor` fails in both modes, and with stderr
+// discarded the failure was silent (empty rollback identities).  Scan every script
+// and workflow so no such template comes back.
+const listFiles = dir => readdirSync(new URL(`../../${dir}`, import.meta.url), { withFileTypes: true })
+  .flatMap(entry => entry.isDirectory() ? (entry.name === "node_modules" ? [] : listFiles(`${dir}${entry.name}/`)) : [`${dir}${entry.name}`]);
+const mixesIdAndDescriptor = line => /(?:--format|\s-f)[=\s]+["']?[^\n]*\{\{/.test(line) && /\.Id\b/.test(line) && /\.Descriptor\b/.test(line);
+const idField = "{{." + "Id}}";
+assert.equal(mixesIdAndDescriptor(`docker image inspect --format '${idField}{{println}}{{if .Descriptor}}{{.Descriptor.Digest}}{{end}}' ref`), true);
+assert.equal(mixesIdAndDescriptor(`docker image inspect -f '{{if .Descriptor}}{{.Descriptor.Digest}}{{end}}' ref`), false);
+assert.equal(mixesIdAndDescriptor(`docker image inspect -f '${idField}' ref`), false);
+const inspectTemplateOffenders = [...listFiles("scripts/"), ...listFiles(".github/workflows/")]
+  .filter(path => /\.(?:sh|bash|mjs|cjs|js|ts|ya?ml)$/.test(path))
+  .flatMap(path => read(path).split("\n").flatMap((line, index) => mixesIdAndDescriptor(line) ? [`${path}:${index + 1}`] : []));
+assert.deepEqual(inspectTemplateOffenders, [], "template de inspect mistura .Id com .Descriptor (quebra no CLI do Docker 29)");
 const compose=read("docker-compose.production.yml"), deploy=read("scripts/deploy-production.sh"), schemaEvidence=read("scripts/schema-evidence-validation.sh"), pre=read("scripts/production-preflight.sh"), rollback=read("scripts/production-rollback.sh"), preview=read("scripts/production-schema-preview.sh"), envSource=read("apps/api/src/config/env.ts"), unit=read("docs/ops/gest-o.service"), workflow=read(".github/workflows/deploy-production.yml"), api=read("apps/api/src/app.ts");
 const erpEnvPreflight=read("scripts/erp-production-env-preflight.sh");
 const envResolver=read("scripts/resolve-production-env.sh");

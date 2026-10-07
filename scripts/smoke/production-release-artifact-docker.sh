@@ -50,6 +50,8 @@ RELEASE_ARTIFACT_EXPECTED_OWNER="$(id -un):$(id -gn)"; export RELEASE_ARTIFACT_E
 source "$ROOT/scripts/lib/production-build-evidence.sh"
 # shellcheck source=scripts/lib/production-release-artifact.sh
 source "$ROOT/scripts/lib/production-release-artifact.sh"
+# shellcheck source=scripts/lib/production-rollback-image.sh
+source "$ROOT/scripts/lib/production-rollback-image.sh"
 
 # 1. The image built here passes the cutover's image validation.
 build_image_validate api "$ID" "$REV" "$BUILT_AT" || fail "build_image_validate: $BUILD_EVIDENCE_ERROR"
@@ -72,6 +74,13 @@ build_image_validate api "$ID" "$REV" "$BUILT_AT" || fail "imagem restaurada inv
 IMG="$ID" docker compose -p "$P" -f "$TMP/compose.yml" up -d --no-build --no-deps --pull never app >/dev/null 2>&1 || fail 'compose up por ID'
 cid=$(IMG="$ID" docker compose -p "$P" -f "$TMP/compose.yml" ps -q app)
 [[ "$(docker inspect -f '{{.Image}}' "$cid")" == "$ID" ]] || fail 'container não usa o ID'
+# 6b. The rollback predicate, with the real CLI, proves the running container's
+# image (the bootstrap and the cutover inventory depend on it).
+rollback_image_identities "$ID" | grep -Fxq "$ID" || fail "rollback_image_identities não lista $ID com o CLI real"
+resolve_rollback_image api "$(docker inspect -f '{{.Image}}' "$cid")" "$(docker inspect -f '{{.Config.Image}}' "$cid")" ||
+  fail "resolve_rollback_image: $ROLLBACK_BLOCK_REASON"
+[[ "$ROLLBACK_RESOLUTION_METHOD" == runtime-identity && "$ROLLBACK_ARTIFACT_ID" == "$ID" ]] ||
+  fail "resolve_rollback_image: method=$ROLLBACK_RESOLUTION_METHOD artifact=$ROLLBACK_ARTIFACT_ID"
 # 7. A tampered copy is rejected offline.
 cp "$tar_file" "$TMP/tampered.tar.gz"; printf 'x' >>"$TMP/tampered.tar.gz"
 if release_verify_tar "$TMP/tampered.tar.gz" "$ID" "gest-o-api-release:sha256-${ID#sha256:}"; then fail 'tar adulterado aceito'; fi
