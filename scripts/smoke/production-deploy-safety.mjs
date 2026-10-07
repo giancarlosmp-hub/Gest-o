@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 const read = p => readFileSync(new URL(`../../${p}`, import.meta.url), "utf8");
 
 // Docker 29 CLI: `.Id` renders only from the raw JSON map (Go field `ID`) and
@@ -65,23 +65,38 @@ const scriptStopCounts = scriptStopFound.reduce((counts, found) => ({ ...counts,
 assert.deepEqual(scriptStopCounts, scriptStopAllowlist,
   "script inline com script_stop: true não pode ter else/elif em linha própria nem case multi-linha (o drone-ssh injeta checagem de $? por linha)");
 
-// VPS Drift Detection runs inline (it must not depend on the checkout it verifies).  Run that exact
-// logic against throwaway git repositories: clean+synced, dirty worktree and HEAD != origin/main.
+// VPS Drift Detection runs inline (it must not depend on the checkout it verifies).  It compares the
+// VPS HEAD with the commit served by /health/version, not with origin/main: merges waiting for a
+// deploy are reported as [INFO].  Run that exact logic against throwaway git repositories, with a
+// fake curl on PATH standing in for the health endpoint (no network).
 const driftPath = ".github/workflows/vps-drift-detection.yml";
 const driftSteps = workflowSteps(read(driftPath), driftPath).filter(step => step.script !== null);
 assert.equal(driftSteps.length, 1);
 const [drift] = driftSteps;
-assert.equal(drift.scriptStop, false, "VPS Drift Detection não pode usar script_stop (o else do caso limpo sairia com 1)");
+assert.equal(drift.scriptStop, false, "VPS Drift Detection não pode usar script_stop (o drone-ssh injeta checagem de $? por linha)");
+assert.deepEqual(scriptStopHazards(drift.script), [], "VPS Drift Detection não usa else/elif em linha própria nem case multi-linha");
 assert.equal(drift.script.split("\n")[0], "set -Eeuo pipefail");
-const driftCd = "cd /apps/gest-o";
+const driftCd = "cd /apps/gest-o", driftHealthUrl = "http://127.0.0.1:4000/health/version";
 assert.equal(drift.script.split("\n").filter(line => line === driftCd).length, 1);
+assert.ok(drift.script.includes(`curl -fsS --max-time 5 ${driftHealthUrl}`));
 const driftTmp = mkdtempSync(join(tmpdir(), "vps-drift-"));
 try {
   const git = (cwd, ...args) => {
     const result = spawnSync("git", ["-c", "user.name=drift-test", "-c", "user.email=drift-test@example.invalid", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
     assert.equal(result.status, 0, `git ${args.join(" ")}: ${result.stderr}`);
+    return result.stdout.trim();
   };
   const commit = (repo, name) => { writeFileSync(join(repo, name), `${name}\n`); git(repo, "add", name); git(repo, "commit", "-q", "-m", name); };
+  const fakeBin = join(driftTmp, "bin");
+  mkdirSync(fakeBin);
+  writeFileSync(join(fakeBin, "curl"), [
+    "#!/usr/bin/env bash",
+    `[[ "\${*: -1}" == "${driftHealthUrl}" ]] || exit 3`,
+    '[[ "${FAKE_HEALTH_EXIT:-0}" == 0 ]] || exit "$FAKE_HEALTH_EXIT"',
+    "printf '%s' \"$FAKE_HEALTH_BODY\"",
+    "",
+  ].join("\n"));
+  chmodSync(join(fakeBin, "curl"), 0o755);
   git(driftTmp, "init", "-q", "--bare", "origin.git");
   git(join(driftTmp, "origin.git"), "symbolic-ref", "HEAD", "refs/heads/main");
   const vps = join(driftTmp, "vps"), other = join(driftTmp, "other");
@@ -89,26 +104,57 @@ try {
   git(vps, "symbolic-ref", "HEAD", "refs/heads/main");
   commit(vps, "README");
   git(vps, "push", "-q", "origin", "main");
-  const runDrift = () => spawnSync("bash", ["-s"], { input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"'), env: { ...process.env, DRIFT_REPO: vps }, encoding: "utf8" });
+  const production = git(vps, "rev-parse", "HEAD");
+  const health = commitSha => ({ FAKE_HEALTH_BODY: JSON.stringify({ commit: commitSha, builtAt: "2026-10-07T00:00:00Z" }) });
+  const runDrift = healthEnv => spawnSync("bash", ["-s"], {
+    input: drift.script.replace(driftCd, 'cd "$DRIFT_REPO"'),
+    env: { ...process.env, DRIFT_REPO: vps, PATH: `${fakeBin}${delimiter}${process.env.PATH}`, FAKE_HEALTH_EXIT: "0", FAKE_HEALTH_BODY: "", ...healthEnv },
+    encoding: "utf8",
+  });
 
-  const clean = runDrift();
+  const clean = runDrift(health(production));
   assert.equal(clean.status, 0, `drift limpo: ${clean.stderr}`);
-  assert.match(clean.stdout, /^\[OK\] VPS working tree limpo e sincronizado com origin\/main \([0-9a-f]{40}\)\.$/m);
-
-  writeFileSync(join(vps, "stray.txt"), "x\n");
-  const dirty = runDrift();
-  assert.equal(dirty.status, 1);
-  assert.match(dirty.stderr, /Working tree em \/apps\/gest-o não está limpo/);
-  assert.doesNotMatch(dirty.stdout, /\[OK\]/);
-  rmSync(join(vps, "stray.txt"));
+  assert.doesNotMatch(clean.stdout, /\[INFO\]/);
+  assert.match(clean.stdout, new RegExp(`^\\[OK\\] VPS working tree limpo e HEAD igual ao commit em produção \\(${production}\\)\\.$`, "m"));
 
   git(driftTmp, "clone", "-q", "origin.git", "other");
-  commit(other, "next");
+  commit(other, "docs-only");
+  commit(other, "workflow-only");
   git(other, "push", "-q", "origin", "main");
-  const behind = runDrift();
-  assert.equal(behind.status, 1);
-  assert.match(behind.stderr, /Divergência de SHA entre HEAD local e origin\/main/);
-  assert.doesNotMatch(behind.stderr, /não está limpo/);
+  const ahead = runDrift(health(production));
+  assert.equal(ahead.status, 0, `main à frente: ${ahead.stderr}`);
+  assert.match(ahead.stdout, /^\[INFO\] main 2 commits à frente da produção \(origin\/main [0-9a-f]{40}\)\.$/m);
+  assert.match(ahead.stdout, /^\[OK\]/m);
+
+  const deployedElsewhere = runDrift(health("a".repeat(40)));
+  assert.equal(deployedElsewhere.status, 1);
+  assert.match(deployedElsewhere.stderr, /Divergência de SHA entre HEAD local e o commit em produção/);
+  assert.doesNotMatch(deployedElsewhere.stdout, /\[OK\]/);
+
+  writeFileSync(join(vps, "stray.txt"), "x\n");
+  const dirty = runDrift(health(production));
+  assert.equal(dirty.status, 1);
+  assert.match(dirty.stderr, /Working tree em \/apps\/gest-o não está limpo/);
+  assert.doesNotMatch(dirty.stderr, /Divergência de SHA/);
+  rmSync(join(vps, "stray.txt"));
+
+  for (const unavailable of [{ FAKE_HEALTH_EXIT: "7" }, { FAKE_HEALTH_EXIT: "22" }, { FAKE_HEALTH_BODY: "not json" }, health("unknown")]) {
+    const result = runDrift(unavailable);
+    assert.equal(result.status, 1, `health indisponível ${JSON.stringify(unavailable)}`);
+    assert.match(result.stderr, /\/health\/version da API não respondeu ou não trouxe commit válido/);
+    assert.doesNotMatch(result.stdout, /\[OK\]/);
+  }
+
+  git(vps, "switch", "-q", "-c", "local-hotfix");
+  commit(vps, "outside-main");
+  const outsideMain = git(vps, "rev-parse", "HEAD"), mainSha = git(vps, "rev-parse", "origin/main");
+  const unmerged = runDrift(health(outsideMain));
+  assert.equal(unmerged.status, 1, `commit fora da main: ${unmerged.stdout}`);
+  assert.match(unmerged.stderr, /--- Commit em produção não está contido em origin\/main ---/);
+  assert.match(unmerged.stderr, new RegExp(`produção: +${outsideMain}\\n`));
+  assert.match(unmerged.stderr, new RegExp(`origin/main: +${mainSha}\\n`));
+  assert.doesNotMatch(unmerged.stderr, /Divergência de SHA|não está limpo/);
+  assert.doesNotMatch(unmerged.stdout, /\[OK\]|\[INFO\]/);
 } finally {
   rmSync(driftTmp, { recursive: true, force: true });
 }

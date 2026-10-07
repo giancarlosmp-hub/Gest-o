@@ -17,7 +17,22 @@ Com `script_stop: true`, o `drone-ssh` (1.8.0, usado pelo `appleboy/ssh-action@v
 - Um `case` multi-linha quebra a sintaxe.
 - São seguros: `if …; then …; fi` e `case … esac` numa linha só, e `if` multi-linha sem `else`.
 
-Foi a causa de o **VPS Drift Detection** falhar em todos os runs desde a criação: no caso limpo ele entrava no `else` e saía com 1. O workflow deixou de usar `script_stop` e depende do `set -Eeuo pipefail` no início do script inline, que continua sem depender de arquivos do checkout que ele verifica. `scripts/smoke/production-deploy-safety.mjs` reprova `else`/`elif` em linha própria e `case` multi-linha em qualquer step com `script_stop: true` (os 4 `else` conhecidos do `preview.yml` estão numa allowlist contada; ver `TECH_DEBT.md`) e executa a lógica do drift em repositórios git temporários.
+Foi a causa de o **VPS Drift Detection** falhar em todos os runs desde a criação: no caso limpo ele entrava no `else` e saía com 1. O workflow deixou de usar `script_stop` e depende do `set -Eeuo pipefail` no início do script inline. `scripts/smoke/production-deploy-safety.mjs` reprova `else`/`elif` em linha própria e `case` multi-linha em qualquer step com `script_stop: true` (os 4 `else` conhecidos do `preview.yml` estão numa allowlist contada; ver `TECH_DEBT.md`).
+
+### O que o VPS Drift Detection verifica
+
+O script continua inline (não depende de arquivos do checkout que ele verifica) e sem `else`. Ele compara o checkout `/apps/gest-o` com o **commit em produção**, não com `origin/main`: merges de documentação ou workflow sem deploy não são drift.
+
+| Situação | Resultado |
+|---|---|
+| Worktree sujo (`git status --porcelain` não vazio) | exit 1 |
+| `curl -fsS --max-time 5 http://127.0.0.1:4000/health/version` falha, ou a resposta não traz `commit` com 40 hex | exit 1 |
+| `HEAD` diferente do `commit` servido | exit 1 |
+| `HEAD` igual à produção, mas não contido em `origin/main` (`git merge-base --is-ancestor HEAD origin/main` falso: main reescrita, commit local ou `origin/main` ilegível) | exit 1, `--- Commit em produção não está contido em origin/main ---` com os dois SHAs |
+| `HEAD` igual à produção e a `origin/main` | exit 0, `[OK]` |
+| `HEAD` igual à produção, `origin/main` à frente | exit 0, `[INFO] main N commits à frente da produção` (`git rev-list --count HEAD..origin/main`) e `[OK]` |
+
+O commit é lido como no deploy (`node -pe '…commit'`). O teste executa a lógica inline extraída do workflow em repositórios git temporários, com um `curl` falso no `PATH` no lugar do health (sem rede), cobrindo os seis casos acima e respostas sem JSON ou com commit inválido.
 
 ## Cutover sem rebuild, artefato de release e retenção em modo relatório (07/10/2026)
 

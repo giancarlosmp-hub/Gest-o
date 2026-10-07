@@ -25,8 +25,9 @@ jobs:
           username: ${{ secrets.SSH_USER || secrets.VPS_USER }}
           key: ${{ secrets.SSH_KEY || secrets.VPS_KEY }}
           port: ${{ secrets.SSH_PORT || secrets.VPS_PORT || '22022' }}
-          # Sem script_stop: o drone-ssh injetaria uma checagem de $? depois do `else`, que
-          # sairia com 1 no caso limpo. O `set -Eeuo pipefail` abaixo cobre a parada em erro.
+          # Sem script_stop: o drone-ssh injeta uma checagem de $? depois de cada linha, que sai
+          # com 1 logo após um `else` (regra no DEPLOY_GUIDE). O `set -Eeuo pipefail` abaixo cobre
+          # a parada em erro, e o script não usa `else`.
           command_timeout: 10m
           debug: true
           script: |
@@ -40,30 +41,60 @@ jobs:
             local_sha="$(git rev-parse HEAD 2>/dev/null || echo 'UNKNOWN_LOCAL_SHA')"
             remote_sha="$(git rev-parse origin/main 2>/dev/null || echo 'UNKNOWN_REMOTE_SHA')"
 
+            # Commit servido em produção, lido como no deploy (scripts/deploy-production.sh).
+            health_json="$(curl -fsS --max-time 5 http://127.0.0.1:4000/health/version 2>/dev/null || true)"
+            deployed_sha="$(printf '%s' "$health_json" | node -pe 'JSON.parse(require("fs").readFileSync(0)).commit' 2>/dev/null || true)"
+
             has_dirty_worktree=false
-            has_sha_drift=false
+            has_health_failure=false
+            has_deployed_drift=false
 
             if [[ -n "$worktree_status" ]]; then
               has_dirty_worktree=true
             fi
 
-            if [[ "$local_sha" != "$remote_sha" ]]; then
-              has_sha_drift=true
+            if [[ ! "$deployed_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              has_health_failure=true
             fi
 
-            if [[ "$has_dirty_worktree" == true || "$has_sha_drift" == true ]]; then
+            if [[ "$has_health_failure" == false && "$local_sha" != "$deployed_sha" ]]; then
+              has_deployed_drift=true
+            fi
+
+            # O commit em produção precisa estar contido na main (ex.: main reescrita ou commit local).
+            has_unmerged_production=false
+            if [[ "$has_health_failure" == false && "$has_deployed_drift" == false ]]; then
+              if ! git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+                has_unmerged_production=true
+              fi
+            fi
+
+            if [[ "$has_dirty_worktree" == true || "$has_health_failure" == true || "$has_deployed_drift" == true || "$has_unmerged_production" == true ]]; then
               printf '[CRITICAL] Drift detectado na VPS em /apps/gest-o!\n\n' >&2
               if [[ "$has_dirty_worktree" == true ]]; then
                 printf '%s\n' '--- Working tree em /apps/gest-o não está limpo ---' >&2
                 printf '%s\n\n' "$worktree_status" >&2
               fi
-              if [[ "$has_sha_drift" == true ]]; then
-                printf '%s\n' '--- Divergência de SHA entre HEAD local e origin/main ---' >&2
-                printf 'HEAD local:  %s\n' "$local_sha" >&2
+              if [[ "$has_health_failure" == true ]]; then
+                printf '%s\n\n' '--- /health/version da API não respondeu ou não trouxe commit válido ---' >&2
+              fi
+              if [[ "$has_deployed_drift" == true ]]; then
+                printf '%s\n' '--- Divergência de SHA entre HEAD local e o commit em produção ---' >&2
+                printf 'HEAD local: %s\n' "$local_sha" >&2
+                printf 'produção:   %s\n\n' "$deployed_sha" >&2
+              fi
+              if [[ "$has_unmerged_production" == true ]]; then
+                printf '%s\n' '--- Commit em produção não está contido em origin/main ---' >&2
+                printf 'produção:    %s\n' "$local_sha" >&2
                 printf 'origin/main: %s\n\n' "$remote_sha" >&2
               fi
               printf 'Investigue antes de descartar. Ver runbook: docs/OPERACAO.md\n' >&2
               exit 1
-            else
-              printf '[OK] VPS working tree limpo e sincronizado com origin/main (%s).\n' "$local_sha"
             fi
+
+            # HEAD igual à produção: main à frente (merges ainda sem deploy) não é drift.
+            if [[ "$local_sha" != "$remote_sha" ]]; then
+              ahead="$(git rev-list --count HEAD..origin/main 2>/dev/null || echo '?')"
+              printf '[INFO] main %s commits à frente da produção (origin/main %s).\n' "$ahead" "$remote_sha"
+            fi
+            printf '[OK] VPS working tree limpo e HEAD igual ao commit em produção (%s).\n' "$local_sha"
