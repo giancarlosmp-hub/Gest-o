@@ -41,6 +41,8 @@ O cutover não reconstrói mais as imagens: ele sobe exatamente os image IDs que
 
 **Primeiro deploy depois do merge**: rodar apenas `phase=build` e conferir o `build.tsv`, `RELEASE_ARTIFACT_BOOTSTRAP=PASS` (ou `EXISTS`) para o runtime `6e03c9ae…` (`sha256:fa57…`/`sha256:9968…`), os tars verificados e o relatório de retenção. Só então rodar `phase=cutover` no mesmo SHA.
 
+**Resultado do primeiro cutover (07/10/2026)**: concluído em `b3a662a9…` (PR #921) pelo run `37662560135`, sem rebaseline: o rollback de api e web foi resolvido por `method=runtime-identity` e o artefato de release foi salvo para os dois papéis (`DEPLOY_RELEASE_ARTIFACT=PASS`). O operador confirmou containers healthy e `/health/version` com o commit esperado.
+
 **Testes**: `npm run test:production-deploy` (Docker falso, roda no CI). Opcional, contra o Docker real com containerd: `npm run test:production-release:docker`. Ele sai com 77 (pulado) sem engine containerd ou sem a imagem base local (`PRODUCTION_RELEASE_DOCKER_BASE`, padrão `busybox:1.36`) e nunca faz pull.
 
 ## Validação de Imagens OCI Alvo e Container Anterior no Cutover (29/09/2026)
