@@ -132,3 +132,26 @@ gest-o-production-web-1  Up 3 hours (healthy)
 - `phase=build` recusa reconstruir um SHA que está em produção, fixa as imagens novas em tags `gest-o-<role>-release:sha256-<hex>`, grava `deploy-builds/<sha>/build.tsv` e cria o artefato verificado (`docker save | gzip -1`) do runtime em execução.
 - `phase=cutover` não reconstrói: sobe os IDs da evidência com `--pull never`, prova `.Image` e `/health/version` (`commit`/`builtAt`) depois de subir, executa o rollback em qualquer rejeição dentro da janela stop/start e salva o artefato da release nova sem nunca reverter um runtime saudável (falha de artefato = exit 3).
 - O inventário de rollback ganha o caminho `release-artifact-load` antes do rebaseline. O predicado de `scripts/lib/production-rollback-image.sh` continua sendo a única prova aceita.
+
+---
+
+## Causa raiz (07/10/2026): template misto de `docker image inspect` no CLI do Docker 29
+
+O primeiro `phase=build` depois do merge do PR #920 (`1ce649a`) reportou `RELEASE_ARTIFACT_BOOTSTRAP=UNAVAILABLE … reason=not_inspectable_without_artifact` para as duas imagens do runtime, embora elas fossem inspecionáveis no host (`docker image inspect -f '{{.Id}} rev=…'` retornou os IDs com `revision=6e03c9ae…`).
+
+**Mecanismo.** `rollback_image_identities` montava a lista de identidades com um único template:
+
+```
+{{.Id}}{{println}}{{if .Descriptor}}{{.Descriptor.Digest}}{{println}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}
+```
+
+O CLI do Docker 29 executa o template primeiro sobre a struct tipada e, se falhar, sobre o JSON bruto (mapa). `.Id` só existe no mapa (o campo Go é `ID`), e `.Descriptor.Digest` só existe na struct (a chave JSON é `digest`). Um template que usa os dois falha nos dois modos (`map has no entry for key "Digest"`). Como o stderr era descartado, a lista de identidades vinha vazia e `resolve_rollback_image` concluía, sem nenhuma mensagem de erro, que "nenhuma imagem local demonstra vínculo criptográfico". O comportamento foi reproduzido no Docker Desktop 29.2.1 só com `inspect`: cada campo funciona isolado, e qualquer combinação de `.Id` com `.Descriptor.Digest` falha.
+
+**Consequência histórica.** O predicado de rollback nunca conseguiu provar a identidade do runtime neste engine. Nas evidências de cutover do host (`/var/log/gest-o/deploy/*/previous-runtime.tsv`), nenhum registro tem `resolution_method=runtime-identity`: 6 cutovers usaram `authorized-rebaseline` (`1d855dab4c70`, `52ff666e1d02`, `6e03c9ae2f78`, `95f157fdb4cb`, `e2d1a4b6bfa7`, `e4f08c7df5ff`) e os 18 mais antigos não têm a coluna de método (formato anterior). O bloqueio "imagem anterior não verificável" desta investigação era, portanto, falha do template, e não uma imagem ausente: segundo a verificação do operador, `sha256:74590ba1…` ainda existia localmente no momento em que o cutover nº 221 falhou. O rebaseline contornava o problema porque validava a identidade por outro caminho.
+
+**Correção.** `rollback_image_identities` passou a fazer uma consulta por campo (`{{.Id}}`, `{{if .Descriptor}}{{.Descriptor.Digest}}{{end}}` e `{{range .RepoDigests}}…{{end}}`), e o predicado de aceitação não mudou. O mesmo padrão foi corrigido em `production-rebaseline.sh`, onde só afetava o digest registrado. Para não voltar:
+- os Docker falsos dos testes imitam a regra de dois modos do CLI;
+- o teste com Docker real chama `resolve_rollback_image` sobre um container criado pelo compose (falha antes da correção e passa depois);
+- `production-deploy-safety.mjs` reprova qualquer `-f`/`--format` que misture `.Id` com `.Descriptor` em `scripts/` e `.github/workflows/`.
+
+**Retenção.** No mesmo build, o relatório marcou como `would_delete` as tags de release das imagens recém-construídas, que só estão no `build.tsv`. Elas passam a ser mantidas com o motivo `build_evidence`. Como a retenção só gera relatório, nada foi apagado.
