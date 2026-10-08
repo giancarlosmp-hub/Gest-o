@@ -212,7 +212,22 @@ Critério: atualização em PR próprio, com `npm audit` sem críticas e CI verd
 da `main` em `b3a662a`: Docker Compose CI `37654389601` e Production Deploy Safety `37654389855`
 estão verdes, com `# fail 0` em todas as suítes. Identificar quais testes e em que ambiente falham
 antes de corrigir.
-Hipótese: falhas só no Windows por CRLF (core.autocrlf=true) em scripts .sh; avaliar .gitattributes com eol=lf no PR de limpeza.
+
+**CRLF resolvido; restam falhas de ambiente Windows.** O índice já estava todo em LF; o CRLF vinha do
+`core.autocrlf=true` do Git for Windows no checkout. O PR `chore/gitattributes-eol-lf` criou o
+`.gitattributes` com `eol=lf` (nenhum arquivo precisou ser renormalizado). Em clones locais no Windows
+(Git Bash), rodando cada script de `test:production-deploy` e `test:architecture-docs` separadamente:
+9 de 13 falhavam antes e 8 de 13 falham depois. Voltou a passar `production-deploy-safety.mjs`. As 8
+restantes não são de quebra de linha:
+
+- 7 scripts `.sh` (`production-preflight-mode`, `production-deploy-real-call-graph`,
+  `production-env-resolution`, `prepare-canonical-production-env`, `production-build-evidence`,
+  `production-release-artifact`, `production-cutover-no-rebuild`): `id -gn` sai com status 1 no Git
+  Bash ("cannot find name for group ID"), e o `set -e` encerra o teste.
+- `production-rebaseline-safety.mjs`: `mkdir`/`chmod` sem permissão no diretório temporário do Windows.
+
+No CI (Linux) todos passam. Pendente: decidir se esses testes devem rodar no Windows (por exemplo, com
+fallback para `id -g` quando o grupo não tem nome) ou se ficam documentados como só Linux/WSL.
 
 ### TD-WORKFLOW-SCRIPT-STOP-ELSE — `else` sob `script_stop` no `preview.yml`
 
