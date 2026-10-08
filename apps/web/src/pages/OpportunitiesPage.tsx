@@ -11,6 +11,7 @@ import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
 import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
+import ActionMenuPopover from "../components/opportunities/ActionMenuPopover";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
@@ -242,6 +243,13 @@ const riskRowClassName: Record<OpportunityRisk, string> = {
   baixo: "bg-emerald-50/30"
 };
 
+// Mesmo tom da linha, porém opaco (tom sobre branco), para a coluna fixa de ações não deixar o texto aparecer por baixo.
+const riskStickyCellClassName: Record<OpportunityRisk, string> = {
+  alto: "bg-[#fffafa]",
+  medio: "bg-[#fffdf7]",
+  baixo: "bg-[#f9fefc]"
+};
+
 const emptyForm: FormState = {
   title: "",
   value: "",
@@ -424,6 +432,8 @@ export default function OpportunitiesPage() {
   // Menus ⋯ da lista/card e menu "Encerrar" do drawer têm estados separados: abrir um nunca abre o outro.
   const [openCloseMenuId, setOpenCloseMenuId] = useState<string | null>(null);
   const [isDrawerCloseMenuOpen, setIsDrawerCloseMenuOpen] = useState(false);
+  const itemActionMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
+  const drawerCloseMenuAnchorRef = useRef<HTMLButtonElement | null>(null);
   const [closeOpportunityState, setCloseOpportunityState] = useState<CloseOpportunityState | null>(null);
   const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
@@ -1706,7 +1716,7 @@ export default function OpportunitiesPage() {
   };
 
   return (
-    <div className="space-y-5 pb-4">
+    <div className="opportunity-touch-targets space-y-5 pb-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 className="text-2xl font-bold text-slate-900">Oportunidades</h2>
         <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
@@ -2047,11 +2057,11 @@ export default function OpportunitiesPage() {
 
       {viewMode === "list" ? (
 
-        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm" data-action-menu-boundary>
           <table className="min-w-[1500px] w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">
-                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Risco</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="p-2">Ações</th>
+                <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Risco</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="sticky right-0 z-[1] border-l border-slate-200 bg-slate-50 p-2 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)]">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -2083,7 +2093,8 @@ export default function OpportunitiesPage() {
                     <td className="p-2">{formatDateBR(item.proposalDate)}</td>
                     <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
                     <td className="p-2"><ReturnStatusBadge status={getReturnStatus(item)} /></td>
-                    <td className="space-x-2 whitespace-nowrap p-2">
+                    <td className={`sticky right-0 z-[1] border-l border-slate-200 p-2 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)] ${riskStickyCellClassName[risk]}`}>
+                      <div className="opportunity-list-actions flex items-center gap-x-2 whitespace-nowrap">
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="font-semibold text-amber-700" onClick={() => onEdit(item)}>Transferir responsável</button> : null}
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
@@ -2093,21 +2104,24 @@ export default function OpportunitiesPage() {
                       {!["ganho", "perdido"].includes(item.stage) ? (
                         <span className="relative inline-block" data-opportunity-action-menu>
                           <button
+                            ref={openCloseMenuId === item.id ? itemActionMenuAnchorRef : undefined}
                             type="button"
                             className="text-slate-700"
+                            aria-expanded={openCloseMenuId === item.id}
                             onClick={() => toggleItemActionMenu(item.id)}
                           >
                             Encerrar ▾
                           </button>
                           {openCloseMenuId === item.id ? (
-                            <span className="absolute right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                            <ActionMenuPopover anchorRef={itemActionMenuAnchorRef} className="min-w-44">
                               <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
                               <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
-                            </span>
+                            </ActionMenuPopover>
                           ) : null}
                         </span>
                       ) : null}
                       {canDeleteOpportunity ? <button type="button" className="text-red-600" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2165,7 +2179,7 @@ export default function OpportunitiesPage() {
                       <div className="flex items-center justify-between text-xs text-slate-600"><span>Total</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageTotal)}</span></div>
                       <div className="flex items-center justify-between text-xs text-slate-600"><span>Ponderado</span><span className="font-semibold text-slate-900">{formatCurrencyBRL(stageWeightedTotal)}</span></div>
                     </div>
-                    <div className="flex-1 space-y-2 overflow-y-auto p-3">
+                    <div className="flex-1 space-y-2 overflow-y-auto p-3" data-action-menu-boundary>
                       {loading ? Array.from({ length: 3 }).map((_, index) => (
                         <div key={`${stage}-skeleton-${index}`} className="h-24 animate-pulse rounded-lg bg-slate-200" />
                       )) : stageItems.length ? stageItems.map((item) => {
@@ -2180,6 +2194,8 @@ export default function OpportunitiesPage() {
                           role="button"
                           tabIndex={0}
                           onKeyDown={(event) => {
+                            // Teclas nos botões do menu ⋯ (renderizado em portal, mas ainda filho no React) não abrem o drawer.
+                            if (event.target !== event.currentTarget) return;
                             if (event.key === "Enter" || event.key === " ") {
                               event.preventDefault();
                               openPipelineDrawer(item);
@@ -2206,9 +2222,11 @@ export default function OpportunitiesPage() {
                           {!["ganho", "perdido"].includes(item.stage) || canDeleteOpportunity ? (
                             <div className="relative flex justify-end" data-opportunity-action-menu onClick={(event) => event.stopPropagation()}>
                               <button
+                                ref={openCloseMenuId === item.id ? itemActionMenuAnchorRef : undefined}
                                 type="button"
-                                className="rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
+                                className="touch-icon-button inline-flex items-center justify-center rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
                                 aria-label="Abrir ações da oportunidade"
+                                aria-expanded={openCloseMenuId === item.id}
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   toggleItemActionMenu(item.id);
@@ -2217,7 +2235,7 @@ export default function OpportunitiesPage() {
                                 <MoreHorizontal size={14} />
                               </button>
                               {openCloseMenuId === item.id ? (
-                                <div className="absolute right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                                <ActionMenuPopover anchorRef={itemActionMenuAnchorRef} className="min-w-44">
                                   {!["ganho", "perdido"].includes(item.stage) ? (
                                     <>
                                       <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
@@ -2225,7 +2243,7 @@ export default function OpportunitiesPage() {
                                     </>
                                   ) : null}
                                   {canDeleteOpportunity ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
-                                </div>
+                                </ActionMenuPopover>
                               ) : null}
                             </div>
                           ) : null}
@@ -2248,7 +2266,7 @@ export default function OpportunitiesPage() {
       {isPipelineDrawerOpen && selectedOpportunity ? (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={closePipelineDrawer}>
           <aside
-            className="h-full w-full max-w-lg overflow-y-auto bg-white p-5 shadow-xl"
+            className="opportunity-touch-targets opportunity-drawer-panel h-full w-full max-w-lg overflow-y-auto overscroll-contain bg-white p-5 shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-4">
@@ -2326,18 +2344,20 @@ export default function OpportunitiesPage() {
                 <p className="mb-2 text-sm font-medium text-slate-800">Encerrar</p>
                 <div className="relative inline-block" data-opportunity-action-menu>
                   <button
+                    ref={drawerCloseMenuAnchorRef}
                     type="button"
                     disabled={isQuickActionLoading !== null}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    aria-expanded={isDrawerCloseMenuOpen}
                     onClick={toggleDrawerCloseMenu}
                   >
                     {isQuickActionLoading ? "Atualizando..." : "Encerrar ▾"}
                   </button>
                   {isDrawerCloseMenuOpen ? (
-                    <div className="absolute left-0 z-10 mt-1 min-w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                    <ActionMenuPopover anchorRef={drawerCloseMenuAnchorRef} align="start" className="min-w-52">
                       <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(selectedOpportunity.id, "ganho")}>Marcar como Ganho</button>
                       <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(selectedOpportunity.id, "perdido")}>Marcar como Perdido</button>
-                    </div>
+                    </ActionMenuPopover>
                   ) : null}
                 </div>
               </div>
@@ -2347,7 +2367,7 @@ export default function OpportunitiesPage() {
               <label className="block text-sm font-medium text-slate-800" htmlFor="pipeline-followup-date">
                 Agendar Follow-up
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 max-sm:flex-wrap">
                 <input
                   id="pipeline-followup-date"
                   type="date"

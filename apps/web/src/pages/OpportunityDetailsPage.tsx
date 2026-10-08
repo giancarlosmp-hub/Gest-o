@@ -1301,7 +1301,7 @@ export default function OpportunityDetailsPage() {
   if (!item) return null;
 
   return (
-    <div className="space-y-4 pb-5">
+    <div className="opportunity-touch-targets space-y-4 pb-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h2 className="text-2xl font-bold text-slate-900">
           Visão da Oportunidade

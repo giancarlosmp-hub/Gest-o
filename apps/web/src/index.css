@@ -297,3 +297,25 @@ textarea:focus {
   height: 0;
   display: none;
 }
+
+/* Oportunidades (pipeline, lista, drawer, detalhes e menus de ação): alvos de toque de 44px no celular. */
+@media (max-width: 640px) {
+  .opportunity-touch-targets :where(button, [role="button"], select, input:not([type="checkbox"]):not([type="radio"]), label:has(> input[type="checkbox"])) {
+    min-height: 44px;
+  }
+
+  .opportunity-touch-targets .touch-icon-button {
+    min-width: 44px;
+  }
+
+  .opportunity-drawer-panel {
+    max-width: none;
+  }
+
+  /* Coluna fixa de ações da lista: quebra em linhas para não ocupar a largura toda da tela. */
+  .opportunity-list-actions {
+    width: 9.5rem;
+    flex-wrap: wrap;
+    white-space: normal;
+  }
+}
