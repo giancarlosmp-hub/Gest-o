@@ -278,3 +278,18 @@ no run `37658861500`).
 
 Critério: remover a função e o comentário em PR futuro, junto com o ajuste do teste, com
 `npm run test:production-backup-recovery` e o CI verdes.
+
+### TD-SMOKE-PR18A2-HTTP — `smoke:pr18a2-http` falha com 403
+
+**Aberto, a investigar.** O `npm run smoke:pr18a2-http -w @salesforce-pro/api`
+(`apps/api/src/scripts/pr18a2HttpRegression.ts`) falha com `403 !== 200` em
+`GET /api/erp/ultrafv3/scheduler/status`. A falha já existia antes do PR #930: foi reproduzida com
+as versões anteriores (`express` 4.22.2 / `proxy-addr` 2.0.7). O smoke não roda no CI nem faz parte
+da lista `test:*`, por isso não foi detectado. Investigar se o teste está desatualizado ou se mudou
+uma regra de permissão da rota.
+
+### TD-WINDOWS-SHARED-CLEAN-RM — `npm run build` falha no PowerShell
+
+**Aberto, baixo.** No Windows, `npm run build` falha quando chamado pelo PowerShell: o script
+`clean` de `packages/shared` usa `rm -rf dist`, e o `cmd.exe` (shell padrão dos scripts npm no
+Windows) não tem `rm`. Pelo Git Bash funciona, porque o `rm` está no `PATH`.
