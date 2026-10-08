@@ -17,7 +17,7 @@ Com `script_stop: true`, o `drone-ssh` (1.8.0, usado pelo `appleboy/ssh-action@v
 - Um `case` multi-linha quebra a sintaxe.
 - São seguros: `if …; then …; fi` e `case … esac` numa linha só, e `if` multi-linha sem `else`.
 
-Foi a causa de o **VPS Drift Detection** falhar em todos os runs desde a criação: no caso limpo ele entrava no `else` e saía com 1. O workflow deixou de usar `script_stop` e depende do `set -Eeuo pipefail` no início do script inline. `scripts/smoke/production-deploy-safety.mjs` reprova `else`/`elif` em linha própria e `case` multi-linha em qualquer step com `script_stop: true` (os 4 `else` conhecidos do `preview.yml` estão numa allowlist contada; ver `TECH_DEBT.md`).
+Foi a causa de o **VPS Drift Detection** falhar em todos os runs desde a criação: no caso limpo ele entrava no `else` e saía com 1. O workflow deixou de usar `script_stop` e depende do `set -Eeuo pipefail` no início do script inline. `scripts/smoke/production-deploy-safety.mjs` reprova `else`/`elif` em linha própria e `case` multi-linha em qualquer step com `script_stop: true`, sem allowlist (os 4 `else` que o `preview.yml` tinha foram reescritos sem `else`; ver `TD-WORKFLOW-SCRIPT-STOP-ELSE` em `TECH_DEBT.md`).
 
 ### O que o VPS Drift Detection verifica
 

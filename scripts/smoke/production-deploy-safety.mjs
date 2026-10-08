@@ -56,13 +56,9 @@ const scriptStopOffenders = steps => steps.filter(step => step.scriptStop && ste
 const reintroduced = "    steps:\n      - name: ssh\n        uses: appleboy/ssh-action@v1.2.0\n        with:\n          script_stop: true\n          script: |\n            set -Eeuo pipefail\n            if [[ -n \"$x\" ]]; then\n              exit 1\n            else\n              printf ok\n            fi\n            case \"$y\" in\n              a) : ;;\n            esac\n            case \"$y\" in a) : ;; esac\n            if true; then :; fi\n";
 assert.deepEqual(scriptStopOffenders(workflowSteps(reintroduced, "fixture.yml")), ["fixture.yml: else", 'fixture.yml: case "$y" in']);
 assert.deepEqual(scriptStopOffenders(workflowSteps(reintroduced.replace("          script_stop: true\n", ""), "fixture.yml")), []);
-// Known debt (TECH_DEBT.md, TD-WORKFLOW-SCRIPT-STOP-ELSE): failure-path `else` branches of preview.yml.
-// Counted, so any new occurrence there still fails.
-const scriptStopAllowlist = { ".github/workflows/preview.yml: else": 4 };
 const scriptStopFound = scriptStopOffenders(listFiles(".github/workflows/").filter(path => /\.ya?ml$/.test(path))
   .flatMap(path => workflowSteps(read(path), path)));
-const scriptStopCounts = scriptStopFound.reduce((counts, found) => ({ ...counts, [found]: (counts[found] ?? 0) + 1 }), {});
-assert.deepEqual(scriptStopCounts, scriptStopAllowlist,
+assert.deepEqual(scriptStopFound, [],
   "script inline com script_stop: true não pode ter else/elif em linha própria nem case multi-linha (o drone-ssh injeta checagem de $? por linha)");
 
 // VPS Drift Detection runs inline (it must not depend on the checkout it verifies).  It compares the
