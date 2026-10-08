@@ -421,7 +421,9 @@ export default function OpportunitiesPage() {
   const [loadingMorePipelineEvents, setLoadingMorePipelineEvents] = useState(false);
   const [pipelineEventsCursor, setPipelineEventsCursor] = useState<string | null>(null);
   const [isQuickActionLoading, setIsQuickActionLoading] = useState<"ganho" | "perdido" | null>(null);
+  // Menus ⋯ da lista/card e menu "Encerrar" do drawer têm estados separados: abrir um nunca abre o outro.
   const [openCloseMenuId, setOpenCloseMenuId] = useState<string | null>(null);
+  const [isDrawerCloseMenuOpen, setIsDrawerCloseMenuOpen] = useState(false);
   const [closeOpportunityState, setCloseOpportunityState] = useState<CloseOpportunityState | null>(null);
   const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
@@ -437,6 +439,42 @@ export default function OpportunitiesPage() {
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
   const canDeleteOpportunity = user?.role === "diretor" || user?.role === "gerente";
+  const isAnyActionMenuOpen = openCloseMenuId !== null || isDrawerCloseMenuOpen;
+
+  const closeActionMenus = () => {
+    setOpenCloseMenuId(null);
+    setIsDrawerCloseMenuOpen(false);
+  };
+
+  const toggleItemActionMenu = (opportunityId: string) => {
+    setIsDrawerCloseMenuOpen(false);
+    setOpenCloseMenuId((current) => (current === opportunityId ? null : opportunityId));
+  };
+
+  const toggleDrawerCloseMenu = () => {
+    setOpenCloseMenuId(null);
+    setIsDrawerCloseMenuOpen((current) => !current);
+  };
+
+  useEffect(() => {
+    if (!isAnyActionMenuOpen) return;
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest("[data-opportunity-action-menu]")) return;
+      setOpenCloseMenuId(null);
+      setIsDrawerCloseMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpenCloseMenuId(null);
+      setIsDrawerCloseMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isAnyActionMenuOpen]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -1241,7 +1279,7 @@ export default function OpportunitiesPage() {
   };
 
   const requestDeleteOpportunity = (item: Pick<Opportunity, "id" | "title">) => {
-    setOpenCloseMenuId(null);
+    closeActionMenus();
     setDeleteTarget({ id: item.id, title: item.title });
   };
 
@@ -1391,11 +1429,13 @@ export default function OpportunitiesPage() {
   }, [itemsTotals.netTotal]);
 
   const openPipelineDrawer = (item: Opportunity) => {
+    closeActionMenus();
     setSelectedOpportunity(item);
     setIsPipelineDrawerOpen(true);
   };
 
   const closePipelineDrawer = () => {
+    setIsDrawerCloseMenuOpen(false);
     setIsPipelineDrawerOpen(false);
     setSelectedOpportunity(null);
     setPipelineInteraction("");
@@ -1458,7 +1498,7 @@ export default function OpportunitiesPage() {
   };
 
   const openCloseModal = (opportunityId: string, stage: CloseAction) => {
-    setOpenCloseMenuId(null);
+    closeActionMenus();
     setCloseReason("");
     setCloseOpportunityState({ opportunityId, stage });
   };
@@ -1541,7 +1581,7 @@ export default function OpportunitiesPage() {
   };
 
   const openWonOpportunityErpOrderFlow = (opportunityId: string) => {
-    setOpenCloseMenuId(null);
+    closeActionMenus();
     closeCloseModal();
     closePipelineDrawer();
     navigate(`/oportunidades/${opportunityId}?openErpOrder=1`);
@@ -2051,11 +2091,11 @@ export default function OpportunitiesPage() {
                         <button type="button" className="text-emerald-700" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
                       ) : null}
                       {!["ganho", "perdido"].includes(item.stage) ? (
-                        <span className="relative inline-block">
+                        <span className="relative inline-block" data-opportunity-action-menu>
                           <button
                             type="button"
                             className="text-slate-700"
-                            onClick={() => setOpenCloseMenuId((current) => (current === item.id ? null : item.id))}
+                            onClick={() => toggleItemActionMenu(item.id)}
                           >
                             Encerrar ▾
                           </button>
@@ -2164,14 +2204,14 @@ export default function OpportunitiesPage() {
                             </div>
                           </div>
                           {!["ganho", "perdido"].includes(item.stage) || canDeleteOpportunity ? (
-                            <div className="relative flex justify-end" onClick={(event) => event.stopPropagation()}>
+                            <div className="relative flex justify-end" data-opportunity-action-menu onClick={(event) => event.stopPropagation()}>
                               <button
                                 type="button"
                                 className="rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
                                 aria-label="Abrir ações da oportunidade"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  setOpenCloseMenuId((current) => (current === item.id ? null : item.id));
+                                  toggleItemActionMenu(item.id);
                                 }}
                               >
                                 <MoreHorizontal size={14} />
@@ -2284,16 +2324,16 @@ export default function OpportunitiesPage() {
             {!["ganho", "perdido"].includes(selectedOpportunity.stage) ? (
               <div className="mt-4">
                 <p className="mb-2 text-sm font-medium text-slate-800">Encerrar</p>
-                <div className="relative inline-block">
+                <div className="relative inline-block" data-opportunity-action-menu>
                   <button
                     type="button"
                     disabled={isQuickActionLoading !== null}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:bg-slate-100"
-                    onClick={() => setOpenCloseMenuId((current) => (current === selectedOpportunity.id ? null : selectedOpportunity.id))}
+                    onClick={toggleDrawerCloseMenu}
                   >
                     {isQuickActionLoading ? "Atualizando..." : "Encerrar ▾"}
                   </button>
-                  {openCloseMenuId === selectedOpportunity.id ? (
+                  {isDrawerCloseMenuOpen ? (
                     <div className="absolute left-0 z-10 mt-1 min-w-52 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                       <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(selectedOpportunity.id, "ganho")}>Marcar como Ganho</button>
                       <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(selectedOpportunity.id, "perdido")}>Marcar como Perdido</button>
