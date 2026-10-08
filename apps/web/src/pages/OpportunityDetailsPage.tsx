@@ -18,6 +18,7 @@ import { canConfirmErpManualResolution } from "../lib/erpManualResolution";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import AccessibleCheckbox from "../components/AccessibleCheckbox";
+import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
 import { useAuth } from "../context/AuthContext";
 import {
   getErpOrderReadiness,
@@ -675,6 +676,9 @@ export default function OpportunityDetailsPage() {
   const [interactionNote, setInteractionNote] = useState("");
   const [showLossModal, setShowLossModal] = useState(false);
   const [lossReason, setLossReason] = useState("");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingOpportunity, setDeletingOpportunity] = useState(false);
+  const canDeleteOpportunity = user?.role === "diretor" || user?.role === "gerente";
   const [events, setEvents] = useState<EventItem[]>([]);
   const [insight, setInsight] = useState<OpportunityInsight | null>(null);
   const [salesMessage, setSalesMessage] = useState("");
@@ -1239,6 +1243,22 @@ export default function OpportunityDetailsPage() {
     setShowLossModal(false);
   };
 
+  const onConfirmDeleteOpportunity = async () => {
+    if (!item || deletingOpportunity) return;
+    setDeletingOpportunity(true);
+    try {
+      await api.delete(`/opportunities/${item.id}`);
+      toast.success("Oportunidade excluída");
+      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+      setShowDeleteModal(false);
+      navigate("/oportunidades");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível excluir a oportunidade"));
+    } finally {
+      setDeletingOpportunity(false);
+    }
+  };
+
   const onGenerateSalesMessage = async () => {
     if (!item?.id) return;
     setLoadingSalesMessage(true);
@@ -1589,6 +1609,16 @@ export default function OpportunityDetailsPage() {
           >
             Marcar como perdido
           </button>
+          {canDeleteOpportunity ? (
+            <button
+              type="button"
+              disabled={saving || deletingOpportunity}
+              onClick={() => setShowDeleteModal(true)}
+              className="mobile-secondary-half rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              Excluir
+            </button>
+          ) : null}
         </div>
       </section>
 
@@ -2426,6 +2456,15 @@ export default function OpportunityDetailsPage() {
             </div>
           </form>
         </div>
+      ) : null}
+
+      {showDeleteModal ? (
+        <DeleteOpportunityConfirmModal
+          opportunityTitle={item.title}
+          deleting={deletingOpportunity}
+          onCancel={() => setShowDeleteModal(false)}
+          onConfirm={() => void onConfirmDeleteOpportunity()}
+        />
       ) : null}
     </div>
   );
