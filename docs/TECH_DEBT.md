@@ -231,7 +231,9 @@ nova falha. Correção em PR separado (tirar `script_stop` do step ou reescrever
 
 ### TD-REPO-ROOT-STRAY-FILES — arquivos soltos na raiz
 
-**Aberto.** A raiz rastreia 37 arquivos vazios com nomes de fragmentos de código (restos de
-redirecionamento de shell, por exemplo `(`, `void`, `setForm(initialForm)`) e dois arquivos com
-conteúdo, `build-web-log.txt` e `row.status`, que contêm identificação de usuário/host de terminal.
-Remoção em PR separado; avaliar tornar o repositório privado.
+**Removidos da raiz; continuam no histórico.** Os 37 arquivos vazios com nomes de fragmentos de
+código (restos de redirecionamento de shell, por exemplo `(`, `void`, `setForm(initialForm)`) e os
+dois arquivos com conteúdo, `build-web-log.txt` e `row.status`, que continham identificação de
+usuário/host de terminal, foram removidos no PR `chore/remove-root-stray-files`. O `.gitignore`
+passou a ignorar `*.log`, `/build-*-log.txt` e `/row.status`. O conteúdo continua acessível no
+histórico do git; avaliar tornar o repositório privado.

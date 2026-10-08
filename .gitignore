@@ -8,3 +8,8 @@ demetra-env/
 apps/*/dist/
 packages/*/dist/
 dist/
+
+# Saídas soltas de terminal/build (ver TD-REPO-ROOT-STRAY-FILES)
+*.log
+/build-*-log.txt
+/row.status
