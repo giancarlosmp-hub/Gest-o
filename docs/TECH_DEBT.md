@@ -281,15 +281,20 @@ Critério: remover a função e o comentário em PR futuro, junto com o ajuste d
 
 ### TD-SMOKE-PR18A2-HTTP — `smoke:pr18a2-http` falha com 403
 
-**Aberto, a investigar.** O `npm run smoke:pr18a2-http -w @salesforce-pro/api`
-(`apps/api/src/scripts/pr18a2HttpRegression.ts`) falha com `403 !== 200` em
-`GET /api/erp/ultrafv3/scheduler/status`. A falha já existia antes do PR #930: foi reproduzida com
-as versões anteriores (`express` 4.22.2 / `proxy-addr` 2.0.7). O smoke não roda no CI nem faz parte
-da lista `test:*`, por isso não foi detectado. Investigar se o teste está desatualizado ou se mudou
-uma regra de permissão da rota.
+**Resolvido.** O `npm run smoke:pr18a2-http -w @salesforce-pro/api`
+(`apps/api/src/scripts/pr18a2HttpRegression.ts`) falhava com `403 !== 200` em
+`GET /api/erp/ultrafv3/scheduler/status`. Causa: desde o PR #861 o `authMiddleware` relê o usuário
+no banco, e o mock do smoke devolvia só `{ id }`, sem `role` (e sem `email`/`region`). A regra de
+permissão da rota não mudou. Corrigido no PR #932, que ajustou o mock do smoke.
 
 ### TD-WINDOWS-SHARED-CLEAN-RM — `npm run build` falha no PowerShell
 
 **Aberto, baixo.** No Windows, `npm run build` falha quando chamado pelo PowerShell: o script
 `clean` de `packages/shared` usa `rm -rf dist`, e o `cmd.exe` (shell padrão dos scripts npm no
 Windows) não tem `rm`. Pelo Git Bash funciona, porque o `rm` está no `PATH`.
+
+### TD-OPPORTUNITY-CLOSE-PATHS — dois caminhos para encerrar oportunidade
+
+**Aberto.** A tela de detalhes (`apps/web/src/pages/OpportunityDetailsPage.tsx`) encerra a
+oportunidade por `PUT /opportunities/:id`, e o pipeline (`apps/web/src/pages/OpportunitiesPage.tsx`)
+por `PATCH /opportunities/:id/close`. Unificar em um único caminho em PR próprio.
