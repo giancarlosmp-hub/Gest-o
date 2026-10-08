@@ -7980,7 +7980,7 @@ router.put("/opportunities/:id", validateBody(opportunitySchema.partial()), asyn
 
   return res.json(data);
 });
-router.delete("/opportunities/:id", async (req, res) => {
+router.delete("/opportunities/:id", authorize("diretor", "gerente"), async (req, res) => {
   const tenantId = await resolveRequestTenantId(req, res);
   if (!tenantId) return;
   const old = await prisma.opportunity.findFirst({ where: { id: req.params.id, ...sellerWhere(req), client: { tenantId } }, select: { id: true } });

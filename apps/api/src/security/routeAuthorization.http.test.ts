@@ -149,7 +149,7 @@ try {
   resetData();
   assert.equal(await status("seller-a", "POST", "/api/ai/opportunity-insight", { opportunityId: "opp-b" }), 404);
   assert.equal(await status("seller-a", "GET", "/api/ai/opportunity-message?opportunityId=opp-b"), 404);
-  assert.equal(await status("seller-a", "DELETE", "/api/opportunities/opp-b"), 404);
+  assert.equal(await status("seller-a", "DELETE", "/api/opportunities/opp-b"), 403);
   assert.equal(await status("seller-a", "DELETE", "/api/companies/client-b"), 404);
   assert.equal(await status("seller-a", "PUT", "/api/contacts/contact-b", { name: "Invasor" }), 404);
   assert.equal(await status("seller-a", "PUT", "/api/contacts/contact-orphan-b", { name: "Invasor" }), 404);
@@ -166,8 +166,9 @@ try {
   assert.equal(contacts.find((row) => row.id === "contact-a")?.ownerSellerId, "seller-a", "vendedor não pode transferir o contato para outro dono");
   assert.equal(await status("seller-a", "PUT", "/api/contacts/contact-a", { clientId: "client-b" }), 404);
   assert.equal(contacts.find((row) => row.id === "contact-a")?.clientId, "client-a");
-  assert.equal(await status("seller-a", "DELETE", "/api/opportunities/opp-a2"), 204);
-  assert(!exists(opportunities, "opp-a2"));
+  // Vendedor encerra, mas não exclui oportunidade, nem a própria: 403 e o registro permanece.
+  assert.equal(await status("seller-a", "DELETE", "/api/opportunities/opp-a2"), 403);
+  assert(exists(opportunities, "opp-a2"), "vendedor não pode excluir a própria oportunidade");
   assert.equal(await status("seller-a", "DELETE", "/api/contacts/contact-a"), 204);
 
   // Gerente pode tudo dentro do próprio tenant, inclusive contato sem cliente vinculado.
@@ -181,6 +182,13 @@ try {
   assert.equal(await status("manager-a", "DELETE", "/api/opportunities/opp-b"), 204);
   assert.equal(await status("manager-a", "DELETE", "/api/companies/client-b"), 204);
   assert(!exists(opportunities, "opp-b") && !exists(clients, "client-b") && !exists(contacts, "contact-orphan-b"));
+
+  // Diretor exclui oportunidade de qualquer vendedor do próprio tenant.
+  resetData();
+  assert.equal(await status("director-a", "DELETE", "/api/opportunities/opp-a"), 204);
+  assert.equal(await status("director-a", "DELETE", "/api/opportunities/opp-b"), 204);
+  assert(!exists(opportunities, "opp-a") && !exists(opportunities, "opp-b"));
+  resetData();
 
   // Gerente e diretor não alcançam registros de outro tenant.
   for (const userId of ["manager-a", "director-a"]) {
