@@ -262,3 +262,19 @@ dois arquivos com conteúdo, `build-web-log.txt` e `row.status`, que continham i
 usuário/host de terminal, foram removidos no PR `chore/remove-root-stray-files`. O `.gitignore`
 passou a ignorar `*.log`, `/build-*-log.txt` e `/row.status`. O conteúdo continua acessível no
 histórico do git; avaliar tornar o repositório privado.
+
+### TD-BACKUP-UNUSED-CANONICAL-FN — função de backup usada só por teste
+
+**Aberto, baixo.** `backup_validate_canonical_pair_and_freshness`
+(`scripts/lib/production-backup-common.sh:18-24`), que exige o par fixo `production.sql.gz`, só é
+chamada pelo teste `scripts/smoke/production-backup-canonical-freshness-safety.sh`. Nenhum script,
+workflow, `erp-production-recovery.sh` ou o preflight a usa. O comentário da linha 27 ("remains strict
+for its existing callers") cita chamadores que não existem mais.
+
+`backup_bind_canonical_pair` **está em uso e deve ficar**: `backup_validate_pair_and_freshness` a
+chama (linha 31), e o preparador de backup chama esta em
+`scripts/prepare-production-recovery-backup.sh:412` (`PRODUCTION_BACKUP_CANONICAL_PAIR=VALIDATED`
+no run `37658861500`).
+
+Critério: remover a função e o comentário em PR futuro, junto com o ajuste do teste, com
+`npm run test:production-backup-recovery` e o CI verdes.
