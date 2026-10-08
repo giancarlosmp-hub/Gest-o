@@ -15,7 +15,7 @@ setModel("client", {
   findFirst: async (args: any) => args?.where?.id === "client-1" ? { id: "client-1", name: "Cliente Smoke", isArchived: false, ownerSellerId: "seller-1" } : null,
 });
 setModel("user", {
-  findFirst: async (args: any) => args?.where?.id === "invalid-seller" ? null : { id: args?.where?.id ?? "seller-1" },
+  findFirst: async (args: any) => { const id = args?.where?.id ?? "seller-1"; return id === "invalid-seller" ? null : { id, email: `${id}@example.test`, role: id.startsWith("director") ? "diretor" : id.startsWith("manager") ? "gerente" : "vendedor", region: null }; },
   findMany: async () => [{ id: "seller-1" }, { id: "seller-2" }],
 });
 setModel("agendaEvent", { findMany: async () => [] });
