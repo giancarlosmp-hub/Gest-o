@@ -237,18 +237,22 @@ Registrado na seção de comandos do `CLAUDE.md`.
 
 ### TD-WORKFLOW-SCRIPT-STOP-ELSE — `else` sob `script_stop` no `preview.yml`
 
-**Aberto.** O step SSH do `preview.yml` usa `script_stop: true` e tem 4 `else` em linha própria. É o
-mesmo defeito do VPS Drift Detection (regra em `DEPLOY_GUIDE.md`): quando a condição é falsa, a
-checagem que o `drone-ssh` injeta logo depois do `else` encerra o script com o status não zero da
-condição (exit 1 no caso comum), sem executar o ramo. Alcançabilidade, só pela leitura do código:
+**Resolvido.** Os 4 `else` em linha própria do step SSH do `preview.yml` foram reescritos sem
+`else`, sem mudar o comportamento de nenhum ramo: a condição vira uma flag avaliada uma vez e dois
+`if` sem `else` (site nginx), ou `cmd && X=0 || X="$?"` numa linha seguida de `if` de uma linha
+(login, token, `wait`). O `script_stop: true` continua no step. A allowlist de
+`scripts/smoke/production-deploy-safety.mjs` foi removida: qualquer `else`/`elif` em linha própria
+sob `script_stop` volta a falhar o teste.
+
+Defeito original, o mesmo do VPS Drift Detection (regra em `DEPLOY_GUIDE.md`): quando a condição era
+falsa, a checagem que o `drone-ssh` injeta logo depois do `else` encerrava o script com o status não
+zero da condição (exit 1 no caso comum), sem executar o ramo. Alcançabilidade antes da correção, só
+pela leitura do código (linhas anteriores à correção):
 
 - `cleanup_current_run_on_failure` (trap EXIT, linha ~231, sem nginx anterior): **alcançável** no primeiro preview de uma PR que falha depois de gravar o site nginx; pula a remoção do site, o `nginx -t`/reload e o `rm -rf` do diretório do preview.
 - login do shadow proof (linha ~481, `curl` falhou): **alcançável** quando a API não responde (o `curl` sem `-f` só falha por conexão/timeout); pula o marcador de login e o `fail_shadow_proof login`, mas o trap `emergency_shadow_cleanup` ainda faz o rollback do piloto.
 - extração do token (linha ~491): **pouco provável**, só com login HTTP 200 sem `accessToken` (regressão de contrato da API); pula `fail_shadow_proof token_extraction`, e o trap ainda faz o rollback.
 - `wait` das requisições (linha ~512): **alcançável** quando um `curl` em background falha por conexão/timeout durante os ciclos; pula o registro do exit code e a classificação, e o trap ainda faz o rollback.
-
-Os 4 estão numa allowlist contada em `scripts/smoke/production-deploy-safety.mjs`; uma ocorrência
-nova falha. Correção em PR separado (tirar `script_stop` do step ou reescrever os ramos sem `else`).
 
 ### TD-REPO-ROOT-STRAY-FILES — arquivos soltos na raiz
 

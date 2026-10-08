@@ -225,10 +225,13 @@ jobs:
                 fi
                 nginx_site="/etc/nginx/sites-available/crm-preview-pr-${PR_NUMBER}"
                 if sudo test -f "$nginx_site" && sudo grep -Fq "owner-run=${PREVIEW_OWNER_RUN_ID} owner-attempt=${PREVIEW_OWNER_RUN_ATTEMPT}" "$nginx_site"; then
-                  if [ -n "$PREVIOUS_NGINX_SITE" ] && [ -f "$PREVIOUS_NGINX_SITE" ]; then
+                  restore_previous_nginx_site=false
+                  if [ -n "$PREVIOUS_NGINX_SITE" ] && [ -f "$PREVIOUS_NGINX_SITE" ]; then restore_previous_nginx_site=true; fi
+                  if [ "$restore_previous_nginx_site" = "true" ]; then
                     sudo install -m 644 "$PREVIOUS_NGINX_SITE" "$nginx_site"
                     sudo ln -sfn "$nginx_site" "/etc/nginx/sites-enabled/crm-preview-pr-${PR_NUMBER}"
-                  else
+                  fi
+                  if [ "$restore_previous_nginx_site" != "true" ]; then
                     sudo rm -f "/etc/nginx/sites-enabled/crm-preview-pr-${PR_NUMBER}" "$nginx_site"
                   fi
                   sudo nginx -t
@@ -475,24 +478,15 @@ jobs:
 
             echo "=== REAL GET /clients SHADOW PROOF ==="
             node -e 'const fs=require("fs");fs.writeFileSync(process.argv[1],JSON.stringify({email:process.env.ADMIN_BOOTSTRAP_EMAIL,password:process.env.ADMIN_BOOTSTRAP_PASSWORD}),{mode:0o600})' "$LOGIN_PAYLOAD_FILE"
-            if curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
-              -H "Content-Type: application/json" --data-binary "@$LOGIN_PAYLOAD_FILE" > "$LOGIN_HTTP_FILE"; then
-              LOGIN_CURL_EXIT=0
-            else
-              LOGIN_CURL_EXIT="$?"
-            fi
+            curl -sS -o "$LOGIN_FILE" -w '%{http_code}' -X POST "http://127.0.0.1:${API_PORT}/auth/login" \
+              -H "Content-Type: application/json" --data-binary "@$LOGIN_PAYLOAD_FILE" > "$LOGIN_HTTP_FILE" && LOGIN_CURL_EXIT=0 || LOGIN_CURL_EXIT="$?"
             LOGIN_HTTP_STATUS="$(cat "$LOGIN_HTTP_FILE")"
             echo "TENANT_READ_PREVIEW_LOGIN_HTTP=${LOGIN_HTTP_STATUS:-unavailable}"
             if [ "$LOGIN_CURL_EXIT" != "0" ] || [ "$LOGIN_HTTP_STATUS" != "200" ]; then fail_shadow_proof login; fi
 
-            if TOKEN="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(typeof x.accessToken!=="string"||!x.accessToken)process.exit(1);process.stdout.write(x.accessToken)' "$LOGIN_FILE" 2>/dev/null)" && [ -n "$TOKEN" ]; then
-              TOKEN_EXTRACTION_EXIT=0
-              echo "TENANT_READ_PREVIEW_TOKEN=ACQUIRED"
-            else
-              TOKEN_EXTRACTION_EXIT="$?"
-              TOKEN=""
-              fail_shadow_proof token_extraction
-            fi
+            TOKEN="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(typeof x.accessToken!=="string"||!x.accessToken)process.exit(1);process.stdout.write(x.accessToken)' "$LOGIN_FILE" 2>/dev/null)" && [ -n "$TOKEN" ] && TOKEN_EXTRACTION_EXIT=0 || TOKEN_EXTRACTION_EXIT="$?"
+            if [ "$TOKEN_EXTRACTION_EXIT" = "0" ]; then echo "TENANT_READ_PREVIEW_TOKEN=ACQUIRED"; fi
+            if [ "$TOKEN_EXTRACTION_EXIT" != "0" ]; then TOKEN=""; fail_shadow_proof token_extraction; fi
 
             SHADOW_SINCE="$(date -u +%FT%TZ)"
             declare -A SEEN_REQUEST_IDS=()
@@ -507,11 +501,8 @@ jobs:
               done
               for index in $(seq 1 "$REQUESTS_PER_CYCLE"); do
                 request=$(( (cycle - 1) * REQUESTS_PER_CYCLE + index ))
-                if wait "${PIDS[$((index - 1))]}"; then
-                  printf '0\n' > "${RESULT_DIR}/${request}.exit"
-                else
-                  printf '%s\n' "$?" > "${RESULT_DIR}/${request}.exit"
-                fi
+                wait "${PIDS[$((index - 1))]}" && wait_exit=0 || wait_exit="$?"
+                printf '%s\n' "$wait_exit" > "${RESULT_DIR}/${request}.exit"
                 status="$(cat "${RESULT_DIR}/${request}.status")"
                 exit_code="$(cat "${RESULT_DIR}/${request}.exit")"
                 if [ "$status" != "200" ] || [ "$exit_code" != "0" ]; then fail_shadow_proof request; fi
