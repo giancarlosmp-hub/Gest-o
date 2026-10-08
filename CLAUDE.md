@@ -20,7 +20,10 @@ geral está no [`README.md`](README.md) e o estado oficial, decisões e procedim
 
 - `npm run build` e `npm run typecheck`: shared, API e web.
 - `npm run test:architecture-docs`: gate de segurança da documentação.
-- `npm run test:production-deploy`: scripts de deploy com Docker falso (roda no CI).
+- `npm run test:production-deploy`: scripts de deploy com Docker falso (roda no CI). Os testes em
+  shell verificam dono e permissões de arquivo no padrão Linux e são suportados só em Linux/WSL e no
+  CI. No Windows nativo passam 4 de 12 (`id -gn` falha, `stat -c '%U:%G'` devolve `UNKNOWN` e
+  `chmod` falha na pasta temporária). A referência é o CI.
 - Os demais `npm run test:*` estão em [`package.json`](package.json). Os sufixos `:postgres` e
   `:docker` exigem PostgreSQL ou Docker reais locais.
 
