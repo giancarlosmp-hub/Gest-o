@@ -1,0 +1,12 @@
+# Quebras de linha: LF no repositório e no checkout, em qualquer sistema.
+# Os scripts bash de deploy e os testes de deploy exigem LF; no Windows o
+# core.autocrlf=true gerava CRLF no checkout e quebrava os scripts.
+* text=auto eol=lf
+
+# Scripts do Windows continuam com CRLF no checkout.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários: sem conversão de quebra de linha nem diff de texto.
+*.png binary
