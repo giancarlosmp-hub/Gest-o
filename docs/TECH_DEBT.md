@@ -226,8 +226,14 @@ restantes não são de quebra de linha:
   Bash ("cannot find name for group ID"), e o `set -e` encerra o teste.
 - `production-rebaseline-safety.mjs`: `mkdir`/`chmod` sem permissão no diretório temporário do Windows.
 
-No CI (Linux) todos passam. Pendente: decidir se esses testes devem rodar no Windows (por exemplo, com
-fallback para `id -g` quando o grupo não tem nome) ou se ficam documentados como só Linux/WSL.
+No CI (Linux) todos passam.
+
+**Decidido: testes de deploy em shell só em Linux/WSL e no CI.** Esses testes verificam dono e
+permissões de arquivo no padrão Linux. No Windows nativo (Git Bash) passam 4 de 12 scripts de
+`test:production-deploy`, com três causas: `id -gn` não encontra o nome do grupo, `stat -c '%U:%G'`
+devolve o grupo como `UNKNOWN` (por isso um fallback para `id -g` não resolveria: o dono esperado não
+casaria) e `chmod` falha na pasta temporária. Os testes não foram alterados; a referência é o CI.
+Registrado na seção de comandos do `CLAUDE.md`.
 
 ### TD-WORKFLOW-SCRIPT-STOP-ELSE — `else` sob `script_stop` no `preview.yml`
 
