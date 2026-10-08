@@ -10,6 +10,7 @@ import TimelineEventList, { TimelineEventItem } from "../components/TimelineEven
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import CreateOpportunityModal from "../components/opportunities/CreateOpportunityModal";
 import OpportunityImportModal from "../components/opportunities/OpportunityImportModal";
+import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
@@ -425,6 +426,8 @@ export default function OpportunitiesPage() {
   const [closeReason, setCloseReason] = useState("");
   const [isSchedulingFollowUp, setIsSchedulingFollowUp] = useState(false);
   const [pipelineFollowUpDate, setPipelineFollowUpDate] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isDeletingOpportunity, setIsDeletingOpportunity] = useState(false);
   const opportunitiesRequestRef = useRef(0);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   const productDropdownTouchStartYRef = useRef<number | null>(null);
@@ -433,6 +436,7 @@ export default function OpportunitiesPage() {
   const actionTodayFilter = searchParams.get("actionToday") === "true";
   const isSeller = user?.role === "vendedor";
   const canFilterByOwner = user?.role === "diretor" || user?.role === "gerente";
+  const canDeleteOpportunity = user?.role === "diretor" || user?.role === "gerente";
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search.trim()), 400);
@@ -1236,10 +1240,27 @@ export default function OpportunitiesPage() {
     loadOpportunityItems(item.id).catch(() => null);
   };
 
-  const onDelete = async (id: string) => {
-    await api.delete(`/opportunities/${id}`);
-    await invalidateOpportunitiesAndDashboardQueries();
-    toast.success("Oportunidade excluída");
+  const requestDeleteOpportunity = (item: Pick<Opportunity, "id" | "title">) => {
+    setOpenCloseMenuId(null);
+    setDeleteTarget({ id: item.id, title: item.title });
+  };
+
+  const onConfirmDeleteOpportunity = async () => {
+    if (!deleteTarget || isDeletingOpportunity) return;
+    const targetId = deleteTarget.id;
+    setIsDeletingOpportunity(true);
+    try {
+      await api.delete(`/opportunities/${targetId}`);
+      setItems((currentItems) => currentItems.filter((item) => item.id !== targetId));
+      if (selectedOpportunity?.id === targetId) closePipelineDrawer();
+      setDeleteTarget(null);
+      toast.success("Oportunidade excluída");
+      await invalidateOpportunitiesAndDashboardQueries();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Não foi possível excluir a oportunidade"));
+    } finally {
+      setIsDeletingOpportunity(false);
+    }
   };
 
   const selectExistingClient = (client: {
@@ -2025,7 +2046,6 @@ export default function OpportunitiesPage() {
                     <td className="space-x-2 whitespace-nowrap p-2">
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="font-semibold text-amber-700" onClick={() => onEdit(item)}>Transferir responsável</button> : null}
-                      <button type="button" className="text-red-600" onClick={() => onDelete(item.id)}>Excluir</button>
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
                       {item.stage === "ganho" ? (
                         <button type="button" className="text-emerald-700" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
@@ -2047,6 +2067,7 @@ export default function OpportunitiesPage() {
                           ) : null}
                         </span>
                       ) : null}
+                      {canDeleteOpportunity ? <button type="button" className="text-red-600" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
                     </td>
                   </tr>
                 );
@@ -2142,12 +2163,12 @@ export default function OpportunitiesPage() {
                               <ReturnStatusBadge status={getReturnStatus(item)} />
                             </div>
                           </div>
-                          {!["ganho", "perdido"].includes(item.stage) ? (
+                          {!["ganho", "perdido"].includes(item.stage) || canDeleteOpportunity ? (
                             <div className="relative flex justify-end" onClick={(event) => event.stopPropagation()}>
                               <button
                                 type="button"
                                 className="rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
-                                aria-label="Abrir ações de encerramento"
+                                aria-label="Abrir ações da oportunidade"
                                 onClick={(event) => {
                                   event.stopPropagation();
                                   setOpenCloseMenuId((current) => (current === item.id ? null : item.id));
@@ -2157,8 +2178,13 @@ export default function OpportunitiesPage() {
                               </button>
                               {openCloseMenuId === item.id ? (
                                 <div className="absolute right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-                                  <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
-                                  <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                                  {!["ganho", "perdido"].includes(item.stage) ? (
+                                    <>
+                                      <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
+                                      <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                                    </>
+                                  ) : null}
+                                  {canDeleteOpportunity ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
                                 </div>
                               ) : null}
                             </div>
@@ -2323,6 +2349,15 @@ export default function OpportunitiesPage() {
               >
                 Abrir detalhes
               </button>
+              {canDeleteOpportunity ? (
+                <button
+                  type="button"
+                  className="rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                  onClick={() => requestDeleteOpportunity(selectedOpportunity)}
+                >
+                  Excluir oportunidade
+                </button>
+              ) : null}
             </div>
 
             <form className="mt-6 space-y-3" onSubmit={onSavePipelineInteraction}>
@@ -2396,6 +2431,15 @@ export default function OpportunitiesPage() {
             </div>
           </form>
         </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <DeleteOpportunityConfirmModal
+          opportunityTitle={deleteTarget.title}
+          deleting={isDeletingOpportunity}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => void onConfirmDeleteOpportunity()}
+        />
       ) : null}
     </div>
   );
