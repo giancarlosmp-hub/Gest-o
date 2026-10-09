@@ -8,7 +8,7 @@ type DeleteOpportunityConfirmModalProps = {
 // Exclusão é exclusiva de diretor/gerente (a API é a proteção real) e sempre passa por esta confirmação.
 export default function DeleteOpportunityConfirmModal({ opportunityTitle, deleting, onCancel, onConfirm }: DeleteOpportunityConfirmModalProps) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4" onClick={deleting ? undefined : onCancel}>
+    <div className="fixed inset-0 z-[70] !mt-0 flex items-center justify-center bg-slate-900/60 p-4" onClick={deleting ? undefined : onCancel}>
       <div
         role="alertdialog"
         aria-modal="true"

@@ -268,7 +268,7 @@ textarea:focus {
     margin-bottom: 4px;
   }
 
-  form input:not([type="checkbox"]):not([type="radio"]),
+  form input:not([type="checkbox"]):not([type="radio"]):not(.sr-only),
   form select,
   form textarea {
     width: 100%;
@@ -312,10 +312,13 @@ textarea:focus {
     max-width: none;
   }
 
-  /* Coluna fixa de ações da lista: quebra em linhas para não ocupar a largura toda da tela. */
-  .opportunity-list-actions {
-    width: 9.5rem;
-    flex-wrap: wrap;
-    white-space: normal;
+  .opportunity-desktop-only {
+    display: none !important;
+  }
+}
+
+@media (min-width: 641px) {
+  .opportunity-mobile-only {
+    display: none !important;
   }
 }

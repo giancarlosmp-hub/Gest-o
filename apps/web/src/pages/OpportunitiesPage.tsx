@@ -1288,6 +1288,12 @@ export default function OpportunitiesPage() {
     loadOpportunityItems(item.id).catch(() => null);
   };
 
+  // O modal de edição não abre por cima do drawer: fecha o drawer primeiro.
+  const onEditFromDrawer = (item: Opportunity) => {
+    closePipelineDrawer();
+    onEdit(item);
+  };
+
   const requestDeleteOpportunity = (item: Pick<Opportunity, "id" | "title">) => {
     closeActionMenus();
     setDeleteTarget({ id: item.id, title: item.title });
@@ -1991,9 +1997,43 @@ export default function OpportunitiesPage() {
             </div>
             {addItemDisabledReason ? <p className="text-right text-xs text-amber-700">{addItemDisabledReason}</p> : null}
 
-            <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+            <div className="opportunity-mobile-only space-y-2">
+              {loadingItems ? (
+                <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">Carregando itens...</p>
+              ) : opportunityItems.length === 0 ? (
+                <p className="rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-500">Nenhum produto adicionado.</p>
+              ) : opportunityItems.map((opportunityItem) => {
+                const totals = calculateItemTotals(opportunityItem);
+                const stockBadge = getStockBadge(opportunityItem.stock);
+                return (
+                  <article key={opportunityItem.id} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-slate-900">{opportunityItem.productNameSnapshot} · {opportunityItem.erpProductClassCode}</span>
+                      {stockBadge ? (
+                        <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${stockBadge.className}`}>
+                          {stockBadge.label}
+                        </span>
+                      ) : null}
+                    </div>
+                    {/* Flex, não grid: no celular, regras globais de formulário forçam .grid a uma coluna. */}
+                    <dl className="mt-2 space-y-1">
+                      <div className="flex items-center justify-between gap-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Qtd</dt><dd>{opportunityItem.quantity}</dd></div>
+                      <div className="flex items-center justify-between gap-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Preço</dt><dd className="whitespace-nowrap">{formatCurrencyBRL(Number(opportunityItem.unitPrice || 0))}</dd></div>
+                      <div className="flex items-center justify-between gap-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Desc.</dt><dd className="whitespace-nowrap">{opportunityItem.discountType === "percent" ? `${opportunityItem.discountValue}%` : formatCurrencyBRL(Number(opportunityItem.discountValue || 0))}</dd></div>
+                      <div className="flex items-center justify-between gap-3"><dt className="text-xs uppercase tracking-wide text-slate-500">Total</dt><dd className="whitespace-nowrap font-medium">{formatCurrencyBRL(totals.netTotal)}</dd></div>
+                    </dl>
+                    <div className="mt-3 flex gap-2">
+                      <button type="button" className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700" onClick={() => editOpportunityItem(opportunityItem)}>Editar</button>
+                      <button type="button" className="flex-1 rounded border border-red-200 px-2 py-1 text-xs text-red-600" onClick={() => removeOpportunityItem(opportunityItem.id).catch((error) => toast.error(getApiErrorMessage(error, "Não foi possível remover item")))}>Remover</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="opportunity-desktop-only overflow-x-auto rounded-lg border border-slate-200 bg-white">
               <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <thead className="whitespace-nowrap bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <tr>
                     <th className="p-2">Produto</th>
                     <th className="p-2">Qtd</th>
@@ -2058,7 +2098,7 @@ export default function OpportunitiesPage() {
       {viewMode === "list" ? (
 
         <div className="overflow-auto rounded-2xl border border-slate-200 bg-white shadow-sm" data-action-menu-boundary>
-          <table className="min-w-[1500px] w-full text-sm">
+          <table className="min-w-[1500px] w-full whitespace-nowrap text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-slate-600">
                 <th className="p-2">Título</th><th className="p-2">Cliente</th><th className="p-2">Vendedor</th><th className="p-2">Risco</th><th className="p-2">Etapa</th><th className="p-2">Valor</th><th className="p-2">Probabilidade</th><th className="p-2">Valor Ponderado</th><th className="p-2">Cultura</th><th className="p-2">Safra</th><th className="p-2">Área (ha)</th><th className="p-2">Produto ofertado</th><th className="p-2">Entrada proposta</th><th className="p-2">Retorno previsto</th><th className="p-2">Status retorno</th><th className="sticky right-0 z-[1] border-l border-slate-200 bg-slate-50 p-2 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)]">Ações</th>
@@ -2078,11 +2118,11 @@ export default function OpportunitiesPage() {
                     <td className="p-2">{getClientName(item)}</td>
                     <td className="p-2">{getSellerName(item)}</td>
                     <td className="p-2">
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeClassName[risk]}`}>
+                      <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold ${riskBadgeClassName[risk]}`}>
                         {riskLabel[risk]}
                       </span>
                     </td>
-                    <td className="p-2"><div>{stageLabel[item.stage]}</div>{item.effectiveWin?.reason ? <div className="mt-1 max-w-52 rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}</td>
+                    <td className="p-2"><div>{stageLabel[item.stage]}</div>{item.effectiveWin?.reason ? <div className="mt-1 min-w-40 max-w-52 whitespace-normal rounded bg-red-50 px-2 py-1 text-xs font-semibold text-red-800">{item.effectiveWin.reason}</div> : null}</td>
                     <td className="p-2">{formatCurrencyBRL(item.value)}</td>
                     <td className="p-2">{item.probability ?? 0}%</td>
                     <td className="p-2">{formatCurrencyBRL(weighted)}</td>
@@ -2094,7 +2134,7 @@ export default function OpportunitiesPage() {
                     <td className="p-2">{formatDateBR(item.expectedCloseDate)}</td>
                     <td className="p-2"><ReturnStatusBadge status={getReturnStatus(item)} /></td>
                     <td className={`sticky right-0 z-[1] border-l border-slate-200 p-2 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.18)] ${riskStickyCellClassName[risk]}`}>
-                      <div className="opportunity-list-actions flex items-center gap-x-2 whitespace-nowrap">
+                      <div className="opportunity-desktop-only flex items-center gap-x-2 whitespace-nowrap">
                       <button type="button" className="text-brand-700" onClick={() => onEdit(item)}>Editar</button>
                       {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="font-semibold text-amber-700" onClick={() => onEdit(item)}>Transferir responsável</button> : null}
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
@@ -2121,6 +2161,35 @@ export default function OpportunitiesPage() {
                         </span>
                       ) : null}
                       {canDeleteOpportunity ? <button type="button" className="text-red-600" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
+                      </div>
+                      <div className="opportunity-mobile-only flex justify-center" data-opportunity-action-menu>
+                        <button
+                          ref={openCloseMenuId === `mobile:${item.id}` ? itemActionMenuAnchorRef : undefined}
+                          type="button"
+                          className="touch-icon-button inline-flex items-center justify-center rounded-md border border-slate-300 p-1 text-slate-600 hover:bg-slate-100"
+                          aria-label="Abrir ações da oportunidade"
+                          aria-expanded={openCloseMenuId === `mobile:${item.id}`}
+                          onClick={() => toggleItemActionMenu(`mobile:${item.id}`)}
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+                        {openCloseMenuId === `mobile:${item.id}` ? (
+                          <ActionMenuPopover anchorRef={itemActionMenuAnchorRef} className="min-w-52">
+                            <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-brand-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Editar</button>
+                            {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm font-semibold text-amber-700 hover:bg-amber-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Transferir responsável</button> : null}
+                            <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); navigate(`/oportunidades/${item.id}`); }}>Detalhes</button>
+                            {item.stage === "ganho" ? (
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
+                            ) : null}
+                            {!["ganho", "perdido"].includes(item.stage) ? (
+                              <>
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openCloseModal(item.id, "ganho")}>Marcar como Ganho</button>
+                                <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-rose-700 hover:bg-rose-50" onClick={() => openCloseModal(item.id, "perdido")}>Marcar como Perdido</button>
+                              </>
+                            ) : null}
+                            {canDeleteOpportunity ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50" onClick={() => requestDeleteOpportunity(item)}>Excluir</button> : null}
+                          </ActionMenuPopover>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -2213,7 +2282,7 @@ export default function OpportunitiesPage() {
                               <div className="text-xs text-slate-500">Follow-up: {formatDateBR(item.followUpDate || item.expectedCloseDate)}</div>
                             </div>
                             <div className="flex flex-col items-end gap-1">
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClassName[risk]}`}>
+                              <span className={`inline-flex whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClassName[risk]}`}>
                                 Risco {riskLabel[risk]}
                               </span>
                               <ReturnStatusBadge status={getReturnStatus(item)} />
@@ -2264,7 +2333,7 @@ export default function OpportunitiesPage() {
       )}
 
       {isPipelineDrawerOpen && selectedOpportunity ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40" onClick={closePipelineDrawer}>
+        <div className="fixed inset-0 z-50 !mt-0 flex justify-end bg-slate-900/40" onClick={closePipelineDrawer}>
           <aside
             className="opportunity-touch-targets opportunity-drawer-panel h-full w-full max-w-lg overflow-y-auto overscroll-contain bg-white p-5 shadow-xl"
             onClick={(event) => event.stopPropagation()}
@@ -2378,7 +2447,7 @@ export default function OpportunitiesPage() {
                 <button
                   type="submit"
                   disabled={isSchedulingFollowUp}
-                  className="whitespace-nowrap rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="shrink-0 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   {isSchedulingFollowUp ? "Salvando..." : "Agendar Follow-up"}
                 </button>
@@ -2389,7 +2458,7 @@ export default function OpportunitiesPage() {
               <button
                 type="button"
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700"
-                onClick={() => onEdit(selectedOpportunity)}
+                onClick={() => onEditFromDrawer(selectedOpportunity)}
               >
                 Editar oportunidade
               </button>
@@ -2462,7 +2531,7 @@ export default function OpportunitiesPage() {
       ) : null}
 
       {closeOpportunityState ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCloseModal}>
+        <div className="fixed inset-0 z-[70] !mt-0 flex items-center justify-center bg-slate-900/60 p-4" onClick={closeCloseModal}>
           <form className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-5" onSubmit={onConfirmCloseOpportunity} onClick={(event) => event.stopPropagation()}>
             <h4 className="text-lg font-semibold text-slate-900">Confirmar encerramento</h4>
             <p className="text-sm text-slate-600">Tem certeza que deseja marcar esta oportunidade como <strong>{stageLabel[closeOpportunityState.stage]}</strong>?</p>
@@ -2521,5 +2590,5 @@ function Card({ title, value, loading }: { title: string; value: string; loading
 }
 
 function Badge({ className, children }: { className: string; children: ReactNode }) {
-  return <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${className}`}>{children}</span>;
+  return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-xs font-semibold ${className}`}>{children}</span>;
 }
