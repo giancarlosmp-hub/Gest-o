@@ -109,6 +109,64 @@ const PREVIEW_PRODUCTS = [
   }
 ] as const;
 
+// Produtos fictícios para testar itens de oportunidade sem o ERP. O preço por
+// tabela fica em ProductPrice.erpPriceId (código da tabela, como na sync de
+// /prices) sem filial, que é o que a busca da oportunidade aceita. Os saldos
+// cobrem os avisos de estoque: alto, baixo, zerado e negativo.
+const PREVIEW_PRICE_TABLE_CODES = ["1", "2"] as const;
+const PREVIEW_ITEM_PRODUCTS = [
+  { erpProductCode: "1", name: "Semente Milho Teste 1", className: "Sementes", unit: "SC", groupName: "Milho", stockQuantity: 1200, tablePrices: { "1": 980, "2": 1097.6 } },
+  { erpProductCode: "2", name: "Semente Soja Teste 2", className: "Sementes", unit: "SC", groupName: "Soja", stockQuantity: 6, tablePrices: { "1": 420, "2": 470.4 } },
+  { erpProductCode: "3", name: "Fertilizante NPK Teste 3", className: "Fertilizantes", unit: "SC", groupName: "Nutrição", stockQuantity: 0, tablePrices: { "1": 165, "2": 184.8 } },
+  { erpProductCode: "4", name: "Herbicida Teste 4", className: "Defensivos", unit: "LT", groupName: "Proteção", stockQuantity: -15, tablePrices: { "1": 89.9, "2": 100.69 } },
+  { erpProductCode: "5", name: "Inseticida Teste 5", className: "Defensivos", unit: "LT", groupName: "Proteção", stockQuantity: 180, tablePrices: { "1": 132.5, "2": 148.4 } },
+  { erpProductCode: "6", name: "Adjuvante Teste 6", className: "Adjuvantes", unit: "LT", groupName: "Proteção", stockQuantity: 640, tablePrices: { "1": 38, "2": 42.56 } }
+] as const;
+const PREVIEW_ITEM_PRODUCT_CLASS_CODE = "PREVIEW";
+
+type PreviewItemProductCode = (typeof PREVIEW_ITEM_PRODUCTS)[number]["erpProductCode"];
+
+type PreviewOpportunityWithItemsTemplate = {
+  sellerEmail: (typeof PREVIEW_SELLERS)[number]["email"];
+  title: string;
+  stage: OpportunityStage;
+  probability: number;
+  items: Array<{ erpProductCode: PreviewItemProductCode; quantity: number; discountType: "value" | "percent"; discountValue: number }>;
+};
+
+const PREVIEW_OPPORTUNITIES_WITH_ITEMS: PreviewOpportunityWithItemsTemplate[] = [
+  {
+    sellerEmail: "ana.preview@preview.local",
+    title: "Oportunidade com itens 1",
+    stage: "proposta",
+    probability: 70,
+    items: [
+      { erpProductCode: "1", quantity: 10, discountType: "value", discountValue: 0 },
+      { erpProductCode: "2", quantity: 20, discountType: "percent", discountValue: 5 },
+      { erpProductCode: "6", quantity: 30, discountType: "value", discountValue: 0 }
+    ]
+  },
+  {
+    sellerEmail: "bruno.preview@preview.local",
+    title: "Oportunidade com itens 2",
+    stage: "negociacao",
+    probability: 50,
+    items: [
+      { erpProductCode: "3", quantity: 40, discountType: "value", discountValue: 300 },
+      { erpProductCode: "4", quantity: 25, discountType: "value", discountValue: 0 }
+    ]
+  }
+];
+
+// Mesma regra de computeOpportunityItemTotals (crudRoutes) para o valor da
+// oportunidade bater com a soma dos itens.
+function computePreviewItemTotals(quantity: number, unitPrice: number, discountType: "value" | "percent", discountValue: number) {
+  const grossTotal = Number((quantity * unitPrice).toFixed(2));
+  const rawDiscount = discountType === "percent" ? grossTotal * (discountValue / 100) : discountValue;
+  const discountTotal = Number(Math.max(0, Math.min(grossTotal, rawDiscount)).toFixed(2));
+  return { grossTotal, discountTotal, netTotal: Number((grossTotal - discountTotal).toFixed(2)) };
+}
+
 
 type PreviewTerritoryCityTemplate = {
   city: string;
@@ -296,6 +354,10 @@ function assertSafePreviewEnvironment() {
 
   if (!enablePreviewSeed) {
     throw new Error("ENABLE_PREVIEW_SEED=true é obrigatório para executar seed de preview.");
+  }
+
+  if (process.env.DEPLOYMENT_ENV !== "preview") {
+    throw new Error("DEPLOYMENT_ENV=preview é obrigatório para executar seed de preview.");
   }
 
   if (nodeEnv === "production") {
@@ -514,6 +576,128 @@ async function seedCancelledOrderScenario(seller: Awaited<ReturnType<typeof upse
   });
 }
 
+async function seedPreviewItemProducts(now: Date) {
+  const productsByCode = new Map<string, { id: string; erpProductCode: string; erpProductClassCode: string; name: string; unit: string | null; tablePrice: number }>();
+
+  for (const template of PREVIEW_ITEM_PRODUCTS) {
+    const name = `${PREVIEW_SEED_TAG} ${template.name}`;
+    const data = {
+      name,
+      className: template.className,
+      unit: template.unit,
+      brand: "Preview QA",
+      groupName: template.groupName,
+      defaultPrice: template.tablePrices["1"],
+      minPrice: Number((template.tablePrices["1"] * 0.9).toFixed(2)),
+      stockQuantity: template.stockQuantity,
+      isActive: true,
+      isSuspended: false,
+      rawErpPayload: {
+        previewSeed: true,
+        source: PREVIEW_SEED_TAG,
+        CODPRODUTO: template.erpProductCode,
+        CODPRODUTO_CLAS: PREVIEW_ITEM_PRODUCT_CLASS_CODE,
+        DSCPRODUTO: name,
+        UND_MEDIDA: template.unit,
+        PRECO: template.tablePrices["1"],
+        ESTOQUE: template.stockQuantity
+      }
+    };
+    const product = await prisma.product.upsert({
+      where: { erpProductCode_erpProductClassCode: { erpProductCode: template.erpProductCode, erpProductClassCode: PREVIEW_ITEM_PRODUCT_CLASS_CODE } },
+      update: data,
+      create: { erpProductCode: template.erpProductCode, erpProductClassCode: PREVIEW_ITEM_PRODUCT_CLASS_CODE, ...data }
+    });
+
+    await prisma.productPrice.deleteMany({ where: { productId: product.id } });
+    await prisma.productPrice.createMany({
+      data: PREVIEW_PRICE_TABLE_CODES.map((priceTableCode) => ({
+        productId: product.id,
+        erpPriceId: priceTableCode,
+        branchCode: null,
+        price: template.tablePrices[priceTableCode],
+        source: "prices",
+        availabilityState: "available",
+        validFrom: addDays(now, -1),
+        observedAt: now
+      }))
+    });
+
+    productsByCode.set(template.erpProductCode, {
+      id: product.id,
+      erpProductCode: product.erpProductCode,
+      erpProductClassCode: product.erpProductClassCode,
+      name: product.name,
+      unit: product.unit,
+      tablePrice: template.tablePrices["1"]
+    });
+  }
+
+  return productsByCode;
+}
+
+async function seedPreviewOpportunitiesWithItems(
+  sellers: Awaited<ReturnType<typeof upsertSeller>>[],
+  clients: Array<{ id: string; ownerSellerId: string }>,
+  productsByCode: Awaited<ReturnType<typeof seedPreviewItemProducts>>,
+  now: Date
+) {
+  let itemCount = 0;
+
+  for (const template of PREVIEW_OPPORTUNITIES_WITH_ITEMS) {
+    const seller = sellers.find((candidate) => candidate.email === template.sellerEmail);
+    if (!seller) throw new Error("PREVIEW_ITEM_SELLER_MISSING");
+    const client = clients.find((candidate) => candidate.ownerSellerId === seller.id);
+    if (!client) throw new Error("PREVIEW_ITEM_CLIENT_MISSING");
+
+    const items = template.items.map((item, index) => {
+      const product = productsByCode.get(item.erpProductCode);
+      if (!product) throw new Error("PREVIEW_ITEM_PRODUCT_MISSING");
+      return {
+        productId: product.id,
+        lineNumber: index + 1,
+        erpProductCode: product.erpProductCode,
+        erpProductClassCode: product.erpProductClassCode,
+        productNameSnapshot: product.name,
+        unit: product.unit,
+        quantity: item.quantity,
+        unitPrice: product.tablePrice,
+        discountType: item.discountType,
+        discountValue: item.discountValue,
+        ...computePreviewItemTotals(item.quantity, product.tablePrice, item.discountType, item.discountValue),
+        notes: `${PREVIEW_SEED_TAG} item ${index + 1}`
+      };
+    });
+    const value = Number(items.reduce((sum, item) => sum + item.netTotal, 0).toFixed(2));
+
+    // Oportunidade e itens nascem juntos; a limpeza por título remove os itens em cascata.
+    await prisma.opportunity.create({
+      data: {
+        title: `${PREVIEW_SEED_TAG} ${template.title}`,
+        value,
+        stage: template.stage,
+        crop: "milho",
+        season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
+        areaHa: 150,
+        productOffered: "Itens de teste do preview",
+        proposalDate: addDays(now, -3),
+        followUpDate: addDays(now, 2),
+        expectedCloseDate: addDays(now, 15),
+        lastContactAt: addDays(now, -1),
+        probability: template.probability,
+        priceTableCode: "1",
+        notes: `${PREVIEW_SEED_TAG} oportunidade com itens para testar adicionar, editar e remover produtos`,
+        clientId: client.id,
+        ownerSellerId: seller.id,
+        items: { create: items }
+      }
+    });
+    itemCount += items.length;
+  }
+
+  return { opportunitiesWithItems: PREVIEW_OPPORTUNITIES_WITH_ITEMS.length, opportunityItems: itemCount };
+}
+
 async function createPreviewDataset() {
   const now = new Date();
   const currentMonth = monthString(now);
@@ -566,6 +750,8 @@ async function createPreviewDataset() {
       }))
     });
   }
+
+  const previewItemProducts = await seedPreviewItemProducts(now);
 
   const clients = [];
 
@@ -649,6 +835,8 @@ async function createPreviewDataset() {
     opportunityCounter += 1;
   }
 
+  const itemSeedSummary = await seedPreviewOpportunitiesWithItems(sellers, clients, previewItemProducts, now);
+
   const territorySeedSummary = await seedPreviewTerritories(sellers, now);
 
   for (const [index, template] of PREVIEW_AGENDA_TEMPLATES.entries()) {
@@ -721,6 +909,9 @@ async function createPreviewDataset() {
     territoryCities: territorySeedSummary.territoryCityCount,
     territoryOpportunities: territorySeedSummary.territoryOpportunityCount,
     territoryOrders: territorySeedSummary.territoryOrderCount,
+    itemProducts: previewItemProducts.size,
+    opportunitiesWithItems: itemSeedSummary.opportunitiesWithItems,
+    opportunityItems: itemSeedSummary.opportunityItems,
     tag: PREVIEW_SEED_TAG
   });
 }

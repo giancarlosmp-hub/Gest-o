@@ -54,7 +54,39 @@ async function failClosed() {
     const scoped = clients.filter((client) => client.ownerSellerId === user.id && !client.isArchived && client.tenantId === tenantId).length;
     if (legacy !== scoped) throw new Error("DATASET_RBAC_COUNT_FAILED");
   }
-  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length, territoryOrders: territoryOrders.length, cancellationOrders: cancellationOrders.length });
+  const [itemProducts, itemOpportunities] = await Promise.all([
+    prisma.product.findMany({
+      where: { erpProductClassCode: "PREVIEW", name: { startsWith: "[preview-seed]" } },
+      select: { erpProductCode: true, isActive: true, isSuspended: true, stockQuantity: true, prices: { select: { erpPriceId: true, branchCode: true, price: true, availabilityState: true } } }
+    }),
+    prisma.opportunity.findMany({
+      where: { title: { contains: "[preview-seed]" }, items: { some: {} } },
+      select: { value: true, ownerSellerId: true, client: { select: { tenantId: true, ownerSellerId: true } }, items: { select: { lineNumber: true, erpProductCode: true, discountTotal: true, grossTotal: true, netTotal: true, product: { select: { erpProductClassCode: true } } } } }
+    })
+  ]);
+  const productCodes = itemProducts.map((product) => product.erpProductCode).sort();
+  if (itemProducts.length !== 6 || productCodes.join(",") !== "1,2,3,4,5,6") throw new Error("DATASET_ITEM_PRODUCT_CARDINALITY_FAILED");
+  for (const product of itemProducts) {
+    if (!product.isActive || product.isSuspended) throw new Error("DATASET_ITEM_PRODUCT_STATUS_FAILED");
+    for (const table of ["1", "2"]) {
+      const rows = product.prices.filter((price) => price.erpPriceId === table);
+      if (rows.length !== 1 || rows[0].branchCode !== null || rows[0].availabilityState !== "available" || !(rows[0].price > 0)) throw new Error("DATASET_ITEM_PRODUCT_PRICE_FAILED");
+    }
+  }
+  const stocks = itemProducts.map((product) => product.stockQuantity ?? Number.NaN);
+  if (!stocks.some((stock) => stock >= 100) || !stocks.some((stock) => stock > 0 && stock < 10) || !stocks.some((stock) => stock === 0) || !stocks.some((stock) => stock < 0)) throw new Error("DATASET_ITEM_STOCK_SCENARIOS_FAILED");
+  const sellerIds = new Set(users.filter((user) => user.role === "vendedor").map((user) => user.id));
+  const items = itemOpportunities.flatMap((opportunity) => opportunity.items);
+  if (itemOpportunities.length !== 2 || items.length !== 5) throw new Error("DATASET_ITEM_CARDINALITY_FAILED");
+  for (const opportunity of itemOpportunities) {
+    const netTotal = Number(opportunity.items.reduce((sum, item) => sum + item.netTotal, 0).toFixed(2));
+    if (opportunity.items.length < 2 || opportunity.items.length > 3 || Math.abs(netTotal - opportunity.value) > 0.005) throw new Error("DATASET_ITEM_VALUE_FAILED");
+    if (new Set(opportunity.items.map((item) => item.lineNumber)).size !== opportunity.items.length) throw new Error("DATASET_ITEM_LINE_FAILED");
+    if (!sellerIds.has(opportunity.ownerSellerId) || opportunity.client.ownerSellerId !== opportunity.ownerSellerId || opportunity.client.tenantId !== tenantId) throw new Error("DATASET_ITEM_OWNERSHIP_FAILED");
+  }
+  if (items.some((item) => item.product?.erpProductClassCode !== "PREVIEW" || Math.abs(item.grossTotal - item.discountTotal - item.netTotal) > 0.005)) throw new Error("DATASET_ITEM_PRODUCT_LINK_FAILED");
+  if (!items.some((item) => item.discountTotal > 0)) throw new Error("DATASET_ITEM_DISCOUNT_FAILED");
+  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length, territoryOrders: territoryOrders.length, cancellationOrders: cancellationOrders.length, itemProducts: itemProducts.length, itemOpportunities: itemOpportunities.length, opportunityItems: items.length });
 }
 
 failClosed().finally(() => prisma.$disconnect()).catch((error) => { console.error("Preview dataset certification failed", { code: error instanceof Error ? error.message : "UNKNOWN" }); process.exit(1); });

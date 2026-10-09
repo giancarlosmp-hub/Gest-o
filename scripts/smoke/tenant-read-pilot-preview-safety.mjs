@@ -90,6 +90,11 @@ assert.match(previewSeed, /seller:\s*\{\s*connect:\s*\{\s*id:\s*seller\.id/, "se
 const cancelledScenario = previewSeed.slice(previewSeed.indexOf("async function seedCancelledOrderScenario"), previewSeed.indexOf("async function createPreviewDataset"));
 assert.ok(cancelledScenario.includes('code: "968-PREVIEW"') && cancelledScenario.includes('region: "Sul"'), "cancelled-order preview client must satisfy the required synthetic region contract");
 assert.match(previewSeed, /seedCancelledOrderScenario[\s\S]*prisma\.\$transaction/, "cancelled-order preview scenario must be atomic on partial failure");
+assert.match(postgresHarness, /"erpProductClassCode" = 'PREVIEW'[^\n]*<> 6 THEN RAISE EXCEPTION 'item product count'/, "seed proof must require exactly six synthetic item products");
+assert.match(postgresHarness, /"erpPriceId" IN \('1','2'\)[^\n]*<> 12 THEN RAISE EXCEPTION 'item product price count'/, "seed proof must require table 1 and 2 prices for every synthetic item product");
+assert.match(postgresHarness, /"OpportunityItem"[^\n]*<> 5 THEN RAISE EXCEPTION 'opportunity item count'/, "seed proof must require exactly five synthetic opportunity items");
+assert.match(postgresHarness, /count\(\*\) FROM "Product"\) \|\| ':' \|\| \(SELECT count\(\*\) FROM "ProductPrice"\) \|\| ':' \|\| \(SELECT count\(\*\) FROM "OpportunityItem"\)/, "seed idempotency snapshot must include products, prices and items");
+assert.match(previewSeed, /if \(process\.env\.DEPLOYMENT_ENV !== "preview"\)/, "preview seed must refuse to run outside DEPLOYMENT_ENV=preview");
 assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
 for (const stage of ["image_build", "network_setup", "database_start", "database_readiness", "schema", "initial_seed", "initial_snapshot", "dataset_validation", "seed_reapply", "final_snapshot", "idempotency", "ownership_assertions"]) {
