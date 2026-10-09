@@ -268,7 +268,7 @@ textarea:focus {
     margin-bottom: 4px;
   }
 
-  form input:not([type="checkbox"]):not([type="radio"]),
+  form input:not([type="checkbox"]):not([type="radio"]):not(.sr-only),
   form select,
   form textarea {
     width: 100%;
@@ -296,4 +296,29 @@ textarea:focus {
   width: 0;
   height: 0;
   display: none;
+}
+
+/* Oportunidades (pipeline, lista, drawer, detalhes e menus de ação): alvos de toque de 44px no celular. */
+@media (max-width: 640px) {
+  .opportunity-touch-targets :where(button, [role="button"], select, input:not([type="checkbox"]):not([type="radio"]), label:has(> input[type="checkbox"])) {
+    min-height: 44px;
+  }
+
+  .opportunity-touch-targets .touch-icon-button {
+    min-width: 44px;
+  }
+
+  .opportunity-drawer-panel {
+    max-width: none;
+  }
+
+  .opportunity-desktop-only {
+    display: none !important;
+  }
+}
+
+@media (min-width: 641px) {
+  .opportunity-mobile-only {
+    display: none !important;
+  }
 }

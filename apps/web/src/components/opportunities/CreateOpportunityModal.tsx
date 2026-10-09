@@ -131,7 +131,7 @@ export default function CreateOpportunityModal({
   if (!open) return null;
 
   return (
-    <div className="mobile-modal-shell" role="dialog" aria-modal="true" onClick={requestClose}>
+    <div className="mobile-modal-shell z-[70] !mt-0" role="dialog" aria-modal="true" onClick={requestClose}>
       <div
         className="mobile-modal-panel relative h-full max-w-full sm:max-w-3xl"
         onClick={(event) => event.stopPropagation()}
