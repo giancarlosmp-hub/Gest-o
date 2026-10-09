@@ -27,6 +27,14 @@ geral está no [`README.md`](README.md) e o estado oficial, decisões e procedim
 - Os demais `npm run test:*` estão em [`package.json`](package.json). Os sufixos `:postgres` e
   `:docker` exigem PostgreSQL ou Docker reais locais.
 
+## Como trabalhar
+
+- Pense antes de codar: diga as suposições e pergunte quando houver ambiguidade.
+- Faça o mínimo necessário, sem recursos especulativos.
+- Faça mudanças cirúrgicas: altere só o que foi pedido, mantenha o estilo existente e aponte (sem
+  remover) código morto que encontrar.
+- Defina antes como verificar o resultado (teste, build, preview).
+
 ## Regras do projeto
 
 - Uma mudança por vez.
