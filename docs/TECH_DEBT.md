@@ -298,3 +298,19 @@ Windows) não tem `rm`. Pelo Git Bash funciona, porque o `rm` está no `PATH`.
 **Aberto.** A tela de detalhes (`apps/web/src/pages/OpportunityDetailsPage.tsx`) encerra a
 oportunidade por `PUT /opportunities/:id`, e o pipeline (`apps/web/src/pages/OpportunitiesPage.tsx`)
 por `PATCH /opportunities/:id/close`. Unificar em um único caminho em PR próprio.
+
+### TD-PRODUCT-SEARCH-MIN-CHARS — busca de produtos a partir de 2 caracteres
+
+**Aberto, decisão atual: manter.** A busca de produtos da oportunidade
+(`apps/web/src/pages/OpportunitiesPage.tsx`) só responde a partir de 2 caracteres e busca por
+“contém”, então códigos ERP de 1 dígito não são encontrados pelo código.
+
+### TD-PREVIEW-SEED-LEGACY-PRODUCTS — produtos antigos do seed do preview
+
+**Aberto, baixo.** Os 7 produtos antigos do seed do preview (`apps/api/prisma/seedPreview.ts`,
+`erpPriceId` “P1001”, filial “01”) nunca aparecem na busca. Remover em ajuste futuro.
+
+### TD-PREVIEW-SEED-LOCAL — seed do preview não roda no compose local
+
+**Aberto, baixo.** Desde o PR #936, o seed do preview exige `DEPLOYMENT_ENV=preview` e não roda mais
+no `docker-compose` local (que usa `DEPLOYMENT_ENV=local`).
