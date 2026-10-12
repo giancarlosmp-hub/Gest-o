@@ -67,7 +67,7 @@ run_api 'npm run seed:preview -w @salesforce-pro/api >/dev/null'
 set_failure_context initial_snapshot read_preview_counts
 before="$(docker exec -i "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -At <<'SQL'
 SET search_path TO public;
-SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') || ':' || (SELECT count(*) FROM "Product") || ':' || (SELECT count(*) FROM "ProductPrice") || ':' || (SELECT count(*) FROM "OpportunityItem");
+SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') || ':' || (SELECT count(*) FROM "Product") || ':' || (SELECT count(*) FROM "ProductPrice") || ':' || (SELECT count(*) FROM "OpportunityItem") || ':' || (SELECT count(*) FROM "Client" WHERE code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW')) || ':' || (SELECT count(*) FROM "Opportunity" o JOIN "Client" c ON c.id=o."clientId" WHERE c.code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW'));
 SQL
 )"
 echo "checkpoint: validate"
@@ -79,7 +79,7 @@ run_api 'npm run seed:preview -w @salesforce-pro/api >/dev/null'
 set_failure_context final_snapshot read_reapplied_counts
 after="$(docker exec -i "$name" psql -X -U postgres -d "$db" -v ON_ERROR_STOP=1 -At <<'SQL'
 SET search_path TO public;
-SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') || ':' || (SELECT count(*) FROM "Product") || ':' || (SELECT count(*) FROM "ProductPrice") || ':' || (SELECT count(*) FROM "OpportunityItem");
+SELECT (SELECT count(*) FROM "Tenant") || ':' || (SELECT count(*) FROM "TenantMembership") || ':' || (SELECT count(*) FROM "Client") || ':' || (SELECT count(*) FROM "ErpOrderSync" WHERE "pedidoIdImportacao" LIKE '%[preview-seed]%') || ':' || (SELECT count(*) FROM "Product") || ':' || (SELECT count(*) FROM "ProductPrice") || ':' || (SELECT count(*) FROM "OpportunityItem") || ':' || (SELECT count(*) FROM "Client" WHERE code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW')) || ':' || (SELECT count(*) FROM "Opportunity" o JOIN "Client" c ON c.id=o."clientId" WHERE c.code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW'));
 SQL
 )"
 set_failure_context idempotency compare_seed_counts
@@ -98,6 +98,13 @@ DO \$\$ BEGIN
  IF (SELECT count(*) FROM "ProductPrice" pp JOIN "Product" p ON p.id=pp."productId" WHERE p."erpProductClassCode" = 'PREVIEW' AND pp."erpPriceId" IN ('1','2') AND pp."branchCode" IS NULL AND pp.price > 0) <> 12 THEN RAISE EXCEPTION 'item product price count'; END IF;
  IF (SELECT count(*) FROM "OpportunityItem" i JOIN "Opportunity" o ON o.id=i."opportunityId" WHERE o.title LIKE '%[preview-seed]%') <> 5 THEN RAISE EXCEPTION 'opportunity item count'; END IF;
  IF EXISTS (SELECT 1 FROM "Opportunity" o JOIN "OpportunityItem" i ON i."opportunityId"=o.id WHERE o.title LIKE '%[preview-seed]%' GROUP BY o.id, o.value HAVING abs(sum(i."netTotal") - o.value) > 0.005) THEN RAISE EXCEPTION 'opportunity item value'; END IF;
+ IF (SELECT count(*) FROM "Client" WHERE code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW') AND name LIKE '[preview-seed]%' AND "isArchived" = false) <> 3 THEN RAISE EXCEPTION 'credit client count'; END IF;
+ IF EXISTS (SELECT 1 FROM "Client" WHERE code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW') AND NOT ("financialProfile" ? 'LIMITE_CREDITO')) THEN RAISE EXCEPTION 'credit out-of-allowlist proof key'; END IF;
+ IF (SELECT count(*) FROM "Client" WHERE code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW') AND "overdueTitlesTotal" = 0) <> 2 THEN RAISE EXCEPTION 'credit ok/atencao overdue'; END IF;
+ IF (SELECT count(*) FROM "Client" WHERE code = 'CRED-RISCO-PREVIEW' AND "overdueTitlesTotal" = 4350) <> 1 THEN RAISE EXCEPTION 'credit risk overdue total'; END IF;
+ IF (SELECT count(*) FROM "Client" c, jsonb_array_elements(c."partnerTitles") t WHERE c.code = 'CRED-RISCO-PREVIEW' AND (t->>'DATA_VENCIMENTO')::timestamptz < now() AND (t->>'SALDO_CAPITAL')::numeric > 0) <> 2 THEN RAISE EXCEPTION 'credit risk overdue titles'; END IF;
+ IF (SELECT count(*) FROM "Opportunity" o JOIN "Client" c ON c.id=o."clientId" WHERE c.code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW') AND o.title LIKE '%[preview-seed]%' AND o.stage NOT IN ('ganho','perdido') AND o."ownerSellerId" = c."ownerSellerId") <> 3 THEN RAISE EXCEPTION 'credit open opportunity count'; END IF;
+ IF (SELECT count(DISTINCT u.email) FROM "Client" c JOIN "User" u ON u.id=c."ownerSellerId" WHERE c.code IN ('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW') AND u.email IN ('ana.preview@preview.local','bruno.preview@preview.local')) <> 2 THEN RAISE EXCEPTION 'credit seller spread'; END IF;
  IF EXISTS (SELECT 1 FROM "ErpOrderSync" e JOIN "Opportunity" o ON o.id=e."opportunityId" JOIN "Client" c ON c.id=o."clientId" WHERE e."pedidoIdImportacao" LIKE '%[preview-seed]%' AND (e."tenantId" <> c."tenantId" OR e."tenantId" <> '$tenant_id' OR e."sellerId" <> o."ownerSellerId" OR e."sellerId" <> c."ownerSellerId")) THEN RAISE EXCEPTION 'order tenant ownership'; END IF;
 END \$\$;
 SQL

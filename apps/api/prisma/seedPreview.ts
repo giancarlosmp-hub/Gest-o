@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { AgendaEventStatus, AgendaEventType, OpportunityStage, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { buildPreviewCreditClientFixtures } from "./previewCreditFixtures.js";
 
 const prisma = new PrismaClient();
 
@@ -698,6 +699,49 @@ async function seedPreviewOpportunitiesWithItems(
   return { opportunitiesWithItems: PREVIEW_OPPORTUNITIES_WITH_ITEMS.length, opportunityItems: itemCount };
 }
 
+// Um cliente por nível do creditAlert (ok, atenção, risco), cada um com uma oportunidade aberta
+// do próprio vendedor, para ver a faixa no detalhe do cliente, no drawer e no detalhe da oportunidade.
+async function seedPreviewCreditClients(sellers: Awaited<ReturnType<typeof upsertSeller>>[], now: Date) {
+  const fixtures = buildPreviewCreditClientFixtures(now);
+  for (const fixture of fixtures) {
+    const seller = sellers.find((candidate) => candidate.email === fixture.sellerEmail);
+    if (!seller) throw new Error("PREVIEW_CREDIT_SELLER_MISSING");
+    const client = await prisma.client.create({
+      data: {
+        tenantId: PREVIEW_DEFAULT_TENANT_ID,
+        code: fixture.code,
+        name: `${PREVIEW_SEED_TAG} ${fixture.name}`,
+        city: fixture.city,
+        state: fixture.state,
+        region: fixture.region,
+        ownerSellerId: seller.id,
+        financialProfile: fixture.financialProfile,
+        partnerTitles: fixture.partnerTitles,
+        openTitlesTotal: fixture.openTitlesTotal,
+        overdueTitlesTotal: fixture.overdueTitlesTotal
+      }
+    });
+    await prisma.opportunity.create({
+      data: {
+        title: `${PREVIEW_SEED_TAG} ${fixture.opportunityTitle}`,
+        value: 32000,
+        stage: "negociacao",
+        crop: "soja",
+        season: `${now.getFullYear()}/${now.getFullYear() + 1}`,
+        proposalDate: addDays(now, -2),
+        followUpDate: addDays(now, 3),
+        expectedCloseDate: addDays(now, 20),
+        lastContactAt: addDays(now, -1),
+        probability: 50,
+        notes: `${PREVIEW_SEED_TAG} oportunidade para testar a faixa de crédito (${fixture.level})`,
+        clientId: client.id,
+        ownerSellerId: seller.id
+      }
+    });
+  }
+  return { creditClients: fixtures.length };
+}
+
 async function createPreviewDataset() {
   const now = new Date();
   const currentMonth = monthString(now);
@@ -839,6 +883,8 @@ async function createPreviewDataset() {
 
   const territorySeedSummary = await seedPreviewTerritories(sellers, now);
 
+  const creditSeedSummary = await seedPreviewCreditClients(sellers, now);
+
   for (const [index, template] of PREVIEW_AGENDA_TEMPLATES.entries()) {
     const ownerSeller = sellers[index % sellers.length];
     const client = clients[index % clients.length];
@@ -912,6 +958,7 @@ async function createPreviewDataset() {
     itemProducts: previewItemProducts.size,
     opportunitiesWithItems: itemSeedSummary.opportunitiesWithItems,
     opportunityItems: itemSeedSummary.opportunityItems,
+    creditClients: creditSeedSummary.creditClients,
     tag: PREVIEW_SEED_TAG
   });
 }

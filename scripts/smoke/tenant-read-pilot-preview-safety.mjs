@@ -94,6 +94,11 @@ assert.match(postgresHarness, /"erpProductClassCode" = 'PREVIEW'[^\n]*<> 6 THEN 
 assert.match(postgresHarness, /"erpPriceId" IN \('1','2'\)[^\n]*<> 12 THEN RAISE EXCEPTION 'item product price count'/, "seed proof must require table 1 and 2 prices for every synthetic item product");
 assert.match(postgresHarness, /"OpportunityItem"[^\n]*<> 5 THEN RAISE EXCEPTION 'opportunity item count'/, "seed proof must require exactly five synthetic opportunity items");
 assert.match(postgresHarness, /count\(\*\) FROM "Product"\) \|\| ':' \|\| \(SELECT count\(\*\) FROM "ProductPrice"\) \|\| ':' \|\| \(SELECT count\(\*\) FROM "OpportunityItem"\)/, "seed idempotency snapshot must include products, prices and items");
+assert.match(postgresHarness, /code IN \('CRED-OK-PREVIEW','CRED-ATENCAO-PREVIEW','CRED-RISCO-PREVIEW'\)[^\n]*<> 3 THEN RAISE EXCEPTION 'credit client count'/, "seed proof must require exactly three credit-alert clients");
+assert.match(postgresHarness, /NOT \("financialProfile" \? 'LIMITE_CREDITO'\)\) THEN RAISE EXCEPTION 'credit out-of-allowlist proof key'/, "seed proof must keep the out-of-allowlist key in the database");
+assert.match(postgresHarness, /"overdueTitlesTotal" = 4350\) <> 1 THEN RAISE EXCEPTION 'credit risk overdue total'/, "seed proof must require the risk client overdue total");
+assert.match(postgresHarness, /<> 3 THEN RAISE EXCEPTION 'credit open opportunity count'/, "seed proof must require one open opportunity per credit client");
+assert.match(postgresHarness, /count\(\*\) FROM "OpportunityItem"\) \|\| ':' \|\| \(SELECT count\(\*\) FROM "Client" WHERE code IN \('CRED-OK-PREVIEW'/, "seed idempotency snapshot must include credit clients");
 assert.match(previewSeed, /if \(process\.env\.DEPLOYMENT_ENV !== "preview"\)/, "preview seed must refuse to run outside DEPLOYMENT_ENV=preview");
 assert.doesNotMatch(postgresHarness, /PREVIEW_AUTH_PASSWORD|123456/);
 assert.match(postgresHarness, /trap on_error ERR/, "PostgreSQL harness must diagnose unexpected fail-closed exits");
