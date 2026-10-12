@@ -26,7 +26,7 @@ const resetData = () => {
       // Payload ERP fictício com chaves fora da lista de permitidos.
       overdueTitlesTotal: 0,
       financialProfile: { DIAS_MEDIAATRASO: 20, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0, VALOR_MEDIO: 100, LIMITE_CREDITO: 1, CPF_CNPJ: "synthetic-erp" },
-      partnerTitles: [{ DOCTO: 1, PARCELA: "1", DATA_VENCIMENTO: "2026-01-01", DSCFORMA: "BOLETO", VALOR: 10, SALDO_CAPITAL: 5, NOSSO_NUMERO: "synthetic-erp" }],
+      partnerTitles: [{ DOCTO: 1, PARCELA: "1", DATA_VENCIMENTO: "2099-01-01", DSCFORMA: "BOLETO", VALOR: 10, SALDO_CAPITAL: 5, NOSSO_NUMERO: "synthetic-erp" }],
     },
     { id: "client-b", tenantId: "tenant-a", ownerSellerId: "seller-b", name: "Cliente B", cnpjNormalized: "11111111000111", isArchived: false },
     { id: "client-other", tenantId: "tenant-b", ownerSellerId: "seller-c", name: "Cliente Outro Tenant", cnpjNormalized: "11111111000111", isArchived: false },

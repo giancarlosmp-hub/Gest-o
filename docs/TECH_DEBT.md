@@ -330,6 +330,17 @@ retorno e mantém `partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` anti
 crédito fica desatualizado. A correção exige saber quando o retorno é um snapshot completo por
 vendedor; não foi feita no PR da sincronização financeira por vendedor.
 
+### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
+
+**Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`
+gravados em `Client.partnerTitles` estavam em ISO com hora (ex.: `2025-12-10T03:00:00.000Z`). O
+`isTitleOverdue` da sincronização (`apps/api/src/services/ultraFv3SyncService.ts`), que calcula o
+`overdueTitlesTotal` do banner de crédito, e o status "vencido" de cada linha na tela do cliente
+(`apps/web/src/pages/ClientDetailsPage.tsx`) usam `new Date(String(DATA_VENCIMENTO))` e dependem
+desse formato: `dd/mm/aaaa` seria lido como mês/dia e `dd.mm.aaaa` seria inválido. O atraso em aberto
+calculado pela API (`parseErpDueDay` em `clientErpProjection.ts`) já aceita os três formatos. Se o ERP
+mudar o formato, trocar os dois pontos acima por `parseErpDueDay`.
+
 ### TD-ERP-REFERENCE-SELLER-ALPHABETICAL — vendedor de referência escolhido por ordem alfabética
 
 **Aberto.** Sem credencial global, `resolveReferenceCredentials` (`ultraFv3SyncService.ts`) e o status do
