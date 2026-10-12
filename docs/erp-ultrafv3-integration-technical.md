@@ -139,6 +139,32 @@ baixa, tolerância, renegociação, cancelamento, timezone, atraso médio, maior
 não têm contrato validado. Tablet manual e CRM automático só são comparáveis com timestamps iguais.
 Conclusão atual: `FINANCIAL_DIVERGENCE=INSUFFICIENT_EVIDENCE`; nenhuma correção financeira autorizada.
 
+### Sincronização financeira por vendedor (2026-10-12)
+
+**[CÓDIGO]** Sem credencial global, `partners`, `financialProfiles` e `partnerTitles` rodam com a
+credencial de cada vendedor ativo com Login FV3, em sequência e com falha isolada por vendedor. Isso
+vale para o scheduler, a Sincronização Completa e o botão "Sincronizar clientes de todos vendedores".
+Catálogos continuam com o vendedor de referência. Cada vendedor e escopo gera um `ErpSyncRun`
+(`authMode=seller`) com quantidade, duração e erro. O agregado do escopo (`authMode=all_sellers`)
+registra `partial` e as durações de busca e gravação. O filtro por vendedor de `/financialProfiles` e
+`/partnerTitles` ainda é **não comprovado**: a prova virá das contagens por vendedor no Histórico.
+
+Regras de gravação (`apps/api/src/services/ultraFv3FinancialMerge.ts`): os retornos são juntados e
+gravados uma vez por escopo; cliente ausente do retorno nunca é limpo. Se um vendedor falhar, ficam
+intocados os códigos de clientes dos quais ele é dono e os códigos que ele retornou na última rodada
+bem-sucedida (`erp.ultrafv3.<escopo>.sellerCoverage`); sem essa cobertura, nada é gravado no escopo.
+O perfil vem do vendedor dono do cliente, com o primeiro recebido como fallback. Os títulos são
+deduplicados por `DOCTO` + `PARCELA`: vale a versão do dono, senão a de maior `SALDO_CAPITAL`.
+
+O botão responde na hora e roda em background (`ErpSyncRun scope=sellerPortfolio`). Ele usa o mesmo
+lock do scheduler (`erpSellerPortfolio`), então um nunca roda junto com o outro. O lock tem TTL de
+30 minutos e é renovado entre vendedores e etapas. **Execução interrompida** (API reiniciada no
+meio, por exemplo num cutover): o `ErpSyncRun` fica como `running` no Histórico, e o lock expira até
+30 minutos depois da última renovação, liberando uma nova execução. Os dados financeiros só são
+gravados na etapa final de cada escopo e nunca apagados. Se a interrupção ocorrer durante a gravação,
+parte dos clientes fica com o dado novo e o resto com o anterior até a próxima rodada; a cobertura só é
+registrada depois da gravação.
+
 ## Pedidos
 
 **[CÓDIGO]** oportunidade deve estar ganha e possuir cliente, vendedor/operador e itens ERP válidos. A
