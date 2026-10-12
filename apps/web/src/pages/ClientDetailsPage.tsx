@@ -31,7 +31,16 @@ type Client = {
   partnerTitles?: Array<Record<string, unknown>> | null;
   openTitlesTotal?: number | null;
   overdueTitlesTotal?: number | null;
+  delayMetrics?: ClientDelayMetrics | null;
   creditAlert?: ClientCreditAlert | null;
+};
+
+// Atraso calculado pela API a partir dos títulos em aberto (partnerTitles).
+type ClientDelayMetrics = {
+  openDelayDays: number | null;
+  overdueTitlesCount: number;
+  oldestOverdueDueDate: string | null;
+  unparseableDueDates: number;
 };
 
 type Contact = {
@@ -351,8 +360,12 @@ export default function ClientDetailsPage() {
 
   const hasErpData = Object.values(erpData).some((value) => value !== null && value !== undefined && value !== "");
   const financial = client.financialProfile || {};
-  const averageDelay = numberFromErp(financial.DIAS_MEDIAATRASO);
-  const openDelay = numberFromErp(financial.DIAS_MAIORATRASO_AB);
+  // Campo ausente ou vazio vira "—" na tela, não 0.
+  const rawAverageDelay = financial.DIAS_MEDIAATRASO;
+  const averageDelay =
+    rawAverageDelay === undefined || rawAverageDelay === null || String(rawAverageDelay).trim() === "" ? null : numberFromErp(rawAverageDelay);
+  // O maior atraso em aberto vem dos títulos (delayMetrics); o DIAS_MAIORATRASO_AB do ERP não é exibido.
+  const delayMetrics = client.delayMetrics ?? null;
   const bouncedChecks = numberFromErp(financial.QTD_CHEQUES_DEV);
   // A regra de cores vem pronta da API (creditAlert); a tela só traduz o nível.
   const riskBadge =
@@ -536,8 +549,21 @@ export default function ClientDetailsPage() {
             <p><strong>Primeira compra:</strong> {formatPtBrDate(String(financial.DATA_PRIMFATURA || ""))}</p>
             <p><strong>Última compra:</strong> {formatPtBrDate(String(financial.DATA_ULTFATURA || ""))}</p>
             <p><strong>Valor da última compra:</strong> {formatCurrency(numberFromErp(financial.VALOR_ULTFATURA))}</p>
-            <p><strong>Média de atraso:</strong> {averageDelay ?? 0} dia(s)</p>
-            <p><strong>Maior atraso em aberto:</strong> {openDelay ?? 0} dia(s)</p>
+            <p>
+              <strong>Média de atraso (histórico ERP):</strong> {averageDelay === null ? "—" : `${averageDelay} dia(s)`}
+              {delayMetrics && delayMetrics.overdueTitlesCount > 0 ? (
+                <span className="block text-xs text-slate-500">Não inclui os títulos vencidos em aberto abaixo.</span>
+              ) : null}
+            </p>
+            <p>
+              <strong>Maior atraso em aberto:</strong>{" "}
+              {delayMetrics?.openDelayDays === null || delayMetrics?.openDelayDays === undefined ? "—" : `${delayMetrics.openDelayDays} dia(s)`}
+              {delayMetrics && delayMetrics.overdueTitlesCount > 0 ? (
+                <span className="block text-xs text-slate-500">
+                  {delayMetrics.overdueTitlesCount} título(s) vencido(s) desde {formatPtBrDate(delayMetrics.oldestOverdueDueDate)}
+                </span>
+              ) : null}
+            </p>
             <p><strong>Cheques devolvidos:</strong> {bouncedChecks ?? 0}</p>
           </div>
         </section>

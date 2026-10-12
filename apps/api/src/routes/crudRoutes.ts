@@ -6663,6 +6663,7 @@ router.get("/opportunities/:id", async (req, res) => {
           city: true,
           state: true,
           financialProfile: true,
+          partnerTitles: true,
           overdueTitlesTotal: true
         }
       },
