@@ -73,6 +73,7 @@ import {
   syncSalesmen,
   syncOrderStatus,
   startUltraFv3FullSyncJob,
+  startSellerPortfolioSyncJob,
   resolveUniqueActiveTenantForUser
 } from "../services/ultraFv3SyncService.js";
 import { buildUltraFv3TimeoutPayload, ULTRAFV3_REQUEST_TIMEOUT_MS, ultraFv3Client } from "../services/ultraFv3Client.js";
@@ -9167,9 +9168,27 @@ router.post("/erp/ultrafv3/sync/partners/by-user/:userId", authorize("diretor", 
     });
   }
 });
+// Clientes, perfil financeiro e títulos por vendedor, em background: responde logo e a UI acompanha
+// o ErpSyncRun `sellerPortfolio` no Histórico. Não roda junto com o scheduler (lock compartilhado).
 router.post("/erp/ultrafv3/sync/partners/all-sellers", authorize("diretor", "gerente"), async (req, res) => {
-  const result = await syncPartnersForAllConfiguredSellers(await authenticatedPartnerSyncOptions(req));
-  return res.status(result.status === "failed" ? 502 : result.status === "partial" ? 207 : 200).json(result);
+  try {
+    const job = await startSellerPortfolioSyncJob(await authenticatedPartnerSyncOptions(req));
+    logApiEvent("INFO", "[ultrafv3 seller portfolio route] async job response sent", {
+      correlationId: job.correlationId,
+      runId: job.runId,
+      status: job.status,
+      alreadyRunning: job.alreadyRunning,
+    });
+    return res.status(job.alreadyRunning ? 200 : 202).json(job);
+  } catch (error) {
+    const details = error instanceof Error ? error.message : String(error);
+    logApiEvent("ERROR", "[ultrafv3 seller portfolio route] failed to start", { error: details });
+    return res.status(typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 502).json({
+      scope: "sellerPortfolio",
+      message: "Falha ao iniciar a sincronização de clientes de todos vendedores.",
+      details,
+    });
+  }
 });
 router.post("/erp/ultrafv3/sync/salesmen", authorize("diretor", "gerente"), runUltraFv3Sync("salesmen"));
 router.post("/erp/ultrafv3/sync/payment-methods", authorize("diretor", "gerente"), runUltraFv3Sync("paymentMethods"));

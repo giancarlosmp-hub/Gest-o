@@ -322,6 +322,30 @@ grava o endereço mapeado no campo `Client.segment`. A busca de clientes (`GET /
 procura em `segment`. Corrigir o mapeamento (e decidir o que fazer com os valores já gravados) em PR
 próprio; não foi alterado no PR da projeção de dados do ERP.
 
+### TD-ERP-PAID-TITLES-STALE — títulos pagos ou ausentes do retorno nunca saem do Client
+
+**Aberto.** A sincronização de `/partnerTitles` (`apps/api/src/services/ultraFv3SyncService.ts`) só
+atualiza clientes presentes no retorno do ERP. Um cliente que quitou todos os títulos deixa de vir no
+retorno e mantém `partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` antigos, então o banner de
+crédito fica desatualizado. A correção exige saber quando o retorno é um snapshot completo por
+vendedor; não foi feita no PR da sincronização financeira por vendedor.
+
+### TD-ERP-REFERENCE-SELLER-ALPHABETICAL — vendedor de referência escolhido por ordem alfabética
+
+**Aberto.** Sem credencial global, `resolveReferenceCredentials` (`ultraFv3SyncService.ts`) e o status do
+scheduler (`erpSyncScheduler.ts`) usam o primeiro vendedor ativo com Login FV3 em ordem alfabética
+para os catálogos. Não há configuração explícita: cadastrar ou desativar um vendedor pode trocar a
+credencial usada sem aviso.
+
+### TD-ERP-SYNC-RUN-ORPHAN-RUNNING — ErpSyncRun interrompido fica como `running` para sempre
+
+**Aberto.** Se a API reinicia no meio de uma sincronização (por exemplo, num cutover), o `ErpSyncRun`
+em andamento nunca é finalizado e aparece como `running` no Histórico indefinidamente. Isso vale para
+a Sincronização Completa (`syncAll`), o botão de todos os vendedores (`sellerPortfolio`), o scheduler
+(`automatic`) e os runs por escopo e vendedor. Os locks expiram pelo TTL e liberam novas execuções,
+mas o run órfão continua visível e pode confundir a UI e a leitura do Histórico. Não corrigido no PR
+da sincronização financeira por vendedor.
+
 ### TD-ERP-CREDIT-FIELDS — campos de limite, bloqueio e crédito duvidoso não confirmados
 
 **Aberto.** O `creditAlert` da API (`apps/api/src/services/clientErpProjection.ts`) usa só atraso

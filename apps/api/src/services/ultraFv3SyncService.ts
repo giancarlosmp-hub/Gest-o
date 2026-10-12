@@ -19,6 +19,15 @@ import { assertUsefulProductPriceSync, runProductAndPriceRefresh } from "./produ
 import { catalogTenantIdForMode, productCatalogTenantWhere, selectProductCandidateForTenant } from "./productCatalogTenancy.js";
 import { normalizeErpProductPriceObservation } from "./erpProductPriceObservation.js";
 import { readTenancyMode } from "../tenancy/tenancyMode.js";
+import {
+  isSuccessfulFetch,
+  planFinancialProfileWrites,
+  planPartnerTitleWrites,
+  resolveFinancialWriteExclusions,
+  type FinancialClientTarget,
+  type FinancialSellerFetch,
+  type FinancialSellerOutcome,
+} from "./ultraFv3FinancialMerge.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
 const ERP_SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
@@ -46,7 +55,7 @@ type SyncStatusPayload = {
   status: "idle" | "running" | "success" | "success_with_warnings" | "error" | "skipped";
   sellerId?: string | null;
   sellerName?: string | null;
-  authMode?: "global" | "seller" | "seller_reference";
+  authMode?: "global" | "seller" | "seller_reference" | "all_sellers";
   lastSyncAt?: string;
   syncedCount?: number;
   errors?: string[];
@@ -60,6 +69,8 @@ type SyncStatusPayload = {
 export type SyncResult = {
   syncedCount: number;
   diagnostics?: Record<string, number>;
+  /** Sucesso parcial: o run fica success, com a mensagem em errorMessage no Histórico. */
+  warning?: string;
 };
 export type RunSyncOptions = {
   trigger?: ErpSyncTrigger;
@@ -67,12 +78,14 @@ export type RunSyncOptions = {
   lockScope?: string;
   sellerId?: string;
   sellerName?: string;
-  authMode?: "global" | "seller" | "seller_reference";
+  authMode?: "global" | "seller" | "seller_reference" | "all_sellers";
   writeStatus?: boolean;
   correlationId?: string;
   /** Tenant proved by the authenticated request. Never populated from ERP input. */
   authenticatedTenantId?: string;
   authenticatedActorUserId?: string;
+  /** Renova o lock da execução que engloba esta (botão ou scheduler) entre vendedores. */
+  heartbeat?: () => Promise<void>;
 };
 
 type PartnerTenantAuthority = Readonly<{
@@ -886,18 +899,21 @@ async function runSync(
         durationMs,
         syncedCount: result.syncedCount,
         metrics: (result.diagnostics ?? {}) as Prisma.InputJsonValue,
+        ...(result.warning ? { errorMessage: result.warning } : {}),
       },
     });
     if (shouldWriteStatus)
       await writeSyncStatus({
         scope,
-        status: "success",
+        status: result.warning ? "success_with_warnings" : "success",
         lastSyncAt: finishedAt.toISOString(),
         correlationId,
         durationMs,
         trigger,
         runId: run.id,
-        ...result,
+        syncedCount: result.syncedCount,
+        diagnostics: result.diagnostics,
+        ...(result.warning ? { errors: [result.warning] } : {}),
         ...syncContext,
       });
     logApiEvent("INFO", `[ultrafv3 sync] ${scope} finished`, {
@@ -2380,10 +2396,8 @@ export async function syncPartnersByUser(
   );
 }
 
-export async function syncPartnersForAllConfiguredSellers(
-  options?: RunSyncOptions,
-) {
-  const sellers = await prisma.user.findMany({
+const listConfiguredFv3Sellers = () =>
+  prisma.user.findMany({
     where: {
       role: "vendedor",
       isActive: true,
@@ -2399,6 +2413,19 @@ export async function syncPartnersForAllConfiguredSellers(
     },
     orderBy: [{ name: "asc" }],
   });
+
+const runHeartbeat = async (options?: RunSyncOptions) => {
+  try {
+    await options?.heartbeat?.();
+  } catch (error) {
+    logApiEvent("WARN", "[ultrafv3 sync] heartbeat failed", { error: formatError(error) });
+  }
+};
+
+export async function syncPartnersForAllConfiguredSellers(
+  options?: RunSyncOptions,
+) {
+  const sellers = await listConfiguredFv3Sellers();
   const summary = {
     status: "failed" as "success" | "partial" | "failed",
     sellerCount: sellers.length,
@@ -2425,9 +2452,12 @@ export async function syncPartnersForAllConfiguredSellers(
     sellerChangedCount?: number;
     diagnostics?: Record<string, number>;
     error?: string;
+    durationMs?: number;
   }> = [];
 
   for (const seller of sellers) {
+    await runHeartbeat(options);
+    const sellerStartedAt = Date.now();
     try {
       const result = await syncPartnersByUser(seller.id, {
         ...options,
@@ -2462,6 +2492,7 @@ export async function syncPartnersForAllConfiguredSellers(
         updated,
         sellerChangedCount,
         diagnostics: result.diagnostics,
+        durationMs: Date.now() - sellerStartedAt,
       });
     } catch (error) {
       summary.errorCount += 1;
@@ -2472,6 +2503,7 @@ export async function syncPartnersForAllConfiguredSellers(
         status: "error",
         reasonCode: /auth|login|credencial/i.test(message) ? "AUTH_ERROR" : "ERP_HTTP_ERROR",
         error: message,
+        durationMs: Date.now() - sellerStartedAt,
       });
       logApiEvent(
         "ERROR",
@@ -3421,6 +3453,465 @@ export async function syncPartnerTitles(options?: RunSyncOptions) {
 }
 
 
+type FinancialScope = "financialProfiles" | "partnerTitles";
+type ConfiguredFv3Seller = Awaited<ReturnType<typeof listConfiguredFv3Sellers>>[number];
+
+const FINANCIAL_SCOPE_CONFIG: Record<FinancialScope, { endpoint: string; codeOf: (row: Record<string, unknown>) => string }> = {
+  financialProfiles: { endpoint: "/financialProfiles?date=01.01.1900+00:00:00", codeOf: getFinancialProfilePartnerCode },
+  partnerTitles: { endpoint: "/partnerTitles?date=01.01.1900+00:00:00", codeOf: getPartnerTitlePartnerCode },
+};
+const FINANCIAL_CODE_CHUNK_SIZE = 500;
+const financialCoverageKey = (scope: FinancialScope) => `erp.ultrafv3.${scope}.sellerCoverage`;
+
+export type SellerScopeReport = {
+  scope: UltraFv3SyncScope;
+  sellerId: string;
+  sellerName: string;
+  status: FinancialSellerOutcome;
+  durationMs: number;
+  syncedCount: number;
+  error?: string;
+};
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const chunkItems = <T,>(items: T[], size: number) => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+};
+
+async function findFinancialClientTargets(codes: string[]): Promise<FinancialClientTarget[]> {
+  const targets: FinancialClientTarget[] = [];
+  for (const codeChunk of chunkItems(codes, FINANCIAL_CODE_CHUNK_SIZE)) {
+    const rows = await prisma.client.findMany({
+      where: { code: { in: codeChunk }, isArchived: false },
+      select: { id: true, code: true, tenantId: true, ownerSellerId: true },
+    });
+    for (const row of rows) if (row.code) targets.push({ id: row.id, code: row.code, tenantId: row.tenantId, ownerSellerId: row.ownerSellerId });
+  }
+  return targets;
+}
+
+/** Tenant único e ativo de cada dono de cliente legado (tenantId nulo); dono ambíguo fica de fora. */
+async function resolveOwnerTenants(clients: FinancialClientTarget[], knownSellerTenants: Map<string, string>) {
+  const ownerTenantById = new Map(knownSellerTenants);
+  const unknownOwners = [...new Set(clients.filter((client) => !client.tenantId && !ownerTenantById.has(client.ownerSellerId)).map((client) => client.ownerSellerId))];
+  for (const ownerChunk of chunkItems(unknownOwners, FINANCIAL_CODE_CHUNK_SIZE)) {
+    const memberships = await prisma.tenantMembership.findMany({
+      where: { userId: { in: ownerChunk }, status: "active", tenant: { status: "active" } },
+      select: { userId: true, tenantId: true },
+    });
+    const byOwner = new Map<string, Set<string>>();
+    for (const membership of memberships) byOwner.set(membership.userId, (byOwner.get(membership.userId) ?? new Set<string>()).add(membership.tenantId));
+    for (const [owner, tenants] of byOwner) if (tenants.size === 1) ownerTenantById.set(owner, [...tenants][0]);
+  }
+  return ownerTenantById;
+}
+
+async function readFinancialCoverage(scope: FinancialScope): Promise<Record<string, string[]>> {
+  const stored = await prisma.appConfig.findUnique({ where: { key: financialCoverageKey(scope) }, select: { value: true } });
+  if (!stored?.value) return {};
+  try {
+    const parsed = JSON.parse(stored.value) as unknown;
+    return isPlainRecord(parsed) ? Object.fromEntries(Object.entries(parsed).filter(([, codes]) => Array.isArray(codes))) as Record<string, string[]> : {};
+  } catch {
+    return {};
+  }
+}
+
+async function fetchFinancialRowsForSeller(
+  scope: FinancialScope,
+  seller: ConfiguredFv3Seller,
+  options: RunSyncOptions,
+): Promise<{ fetch: FinancialSellerFetch; report: SellerScopeReport }> {
+  const { endpoint, codeOf } = FINANCIAL_SCOPE_CONFIG[scope];
+  const startedAt = Date.now();
+  let tenantId: string | null = null;
+  let rows: Record<string, unknown>[] = [];
+  let outcome: FinancialSellerOutcome = "error";
+  let error: string | undefined;
+  let syncedCount = 0;
+  try {
+    const result = await runSync(
+      scope,
+      async (correlationId) => {
+        tenantId = (await resolvePartnerTenantAuthority(seller.id, options)).tenantId;
+        const credentials = getConfiguredSellerCredentials(seller);
+        const requestStartedAt = Date.now();
+        const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(endpoint, credentials, correlationId);
+        const requestDurationMs = Date.now() - requestStartedAt;
+        rows = toArray(response).filter(isPlainRecord);
+        const codes = [...new Set(rows.map(codeOf).filter(Boolean))];
+        let matchedClients = 0;
+        for (const codeChunk of chunkItems(codes, FINANCIAL_CODE_CHUNK_SIZE)) {
+          matchedClients += await prisma.client.count({ where: { code: { in: codeChunk }, isArchived: false } });
+        }
+        return {
+          syncedCount: rows.length,
+          diagnostics: { requestDurationMs, emptyResponse: rows.length ? 0 : 1, distinctPartnerCodes: codes.length, matchedClients },
+        };
+      },
+      {
+        trigger: options.trigger,
+        correlationId: options.correlationId,
+        sellerId: seller.id,
+        sellerName: seller.name,
+        authMode: "seller",
+        lockScope: `${scope}:user:${seller.id}`,
+        writeStatus: false,
+        failIfLocked: false,
+      },
+    );
+    syncedCount = result.syncedCount;
+    outcome = result.diagnostics?.skippedByLock ? "skipped" : rows.length ? "success" : "empty";
+    if (outcome === "skipped") error = "Execução do mesmo vendedor e escopo já em andamento.";
+  } catch (caught) {
+    outcome = "error";
+    error = formatError(caught);
+    logApiEvent("ERROR", "[ultrafv3 sync financial] seller fetch failed during all-sellers run", {
+      scope, sellerId: seller.id, correlationId: options.correlationId, error,
+    });
+  }
+  return {
+    fetch: { sellerId: seller.id, tenantId, outcome, rows: outcome === "success" ? rows : [] },
+    report: { scope, sellerId: seller.id, sellerName: seller.name, status: outcome, durationMs: Date.now() - startedAt, syncedCount, ...(error ? { error } : {}) },
+  };
+}
+
+/**
+ * Busca o escopo financeiro com a credencial de cada vendedor (em sequência, falha isolada por
+ * vendedor), junta tudo e grava uma vez. Clientes ausentes do retorno nunca são limpos, e códigos
+ * que um vendedor com falha poderia ter retornado ficam intocados (ver ultraFv3FinancialMerge.ts).
+ */
+async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, options: RunSyncOptions = {}) {
+  const sellerReports: SellerScopeReport[] = [];
+  const { codeOf } = FINANCIAL_SCOPE_CONFIG[scope];
+  const result = await runSync(
+    scope,
+    async (correlationId) => {
+      const sellers = await listConfiguredFv3Sellers();
+      if (!sellers.length) throw new Error("Nenhum vendedor ativo com Login FV3/Senha FV3 configurados.");
+      const fetchStartedAt = Date.now();
+      const fetches: FinancialSellerFetch[] = [];
+      for (const seller of sellers) {
+        await runHeartbeat(options);
+        const { fetch, report } = await fetchFinancialRowsForSeller(scope, seller, { ...options, correlationId });
+        fetches.push(fetch);
+        sellerReports.push(report);
+      }
+      const fetchDurationMs = Date.now() - fetchStartedAt;
+      const succeeded = fetches.filter(isSuccessfulFetch);
+      const failedSellerIds = new Set(fetches.filter((fetch) => !isSuccessfulFetch(fetch)).map((fetch) => fetch.sellerId));
+      if (!succeeded.length) throw new Error(`Nenhum vendedor concluiu ${scope}: ${failedSellerIds.size} falha(s). Nada foi gravado.`);
+
+      const persistStartedAt = Date.now();
+      const allRows = succeeded.flatMap((fetch) => fetch.rows);
+      const codes = [...new Set(allRows.map(codeOf).filter(Boolean))];
+      const clients = await findFinancialClientTargets(codes);
+      const knownSellerTenants = new Map(succeeded.filter((fetch) => fetch.tenantId).map((fetch) => [fetch.sellerId, fetch.tenantId as string]));
+      const ownerTenantById = await resolveOwnerTenants(clients, knownSellerTenants);
+      const coverage = await readFinancialCoverage(scope);
+      const exclusions = resolveFinancialWriteExclusions({ failedSellerIds, candidateClients: clients, coverageBySeller: coverage });
+      const context = { fetches, clients, ownerTenantById, exclusions, codeOf };
+
+      let planDiagnostics: Record<string, number>;
+      let writtenClients = 0;
+      if (scope === "financialProfiles") {
+        const plan = planFinancialProfileWrites(context);
+        planDiagnostics = plan.diagnostics;
+        for (const write of plan.writes) {
+          const payload = write.profile;
+          const updated = await prisma.client.updateMany({
+            where: { id: { in: write.clientIds }, isArchived: false },
+            data: {
+              financialProfile: payload as Prisma.InputJsonObject,
+              lastPurchaseDate: payload.DATA_ULTFATURA ? new Date(String(payload.DATA_ULTFATURA)) : undefined,
+              lastPurchaseValue: parseNumber(payload.VALOR_ULTFATURA) ?? undefined,
+            },
+          });
+          writtenClients += updated.count;
+        }
+      } else {
+        const plan = planPartnerTitleWrites({ ...context, saldoOf: getTitleSaldoCapital });
+        planDiagnostics = plan.diagnostics;
+        for (const write of plan.writes) {
+          const openTitlesTotal = write.titles.reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+          const overdueTitlesTotal = write.titles.filter((title) => isTitleOverdue(title)).reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+          const updated = await prisma.client.updateMany({
+            where: { id: { in: write.clientIds }, isArchived: false },
+            data: { partnerTitles: write.titles as Prisma.InputJsonArray, openTitlesTotal, overdueTitlesTotal },
+          });
+          writtenClients += updated.count;
+        }
+      }
+
+      // Cobertura e cache só depois de gravar: execução interrompida não registra cobertura nova.
+      const nextCoverage = { ...coverage };
+      for (const fetch of succeeded) nextCoverage[fetch.sellerId] = [...new Set(fetch.rows.map(codeOf).filter(Boolean))];
+      await prisma.appConfig.upsert({
+        where: { key: financialCoverageKey(scope) },
+        update: { value: JSON.stringify(nextCoverage) },
+        create: { key: financialCoverageKey(scope), value: JSON.stringify(nextCoverage) },
+      });
+      await prisma.appConfig.upsert({
+        where: { key: `erp.ultrafv3.${scope}` },
+        update: { value: JSON.stringify(allRows) },
+        create: { key: `erp.ultrafv3.${scope}`, value: JSON.stringify(allRows) },
+      });
+      const persistDurationMs = Date.now() - persistStartedAt;
+
+      const count = (status: FinancialSellerOutcome) => fetches.filter((fetch) => fetch.outcome === status).length;
+      const partial = failedSellerIds.size > 0;
+      return {
+        syncedCount: allRows.length,
+        diagnostics: {
+          sellerCount: sellers.length,
+          successCount: count("success"),
+          emptyCount: count("empty"),
+          errorCount: count("error"),
+          skippedCount: count("skipped"),
+          partial: partial ? 1 : 0,
+          writeBlockedNoCoverage: exclusions.blockAll ? 1 : 0,
+          failedWithoutCoverage: exclusions.failedWithoutCoverage,
+          excludedCodes: exclusions.excludedCodes.size,
+          matchedClients: writtenClients,
+          fetchDurationMs,
+          persistDurationMs,
+          ...planDiagnostics,
+        },
+        ...(partial
+          ? {
+              warning: exclusions.blockAll
+                ? `Parcial: ${failedSellerIds.size} de ${sellers.length} vendedor(es) falharam em ${scope} sem cobertura anterior conhecida; nada foi gravado.`
+                : `Parcial: ${failedSellerIds.size} de ${sellers.length} vendedor(es) falharam em ${scope}; ${exclusions.excludedCodes.size} código(s) ficaram intocados.`,
+            }
+          : {}),
+      };
+    },
+    { ...options, authMode: "all_sellers", lockScope: `${scope}:allSellers`, sellerId: undefined, sellerName: undefined, writeStatus: true },
+  );
+  return { result, sellerReports };
+}
+
+/** Escopos financeiros: credencial global quando houver; senão, um a um os vendedores com Login FV3. */
+export async function syncFinancialProfilesAcrossSellers(options?: RunSyncOptions) {
+  if (ultraFv3Client.hasGlobalCredentials()) return syncFinancialProfiles(options);
+  return (await syncFinancialScopeForAllConfiguredSellers("financialProfiles", options)).result;
+}
+
+export async function syncPartnerTitlesAcrossSellers(options?: RunSyncOptions) {
+  if (ultraFv3Client.hasGlobalCredentials()) return syncPartnerTitles(options);
+  return (await syncFinancialScopeForAllConfiguredSellers("partnerTitles", options)).result;
+}
+
+/** Clientes: credencial global quando houver; senão, /partners por vendedor (falha isolada). */
+export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promise<SyncResult> {
+  if (ultraFv3Client.hasGlobalCredentials()) return syncPartners(options);
+  const summary = await syncPartnersForAllConfiguredSellers(options);
+  if (summary.status === "failed") throw new Error(`Nenhum vendedor concluiu partners: ${summary.errorCount} falha(s), ${summary.skippedCount} ignorado(s) por lock.`);
+  const failed = summary.errorCount + summary.skippedCount;
+  return {
+    syncedCount: summary.processed,
+    diagnostics: {
+      sellerCount: summary.sellerCount,
+      successCount: summary.successCount,
+      emptyCount: summary.emptyCount,
+      errorCount: summary.errorCount,
+      skippedCount: summary.skippedCount,
+      created: summary.created,
+      updated: summary.updated,
+      partial: summary.status === "partial" ? 1 : 0,
+    },
+    ...(failed ? { warning: `Parcial: ${failed} de ${summary.sellerCount} vendedor(es) falharam em partners.` } : {}),
+  };
+}
+
+// Lock compartilhado entre o botão "todos vendedores", o scheduler e a Sincronização Completa: só um roda por vez. O TTL é o
+// mesmo dos demais locks (ERP_SYNC_LOCK_TTL_MS) e é renovado entre vendedores e etapas.
+export const SELLER_PORTFOLIO_LOCK_SCOPE = "erpSellerPortfolio";
+export const SELLER_PORTFOLIO_RUN_SCOPE = "sellerPortfolio";
+
+const findRunningExclusiveErpRun = () =>
+  prisma.erpSyncRun.findFirst({
+    where: { scope: { in: [SELLER_PORTFOLIO_RUN_SCOPE, "automatic", "syncAll"] }, status: ErpSyncRunStatus.running },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, correlationId: true },
+  });
+
+export const acquireSellerPortfolioLock = (runId: string) => acquireSyncLock(SELLER_PORTFOLIO_LOCK_SCOPE, runId);
+export const releaseSellerPortfolioLock = (runId: string) => releaseSyncLock(SELLER_PORTFOLIO_LOCK_SCOPE, runId);
+export const sellerPortfolioHeartbeat = (runId: string) => async () => {
+  const renewed = await acquireSyncLock(SELLER_PORTFOLIO_LOCK_SCOPE, runId);
+  if (!renewed.acquired) {
+    logApiEvent("WARN", "[ultrafv3 seller portfolio] lock lost before renewal", { correlationId: runId, lockedRunId: renewed.runId });
+  }
+};
+
+type PortfolioScopeReport = { status: "success" | "partial" | "failed"; durationMs: number; syncedCount: number; diagnostics?: Record<string, number>; error?: string };
+
+async function runSellerPortfolioSync(options: RunSyncOptions) {
+  const scopes: Record<string, PortfolioScopeReport> = {};
+  const sellers: SellerScopeReport[] = [];
+
+  const partnersStartedAt = Date.now();
+  try {
+    const summary = await syncPartnersForAllConfiguredSellers(options);
+    for (const item of summary.results) {
+      sellers.push({
+        scope: "partners",
+        sellerId: item.userId,
+        sellerName: item.sellerName,
+        status: item.status === "error" ? "error" : item.status === "skipped" ? "skipped" : item.reasonCode === "EMPTY_SUCCESS" ? "empty" : "success",
+        durationMs: item.durationMs ?? 0,
+        syncedCount: item.syncedCount ?? 0,
+        ...(item.error ? { error: item.error } : {}),
+      });
+    }
+    scopes.partners = {
+      status: summary.status,
+      durationMs: Date.now() - partnersStartedAt,
+      syncedCount: summary.processed,
+      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated },
+    };
+  } catch (error) {
+    scopes.partners = { status: "failed", durationMs: Date.now() - partnersStartedAt, syncedCount: 0, error: formatError(error) };
+  }
+
+  for (const scope of ["financialProfiles", "partnerTitles"] as const) {
+    await runHeartbeat(options);
+    const scopeStartedAt = Date.now();
+    try {
+      const { result, sellerReports } = await syncFinancialScopeForAllConfiguredSellers(scope, options);
+      sellers.push(...sellerReports);
+      scopes[scope] = {
+        status: result.diagnostics?.partial ? "partial" : "success",
+        durationMs: Date.now() - scopeStartedAt,
+        syncedCount: result.syncedCount,
+        diagnostics: result.diagnostics,
+        ...(result.warning ? { error: result.warning } : {}),
+      };
+    } catch (error) {
+      scopes[scope] = { status: "failed", durationMs: Date.now() - scopeStartedAt, syncedCount: 0, error: formatError(error) };
+    }
+  }
+
+  const statuses = Object.values(scopes).map((scope) => scope.status);
+  const finalStatus: "success" | "partial" | "failed" = statuses.every((status) => status === "failed")
+    ? "failed"
+    : statuses.every((status) => status === "success")
+      ? "success"
+      : "partial";
+  return { finalStatus, scopes, sellers };
+}
+
+export type StartSellerPortfolioSyncJobResult = {
+  accepted: boolean;
+  alreadyRunning: boolean;
+  runId: string;
+  correlationId: string;
+  status: "running" | "already_running";
+  message: string;
+};
+
+/**
+ * Botão "Sincronizar clientes de todos vendedores": partners, financialProfiles e partnerTitles por
+ * vendedor, em background. Responde logo; a UI acompanha o ErpSyncRun `sellerPortfolio` no Histórico.
+ *
+ * Execução interrompida (API reiniciada no meio, por exemplo num cutover): o ErpSyncRun fica como
+ * `running` no Histórico, e o lock expira sozinho em até ERP_SYNC_LOCK_TTL_MS depois da última
+ * renovação, liberando uma nova execução. Dados financeiros só são gravados na etapa final de cada
+ * escopo e nunca são apagados; clientes não gravados mantêm os dados anteriores até a próxima rodada.
+ */
+export async function startSellerPortfolioSyncJob(options: RunSyncOptions = {}): Promise<StartSellerPortfolioSyncJobResult> {
+  const correlationId = randomUUID();
+  const lock = await acquireSellerPortfolioLock(correlationId);
+  if (!lock.acquired) {
+    const currentRun = await findRunningExclusiveErpRun();
+    return {
+      accepted: false,
+      alreadyRunning: true,
+      runId: currentRun?.id ?? lock.runId,
+      correlationId: currentRun?.correlationId ?? lock.runId,
+      status: "already_running",
+      message: "Já existe uma sincronização de clientes por vendedor, automática ou completa em execução.",
+    };
+  }
+
+  let runId: string;
+  try {
+    const run = await prisma.erpSyncRun.create({
+      data: {
+        scope: SELLER_PORTFOLIO_RUN_SCOPE,
+        trigger: ErpSyncTrigger.manual,
+        status: ErpSyncRunStatus.running,
+        authMode: "all_sellers",
+        correlationId,
+      },
+    });
+    runId = run.id;
+  } catch (error) {
+    await releaseSellerPortfolioLock(correlationId).catch(() => undefined);
+    throw error;
+  }
+
+  logApiEvent("INFO", "[ultrafv3 seller portfolio job] accepted", { correlationId, runId });
+  void runSellerPortfolioJobInBackground(runId, correlationId, options).catch((error) =>
+    logApiEvent("ERROR", "[ultrafv3 seller portfolio job] unexpected failure", { correlationId, runId, error: formatError(error) }),
+  );
+
+  return { accepted: true, alreadyRunning: false, runId, correlationId, status: "running", message: "Sincronização iniciada" };
+}
+
+async function runSellerPortfolioJobInBackground(runId: string, correlationId: string, options: RunSyncOptions) {
+  const startedAt = Date.now();
+  try {
+    const report = await runSellerPortfolioSync({
+      ...options,
+      trigger: ErpSyncTrigger.manual,
+      correlationId,
+      heartbeat: sellerPortfolioHeartbeat(correlationId),
+    });
+    const notOk = Object.entries(report.scopes).filter(([, scope]) => scope.status !== "success");
+    const summary = notOk.map(([scope, item]) => `${scope}: ${item.error ?? item.status}`).join(" | ");
+    await prisma.erpSyncRun.update({
+      where: { id: runId },
+      data: {
+        status: report.finalStatus === "failed" ? ErpSyncRunStatus.error : ErpSyncRunStatus.success,
+        finishedAt: new Date(),
+        durationMs: Date.now() - startedAt,
+        syncedCount: Object.values(report.scopes).reduce((total, scope) => total + scope.syncedCount, 0),
+        metrics: report as unknown as Prisma.InputJsonValue,
+        errorMessage: summary ? `${report.finalStatus === "failed" ? "Falha" : "Parcial"}: ${summary}` : null,
+      },
+    });
+    logApiEvent("INFO", "[ultrafv3 seller portfolio job] finished", { correlationId, runId, finalStatus: report.finalStatus });
+  } catch (error) {
+    const message = formatError(error);
+    logApiEvent("ERROR", "[ultrafv3 seller portfolio job] failed", { correlationId, runId, error: message });
+    await prisma.erpSyncRun
+      .update({
+        where: { id: runId },
+        data: {
+          status: ErpSyncRunStatus.error,
+          finishedAt: new Date(),
+          durationMs: Date.now() - startedAt,
+          errorMessage: message,
+          errors: [{ message, at: new Date().toISOString(), correlationId }] as Prisma.InputJsonValue,
+          metrics: { finalStatus: "failed" } as Prisma.InputJsonValue,
+        },
+      })
+      .catch((updateError) =>
+        logApiEvent("ERROR", "[ultrafv3 seller portfolio job] failed to record failure", { correlationId, runId, error: formatError(updateError) }),
+      );
+  } finally {
+    await releaseSellerPortfolioLock(correlationId).catch((error) =>
+      logApiEvent("ERROR", "[ultrafv3 seller portfolio job] failed to release lock", { correlationId, runId, error: formatError(error) }),
+    );
+  }
+}
+
 export type UltraFv3FullSyncStep = {
   scope: UltraFv3SyncScope;
   label: string;
@@ -3458,9 +3949,9 @@ const FULL_SYNC_STEPS: Array<{
 }> = orderPriceAuthoritySteps([
   { scope: "connection", label: "Conexão", run: syncConnection },
   { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
-  { scope: "partners", label: "Clientes", run: syncPartners },
-  { scope: "financialProfiles", label: "Perfil financeiro", run: syncFinancialProfiles },
-  { scope: "partnerTitles", label: "Títulos em aberto", run: syncPartnerTitles },
+  { scope: "partners", label: "Clientes", run: syncPartnersAcrossSellers },
+  { scope: "financialProfiles", label: "Perfil financeiro", run: syncFinancialProfilesAcrossSellers, nonCritical: true },
+  { scope: "partnerTitles", label: "Títulos em aberto", run: syncPartnerTitlesAcrossSellers, nonCritical: true },
   { scope: "products", label: "Produtos", run: syncProducts },
   { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
   { scope: "priceVariations", label: "Variações por tabela", run: syncPriceVariations },
@@ -3472,7 +3963,7 @@ const FULL_SYNC_STEPS: Array<{
   { scope: "orderStatus", label: "Status de pedidos", run: (options) => syncOrderStatus(() => import("./erpOrderService.js").then(({ syncErpOrderStatuses }) => syncErpOrderStatuses()), options), nonCritical: true },
 ]);
 
-export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Promise<UltraFv3FullSyncResult> {
+export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), heartbeat?: () => Promise<void>): Promise<UltraFv3FullSyncResult> {
   const startedAt = Date.now();
   const steps: UltraFv3FullSyncStep[] = [];
   const warnings: Array<{ scope: UltraFv3SyncScope; label: string; message: string; correlationId: string }> = [];
@@ -3496,7 +3987,8 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Pro
       });
       let result: SyncResult;
       try {
-        result = await step.run({ correlationId, failIfLocked: true });
+        await runHeartbeat({ heartbeat });
+        result = await step.run({ correlationId, failIfLocked: true, heartbeat });
       } catch (error) {
         if (!step.nonCritical) throw error;
         const message = formatError(error);
@@ -3512,7 +4004,14 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Pro
           operationalAlert: true,
         });
       }
-      if (step.nonCritical && (result.diagnostics?.skippedOrderStatusMissingGlobalCredentials ?? 0) > 0) {
+      if ((result.diagnostics?.partial ?? 0) > 0) {
+        warnings.push({
+          scope: step.scope,
+          label: step.label,
+          message: result.warning ?? `${step.label}: sincronização parcial por vendedor; veja o Histórico.`,
+          correlationId,
+        });
+      } else if (step.nonCritical && (result.diagnostics?.skippedOrderStatusMissingGlobalCredentials ?? 0) > 0) {
         warnings.push({
           scope: step.scope,
           label: step.label,
@@ -3527,7 +4026,7 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Pro
           correlationId,
         });
       }
-      const stepWarning = step.nonCritical ? warnings.find((warning) => warning.scope === step.scope)?.message : undefined;
+      const stepWarning = warnings.find((warning) => warning.scope === step.scope)?.message;
       steps.push({
         scope: step.scope,
         label: step.label,
@@ -3612,20 +4111,41 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
       message: "Sincronização Completa ERP já está em execução.",
     };
   }
+  // Não roda junto com o botão "todos vendedores" nem com o scheduler (lock compartilhado com TTL).
+  const portfolioLock = await acquireSellerPortfolioLock(correlationId);
+  if (!portfolioLock.acquired) {
+    await releaseSyncLock("syncAll", correlationId).catch(() => undefined);
+    const currentRun = await findRunningExclusiveErpRun();
+    return {
+      accepted: false,
+      alreadyRunning: true,
+      runId: currentRun?.id ?? portfolioLock.runId,
+      correlationId: currentRun?.correlationId ?? portfolioLock.runId,
+      status: "already_running",
+      message: "Já existe uma sincronização de clientes por vendedor ou automática em execução.",
+    };
+  }
 
-  const run = await prisma.erpSyncRun.create({
-    data: {
-      scope: "syncAll",
-      trigger: ErpSyncTrigger.manual,
-      status: ErpSyncRunStatus.running,
-      correlationId,
-      metrics: { totalSteps: FULL_SYNC_STEPS.length } as Prisma.InputJsonValue,
-    },
-  });
+  let run: { id: string };
+  try {
+    run = await prisma.erpSyncRun.create({
+      data: {
+        scope: "syncAll",
+        trigger: ErpSyncTrigger.manual,
+        status: ErpSyncRunStatus.running,
+        correlationId,
+        metrics: { totalSteps: FULL_SYNC_STEPS.length } as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    await releaseSellerPortfolioLock(correlationId).catch(() => undefined);
+    await releaseSyncLock("syncAll", correlationId).catch(() => undefined);
+    throw error;
+  }
 
   logApiEvent("INFO", "[ultrafv3 sync-all job] accepted", { correlationId, runId: run.id });
 
-  void syncAllUltraFv3Catalogs(correlationId)
+  void syncAllUltraFv3Catalogs(correlationId, sellerPortfolioHeartbeat(correlationId))
     .then(async (result) => {
       await prisma.erpSyncRun.update({
         where: { id: run.id },
@@ -3647,6 +4167,7 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
     })
     .catch(async (error) => {
       const message = formatError(error);
+      logApiEvent("ERROR", "[ultrafv3 sync-all job] failed", { correlationId, runId: run.id, error: message });
       await prisma.erpSyncRun.update({
         where: { id: run.id },
         data: {
@@ -3657,12 +4178,16 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
           errors: [{ message, at: new Date().toISOString(), correlationId }] as Prisma.InputJsonValue,
           metrics: { finalStatus: "failed", completedSteps: (error as { completedSteps?: unknown }).completedSteps ?? [] } as Prisma.InputJsonValue,
         },
-      });
-      logApiEvent("ERROR", "[ultrafv3 sync-all job] failed", { correlationId, runId: run.id, error: message });
+      }).catch((updateError) =>
+        logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to record failure", { correlationId, runId: run.id, error: formatError(updateError) }),
+      );
     })
     .finally(() => {
       void releaseSyncLock("syncAll", correlationId).catch((error) =>
         logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to release lock", { correlationId, runId: run.id, error: formatError(error) }),
+      );
+      void releaseSellerPortfolioLock(correlationId).catch((error) =>
+        logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to release seller portfolio lock", { correlationId, runId: run.id, error: formatError(error) }),
       );
     });
 

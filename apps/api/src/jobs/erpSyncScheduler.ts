@@ -3,11 +3,16 @@ import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { syncErpOrderStatuses } from "../services/erpOrderService.js";
 import {
+  acquireSellerPortfolioLock,
+  releaseSellerPortfolioLock,
+  sellerPortfolioHeartbeat,
   syncBranches,
   syncConnection,
+  syncFinancialProfilesAcrossSellers,
   syncOperations,
   syncOrderStatus,
-  syncPartners,
+  syncPartnersAcrossSellers,
+  syncPartnerTitlesAcrossSellers,
   syncPaymentMethods,
   syncPrices,
   syncPriceTables,
@@ -34,10 +39,13 @@ const AUTOMATIC_SYNC_STEPS: Array<{
   scope: string;
   label: string;
   run: (options?: RunSyncOptions) => Promise<unknown>;
+  nonCritical?: boolean;
 }> = orderPriceAuthoritySteps([
   { scope: "connection", label: "Conexão", run: syncConnection },
   { scope: "salesmen", label: "Vendedores", run: syncSalesmen },
-  { scope: "partners", label: "Clientes/parceiros", run: syncPartners },
+  { scope: "partners", label: "Clientes/parceiros", run: syncPartnersAcrossSellers },
+  { scope: "financialProfiles", label: "Perfil financeiro", run: syncFinancialProfilesAcrossSellers, nonCritical: true },
+  { scope: "partnerTitles", label: "Títulos em aberto", run: syncPartnerTitlesAcrossSellers, nonCritical: true },
   { scope: "products", label: "Produtos", run: syncProducts },
   { scope: "priceTables", label: "Tabelas de preço", run: syncPriceTables },
   {
@@ -396,6 +404,25 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   }
 
   const correlationId = randomUUID();
+  // Mesmo lock do botão "Sincronizar clientes de todos vendedores": os dois nunca rodam juntos.
+  const portfolioLock = await acquireSellerPortfolioLock(correlationId);
+  if (!portfolioLock.acquired) {
+    lastAutomaticSkippedReason = "lock_active";
+    nextAutomaticRunAt = calculateNextAutomaticRunAt(schedulerTickAt);
+    logApiEvent("WARN", "[ultrafv3 scheduler] skipped", {
+      ...tickMetadataBase,
+      shouldRun: false,
+      skippedReason: lastAutomaticSkippedReason,
+      startedAt: null,
+      finishedAt: new Date().toISOString(),
+      status: "skipped",
+      correlationId: null,
+      lockedRunId: portfolioLock.runId,
+      lockedUntil: portfolioLock.lockedUntil?.toISOString() ?? null,
+    });
+    return;
+  }
+  const heartbeat = sellerPortfolioHeartbeat(correlationId);
   const startedAt = new Date();
   const startedAtMs = Date.now();
   currentAutomaticRunId = correlationId;
@@ -456,11 +483,25 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
         totalSteps: AUTOMATIC_SYNC_STEPS.length,
       });
       try {
+        await heartbeat().catch((error) =>
+          logApiEvent("WARN", "[erp automatic sync] heartbeat failed", { correlationId, error: formatErrorMessage(error) }),
+        );
         const result = await step.run({
           trigger: ErpSyncTrigger.scheduler,
           failIfLocked: true,
           correlationId,
+          heartbeat,
         });
+        const stepResult = result as { diagnostics?: Record<string, number>; warning?: string } | undefined;
+        if ((stepResult?.diagnostics?.partial ?? 0) > 0) {
+          nonCriticalStepWarnings.push({
+            scope: step.scope,
+            label: step.label,
+            step: index + 1,
+            message: stepResult?.warning ?? `${step.label}: sincronização parcial por vendedor; veja o Histórico.`,
+            correlationId,
+          });
+        }
         if (step.scope === "orderStatus") {
           const diagnostics = (
             result as { diagnostics?: Record<string, number> }
@@ -485,7 +526,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           }
         }
       } catch (error) {
-        if (step.scope === "orderStatus") {
+        if (step.scope === "orderStatus" || step.nonCritical) {
           const message = formatErrorMessage(error);
           nonCriticalStepWarnings.push({
             scope: step.scope,
@@ -610,6 +651,9 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   } finally {
     automaticSyncRunning = false;
     currentAutomaticRunId = null;
+    await releaseSellerPortfolioLock(correlationId).catch((error) =>
+      logApiEvent("ERROR", "[erp automatic sync] failed to release seller portfolio lock", { correlationId, error: formatErrorMessage(error) }),
+    );
   }
 }
 

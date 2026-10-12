@@ -227,7 +227,14 @@ const formatDate = (value?: string) => {
 const latestError = (status?: SyncScopeStatus) => status?.errors?.[0] || "Nenhum erro registrado.";
 
 
-const authModeLabel = (mode?: string) => (mode === "seller" ? "Vendedor" : mode === "seller_reference" ? "Vendedor de referência" : "Global");
+const authModeLabel = (mode?: string) => (mode === "seller" ? "Vendedor" : mode === "seller_reference" ? "Vendedor de referência" : mode === "all_sellers" ? "Todos os vendedores" : "Global");
+
+const SELLER_PORTFOLIO_POLL_INTERVAL_MS = 3_000;
+const SELLER_PORTFOLIO_POLL_MAX_MS = 5 * 60_000;
+const SELLER_PORTFOLIO_IN_PROGRESS_MESSAGE = "Sincronização em andamento, acompanhe pelo Histórico.";
+const sellerRunScopeLabel: Record<string, string> = { partners: "Clientes", financialProfiles: "Perfil financeiro", partnerTitles: "Títulos" };
+
+type SellerPortfolioJobResponse = { accepted: boolean; alreadyRunning: boolean; runId: string; correlationId: string; status: "running" | "already_running"; message: string };
 const contextModeLabel = (mode?: string) => (mode === "seller" ? "seller" : mode === "seller_reference" ? "seller_reference" : "global");
 const authenticationStatusLabel: Record<string, string> = {
   missing_config: "Configuração ausente",
@@ -298,20 +305,48 @@ export default function ErpIntegrationPanel() {
     }
   };
 
+  // A sincronização roda em background; acompanha o ErpSyncRun pelo Histórico até um tempo máximo.
+  const waitForSellerPortfolioRun = async (runId: string) => {
+    const deadline = Date.now() + SELLER_PORTFOLIO_POLL_MAX_MS;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, SELLER_PORTFOLIO_POLL_INTERVAL_MS));
+      try {
+        const response = await api.get<{ items: SyncHistoryItem[] }>("/erp/ultrafv3/sync/history", { params: { limit: 100 } });
+        const run = response.data.items.find((item) => item.id === runId);
+        if (run && run.status !== "running") return run;
+      } catch {
+        // Falha pontual de consulta não interrompe o acompanhamento.
+      }
+    }
+    return null;
+  };
+
   const runAllSellerPartnersSync = async () => {
     setRunning("allSellers");
     try {
-      const response = await api.post<{ status: "success" | "partial" | "failed"; sellerCount: number; successCount: number; emptyCount: number; errorCount: number; skippedCount: number; processed: number; syncedCount?: number; created?: number; updated?: number }>("/erp/ultrafv3/sync/partners/all-sellers");
-      const { status, errorCount, emptyCount, skippedCount, processed, syncedCount } = response.data;
-      const processedCount = Number(processed ?? syncedCount ?? 0);
-      if (status === "failed") {
-        toast.error("Não foi possível sincronizar clientes. Nenhum vendedor foi processado com sucesso.");
-      } else if (status === "partial" || response.status === 207) {
-        toast.warning(`Sincronização parcial: ${processedCount} clientes processados; ${errorCount + skippedCount} vendedores com falha; ${emptyCount} sem registros.`);
-      } else {
-        toast.success(`Sincronização concluída: ${processedCount} clientes processados.`);
+      const response = await api.post<SellerPortfolioJobResponse>("/erp/ultrafv3/sync/partners/all-sellers");
+      if (response.data.alreadyRunning) {
+        toast.info(`${response.data.message} Acompanhe pelo Histórico.`);
+        return;
       }
-      await load();
+      toast.info("Sincronização de clientes, perfil financeiro e títulos iniciada.");
+      const run = await waitForSellerPortfolioRun(response.data.runId);
+      if (!run) {
+        toast.info(SELLER_PORTFOLIO_IN_PROGRESS_MESSAGE);
+      } else {
+        const metrics = run.metrics as { finalStatus?: string; scopes?: { partners?: { syncedCount?: number; diagnostics?: Record<string, number> } } } | null | undefined;
+        const finalStatus = metrics?.finalStatus;
+        const processedCount = Number(metrics?.scopes?.partners?.syncedCount ?? 0);
+        const { errorCount = 0, skippedCount = 0, emptyCount = 0 } = metrics?.scopes?.partners?.diagnostics ?? {};
+        if (run.status === "error" || finalStatus === "failed") {
+          toast.error(`Não foi possível sincronizar clientes. Nenhum vendedor foi processado com sucesso. ${run.errorMessage ?? ""}`.trim());
+        } else if (finalStatus === "partial") {
+          toast.warning(`Sincronização parcial: ${processedCount} clientes processados; ${errorCount + skippedCount} vendedores com falha; ${emptyCount} sem registros. ${run.errorMessage ?? ""}`.trim());
+        } else {
+          toast.success(`Sincronização concluída: ${processedCount} clientes processados. Perfil financeiro e títulos atualizados.`);
+        }
+      }
+      await load().catch(() => undefined);
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível sincronizar clientes de todos vendedores."));
       await load().catch(() => undefined);
@@ -454,11 +489,14 @@ export default function ErpIntegrationPanel() {
 
 
   const sellerPartnerRuns = useMemo(() => {
-    const grouped = new Map<string, { sellerId: string; sellerName: string; status: string; syncedCount: number; durationMs?: number | null; requestDurationMs?: number | null; error?: string }>();
+    const grouped = new Map<string, { key: string; scope: string; sellerId: string; sellerName: string; status: string; syncedCount: number; durationMs?: number | null; requestDurationMs?: number | null; error?: string }>();
     for (const item of data?.history ?? []) {
-      if (item.scope !== "partners" || item.authMode !== "seller" || !item.sellerId) continue;
-      if (grouped.has(item.sellerId)) continue;
-      grouped.set(item.sellerId, {
+      if (!sellerRunScopeLabel[item.scope] || item.authMode !== "seller" || !item.sellerId) continue;
+      const key = `${item.sellerId}:${item.scope}`;
+      if (grouped.has(key)) continue;
+      grouped.set(key, {
+        key,
+        scope: item.scope,
         sellerId: item.sellerId,
         sellerName: item.sellerName || "Sem nome",
         status: item.status,
@@ -704,15 +742,15 @@ export default function ErpIntegrationPanel() {
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <h4 className="text-sm font-semibold text-slate-900">Resumo de clientes por vendedor</h4>
-        <p className="mt-1 text-xs text-slate-600">Última execução individual por vendedor (fluxo correto para parceiros/clientes).</p>
+        <p className="mt-1 text-xs text-slate-600">Última execução individual por vendedor e escopo (clientes, perfil financeiro e títulos).</p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-left text-xs">
-            <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Importados</th><th className="py-2 pr-3">Duração</th><th className="py-2 pr-3">Chamada /partners</th><th className="py-2 pr-3">Erro</th></tr></thead>
+            <thead className="text-slate-500"><tr><th className="py-2 pr-3">Vendedor</th><th className="py-2 pr-3">Escopo</th><th className="py-2 pr-3">Status</th><th className="py-2 pr-3">Recebidos</th><th className="py-2 pr-3">Duração</th><th className="py-2 pr-3">Chamada ERP</th><th className="py-2 pr-3">Erro</th></tr></thead>
             <tbody className="divide-y divide-slate-100">
               {sellerPartnerRuns.map((item) => (
-                <tr key={item.sellerId}><td className="py-2 pr-3 font-medium text-slate-800">{item.sellerName}</td><td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td><td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td><td className="py-2 pr-3 text-slate-600">{item.durationMs ?? 0}ms</td><td className="py-2 pr-3 text-slate-600">{item.requestDurationMs ?? "—"}{item.requestDurationMs != null ? "ms" : ""}</td><td className="max-w-md truncate py-2 pr-3 text-red-700" title={item.error}>{item.error || "—"}</td></tr>
+                <tr key={item.key}><td className="py-2 pr-3 font-medium text-slate-800">{item.sellerName}</td><td className="py-2 pr-3 text-slate-600">{sellerRunScopeLabel[item.scope] ?? item.scope}</td><td className="py-2 pr-3"><span className={`rounded-full px-2 py-1 font-semibold ring-1 ${statusClasses[item.status] || statusClasses.idle}`}>{statusLabel[item.status] || item.status}</span></td><td className="py-2 pr-3 text-slate-900">{item.syncedCount}</td><td className="py-2 pr-3 text-slate-600">{item.durationMs ?? 0}ms</td><td className="py-2 pr-3 text-slate-600">{item.requestDurationMs ?? "—"}{item.requestDurationMs != null ? "ms" : ""}</td><td className="max-w-md truncate py-2 pr-3 text-red-700" title={item.error}>{item.error || "—"}</td></tr>
               ))}
-              {!sellerPartnerRuns.length ? <tr><td colSpan={6} className="py-4 text-center text-slate-500">Nenhuma execução por vendedor registrada.</td></tr> : null}
+              {!sellerPartnerRuns.length ? <tr><td colSpan={7} className="py-4 text-center text-slate-500">Nenhuma execução por vendedor registrada.</td></tr> : null}
             </tbody>
           </table>
         </div>
