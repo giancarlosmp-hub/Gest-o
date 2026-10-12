@@ -117,13 +117,35 @@ while IFS= read -r project; do
   resource_count=$(( $(docker ps -aq --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker network ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) + $(docker volume ls -q --filter "label=com.docker.compose.project=${project}" | wc -l) ))
   if [ "$resource_count" -eq 0 ]; then
     echo "PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=${project}"
-  elif [ -f "$preview_dir/docker-compose.yml" ] && [ -f "$preview_dir/docker-compose.preview.yml" ]; then
-    (cd "$preview_dir" && docker compose -p "$project" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans)
   else
-    echo "PREVIEW_ORPHAN_CLEANUP=PRESERVED reason=trusted_compose_files_missing project=${project}"
-    preserved_projects=$((preserved_projects + 1))
-    echo "PREVIEW_PROJECT_CLEANUP=PRESERVED project=${project}"
-    continue
+    # volume-guard:begin (a smoke mutation test swaps this block for the old unguarded teardown)
+    # The compose default for the database volume is the production volume, and process variables
+    # override the folder .env. Tear down only with the folder .env pointing to this project's own
+    # volume, and run compose with a clean environment carrying just this project's identity.
+    expected_volume=""
+    if [[ "$project" =~ ^gesto-pr-${PR_NUMBER}-([0-9]+)-([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" = "$owner_run" ] && [ "${BASH_REMATCH[2]}" = "$owner_attempt" ]; then
+      expected_volume="gesto_pgdata_pr_${PR_NUMBER}_${owner_run}_${owner_attempt}"
+    fi
+    guard_reason=""
+    if [ ! -f "$preview_dir/docker-compose.yml" ] || [ ! -f "$preview_dir/docker-compose.preview.yml" ]; then
+      guard_reason=trusted_compose_files_missing
+    elif [ ! -f "$preview_dir/.env" ]; then
+      guard_reason=env_file_missing
+    elif [ -z "$expected_volume" ] || [ "$(grep -c '^POSTGRES_VOLUME_NAME=' "$preview_dir/.env")" != "1" ] || ! grep -Fxq "POSTGRES_VOLUME_NAME=${expected_volume}" "$preview_dir/.env"; then
+      guard_reason=env_volume_mismatch
+    fi
+    if [ -n "$guard_reason" ]; then
+      echo "PREVIEW_ORPHAN_CLEANUP=PRESERVED reason=${guard_reason} project=${project}"
+      preserved_projects=$((preserved_projects + 1))
+      echo "PREVIEW_PROJECT_CLEANUP=PRESERVED project=${project}"
+      continue
+    fi
+    (cd "$preview_dir" && env -i PATH="$PATH" HOME="${HOME:-/root}" ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} \
+      COMPOSE_PROJECT_NAME="$project" POSTGRES_VOLUME_NAME="$expected_volume" \
+      PREVIEW_OWNER_PR="$owner_pr" PREVIEW_OWNER_RUN_ID="$owner_run" PREVIEW_OWNER_RUN_ATTEMPT="$owner_attempt" \
+      PREVIEW_OWNER_WORKFLOW="$owner_workflow" \
+      docker compose -p "$project" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans)
+    # volume-guard:end
   fi
   node "$CLEANUP_SCRIPT" cleanup "$manifest_path"
   rm -rf "$preview_dir"

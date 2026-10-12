@@ -10,6 +10,11 @@ for project in gesto-pr-42-100-1 gesto-pr-42-100-2 gesto-pr-42-101-1; do
 done
 cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 : >"$tmp/copied/scripts/lifecycle.mjs"
+write_env() { # gesto-pr-42-<run>-<attempt> [volume]
+  local rest=${1#gesto-pr-42-}
+  printf 'COMPOSE_PROJECT_NAME=%s\nPOSTGRES_VOLUME_NAME=%s\n' "$1" "${2:-gesto_pgdata_pr_42_${rest%-*}_${rest##*-}}" >"$tmp/preview/pr-42/$1/.env"
+}
+for project in gesto-pr-42-100-1 gesto-pr-42-100-2 gesto-pr-42-101-1; do write_env "$project"; done
 
 cat >"$tmp/bin/docker" <<'SH'
 #!/usr/bin/env bash
@@ -41,7 +46,13 @@ if [[ $1 == inspect ]]; then
 fi
 if [[ $1 == network && $2 == ls ]]; then exit; fi
 if [[ $1 == volume && $2 == ls ]]; then exit; fi
-if [[ $1 == compose ]]; then [[ -z "${MUTATION_LOG:-}" ]] || printf 'compose\n' >>"$MUTATION_LOG"; exit; fi
+if [[ $1 == compose ]]; then
+  base=$(cd "$(dirname "$0")/.." && pwd)
+  volume=${POSTGRES_VOLUME_NAME:-}
+  if [[ -z $volume && -f .env ]]; then volume=$(sed -n 's/^POSTGRES_VOLUME_NAME=//p' .env); fi
+  printf 'compose %s volume=%s secret=%s\n' "$3" "${volume:-gest-o_pgdata}" "${ADMIN_BOOTSTRAP_PASSWORD:-}" >>"$base/mutations"
+  exit
+fi
 echo "unexpected docker command: $*" >&2; exit 2
 SH
 cat >"$tmp/bin/curl" <<'SH'
@@ -104,7 +115,9 @@ for producer in 100:1 100:2 101:1 102:1; do
   printf '{"format":1,"project":"gesto-pr-42-%s-%s","images":[{"labels":{"pr":"42","run-id":"%s","run-attempt":"%s","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"%s","run-attempt":"%s","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' "$run" "$attempt" "$run" "$attempt" "$run" "$attempt" >"$tmp/provenance/gesto-pr-42-$run-$attempt.json"
 done
 
+rm -f "$tmp/mutations"
 if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic \
+  POSTGRES_VOLUME_NAME=gest-o_pgdata ADMIN_BOOTSTRAP_PASSWORD=synthetic-outer-secret \
   CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
   PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
   bash "$tmp/copied/scripts/runner.sh" >"$tmp/out" 2>"$tmp/err"; then
@@ -118,6 +131,11 @@ grep -Fq 'PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=gesto-pr-42-102-1' "$t
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-102-1' "$tmp/out"
 grep -Fq NGINX_RELOAD=PASS "$tmp/out"
 grep -Fxq 'PREVIEW_CLEANUP_RESULT=PASS removed=4 preserved=0' "$tmp/out"
+grep -Fxq 'compose gesto-pr-42-100-1 volume=gesto_pgdata_pr_42_100_1 secret=' "$tmp/mutations"
+grep -Fxq 'compose gesto-pr-42-100-2 volume=gesto_pgdata_pr_42_100_2 secret=' "$tmp/mutations"
+grep -Fxq 'compose gesto-pr-42-101-1 volume=gesto_pgdata_pr_42_101_1 secret=' "$tmp/mutations"
+test "$(grep -c '^compose ' "$tmp/mutations")" -eq 3
+! grep -Eq 'volume=gest-o|secret=synthetic' "$tmp/mutations"
 
 # A conflicting authenticated attempt must stop before compose down or any
 # later nginx/image mutation. This uses only disposable fakes.
@@ -128,6 +146,7 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 mkdir -p "$tmp/preview/pr-42/gesto-pr-42-100-1"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-1"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 set +e
 PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS=gesto-pr-42-100-1 FAKE_API_ATTEMPT_OFFSET=1 MUTATION_LOG="$tmp/mutations" \
@@ -148,8 +167,10 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 : >"$tmp/copied/scripts/lifecycle.mjs"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-1"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-2/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-2/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-2"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 printf '{"format":1,"project":"gesto-pr-42-100-2","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"2","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-2.json"
 
@@ -177,6 +198,7 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 : >"$tmp/copied/scripts/lifecycle.mjs"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-1"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 
 export FAKE_MODE="run_pr_missing"
@@ -199,6 +221,7 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 : >"$tmp/copied/scripts/lifecycle.mjs"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-1"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 
 set +e
@@ -221,6 +244,7 @@ cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
 : >"$tmp/copied/scripts/lifecycle.mjs"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
 : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+write_env "gesto-pr-42-100-1"
 printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
 export FAKE_MODE="commit_not_in_pr"
 if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
@@ -266,4 +290,46 @@ test "$(grep -Ec 'docker (ps -a|network ls|volume ls) --filter "label=com\.gesto
 grep -Fq 'case "$project" in "gesto-pr-${PR_NUMBER}-"*) ;; *) echo '"'"'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT'"'"'; exit 1;; esac' <<<"$runner_text"
 ! grep -Eq 'docker (system|network|volume|image|container) prune|network rm' <<<"$runner_text"
 
-echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS nginx_route_authorization=PASS unexpected_error_reported=PASS final_marker=PASS commit_not_in_pr_preserved=PASS foreign_scope_rejected=PASS unlabeled_never_discovered=PASS'
+# Folder .env guard: without it, or pointing anywhere but this project's own volume, nothing is
+# torn down and the project is preserved (yellow warning).
+guard_case() { # reason [.env volume | "none" for no .env]
+  rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+  rm -rf "$tmp/preview/pr-42/gesto-pr-42-100-1"
+  mkdir -p "$tmp/copied/scripts" "$tmp/preview/pr-42/gesto-pr-42-100-1"
+  cp "${GUARD_RUNNER:-$root/scripts/preview-cleanup-remote.sh}" "$tmp/copied/scripts/runner.sh"
+  : >"$tmp/copied/scripts/lifecycle.mjs"
+  : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+  : >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+  case "$2" in
+    none) ;;
+    double) write_env gesto-pr-42-100-1; printf 'POSTGRES_VOLUME_NAME=gest-o_pgdata\n' >>"$tmp/preview/pr-42/gesto-pr-42-100-1/.env";;
+    *) write_env gesto-pr-42-100-1 "$2";;
+  esac
+  printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+  set +e
+  PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1" \
+    CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+    PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+    bash "$tmp/copied/scripts/runner.sh" >"$tmp/guard.out" 2>&1
+  guard_rc=$?
+  set -e
+}
+for spec in env_file_missing:none env_volume_mismatch:gest-o_pgdata env_volume_mismatch:gesto_pgdata_pr_42_101_1 env_volume_mismatch:double; do
+  reason=${spec%%:*}; guard_case "$reason" "${spec#*:}"
+  test "$guard_rc" -eq 0 || { cat "$tmp/guard.out" >&2; exit 1; }
+  grep -Fxq "PREVIEW_ORPHAN_CLEANUP=PRESERVED reason=${reason} project=gesto-pr-42-100-1" "$tmp/guard.out"
+  grep -Fxq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/guard.out"
+  grep -Fxq 'PREVIEW_CLEANUP_RESULT=PRESERVED removed=0 preserved=1' "$tmp/guard.out"
+  test ! -e "$tmp/mutations"
+  test -d "$tmp/preview/pr-42/gesto-pr-42-100-1"
+done
+
+# Mutation test: the same "no .env" case run against the old unguarded teardown targets the
+# production volume gest-o_pgdata. The real runner above never did; this proves the check bites.
+awk '/# volume-guard:begin/{print "    (cd \"$preview_dir\" && docker compose -p \"$project\" -f docker-compose.yml -f docker-compose.preview.yml down -v --remove-orphans)"; skip=1; next} /# volume-guard:end/{skip=0; next} !skip' \
+  "$root/scripts/preview-cleanup-remote.sh" >"$tmp/unguarded-runner.sh"
+! grep -Fq 'env -i' "$tmp/unguarded-runner.sh"
+GUARD_RUNNER="$tmp/unguarded-runner.sh" guard_case env_file_missing none
+grep -Fxq 'compose gesto-pr-42-100-1 volume=gest-o_pgdata secret=' "$tmp/mutations"
+
+echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS nginx_route_authorization=PASS unexpected_error_reported=PASS final_marker=PASS commit_not_in_pr_preserved=PASS foreign_scope_rejected=PASS unlabeled_never_discovered=PASS env_guard=PASS clean_env=PASS unguarded_mutation_targets_production=DETECTED'
