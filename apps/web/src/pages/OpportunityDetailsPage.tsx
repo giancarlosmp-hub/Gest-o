@@ -16,6 +16,7 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import { canConfirmErpManualResolution } from "../lib/erpManualResolution";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
+import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import AccessibleCheckbox from "../components/AccessibleCheckbox";
 import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpportunityConfirmModal";
@@ -74,6 +75,7 @@ type Opportunity = {
     cnpj?: string | null;
     city?: string | null;
     state?: string | null;
+    creditAlert?: ClientCreditAlert | null;
   } | null;
   owner?: string;
   ownerSeller?: {
@@ -1335,6 +1337,8 @@ export default function OpportunityDetailsPage() {
           </button>
         </div>
       </div>
+
+      <ClientCreditAlertBanner alert={item.clientData?.creditAlert} />
 
       {item.daysOverdue && item.daysOverdue > 0 ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">

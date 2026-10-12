@@ -21,7 +21,13 @@ let contacts: Row[] = [];
 
 const resetData = () => {
   clients = [
-    { id: "client-a", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A", cnpjNormalized: "11111111000111", isArchived: false },
+    {
+      id: "client-a", tenantId: "tenant-a", ownerSellerId: "seller-a", name: "Cliente A", cnpjNormalized: "11111111000111", isArchived: false,
+      // Payload ERP fictício com chaves fora da lista de permitidos.
+      overdueTitlesTotal: 0,
+      financialProfile: { DIAS_MEDIAATRASO: 20, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0, VALOR_MEDIO: 100, LIMITE_CREDITO: 1, CPF_CNPJ: "synthetic-erp" },
+      partnerTitles: [{ DOCTO: 1, PARCELA: "1", DATA_VENCIMENTO: "2026-01-01", DSCFORMA: "BOLETO", VALOR: 10, SALDO_CAPITAL: 5, NOSSO_NUMERO: "synthetic-erp" }],
+    },
     { id: "client-b", tenantId: "tenant-a", ownerSellerId: "seller-b", name: "Cliente B", cnpjNormalized: "11111111000111", isArchived: false },
     { id: "client-other", tenantId: "tenant-b", ownerSellerId: "seller-c", name: "Cliente Outro Tenant", cnpjNormalized: "11111111000111", isArchived: false },
   ];
@@ -90,7 +96,12 @@ setModel("tenantMembership", {
   findMany: async ({ where }: any) => membershipsOf(where.userId).map(({ tenantId }) => ({ tenantId })),
 });
 setModel("knowledgeDocument", { findMany: async () => [] });
+setModel("activity", {
+  aggregate: async () => ({ _max: { date: null, createdAt: null } }),
+  count: async () => 0,
+});
 setModel("opportunity", {
+  count: async () => 0,
   findFirst: async ({ where }: any) => opportunities.map(opportunityView).find((row) => matches(row, where)) ?? null,
   delete: async ({ where }: any) => {
     const removed = opportunities.find((row) => row.id === where.id);
@@ -212,6 +223,27 @@ try {
     assert.equal(payload.duplicates[0].totalClients, 2);
     assert.deepEqual(payload.duplicates[0].clients.map((client) => client.id).sort(), ["client-a", "client-b"]);
   }
+
+  // GET /clients e /clients/:id: só a projeção do ERP (lista de permitidos) e o creditAlert; vendedor A não vê o cliente de B.
+  resetData();
+  assert.equal(await status("seller-a", "GET", "/api/clients/client-b"), 404);
+  const allowedProfileKeys = ["DIAS_MEDIAATRASO", "DIAS_MAIORATRASO_AB", "QTD_CHEQUES_DEV", "VALOR_MEDIO", "DATA_PRIMFATURA", "DATA_ULTFATURA", "VALOR_ULTFATURA"];
+  const allowedTitleKeys = ["DOCTO", "PARCELA", "DATA_VENCIMENTO", "DSCFORMA", "VALOR", "SALDO_CAPITAL"];
+  const assertProjectedClient = (client: Row) => {
+    assert.doesNotMatch(JSON.stringify(client), /synthetic-erp|LIMITE_CREDITO|NOSSO_NUMERO/);
+    for (const key of Object.keys(client.financialProfile ?? {})) assert(allowedProfileKeys.includes(key), key);
+    for (const title of client.partnerTitles ?? []) for (const key of Object.keys(title)) assert(allowedTitleKeys.includes(key), key);
+  };
+  const detailResponse = await call("seller-a", "GET", "/api/clients/client-a");
+  assert.equal(detailResponse.status, 200);
+  const detail = await detailResponse.json() as Row;
+  assertProjectedClient(detail);
+  assert.deepEqual(detail.creditAlert, { level: "risco", reasons: ["Atraso médio de 20 dias"] });
+  const listResponse = await call("seller-a", "GET", "/api/clients");
+  assert.equal(listResponse.status, 200);
+  const list = await listResponse.json() as Row[];
+  assert.deepEqual(list.map((client) => client.id), ["client-a"]);
+  list.forEach(assertProjectedClient);
 
   // Sem tenant ativo: 403 explícito, sem tocar nos dados.
   assert.equal(await status("seller-no-tenant", "DELETE", "/api/opportunities/opp-a"), 403);

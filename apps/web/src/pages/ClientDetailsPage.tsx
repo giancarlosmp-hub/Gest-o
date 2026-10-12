@@ -5,6 +5,7 @@ import api from "../lib/apiClient";
 import TimelineEventList, { TimelineEventItem } from "../components/TimelineEventList";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
+import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 
 type CommercialSummary = {
   openOpportunitiesCount: number;
@@ -30,6 +31,7 @@ type Client = {
   partnerTitles?: Array<Record<string, unknown>> | null;
   openTitlesTotal?: number | null;
   overdueTitlesTotal?: number | null;
+  creditAlert?: ClientCreditAlert | null;
 };
 
 type Contact = {
@@ -352,12 +354,13 @@ export default function ClientDetailsPage() {
   const averageDelay = numberFromErp(financial.DIAS_MEDIAATRASO);
   const openDelay = numberFromErp(financial.DIAS_MAIORATRASO_AB);
   const bouncedChecks = numberFromErp(financial.QTD_CHEQUES_DEV);
+  // A regra de cores vem pronta da API (creditAlert); a tela só traduz o nível.
   const riskBadge =
-    averageDelay === 0 && openDelay === 0 && bouncedChecks === 0
-      ? { label: "Verde", className: "bg-emerald-50 text-emerald-700 ring-emerald-200" }
-      : (averageDelay ?? 0) > 15 || (openDelay ?? 0) > 0 || (bouncedChecks ?? 0) > 0
-        ? { label: "Vermelho", className: "bg-red-50 text-red-700 ring-red-200" }
-        : { label: "Amarelo", className: "bg-amber-50 text-amber-700 ring-amber-200" };
+    client.creditAlert?.level === "risco"
+      ? { label: "Vermelho", className: "bg-red-50 text-red-700 ring-red-200" }
+      : client.creditAlert?.level === "atencao"
+        ? { label: "Amarelo", className: "bg-amber-50 text-amber-700 ring-amber-200" }
+        : { label: "Verde", className: "bg-emerald-50 text-emerald-700 ring-emerald-200" };
   const titles = Array.isArray(client.partnerTitles) ? client.partnerTitles : [];
 
   const openAddContactModal = () => {
@@ -447,6 +450,8 @@ export default function ClientDetailsPage() {
           Voltar
         </button>
       </div>
+
+      <ClientCreditAlertBanner alert={client.creditAlert} />
 
       <ClientAutoSummaryCard clientId={id} />
 
@@ -555,7 +560,7 @@ export default function ClientDetailsPage() {
                   const dueDate = title.DATA_VENCIMENTO ? new Date(String(title.DATA_VENCIMENTO)) : null;
                   const overdue = Boolean(dueDate && !Number.isNaN(dueDate.getTime()) && dueDate.getTime() < Date.now() && saldo > 0);
                   return (
-                    <tr key={`${title.FATURAS_RECEBER_ID || title.DOCTO || index}`} className="border-t border-slate-100">
+                    <tr key={`${title.DOCTO || "-"}-${title.PARCELA || "-"}-${index}`} className="border-t border-slate-100">
                       <td className="px-2 py-2">{String(title.DOCTO || "-")}</td>
                       <td className="px-2 py-2">{String(title.PARCELA || "-")}</td>
                       <td className="px-2 py-2">{formatPtBrDate(String(title.DATA_VENCIMENTO || ""))}</td>

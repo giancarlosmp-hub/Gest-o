@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { ExistingClientSummary } from "../../lib/clientDuplicateCheck";
 import ClientSearchSelect from "../clients/ClientSearchSelect";
 import QuickCreateClientSection from "../clients/QuickCreateClientSection";
+import ClientCreditAlertBanner, { ClientCreditAlert } from "../clients/ClientCreditAlertBanner";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 
@@ -32,6 +33,7 @@ type ClientOption = {
   state?: string | null;
   cnpj?: string | null;
   overdueTitlesTotal?: number | null;
+  creditAlert?: ClientCreditAlert | null;
 };
 type SellerOption = { id: string; name: string };
 type PriceTableOption = { code: string; label: string };
@@ -126,7 +128,6 @@ export default function CreateOpportunityModal({
   }, [open]);
 
   const selectedClient = clients.find((client) => client.id === form.clientId) || null;
-  const overdueTitlesTotal = selectedClient?.overdueTitlesTotal || 0;
 
   if (!open) return null;
 
@@ -145,6 +146,7 @@ export default function CreateOpportunityModal({
 
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <div className="mobile-modal-body space-y-6 overscroll-contain pb-24">
+            <ClientCreditAlertBanner alert={selectedClient?.creditAlert} />
             <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
               <h4 className="text-sm font-semibold uppercase tracking-wide text-slate-700">Identificação</h4>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -177,11 +179,6 @@ export default function CreateOpportunityModal({
                       className={fieldClassName}
                     />
                   </label>
-                  {overdueTitlesTotal > 0 ? (
-                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
-                      ⚠️ Cliente com {new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(overdueTitlesTotal)} em títulos vencidos.
-                    </p>
-                  ) : null}
                   <QuickCreateClientSection
                     open={open}
                     fieldClassName={fieldClassName}
