@@ -40,9 +40,14 @@ jobs:
           port: 22022
           source: scripts/preview-image-lifecycle.mjs,scripts/preview-cleanup-remote.sh
           target: /tmp/gesto-preview-cleanup-${{ github.run_id }}
+      # OpenSSH captures the remote output (the previous SSH action did not return it), so the result
+      # becomes a job summary and a ::warning:: when any project is preserved.
       - name: Cleanup completed preview runs on VPS
-        uses: appleboy/ssh-action@v1.2.0
+        shell: bash
         env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_KEY: ${{ secrets.VPS_KEY }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,12 +55,30 @@ jobs:
           PREVIEW_OWNER_REPOSITORY: ${{ github.repository }}
           CLEANUP_SCRIPT: /tmp/gesto-preview-cleanup-${{ github.run_id }}/scripts/preview-image-lifecycle.mjs
           CLEANUP_RUNNER: /tmp/gesto-preview-cleanup-${{ github.run_id }}/scripts/preview-cleanup-remote.sh
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_KEY }}
-          port: 22022
-          script_stop: true
-          envs: PR_NUMBER,GITHUB_REPOSITORY,GITHUB_TOKEN,EXPECTED_PREVIEW_SHA,PREVIEW_OWNER_REPOSITORY,CLEANUP_SCRIPT,CLEANUP_RUNNER
-          script: |
-            bash "$CLEANUP_RUNNER"
+        run: |
+          set -euo pipefail
+          key_file=$(mktemp)
+          request_file=$(mktemp)
+          remote_output=$(mktemp)
+          cleanup_local() { rm -f -- "$key_file" "$request_file" "$remote_output"; }
+          trap cleanup_local EXIT
+          chmod 600 "$key_file" "$request_file" "$remote_output"
+          printf '%s\n' "$VPS_KEY" > "$key_file"
+          {
+            for name in PR_NUMBER GITHUB_REPOSITORY GITHUB_TOKEN EXPECTED_PREVIEW_SHA PREVIEW_OWNER_REPOSITORY CLEANUP_SCRIPT CLEANUP_RUNNER; do
+              printf 'export %s=%q\n' "$name" "${!name}"
+            done
+            printf '%s\n' 'bash "$CLEANUP_RUNNER"'
+          } > "$request_file"
+          set +e
+          ssh -i "$key_file" -p 22022 \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new \
+            -- "$VPS_USER@$VPS_HOST" 'bash -s' < "$request_file" > "$remote_output" 2>&1
+          ssh_rc=$?
+          set -e
+          # The raw remote log is shown with workflow commands disabled; only the parser emits annotations.
+          stop_token="preview-cleanup-log-$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')"
+          echo "::stop-commands::${stop_token}"
+          cat "$remote_output"
+          echo "::${stop_token}::"
+          node scripts/preview-cleanup-result.mjs "$remote_output" "$ssh_rc" "$GITHUB_STEP_SUMMARY"

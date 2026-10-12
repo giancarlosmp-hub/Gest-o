@@ -105,6 +105,23 @@ const github = async path => {
   return response.json();
 };
 const identityDiverged = (field, detail = '') => die(`authenticated_run_identity_diverged field=${field} pr=${expectedBase.pr} run_id=${expectedBase['run-id']}${detail}`);
+// A preview built from an earlier push of the same PR is legitimate: its commit belongs to the PR
+// history even though it is no longer the PR head. GitHub lists at most 250 commits per PR, so a
+// longer PR fails closed instead of trusting a truncated list.
+const PR_COMMIT_LIST_LIMIT = 250;
+const assertCommitInPullRequest = async pr => {
+  if (!Number.isSafeInteger(pr.commits) || pr.commits < 1) die('pr_commit_list_invalid');
+  if (pr.commits > PR_COMMIT_LIST_LIMIT) die(`pr_commit_list_truncated pr=${expectedBase.pr} commits=${pr.commits}`);
+  const shas = new Set();
+  for (let page = 1; page <= Math.ceil(PR_COMMIT_LIST_LIMIT / 100); page++) {
+    const pageData = await github(`/pulls/${expectedBase.pr}/commits?per_page=100&page=${page}`);
+    if (!Array.isArray(pageData)) die('pr_commit_list_invalid');
+    for (const commit of pageData) if (/^[a-f0-9]{40}$/.test(commit?.sha || '')) shas.add(commit.sha);
+    if (pageData.length < 100) break;
+  }
+  if (shas.size !== pr.commits) die('pr_commit_list_invalid');
+  if (!shas.has(expectedBase.commit)) die(`pr_commit_not_in_pull_request pr=${expectedBase.pr} run_id=${expectedBase['run-id']}`);
+};
 const authenticateProducer = async () => {
   const pr = await github(`/pulls/${expectedBase.pr}`);
   if (pr.state !== 'closed') die('pr_not_closed');
@@ -148,7 +165,7 @@ const authenticateProducer = async () => {
       if (!attemptCorrelated) die('run_pr_correlation_missing');
       if (attemptCorrelated.head?.sha !== expectedBase.commit) identityDiverged('run_pull_request_head_sha');
     }
-    if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+    await assertCommitInPullRequest(pr);
   } else {
     // GitHub Actions REST API clears the pull_requests array on workflow runs when a PR is closed or merged.
     // Fallback for closed PRs with empty pull_requests arrays:
@@ -161,8 +178,8 @@ const authenticateProducer = async () => {
       die('run_pr_correlation_missing');
     }
 
-    // Prove exact 3-way commit linkage: candidate build commit == PR head SHA == Workflow run SHA.
-    if (pr.head?.sha !== expectedBase.commit) identityDiverged('pull_request_head_sha');
+    // Prove commit linkage: candidate build commit == workflow run SHA, and it belongs to the PR history.
+    await assertCommitInPullRequest(pr);
     if (topRun.head_sha !== expectedBase.commit || run.head_sha !== expectedBase.commit) {
       identityDiverged('run_head_sha');
     }

@@ -22,6 +22,7 @@ fi
 sort -u "$projects_file" -o "$projects_file"
 
 preserved_projects=0
+removed_projects=0
 unexpected_errors=0
 
 while IFS= read -r project; do
@@ -103,7 +104,7 @@ while IFS= read -r project; do
     printf '%s\n' "$auth_msg"
   fi
   if [ "$auth_rc" -ne 0 ]; then
-    if echo "$auth_msg" | grep -Eq 'reason=(producer_run_not_|pr_not_closed|run_pr_|authenticated_run_identity_diverged|container_reference_|production_container_reference|rollback_or_recovery_|concurrent_run_|references_diverged_|protected_tag_|manifest_|project_invalid|numeric_identity_invalid|identity_)'; then
+    if echo "$auth_msg" | grep -Eq 'reason=(producer_run_not_|pr_not_closed|pr_commit_|run_pr_|authenticated_run_identity_diverged|container_reference_|production_container_reference|rollback_or_recovery_|concurrent_run_|references_diverged_|protected_tag_|manifest_|project_invalid|numeric_identity_invalid|identity_)'; then
       echo "PREVIEW_PROJECT_CLEANUP=PRESERVED project=${project}"
       preserved_projects=$((preserved_projects + 1))
     else
@@ -127,6 +128,7 @@ while IFS= read -r project; do
   node "$CLEANUP_SCRIPT" cleanup "$manifest_path"
   rm -rf "$preview_dir"
   echo "PREVIEW_ORPHAN_CLEANUP=PASS project=${project}"
+  removed_projects=$((removed_projects + 1))
 done < "$projects_file"
 
 remaining_resources=$(( $(docker ps -aq --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) + $(docker network ls -q --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) + $(docker volume ls -q --filter "label=com.gesto.preview.pr=${PR_NUMBER}" | wc -l) ))
@@ -142,4 +144,10 @@ fi
 if [ "$unexpected_errors" -gt 0 ]; then
   echo "PREVIEW_CLEANUP_RESULT=FAIL reason=unexpected_system_errors count=${unexpected_errors}"
   exit 1
+fi
+# Final marker read by scripts/preview-cleanup-result.mjs: PRESERVED becomes a visible warning.
+if [ "$preserved_projects" -gt 0 ]; then
+  echo "PREVIEW_CLEANUP_RESULT=PRESERVED removed=${removed_projects} preserved=${preserved_projects}"
+else
+  echo "PREVIEW_CLEANUP_RESULT=PASS removed=${removed_projects} preserved=0"
 fi

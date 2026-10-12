@@ -87,6 +87,14 @@ df -Pk /root/backups   # antes e depois de lote aprovado; registrar somente vari
 
 O diagnóstico e planejador não removem objetos. Revise cada IMAGE ID, todas as tags/digests/containers, estados remotos e proteções; `NOT_PROVEN` é preservação. Não há apply para legado. O cleanup de novos previews ocorre exclusivamente no workflow existente após fechamento da PR; qualquer motivo `PRESERVED` exige investigação, nunca prune/force. A soma de tamanhos ou reclaimable negativo não estima ganho: use `NOT_MEASURED` e `df` antes/depois, anotando atividade concorrente.
 
+**Preview Cleanup — resultado visível (12/10/2026).** O job agora roda o runner por OpenSSH, captura a
+saída e publica um resumo (projetos removidos, preservados com o motivo, rota do nginx). Projeto
+preservado gera `::warning::` e o job continua verde; erro inesperado, falha de SSH ou ausência do
+marcador final `PREVIEW_CLEANUP_RESULT` deixam o job vermelho. Previews de pushes anteriores do mesmo PR
+passam a ser autorizados quando o commit pertence ao histórico do PR (`/pulls/<n>/commits`); commit fora
+do histórico (`pr_commit_not_in_pull_request`) ou PR com mais de 250 commits (`pr_commit_list_truncated`)
+continuam preservados e aparecem no aviso.
+
 # Operação revisável de backup pós-PR #870
 
 Não executar backup produtivo ainda. O inventário aprovado é read-only e não lê env/dumps:

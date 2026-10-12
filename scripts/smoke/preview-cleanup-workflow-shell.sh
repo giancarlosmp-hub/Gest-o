@@ -65,6 +65,9 @@ elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-
 elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "run_pr_missing" ]]; then
   echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=run_pr_correlation_missing"
   exit 1
+elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "commit_not_in_pr" ]]; then
+  echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=pr_commit_not_in_pull_request pr=42 run_id=100"
+  exit 1
 elif [[ "$*" == *"gesto-pr-42-100-1"* && "$*" == *"authorize"* && "${FAKE_MODE:-}" == "unexpected_fail" ]]; then
   echo "PREVIEW_IMAGE_RESULT=PRESERVED reason=github_query_failed_500"
   exit 1
@@ -114,6 +117,7 @@ grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-101-1' "$tmp/out"
 grep -Fq 'PREVIEW_RESOURCE_CLEANUP=ALREADY_ABSENT project=gesto-pr-42-102-1' "$tmp/out"
 grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-102-1' "$tmp/out"
 grep -Fq NGINX_RELOAD=PASS "$tmp/out"
+grep -Fxq 'PREVIEW_CLEANUP_RESULT=PASS removed=4 preserved=0' "$tmp/out"
 
 # A conflicting authenticated attempt must stop before compose down or any
 # later nginx/image mutation. This uses only disposable fakes.
@@ -164,6 +168,7 @@ grep -Fq 'PREVIEW_ORPHAN_CLEANUP=PASS project=gesto-pr-42-100-2' "$tmp/unsuccess
 grep -Fq 'PREVIEW_NGINX_ROUTE=PRESERVED reason=active_preview_resources_or_errors_remain pr=42' "$tmp/unsuccessful.out"
 # 100-1 compose down was never invoked; only 100-2 was dismantled.
 test "$(grep -c compose "$tmp/mutations")" -eq 1
+grep -Fxq 'PREVIEW_CLEANUP_RESULT=PRESERVED removed=1 preserved=1' "$tmp/unsuccessful.out"
 
 # A candidate preserved due to run_pr_correlation_missing must be preserved without Nginx route removal.
 rm -f "$tmp/provenance"/*.json "$tmp/mutations"
@@ -208,4 +213,57 @@ test "$unexpected_rc" -ne 0
 grep -Fq 'PREVIEW_PROJECT_CLEANUP=ERROR project=gesto-pr-42-100-1 reason=unexpected_authorization_failure' "$tmp/unexpected.out"
 grep -Fq 'PREVIEW_CLEANUP_RESULT=FAIL reason=unexpected_system_errors count=1' "$tmp/unexpected.out"
 
-echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS nginx_route_authorization=PASS unexpected_error_reported=PASS'
+# A commit that is no longer part of the PR history is preserved (yellow warning), not an
+# unexpected error, and nothing is torn down for it.
+rm -f "$tmp/provenance"/*.json "$tmp/mutations"
+mkdir -p "$tmp/copied/scripts" "$tmp/preview/pr-42/gesto-pr-42-100-1"
+cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+: >"$tmp/copied/scripts/lifecycle.mjs"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.yml"
+: >"$tmp/preview/pr-42/gesto-pr-42-100-1/docker-compose.preview.yml"
+printf '{"format":1,"project":"gesto-pr-42-100-1","images":[{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}},{"labels":{"pr":"42","run-id":"100","run-attempt":"1","workflow":"Preview-Deploy","commit":"0000000000000000000000000000000000000000"}}]}\n' >"$tmp/provenance/gesto-pr-42-100-1.json"
+export FAKE_MODE="commit_not_in_pr"
+if ! PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="gesto-pr-42-100-1" MUTATION_LOG="$tmp/mutations" \
+  CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+  PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+  bash "$tmp/copied/scripts/runner.sh" >"$tmp/not_in_pr.out" 2>"$tmp/not_in_pr.err"; then
+  cat "$tmp/not_in_pr.out" "$tmp/not_in_pr.err" >&2
+  exit 1
+fi
+unset FAKE_MODE
+grep -Fq 'PREVIEW_IMAGE_RESULT=PRESERVED reason=pr_commit_not_in_pull_request' "$tmp/not_in_pr.out"
+grep -Fq 'PREVIEW_PROJECT_CLEANUP=PRESERVED project=gesto-pr-42-100-1' "$tmp/not_in_pr.out"
+grep -Fxq 'PREVIEW_CLEANUP_RESULT=PRESERVED removed=0 preserved=1' "$tmp/not_in_pr.out"
+! grep -Fq 'PREVIEW_PROJECT_CLEANUP=ERROR' "$tmp/not_in_pr.out"
+test ! -e "$tmp/mutations"
+
+# Scope: whatever discovery returns, a project of another PR or of production makes the runner
+# stop before any mutation (no compose down, no nginx change).
+for foreign in gesto-pr-99-100-1 gest-o gest-o-production gesto-pr-420-100-1; do
+  rm -f "$tmp/provenance"/*.json "$tmp/mutations" "$tmp/scope.out"
+  mkdir -p "$tmp/copied/scripts"
+  cp "$root/scripts/preview-cleanup-remote.sh" "$tmp/copied/scripts/runner.sh"
+  : >"$tmp/copied/scripts/lifecycle.mjs"
+  set +e
+  PATH="$tmp/bin:$PATH" PR_NUMBER=42 GITHUB_REPOSITORY=owner/repo GITHUB_TOKEN=synthetic FAKE_DISCOVERY_PROJECTS="$foreign" MUTATION_LOG="$tmp/mutations" \
+    CLEANUP_SCRIPT="$tmp/copied/scripts/lifecycle.mjs" PREVIEW_PROVENANCE_DIR="$tmp/provenance" \
+    PREVIEW_ROOT="$tmp/preview" NGINX_SITES_DIR="$tmp/nginx" \
+    bash "$tmp/copied/scripts/runner.sh" >"$tmp/scope.out" 2>&1
+  scope_rc=$?
+  set -e
+  test "$scope_rc" -ne 0
+  grep -Fxq 'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT' "$tmp/scope.out"
+  test ! -e "$tmp/mutations"
+  ! grep -Eq 'NGINX_(TEST|RELOAD)=PASS|PREVIEW_ORPHAN_CLEANUP=PASS' "$tmp/scope.out"
+done
+
+# Unlabeled networks/containers (legacy previews, production) are never discovered: every
+# discovery command filters by both the preview label and this PR's label.
+runner_text=$(cat "$root/scripts/preview-cleanup-remote.sh")
+discovery_lines=$(grep -E 'docker (ps -a|network ls|volume ls) --filter "label=com\.gesto\.preview=true"' "$root/scripts/preview-cleanup-remote.sh" | wc -l)
+test "$discovery_lines" -eq 3
+test "$(grep -Ec 'docker (ps -a|network ls|volume ls) --filter "label=com\.gesto\.preview=true" --filter "label=com\.gesto\.preview\.pr=\$\{PR_NUMBER\}"' "$root/scripts/preview-cleanup-remote.sh")" -eq 3
+grep -Fq 'case "$project" in "gesto-pr-${PR_NUMBER}-"*) ;; *) echo '"'"'PREVIEW_ORPHAN_SCOPE=REJECTED_PROJECT'"'"'; exit 1;; esac' <<<"$runner_text"
+! grep -Eq 'docker (system|network|volume|image|container) prune|network rm' <<<"$runner_text"
+
+echo 'PREVIEW_CLEANUP_WORKFLOW_SHELL=PASS legacy_head_exit=141 projects=4 same_run_multiple_attempts=PASS manifest_without_runtime=PASS pre_teardown_failure_mutations=0 unsuccessful_producer_candidate_preserved=PASS nginx_route_authorization=PASS unexpected_error_reported=PASS final_marker=PASS commit_not_in_pr_preserved=PASS foreign_scope_rejected=PASS unlabeled_never_discovered=PASS'

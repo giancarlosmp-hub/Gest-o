@@ -19,7 +19,7 @@ for (const marker of ['repository', 'pr', 'run-id', 'run-attempt', 'workflow', '
   assert.match(apiDockerfile, new RegExp(`com\\.gesto\\.preview\\.${marker}`));
   assert.match(webDockerfile, new RegExp(`com\\.gesto\\.preview\\.${marker}`));
 }
-for (const gate of ['pr_not_closed', 'producer_run_not_completed', 'producer_run_not_successful', 'github_auth_missing', 'github_query_failed', 'identity_\\$\\{key\\}_not_proven', 'authenticated_run_identity_diverged field=', 'run_pull_request_head_sha', 'pull_request_head_sha', 'workflow_path', 'workflow_id_path', 'head_ref', 'references_diverged_since_manifest', 'protected_tag_present', 'container_reference_present', 'container_reference_created_before_delete', 'production_container_reference', 'rollback_or_recovery_evidence_present', 'concurrent_run_']) assert.match(lifecycle, new RegExp(gate));
+for (const gate of ['pr_not_closed', 'producer_run_not_completed', 'producer_run_not_successful', 'github_auth_missing', 'github_query_failed', 'identity_\\$\\{key\\}_not_proven', 'authenticated_run_identity_diverged field=', 'run_pull_request_head_sha', 'pr_commit_not_in_pull_request', 'pr_commit_list_truncated', 'pr_commit_list_invalid', 'workflow_path', 'workflow_id_path', 'head_ref', 'references_diverged_since_manifest', 'protected_tag_present', 'container_reference_present', 'container_reference_created_before_delete', 'production_container_reference', 'rollback_or_recovery_evidence_present', 'concurrent_run_']) assert.match(lifecycle, new RegExp(gate));
 assert.match(lifecycle, /docker\('image', 'rm', \.\.\.removalReferences\)/);
 assert.doesNotMatch(lifecycle, /image[^\n]*rm[^\n]*(?:--force|-f\b)|\bprune\b/);
 assert.doesNotMatch(workflow, /docker rm -f|image prune|system prune|volume prune/);
@@ -41,6 +41,11 @@ assert.match(lifecycle, /field=\$\{field\} pr=\$\{expectedBase\.pr\} run_id=\$\{
 assert.match(lifecycle, /expected=\$\{expectedBase\['run-attempt'\]\} observed=/);
 assert.doesNotMatch(cleanupRunner, /EXPECTED_PREVIEW_SHA="\$producer_sha"/, 'workflow run revision must not replace the built PR head revision');
 assert.match(workflow, /bash "\$CLEANUP_RUNNER"/);
+assert.match(lifecycle, /\/pulls\/\$\{expectedBase\.pr\}\/commits\?per_page=100&page=\$\{page\}/, 'earlier pushes are authorized through the PR commit history');
+assert.doesNotMatch(lifecycle, /pr\.head\?\.sha !== expectedBase\.commit/, 'the PR head must not be required to equal the preview commit');
+assert.match(cleanupRunner, /reason=\([^)]*pr_commit_/, 'commit-history reasons are preserved, not unexpected errors');
+assert.match(cleanupRunner, /PREVIEW_CLEANUP_RESULT=PRESERVED removed=\$\{removed_projects\} preserved=\$\{preserved_projects\}/);
+assert.match(workflow, /node scripts\/preview-cleanup-result\.mjs "\$remote_output" "\$ssh_rc" "\$GITHUB_STEP_SUMMARY"/);
 assert.match(composeCiWorkflow, /on:\s*\n\s*push:[\s\S]*\n\s*pull_request:/, 'cleanup shell gate must run for the existing push and pull_request triggers');
 assert.match(composeCiWorkflow, /run: npm run test:preview-images:docker:repeated/, 'CI must invoke the bounded repeated lifecycle harness');
 const cleanupCiStepStart = composeCiWorkflow.indexOf('- name: Prove preview cleanup workflow shell');
