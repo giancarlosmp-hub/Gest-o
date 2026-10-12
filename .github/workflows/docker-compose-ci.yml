@@ -93,6 +93,9 @@ jobs:
       - name: Prove concurrent preview run isolation
         run: npm run test:preview-isolation
 
+      - name: Validate ERP client data allowlist and credit alert projection
+        run: npm run test:client-erp-projection -w @salesforce-pro/api
+
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         env:
           POSTGRES_TEST_IMAGE: postgres:16
