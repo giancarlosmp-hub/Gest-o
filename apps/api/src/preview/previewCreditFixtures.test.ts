@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildClientCreditAlert, projectClientForResponse } from "../src/services/clientErpProjection.js";
+import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY, buildPreviewCreditClientFixtures } from "./previewCreditFixtures.js";
 
 const fixtures = buildPreviewCreditClientFixtures(new Date());

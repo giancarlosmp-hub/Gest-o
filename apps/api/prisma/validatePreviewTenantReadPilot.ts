@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY, buildPreviewCreditClientFixtures } from "./previewCreditFixtures.js";
+import { PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY, buildPreviewCreditClientFixtures } from "../src/preview/previewCreditFixtures.js";
 
 const prisma = new PrismaClient();
 const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
