@@ -91,6 +91,7 @@ import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigati
 import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
+import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
 import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowledgeDocuments } from "../services/knowledgeBaseService.js";
 import { formatTenantReadPilotMarker, isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
 import { PrismaTenantControlPlaneReader } from "../tenancy/prismaTenantControlPlaneReader.js";
@@ -4092,7 +4093,7 @@ router.get("/clients", async (req, res) => {
       }
     });
     await runShadow(data.length);
-    return res.json(data);
+    return res.json(data.map(projectClientForResponse));
   }
 
   const [items, total] = await Promise.all([
@@ -4116,7 +4117,7 @@ router.get("/clients", async (req, res) => {
   await runShadow(total);
 
   res.json({
-    items,
+    items: items.map(projectClientForResponse),
     total,
     page,
     pageSize
@@ -4171,7 +4172,7 @@ router.get("/clients/:id", async (req, res) => {
   };
 
   res.json({
-    ...data,
+    ...projectClientForResponse(data),
     commercialSummary
   });
 });
@@ -4544,7 +4545,7 @@ router.post("/clients", validateBody(clientSchema), async (req, res) => {
         requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
       return created;
     });
-    res.status(201).json(data);
+    res.status(201).json(projectClientForResponse(data));
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
@@ -4818,7 +4819,7 @@ router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res
         requestIp: req.ip, requestId: req.requestId || "request-id-unavailable" });
       return changed;
     });
-    res.json(data);
+    res.json(projectClientForResponse(data));
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
@@ -5015,7 +5016,7 @@ router.post("/companies", validateBody(companySchema), async (req, res) => {
 
     const data = await prisma.client.create({ data: payload });
 
-    res.status(201).json(data);
+    res.status(201).json(projectClientForResponse(data));
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
@@ -5062,7 +5063,7 @@ router.put("/companies/:id", validateBody(companySchema.partial()), async (req, 
       }
     });
 
-    res.json(data);
+    res.json(projectClientForResponse(data));
   } catch (error) {
     if (error instanceof DuplicateClientError) {
       return res.status(error.statusCode).json({ message: error.message, existingClient: error.existingClient, matchType: error.matchType });
@@ -5101,15 +5102,14 @@ router.delete("/companies/:id", async (req, res) => {
   res.status(204).send();
 });
 
-router.get("/contacts", async (req, res) =>
-  res.json(
-    await prisma.contact.findMany({
-      where: sellerWhere(req),
-      include: { client: true },
-      orderBy: { createdAt: "desc" }
-    })
-  )
-);
+router.get("/contacts", async (req, res) => {
+  const contacts = await prisma.contact.findMany({
+    where: sellerWhere(req),
+    include: { client: true },
+    orderBy: { createdAt: "desc" }
+  });
+  res.json(contacts.map((contact) => ({ ...contact, client: contact.client ? projectClientForResponse(contact.client) : contact.client })));
+});
 
 router.post("/contacts", validateBody(contactSchema), async (req, res) =>
   res
@@ -6660,7 +6660,9 @@ router.get("/opportunities/:id", async (req, res) => {
           fantasyName: true,
           cnpj: true,
           city: true,
-          state: true
+          state: true,
+          financialProfile: true,
+          overdueTitlesTotal: true
         }
       },
       ownerSeller: true
@@ -6670,7 +6672,12 @@ router.get("/opportunities/:id", async (req, res) => {
   if (!opportunity) return res.status(404).json({ message: "Oportunidade não encontrada" });
 
   const states = await loadEffectiveWonContributions(opportunity.stage === "ganho" ? [opportunity] : []);
-  return res.json(serializeOpportunity(withEffectiveWin(opportunity, states), todayStart));
+  const serialized = serializeOpportunity(withEffectiveWin(opportunity, states), todayStart);
+  // clientData não leva o financialProfile: só o alerta de crédito calculado.
+  return res.json({
+    ...serialized,
+    clientData: serialized.clientData ? { ...serialized.clientData, creditAlert: buildClientCreditAlert(opportunity.client) } : null
+  });
 });
 
 

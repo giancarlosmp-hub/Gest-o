@@ -15,6 +15,7 @@ import {
   type User,
   type PrismaClient,
 } from "@prisma/client";
+import { sanitizePayload } from "../utils/logger.js";
 
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
@@ -1389,15 +1390,15 @@ export const buildErpOrderPdf = (
   if (options.logRawFields) {
     console.log(
       "CLIENT FIELDS:",
-      JSON.stringify(getClientSource(client, metadata.partner), null, 2),
+      JSON.stringify(sanitizePayload(getClientSource(client, metadata.partner)), null, 2),
     );
     console.log(
       "BRANCH FIELDS:",
-      JSON.stringify(metadata.branch ?? null, null, 2),
+      JSON.stringify(sanitizePayload(metadata.branch ?? null), null, 2),
     );
     console.log(
       "PARTNER FIELDS:",
-      JSON.stringify(metadata.partner ?? null, null, 2),
+      JSON.stringify(sanitizePayload(metadata.partner ?? null), null, 2),
     );
     console.log(
       "PDF REGENERATION:",

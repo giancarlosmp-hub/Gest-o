@@ -14,6 +14,7 @@ import DeleteOpportunityConfirmModal from "../components/opportunities/DeleteOpp
 import ActionMenuPopover from "../components/opportunities/ActionMenuPopover";
 import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
+import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
@@ -63,6 +64,7 @@ type Client = {
   state?: string | null;
   cnpj?: string | null;
   overdueTitlesTotal?: number | null;
+  creditAlert?: ClientCreditAlert | null;
 };
 type Summary = {
   pipelineTotal: number;
@@ -2347,6 +2349,11 @@ export default function OpportunitiesPage() {
                 Fechar
               </button>
             </div>
+
+            <ClientCreditAlertBanner
+              alert={clients.find((client) => client.id === selectedOpportunity.clientId)?.creditAlert}
+              className="mb-4"
+            />
 
             <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
               <div className="flex items-center justify-between gap-3">

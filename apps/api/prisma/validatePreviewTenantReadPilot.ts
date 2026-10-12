@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY, buildPreviewCreditClientFixtures } from "./previewCreditFixtures.js";
 
 const prisma = new PrismaClient();
 const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
@@ -86,7 +87,43 @@ async function failClosed() {
   }
   if (items.some((item) => item.product?.erpProductClassCode !== "PREVIEW" || Math.abs(item.grossTotal - item.discountTotal - item.netTotal) > 0.005)) throw new Error("DATASET_ITEM_PRODUCT_LINK_FAILED");
   if (!items.some((item) => item.discountTotal > 0)) throw new Error("DATASET_ITEM_DISCOUNT_FAILED");
-  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length, territoryOrders: territoryOrders.length, cancellationOrders: cancellationOrders.length, itemProducts: itemProducts.length, itemOpportunities: itemOpportunities.length, opportunityItems: items.length });
+  // Clientes da faixa de crédito: um por nível, dados coerentes e uma oportunidade aberta do próprio vendedor.
+  const creditFixtures = buildPreviewCreditClientFixtures(new Date());
+  const [creditClients, sellerEmails] = await Promise.all([
+    prisma.client.findMany({
+      where: { code: { in: creditFixtures.map((fixture) => fixture.code) }, name: { startsWith: "[preview-seed]" } },
+      select: { code: true, tenantId: true, ownerSellerId: true, isArchived: true, financialProfile: true, partnerTitles: true, openTitlesTotal: true, overdueTitlesTotal: true, opportunities: { where: { title: { contains: "[preview-seed]" }, stage: { notIn: ["ganho", "perdido"] } }, select: { ownerSellerId: true } } }
+    }),
+    prisma.user.findMany({ where: { email: { in: creditFixtures.map((fixture) => fixture.sellerEmail) } }, select: { id: true, email: true, role: true } })
+  ]);
+  if (creditClients.length !== 3) throw new Error("DATASET_CREDIT_CLIENT_CARDINALITY_FAILED");
+  for (const fixture of creditFixtures) {
+    const client = creditClients.find((candidate) => candidate.code === fixture.code);
+    const seller = sellerEmails.find((candidate) => candidate.email === fixture.sellerEmail);
+    if (!client || !seller || seller.role !== "vendedor") throw new Error("DATASET_CREDIT_CLIENT_MISSING");
+    if (client.tenantId !== tenantId || client.ownerSellerId !== seller.id || client.isArchived) throw new Error("DATASET_CREDIT_CLIENT_OWNERSHIP_FAILED");
+    if (client.opportunities.length !== 1 || client.opportunities[0].ownerSellerId !== seller.id) throw new Error("DATASET_CREDIT_OPPORTUNITY_FAILED");
+    const profile = client.financialProfile as Record<string, unknown> | null;
+    if (!profile || typeof profile !== "object" || !(PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY in profile)) throw new Error("DATASET_CREDIT_PROFILE_FAILED");
+    const titles = Array.isArray(client.partnerTitles) ? (client.partnerTitles as Array<Record<string, unknown>>) : [];
+    const now = Date.now();
+    const saldo = (title: Record<string, unknown>) => Number(title.SALDO_CAPITAL) || 0;
+    const overdueTitles = titles.filter((title) => new Date(String(title.DATA_VENCIMENTO)).getTime() < now && saldo(title) > 0);
+    const openTotal = Number(titles.reduce((sum, title) => sum + saldo(title), 0).toFixed(2));
+    const overdueTotal = Number(overdueTitles.reduce((sum, title) => sum + saldo(title), 0).toFixed(2));
+    if (Math.abs(openTotal - (client.openTitlesTotal ?? 0)) > 0.005 || Math.abs(overdueTotal - (client.overdueTitlesTotal ?? 0)) > 0.005) throw new Error("DATASET_CREDIT_TITLES_FAILED");
+    const averageDelay = Number(profile.DIAS_MEDIAATRASO);
+    const openDelay = Number(profile.DIAS_MAIORATRASO_AB);
+    const bouncedChecks = Number(profile.QTD_CHEQUES_DEV);
+    const levelMatches =
+      fixture.level === "ok" ? averageDelay === 0 && openDelay === 0 && bouncedChecks === 0 && overdueTotal === 0
+        : fixture.level === "atencao" ? averageDelay > 0 && averageDelay <= 15 && openDelay === 0 && bouncedChecks === 0 && overdueTotal === 0
+          : overdueTitles.length === 2 && Math.abs(overdueTotal - 4350) < 0.005 && bouncedChecks > 0;
+    if (!levelMatches) throw new Error("DATASET_CREDIT_LEVEL_FAILED");
+  }
+  const creditOwnerEmails = new Set(creditFixtures.map((fixture) => fixture.sellerEmail));
+  if (!creditOwnerEmails.has("ana.preview@preview.local") || !creditOwnerEmails.has("bruno.preview@preview.local")) throw new Error("DATASET_CREDIT_SELLER_SPREAD_FAILED");
+  console.log("TENANT_READ_PREVIEW_DATASET=PASS", { tenantId, tenants: tenants.length, users: users.length, memberships: memberships.length, clients: clients.length, orders: orders.length, territoryOrders: territoryOrders.length, cancellationOrders: cancellationOrders.length, itemProducts: itemProducts.length, itemOpportunities: itemOpportunities.length, opportunityItems: items.length, creditClients: creditClients.length });
 }
 
 failClosed().finally(() => prisma.$disconnect()).catch((error) => { console.error("Preview dataset certification failed", { code: error instanceof Error ? error.message : "UNKNOWN" }); process.exit(1); });

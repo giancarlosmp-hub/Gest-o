@@ -314,3 +314,24 @@ por `PATCH /opportunities/:id/close`. Unificar em um único caminho em PR própr
 
 **Aberto, baixo.** Desde o PR #936, o seed do preview exige `DEPLOYMENT_ENV=preview` e não roda mais
 no `docker-compose` local (que usa `DEPLOYMENT_ENV=local`).
+
+### TD-CLIENT-SEGMENT-ADDRESS — `segment` do cliente recebe o endereço do ERP
+
+**Aberto.** A sincronização de parceiros do UltraFV3 (`apps/api/src/services/ultraFv3SyncService.ts`)
+grava o endereço mapeado no campo `Client.segment`. A busca de clientes (`GET /clients`) também
+procura em `segment`. Corrigir o mapeamento (e decidir o que fazer com os valores já gravados) em PR
+próprio; não foi alterado no PR da projeção de dados do ERP.
+
+### TD-ERP-CREDIT-FIELDS — campos de limite, bloqueio e crédito duvidoso não confirmados
+
+**Aberto.** O `creditAlert` da API (`apps/api/src/services/clientErpProjection.ts`) usa só atraso
+médio, maior atraso em aberto, cheques devolvidos e `overdueTitlesTotal`. Os nomes reais dos campos
+de limite de crédito, bloqueio e crédito duvidoso no `/financialProfiles` do UltraFV3 não foram
+confirmados; incluí-los no alerta e na lista de permitidos só depois de confirmar com o ERP.
+
+### TD-WINDOWS-URL-PATHNAME — scripts que montam caminho com `URL.pathname` falham no Windows
+
+**Aberto, baixo.** `apps/api/src/scripts/commercialAutomationsSmoke.ts` (`smoke:commercial-automations`)
+usa `new URL(..., import.meta.url).pathname` e, no Windows nativo, abre `C:\C:\...` (ENOENT). O
+`verify-brand-assets` do build do web mostra o mesmo padrão nos avisos (`/C:/...`), sem falhar o
+build. Em Linux e no CI funciona. Trocar por `fileURLToPath` em PR próprio.

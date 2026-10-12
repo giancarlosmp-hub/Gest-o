@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Copy, ExternalLink, MessageCircle, Search, Sparkles, Check } from "lucide-react";
 import api from "../lib/apiClient";
+import { buildWhatsAppUrl } from "../lib/whatsappLink";
 
 type Client = {
   id: string;
@@ -99,9 +100,7 @@ export default function WhatsAppPage() {
   };
 
   const openWhatsApp = () => {
-    const encodedText = encodeURIComponent(draft.trim());
-    const url = phone ? `https://wa.me/55${phone}?text=${encodedText}` : `https://web.whatsapp.com/send?text=${encodedText}`;
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(buildWhatsAppUrl(phone, draft.trim()), "_blank", "noopener,noreferrer");
   };
 
   const registerContact = async () => {

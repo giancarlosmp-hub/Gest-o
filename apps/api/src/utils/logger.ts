@@ -7,6 +7,9 @@ type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string
 const SENSITIVE_KEY_PATTERN = /(password|senha|token|authorization|jwt|secret|api[-_]?key|refresh[-_]?token|cookie|credential|credencial)/i;
 const PERSONAL_KEY_PATTERN = /(cpf|cnpj|documento|document|email|e-mail|telefone|phone|celular|endereco|address|cliente|razao|fantasia)/i;
 const PERSON_NAME_KEY_PATTERN = /(^|_)(nome|name|vendedor|salesman|seller)(_|$)/i;
+// RG, data de nascimento e inscrição estadual (ex.: RG, NUM_RG, rgNumber, DATA_NASCIMENTO, birthDate, IE, INSCESTADUAL).
+const PERSONAL_ID_KEY_PATTERN = /((^|[_-])(rg|ie)([_-]|$)|nasc|birth|insc(ricao)?[_-]?estadual|^inscricao$|state[_-]?registration|identidade)/i;
+const PERSONAL_ID_CAMEL_KEY_PATTERN = /^(rg|ie)[A-Z]|[a-z](Rg|RG|Ie|IE)$/;
 
 const maskName = (value: unknown) => {
   const text = String(value ?? "").trim();
@@ -36,7 +39,7 @@ const redactSensitiveData = (value: unknown): JsonValue => {
     for (const [key, nestedValue] of Object.entries(value as Record<string, unknown>)) {
       if (SENSITIVE_KEY_PATTERN.test(key)) {
         output[key] = "[REDACTED]";
-      } else if (PERSONAL_KEY_PATTERN.test(key)) {
+      } else if (PERSONAL_KEY_PATTERN.test(key) || PERSONAL_ID_KEY_PATTERN.test(key) || PERSONAL_ID_CAMEL_KEY_PATTERN.test(key)) {
         output[key] = "[REDACTED]";
       } else if (PERSON_NAME_KEY_PATTERN.test(key) && typeof nestedValue !== "object") {
         output[key] = maskName(nestedValue);

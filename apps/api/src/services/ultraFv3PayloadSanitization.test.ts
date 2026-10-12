@@ -38,3 +38,20 @@ test("bounds arrays, strings and recursion in diagnostics", () => {
   assert.equal(String(sanitized.description).length, 163);
   assert.match(JSON.stringify(sanitized), /max-depth/);
 });
+
+test("redacts RG, birth date and state registration aliases", () => {
+  const sanitized = sanitizeUltraFv3PayloadForLog({
+    RG: "synthetic-rg",
+    NUM_RG: "synthetic-rg",
+    DATA_NASCIMENTO: "synthetic-birth",
+    birthDate: "synthetic-birth",
+    IE: "synthetic-ie",
+    INSCESTADUAL: "synthetic-ie",
+    INSCRICAO_ESTADUAL: "synthetic-ie",
+    inscricaoEstadual: "synthetic-ie",
+    status: "ACTIVE",
+  });
+
+  assert.doesNotMatch(JSON.stringify(sanitized), /synthetic-(rg|birth|ie)/);
+  assert.equal((sanitized as Record<string, unknown>).status, "ACTIVE");
+});
