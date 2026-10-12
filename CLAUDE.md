@@ -44,3 +44,7 @@ geral está no [`README.md`](README.md) e o estado oficial, decisões e procedim
 - Nunca colocar hostnames, IPs, senhas, tokens ou dados reais de clientes em arquivos, commits,
   PRs ou logs.
 - Se algum comando for recusado, pare e pergunte antes de tentar de novo ou contornar.
+- Em `apps/api/prisma/` só entram schema, migrations e os scripts já existentes. Fixtures e
+  helpers de preview ou de teste ficam em `apps/api/src/preview/`: qualquer arquivo novo em
+  `prisma/` bloqueia o cutover pela checagem de evidência de schema
+  (`schema_prisma_trees_equivalent` em `scripts/schema-evidence-validation.sh`).

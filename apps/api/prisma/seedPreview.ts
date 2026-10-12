@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { AgendaEventStatus, AgendaEventType, OpportunityStage, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { buildPreviewCreditClientFixtures } from "./previewCreditFixtures.js";
+import { buildPreviewCreditClientFixtures } from "../src/preview/previewCreditFixtures.js";
 
 const prisma = new PrismaClient();
 

@@ -67,7 +67,7 @@
     "test:seller-offboarding": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/sellerOffboarding.test.ts",
     "test:inactive-user-auth": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/inactiveUserAuth.test.ts",
     "test:route-authorization": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/security/routeAuthorization.http.test.ts",
-    "test:client-erp-projection": "tsx src/services/clientErpProjection.test.ts && tsx prisma/previewCreditFixtures.test.ts && tsx src/utils/logger.test.ts && tsx src/services/ultraFv3PayloadSanitization.test.ts"
+    "test:client-erp-projection": "tsx src/services/clientErpProjection.test.ts && tsx src/preview/previewCreditFixtures.test.ts && tsx src/utils/logger.test.ts && tsx src/services/ultraFv3PayloadSanitization.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
