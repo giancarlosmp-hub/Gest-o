@@ -96,6 +96,9 @@ jobs:
       - name: Validate ERP client data allowlist and credit alert projection
         run: npm run test:client-erp-projection -w @salesforce-pro/api
 
+      - name: Validate UltraFV3 financial sync across sellers and shared sync lock
+        run: npm run test:ultrafv3-financial-sync -w @salesforce-pro/api
+
       - name: Cache PostgreSQL 16 image for pull-free restore harness
         env:
           POSTGRES_TEST_IMAGE: postgres:16
