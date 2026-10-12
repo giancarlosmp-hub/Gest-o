@@ -3728,10 +3728,17 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
   };
 }
 
-// Lock compartilhado entre o botão "todos vendedores" e o scheduler: só um roda por vez. O TTL é o
+// Lock compartilhado entre o botão "todos vendedores", o scheduler e a Sincronização Completa: só um roda por vez. O TTL é o
 // mesmo dos demais locks (ERP_SYNC_LOCK_TTL_MS) e é renovado entre vendedores e etapas.
 export const SELLER_PORTFOLIO_LOCK_SCOPE = "erpSellerPortfolio";
 export const SELLER_PORTFOLIO_RUN_SCOPE = "sellerPortfolio";
+
+const findRunningExclusiveErpRun = () =>
+  prisma.erpSyncRun.findFirst({
+    where: { scope: { in: [SELLER_PORTFOLIO_RUN_SCOPE, "automatic", "syncAll"] }, status: ErpSyncRunStatus.running },
+    orderBy: { startedAt: "desc" },
+    select: { id: true, correlationId: true },
+  });
 
 export const acquireSellerPortfolioLock = (runId: string) => acquireSyncLock(SELLER_PORTFOLIO_LOCK_SCOPE, runId);
 export const releaseSellerPortfolioLock = (runId: string) => releaseSyncLock(SELLER_PORTFOLIO_LOCK_SCOPE, runId);
@@ -3821,18 +3828,14 @@ export async function startSellerPortfolioSyncJob(options: RunSyncOptions = {}):
   const correlationId = randomUUID();
   const lock = await acquireSellerPortfolioLock(correlationId);
   if (!lock.acquired) {
-    const currentRun = await prisma.erpSyncRun.findFirst({
-      where: { scope: { in: [SELLER_PORTFOLIO_RUN_SCOPE, "automatic"] }, status: ErpSyncRunStatus.running },
-      orderBy: { startedAt: "desc" },
-      select: { id: true, correlationId: true },
-    });
+    const currentRun = await findRunningExclusiveErpRun();
     return {
       accepted: false,
       alreadyRunning: true,
       runId: currentRun?.id ?? lock.runId,
       correlationId: currentRun?.correlationId ?? lock.runId,
       status: "already_running",
-      message: "Já existe uma sincronização de clientes por vendedor ou automática em execução.",
+      message: "Já existe uma sincronização de clientes por vendedor, automática ou completa em execução.",
     };
   }
 
@@ -3960,7 +3963,7 @@ const FULL_SYNC_STEPS: Array<{
   { scope: "orderStatus", label: "Status de pedidos", run: (options) => syncOrderStatus(() => import("./erpOrderService.js").then(({ syncErpOrderStatuses }) => syncErpOrderStatuses()), options), nonCritical: true },
 ]);
 
-export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Promise<UltraFv3FullSyncResult> {
+export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), heartbeat?: () => Promise<void>): Promise<UltraFv3FullSyncResult> {
   const startedAt = Date.now();
   const steps: UltraFv3FullSyncStep[] = [];
   const warnings: Array<{ scope: UltraFv3SyncScope; label: string; message: string; correlationId: string }> = [];
@@ -3984,7 +3987,8 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID()): Pro
       });
       let result: SyncResult;
       try {
-        result = await step.run({ correlationId, failIfLocked: true });
+        await runHeartbeat({ heartbeat });
+        result = await step.run({ correlationId, failIfLocked: true, heartbeat });
       } catch (error) {
         if (!step.nonCritical) throw error;
         const message = formatError(error);
@@ -4107,20 +4111,41 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
       message: "Sincronização Completa ERP já está em execução.",
     };
   }
+  // Não roda junto com o botão "todos vendedores" nem com o scheduler (lock compartilhado com TTL).
+  const portfolioLock = await acquireSellerPortfolioLock(correlationId);
+  if (!portfolioLock.acquired) {
+    await releaseSyncLock("syncAll", correlationId).catch(() => undefined);
+    const currentRun = await findRunningExclusiveErpRun();
+    return {
+      accepted: false,
+      alreadyRunning: true,
+      runId: currentRun?.id ?? portfolioLock.runId,
+      correlationId: currentRun?.correlationId ?? portfolioLock.runId,
+      status: "already_running",
+      message: "Já existe uma sincronização de clientes por vendedor ou automática em execução.",
+    };
+  }
 
-  const run = await prisma.erpSyncRun.create({
-    data: {
-      scope: "syncAll",
-      trigger: ErpSyncTrigger.manual,
-      status: ErpSyncRunStatus.running,
-      correlationId,
-      metrics: { totalSteps: FULL_SYNC_STEPS.length } as Prisma.InputJsonValue,
-    },
-  });
+  let run: { id: string };
+  try {
+    run = await prisma.erpSyncRun.create({
+      data: {
+        scope: "syncAll",
+        trigger: ErpSyncTrigger.manual,
+        status: ErpSyncRunStatus.running,
+        correlationId,
+        metrics: { totalSteps: FULL_SYNC_STEPS.length } as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    await releaseSellerPortfolioLock(correlationId).catch(() => undefined);
+    await releaseSyncLock("syncAll", correlationId).catch(() => undefined);
+    throw error;
+  }
 
   logApiEvent("INFO", "[ultrafv3 sync-all job] accepted", { correlationId, runId: run.id });
 
-  void syncAllUltraFv3Catalogs(correlationId)
+  void syncAllUltraFv3Catalogs(correlationId, sellerPortfolioHeartbeat(correlationId))
     .then(async (result) => {
       await prisma.erpSyncRun.update({
         where: { id: run.id },
@@ -4142,6 +4167,7 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
     })
     .catch(async (error) => {
       const message = formatError(error);
+      logApiEvent("ERROR", "[ultrafv3 sync-all job] failed", { correlationId, runId: run.id, error: message });
       await prisma.erpSyncRun.update({
         where: { id: run.id },
         data: {
@@ -4152,12 +4178,16 @@ export async function startUltraFv3FullSyncJob(): Promise<StartUltraFv3FullSyncJ
           errors: [{ message, at: new Date().toISOString(), correlationId }] as Prisma.InputJsonValue,
           metrics: { finalStatus: "failed", completedSteps: (error as { completedSteps?: unknown }).completedSteps ?? [] } as Prisma.InputJsonValue,
         },
-      });
-      logApiEvent("ERROR", "[ultrafv3 sync-all job] failed", { correlationId, runId: run.id, error: message });
+      }).catch((updateError) =>
+        logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to record failure", { correlationId, runId: run.id, error: formatError(updateError) }),
+      );
     })
     .finally(() => {
       void releaseSyncLock("syncAll", correlationId).catch((error) =>
         logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to release lock", { correlationId, runId: run.id, error: formatError(error) }),
+      );
+      void releaseSellerPortfolioLock(correlationId).catch((error) =>
+        logApiEvent("ERROR", "[ultrafv3 sync-all job] failed to release seller portfolio lock", { correlationId, runId: run.id, error: formatError(error) }),
       );
     });
 

@@ -337,6 +337,15 @@ scheduler (`erpSyncScheduler.ts`) usam o primeiro vendedor ativo com Login FV3 e
 para os catálogos. Não há configuração explícita: cadastrar ou desativar um vendedor pode trocar a
 credencial usada sem aviso.
 
+### TD-ERP-SYNC-RUN-ORPHAN-RUNNING — ErpSyncRun interrompido fica como `running` para sempre
+
+**Aberto.** Se a API reinicia no meio de uma sincronização (por exemplo, num cutover), o `ErpSyncRun`
+em andamento nunca é finalizado e aparece como `running` no Histórico indefinidamente. Isso vale para
+a Sincronização Completa (`syncAll`), o botão de todos os vendedores (`sellerPortfolio`), o scheduler
+(`automatic`) e os runs por escopo e vendedor. Os locks expiram pelo TTL e liberam novas execuções,
+mas o run órfão continua visível e pode confundir a UI e a leitura do Histórico. Não corrigido no PR
+da sincronização financeira por vendedor.
+
 ### TD-ERP-CREDIT-FIELDS — campos de limite, bloqueio e crédito duvidoso não confirmados
 
 **Aberto.** O `creditAlert` da API (`apps/api/src/services/clientErpProjection.ts`) usa só atraso

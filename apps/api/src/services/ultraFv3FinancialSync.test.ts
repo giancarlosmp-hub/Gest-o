@@ -215,7 +215,8 @@ setModel("appConfig", {
 });
 setModel("user", {
   findMany: async () => sellers,
-  findFirst: async ({ where }: any) => sellers.find((seller) => seller.id === where.id) ?? null,
+  // Sem id: vendedor de referência (primeiro em ordem alfabética), como em resolveReferenceCredentials.
+  findFirst: async ({ where }: any) => (where.id ? sellers.find((seller) => seller.id === where.id) ?? null : sellers[0]),
 });
 setModel("tenantMembership", {
   findMany: async ({ where }: any) =>
@@ -255,6 +256,13 @@ const waitForRun = async (runId: string) => {
   }
   throw new Error("job não terminou");
 };
+const waitUntil = async (condition: () => boolean, label: string) => {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`condição não atingida: ${label}`);
+};
 const reset = () => {
   locks.clear();
   runs.length = 0;
@@ -271,12 +279,13 @@ const reset = () => {
   erpGate = new Promise<void>((resolve) => { release = resolve; });
   const first = await sync.startSellerPortfolioSyncJob();
   assert.equal(first.accepted, true);
-  const runsBefore = runs.length;
+  const portfolioRuns = () => runs.filter((run) => run.scope === sync.SELLER_PORTFOLIO_RUN_SCOPE).length;
+  const runsBefore = portfolioRuns();
   const second = await sync.startSellerPortfolioSyncJob();
   assert.equal(second.alreadyRunning, true);
   assert.equal(second.status, "already_running");
   assert.equal(second.runId, first.runId, "aponta para a execução em andamento");
-  assert.equal(runs.length, runsBefore, "segundo POST não cria ErpSyncRun");
+  assert.equal(portfolioRuns(), runsBefore, "segundo POST não cria ErpSyncRun");
 
   // O scheduler usa o mesmo lock: enquanto o botão roda, ele também não consegue iniciar.
   assert.equal((await sync.acquireSellerPortfolioLock("scheduler-run")).acquired, false);
@@ -345,6 +354,47 @@ const reset = () => {
   assert.equal(clients.find((client) => client.id === "client-b")?.partnerTitles, undefined);
 }
 
+{
+  // Sincronização Completa em andamento: botão responde already_running e o scheduler não pega o lock.
+  reset();
+  clients = [];
+  let release!: () => void;
+  erpGate = new Promise<void>((resolve) => { release = resolve; });
+  const full = await sync.startUltraFv3FullSyncJob();
+  assert.equal(full.accepted, true);
+  const countScope = (scope: string) => runs.filter((run) => run.scope === scope).length;
+  const runsBefore = countScope(sync.SELLER_PORTFOLIO_RUN_SCOPE);
+  const button = await sync.startSellerPortfolioSyncJob();
+  assert.equal(button.alreadyRunning, true);
+  assert.equal(button.status, "already_running");
+  assert.equal(button.runId, full.runId, "aponta para a Sincronização Completa em andamento");
+  assert.equal(countScope(sync.SELLER_PORTFOLIO_RUN_SCOPE), runsBefore, "botão não cria ErpSyncRun");
+  assert.equal((await sync.acquireSellerPortfolioLock("scheduler-run")).acquired, false, "scheduler também fica bloqueado");
+  release();
+  await waitForRun(full.runId);
+  await waitUntil(() => !locks.has(sync.SELLER_PORTFOLIO_LOCK_SCOPE) && !locks.has("syncAll"), "locks da Sincronização Completa liberados");
+
+  // Vice-versa: botão em andamento, a Sincronização Completa responde already_running sem iniciar nada.
+  erpGate = new Promise<void>((resolve) => { release = resolve; });
+  const job = await sync.startSellerPortfolioSyncJob();
+  assert.equal(job.accepted, true);
+  const fullRunsDuringJob = countScope("syncAll");
+  const blockedFull = await sync.startUltraFv3FullSyncJob();
+  assert.equal(blockedFull.alreadyRunning, true);
+  assert.equal(blockedFull.status, "already_running");
+  assert.equal(blockedFull.runId, job.runId);
+  assert.equal(countScope("syncAll"), fullRunsDuringJob, "Sincronização Completa não cria ErpSyncRun");
+  assert.equal(locks.has("syncAll"), false, "lock syncAll devolvido ao desistir");
+
+  // Scheduler em andamento (lock tomado por ele): a Sincronização Completa também desiste.
+  release();
+  await waitForRun(job.runId);
+  await waitUntil(() => !locks.has(sync.SELLER_PORTFOLIO_LOCK_SCOPE), "lock do botão liberado");
+  assert.equal((await sync.acquireSellerPortfolioLock("scheduler-run")).acquired, true);
+  assert.equal((await sync.startUltraFv3FullSyncJob()).alreadyRunning, true);
+  await sync.releaseSellerPortfolioLock("scheduler-run");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Contratos estáticos de integração
 // ---------------------------------------------------------------------------------------------
@@ -361,6 +411,7 @@ assert.match(scheduler, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/
 assert.match(scheduler, /acquireSellerPortfolioLock\(correlationId\)[\s\S]*skippedReason: lastAutomaticSkippedReason[\s\S]*automaticSyncRunning = true/, "scheduler pega o lock compartilhado antes de rodar");
 assert.match(scheduler, /releaseSellerPortfolioLock\(correlationId\)/);
 assert.match(service, /run: syncFinancialProfilesAcrossSellers, nonCritical: true/);
+assert.match(service, /export async function startUltraFv3FullSyncJob[\s\S]*acquireSellerPortfolioLock\(correlationId\)[\s\S]*void syncAllUltraFv3Catalogs/, "Sincronização Completa pega o lock compartilhado antes de iniciar");
 assert.match(service, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/);
 assert.match(service, /export async function syncProducts[\s\S]{0,120}resolveReferenceCredentials\(\)/, "catálogos seguem com o vendedor de referência");
 assert.match(routes, /router\.post\("\/erp\/ultrafv3\/sync\/partners\/all-sellers", authorize\("diretor", "gerente"\), async[\s\S]{0,200}startSellerPortfolioSyncJob/, "mesmos perfis de antes");

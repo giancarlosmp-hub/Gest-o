@@ -156,10 +156,12 @@ bem-sucedida (`erp.ultrafv3.<escopo>.sellerCoverage`); sem essa cobertura, nada 
 O perfil vem do vendedor dono do cliente, com o primeiro recebido como fallback. Os títulos são
 deduplicados por `DOCTO` + `PARCELA`: vale a versão do dono, senão a de maior `SALDO_CAPITAL`.
 
-O botão responde na hora e roda em background (`ErpSyncRun scope=sellerPortfolio`). Ele usa o mesmo
-lock do scheduler (`erpSellerPortfolio`), então um nunca roda junto com o outro. O lock tem TTL de
+O botão responde na hora e roda em background (`ErpSyncRun scope=sellerPortfolio`). Botão, scheduler
+e Sincronização Completa usam o mesmo lock (`erpSellerPortfolio`): se um está rodando, os outros
+respondem `already_running` (o scheduler pula com `lock_active`) sem iniciar nada. O lock tem TTL de
 30 minutos e é renovado entre vendedores e etapas. **Execução interrompida** (API reiniciada no
-meio, por exemplo num cutover): o `ErpSyncRun` fica como `running` no Histórico, e o lock expira até
+meio, por exemplo num cutover): o `ErpSyncRun` fica como `running` no Histórico (ver
+`TD-ERP-SYNC-RUN-ORPHAN-RUNNING`), e o lock expira até
 30 minutos depois da última renovação, liberando uma nova execução. Os dados financeiros só são
 gravados na etapa final de cada escopo e nunca apagados. Se a interrupção ocorrer durante a gravação,
 parte dos clientes fica com o dado novo e o resto com o anterior até a próxima rodada; a cobertura só é
