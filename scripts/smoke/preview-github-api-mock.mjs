@@ -20,7 +20,17 @@ const server = http.createServer((request, response) => {
     return;
   }
   let body;
-  if (request.url.includes('/pulls?head=')) {
+  // Commit history of PR 42. In the earlier-push modes the preview commit (b) is no longer the head (d).
+  const prHeadSha = ['superseded_commit', 'superseded_commit_explicit', 'commit_not_in_pr', 'commits_truncated', 'commit_list_mismatch'].includes(mode) ? 'd'.repeat(40) : 'b'.repeat(40);
+  const prCommits = mode === 'commit_not_in_pr'
+    ? ['d'.repeat(40)]
+    : ['superseded_commit', 'superseded_commit_explicit', 'commits_truncated', 'commit_list_mismatch'].includes(mode)
+      ? ['b'.repeat(40), 'd'.repeat(40)]
+      : ['b'.repeat(40)];
+  const prCommitCount = mode === 'commits_truncated' ? 300 : mode === 'commit_list_mismatch' ? 3 : prCommits.length;
+  if (/\/pulls\/42\/commits\?/.test(request.url)) {
+    body = request.url.includes('page=1') ? prCommits.map(sha => ({ sha })) : [];
+  } else if (request.url.includes('/pulls?head=')) {
     if (mode === 'api_incomplete_response') {
       body = {};
     } else if (mode === 'paginated_ambiguous_page2') {
@@ -42,12 +52,13 @@ const server = http.createServer((request, response) => {
         { number: 99, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }
       ];
     } else {
-      body = [{ number: 42, head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }];
+      body = [{ number: 42, head: { sha: prHeadSha, ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } } }];
     }
   } else if (request.url.includes('/pulls/')) {
     body = {
       state: mode === 'open' ? 'open' : 'closed',
-      head: { sha: 'b'.repeat(40), ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } }
+      commits: prCommitCount,
+      head: { sha: prHeadSha, ref: 'feature', user: { login: 'owner' }, repo: { full_name: 'owner/repo' } }
     };
   } else {
     const attemptMatch = request.url.match(/\/actions\/runs\/100\/attempts\/([0-9]+)$/);
@@ -88,7 +99,7 @@ const server = http.createServer((request, response) => {
           ? [{ number: 42, head: { sha: 'c'.repeat(40) } }]
           : mode === 'explicit_sha_mismatch_attempt_divergent'
           ? [{ number: 42, head: { sha: 'b'.repeat(40) } }]
-          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo', 'missing_head_repo_in_fallback'].includes(mode)
+          : (['empty_prs', 'empty_prs_divergent_branch', 'empty_prs_push_event', 'ambiguous_multiple_prs', 'paginated_ambiguous_page2', 'branch_reuse_different_shas', 'api_incomplete_response', 'divergent_head_repo', 'missing_head_repo_in_fallback', 'superseded_commit', 'commit_not_in_pr', 'commits_truncated', 'commit_list_mismatch'].includes(mode)
             ? []
             : [{ number: 42, head: { sha: mode === 'head' ? 'c'.repeat(40) : 'b'.repeat(40) } }])
       };

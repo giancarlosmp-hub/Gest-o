@@ -20,7 +20,10 @@ assert.doesNotMatch(deferred, /actions\/checkout|appleboy|ssh|scp|secrets\.|VPS_
 assert.match(cleanup, /if: github\.event\.pull_request\.number != 877/);
 assert.match(cleanup, /uses: actions\/checkout@v4/);
 assert.match(cleanup, /uses: appleboy\/scp-action@v0\.1\.7/);
-assert.match(cleanup, /uses: appleboy\/ssh-action@v1\.2\.0/);
+// Execution moved from appleboy/ssh-action to OpenSSH so the remote output is captured and parsed.
+assert.doesNotMatch(cleanup, /appleboy\/ssh-action/);
+assert.match(cleanup, /ssh -i "\$key_file" -p 22022[\s\S]*'bash -s' < "\$request_file" > "\$remote_output"/);
+assert.match(cleanup, /::stop-commands::[\s\S]*cat "\$remote_output"[\s\S]*node scripts\/preview-cleanup-result\.mjs "\$remote_output" "\$ssh_rc" "\$GITHUB_STEP_SUMMARY"/);
 assert.match(cleanup, /bash "\$CLEANUP_RUNNER"/);
 assert.doesNotMatch(cleanup, /continue-on-error|\|\|\s*true|exit\s+77|SKIP/i);
 

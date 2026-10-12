@@ -179,6 +179,21 @@ writeFileSync(modeFile, 'missing_head_repo_in_fallback');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
 assert.notEqual(result.status, 0); assert.match(result.stderr, /run_pr_correlation_missing/);
 assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), 'missing head repo in fallback preserves all images');
+// Earlier push of the same PR: the preview commit is no longer the PR head but belongs to the PR
+// history, so it is authorized (fallback and explicit-association paths).
+for (const mode of ['superseded_commit', 'superseded_commit_explicit']) {
+  writeFileSync(modeFile, mode);
+  result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'authorize', failureManifest], { env: identity });
+  assert.equal(result.status, 0, mode + result.stderr + result.stdout);
+  assert.match(result.stdout, /PREVIEW_IMAGE_AUTHORIZATION=PASS/, mode);
+}
+// Fail closed: commit outside the PR history, truncated or inconsistent commit list.
+for (const [mode, reason] of [['commit_not_in_pr', 'pr_commit_not_in_pull_request pr=42 run_id=100'], ['commits_truncated', 'pr_commit_list_truncated pr=42 commits=300'], ['commit_list_mismatch', 'pr_commit_list_invalid']]) {
+  writeFileSync(modeFile, mode);
+  result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'cleanup', failureManifest], { env: identity });
+  assert.notEqual(result.status, 0, mode); assert.match(result.stderr, new RegExp(reason), mode);
+  assert.ok(failureImages.every(image => spawnSync('docker', ['image', 'inspect', image.image_id]).status === 0), `${mode} preserves all images`);
+}
 writeFileSync(modeFile, 'empty_prs');
 result = run(process.execPath, [join(root, 'scripts/preview-image-lifecycle.mjs'), 'authorize', failureManifest], { env: identity });
 assert.equal(result.status, 0, result.stderr + result.stdout);
