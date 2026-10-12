@@ -571,6 +571,14 @@ jobs:
             PILOT_ACTIVATED=false
             echo "PREVIEW_DEPLOY_RESULT=PASS"
 
+            # Só depois do PASS: aposenta os previews de pushes anteriores deste PR (o anterior servia
+            # de rollback até aqui). Qualquer falha vira aviso e nunca derruba o deploy atual.
+            echo "PREVIEW_DEPLOY_STEP=retire_superseded_previews"
+            if ! bash "$PREVIEW_DIR/scripts/preview-retire-superseded.sh"; then
+              echo "PREVIEW_SUPERSEDED_CLEANUP_RESULT=ERROR reason=retire_script_failed"
+              echo "::warning title=Preview Deploy::Falha ao aposentar previews anteriores do PR ${PR_NUMBER}; o deploy atual não foi afetado."
+            fi
+
 
 
       - name: Comment preview link on PR

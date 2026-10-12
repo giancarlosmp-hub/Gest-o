@@ -95,6 +95,16 @@ passam a ser autorizados quando o commit pertence ao histórico do PR (`/pulls/<
 do histórico (`pr_commit_not_in_pull_request`) ou PR com mais de 250 commits (`pr_commit_list_truncated`)
 continuam preservados e aparecem no aviso.
 
+**Preview Deploy — aposentadoria do preview anterior.** Depois de `PREVIEW_DEPLOY_RESULT=PASS`, o deploy
+roda `scripts/preview-retire-superseded.sh`: derruba (`docker compose down -v`) só os projetos do mesmo PR
+com rótulos `com.gesto.preview.*` coerentes, que não são o projeto atual nem o destino da rota do nginx.
+O compose roda em ambiente limpo, com o volume do próprio projeto conferido no `.env` da pasta (o
+padrão do `docker-compose.yml` é o volume de produção). Falha vira `PREVIEW_SUPERSEDED_CLEANUP=PRESERVED`
+e aviso; o deploy que passou nunca é derrubado. Imagens e manifesto do projeto aposentado ficam para o
+Preview Cleanup do fechamento do PR. O cleanup do fechamento (`preview-cleanup-remote.sh`) aplica a
+mesma proteção: sem `.env` na pasta (`env_file_missing`) ou com `POSTGRES_VOLUME_NAME` diferente de
+`gesto_pgdata_pr_<PR>_<run>_<attempt>` (`env_volume_mismatch`), o projeto é preservado com aviso.
+
 # Operação revisável de backup pós-PR #870
 
 Não executar backup produtivo ainda. O inventário aprovado é read-only e não lê env/dumps:
