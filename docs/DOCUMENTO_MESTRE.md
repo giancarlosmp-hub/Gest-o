@@ -1481,7 +1481,7 @@ O contrato sanitizado disponível não contém payload integral comprovado de `F
 | Pedidos, vendas, autoria, Timeline e change logs | Histórico imutável | Permanecem no ID original; nunca renomear/fundir usuário |
 | Metas/KPIs de período iniciado ou passado | Histórico imutável | Permanecem no vendedor original |
 | Territórios/cidades | Responsabilidade operacional transferível | Transferência explícita, seletiva, com prévia consistente, confirmação, atomicidade e auditoria |
-| Carteira atual | Responsabilidade operacional ERP | `/partners` altera o mesmo cliente quando a identidade e o novo vendedor são comprovados |
+| Carteira atual | Responsabilidade operacional ERP | `/partners` altera o mesmo cliente quando a identidade e o novo vendedor são comprovados; só parceiros com `IDN_CLIENTE = "S"` entram no CRM (fornecedores, funcionários etc. que não são clientes ficam de fora) |
 | Oportunidades abertas | Decisão humana | Permanecem no desligado até “Transferir responsável” |
 | Oportunidades encerradas | Histórico imutável | Responsável original não pode ser alterado |
 | Agenda/follow-ups futuros | Decisão humana | Não transferir na desativação; ação futura deve ser selecionada |
