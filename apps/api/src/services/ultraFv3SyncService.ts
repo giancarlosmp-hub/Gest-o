@@ -1492,6 +1492,7 @@ type PartnerPersistenceDiagnostics = {
   cityCorrectedCount: number;
   documentErpConflicts: number;
   fallbackSellerLinks?: number;
+  legacyTenantAdoptionRequired?: number;
   validAfterNormalization?: number;
   discardedAfterNormalization?: number;
   receivedWithDocument: number;
@@ -1673,6 +1674,28 @@ const choosePrimaryPartnerClient = (candidates: PartnerClientCandidate[], ownerS
     if (erpDiff !== 0) return erpDiff;
     return a.createdAt.getTime() - b.createdAt.getTime();
   })[0] ?? null;
+
+// Rodadas não autenticadas (scheduler e Sincronização Completa) não enxergam clientes legados sem
+// tenant. Criar um cliente nessas rodadas duplicaria o mesmo parceiro; só o botão autenticado pode
+// adotar o tenant do cliente legado e trocar o dono dele.
+const hasLegacyClientWithoutTenant = async (data: PartnerMappedData, normalizedDocument: string) => {
+  const identity: Prisma.ClientWhereInput[] = [];
+  if (data.code) identity.push({ code: data.code });
+  if (normalizedDocument) {
+    identity.push({ cnpjNormalized: normalizedDocument });
+    if (data.cnpj) identity.push({ cnpj: data.cnpj });
+  }
+  if (!identity.length && data.nameNormalized && data.cityNormalized && data.state) {
+    identity.push({ nameNormalized: data.nameNormalized, cityNormalized: data.cityNormalized, state: data.state });
+  }
+  if (!identity.length) return false;
+  const count = await prisma.client.count({ where: { tenantId: null, OR: identity, NOT: legacyArchivedDuplicateNameWhere } });
+  return count > 0;
+};
+
+const legacyTenantAdoptionWarning = (count: number) =>
+  `${count} parceiro(s) com cliente legado sem tenant não foram criados (legacy_tenant_adoption_required). ` +
+  'Rode "Sincronizar clientes de todos vendedores" para adotar o tenant e trocar o dono sem duplicar.';
 
 const findPartnerClientCandidates = async (data: PartnerMappedData, normalizedDocument: string, authority: PartnerTenantAuthority) => {
   const tenantScope: Prisma.ClientWhereInput = authority.allowLegacyAdoption
@@ -1984,6 +2007,18 @@ async function persistPartnerPayload(
     return true;
   }
 
+  // legacy-tenant-guard:begin (um teste de mutação remove este bloco e prova que o scheduler duplicaria)
+  if (!authority.allowLegacyAdoption && await hasLegacyClientWithoutTenant(data, normalizedDocument)) {
+    diagnostics.legacyTenantAdoptionRequired = (diagnostics.legacyTenantAdoptionRequired ?? 0) + 1;
+    logApiEvent("WARN", "[ultrafv3 sync partners] creation blocked: legacy client without tenant", {
+      correlationId,
+      reason: "legacy_tenant_adoption_required",
+      codePresent: Boolean(data.code),
+      documentPresent: Boolean(normalizedDocument),
+    });
+    return false;
+  }
+  // legacy-tenant-guard:end
   await prisma.$transaction(async (tx) => {
     const created = await tx.client.create({ data: {
       tenantId: authority.tenantId,
@@ -2220,7 +2255,8 @@ export async function syncPartners(options?: RunSyncOptions) {
           },
         );
       }
-      return { syncedCount, diagnostics };
+      const legacyBlocked = diagnostics.legacyTenantAdoptionRequired ?? 0;
+      return { syncedCount, diagnostics, ...(legacyBlocked ? { warning: legacyTenantAdoptionWarning(legacyBlocked) } : {}) };
     },
     {
       ...options,
@@ -2369,7 +2405,9 @@ export async function syncPartnersByUser(
           authMode: "seller",
         },
       );
+      const legacyBlocked = result.diagnostics.legacyTenantAdoptionRequired ?? 0;
       return {
+        ...(legacyBlocked ? { warning: legacyTenantAdoptionWarning(legacyBlocked) } : {}),
         syncedCount: result.syncedCount,
         diagnostics: {
           ...diagnosticsBase,
@@ -2440,6 +2478,7 @@ export async function syncPartnersForAllConfiguredSellers(
     updated: 0,
     sellerChangedCount: 0,
     skipped: 0,
+    legacyTenantAdoptionRequired: 0,
   };
   const results: Array<{
     userId: string;
@@ -2482,6 +2521,7 @@ export async function syncPartnersForAllConfiguredSellers(
       summary.processed += result.syncedCount ?? 0;
       summary.syncedCount = summary.processed;
       summary.sellerChangedCount += sellerChangedCount;
+      summary.legacyTenantAdoptionRequired += result.diagnostics?.legacyTenantAdoptionRequired ?? 0;
       results.push({
         userId: seller.id,
         sellerName: seller.name,
@@ -3712,6 +3752,10 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
   const summary = await syncPartnersForAllConfiguredSellers(options);
   if (summary.status === "failed") throw new Error(`Nenhum vendedor concluiu partners: ${summary.errorCount} falha(s), ${summary.skippedCount} ignorado(s) por lock.`);
   const failed = summary.errorCount + summary.skippedCount;
+  const warnings = [
+    ...(failed ? [`Parcial: ${failed} de ${summary.sellerCount} vendedor(es) falharam em partners.`] : []),
+    ...(summary.legacyTenantAdoptionRequired ? [legacyTenantAdoptionWarning(summary.legacyTenantAdoptionRequired)] : []),
+  ];
   return {
     syncedCount: summary.processed,
     diagnostics: {
@@ -3723,8 +3767,9 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
       created: summary.created,
       updated: summary.updated,
       partial: summary.status === "partial" ? 1 : 0,
+      legacyTenantAdoptionRequired: summary.legacyTenantAdoptionRequired,
     },
-    ...(failed ? { warning: `Parcial: ${failed} de ${summary.sellerCount} vendedor(es) falharam em partners.` } : {}),
+    ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
 }
 
@@ -4004,7 +4049,7 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), hear
           operationalAlert: true,
         });
       }
-      if ((result.diagnostics?.partial ?? 0) > 0) {
+      if ((result.diagnostics?.partial ?? 0) > 0 || result.warning) {
         warnings.push({
           scope: step.scope,
           label: step.label,

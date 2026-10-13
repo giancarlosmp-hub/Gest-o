@@ -129,6 +129,13 @@ para vendedor ativo, que deve ser monitorado. **[CÓDIGO]** telefone/e-mail não
 vazia. Presença, alias, remoção e coleção no payload são **não comprovados**. Não misturar telefone
 geral da empresa com pessoa de contato e não sobrescrever edição manual.
 
+**[CÓDIGO]** Rodadas não autenticadas (scheduler e Sincronização Completa) só enxergam clientes do tenant
+do vendedor. Para não duplicar um parceiro cujo cliente legado está sem tenant (mesmo código, mesmo
+documento ou, sem os dois, mesmo nome+cidade+UF), essas rodadas não criam o cliente: contam
+`legacyTenantAdoptionRequired` e registram aviso no Histórico (`legacy_tenant_adoption_required`). Só o
+botão "Sincronizar clientes de todos vendedores", autenticado, adota o tenant e troca o dono do mesmo
+cliente.
+
 ## Perfil financeiro e títulos
 
 **[CÓDIGO Gest-o]** `/financialProfiles` é chamado e projeta última fatura/valor quando presentes;
