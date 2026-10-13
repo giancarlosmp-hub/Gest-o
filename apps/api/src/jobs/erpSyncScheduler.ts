@@ -493,7 +493,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           heartbeat,
         });
         const stepResult = result as { diagnostics?: Record<string, number>; warning?: string } | undefined;
-        if ((stepResult?.diagnostics?.partial ?? 0) > 0) {
+        if ((stepResult?.diagnostics?.partial ?? 0) > 0 || stepResult?.warning) {
           nonCriticalStepWarnings.push({
             scope: step.scope,
             label: step.label,
