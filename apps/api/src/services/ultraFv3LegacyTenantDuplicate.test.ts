@@ -115,9 +115,9 @@ setModel("erpSyncRun", {
 (ultraFv3Client as any).requestWithCredentials = async (path: string) => {
   assert.ok(path.startsWith("/partners"), path);
   return [
-    { PARCEIRO: "5001", RAZAO_SOCIAL: "Fazenda Legada Ficticia", CIDADE: "Cidade Ficticia", UF: "PR" },
-    { PARCEIRO: "5003", RAZAO_SOCIAL: "Sitio Legado Ficticio", CNPJ: "11.222.333/0001-81", CIDADE: "Cidade Ficticia", UF: "PR" },
-    { PARCEIRO: "5002", RAZAO_SOCIAL: "Cliente Novo Ficticio", CIDADE: "Outra Cidade Ficticia", UF: "SC" },
+    { PARCEIRO: "5001", RAZAO_SOCIAL: "Fazenda Legada Ficticia", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S" },
+    { PARCEIRO: "5003", RAZAO_SOCIAL: "Sitio Legado Ficticio", CNPJ: "11.222.333/0001-81", CIDADE: "Cidade Ficticia", UF: "PR", IDN_CLIENTE: "S" },
+    { PARCEIRO: "5002", RAZAO_SOCIAL: "Cliente Novo Ficticio", CIDADE: "Outra Cidade Ficticia", UF: "SC", IDN_CLIENTE: "S" },
   ];
 };
 
@@ -191,7 +191,8 @@ try {
 const scheduler = readFileSync(new URL("../jobs/erpSyncScheduler.ts", import.meta.url), "utf8");
 assert.match(scheduler, /stepResult\?\.diagnostics\?\.partial \?\? 0\) > 0 \|\| stepResult\?\.warning/);
 assert.match(source, /result\.diagnostics\?\.partial \?\? 0\) > 0 \|\| result\.warning/);
-assert.match(source, /summary\.legacyTenantAdoptionRequired \? \[legacyTenantAdoptionWarning/);
+assert.match(source, /summary\.legacyTenantAdoptionRequired \|\| summary\.skippedCustomerFlagMissing \? \[partnerSyncWarning\(summary\)/);
+assert.match(source, /const partnerSyncWarning = [\s\S]*?diagnostics\.legacyTenantAdoptionRequired \? \[legacyTenantAdoptionWarning\(diagnostics\.legacyTenantAdoptionRequired\)\]/);
 
 await (prisma as any).$disconnect?.();
 console.log("ULTRAFV3_PARTNERS_LEGACY_TENANT=PASS scheduler_no_duplicate=PASS authenticated_adoption=PASS new_partner_created=PASS history_warning=PASS mutation_creates_duplicate=DETECTED");

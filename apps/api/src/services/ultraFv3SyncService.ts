@@ -1493,6 +1493,8 @@ type PartnerPersistenceDiagnostics = {
   documentErpConflicts: number;
   fallbackSellerLinks?: number;
   legacyTenantAdoptionRequired?: number;
+  skippedNotCustomer?: number;
+  skippedCustomerFlagMissing?: number;
   validAfterNormalization?: number;
   discardedAfterNormalization?: number;
   receivedWithDocument: number;
@@ -1691,6 +1693,29 @@ const hasLegacyClientWithoutTenant = async (data: PartnerMappedData, normalizedD
   if (!identity.length) return false;
   const count = await prisma.client.count({ where: { tenantId: null, OR: identity, NOT: legacyArchivedDuplicateNameWhere } });
   return count > 0;
+};
+
+// Só parceiros marcados como cliente no ERP entram no CRM. IDN_CLIENTE = "S" (sem diferenciar
+// maiúsculas e ignorando espaços), sem olhar as outras flags: cliente que também é fornecedor entra.
+// "N" ou campo ausente: o parceiro não é criado nem atualizado (nada é apagado nem arquivado aqui).
+type PartnerCustomerFlag = "customer" | "not_customer" | "missing";
+const classifyPartnerCustomerFlag = (payload: Record<string, unknown>): PartnerCustomerFlag => {
+  const raw = payload.IDN_CLIENTE;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return "missing";
+  return String(raw).trim().toUpperCase() === "S" ? "customer" : "not_customer";
+};
+const countSkippedNonCustomer = (diagnostics: PartnerPersistenceDiagnostics, flag: Exclude<PartnerCustomerFlag, "customer">) => {
+  if (flag === "missing") diagnostics.skippedCustomerFlagMissing = (diagnostics.skippedCustomerFlagMissing ?? 0) + 1;
+  else diagnostics.skippedNotCustomer = (diagnostics.skippedNotCustomer ?? 0) + 1;
+};
+const customerFlagMissingWarning = (count: number) =>
+  `${count} parceiro(s) sem o campo IDN_CLIENTE foram ignorados (não criados nem atualizados). Confira o retorno do /partners.`;
+const partnerSyncWarning = (diagnostics: { legacyTenantAdoptionRequired?: number; skippedCustomerFlagMissing?: number }) => {
+  const parts = [
+    ...(diagnostics.legacyTenantAdoptionRequired ? [legacyTenantAdoptionWarning(diagnostics.legacyTenantAdoptionRequired)] : []),
+    ...(diagnostics.skippedCustomerFlagMissing ? [customerFlagMissingWarning(diagnostics.skippedCustomerFlagMissing)] : []),
+  ];
+  return parts.length ? parts.join(" ") : undefined;
 };
 
 const legacyTenantAdoptionWarning = (count: number) =>
@@ -2084,6 +2109,13 @@ async function persistPartnerRowsForSeller(
       diagnostics.discardedNonObject += 1;
       continue;
     }
+    // partner-customer-filter:begin (um teste de mutação remove este bloco e prova que um fornecedor entraria)
+    const customerFlag = classifyPartnerCustomerFlag(row as Record<string, unknown>);
+    if (customerFlag !== "customer") {
+      countSkippedNonCustomer(diagnostics, customerFlag);
+      continue;
+    }
+    // partner-customer-filter:end
     const persisted = await persistPartnerPayload(row as Record<string, unknown>, seller.id, authority, diagnostics, correlationId);
     if (persisted) syncedCount += 1;
   }
@@ -2157,6 +2189,11 @@ export async function syncPartners(options?: RunSyncOptions) {
           continue;
         }
         const payload = row as Record<string, unknown>;
+        const customerFlag = classifyPartnerCustomerFlag(payload);
+        if (customerFlag !== "customer") {
+          countSkippedNonCustomer(diagnostics, customerFlag);
+          continue;
+        }
         const sellerCode = normalizePartnerCacheCode(pickFirstString(payload, partnerSellerCodeKeys));
         const sellerMatches = sellerBuckets.get(sellerCode) || [];
         const seller = sellerMatches.length === 1 ? sellerMatches[0] : null;
@@ -2255,8 +2292,8 @@ export async function syncPartners(options?: RunSyncOptions) {
           },
         );
       }
-      const legacyBlocked = diagnostics.legacyTenantAdoptionRequired ?? 0;
-      return { syncedCount, diagnostics, ...(legacyBlocked ? { warning: legacyTenantAdoptionWarning(legacyBlocked) } : {}) };
+      const warning = partnerSyncWarning(diagnostics);
+      return { syncedCount, diagnostics, ...(warning ? { warning } : {}) };
     },
     {
       ...options,
@@ -2405,9 +2442,9 @@ export async function syncPartnersByUser(
           authMode: "seller",
         },
       );
-      const legacyBlocked = result.diagnostics.legacyTenantAdoptionRequired ?? 0;
+      const warning = partnerSyncWarning(result.diagnostics);
       return {
-        ...(legacyBlocked ? { warning: legacyTenantAdoptionWarning(legacyBlocked) } : {}),
+        ...(warning ? { warning } : {}),
         syncedCount: result.syncedCount,
         diagnostics: {
           ...diagnosticsBase,
@@ -2479,6 +2516,8 @@ export async function syncPartnersForAllConfiguredSellers(
     sellerChangedCount: 0,
     skipped: 0,
     legacyTenantAdoptionRequired: 0,
+    skippedNotCustomer: 0,
+    skippedCustomerFlagMissing: 0,
   };
   const results: Array<{
     userId: string;
@@ -2522,6 +2561,8 @@ export async function syncPartnersForAllConfiguredSellers(
       summary.syncedCount = summary.processed;
       summary.sellerChangedCount += sellerChangedCount;
       summary.legacyTenantAdoptionRequired += result.diagnostics?.legacyTenantAdoptionRequired ?? 0;
+      summary.skippedNotCustomer += result.diagnostics?.skippedNotCustomer ?? 0;
+      summary.skippedCustomerFlagMissing += result.diagnostics?.skippedCustomerFlagMissing ?? 0;
       results.push({
         userId: seller.id,
         sellerName: seller.name,
@@ -3754,7 +3795,7 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
   const failed = summary.errorCount + summary.skippedCount;
   const warnings = [
     ...(failed ? [`Parcial: ${failed} de ${summary.sellerCount} vendedor(es) falharam em partners.`] : []),
-    ...(summary.legacyTenantAdoptionRequired ? [legacyTenantAdoptionWarning(summary.legacyTenantAdoptionRequired)] : []),
+    ...(summary.legacyTenantAdoptionRequired || summary.skippedCustomerFlagMissing ? [partnerSyncWarning(summary)!] : []),
   ];
   return {
     syncedCount: summary.processed,
@@ -3768,6 +3809,8 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
       updated: summary.updated,
       partial: summary.status === "partial" ? 1 : 0,
       legacyTenantAdoptionRequired: summary.legacyTenantAdoptionRequired,
+      skippedNotCustomer: summary.skippedNotCustomer,
+      skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing,
     },
     ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
@@ -3818,7 +3861,8 @@ async function runSellerPortfolioSync(options: RunSyncOptions) {
       status: summary.status,
       durationMs: Date.now() - partnersStartedAt,
       syncedCount: summary.processed,
-      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated },
+      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated, skippedNotCustomer: summary.skippedNotCustomer, skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing },
+      ...(summary.skippedCustomerFlagMissing ? { error: customerFlagMissingWarning(summary.skippedCustomerFlagMissing) } : {}),
     };
   } catch (error) {
     scopes.partners = { status: "failed", durationMs: Date.now() - partnersStartedAt, syncedCount: 0, error: formatError(error) };

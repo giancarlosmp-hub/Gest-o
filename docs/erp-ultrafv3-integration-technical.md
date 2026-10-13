@@ -136,6 +136,15 @@ documento ou, sem os dois, mesmo nome+cidade+UF), essas rodadas não criam o cli
 botão "Sincronizar clientes de todos vendedores", autenticado, adota o tenant e troca o dono do mesmo
 cliente.
 
+**[CÓDIGO]** O `/partners` devolve todos os cadastros do ERP (clientes, fornecedores, transportadoras,
+funcionários, vendedores), com as flags `IDN_CLIENTE`, `IDN_FORNECEDOR`, `IDN_TRANSPORTADORA`,
+`IDN_FUNCIONARIO` e `IDN_VENDEDOR` ("S"/"N"). Só parceiros com `IDN_CLIENTE = "S"` (sem diferenciar
+maiúsculas e ignorando espaços) são criados ou atualizados no CRM, nos caminhos por vendedor e global;
+as outras flags não são olhadas, então cliente que também é fornecedor entra. `IDN_CLIENTE = "N"` ou
+campo ausente: o parceiro não é criado nem atualizado, e nada é apagado ou arquivado. O Histórico mostra
+por vendedor `skippedNotCustomer` e `skippedCustomerFlagMissing`; campo ausente vira aviso. O cache bruto
+do `/partners` continua guardando todos os cadastros. Cliente arquivado que volta com `S` é reativado.
+
 ## Perfil financeiro e títulos
 
 **[CÓDIGO Gest-o]** `/financialProfiles` é chamado e projeta última fatura/valor quando presentes;
