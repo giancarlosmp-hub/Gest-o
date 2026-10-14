@@ -370,3 +370,12 @@ confirmados; incluí-los no alerta e na lista de permitidos só depois de confir
 usa `new URL(..., import.meta.url).pathname` e, no Windows nativo, abre `C:\C:\...` (ENOENT). O
 `verify-brand-assets` do build do web mostra o mesmo padrão nos avisos (`/C:/...`), sem falhar o
 build. Em Linux e no CI funciona. Trocar por `fileURLToPath` em PR próprio.
+
+### TD-ERP-REFERENCE-EMPTY-CACHE-OPEN — revalidação de referências libera o envio com cache vazio
+
+**Aberto.** `assertReferenceCode` (`apps/api/src/services/erpOrderService.ts`) só rejeita forma de
+pagamento, condição de recebimento ou operação não liberada quando o cache sincronizado
+(`erp.ultrafv3.paymentMethods`, `erp.ultrafv3.receivingConditions`, `erp.ultrafv3.operations`) existe e
+tem linhas. Com o cache ausente ou vazio, a revalidação retorna sem bloquear e o pedido segue para o
+ERP com o código informado. A listagem da tela fica vazia nesse caso, mas um envio direto pela API passa.
+Mantido assim no PR #949; tornar fail-closed em PR próprio.
