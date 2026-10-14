@@ -56,6 +56,7 @@
     "test:ultrafv3-partner-tenancy": "tsx src/services/ultraFv3PartnerTenantSafety.test.ts",
     "test:ultrafv3-partners-customer-flag": "npm run prisma:generate && tsx src/services/ultraFv3PartnerCustomerFilter.test.ts",
     "test:ultrafv3-partners-legacy-tenant": "npm run prisma:generate && tsx src/services/ultraFv3LegacyTenantDuplicate.test.ts",
+    "test:erp-payment-method-eligibility": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpPaymentMethodEligibility.test.ts",
     "test:ultrafv3-financial-sync": "npm run prisma:generate && tsx src/services/ultraFv3FinancialSync.test.ts",
     "test:opportunity-product-availability": "tsx src/services/opportunityProductAvailability.test.ts",
     "test:erp-price-variation-policy": "tsx src/services/erpPriceVariationPolicy.test.ts",

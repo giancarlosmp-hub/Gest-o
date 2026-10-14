@@ -9,6 +9,9 @@ export function readRecordField(record: Record<string, unknown>, keys: string[])
   return null;
 }
 
+// Scopes whose options are filtered for the seller and revalidated before an ERP order is sent.
+export const ERP_ELIGIBILITY_FILTERED_SCOPES = ["operations", "receivingConditions", "paymentMethods"] as const;
+
 export function isErpReferenceEligible(
   scope: string,
   record: Record<string, unknown>,
@@ -25,8 +28,8 @@ export function isErpReferenceEligible(
     }
   }
 
-  // 2. For operations & receivingConditions, check LIBERAR_INTERNET (fail closed: must be "S")
-  if (scope === "operations" || scope === "receivingConditions") {
+  // 2. For operations, receivingConditions & paymentMethods, check LIBERAR_INTERNET (fail closed: must be "S")
+  if (scope === "operations" || scope === "receivingConditions" || scope === "paymentMethods") {
     const liberarInternetKeys = [
       "LIBERAR_INTERNET",
       "LIBERARINTERNET",
@@ -44,6 +47,13 @@ export function isErpReferenceEligible(
     const vendasKeys = ["VENDAS", "vendas", "IS_VENDAS", "isVendas"];
     const rawVendas = readRecordField(record, vendasKeys);
     if (!rawVendas || rawVendas.toUpperCase() !== "S") {
+      return false;
+    }
+  }
+
+  // 4. For paymentMethods, ATIVO is required (fail closed: absent ATIVO is not eligible)
+  if (scope === "paymentMethods") {
+    if (!rawAtivo || rawAtivo.toUpperCase() !== "S") {
       return false;
     }
   }
