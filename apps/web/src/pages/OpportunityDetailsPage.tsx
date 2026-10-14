@@ -15,6 +15,7 @@ import {
 import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import { getApiErrorMessage } from "../lib/apiError";
 import { canConfirmErpManualResolution } from "../lib/erpManualResolution";
+import { getPaymentMethodNotAllowedReason } from "../lib/erpPaymentMethodEligibility";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
@@ -836,8 +837,12 @@ export default function OpportunityDetailsPage() {
     requireOrderParameters: true,
   });
   const canOpenErpOrder = erpOrderReadiness.ready;
+  const paymentMethodNotAllowedReason = loadingErpOrderData
+    ? null
+    : getPaymentMethodNotAllowedReason(erpOrderForm.paymentMethodCode, paymentMethods);
   const canSubmitErpOrder =
     erpOrderSubmitReadiness.ready &&
+    !paymentMethodNotAllowedReason &&
     Boolean(erpOrderForm.expectedDeliveryDate) &&
     !successfulErpOrder &&
     !unresolvedAmbiguousErpOrder;
@@ -846,7 +851,7 @@ export default function OpportunityDetailsPage() {
     ? `Pedido ERP já enviado com sucesso (${successfulErpOrder.erpOrderNumber || successfulErpOrder.numPedido || successfulErpOrder.pedidoIdImportacao}). Reenvio bloqueado para evitar duplicidade.`
     : unresolvedAmbiguousErpOrder
       ? "Pedido ERP indisponível: tentativa anterior com resultado ambíguo; use Atualizar status ou solicite revisão manual de um diretor."
-    : erpOrderSubmitReadiness.firstReason;
+    : erpOrderSubmitReadiness.firstReason || paymentMethodNotAllowedReason;
 
   const setErpOrderField = (
     field: keyof Omit<ErpOrderForm, "simulateOnly">,
@@ -1779,11 +1784,19 @@ export default function OpportunityDetailsPage() {
                           value={erpOrderForm.paymentMethodCode}
                           options={paymentMethods}
                           loading={loadingErpOrderData}
-                          emptyMessage="Não há formas de pagamento sincronizadas. Vá em Configurações > Integração ERP e sincronize Formas de pagamento."
+                          emptyMessage="Não há formas de pagamento autorizadas (LIBERAR_INTERNET=S, ATIVO=S). Vá em Configurações > Integração ERP e sincronize Formas de pagamento."
                           onChange={(value) =>
                             setErpOrderField("paymentMethodCode", value)
                           }
                         />
+                        {paymentMethodNotAllowedReason ? (
+                          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 md:col-span-2 xl:col-span-3">
+                            {paymentMethodNotAllowedReason.replace(
+                              "Pedido ERP indisponível: ",
+                              "",
+                            )}
+                          </p>
+                        ) : null}
                         <SearchableSelect
                           label="Condição de recebimento"
                           value={erpOrderForm.receivingConditionCode}

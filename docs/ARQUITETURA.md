@@ -319,10 +319,13 @@ precedência universal. Contextos diferentes não são ordenados apenas por vig�
 
 ### Referências comerciais e autorização de pedido (Setembro/2026)
 
-Caches de operações/condições são dados externos e exigem validação de elegibilidade e autorização.
-A regra `LIBERAR_INTERNET = "S"` (além de `ATIVO = "S"` e `VENDAS = "S"` para operações) é aplicada
-tanto na projeção de opções das rotas `GET /erp/ultrafv3/operations` e `GET /erp/ultrafv3/receiving-conditions`
-quanto na revalidação backend antes de enviar pedidos ao ERP (`assertReferenceCode`). Opções não elegíveis
+Caches de operações/condições/formas de pagamento são dados externos e exigem validação de elegibilidade e autorização.
+A regra `LIBERAR_INTERNET = "S"` (além de `ATIVO = "S"` e `VENDAS = "S"` para operações, e `ATIVO = "S"`
+obrigatório para formas de pagamento, em que `ATIVO` ausente não é elegível) é aplicada
+tanto na projeção de opções das rotas `GET /erp/ultrafv3/operations`, `GET /erp/ultrafv3/receiving-conditions`
+e `GET /erp/ultrafv3/payment-methods` quanto na revalidação backend antes de enviar pedidos ao ERP (`assertReferenceCode`).
+Os valores são comparados sem diferenciar maiúsculas e ignorando espaços. Na tela "Gerar pedido ERP", uma forma de
+pagamento já selecionada que não está na lista liberada bloqueia o envio e mostra que a forma não está liberada. Opções não elegíveis
 são filtradas da interface e chamadas diretas com códigos não autorizados ou ausentes/nulos/inválidos são rejeitadas em modo
 fail-closed, enquanto pedidos históricos já salvos permanecem preservados e consultáveis.
 

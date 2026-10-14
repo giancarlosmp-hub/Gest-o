@@ -5,7 +5,7 @@ import { logApiEvent } from "../utils/logger.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { authorize } from "../middlewares/authorize.js";
 import { normalizeErpParameterCode } from "@salesforce-pro/shared";
-import { isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
+import { ERP_ELIGIBILITY_FILTERED_SCOPES, isErpReferenceEligible } from "../utils/erpReferenceValidation.js";
 
 const router = Router();
 
@@ -87,14 +87,14 @@ const getFallbackDescription = (scope: ErpReferenceScope, code: string) => {
   return referenceOptionKeys[scope].fallbackDescriptions?.[normalizedCode] || "";
 };
 
-const toReferenceOptions = (scope: ErpReferenceScope, payload: unknown): ErpReferenceOption[] => {
+export const toReferenceOptions = (scope: ErpReferenceScope, payload: unknown): ErpReferenceOption[] => {
   const keys = referenceOptionKeys[scope];
   const rows = toArray(payload);
   const items = rows
     .map((row) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
-      if ((scope === "operations" || scope === "receivingConditions") && !isErpReferenceEligible(scope, record)) {
+      if ((ERP_ELIGIBILITY_FILTERED_SCOPES as readonly string[]).includes(scope) && !isErpReferenceEligible(scope, record)) {
         return null;
       }
       const rawCode = readFirstText(record, keys.code);
