@@ -330,6 +330,13 @@ retorno e mantém `partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` anti
 crédito fica desatualizado. A correção exige saber quando o retorno é um snapshot completo por
 vendedor; não foi feita no PR da sincronização financeira por vendedor.
 
+Fase 2 implementada em **modo simulação** (`PARTNER_TITLE_CLEARING_ENABLED = false` em
+`ultraFv3SyncService.ts`; regra em `planPartnerTitleClears`, `ultraFv3FinancialMerge.ts`). A rodada por
+vendedor registra no metrics do ErpSyncRun de `partnerTitles` os clientes que seriam limpos
+(`titleClearing.clearedClients`) e os motivos de bloqueio, sem gravar. Ligar a limpeza é trocar a flag
+para `true`, em PR próprio, depois de conferir a simulação em produção. A sincronização com credencial
+global (`syncPartnerTitles`) continua sem limpeza.
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`

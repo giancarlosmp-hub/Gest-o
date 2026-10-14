@@ -223,3 +223,96 @@ const preferIncomingTitle = (
   if (currentIsOwner !== incomingIsOwner) return incomingIsOwner;
   return saldoOf(incoming.row) > saldoOf(current.row);
 };
+
+/**
+ * Retorno comprovadamente completo: array puro (formato documentado do conector) ou objeto paginado
+ * sem próxima página e com total informado e atingido. Objeto sem total não comprova nada.
+ */
+export const isProvablyCompleteSnapshot = (response: unknown, rowCount: number) => {
+  if (Array.isArray(response)) return true;
+  if (!response || typeof response !== "object") return false;
+  const body = response as Record<string, unknown>;
+  if (body.hasNext === true || body.has_next === true || body.nextPage != null || body.next_page != null) return false;
+  const total = [body.total, body.totalCount, body.count].find((value) => value !== null && value !== undefined && value !== "");
+  return total !== undefined && Number.isFinite(Number(total)) && rowCount >= Number(total);
+};
+
+export type PartnerTitleClearCandidate = FinancialClientTarget;
+
+export type PartnerTitleClearBlockReason =
+  | "ownerWithoutCoverage"
+  | "ownerFetchFailed"
+  | "ownerEmptyReturn"
+  | "ownerIncompleteSnapshot"
+  | "failedSellerMayReturn"
+  | "tenantUnproven"
+  | "tenantMismatch"
+  | "massClearGuard";
+
+export type PartnerTitleClearPlan = {
+  clear: PartnerTitleClearCandidate[];
+  blocked: { client: PartnerTitleClearCandidate; reason: PartnerTitleClearBlockReason }[];
+  presentInReturns: number;
+  massClearGuardTriggered: boolean;
+};
+
+/** Trava contra limpeza em massa: bloqueia tudo quando a rodada limparia mais de 5 e mais de 50%. */
+export const PARTNER_TITLE_MASS_CLEAR_GUARD = { minCount: 5, maxShare: 0.5 };
+
+/**
+ * Clientes com títulos gravados que não vieram em nenhum retorno da rodada. Só entram para limpeza
+ * quando o dono buscou com sucesso, retorno não vazio e comprovadamente completo, no mesmo tenant do
+ * cliente, e nenhum vendedor com falha poderia ter retornado o código. Dono sem busca na rodada
+ * (sem Login FV3) nunca é limpo. Na dúvida, o cliente fica como está.
+ */
+export function planPartnerTitleClears(input: {
+  fetches: FinancialSellerFetch[];
+  candidates: PartnerTitleClearCandidate[];
+  ownerTenantById: Map<string, string>;
+  exclusions: FinancialWriteExclusions;
+  codeOf: (row: Record<string, unknown>) => string;
+  /** Por vendedor: o retorno da rodada foi comprovadamente completo. */
+  completeSellerIds: Set<string>;
+}): PartnerTitleClearPlan {
+  const returnedCodes = new Set<string>();
+  for (const fetch of input.fetches) for (const row of fetch.rows) {
+    const code = input.codeOf(row);
+    if (code) returnedCodes.add(code);
+  }
+  const fetchBySeller = new Map(input.fetches.map((fetch) => [fetch.sellerId, fetch]));
+  const clear: PartnerTitleClearCandidate[] = [];
+  const blocked: PartnerTitleClearPlan["blocked"] = [];
+  let presentInReturns = 0;
+  for (const client of input.candidates) {
+    if (returnedCodes.has(client.code)) {
+      presentInReturns += 1;
+      continue;
+    }
+    const reason = clearBlockReason(client, fetchBySeller.get(client.ownerSellerId), input);
+    if (reason) blocked.push({ client, reason });
+    else clear.push(client);
+  }
+  const evaluated = clear.length + blocked.length;
+  const massClearGuardTriggered =
+    clear.length > PARTNER_TITLE_MASS_CLEAR_GUARD.minCount && clear.length > evaluated * PARTNER_TITLE_MASS_CLEAR_GUARD.maxShare;
+  if (massClearGuardTriggered) {
+    return { clear: [], blocked: [...blocked, ...clear.map((client) => ({ client, reason: "massClearGuard" as const }))], presentInReturns, massClearGuardTriggered };
+  }
+  return { clear, blocked, presentInReturns, massClearGuardTriggered };
+}
+
+const clearBlockReason = (
+  client: PartnerTitleClearCandidate,
+  ownerFetch: FinancialSellerFetch | undefined,
+  input: Parameters<typeof planPartnerTitleClears>[0],
+): PartnerTitleClearBlockReason | null => {
+  if (!ownerFetch) return "ownerWithoutCoverage";
+  if (!isSuccessfulFetch(ownerFetch)) return "ownerFetchFailed";
+  if (ownerFetch.outcome !== "success" || !ownerFetch.rows.length) return "ownerEmptyReturn";
+  if (!input.completeSellerIds.has(ownerFetch.sellerId)) return "ownerIncompleteSnapshot";
+  if (input.exclusions.blockAll || input.exclusions.excludedCodes.has(client.code)) return "failedSellerMayReturn";
+  const tenantId = client.tenantId ?? input.ownerTenantById.get(client.ownerSellerId) ?? null;
+  if (!tenantId || !ownerFetch.tenantId) return "tenantUnproven";
+  if (tenantId !== ownerFetch.tenantId) return "tenantMismatch";
+  return null;
+};
