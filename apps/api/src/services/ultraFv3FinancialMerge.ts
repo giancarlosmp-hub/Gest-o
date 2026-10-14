@@ -224,17 +224,23 @@ const preferIncomingTitle = (
   return saldoOf(incoming.row) > saldoOf(current.row);
 };
 
+/** Campos que indicariam paginação no envelope; o conector não pagina, então nenhum pode vir preenchido. */
+const PAGINATION_FIELDS = ["hasNext", "has_next", "nextPage", "next_page", "page", "pageSize", "totalPages", "total_pages", "offset", "limit"];
+const TOTAL_FIELDS = ["total", "totalCount", "count"];
+
 /**
- * Retorno comprovadamente completo: array puro (formato documentado do conector) ou objeto paginado
- * sem próxima página e com total informado e atingido. Objeto sem total não comprova nada.
+ * Retorno comprovadamente completo: só o envelope do conector
+ * { message: "OK", data: [...], detail, query, parameters }, com data em array e sem nenhum campo de
+ * paginação preenchido. Total, se vier, tem de ser igual ao número de linhas recebidas. Array puro,
+ * outra mensagem ou qualquer outra forma não comprovam completude.
  */
 export const isProvablyCompleteSnapshot = (response: unknown, rowCount: number) => {
-  if (Array.isArray(response)) return true;
-  if (!response || typeof response !== "object") return false;
+  if (!response || typeof response !== "object" || Array.isArray(response)) return false;
   const body = response as Record<string, unknown>;
-  if (body.hasNext === true || body.has_next === true || body.nextPage != null || body.next_page != null) return false;
-  const total = [body.total, body.totalCount, body.count].find((value) => value !== null && value !== undefined && value !== "");
-  return total !== undefined && Number.isFinite(Number(total)) && rowCount >= Number(total);
+  if (body.message !== "OK" || !Array.isArray(body.data) || body.data.length !== rowCount) return false;
+  const filled = (key: string) => body[key] !== undefined && body[key] !== null && body[key] !== "" && body[key] !== false;
+  if (PAGINATION_FIELDS.some(filled)) return false;
+  return TOTAL_FIELDS.filter(filled).every((key) => Number(body[key]) === rowCount);
 };
 
 export type PartnerTitleClearCandidate = FinancialClientTarget;
@@ -247,23 +253,38 @@ export type PartnerTitleClearBlockReason =
   | "failedSellerMayReturn"
   | "tenantUnproven"
   | "tenantMismatch"
+  | "returnShrank"
   | "massClearGuard";
 
 export type PartnerTitleClearPlan = {
   clear: PartnerTitleClearCandidate[];
   blocked: { client: PartnerTitleClearCandidate; reason: PartnerTitleClearBlockReason }[];
   presentInReturns: number;
+  /** Donos cujo retorno encolheu demais em relação à rodada bem-sucedida anterior. */
+  shrankOwners: number;
   massClearGuardTriggered: boolean;
 };
 
-/** Trava contra limpeza em massa: bloqueia tudo quando a rodada limparia mais de 5 e mais de 50%. */
-export const PARTNER_TITLE_MASS_CLEAR_GUARD = { minCount: 5, maxShare: 0.5 };
+/**
+ * Travas contra limpeza indevida:
+ * - por dono: o retorno dele (clientes distintos) caiu mais de 50% e mais de 5 clientes em relação à
+ *   rodada bem-sucedida anterior (sellerCoverage) → os clientes desse dono não são limpos (returnShrank);
+ * - por rodada: mais de 300 limpezas → nada é limpo (massClearGuard).
+ * O acúmulo de títulos já pagos não dispara nenhuma das duas: só a queda brusca do retorno ou o teto.
+ */
+export const PARTNER_TITLE_CLEAR_GUARDS = { shrinkMinClients: 5, shrinkMaxShare: 0.5, maxClearsPerRound: 300 };
+
+export const ownerReturnShrank = (previousCount: number | undefined, currentCount: number) => {
+  if (previousCount === undefined) return false;
+  const drop = previousCount - currentCount;
+  return drop > PARTNER_TITLE_CLEAR_GUARDS.shrinkMinClients && drop > previousCount * PARTNER_TITLE_CLEAR_GUARDS.shrinkMaxShare;
+};
 
 /**
  * Clientes com títulos gravados que não vieram em nenhum retorno da rodada. Só entram para limpeza
  * quando o dono buscou com sucesso, retorno não vazio e comprovadamente completo, no mesmo tenant do
- * cliente, e nenhum vendedor com falha poderia ter retornado o código. Dono sem busca na rodada
- * (sem Login FV3) nunca é limpo. Na dúvida, o cliente fica como está.
+ * cliente, nenhum vendedor com falha poderia ter retornado o código e o retorno do dono não encolheu
+ * bruscamente. Dono sem busca na rodada (sem Login FV3) nunca é limpo. Na dúvida, o cliente fica como está.
  */
 export function planPartnerTitleClears(input: {
   fetches: FinancialSellerFetch[];
@@ -273,11 +294,22 @@ export function planPartnerTitleClears(input: {
   codeOf: (row: Record<string, unknown>) => string;
   /** Por vendedor: o retorno da rodada foi comprovadamente completo. */
   completeSellerIds: Set<string>;
+  /** Códigos retornados por vendedor na rodada bem-sucedida anterior (sellerCoverage de partnerTitles). */
+  previousCoverageBySeller: Record<string, string[]>;
 }): PartnerTitleClearPlan {
   const returnedCodes = new Set<string>();
-  for (const fetch of input.fetches) for (const row of fetch.rows) {
-    const code = input.codeOf(row);
-    if (code) returnedCodes.add(code);
+  const shrankSellerIds = new Set<string>();
+  for (const fetch of input.fetches) {
+    const sellerCodes = new Set<string>();
+    for (const row of fetch.rows) {
+      const code = input.codeOf(row);
+      if (code) sellerCodes.add(code);
+    }
+    sellerCodes.forEach((code) => returnedCodes.add(code));
+    const previous = input.previousCoverageBySeller[fetch.sellerId];
+    if (isSuccessfulFetch(fetch) && ownerReturnShrank(Array.isArray(previous) ? new Set(previous).size : undefined, sellerCodes.size)) {
+      shrankSellerIds.add(fetch.sellerId);
+    }
   }
   const fetchBySeller = new Map(input.fetches.map((fetch) => [fetch.sellerId, fetch]));
   const clear: PartnerTitleClearCandidate[] = [];
@@ -288,17 +320,16 @@ export function planPartnerTitleClears(input: {
       presentInReturns += 1;
       continue;
     }
-    const reason = clearBlockReason(client, fetchBySeller.get(client.ownerSellerId), input);
+    const reason = clearBlockReason(client, fetchBySeller.get(client.ownerSellerId), input) ?? (shrankSellerIds.has(client.ownerSellerId) ? "returnShrank" : null);
     if (reason) blocked.push({ client, reason });
     else clear.push(client);
   }
-  const evaluated = clear.length + blocked.length;
-  const massClearGuardTriggered =
-    clear.length > PARTNER_TITLE_MASS_CLEAR_GUARD.minCount && clear.length > evaluated * PARTNER_TITLE_MASS_CLEAR_GUARD.maxShare;
+  const shrankOwners = shrankSellerIds.size;
+  const massClearGuardTriggered = clear.length > PARTNER_TITLE_CLEAR_GUARDS.maxClearsPerRound;
   if (massClearGuardTriggered) {
-    return { clear: [], blocked: [...blocked, ...clear.map((client) => ({ client, reason: "massClearGuard" as const }))], presentInReturns, massClearGuardTriggered };
+    return { clear: [], blocked: [...blocked, ...clear.map((client) => ({ client, reason: "massClearGuard" as const }))], presentInReturns, shrankOwners, massClearGuardTriggered };
   }
-  return { clear, blocked, presentInReturns, massClearGuardTriggered };
+  return { clear, blocked, presentInReturns, shrankOwners, massClearGuardTriggered };
 }
 
 const clearBlockReason = (

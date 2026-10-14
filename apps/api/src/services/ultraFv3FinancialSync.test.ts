@@ -152,13 +152,21 @@ const fetchOf = (sellerId: string, rows: Row[], outcome: "success" | "empty" | "
 // ---------------------------------------------------------------------------------------------
 
 {
-  // Completo só com array puro ou paginação com total atingido e sem próxima página.
-  assert.equal(merge.isProvablyCompleteSnapshot([], 0), true);
-  assert.equal(merge.isProvablyCompleteSnapshot({ data: [1, 2], total: 2 }, 2), true);
-  assert.equal(merge.isProvablyCompleteSnapshot({ data: [1], total: 2 }, 1), false);
-  assert.equal(merge.isProvablyCompleteSnapshot({ data: [1, 2], total: 2, hasNext: true }, 2), false);
-  assert.equal(merge.isProvablyCompleteSnapshot({ data: [1, 2] }, 2), false, "objeto sem total não comprova");
-  assert.equal(merge.isProvablyCompleteSnapshot({ data: [1, 2], total: null }, 2), false);
+  // Completo só com o envelope real do conector: message "OK", data em array, sem paginação.
+  const envelope = (data: unknown, extra: Record<string, unknown> = {}) => ({ message: "OK", data, detail: null, query: null, parameters: null, ...extra });
+  const rows = [{ PARCEIRO: "1", DOCTO: 1 }, { PARCEIRO: "2", DOCTO: 2 }];
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows), 2), true);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 2 }), 2), true, "total igual ao recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 3 }), 2), false, "total maior que o recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 1 }), 2), false, "total diferente do recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { hasNext: true }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { nextPage: 2 }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { page: 1 }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot({ ...envelope(rows), message: "ERRO" }, 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(null), 0), false, "data fora de array");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows), 1), false, "linhas descartadas na leitura");
+  assert.equal(merge.isProvablyCompleteSnapshot(rows, 2), false, "array puro não comprova");
+  assert.equal(merge.isProvablyCompleteSnapshot({ items: rows }, 2), false, "outra forma não comprova");
 }
 
 const clearTarget = (id: string, code: string, ownerSellerId: string, tenantId: string | null = "tenant-a") => ({ id, code, tenantId, ownerSellerId });
@@ -185,6 +193,7 @@ const allComplete = new Set(["seller-a", "seller-b", "seller-c"]);
     ],
     ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
     completeSellerIds: new Set(["seller-a", "seller-b"]),
+    previousCoverageBySeller: {},
   });
   assert.deepEqual(plan.clear.map((client) => client.id), ["paid"]);
   assert.equal(plan.presentInReturns, 1, "presente em qualquer retorno nunca é limpo, mesmo de outro dono");
@@ -206,6 +215,7 @@ const failedSellerScenario = {
   exclusions: merge.resolveFinancialWriteExclusions({ failedSellerIds: new Set(["seller-b"]), candidateClients: [], coverageBySeller: { "seller-b": ["9101"] } }),
   codeOf,
   completeSellerIds: allComplete,
+  previousCoverageBySeller: {},
 };
 
 {
@@ -243,20 +253,48 @@ const failedSellerScenario = {
 }
 
 {
-  // Trava contra limpeza em massa: mais de 5 e mais de 50% bloqueia tudo.
-  const rows = [{ PARCEIRO: "9200" }];
-  const candidates = (count: number, blockedCount: number) => [
-    ...Array.from({ length: count }, (_, index) => clearTarget(`ok-${index}`, `93${index}`, "seller-a")),
-    ...Array.from({ length: blockedCount }, (_, index) => clearTarget(`nc-${index}`, `94${index}`, "seller-sem-login")),
-  ];
-  const run = (count: number, blockedCount: number) =>
-    merge.planPartnerTitleClears({ fetches: [fetchOf("seller-a", rows)], candidates: candidates(count, blockedCount), ownerTenantById: new Map(), exclusions: noExclusions, codeOf, completeSellerIds: allComplete });
-  assert.equal(run(5, 0).clear.length, 5, "5 não passa do mínimo");
-  assert.equal(run(6, 6).clear.length, 6, "6 de 12 não passa de 50%");
-  const guarded = run(6, 5);
-  assert.equal(guarded.massClearGuardTriggered, true);
-  assert.equal(guarded.clear.length, 0);
-  assert.equal(guarded.blocked.filter(({ reason }) => reason === "massClearGuard").length, 6);
+  // Travas: retorno do dono que encolheu bruscamente bloqueia só os clientes dele; teto absoluto por rodada.
+  const codes = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+  const rowsOf = (list: string[]) => list.map((code) => ({ PARCEIRO: code, DOCTO: 1, PARCELA: 1 }));
+  const absent = (owner: string, count: number) => codes(`${owner}-pago-`, count).map((code) => clearTarget(code, code, owner));
+  const plan = (input: { fetches: ReturnType<typeof fetchOf>[]; candidates: ReturnType<typeof clearTarget>[]; previous?: Record<string, string[]> }) =>
+    merge.planPartnerTitleClears({
+      fetches: input.fetches, candidates: input.candidates, ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
+      completeSellerIds: new Set(input.fetches.map((fetch) => fetch.sellerId)), previousCoverageBySeller: input.previous ?? {},
+    });
+
+  // Primeira rodada (sem cobertura anterior) com acúmulo grande de títulos pagos: limpa todos.
+  const firstRound = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 3)))], candidates: absent("seller-a", 39) });
+  assert.equal(firstRound.clear.length, 39);
+  assert.equal(firstRound.massClearGuardTriggered, false);
+
+  // Retorno estável em relação à rodada anterior, com muitos ausentes: limpa.
+  const stable = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 40)))], candidates: absent("seller-a", 39), previous: { "seller-a": codes("a-", 79) } });
+  assert.equal(stable.clear.length, 39, "queda de 49%: não passa de 50%");
+
+  // Queda brusca do retorno de A (20 → 4): clientes de A bloqueados; os de B seguem.
+  const shrank = plan({
+    fetches: [fetchOf("seller-a", rowsOf(codes("a-", 4))), fetchOf("seller-b", rowsOf(codes("b-", 10)))],
+    candidates: [...absent("seller-a", 3), ...absent("seller-b", 2)],
+    previous: { "seller-a": codes("a-", 20), "seller-b": codes("b-", 10) },
+  });
+  assert.equal(shrank.shrankOwners, 1);
+  assert.deepEqual(shrank.clear.map((client) => client.ownerSellerId), ["seller-b", "seller-b"]);
+  assert.deepEqual(shrank.blocked.map(({ reason }) => reason), ["returnShrank", "returnShrank", "returnShrank"]);
+
+  // Os dois limites são exigidos: queda de mais de 50% mas só 5 clientes (8 → 3) não bloqueia; 6 de 13 não passa de 50%.
+  assert.equal(merge.ownerReturnShrank(8, 3), false);
+  assert.equal(merge.ownerReturnShrank(9, 3), true);
+  assert.equal(merge.ownerReturnShrank(13, 7), false);
+  assert.equal(merge.ownerReturnShrank(undefined, 1), false, "sem rodada anterior não bloqueia");
+
+  // Teto absoluto: 300 passa; 301 bloqueia tudo como massClearGuard.
+  const atCap = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 1)))], candidates: absent("seller-a", 300) });
+  assert.equal(atCap.clear.length, 300);
+  const overCap = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 1)))], candidates: absent("seller-a", 301) });
+  assert.equal(overCap.massClearGuardTriggered, true);
+  assert.equal(overCap.clear.length, 0);
+  assert.equal(overCap.blocked.filter(({ reason }) => reason === "massClearGuard").length, 301);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -360,7 +398,7 @@ const erpRows: Record<string, Record<string, Row[]>> = {};
   if (path.startsWith("/partners")) return [];
   const scope = path.startsWith("/financialProfiles") ? "financialProfiles" : "partnerTitles";
   if (failing.has(`${sellerId}:${scope}`)) throw new Error("timeout simulado do ERP fictício");
-  return erpRows[sellerId]?.[scope] ?? [];
+  return { message: "OK", data: erpRows[sellerId]?.[scope] ?? [], detail: null, query: null, parameters: null };
 };
 
 const waitForRun = async (runId: string) => {

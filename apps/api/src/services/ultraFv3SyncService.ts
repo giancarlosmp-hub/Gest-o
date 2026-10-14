@@ -3703,6 +3703,7 @@ async function clearPartnerTitlesAbsentFromRound(input: {
   knownSellerTenants: Map<string, string>;
   exclusions: FinancialWriteExclusions;
   codeOf: (row: Record<string, unknown>) => string;
+  previousCoverageBySeller: Record<string, string[]>;
 }) {
   const candidates = await findClientsWithStoredTitles();
   const ownerTenantById = await resolveOwnerTenants(candidates, input.knownSellerTenants);
@@ -3728,6 +3729,7 @@ async function clearPartnerTitlesAbsentFromRound(input: {
       titleClearPlanned: plan.clear.length,
       titleClearWritten: clearedClients,
       titleClearBlocked: plan.blocked.length,
+      titleClearShrankOwners: plan.shrankOwners,
       titleClearMassGuard: plan.massClearGuardTriggered ? 1 : 0,
     },
     details: {
@@ -3809,7 +3811,7 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
           });
           writtenClients += updated.count;
         }
-        const clearing = await clearPartnerTitlesAbsentFromRound({ fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf });
+        const clearing = await clearPartnerTitlesAbsentFromRound({ fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf, previousCoverageBySeller: coverage });
         planDiagnostics = { ...planDiagnostics, ...clearing.diagnostics };
         historyDetails = { titleClearing: clearing.details };
       }
