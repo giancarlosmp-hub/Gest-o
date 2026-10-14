@@ -148,12 +148,162 @@ const fetchOf = (sellerId: string, rows: Row[], outcome: "success" | "empty" | "
 }
 
 // ---------------------------------------------------------------------------------------------
+// Limpeza de títulos de clientes ausentes da rodada (TD-ERP-PAID-TITLES-STALE, fase 2)
+// ---------------------------------------------------------------------------------------------
+
+{
+  // Completo só com o envelope real do conector: message "OK", data em array, sem paginação.
+  const envelope = (data: unknown, extra: Record<string, unknown> = {}) => ({ message: "OK", data, detail: null, query: null, parameters: null, ...extra });
+  const rows = [{ PARCEIRO: "1", DOCTO: 1 }, { PARCEIRO: "2", DOCTO: 2 }];
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows), 2), true);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 2 }), 2), true, "total igual ao recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 3 }), 2), false, "total maior que o recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { total: 1 }), 2), false, "total diferente do recebido");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { hasNext: true }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { nextPage: 2 }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows, { page: 1 }), 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot({ ...envelope(rows), message: "ERRO" }, 2), false);
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(null), 0), false, "data fora de array");
+  assert.equal(merge.isProvablyCompleteSnapshot(envelope(rows), 1), false, "linhas descartadas na leitura");
+  assert.equal(merge.isProvablyCompleteSnapshot(rows, 2), false, "array puro não comprova");
+  assert.equal(merge.isProvablyCompleteSnapshot({ items: rows }, 2), false, "outra forma não comprova");
+}
+
+const clearTarget = (id: string, code: string, ownerSellerId: string, tenantId: string | null = "tenant-a") => ({ id, code, tenantId, ownerSellerId });
+const allComplete = new Set(["seller-a", "seller-b", "seller-c"]);
+
+{
+  // Cada condição bloqueia sozinha; só o cliente que passa em todas é limpo.
+  const plan = merge.planPartnerTitleClears({
+    fetches: [
+      fetchOf("seller-a", [{ PARCEIRO: "9000", DOCTO: 1, PARCELA: 1 }]),
+      fetchOf("seller-b", [], "empty"),
+      fetchOf("seller-c", [], "error"),
+      fetchOf("seller-d", [{ PARCEIRO: "9900" }]),
+    ],
+    candidates: [
+      clearTarget("paid", "9001", "seller-a"),
+      clearTarget("present", "9000", "seller-b"),
+      clearTarget("no-coverage", "9002", "seller-sem-login"),
+      clearTarget("owner-failed", "9003", "seller-c"),
+      clearTarget("owner-empty", "9004", "seller-b"),
+      clearTarget("owner-incomplete", "9005", "seller-d"),
+      clearTarget("other-tenant", "9006", "seller-a", "tenant-x"),
+      clearTarget("legacy-unproven", "9007", "seller-a", null),
+    ],
+    ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
+    completeSellerIds: new Set(["seller-a", "seller-b"]),
+    previousCoverageBySeller: {},
+  });
+  assert.deepEqual(plan.clear.map((client) => client.id), ["paid"]);
+  assert.equal(plan.presentInReturns, 1, "presente em qualquer retorno nunca é limpo, mesmo de outro dono");
+  assert.deepEqual(Object.fromEntries(plan.blocked.map(({ client, reason }) => [client.id, reason])), {
+    "no-coverage": "ownerWithoutCoverage",
+    "owner-failed": "ownerFetchFailed",
+    "owner-empty": "ownerEmptyReturn",
+    "owner-incomplete": "ownerIncompleteSnapshot",
+    "other-tenant": "tenantMismatch",
+    "legacy-unproven": "tenantUnproven",
+  });
+}
+
+// Cenário de falha de vendedor: o dono (A) buscou completo, mas B falhou e já retornou o código antes.
+const failedSellerScenario = {
+  fetches: [fetchOf("seller-a", [{ PARCEIRO: "9100" }]), fetchOf("seller-b", [], "error")],
+  candidates: [clearTarget("covered-by-failed", "9101", "seller-a")],
+  ownerTenantById: new Map<string, string>(),
+  exclusions: merge.resolveFinancialWriteExclusions({ failedSellerIds: new Set(["seller-b"]), candidateClients: [], coverageBySeller: { "seller-b": ["9101"] } }),
+  codeOf,
+  completeSellerIds: allComplete,
+  previousCoverageBySeller: {},
+};
+
+{
+  // Vendedor com falha que poderia trazer o código: não limpa. Sem cobertura dele: não limpa nada.
+  const plan = merge.planPartnerTitleClears(failedSellerScenario);
+  assert.deepEqual(plan.clear, []);
+  assert.deepEqual(plan.blocked.map(({ reason }) => reason), ["failedSellerMayReturn"]);
+  const unknown = merge.planPartnerTitleClears({
+    ...failedSellerScenario,
+    exclusions: merge.resolveFinancialWriteExclusions({ failedSellerIds: new Set(["seller-b"]), candidateClients: [], coverageBySeller: {} }),
+  });
+  assert.deepEqual(unknown.clear, []);
+  // Mesmo cenário sem a falha: seria limpo (a falha é a única coisa que segura).
+  assert.deepEqual(merge.planPartnerTitleClears({ ...failedSellerScenario, exclusions: noExclusions }).clear.map((client) => client.id), ["covered-by-failed"]);
+}
+
+{
+  // Teste de mutação: removendo a condição de falha de vendedor do código, o cenário acima limparia.
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { pathToFileURL } = await import("node:url");
+  const source = readFileSync(new URL("./ultraFv3FinancialMerge.ts", import.meta.url), "utf8");
+  const condition = "if (input.exclusions.blockAll || input.exclusions.excludedCodes.has(client.code)) return \"failedSellerMayReturn\";";
+  assert.equal(source.split(condition).length, 2, "condição de falha de vendedor presente uma vez");
+  const dir = mkdtempSync(join(tmpdir(), "financial-merge-mutant-"));
+  try {
+    const mutantPath = join(dir, "ultraFv3FinancialMerge.mutant.ts");
+    writeFileSync(mutantPath, source.replace(condition, ""));
+    const mutant = await import(pathToFileURL(mutantPath).href);
+    assert.deepEqual(mutant.planPartnerTitleClears(failedSellerScenario).clear.map((client: { id: string }) => client.id), ["covered-by-failed"], "mutante limpa o cliente que a regra protege");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // Travas: retorno do dono que encolheu bruscamente bloqueia só os clientes dele; teto absoluto por rodada.
+  const codes = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
+  const rowsOf = (list: string[]) => list.map((code) => ({ PARCEIRO: code, DOCTO: 1, PARCELA: 1 }));
+  const absent = (owner: string, count: number) => codes(`${owner}-pago-`, count).map((code) => clearTarget(code, code, owner));
+  const plan = (input: { fetches: ReturnType<typeof fetchOf>[]; candidates: ReturnType<typeof clearTarget>[]; previous?: Record<string, string[]> }) =>
+    merge.planPartnerTitleClears({
+      fetches: input.fetches, candidates: input.candidates, ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
+      completeSellerIds: new Set(input.fetches.map((fetch) => fetch.sellerId)), previousCoverageBySeller: input.previous ?? {},
+    });
+
+  // Primeira rodada (sem cobertura anterior) com acúmulo grande de títulos pagos: limpa todos.
+  const firstRound = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 3)))], candidates: absent("seller-a", 39) });
+  assert.equal(firstRound.clear.length, 39);
+  assert.equal(firstRound.massClearGuardTriggered, false);
+
+  // Retorno estável em relação à rodada anterior, com muitos ausentes: limpa.
+  const stable = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 40)))], candidates: absent("seller-a", 39), previous: { "seller-a": codes("a-", 79) } });
+  assert.equal(stable.clear.length, 39, "queda de 49%: não passa de 50%");
+
+  // Queda brusca do retorno de A (20 → 4): clientes de A bloqueados; os de B seguem.
+  const shrank = plan({
+    fetches: [fetchOf("seller-a", rowsOf(codes("a-", 4))), fetchOf("seller-b", rowsOf(codes("b-", 10)))],
+    candidates: [...absent("seller-a", 3), ...absent("seller-b", 2)],
+    previous: { "seller-a": codes("a-", 20), "seller-b": codes("b-", 10) },
+  });
+  assert.equal(shrank.shrankOwners, 1);
+  assert.deepEqual(shrank.clear.map((client) => client.ownerSellerId), ["seller-b", "seller-b"]);
+  assert.deepEqual(shrank.blocked.map(({ reason }) => reason), ["returnShrank", "returnShrank", "returnShrank"]);
+
+  // Os dois limites são exigidos: queda de mais de 50% mas só 5 clientes (8 → 3) não bloqueia; 6 de 13 não passa de 50%.
+  assert.equal(merge.ownerReturnShrank(8, 3), false);
+  assert.equal(merge.ownerReturnShrank(9, 3), true);
+  assert.equal(merge.ownerReturnShrank(13, 7), false);
+  assert.equal(merge.ownerReturnShrank(undefined, 1), false, "sem rodada anterior não bloqueia");
+
+  // Teto absoluto: 300 passa; 301 bloqueia tudo como massClearGuard.
+  const atCap = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 1)))], candidates: absent("seller-a", 300) });
+  assert.equal(atCap.clear.length, 300);
+  const overCap = plan({ fetches: [fetchOf("seller-a", rowsOf(codes("a-", 1)))], candidates: absent("seller-a", 301) });
+  assert.equal(overCap.massClearGuardTriggered, true);
+  assert.equal(overCap.clear.length, 0);
+  assert.equal(overCap.blocked.filter(({ reason }) => reason === "massClearGuard").length, 301);
+}
+
+// ---------------------------------------------------------------------------------------------
 // Job do botão "todos vendedores" com Prisma e ERP em memória
 // ---------------------------------------------------------------------------------------------
 
 type Lock = { scope: string; runId: string; lockedUntil: Date };
 type Run = Record<string, any> & { id: string };
-type ClientRow = { id: string; code: string; tenantId: string | null; ownerSellerId: string; isArchived: boolean; financialProfile?: unknown; partnerTitles?: unknown; openTitlesTotal?: number };
+type ClientRow = { id: string; code: string; tenantId: string | null; ownerSellerId: string; isArchived: boolean; financialProfile?: unknown; partnerTitles?: unknown; openTitlesTotal?: number; overdueTitlesTotal?: number };
 
 const locks = new Map<string, Lock>();
 const runs: Run[] = [];
@@ -225,7 +375,10 @@ setModel("tenantMembership", {
       : where.userId.in.map((userId: string) => ({ userId, tenantId: "tenant-a" })),
 });
 setModel("client", {
-  findMany: async ({ where }: any) => clients.filter((client) => inList(client.code, where.code) && client.isArchived === where.isArchived),
+  findMany: async ({ where }: any) =>
+    where.OR
+      ? clients.filter((client) => !client.isArchived && client.code && (client.partnerTitles != null || (client.openTitlesTotal ?? 0) > 0 || (client.overdueTitlesTotal ?? 0) > 0))
+      : clients.filter((client) => inList(client.code, where.code) && client.isArchived === where.isArchived),
   count: async ({ where }: any) => clients.filter((client) => inList(client.code, where.code) && !client.isArchived).length,
   updateMany: async ({ where, data }: any) => {
     const matched = clients.filter((client) => inList(client.id, where.id) && !client.isArchived);
@@ -245,7 +398,7 @@ const erpRows: Record<string, Record<string, Row[]>> = {};
   if (path.startsWith("/partners")) return [];
   const scope = path.startsWith("/financialProfiles") ? "financialProfiles" : "partnerTitles";
   if (failing.has(`${sellerId}:${scope}`)) throw new Error("timeout simulado do ERP fictício");
-  return erpRows[sellerId]?.[scope] ?? [];
+  return { message: "OK", data: erpRows[sellerId]?.[scope] ?? [], detail: null, query: null, parameters: null };
 };
 
 const waitForRun = async (runId: string) => {
@@ -355,6 +508,34 @@ const reset = () => {
 }
 
 {
+  // Modo simulação: o cliente quitado aparece no Histórico como previsto, mas nada é gravado nele.
+  reset();
+  const staleTitles = [{ PARCEIRO: "2001", DOCTO: 9, PARCELA: 1, SALDO_CAPITAL: 70 }];
+  clients = [
+    { id: "client-live", code: "2000", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false },
+    { id: "client-paid", code: "2001", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false, financialProfile: { VALOR_MEDIO: 5 }, partnerTitles: staleTitles, openTitlesTotal: 70, overdueTitlesTotal: 70 },
+    { id: "client-orphan", code: "2002", tenantId: "tenant-a", ownerSellerId: "seller-sem-login", isArchived: false, partnerTitles: staleTitles, openTitlesTotal: 70, overdueTitlesTotal: 70 },
+  ];
+  for (const key of Object.keys(erpRows)) delete erpRows[key];
+  Object.assign(erpRows, { "seller-a": { financialProfiles: [], partnerTitles: [{ PARCEIRO: "2000", DOCTO: 1, PARCELA: 1, SALDO_CAPITAL: 10 }] } });
+
+  const job = await sync.startSellerPortfolioSyncJob();
+  await waitForRun(job.runId);
+  const titlesRun = runs.find((item) => item.scope === "partnerTitles" && item.authMode === "all_sellers");
+  assert.equal(titlesRun?.metrics.titleClearSimulation, 1);
+  assert.equal(titlesRun?.metrics.titleClearPlanned, 1);
+  assert.equal(titlesRun?.metrics.titleClearWritten, 0);
+  assert.equal(titlesRun?.metrics.titleClearing.mode, "simulation");
+  assert.deepEqual(titlesRun?.metrics.titleClearing.clearedClients.map((item: any) => item.code), ["2001"]);
+  assert.deepEqual(titlesRun?.metrics.titleClearing.blockedByReason, { ownerWithoutCoverage: 1 });
+  const paid = clients.find((client) => client.id === "client-paid")!;
+  assert.deepEqual([paid.partnerTitles, paid.openTitlesTotal, paid.overdueTitlesTotal], [staleTitles, 70, 70], "simulação não grava");
+  assert.deepEqual(paid.financialProfile, { VALOR_MEDIO: 5 });
+  const portfolio = runs.find((item) => item.scope === sync.SELLER_PORTFOLIO_RUN_SCOPE);
+  assert.equal(JSON.stringify(portfolio?.metrics ?? {}).includes("clearedClients"), false, "lista de códigos fica só no run de partnerTitles");
+}
+
+{
   // Sincronização Completa em andamento: botão responde already_running e o scheduler não pega o lock.
   reset();
   clients = [];
@@ -415,6 +596,8 @@ assert.match(service, /export async function startUltraFv3FullSyncJob[\s\S]*acqu
 assert.match(service, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/);
 assert.match(service, /export async function syncProducts[\s\S]{0,120}resolveReferenceCredentials\(\)/, "catálogos seguem com o vendedor de referência");
 assert.match(routes, /router\.post\("\/erp\/ultrafv3\/sync\/partners\/all-sellers", authorize\("diretor", "gerente"\), async[\s\S]{0,200}startSellerPortfolioSyncJob/, "mesmos perfis de antes");
+assert.match(service, /^const PARTNER_TITLE_CLEARING_ENABLED = false;$/m, "limpeza de títulos entra em modo simulação");
+assert.match(service, /data: \{ partnerTitles: \[\] as Prisma\.InputJsonArray, openTitlesTotal: 0, overdueTitlesTotal: 0 \}/, "limpar não toca no financialProfile");
 assert.match(panel, /SELLER_PORTFOLIO_POLL_MAX_MS/);
 assert.match(panel, /Sincronização em andamento, acompanhe pelo Histórico\./);
 

@@ -20,13 +20,16 @@ import { catalogTenantIdForMode, productCatalogTenantWhere, selectProductCandida
 import { normalizeErpProductPriceObservation } from "./erpProductPriceObservation.js";
 import { readTenancyMode } from "../tenancy/tenancyMode.js";
 import {
+  isProvablyCompleteSnapshot,
   isSuccessfulFetch,
   planFinancialProfileWrites,
+  planPartnerTitleClears,
   planPartnerTitleWrites,
   resolveFinancialWriteExclusions,
   type FinancialClientTarget,
   type FinancialSellerFetch,
   type FinancialSellerOutcome,
+  type FinancialWriteExclusions,
 } from "./ultraFv3FinancialMerge.js";
 
 const ERP_SYNC_STATUS_KEY = "erp.ultrafv3.sync.status";
@@ -71,6 +74,8 @@ export type SyncResult = {
   diagnostics?: Record<string, number>;
   /** Sucesso parcial: o run fica success, com a mensagem em errorMessage no Histórico. */
   warning?: string;
+  /** Só para o metrics do ErpSyncRun (Histórico): não vai para log, status nem para quem chamou. */
+  historyDetails?: Record<string, unknown>;
 };
 export type RunSyncOptions = {
   trigger?: ErpSyncTrigger;
@@ -888,7 +893,7 @@ async function runSync(
   });
 
   try {
-    const result = await runner(correlationId);
+    const { historyDetails, ...result } = await runner(correlationId);
     const durationMs = Date.now() - startedAt;
     const finishedAt = new Date();
     await prisma.erpSyncRun.update({
@@ -898,7 +903,7 @@ async function runSync(
         finishedAt,
         durationMs,
         syncedCount: result.syncedCount,
-        metrics: (result.diagnostics ?? {}) as Prisma.InputJsonValue,
+        metrics: { ...(result.diagnostics ?? {}), ...(historyDetails ?? {}) } as Prisma.InputJsonValue,
         ...(result.warning ? { errorMessage: result.warning } : {}),
       },
     });
@@ -3542,6 +3547,14 @@ const FINANCIAL_SCOPE_CONFIG: Record<FinancialScope, { endpoint: string; codeOf:
   partnerTitles: { endpoint: "/partnerTitles?date=01.01.1900+00:00:00", codeOf: getPartnerTitlePartnerCode },
 };
 const FINANCIAL_CODE_CHUNK_SIZE = 500;
+/**
+ * TD-ERP-PAID-TITLES-STALE, fase 2. false = modo simulação: a rodada calcula os clientes que seriam
+ * limpos e os motivos de bloqueio e registra no Histórico (metrics do ErpSyncRun de partnerTitles),
+ * sem gravar nos clientes. true = grava a limpeza. Regra em planPartnerTitleClears.
+ */
+const PARTNER_TITLE_CLEARING_ENABLED = false;
+/** Limite de códigos listados no Histórico por rodada; as contagens são sempre completas. */
+const PARTNER_TITLE_CLEAR_HISTORY_LIMIT = 200;
 const financialCoverageKey = (scope: FinancialScope) => `erp.ultrafv3.${scope}.sellerCoverage`;
 
 export type SellerScopeReport = {
@@ -3606,11 +3619,12 @@ async function fetchFinancialRowsForSeller(
   scope: FinancialScope,
   seller: ConfiguredFv3Seller,
   options: RunSyncOptions,
-): Promise<{ fetch: FinancialSellerFetch; report: SellerScopeReport }> {
+): Promise<{ fetch: FinancialSellerFetch; report: SellerScopeReport; snapshotComplete: boolean }> {
   const { endpoint, codeOf } = FINANCIAL_SCOPE_CONFIG[scope];
   const startedAt = Date.now();
   let tenantId: string | null = null;
   let rows: Record<string, unknown>[] = [];
+  let snapshotComplete = false;
   let outcome: FinancialSellerOutcome = "error";
   let error: string | undefined;
   let syncedCount = 0;
@@ -3624,6 +3638,7 @@ async function fetchFinancialRowsForSeller(
         const response = await requestUltraFv3ReadOnlyWithCredentialsRetry<unknown>(endpoint, credentials, correlationId);
         const requestDurationMs = Date.now() - requestStartedAt;
         rows = toArray(response).filter(isPlainRecord);
+        snapshotComplete = isProvablyCompleteSnapshot(response, rows.length);
         const codes = [...new Set(rows.map(codeOf).filter(Boolean))];
         let matchedClients = 0;
         for (const codeChunk of chunkItems(codes, FINANCIAL_CODE_CHUNK_SIZE)) {
@@ -3658,13 +3673,80 @@ async function fetchFinancialRowsForSeller(
   return {
     fetch: { sellerId: seller.id, tenantId, outcome, rows: outcome === "success" ? rows : [] },
     report: { scope, sellerId: seller.id, sellerName: seller.name, status: outcome, durationMs: Date.now() - startedAt, syncedCount, ...(error ? { error } : {}) },
+    snapshotComplete: outcome === "success" && snapshotComplete,
+  };
+}
+
+/** Clientes não arquivados com títulos gravados (lista não vazia ou totais positivos). */
+async function findClientsWithStoredTitles(): Promise<FinancialClientTarget[]> {
+  const rows = await prisma.client.findMany({
+    where: {
+      isArchived: false,
+      code: { not: null },
+      OR: [{ partnerTitles: { not: Prisma.AnyNull } }, { openTitlesTotal: { gt: 0 } }, { overdueTitlesTotal: { gt: 0 } }],
+    },
+    select: { id: true, code: true, tenantId: true, ownerSellerId: true, partnerTitles: true, openTitlesTotal: true, overdueTitlesTotal: true },
+  });
+  return rows
+    .filter((row) => row.code && ((Array.isArray(row.partnerTitles) && row.partnerTitles.length > 0) || (row.openTitlesTotal ?? 0) > 0 || (row.overdueTitlesTotal ?? 0) > 0))
+    .map((row) => ({ id: row.id, code: row.code as string, tenantId: row.tenantId, ownerSellerId: row.ownerSellerId }));
+}
+
+/**
+ * TD-ERP-PAID-TITLES-STALE, fase 2: limpa títulos de clientes ausentes de todos os retornos da rodada
+ * (ver planPartnerTitleClears). Com PARTNER_TITLE_CLEARING_ENABLED = false só calcula e registra.
+ * Limpar = partnerTitles [], openTitlesTotal 0 e overdueTitlesTotal 0; financialProfile intacto.
+ */
+async function clearPartnerTitlesAbsentFromRound(input: {
+  fetches: FinancialSellerFetch[];
+  completeSellerIds: Set<string>;
+  knownSellerTenants: Map<string, string>;
+  exclusions: FinancialWriteExclusions;
+  codeOf: (row: Record<string, unknown>) => string;
+  previousCoverageBySeller: Record<string, string[]>;
+}) {
+  const candidates = await findClientsWithStoredTitles();
+  const ownerTenantById = await resolveOwnerTenants(candidates, input.knownSellerTenants);
+  const plan = planPartnerTitleClears({ ...input, candidates, ownerTenantById });
+  let clearedClients = 0;
+  if (PARTNER_TITLE_CLEARING_ENABLED) {
+    for (const idChunk of chunkItems(plan.clear.map((client) => client.id), FINANCIAL_CODE_CHUNK_SIZE)) {
+      const updated = await prisma.client.updateMany({
+        where: { id: { in: idChunk }, isArchived: false },
+        data: { partnerTitles: [] as Prisma.InputJsonArray, openTitlesTotal: 0, overdueTitlesTotal: 0 },
+      });
+      clearedClients += updated.count;
+    }
+  }
+  const blockedByReason: Record<string, number> = {};
+  for (const { reason } of plan.blocked) blockedByReason[reason] = (blockedByReason[reason] ?? 0) + 1;
+  const listed = (client: FinancialClientTarget) => ({ clientId: client.id, code: client.code, ownerSellerId: client.ownerSellerId });
+  return {
+    diagnostics: {
+      titleClearSimulation: PARTNER_TITLE_CLEARING_ENABLED ? 0 : 1,
+      titleClearCandidates: candidates.length,
+      titleClearPresentInReturns: plan.presentInReturns,
+      titleClearPlanned: plan.clear.length,
+      titleClearWritten: clearedClients,
+      titleClearBlocked: plan.blocked.length,
+      titleClearShrankOwners: plan.shrankOwners,
+      titleClearMassGuard: plan.massClearGuardTriggered ? 1 : 0,
+    },
+    details: {
+      mode: PARTNER_TITLE_CLEARING_ENABLED ? "enabled" : "simulation",
+      clearedClients: plan.clear.slice(0, PARTNER_TITLE_CLEAR_HISTORY_LIMIT).map(listed),
+      blockedByReason,
+      blockedClients: plan.blocked.slice(0, PARTNER_TITLE_CLEAR_HISTORY_LIMIT).map(({ client, reason }) => ({ ...listed(client), reason })),
+      listLimit: PARTNER_TITLE_CLEAR_HISTORY_LIMIT,
+    },
   };
 }
 
 /**
  * Busca o escopo financeiro com a credencial de cada vendedor (em sequência, falha isolada por
- * vendedor), junta tudo e grava uma vez. Clientes ausentes do retorno nunca são limpos, e códigos
- * que um vendedor com falha poderia ter retornado ficam intocados (ver ultraFv3FinancialMerge.ts).
+ * vendedor), junta tudo e grava uma vez. Códigos que um vendedor com falha poderia ter retornado
+ * ficam intocados (ver ultraFv3FinancialMerge.ts). Em partnerTitles, clientes ausentes de todos os
+ * retornos passam por clearPartnerTitlesAbsentFromRound.
  */
 async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, options: RunSyncOptions = {}) {
   const sellerReports: SellerScopeReport[] = [];
@@ -3676,11 +3758,13 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
       if (!sellers.length) throw new Error("Nenhum vendedor ativo com Login FV3/Senha FV3 configurados.");
       const fetchStartedAt = Date.now();
       const fetches: FinancialSellerFetch[] = [];
+      const completeSellerIds = new Set<string>();
       for (const seller of sellers) {
         await runHeartbeat(options);
-        const { fetch, report } = await fetchFinancialRowsForSeller(scope, seller, { ...options, correlationId });
+        const { fetch, report, snapshotComplete } = await fetchFinancialRowsForSeller(scope, seller, { ...options, correlationId });
         fetches.push(fetch);
         sellerReports.push(report);
+        if (snapshotComplete) completeSellerIds.add(seller.id);
       }
       const fetchDurationMs = Date.now() - fetchStartedAt;
       const succeeded = fetches.filter(isSuccessfulFetch);
@@ -3698,6 +3782,7 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
       const context = { fetches, clients, ownerTenantById, exclusions, codeOf };
 
       let planDiagnostics: Record<string, number>;
+      let historyDetails: Record<string, unknown> | undefined;
       let writtenClients = 0;
       if (scope === "financialProfiles") {
         const plan = planFinancialProfileWrites(context);
@@ -3726,6 +3811,9 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
           });
           writtenClients += updated.count;
         }
+        const clearing = await clearPartnerTitlesAbsentFromRound({ fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf, previousCoverageBySeller: coverage });
+        planDiagnostics = { ...planDiagnostics, ...clearing.diagnostics };
+        historyDetails = { titleClearing: clearing.details };
       }
 
       // Cobertura e cache só depois de gravar: execução interrompida não registra cobertura nova.
@@ -3762,6 +3850,7 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
           persistDurationMs,
           ...planDiagnostics,
         },
+        ...(historyDetails ? { historyDetails } : {}),
         ...(partial
           ? {
               warning: exclusions.blockAll

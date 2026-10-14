@@ -330,6 +330,28 @@ retorno e mantém `partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` anti
 crédito fica desatualizado. A correção exige saber quando o retorno é um snapshot completo por
 vendedor; não foi feita no PR da sincronização financeira por vendedor.
 
+Fase 2 implementada em **modo simulação** (`PARTNER_TITLE_CLEARING_ENABLED = false` em
+`ultraFv3SyncService.ts`; regra em `planPartnerTitleClears`, `ultraFv3FinancialMerge.ts`). A rodada por
+vendedor registra no metrics do ErpSyncRun de `partnerTitles` os clientes que seriam limpos
+(`titleClearing.clearedClients`) e os motivos de bloqueio, sem gravar. Ligar a limpeza é trocar a flag
+para `true`, em PR próprio, depois de conferir a simulação em produção. A sincronização com credencial
+global (`syncPartnerTitles`) continua sem limpeza.
+
+Retorno completo = envelope do conector (`message` = `"OK"`, `data` em array, sem campo de paginação;
+total, se vier, igual ao recebido). Travas: por dono, `returnShrank` quando o número de clientes no
+retorno dele cai mais de 50% **e** mais de 5 em relação à rodada bem-sucedida anterior
+(`erp.ultrafv3.partnerTitles.sellerCoverage`; sem rodada anterior, valem só as demais condições); por
+rodada, teto absoluto de 300 limpezas (`massClearGuard`, bloqueia tudo). O acúmulo de títulos já pagos
+não dispara nenhuma das duas.
+
+### TD-ERP-PARTNER-TITLES-NON-SALES — títulos que não são de venda entram no banner de risco
+
+**Aberto, decisão de negócio pendente.** O `/partnerTitles` traz, além de `DSCRECEITA` = VENDAS, outros
+tipos (DEVOLUÇÃO DE ADIANTAMENTO A CLIENTE, A FUNCIONÁRIO, A FORNECEDORES). Hoje todos entram em
+`partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` (`ultraFv3SyncService.ts`) e, portanto, no
+banner de crédito. Definir com o negócio quais tipos contam como risco antes de filtrar. Não
+implementado.
+
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
 **Aberto, baixo.** Em consulta somente leitura à produção (12/10/2026), 100% dos `DATA_VENCIMENTO`
