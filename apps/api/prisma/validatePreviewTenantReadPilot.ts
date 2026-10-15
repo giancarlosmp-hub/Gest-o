@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { PREVIEW_CREDIT_OUT_OF_ALLOWLIST_KEY, buildPreviewCreditClientFixtures } from "../src/preview/previewCreditFixtures.js";
+import { ERP_AVERAGE_DELAY_TOLERANCE_DAYS } from "../src/services/clientErpProjection.js";
 
 const prisma = new PrismaClient();
 const tenantId = process.env.DEFAULT_TENANT_ID?.trim();
@@ -117,7 +118,7 @@ async function failClosed() {
     const bouncedChecks = Number(profile.QTD_CHEQUES_DEV);
     const levelMatches =
       fixture.level === "ok" ? averageDelay === 0 && openDelay === 0 && bouncedChecks === 0 && overdueTotal === 0
-        : fixture.level === "atencao" ? averageDelay > 0 && averageDelay <= 15 && openDelay === 0 && bouncedChecks === 0 && overdueTotal === 0
+        : fixture.level === "atencao" ? averageDelay > ERP_AVERAGE_DELAY_TOLERANCE_DAYS && averageDelay <= 15 && openDelay === 0 && bouncedChecks === 0 && overdueTotal === 0
           : overdueTitles.length === 2 && Math.abs(overdueTotal - 4350) < 0.005 && bouncedChecks > 0;
     if (!levelMatches) throw new Error("DATASET_CREDIT_LEVEL_FAILED");
   }
