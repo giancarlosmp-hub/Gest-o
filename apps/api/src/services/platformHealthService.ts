@@ -21,12 +21,17 @@ export const loadPlatformHealthRuns = async (since: Date, db: Pick<typeof prisma
   return mergePlatformHealthRuns(parentRuns, recentRuns);
 };
 
+// Última execução-pai com sucesso, sem limite de período: com o ERP fora do ar o scheduler segue
+// terminando com erro de hora em hora, e só o sucesso prova que a sincronização voltou.
+export const loadLastSuccessfulParentRun = (db: Pick<typeof prisma, "erpSyncRun"> = prisma) =>
+  db.erpSyncRun.findFirst({ where: { ...PARENT_RUN_WHERE, status: "success" }, orderBy: { startedAt: "desc" }, select: runSelect });
+
 // "Sincronização parada" só vale dentro da janela do scheduler e conta o atraso a partir do
 // início da janela de hoje, para a última execução da noite anterior não gerar alerta às 7h.
-export const isSyncStopped = (lastSyncAt: Date, now = new Date()) => {
+export const isSyncStopped = (lastSuccessfulSyncAt: Date, now = new Date()) => {
   const windowStartedAt = getAutomaticSyncWindowStartedAt(now);
   if (!windowStartedAt) return false;
-  const reference = Math.max(lastSyncAt.getTime(), windowStartedAt.getTime());
+  const reference = Math.max(lastSuccessfulSyncAt.getTime(), windowStartedAt.getTime());
   return now.getTime() - reference > SYNC_STOPPED_AFTER_MS;
 };
 
@@ -55,13 +60,13 @@ export const metricFrom = (metrics: unknown, ...keys: string[]) => {
 // schema. Whitespace-only imported values are absence, not contact evidence.
 export const CLIENT_CONTACT_QUALITY_SQL = `SELECT COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND BTRIM(ct.phone) <> ''))::bigint AS missing_phone, COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM "Contact" ct WHERE ct."clientId" = c.id AND BTRIM(ct.email) <> ''))::bigint AS missing_email FROM "Client" c`;
 
-export const buildAlerts = (input: { metrics: MetricMap; lastSyncAt: Date | null; durationMs: number; averageDurationMs: number; duplicates: number; partnerTitlesInconsistent: number; financialProfilesOrphaned: number; codeChangesToday: number }, now = new Date()) => {
+export const buildAlerts = (input: { metrics: MetricMap; lastSuccessfulSyncAt: Date | null; durationMs: number; averageDurationMs: number; duplicates: number; partnerTitlesInconsistent: number; financialProfilesOrphaned: number; codeChangesToday: number }, now = new Date()) => {
   const alerts: Array<{ id: string; severity: Severity; title: string; detail: string; metric: string; value: number }> = [];
   const add = (id: string, severity: Severity, title: string, detail: string, metric: string, value: number) => alerts.push({ id, severity, title, detail, metric, value });
   if ((input.metrics.documentConflicts ?? 0) > 0) add("document-conflicts", "critical", "Conflitos documentais", "Existem correspondências ERP rejeitadas por conflito documental.", "documentConflicts", input.metrics.documentConflicts!);
   if (input.codeChangesToday > 20) add("code-changes", "warning", "Alterações de Client.code acima do limite", "Mais de 20 alterações foram auditadas hoje.", "codeChangesToday", input.codeChangesToday);
-  // Sem execução-pai não há atraso a medir: o estado "sem dados" é o alerta sync-never-observed.
-  if (input.lastSyncAt && isSyncStopped(input.lastSyncAt, now)) add("sync-stopped", "critical", "Sincronização parada", "Nenhuma execução-pai concluída nas últimas duas horas dentro da janela do scheduler.", "minutesSinceSync", Math.floor((now.getTime() - input.lastSyncAt.getTime()) / 60_000));
+  // Sem execução-pai com sucesso não há atraso a medir: o estado "sem dados" é o alerta sync-never-observed.
+  if (input.lastSuccessfulSyncAt && isSyncStopped(input.lastSuccessfulSyncAt, now)) add("sync-stopped", "critical", "Sincronização parada", "Nenhuma execução ERP concluída com sucesso nas últimas duas horas.", "minutesSinceSync", Math.floor((now.getTime() - input.lastSuccessfulSyncAt.getTime()) / 60_000));
   if (input.averageDurationMs > 0 && input.durationMs > input.averageDurationMs * 1.5) add("slow-sync", "warning", "Sincronização acima do tempo esperado", "A última execução excedeu em 50% o tempo médio.", "durationMs", input.durationMs);
   if (input.duplicates > 0) add("duplicates", "warning", "Clientes duplicados encontrados", "Revise os documentos repetidos na qualidade dos dados.", "duplicates", input.duplicates);
   if (input.partnerTitlesInconsistent > 0) add("partner-titles", "warning", "PartnerTitles inconsistentes", "Há estruturas de títulos ausentes ou inválidas.", "partnerTitlesInconsistent", input.partnerTitlesInconsistent);
@@ -73,7 +78,7 @@ let cache: { expiresAt: number; data: Awaited<ReturnType<typeof querySnapshot>> 
 const querySnapshot = async (days: 7 | 30 | 90) => {
   const since = new Date(Date.now() - days * 86_400_000);
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-  const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend] = await Promise.all([
+  const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend, lastSuccessfulParent] = await Promise.all([
     loadPlatformHealthRuns(since),
     prisma.client.count(), prisma.client.count({ where: { isArchived: true } }),
     prisma.client.count({ where: { OR: [{ cnpj: null }, { cnpj: "" }] } }),
@@ -83,7 +88,8 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
     prisma.$queryRawUnsafe<Array<{ missing_phone: bigint; missing_email: bigint }>>(CLIENT_CONTACT_QUALITY_SQL),
     prisma.$queryRaw<Array<{ partner_titles: bigint; financial_orphans: bigint }>>`SELECT COUNT(*) FILTER (WHERE "partnerTitles" IS NOT NULL AND jsonb_typeof("partnerTitles") NOT IN ('array', 'object'))::bigint AS partner_titles, COUNT(*) FILTER (WHERE "financialProfile" IS NOT NULL AND "partnerTitles" IS NULL)::bigint AS financial_orphans FROM "Client"`,
     prisma.clientCodeAudit.count({ where: { createdAt: { gte: today } } }),
-    prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } })
+    prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
+    loadLastSuccessfulParentRun(),
   ]);
   const runProjection = projectPlatformHealthRuns(runs);
   const metricKeys = ["partnersReceived", "partnersUpdated", "clientsCreated", "clientsUpdated", "ordersSynced", "ordersError", "documentConflicts", "fallbackNoDocument", "codeExact", "documentExact", "rejectConflict", "createNoSafeMatch"];
@@ -102,7 +108,7 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   const invalidRows = await prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*)::bigint AS count FROM "Client" WHERE COALESCE("cnpj", '') <> '' AND LENGTH(REGEXP_REPLACE(COALESCE("cnpjNormalized", ''), '[^0-9]', '', 'g')) NOT IN (11, 14)`;
   const invalidDocument = Number(invalidRows[0]?.count ?? 0);
   const quality = { totalClients, missingDocument, invalidDocument, duplicates, ...projectSellerQuality(missingSeller), missingRegion, missingPortfolio: null, missingCity, missingState, missingPhone: Number(contactQualityRows[0]?.missing_phone ?? 0), missingEmail: Number(contactQualityRows[0]?.missing_email ?? 0), financialProfilesOrphaned, partnerTitlesInconsistent, archived };
-  const alerts = buildAlerts({ metrics: aggregate, lastSyncAt: runProjection.lastSync?.finishedAt ?? runProjection.lastSync?.startedAt ?? null, durationMs: runProjection.lastSync?.durationMs || 0, averageDurationMs: runProjection.averageDurationMs ?? 0, duplicates, partnerTitlesInconsistent, financialProfilesOrphaned, codeChangesToday: auditToday });
+  const alerts = buildAlerts({ metrics: aggregate, lastSuccessfulSyncAt: lastSuccessfulParent?.finishedAt ?? lastSuccessfulParent?.startedAt ?? null, durationMs: runProjection.lastSync?.durationMs || 0, averageDurationMs: runProjection.averageDurationMs ?? 0, duplicates, partnerTitlesInconsistent, financialProfilesOrphaned, codeChangesToday: auditToday });
   const [scheduler, locks, reachability] = await Promise.all([
     getErpAutomaticSyncState(),
     prisma.erpSyncLock.findMany({ orderBy: { lockedUntil: "desc" }, take: 20, select: { scope: true, runId: true, lockedUntil: true, updatedAt: true } }),

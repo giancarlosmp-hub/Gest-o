@@ -455,8 +455,8 @@ mais recentes de `ErpSyncRun` e procurava a execução-pai entre elas. Cada roda
 etapas, então a execução-pai saía da lista e a tela mostrava "Sem registro", "Sem execução-pai" e
 `-1` em "Sincronização parada". Agora `loadPlatformHealthRuns` (`platformHealthService.ts`) busca as
 execuções-pai direto, pelo mesmo critério de `platformHealthProjection.ts` (`syncAll` manual e
-`automatic` do scheduler). "Sincronização parada" só alerta dentro da janela do scheduler e nunca
-mostra número negativo. O "Executar agora" passou a gravar `metrics.origin = "run_now"` e não comprova
+`automatic` do scheduler). "Sincronização parada" conta a partir da última execução-pai com sucesso,
+só alerta dentro da janela do scheduler e nunca mostra número negativo. O "Executar agora" passou a gravar `metrics.origin = "run_now"` e não comprova
 mais a execução automática na Saúde.
 
 Fica em aberto:
@@ -464,4 +464,3 @@ Fica em aberto:
   o "Executar agora" como última execução do scheduler.
 - Execuções do "Executar agora" gravadas antes desta correção não têm `origin` e continuam contando
   como automáticas até a próxima rodada real do scheduler.
-- Uma execução-pai concluída com erro também zera o tempo de "Sincronização parada".
