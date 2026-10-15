@@ -46,3 +46,9 @@ const scheduler = (overrides: Partial<SchedulerEvidence> = {}): SchedulerEvidenc
  test("auditoria vazia é empty explícito, não erro", () => { assert.equal(projectAuditDataState(0),"empty"); assert.equal(projectAuditDataState(1),"available"); });
 // 20
  test("manual nunca satisfaz requisito automático", () => assert.equal(projectAutomaticEvidence([run()],scheduler(),[],at(13)).automaticProven,false));
+// 21
+ test("Executar agora é execução-pai completa, mas não comprova execução automática", () => { const runNow=run({id:"run-now",scope:"automatic",trigger:"scheduler",metrics:{origin:"run_now"}}); const result=projectPlatformHealthRuns([runNow]); assert.equal(result.lastSync?.id,"run-now"); assert.equal(result.lastManualSync?.id,"run-now"); assert.equal(result.lastAutomaticSync,null); assert.equal(projectAutomaticEvidence([runNow],scheduler(),[],at(13)).automaticProven,false); });
+// 22
+ test("scheduler real continua comprovando execução automática", () => { const timer=run({id:"timer",scope:"automatic",trigger:"scheduler",metrics:{origin:"timer"}}); assert.equal(projectAutomaticEvidence([timer],scheduler(),[],at(13)).automaticProven,true); });
+// 23
+ test("sellerPortfolio não é execução-pai completa", () => { const result=projectPlatformHealthRuns([run({scope:"sellerPortfolio"}),run({scope:"sellerPortfolio",trigger:"scheduler"})]); assert.equal(result.lastSync,null); assert.equal(result.stageRuns.length,2); });

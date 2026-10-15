@@ -1,11 +1,34 @@
 import { prisma } from "../config/prisma.js";
-import { getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
-import { projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
+import { getAutomaticSyncWindowStartedAt, getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
+import { mergePlatformHealthRuns, PARENT_RUN_WHERE, projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
 import { readFile } from "node:fs/promises";
 import { PLATFORM_HEALTH_CONTRACT_VERSION, platformHealthSnapshotSchema } from "@salesforce-pro/shared";
 
 export const PLATFORM_HEALTH_CACHE_TTL_MS = 60_000;
 export const PLATFORM_HEALTH_ROLES = new Set(["diretor", "gerente"]);
+// Linhas recentes (pais e etapas) para o histórico; cada rodada grava dezenas de etapas.
+export const PLATFORM_HEALTH_RECENT_RUN_LIMIT = 100;
+// Execuções-pai buscadas diretamente: cobre 90 dias do scheduler (12 por dia) mais as manuais.
+export const PLATFORM_HEALTH_PARENT_RUN_LIMIT = 1_200;
+const SYNC_STOPPED_AFTER_MS = 2 * 60 * 60 * 1000;
+const runSelect = { id: true, scope: true, status: true, startedAt: true, finishedAt: true, durationMs: true, syncedCount: true, metrics: true, errors: true, errorMessage: true, trigger: true, correlationId: true } as const;
+
+export const loadPlatformHealthRuns = async (since: Date, db: Pick<typeof prisma, "erpSyncRun"> = prisma) => {
+  const [parentRuns, recentRuns] = await Promise.all([
+    db.erpSyncRun.findMany({ where: { startedAt: { gte: since }, ...PARENT_RUN_WHERE }, orderBy: { startedAt: "desc" }, take: PLATFORM_HEALTH_PARENT_RUN_LIMIT, select: runSelect }),
+    db.erpSyncRun.findMany({ where: { startedAt: { gte: since } }, orderBy: { startedAt: "desc" }, take: PLATFORM_HEALTH_RECENT_RUN_LIMIT, select: runSelect }),
+  ]);
+  return mergePlatformHealthRuns(parentRuns, recentRuns);
+};
+
+// "Sincronização parada" só vale dentro da janela do scheduler e conta o atraso a partir do
+// início da janela de hoje, para a última execução da noite anterior não gerar alerta às 7h.
+export const isSyncStopped = (lastSyncAt: Date, now = new Date()) => {
+  const windowStartedAt = getAutomaticSyncWindowStartedAt(now);
+  if (!windowStartedAt) return false;
+  const reference = Math.max(lastSyncAt.getTime(), windowStartedAt.getTime());
+  return now.getTime() - reference > SYNC_STOPPED_AFTER_MS;
+};
 
 export type Severity = "healthy" | "warning" | "critical";
 type MetricMap = Record<string, number | null>;
@@ -37,7 +60,8 @@ export const buildAlerts = (input: { metrics: MetricMap; lastSyncAt: Date | null
   const add = (id: string, severity: Severity, title: string, detail: string, metric: string, value: number) => alerts.push({ id, severity, title, detail, metric, value });
   if ((input.metrics.documentConflicts ?? 0) > 0) add("document-conflicts", "critical", "Conflitos documentais", "Existem correspondências ERP rejeitadas por conflito documental.", "documentConflicts", input.metrics.documentConflicts!);
   if (input.codeChangesToday > 20) add("code-changes", "warning", "Alterações de Client.code acima do limite", "Mais de 20 alterações foram auditadas hoje.", "codeChangesToday", input.codeChangesToday);
-  if (!input.lastSyncAt || now.getTime() - input.lastSyncAt.getTime() > 2 * 60 * 60 * 1000) add("sync-stopped", "critical", "Sincronização parada", "Nenhuma comunicação ERP concluída nas últimas duas horas.", "minutesSinceSync", input.lastSyncAt ? Math.floor((now.getTime() - input.lastSyncAt.getTime()) / 60_000) : -1);
+  // Sem execução-pai não há atraso a medir: o estado "sem dados" é o alerta sync-never-observed.
+  if (input.lastSyncAt && isSyncStopped(input.lastSyncAt, now)) add("sync-stopped", "critical", "Sincronização parada", "Nenhuma execução-pai concluída nas últimas duas horas dentro da janela do scheduler.", "minutesSinceSync", Math.floor((now.getTime() - input.lastSyncAt.getTime()) / 60_000));
   if (input.averageDurationMs > 0 && input.durationMs > input.averageDurationMs * 1.5) add("slow-sync", "warning", "Sincronização acima do tempo esperado", "A última execução excedeu em 50% o tempo médio.", "durationMs", input.durationMs);
   if (input.duplicates > 0) add("duplicates", "warning", "Clientes duplicados encontrados", "Revise os documentos repetidos na qualidade dos dados.", "duplicates", input.duplicates);
   if (input.partnerTitlesInconsistent > 0) add("partner-titles", "warning", "PartnerTitles inconsistentes", "Há estruturas de títulos ausentes ou inválidas.", "partnerTitlesInconsistent", input.partnerTitlesInconsistent);
@@ -50,7 +74,7 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
   const since = new Date(Date.now() - days * 86_400_000);
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend] = await Promise.all([
-    prisma.erpSyncRun.findMany({ where: { startedAt: { gte: since } }, orderBy: { startedAt: "desc" }, take: 100, select: { id: true, scope: true, status: true, startedAt: true, finishedAt: true, durationMs: true, syncedCount: true, metrics: true, errors: true, errorMessage: true, trigger: true, correlationId: true } }),
+    loadPlatformHealthRuns(since),
     prisma.client.count(), prisma.client.count({ where: { isArchived: true } }),
     prisma.client.count({ where: { OR: [{ cnpj: null }, { cnpj: "" }] } }),
     prisma.client.count({ where: { ownerSeller: { is: { isActive: false } } } }),

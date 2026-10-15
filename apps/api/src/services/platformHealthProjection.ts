@@ -38,9 +38,23 @@ export type SyncLockEvidence = {
 const byNewest = <T extends PlatformHealthRun>(left: T, right: T) =>
   right.startedAt.getTime() - left.startedAt.getTime() || right.id.localeCompare(left.id);
 
-export const isManualParent = (run: PlatformHealthRun) => run.trigger === "manual" && run.scope === "syncAll";
-export const isAutomaticParent = (run: PlatformHealthRun) => run.trigger === "scheduler" && run.scope === "automatic";
-export const isParentRun = (run: PlatformHealthRun) => isManualParent(run) || isAutomaticParent(run);
+// Execução-pai completa: "Sincronização Completa" (syncAll manual) e o scheduler (automatic).
+// sellerPortfolio e etapas isoladas não são execução-pai.
+export const MANUAL_PARENT_RUN = { scope: "syncAll", trigger: "manual" } as const;
+export const SCHEDULER_PARENT_RUN = { scope: "automatic", trigger: "scheduler" } as const;
+// Filtro de banco com o mesmo critério dos predicados abaixo; usa o índice (scope, startedAt).
+export const PARENT_RUN_WHERE = { OR: [{ ...MANUAL_PARENT_RUN }, { ...SCHEDULER_PARENT_RUN }] };
+
+const matches = (run: PlatformHealthRun, kind: typeof MANUAL_PARENT_RUN | typeof SCHEDULER_PARENT_RUN) => run.scope === kind.scope && run.trigger === kind.trigger;
+// "Executar agora" grava scope automatic/trigger scheduler com metrics.origin = "run_now".
+export const isRunNowParent = (run: PlatformHealthRun) => matches(run, SCHEDULER_PARENT_RUN) && Boolean(run.metrics && typeof run.metrics === "object" && (run.metrics as Record<string, unknown>).origin === "run_now");
+export const isManualParent = (run: PlatformHealthRun) => matches(run, MANUAL_PARENT_RUN) || isRunNowParent(run);
+export const isAutomaticParent = (run: PlatformHealthRun) => matches(run, SCHEDULER_PARENT_RUN) && !isRunNowParent(run);
+export const isParentRun = (run: PlatformHealthRun) => matches(run, MANUAL_PARENT_RUN) || matches(run, SCHEDULER_PARENT_RUN);
+
+// Junta as execuções-pai buscadas diretamente com as linhas recentes, sem duplicar por id.
+export const mergePlatformHealthRuns = <T extends PlatformHealthRun>(parentRuns: T[], recentRuns: T[]) =>
+  [...new Map([...recentRuns, ...parentRuns].map(run => [run.id, run])).values()];
 
 export function classifyPlatformHealthRuns(runs: PlatformHealthRun[]): ClassifiedPlatformHealthRun[] {
   const parentCorrelations = new Set(runs.filter(isParentRun).map(run => run.correlationId).filter((id): id is string => Boolean(id)));

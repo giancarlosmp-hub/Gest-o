@@ -13,8 +13,9 @@ assert.match(service, /projectPlatformHealthRuns\(runs\)/, "collector must deleg
 assert.match(service, /ownerSeller:\s*\{\s*is:\s*\{\s*isActive:\s*false/, "inactive seller query must match its label");
 assert.doesNotMatch(service, /ownerSellerId:\s*""/, "required ownerSellerId must not be queried as empty");
 assert.match(projection, /runKind: "parent" \| "stage"/, "history must classify parent and stage rows");
-assert.match(projection, /run\.trigger === "manual" && run\.scope === "syncAll"/, "manual parent contract must be exact");
-assert.match(projection, /run\.trigger === "scheduler" && run\.scope === "automatic"/, "automatic parent contract must be exact");
+assert.match(projection, /MANUAL_PARENT_RUN = \{ scope: "syncAll", trigger: "manual" \}/, "manual parent contract must be exact");
+assert.match(projection, /SCHEDULER_PARENT_RUN = \{ scope: "automatic", trigger: "scheduler" \}/, "automatic parent contract must be exact");
+assert.match(service, /\.\.\.PARENT_RUN_WHERE/, "parent runs must be queried directly, not filtered from the recent window");
 assert.match(route, /collectPlatformHealthHttp\(/, "HTTP collection failure must use the sanitized error contract");
 assert.match(page, /Não instrumentado/, "frontend must render null as not instrumented");
 assert.match(page, /Execução-pai/, "frontend history must distinguish parent and stage");
