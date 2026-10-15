@@ -2188,6 +2188,91 @@ export async function runUltraFv3OrderProtocolTest(
   }
 }
 
+type ErpOrderStatusLookupExpected = { pedidoIdImportacao: string; numPedido: string | null; erpOrderId: string | null; erpOrderNumber: string | null };
+type ErpOrderStatusSyncAttempt = Pick<
+  Prisma.ErpOrderSyncGetPayload<{}>,
+  "id" | "opportunityId" | "status" | "erpResponse" | "pedidoIdImportacao" | "erpOrderId" | "erpOrderNumber" | "numPedido" | "orderStatus" | "operationalStatusRaw" | "sentAt"
+>;
+
+/**
+ * Tentativa `error` com recusa definitiva no POST /orders não volta à conferência. A de resultado
+ * incerto (timeout/rede, mesma regra do bloqueio de reenvio) é conferida só pela chave de importação.
+ * A resposta original do POST fica em `erpResponse`, que a conferência não sobrescreve.
+ */
+export function planErpOrderStatusLookup(order: Pick<ErpOrderStatusSyncAttempt, "status" | "erpResponse" | "pedidoIdImportacao" | "erpOrderId" | "erpOrderNumber" | "numPedido">):
+  | { skip: true; reason: "definitive_rejection" }
+  | { skip: false; queries: string[]; expected: ErpOrderStatusLookupExpected } {
+  if (order.status === ErpOrderSyncStatus.error) {
+    if (!isUncertainErpOrderFailure({ status: order.status, syncErrors: null, erpResponse: order.erpResponse })) {
+      return { skip: true, reason: "definitive_rejection" };
+    }
+    return {
+      skip: false,
+      queries: [order.pedidoIdImportacao],
+      expected: { pedidoIdImportacao: order.pedidoIdImportacao, numPedido: null, erpOrderId: null, erpOrderNumber: null },
+    };
+  }
+  return {
+    skip: false,
+    queries: Array.from(new Set([order.pedidoIdImportacao, order.erpOrderId, order.erpOrderNumber, order.numPedido].filter((value): value is string => Boolean(value)))),
+    expected: { pedidoIdImportacao: order.pedidoIdImportacao, numPedido: order.numPedido, erpOrderId: order.erpOrderId, erpOrderNumber: order.erpOrderNumber },
+  };
+}
+
+/** Sem registro do ERP casado (outcome unknown) grava só a conferência: nunca situação, histórico ou timeline. */
+export function buildErpOrderStatusReconciliation(
+  order: ErpOrderStatusSyncAttempt,
+  lookup: {
+    response: unknown;
+    classification: ReturnType<typeof classifyUltraFv3OrderLookup>;
+    expected: ErpOrderStatusLookupExpected;
+    queries: string[];
+    correlationId: string;
+    reconciledAt: Date;
+  },
+) {
+  const { response, classification, expected, queries, correlationId, reconciledAt } = lookup;
+  const reconciliationAudit = { operation: "orderStatus-reconciliation", outcome: classification.outcome, matched: classification.matched, queryOrder: queries, correlationId, at: reconciledAt.toISOString(), response: sanitizeErpOrderPayload(response) };
+  if (!classification.matched || classification.outcome === "unknown") {
+    return {
+      located: false as const,
+      data: {
+        lastStatusPayload: toJson(reconciliationAudit),
+        syncErrors: toJson([{ ...reconciliationAudit, nonCritical: true, message: "Resultado inconclusivo; reenvio permanece bloqueado." }]),
+        statusSyncedAt: reconciledAt,
+      } satisfies Prisma.ErpOrderSyncUpdateManyMutationInput,
+      history: null,
+      timelineDescription: null,
+    };
+  }
+  const confirmed = classification.outcome === "confirmed";
+  const operationalStatusRaw = extractMatchedOperationalStatus(response, expected);
+  const nextSyncStatus = confirmed ? ErpOrderSyncStatus.sent : classification.outcome === "processing" ? ErpOrderSyncStatus.pending : order.status;
+  const nextOrderStatus = classification.orderStatus ?? order.orderStatus;
+  const nextOperationalStatusRaw = operationalStatusRaw ?? order.operationalStatusRaw;
+  const changed = nextSyncStatus !== order.status || nextOrderStatus !== order.orderStatus || nextOperationalStatusRaw !== order.operationalStatusRaw;
+  return {
+    located: true as const,
+    data: {
+      ...(confirmed ? { status: ErpOrderSyncStatus.sent, erpOrderNumber: classification.erpOrderNumber || order.erpOrderNumber || order.numPedido, sentAt: order.sentAt || reconciledAt } : {}),
+      ...(classification.outcome === "processing" ? { status: ErpOrderSyncStatus.pending } : {}),
+      ...(classification.orderStatus ? { orderStatus: classification.orderStatus } : {}),
+      ...(operationalStatusRaw ? { operationalStatusRaw, operationalOrderStatus: normalizeOperationalOrderStatus(operationalStatusRaw) } : {}),
+      lastStatusPayload: toJson(reconciliationAudit),
+      // A recusa confirmada fica em syncErrors (lido pelo bloqueio de reenvio, como antes) e não
+      // sobrescreve a resposta original do POST em erpResponse.
+      syncErrors: classification.outcome === "rejected"
+        ? toJson([{ ...reconciliationAudit, nonCritical: true, message: "UltraFV3 confirmou a recusa pela chave de importação." }])
+        : Prisma.JsonNull,
+      statusSyncedAt: reconciledAt,
+    } satisfies Prisma.ErpOrderSyncUpdateManyMutationInput,
+    history: changed
+      ? { erpOrderSyncId: order.id, opportunityId: order.opportunityId, syncStatus: nextSyncStatus, orderStatus: nextOrderStatus, operationalStatusRaw: nextOperationalStatusRaw, source: "ultrafv3-order-status" }
+      : null,
+    timelineDescription: changed && operationalStatusRaw ? `Pedido ERP ${order.numPedido || order.id}: situação atualizada para ${operationalStatusRaw}.` : null,
+  };
+}
+
 export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncId?: string) {
   const orders = await prisma.erpOrderSync.findMany({
     where: {
@@ -2200,9 +2285,16 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
   });
 
   let syncedCount = 0;
-  let errorCount = 0;
+  let notFoundCount = 0;
+  let callFailedCount = 0;
+  let skippedDefinitiveCount = 0;
   for (const order of orders) {
     if (order.manualResolution) continue;
+    const plan = planErpOrderStatusLookup(order);
+    if (plan.skip) {
+      skippedDefinitiveCount += 1;
+      continue;
+    }
     const syncStartedAt = new Date();
     const correlationId = randomUUID();
     let query = order.pedidoIdImportacao;
@@ -2212,7 +2304,7 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
       const credentials = username && encryptedPassword
         ? { username, password: decryptErpCredential(encryptedPassword) }
         : null;
-      const queries = Array.from(new Set([order.pedidoIdImportacao, order.erpOrderId, order.erpOrderNumber, order.numPedido].filter((value): value is string => Boolean(value))));
+      const { queries, expected } = plan;
       let response: unknown = null;
       let classification: ReturnType<typeof classifyUltraFv3OrderLookup> = { outcome: "unknown", matched: false, erpOrderNumber: null, orderStatus: null };
       query = queries[0] || order.pedidoIdImportacao;
@@ -2228,7 +2320,7 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
           candidateResponse = await requestUltraFv3ReadOnlyWithRetry<unknown>(`/orderStatus?pedido=${encodeURIComponent(candidate)}`, correlationId);
         }
         response = candidateResponse;
-        classification = classifyUltraFv3OrderLookup(candidateResponse, order);
+        classification = classifyUltraFv3OrderLookup(candidateResponse, expected);
         if (classification.matched) break;
       }
       logApiEvent("INFO", "[erp order status] querying UltraFV3 orderStatus", {
@@ -2239,40 +2331,19 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
         correlationId,
       });
       const reconciledAt = new Date();
-      const reconciliationAudit = { operation: "orderStatus-reconciliation", outcome: classification.outcome, matched: classification.matched, queryOrder: queries, correlationId, at: reconciledAt.toISOString(), response: sanitizeErpOrderPayload(response) };
-      const confirmed = classification.outcome === "confirmed";
-      const operationalStatusRaw = extractMatchedOperationalStatus(response, order);
-      const operationalOrderStatus = normalizeOperationalOrderStatus(operationalStatusRaw);
-      const nextSyncStatus = confirmed ? ErpOrderSyncStatus.sent : classification.outcome === "processing" ? ErpOrderSyncStatus.pending : order.status;
-      const nextOrderStatus = classification.orderStatus ?? order.orderStatus;
-      const nextOperationalStatusRaw = operationalStatusRaw ?? order.operationalStatusRaw;
-      const nextOperationalOrderStatus = operationalStatusRaw ? operationalOrderStatus : order.operationalOrderStatus;
+      const reconciliation = buildErpOrderStatusReconciliation(order, { response, classification, expected, queries, correlationId, reconciledAt });
       const persisted = await prisma.erpOrderSync.updateMany({
         where: { id: order.id, OR: [{ statusSyncedAt: null }, { statusSyncedAt: { lte: syncStartedAt } }] },
-        data: {
-          ...(confirmed ? { status: ErpOrderSyncStatus.sent, erpOrderNumber: classification.erpOrderNumber || order.erpOrderNumber || order.numPedido, sentAt: order.sentAt || reconciledAt } : {}),
-          ...(classification.outcome === "processing" ? { status: ErpOrderSyncStatus.pending } : {}),
-          ...(classification.orderStatus ? { orderStatus: classification.orderStatus } : {}),
-          operationalStatusRaw: nextOperationalStatusRaw,
-          operationalOrderStatus: nextOperationalOrderStatus,
-          lastStatusPayload: toJson(reconciliationAudit),
-          syncErrors: classification.outcome === "unknown" ? toJson([{ ...reconciliationAudit, nonCritical: true, message: "Resultado inconclusivo; reenvio permanece bloqueado." }]) : Prisma.JsonNull,
-          ...(classification.outcome === "rejected" ? { erpResponse: toJson(reconciliationAudit) } : {}),
-          statusSyncedAt: reconciledAt,
-        },
+        data: reconciliation.data,
       });
       if (persisted.count === 0) continue; // a synchronization started later already consolidated the state
-      const changed = nextSyncStatus !== order.status || nextOrderStatus !== order.orderStatus || nextOperationalStatusRaw !== order.operationalStatusRaw;
-      if (changed) await prisma.erpOrderStatusHistory.create({ data: {
-        erpOrderSyncId: order.id, opportunityId: order.opportunityId, syncStatus: nextSyncStatus,
-        orderStatus: nextOrderStatus, operationalStatusRaw: nextOperationalStatusRaw, source: "ultrafv3-order-status",
-      } });
-      if (changed && operationalStatusRaw) await prisma.timelineEvent.create({ data: {
+      if (reconciliation.history) await prisma.erpOrderStatusHistory.create({ data: reconciliation.history });
+      if (reconciliation.timelineDescription) await prisma.timelineEvent.create({ data: {
         type: "status", opportunityId: order.opportunityId, clientId: order.opportunity.clientId,
-        ownerSellerId: order.sellerId, description: `Pedido ERP ${order.numPedido || order.id}: situação atualizada para ${operationalStatusRaw}.`,
+        ownerSellerId: order.sellerId, description: reconciliation.timelineDescription,
       } });
-      if (classification.outcome === "unknown") errorCount += 1;
-      else syncedCount += 1;
+      if (reconciliation.located) syncedCount += 1;
+      else notFoundCount += 1;
       logApiEvent("INFO", "[erp order status] UltraFV3 order status synced", {
         erpOrderSyncId: order.id,
         opportunityId: order.opportunityId,
@@ -2282,7 +2353,7 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
         orderStatus: classification.orderStatus,
       });
     } catch (error) {
-      errorCount += 1;
+      callFailedCount += 1;
       const message = error instanceof Error ? error.message : String(error);
       await prisma.erpOrderSync.update({
         where: { id: order.id },
@@ -2310,7 +2381,17 @@ export async function syncErpOrderStatuses(opportunityId?: string, erpOrderSyncI
     }
   }
 
-  return { syncedCount, errorCount, diagnostics: { nonCriticalOrderStatusErrors: errorCount } };
+  const errorCount = notFoundCount + callFailedCount;
+  return {
+    syncedCount,
+    errorCount,
+    diagnostics: {
+      nonCriticalOrderStatusErrors: errorCount,
+      orderStatusNotFound: notFoundCount,
+      orderStatusCallFailures: callFailedCount,
+      orderStatusSkippedDefinitiveErrors: skippedDefinitiveCount,
+    },
+  };
 }
 
 

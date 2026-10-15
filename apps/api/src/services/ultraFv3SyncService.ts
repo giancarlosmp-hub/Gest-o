@@ -13,6 +13,7 @@ import { getErpRuntimeEnvironmentDiagnostics, getMissingErpRuntimeConfig, type E
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
 import { incrementPartnerMatchCounter, resolvePartnerIdentityMatch } from "./partnerIdentityMatching.js";
 import { recordClientCodeChange } from "./clientCodeAuditService.js";
+import { formatOrderStatusSyncWarning } from "./erpOrderStatusSyncWarning.js";
 import { calculatePriceFromErpVariation, orderPriceAuthoritySteps, resolveErpPriceVariationPercent, shouldSweepAbsentPrices } from "./erpPriceVariationPolicy.js";
 import { sanitizeUltraFv3PayloadForLog } from "./ultraFv3PayloadSanitization.js";
 import { assertUsefulProductPriceSync, runProductAndPriceRefresh } from "./productPriceSyncOutcome.js";
@@ -4237,11 +4238,11 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), hear
           message: "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
           correlationId,
         });
-      } else if (step.nonCritical && (result.diagnostics?.nonCriticalOrderStatusErrors ?? 0) > 0) {
+      } else if (step.nonCritical && formatOrderStatusSyncWarning(result.diagnostics)) {
         warnings.push({
           scope: step.scope,
           label: step.label,
-          message: `${result.diagnostics?.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
+          message: formatOrderStatusSyncWarning(result.diagnostics)!,
           correlationId,
         });
       }

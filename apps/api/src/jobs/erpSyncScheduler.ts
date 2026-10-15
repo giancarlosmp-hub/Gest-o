@@ -2,6 +2,7 @@ import { ErpSyncRunStatus, ErpSyncTrigger, Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env.js";
 import { syncErpOrderStatuses } from "../services/erpOrderService.js";
+import { formatOrderStatusSyncWarning } from "../services/erpOrderStatusSyncWarning.js";
 import {
   acquireSellerPortfolioLock,
   createPartnerPortfolioRound,
@@ -531,12 +532,12 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt, origin
                 "Status de pedidos ignorado: credencial global UltraFV3 ausente em ambiente operando por vendedor.",
               correlationId,
             });
-          } else if (diagnostics?.nonCriticalOrderStatusErrors) {
+          } else if (formatOrderStatusSyncWarning(diagnostics)) {
             nonCriticalStepWarnings.push({
               scope: step.scope,
               label: step.label,
               step: index + 1,
-              message: `${diagnostics.nonCriticalOrderStatusErrors} consulta(s) de status de pedidos falharam e foram tratadas como aviso operacional.`,
+              message: formatOrderStatusSyncWarning(diagnostics)!,
               correlationId,
             });
           }
