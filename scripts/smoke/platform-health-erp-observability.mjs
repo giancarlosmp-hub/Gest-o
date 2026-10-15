@@ -17,6 +17,7 @@ assert.match(projection, /MANUAL_PARENT_RUN = \{ scope: "syncAll", trigger: "man
 assert.match(projection, /SCHEDULER_PARENT_RUN = \{ scope: "automatic", trigger: "scheduler" \}/, "automatic parent contract must be exact");
 assert.match(service, /\.\.\.PARENT_RUN_WHERE/, "parent runs must be queried directly, not filtered from the recent window");
 assert.match(service, /lastSuccessfulSyncAt: lastSuccessfulParent\?\./, "sync-stopped must count from the last successful parent run");
+assert.match(service, /ordersError: erpOrders\.openErrorOrders/, "order cards must read ErpOrderSync with the ERP integration rule");
 assert.match(route, /collectPlatformHealthHttp\(/, "HTTP collection failure must use the sanitized error contract");
 assert.match(page, /Não instrumentado/, "frontend must render null as not instrumented");
 assert.match(page, /Execução-pai/, "frontend history must distinguish parent and stage");

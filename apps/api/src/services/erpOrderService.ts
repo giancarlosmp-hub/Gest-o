@@ -2345,26 +2345,4 @@ export async function getZeroNumPedidoDryRunReport() {
   };
 }
 
-export async function getErpOrderOperationalSummary() {
-  const [sentOrders, pendingOrders, errorOrders, fulfilledOrders, lastOrderSync] = await Promise.all([
-    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.sent } }),
-    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.pending } }),
-    prisma.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.error } }),
-    prisma.erpOrderSync.count({ where: { orderStatus: { not: null } } }),
-    prisma.erpOrderSync.findFirst({
-      orderBy: [{ updatedAt: "desc" }],
-      select: { updatedAt: true, sentAt: true, statusSyncedAt: true },
-    }),
-  ]);
-
-  return {
-    sentOrders,
-    pendingOrders,
-    errorOrders,
-    syncedOrders: fulfilledOrders,
-    lastOrderActivityAt: lastOrderSync?.statusSyncedAt?.toISOString()
-      ?? lastOrderSync?.sentAt?.toISOString()
-      ?? lastOrderSync?.updatedAt.toISOString()
-      ?? null,
-  };
-}
+export { getErpOrderOperationalSummary } from "./erpOrderOperationalSummary.js";

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import api from "../../lib/apiClient";
 import { getApiErrorMessage } from "../../lib/apiError";
+import { hasErpOperationalAlert } from "@salesforce-pro/shared";
 
 type SyncScopeKey =
   | "connection"
@@ -55,6 +56,7 @@ type OperationalSummary = {
   sentOrders: number;
   pendingOrders: number;
   errorOrders: number;
+  openErrorOrders: number;
   syncedOrders: number;
   lastOrderActivityAt?: string | null;
 };
@@ -715,9 +717,9 @@ export default function ErpIntegrationPanel() {
         ) : null}
       </div>
 
-      {(summary.errors > 0 || (data?.operational?.errorOrders ?? 0) > 0) ? (
+      {hasErpOperationalAlert({ scopeErrors: summary.errors, openErrorOrders: data?.operational?.openErrorOrders ?? 0 }) ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-          <strong>Alerta operacional ERP:</strong> existem falhas de sincronização ou pedidos com erro. Revise o histórico, correlationId e último erro antes de executar novamente.
+          <strong>Alerta operacional ERP:</strong> existem falhas de sincronização ou pedidos com erro em aberto. Revise o histórico, correlationId e último erro antes de executar novamente.
           {summary.lastError ? <p className="mt-1 text-xs">Último erro: {summary.lastError}</p> : null}
         </div>
       ) : null}
@@ -760,12 +762,13 @@ export default function ErpIntegrationPanel() {
         {[
           { label: "Pedidos enviados", value: data?.operational?.sentOrders ?? 0 },
           { label: "Pendentes", value: data?.operational?.pendingOrders ?? 0 },
-          { label: "Erro", value: data?.operational?.errorOrders ?? 0 },
+          { label: "Erro", value: data?.operational?.openErrorOrders ?? 0, detail: `${data?.operational?.errorOrders ?? 0} no histórico` },
           { label: "Sincronizados", value: data?.operational?.syncedOrders ?? 0 },
         ].map((item) => (
           <div key={item.label} className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
             <p className="text-xs font-semibold text-slate-500">{item.label}</p>
             <p className="mt-1 text-2xl font-bold text-slate-900">{item.value}</p>
+            {"detail" in item ? <p className="mt-0.5 text-[11px] text-slate-500">{item.detail}</p> : null}
           </div>
         ))}
         <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-200">
