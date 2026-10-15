@@ -57,6 +57,18 @@ test("resumo operacional separa erro em aberto do histórico", async () => {
   assert.equal(summary.syncedOrders, 1);
 });
 
+test("Sincronizados conta só pedido válido (sent); tentativa recusada com situação falsa não entra", async () => {
+  const rows = [
+    attempt("op-h", "error", day(1), { orderStatus: "entregue" }),
+    attempt("op-i", "pending", day(2), { orderStatus: "pendente" }),
+    attempt("op-j", "sent", day(3), { orderStatus: "entregue" }),
+  ];
+  const summary = await getErpOrderOperationalSummary(fakeDb(rows));
+  assert.equal(summary.syncedOrders, 1);
+  // Mutante: contar orderStatus preenchido sem filtrar status daria 3.
+  assert.equal(rows.filter((row) => row.orderStatus !== null).length, 3);
+});
+
 test("banner apaga sem erro em aberto e sem falha de sincronização", () => {
   assert.equal(hasErpOperationalAlert({ scopeErrors: 0, openErrorOrders: 0 }), false);
   assert.equal(hasErpOperationalAlert({ scopeErrors: 0, openErrorOrders: 1 }), true);

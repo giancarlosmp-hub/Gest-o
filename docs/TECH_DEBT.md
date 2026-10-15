@@ -543,3 +543,20 @@ Fica em aberto:
   prevista do pedido em `OpportunityDetailsPage`, data de entrada da oportunidade rápida na Agenda).
 - Código morto: `getWeekRangeFromStart` (`crudRoutes.ts`) e `startOfDay`/`endOfDay` em
   `conversationalCrmService.ts`.
+
+### TD-ERP-REJECTED-ATTEMPTS-AS-ORDERS — tentativas recusadas pelo ERP contavam como pedido
+
+**Corrigido na branch `fix/orders-exclude-rejected-attempts`.** Pedido válido = tentativa
+`ErpOrderSync` aceita pelo ERP (`status = sent`), regra única em `isValidErpOrder` /
+`VALID_ERP_ORDER_SYNC_STATUS` (`packages/shared`). Tentativas `error` e `pending` ficam fora de
+"Pedidos", "Valor total" e "Pedidos do cliente" (`summarizeOrders`), de "Sincronizados" na
+Integração ERP e na Saúde (`getErpOrderOperationalSummary`) e do ganho efetivo usado por dashboard,
+relatórios, metas e oportunidade (`effectiveWonContribution`). Na tela Pedidos e na oportunidade, a
+tentativa `error` aparece só como "Recusado pelo ERP" com a mensagem curta do erro, sem situação nem
+quantidades do ERP.
+
+Fica em aberto:
+- 5 tentativas `error` em produção ainda guardam situação FINALIZADO falsa no banco (limpeza em PR
+  próprio). A tela e os totais já as ignoram.
+- `erpClientAuditService` (scripts de auditoria/reparo de cliente) e a contagem de dependências do
+  desligamento de vendedor contam todas as tentativas; mantidos de propósito (registros, não pedidos).

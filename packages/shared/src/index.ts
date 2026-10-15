@@ -561,6 +561,12 @@ export type ErpOrderSyncReadinessInput = {
 export const isSuccessfulErpOrderSync = (order: ErpOrderSyncReadinessInput) =>
   order.status === "sent" && order.orderStatus !== "cancelado";
 
+/** Pedido válido = tentativa aceita pelo ERP (`sent`). Tentativa `error` (recusada) e `pending`
+ * (sem confirmação; vira `sent` quando o ERP confirma) não contam como pedido em contagens, somas,
+ * "Sincronizados" e ganho efetivo. Regra única da API e da web. */
+export const VALID_ERP_ORDER_SYNC_STATUS = "sent" as const;
+export const isValidErpOrder = (order: { status?: string | null }) => order.status === VALID_ERP_ORDER_SYNC_STATUS;
+
 export const isErpOrderSyncResendable = (order: ErpOrderSyncReadinessInput) =>
   order.status === "error" || order.status === "pending" || order.orderStatus === "cancelado";
 

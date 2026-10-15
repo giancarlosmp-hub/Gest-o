@@ -1,5 +1,5 @@
 import { ErpOrderSyncStatus } from "@prisma/client";
-import { findOpenErpOrderErrorOpportunityIds, hasErpOperationalAlert } from "@salesforce-pro/shared";
+import { VALID_ERP_ORDER_SYNC_STATUS, findOpenErpOrderErrorOpportunityIds, hasErpOperationalAlert } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 
 type ErpOrderSyncReader = Pick<typeof prisma, "erpOrderSync">;
@@ -29,7 +29,8 @@ export async function getErpOrderOperationalSummary(db: ErpOrderSyncReader = pri
     db.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.pending } }),
     db.erpOrderSync.count({ where: { status: ErpOrderSyncStatus.error } }),
     countOpenErpOrderErrors(db),
-    db.erpOrderSync.count({ where: { orderStatus: { not: null } } }),
+    // "Sincronizados": só pedido válido (`sent`) com situação conferida; tentativa recusada não entra.
+    db.erpOrderSync.count({ where: { status: VALID_ERP_ORDER_SYNC_STATUS, orderStatus: { not: null } } }),
     db.erpOrderSync.findFirst({
       orderBy: [{ updatedAt: "desc" }],
       select: { updatedAt: true, sentAt: true, statusSyncedAt: true },

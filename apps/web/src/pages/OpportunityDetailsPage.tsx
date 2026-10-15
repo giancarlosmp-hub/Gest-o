@@ -2322,7 +2322,7 @@ export default function OpportunityDetailsPage() {
                                         ? "erro"
                                         : "pendente"}
                                   </StatusPill>
-                                  {order.orderStatus ? (
+                                  {order.orderStatus && order.status !== "error" ? (
                                     <StatusPill
                                       tone={
                                         order.orderStatus === "cancelado"

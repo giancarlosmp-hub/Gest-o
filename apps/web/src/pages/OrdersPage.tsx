@@ -13,7 +13,11 @@ import {
 import api from "../lib/apiClient";
 import { useSearchParams } from "react-router-dom";
 import { getApiErrorMessage } from "../lib/apiError";
-import { formatOrderDate, formatOrderQuantity } from "./orderPresentation";
+import {
+  formatOrderDate,
+  formatOrderQuantity,
+  orderSituationLabel,
+} from "./orderPresentation";
 
 type Order = {
   id: string;
@@ -46,6 +50,7 @@ type Order = {
     pending: number | null;
   };
   hasError: boolean;
+  rejectionMessage: string | null;
   invoice: { available: false; reason: string };
 };
 type Response = {
@@ -128,7 +133,7 @@ function Status({ order }: { order: Order }) {
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${meta.classes}`}
     >
       <Icon size={14} aria-hidden />
-      {order.statusGroup === "cancelled" ? "CANCELADO" : order.operationalStatus || "NÃO INFORMADO"}
+      {orderSituationLabel(order)}
     </span>
   );
 }
@@ -431,6 +436,11 @@ export default function OrdersPage() {
                 <Status order={order} />
                 <strong>{money.format(order.totalValue)}</strong>
               </div>
+              {order.rejectionMessage && (
+                <p className="mt-2 text-xs text-red-700">
+                  {order.rejectionMessage}
+                </p>
+              )}
               <div className="mt-2">
                 <AuthorizationStatus value={order.requestAuthorizationStatus} />
               </div>
@@ -569,7 +579,9 @@ export default function OrdersPage() {
                       Situação atual no ERP
                     </span>
                     <p className="font-semibold">
-                      {detail.operationalStatus || "Não consultado"}
+                      {detail.syncStatus === "error"
+                        ? orderSituationLabel(detail)
+                        : detail.operationalStatus || "Não consultado"}
                     </p>
                   </div>
                   <div>
