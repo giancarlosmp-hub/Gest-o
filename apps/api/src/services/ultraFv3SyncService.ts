@@ -3570,7 +3570,7 @@ const FINANCIAL_CODE_CHUNK_SIZE = 500;
  * limpos e os motivos de bloqueio e registra no Histórico (metrics do ErpSyncRun de partnerTitles),
  * sem gravar nos clientes. true = grava a limpeza. Regra em planPartnerTitleClears.
  */
-const PARTNER_TITLE_CLEARING_ENABLED = false;
+const PARTNER_TITLE_CLEARING_ENABLED = true;
 /** Limite de códigos listados no Histórico por rodada; as contagens são sempre completas. */
 const PARTNER_TITLE_CLEAR_HISTORY_LIMIT = 200;
 const financialCoverageKey = (scope: FinancialScope) => `erp.ultrafv3.${scope}.sellerCoverage`;
