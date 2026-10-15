@@ -171,6 +171,7 @@ const fetchOf = (sellerId: string, rows: Row[], outcome: "success" | "empty" | "
 
 const clearTarget = (id: string, code: string, ownerSellerId: string, tenantId: string | null = "tenant-a") => ({ id, code, tenantId, ownerSellerId });
 const allComplete = new Set(["seller-a", "seller-b", "seller-c"]);
+const portfolioOf = (bySeller: Record<string, string[]>) => new Map(Object.entries(bySeller).map(([sellerId, codes]) => [sellerId, new Set(codes)]));
 
 {
   // Cada condição bloqueia sozinha; só o cliente que passa em todas é limpo.
@@ -194,6 +195,7 @@ const allComplete = new Set(["seller-a", "seller-b", "seller-c"]);
     ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
     completeSellerIds: new Set(["seller-a", "seller-b"]),
     previousCoverageBySeller: {},
+    ownerPortfolioBySeller: portfolioOf({ "seller-a": ["9001", "9006", "9007"], "seller-b": ["9000", "9004"], "seller-c": ["9003"], "seller-d": ["9005"] }),
   });
   assert.deepEqual(plan.clear.map((client) => client.id), ["paid"]);
   assert.equal(plan.presentInReturns, 1, "presente em qualquer retorno nunca é limpo, mesmo de outro dono");
@@ -216,6 +218,7 @@ const failedSellerScenario = {
   codeOf,
   completeSellerIds: allComplete,
   previousCoverageBySeller: {},
+  ownerPortfolioBySeller: portfolioOf({ "seller-a": ["9100", "9101"] }),
 };
 
 {
@@ -252,6 +255,68 @@ const failedSellerScenario = {
   }
 }
 
+// Carteira do dono na mesma rodada (/partners bruto). Caso real: o cadastro saiu da carteira do dono no
+// ERP (ficou sem vendedor), então os títulos em aberto não vêm no /partnerTitles de ninguém, mas no CRM
+// o dono continua o mesmo.
+const portfolioScenario = {
+  fetches: [fetchOf("seller-a", [{ PARCEIRO: "9200", DOCTO: 1, PARCELA: 1 }]), fetchOf("seller-b", [{ PARCEIRO: "9300", DOCTO: 1, PARCELA: 1 }])],
+  candidates: [
+    clearTarget("paid-in-portfolio", "9201", "seller-a"),
+    clearTarget("left-without-seller", "9202", "seller-a"),
+    clearTarget("moved-to-seller-without-fv3", "9203", "seller-a"),
+    clearTarget("owner-partners-failed", "9301", "seller-b"),
+  ],
+  ownerTenantById: new Map<string, string>(),
+  exclusions: noExclusions,
+  codeOf,
+  completeSellerIds: allComplete,
+  previousCoverageBySeller: {},
+  // seller-b falhou no /partners da rodada: não aparece aqui.
+  ownerPortfolioBySeller: portfolioOf({ "seller-a": ["9200", "9201"] }),
+};
+
+{
+  // Quitado e ainda na carteira do dono: limpa. Fora da carteira do dono: não limpa. /partners do dono com falha: não limpa.
+  const plan = merge.planPartnerTitleClears(portfolioScenario);
+  assert.deepEqual(plan.clear.map((client) => client.id), ["paid-in-portfolio"]);
+  assert.deepEqual(Object.fromEntries(plan.blocked.map(({ client, reason }) => [client.id, reason])), {
+    "left-without-seller": "notInOwnerPortfolio",
+    "moved-to-seller-without-fv3": "notInOwnerPortfolio",
+    "owner-partners-failed": "ownerPortfolioUnproven",
+  });
+  // Escopo rodado sem /partners na mesma rodada: ninguém é limpo.
+  const withoutPartners = merge.planPartnerTitleClears({ ...portfolioScenario, ownerPortfolioBySeller: new Map() });
+  assert.deepEqual(withoutPartners.clear, []);
+  assert.ok(withoutPartners.blocked.every(({ reason }) => reason === "ownerPortfolioUnproven"));
+}
+
+{
+  // Teste de mutação: sem a condição de carteira do dono, o cliente que saiu da carteira (títulos em aberto) seria limpo.
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { pathToFileURL } = await import("node:url");
+  const source = readFileSync(new URL("./ultraFv3FinancialMerge.ts", import.meta.url), "utf8");
+  const condition = [
+    "  const ownerPortfolio = input.ownerPortfolioBySeller.get(client.ownerSellerId);",
+    "  if (!ownerPortfolio) return \"ownerPortfolioUnproven\";",
+    "  if (!ownerPortfolio.has(client.code)) return \"notInOwnerPortfolio\";",
+    "",
+  ].join("\n");
+  assert.equal(source.split(condition).length, 2, "condição de carteira do dono presente uma vez");
+  const dir = mkdtempSync(join(tmpdir(), "financial-merge-portfolio-mutant-"));
+  try {
+    const mutantPath = join(dir, "ultraFv3FinancialMerge.mutant.ts");
+    writeFileSync(mutantPath, source.replace(condition, ""));
+    const mutant = await import(pathToFileURL(mutantPath).href);
+    const cleared = mutant.planPartnerTitleClears(portfolioScenario).clear.map((client: { id: string }) => client.id);
+    assert.ok(cleared.includes("left-without-seller"), "mutante limpa o cliente que saiu da carteira do dono");
+    assert.ok(cleared.includes("owner-partners-failed"), "mutante limpa mesmo com o /partners do dono com falha");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 {
   // Travas: retorno do dono que encolheu bruscamente bloqueia só os clientes dele; teto absoluto por rodada.
   const codes = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => `${prefix}${index}`);
@@ -261,6 +326,7 @@ const failedSellerScenario = {
     merge.planPartnerTitleClears({
       fetches: input.fetches, candidates: input.candidates, ownerTenantById: new Map(), exclusions: noExclusions, codeOf,
       completeSellerIds: new Set(input.fetches.map((fetch) => fetch.sellerId)), previousCoverageBySeller: input.previous ?? {},
+      ownerPortfolioBySeller: new Map(input.fetches.map((fetch) => [fetch.sellerId, new Set(input.candidates.map((client) => client.code))])),
     });
 
   // Primeira rodada (sem cobertura anterior) com acúmulo grande de títulos pagos: limpa todos.
@@ -387,15 +453,20 @@ setModel("client", {
   },
 });
 
-// ERP fictício: /partners vazio; financeiros por vendedor. Erro de timeout evita as esperas de retry.
+// ERP fictício: /partners e financeiros por vendedor. Parceiros com IDN_CLIENTE "N" passam pela carteira
+// da rodada sem serem gravados no CRM. Erro de timeout evita as esperas de retry.
 let erpGate: Promise<void> = Promise.resolve();
 const failing = new Set<string>();
 const erpRows: Record<string, Record<string, Row[]>> = {};
+const partnerRows: Record<string, Row[]> = {};
 (ultraFv3Client as any).hasGlobalCredentials = () => false;
 (ultraFv3Client as any).requestWithCredentials = async (path: string, credentials: { username: string }) => {
   await erpGate;
   const sellerId = credentials.username.replace(/^login-/, "");
-  if (path.startsWith("/partners")) return [];
+  if (path.startsWith("/partners")) {
+    if (failing.has(`${sellerId}:partners`)) throw new Error("timeout simulado do ERP fictício");
+    return partnerRows[sellerId] ?? [];
+  }
   const scope = path.startsWith("/financialProfiles") ? "financialProfiles" : "partnerTitles";
   if (failing.has(`${sellerId}:${scope}`)) throw new Error("timeout simulado do ERP fictício");
   return { message: "OK", data: erpRows[sellerId]?.[scope] ?? [], detail: null, query: null, parameters: null };
@@ -421,6 +492,7 @@ const reset = () => {
   runs.length = 0;
   appConfig.clear();
   failing.clear();
+  for (const key of Object.keys(partnerRows)) delete partnerRows[key];
   erpGate = Promise.resolve();
 };
 
@@ -507,32 +579,75 @@ const reset = () => {
   assert.equal(clients.find((client) => client.id === "client-b")?.partnerTitles, undefined);
 }
 
-{
-  // Modo simulação: o cliente quitado aparece no Histórico como previsto, mas nada é gravado nele.
-  reset();
-  const staleTitles = [{ PARCEIRO: "2001", DOCTO: 9, PARCELA: 1, SALDO_CAPITAL: 70 }];
+// Rodada com cliente quitado na carteira do dono (2001, parceiro não cliente no ERP: entra pela carteira
+// bruta), cliente com títulos em aberto que saiu da carteira do dono (2003) e dono sem Login FV3 (2002).
+const staleTitles = [{ PARCEIRO: "2001", DOCTO: 9, PARCELA: 1, SALDO_CAPITAL: 70 }];
+const seedPortfolioRound = () => {
   clients = [
     { id: "client-live", code: "2000", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false },
     { id: "client-paid", code: "2001", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false, financialProfile: { VALOR_MEDIO: 5 }, partnerTitles: staleTitles, openTitlesTotal: 70, overdueTitlesTotal: 70 },
     { id: "client-orphan", code: "2002", tenantId: "tenant-a", ownerSellerId: "seller-sem-login", isArchived: false, partnerTitles: staleTitles, openTitlesTotal: 70, overdueTitlesTotal: 70 },
+    { id: "client-left", code: "2003", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false, partnerTitles: [{ PARCEIRO: "2003", DOCTO: 5, PARCELA: 1, SALDO_CAPITAL: 40 }], openTitlesTotal: 40, overdueTitlesTotal: 0 },
   ];
   for (const key of Object.keys(erpRows)) delete erpRows[key];
   Object.assign(erpRows, { "seller-a": { financialProfiles: [], partnerTitles: [{ PARCEIRO: "2000", DOCTO: 1, PARCELA: 1, SALDO_CAPITAL: 10 }] } });
+  Object.assign(partnerRows, { "seller-a": [{ PARCEIRO: "2000", IDN_CLIENTE: "N" }, { PARCEIRO: "2001", IDN_CLIENTE: "N" }] });
+};
+const titlesRunOf = () => runs.find((item) => item.scope === "partnerTitles" && item.authMode === "all_sellers");
+const clearingOf = () => {
+  const metrics = titlesRunOf()?.metrics;
+  return { planned: metrics?.titleClearing.clearedClients.map((item: any) => item.code), blockedByReason: metrics?.titleClearing.blockedByReason };
+};
 
+{
+  // Modo simulação: o cliente quitado aparece no Histórico como previsto, mas nada é gravado nele.
+  reset();
+  seedPortfolioRound();
   const job = await sync.startSellerPortfolioSyncJob();
   await waitForRun(job.runId);
-  const titlesRun = runs.find((item) => item.scope === "partnerTitles" && item.authMode === "all_sellers");
+  const titlesRun = titlesRunOf();
   assert.equal(titlesRun?.metrics.titleClearSimulation, 1);
   assert.equal(titlesRun?.metrics.titleClearPlanned, 1);
   assert.equal(titlesRun?.metrics.titleClearWritten, 0);
+  assert.equal(titlesRun?.metrics.titleClearOwnerPortfolios, 3, "carteira dos três vendedores na rodada");
   assert.equal(titlesRun?.metrics.titleClearing.mode, "simulation");
-  assert.deepEqual(titlesRun?.metrics.titleClearing.clearedClients.map((item: any) => item.code), ["2001"]);
-  assert.deepEqual(titlesRun?.metrics.titleClearing.blockedByReason, { ownerWithoutCoverage: 1 });
+  assert.deepEqual(clearingOf(), { planned: ["2001"], blockedByReason: { ownerWithoutCoverage: 1, notInOwnerPortfolio: 1 } });
   const paid = clients.find((client) => client.id === "client-paid")!;
   assert.deepEqual([paid.partnerTitles, paid.openTitlesTotal, paid.overdueTitlesTotal], [staleTitles, 70, 70], "simulação não grava");
   assert.deepEqual(paid.financialProfile, { VALOR_MEDIO: 5 });
+  assert.equal(clients.find((client) => client.id === "client-left")?.openTitlesTotal, 40);
   const portfolio = runs.find((item) => item.scope === sync.SELLER_PORTFOLIO_RUN_SCOPE);
   assert.equal(JSON.stringify(portfolio?.metrics ?? {}).includes("clearedClients"), false, "lista de códigos fica só no run de partnerTitles");
+}
+
+{
+  // /partners do dono falhou na rodada: o quitado também fica bloqueado.
+  reset();
+  seedPortfolioRound();
+  failing.add("seller-a:partners");
+  const job = await sync.startSellerPortfolioSyncJob();
+  await waitForRun(job.runId);
+  assert.deepEqual(clearingOf(), { planned: [], blockedByReason: { ownerWithoutCoverage: 1, ownerPortfolioUnproven: 2 } });
+}
+
+{
+  // Títulos rodados sem /partners na mesma rodada: ninguém é limpo.
+  reset();
+  seedPortfolioRound();
+  await sync.syncPartnerTitlesAcrossSellers();
+  assert.equal(titlesRunOf()?.metrics.titleClearOwnerPortfolios, 0);
+  assert.deepEqual(clearingOf(), { planned: [], blockedByReason: { ownerWithoutCoverage: 1, ownerPortfolioUnproven: 2 } });
+}
+
+{
+  // Sincronização Completa e scheduler: os passos partners e partnerTitles recebem a mesma carteira da rodada
+  // (step.run com partnerPortfolioRound; contrato estático abaixo). Mesma regra do botão.
+  reset();
+  seedPortfolioRound();
+  const partnerPortfolioRound = sync.createPartnerPortfolioRound();
+  await sync.syncPartnersAcrossSellers({ partnerPortfolioRound });
+  await sync.syncPartnerTitlesAcrossSellers({ partnerPortfolioRound });
+  assert.deepEqual(clearingOf(), { planned: ["2001"], blockedByReason: { ownerWithoutCoverage: 1, notInOwnerPortfolio: 1 } });
 }
 
 {
@@ -589,11 +704,13 @@ const panel = read("../../../web/src/components/settings/ErpIntegrationPanel.tsx
 assert.match(scheduler, /run: syncPartnersAcrossSellers/);
 assert.match(scheduler, /run: syncFinancialProfilesAcrossSellers, nonCritical: true/);
 assert.match(scheduler, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/);
+assert.match(scheduler, /const partnerPortfolioRound = createPartnerPortfolioRound\(\);[\s\S]*step\.run\(\{[\s\S]{0,200}partnerPortfolioRound,/, "scheduler passa a carteira da rodada de /partners para os títulos");
 assert.match(scheduler, /acquireSellerPortfolioLock\(correlationId\)[\s\S]*skippedReason: lastAutomaticSkippedReason[\s\S]*automaticSyncRunning = true/, "scheduler pega o lock compartilhado antes de rodar");
 assert.match(scheduler, /releaseSellerPortfolioLock\(correlationId\)/);
 assert.match(service, /run: syncFinancialProfilesAcrossSellers, nonCritical: true/);
 assert.match(service, /export async function startUltraFv3FullSyncJob[\s\S]*acquireSellerPortfolioLock\(correlationId\)[\s\S]*void syncAllUltraFv3Catalogs/, "Sincronização Completa pega o lock compartilhado antes de iniciar");
 assert.match(service, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/);
+assert.match(service, /export async function syncAllUltraFv3Catalogs[\s\S]*const partnerPortfolioRound = createPartnerPortfolioRound\(\);[\s\S]*step\.run\(\{ correlationId, failIfLocked: true, heartbeat, partnerPortfolioRound \}\)/, "Sincronização Completa passa a carteira da rodada de /partners para os títulos");
 assert.match(service, /export async function syncProducts[\s\S]{0,120}resolveReferenceCredentials\(\)/, "catálogos seguem com o vendedor de referência");
 assert.match(routes, /router\.post\("\/erp\/ultrafv3\/sync\/partners\/all-sellers", authorize\("diretor", "gerente"\), async[\s\S]{0,200}startSellerPortfolioSyncJob/, "mesmos perfis de antes");
 assert.match(service, /^const PARTNER_TITLE_CLEARING_ENABLED = false;$/m, "limpeza de títulos entra em modo simulação");

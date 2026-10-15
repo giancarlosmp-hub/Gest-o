@@ -91,7 +91,16 @@ export type RunSyncOptions = {
   authenticatedActorUserId?: string;
   /** Renova o lock da execução que engloba esta (botão ou scheduler) entre vendedores. */
   heartbeat?: () => Promise<void>;
+  /**
+   * Carteira do /partners por vendedor na rodada (botão, scheduler ou Sincronização Completa): o
+   * /partners preenche e a limpeza de títulos lê. Sem ela, a limpeza não limpa ninguém.
+   */
+  partnerPortfolioRound?: PartnerPortfolioRound;
 };
+
+/** Por vendedor que concluiu o /partners na rodada: códigos do retorno bruto, antes do filtro IDN_CLIENTE. */
+export type PartnerPortfolioRound = Map<string, Set<string>>;
+export const createPartnerPortfolioRound = (): PartnerPortfolioRound => new Map();
 
 type PartnerTenantAuthority = Readonly<{
   tenantId: string;
@@ -2309,6 +2318,13 @@ export async function syncPartners(options?: RunSyncOptions) {
   );
 }
 
+/** Só registra retorno sem erro de paginação: carteira incompleta não comprova nada. */
+const recordPartnerPortfolio = (options: RunSyncOptions | undefined, sellerId: string, rows: unknown[], pagination: PartnerPaginationDiagnostics) => {
+  if (!options?.partnerPortfolioRound || pagination.paginationError) return;
+  const codes = rows.flatMap((row) => (row && typeof row === "object" && !Array.isArray(row) ? [pickPartnerCode(row as Record<string, unknown>)] : []));
+  options.partnerPortfolioRound.set(sellerId, new Set(codes.filter(Boolean)));
+};
+
 export async function syncPartnersByUser(
   userId: string,
   options?: RunSyncOptions,
@@ -2391,6 +2407,7 @@ export async function syncPartnersByUser(
           sampleFields: firstRowSamples,
           ...diagnosticsBase,
         });
+        recordPartnerPortfolio(options, seller.id, rows, paged.pagination);
         return {
           syncedCount: 0,
           diagnostics: {
@@ -2448,6 +2465,7 @@ export async function syncPartnersByUser(
         },
       );
       const warning = partnerSyncWarning(result.diagnostics);
+      recordPartnerPortfolio(options, seller.id, rows, paged.pagination);
       return {
         ...(warning ? { warning } : {}),
         syncedCount: result.syncedCount,
@@ -3704,6 +3722,7 @@ async function clearPartnerTitlesAbsentFromRound(input: {
   exclusions: FinancialWriteExclusions;
   codeOf: (row: Record<string, unknown>) => string;
   previousCoverageBySeller: Record<string, string[]>;
+  ownerPortfolioBySeller: PartnerPortfolioRound;
 }) {
   const candidates = await findClientsWithStoredTitles();
   const ownerTenantById = await resolveOwnerTenants(candidates, input.knownSellerTenants);
@@ -3731,6 +3750,7 @@ async function clearPartnerTitlesAbsentFromRound(input: {
       titleClearBlocked: plan.blocked.length,
       titleClearShrankOwners: plan.shrankOwners,
       titleClearMassGuard: plan.massClearGuardTriggered ? 1 : 0,
+      titleClearOwnerPortfolios: input.ownerPortfolioBySeller.size,
     },
     details: {
       mode: PARTNER_TITLE_CLEARING_ENABLED ? "enabled" : "simulation",
@@ -3811,7 +3831,11 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
           });
           writtenClients += updated.count;
         }
-        const clearing = await clearPartnerTitlesAbsentFromRound({ fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf, previousCoverageBySeller: coverage });
+        // Sem /partners na mesma rodada (escopo rodado sozinho), a carteira fica vazia e ninguém é limpo.
+        const clearing = await clearPartnerTitlesAbsentFromRound({
+          fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf, previousCoverageBySeller: coverage,
+          ownerPortfolioBySeller: options.partnerPortfolioRound ?? createPartnerPortfolioRound(),
+        });
         planDiagnostics = { ...planDiagnostics, ...clearing.diagnostics };
         historyDetails = { titleClearing: clearing.details };
       }
@@ -3928,7 +3952,8 @@ export const sellerPortfolioHeartbeat = (runId: string) => async () => {
 
 type PortfolioScopeReport = { status: "success" | "partial" | "failed"; durationMs: number; syncedCount: number; diagnostics?: Record<string, number>; error?: string };
 
-async function runSellerPortfolioSync(options: RunSyncOptions) {
+async function runSellerPortfolioSync(baseOptions: RunSyncOptions) {
+  const options = { ...baseOptions, partnerPortfolioRound: createPartnerPortfolioRound() };
   const scopes: Record<string, PortfolioScopeReport> = {};
   const sellers: SellerScopeReport[] = [];
 
@@ -4152,6 +4177,8 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), hear
     steps: FULL_SYNC_STEPS.map((step) => step.scope),
   });
 
+  const partnerPortfolioRound = createPartnerPortfolioRound();
+
   try {
     for (const [index, step] of FULL_SYNC_STEPS.entries()) {
       const stepStartedAt = Date.now();
@@ -4166,7 +4193,7 @@ export async function syncAllUltraFv3Catalogs(correlationId = randomUUID(), hear
       let result: SyncResult;
       try {
         await runHeartbeat({ heartbeat });
-        result = await step.run({ correlationId, failIfLocked: true, heartbeat });
+        result = await step.run({ correlationId, failIfLocked: true, heartbeat, partnerPortfolioRound });
       } catch (error) {
         if (!step.nonCritical) throw error;
         const message = formatError(error);

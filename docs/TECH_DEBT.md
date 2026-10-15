@@ -344,6 +344,21 @@ retorno dele cai mais de 50% **e** mais de 5 em relação à rodada bem-sucedida
 rodada, teto absoluto de 300 limpezas (`massClearGuard`, bloqueia tudo). O acúmulo de títulos já pagos
 não dispara nenhuma das duas.
 
+Carteira do dono na mesma rodada (obrigatória): só limpa se o código do cliente veio no `/partners` do
+vendedor dono na mesma rodada, no retorno bruto (antes do filtro `IDN_CLIENTE`). Fora da carteira:
+`notInOwnerPortfolio`. `/partners` do dono não rodou, falhou ou teve erro de paginação:
+`ownerPortfolioUnproven`. Motivo: na simulação em produção (14/10/2026), um cadastro alterado no ERP
+ficou sem vendedor e saiu da carteira do dono. Os títulos em aberto dele deixaram de vir no
+`/partnerTitles` de qualquer vendedor, mas no CRM o dono continuou o mesmo (o filtro `IDN_CLIENTE` não
+atualiza não-clientes), então o cliente seria limpo por engano. O mesmo vale para um cliente que mude de
+carteira ou fique sem vendedor. O botão, o scheduler e a Sincronização Completa passam a carteira do
+passo `partners` para o passo `partnerTitles` (`partnerPortfolioRound` em `RunSyncOptions`). Títulos
+rodados sem `/partners` na mesma rodada não limpam ninguém. A métrica `titleClearOwnerPortfolios`
+registra quantos vendedores tiveram a carteira comprovada na rodada.
+
+Limitação conhecida: o cliente que sai da carteira do dono fica com os títulos antigos (bloqueado, não
+limpo) até o dono no CRM ser corrigido ou o cadastro voltar para a carteira dele no ERP.
+
 ### TD-ERP-PARTNER-TITLES-NON-SALES — títulos que não são de venda entram no banner de risco
 
 **Aberto, decisão de negócio pendente.** O `/partnerTitles` traz, além de `DSCRECEITA` = VENDAS, outros
