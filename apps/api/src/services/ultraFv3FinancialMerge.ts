@@ -212,6 +212,42 @@ export function planPartnerTitleWrites(context: FinancialPlanContext & { saldoOf
   return { writes, diagnostics: { ...diagnostics, duplicateTitlesMerged } };
 }
 
+/**
+ * TD-ERP-PARTNER-TITLES-NON-SALES: só receitas de venda contam como título a receber do cliente.
+ * Comparação exata depois de normalizar (maiúsculas, sem acento, espaços aparados e colapsados).
+ */
+export const SALES_RECEIVABLE_TYPES: ReadonlySet<string> = new Set(["VENDAS", "VENDA ENTREGA FUTURA", "VENDA AMBULANTE"]);
+
+export const normalizeReceivableType = (value: unknown) =>
+  value === undefined || value === null
+    ? ""
+    : String(value).normalize("NFD").replace(/[̀-ͯ]/g, "").trim().replace(/\s+/g, " ").toUpperCase();
+
+/** DSCRECEITA ausente ou vazio conta (fail-open); qualquer outro tipo preenchido fora da lista não conta. */
+export const isSalesReceivableTitle = (row: Record<string, unknown>) => {
+  const type = normalizeReceivableType(row.DSCRECEITA);
+  return !type || SALES_RECEIVABLE_TYPES.has(type);
+};
+
+export type SalesTitleFilterStats = { droppedByType: Record<string, number>; withoutType: number };
+
+export const emptySalesTitleFilterStats = (): SalesTitleFilterStats => ({ droppedByType: {}, withoutType: 0 });
+
+/** Títulos que serão gravados; acumula em stats os descartados por tipo e os sem tipo. */
+export const filterSalesReceivableTitles = (titles: Record<string, unknown>[], stats: SalesTitleFilterStats) =>
+  titles.filter((title) => {
+    const type = normalizeReceivableType(title.DSCRECEITA);
+    if (!type) stats.withoutType += 1;
+    if (isSalesReceivableTitle(title)) return true;
+    stats.droppedByType[type] = (stats.droppedByType[type] ?? 0) + 1;
+    return false;
+  });
+
+export const salesTitleFilterDiagnostics = (stats: SalesTitleFilterStats) => ({
+  nonSalesTitlesDropped: Object.values(stats.droppedByType).reduce((total, count) => total + count, 0),
+  titlesWithoutType: stats.withoutType,
+});
+
 const preferIncomingTitle = (
   current: SourcedRow,
   incoming: SourcedRow,
