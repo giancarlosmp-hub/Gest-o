@@ -447,3 +447,20 @@ geram). Títulos vencidos, maior atraso em aberto pelos títulos e cheques devol
 tolerância. A média continua visível no Perfil Financeiro. Para reverter, voltar a constante para `0`
 (regra anterior: qualquer média acima de 0 gera atenção) e ajustar o teste de tolerância em
 `clientErpProjection.test.ts`.
+
+### TD-PLATFORM-HEALTH-PARENT-RUN — Saúde perdia a execução-pai fora das 100 linhas recentes
+
+**Corrigido na branch `fix/platform-health-parent-run`.** A Saúde da Plataforma lia só as 100 linhas
+mais recentes de `ErpSyncRun` e procurava a execução-pai entre elas. Cada rodada grava dezenas de
+etapas, então a execução-pai saía da lista e a tela mostrava "Sem registro", "Sem execução-pai" e
+`-1` em "Sincronização parada". Agora `loadPlatformHealthRuns` (`platformHealthService.ts`) busca as
+execuções-pai direto, pelo mesmo critério de `platformHealthProjection.ts` (`syncAll` manual e
+`automatic` do scheduler). "Sincronização parada" conta a partir da última execução-pai com sucesso,
+só alerta dentro da janela do scheduler e nunca mostra número negativo. O "Executar agora" passou a gravar `metrics.origin = "run_now"` e não comprova
+mais a execução automática na Saúde.
+
+Fica em aberto:
+- A Integração ERP (`getErpAutomaticSyncState` em `apps/api/src/jobs/erpSyncScheduler.ts`) ainda conta
+  o "Executar agora" como última execução do scheduler.
+- Execuções do "Executar agora" gravadas antes desta correção não têm `origin` e continuam contando
+  como automáticas até a próxima rodada real do scheduler.

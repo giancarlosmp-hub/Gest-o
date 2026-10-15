@@ -252,6 +252,15 @@ export const isInsideAutomaticSyncWindow = (date: Date) => {
   return hour >= AUTOMATIC_SYNC_START_HOUR && hour < AUTOMATIC_SYNC_END_HOUR;
 };
 
+// Início da janela de hoje quando `date` está dentro dela; null fora da janela.
+export const getAutomaticSyncWindowStartedAt = (date: Date) => {
+  if (!isInsideAutomaticSyncWindow(date)) return null;
+  const start = new Date(date.getTime());
+  start.setUTCMinutes(0, 0, 0);
+  start.setUTCHours(start.getUTCHours() - (getSaoPauloHour(date) - AUTOMATIC_SYNC_START_HOUR));
+  return start;
+};
+
 export const calculateNextAutomaticRunAt = (from = new Date()) => {
   const probe = new Date(from.getTime());
   probe.setUTCSeconds(0, 0);
@@ -322,7 +331,10 @@ async function loadLatestAutomaticRunSummary() {
   return { latestFinished, latestSuccess, latestAttempt };
 }
 
-async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
+// "run_now" marca o botão "Executar agora": é execução-pai completa, mas não comprova o scheduler.
+export type AutomaticSyncRunOrigin = "timer" | "run_now";
+
+async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt, origin: AutomaticSyncRunOrigin = "timer") {
   const schedulerTickAt = new Date();
   lastAutomaticTickAt = schedulerTickAt;
   const tickMetadataBase = {
@@ -442,6 +454,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
       metrics: {
         schedulerTickAt: schedulerTickAt.toISOString(),
         scheduledFor: scheduledFor?.toISOString() ?? null,
+        origin,
         timezone: SAO_PAULO_TIME_ZONE,
         totalSteps: AUTOMATIC_SYNC_STEPS.length,
       } as Prisma.InputJsonValue,
@@ -581,6 +594,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
         metrics: {
           schedulerTickAt: schedulerTickAt.toISOString(),
           scheduledFor: scheduledFor?.toISOString() ?? null,
+          origin,
           timezone: SAO_PAULO_TIME_ZONE,
           completedSteps,
           nonCriticalStepWarnings,
@@ -621,6 +635,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
         metrics: {
           schedulerTickAt: schedulerTickAt.toISOString(),
           scheduledFor: scheduledFor?.toISOString() ?? null,
+          origin,
           timezone: SAO_PAULO_TIME_ZONE,
           completedSteps,
           failedStep,
@@ -915,7 +930,7 @@ export async function runAutomaticErpSyncNow() {
   if (!automaticSchedulerInitialized) {
     await startErpSyncScheduler();
   }
-  await executeAutomaticErpSync(new Date());
+  await executeAutomaticErpSync(new Date(), "run_now");
   return getErpAutomaticSyncState();
 }
 
