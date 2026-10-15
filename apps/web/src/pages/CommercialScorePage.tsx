@@ -14,6 +14,7 @@ import {
 import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatPercentBR } from "../lib/formatters";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend);
 
@@ -40,7 +41,7 @@ type CommercialScoreResponse = {
 
 const cardClass = "rounded-2xl border border-slate-200 bg-white p-5 shadow-sm";
 
-const getCurrentMonth = () => new Date().toISOString().slice(0, 7);
+const getCurrentMonth = () => brazilMonthKey();
 
 const getScoreColorClass = (score: number) => {
   if (score > 80) return "bg-emerald-100 text-emerald-700";

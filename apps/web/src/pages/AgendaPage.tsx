@@ -11,6 +11,7 @@ import type { AgendaEvent, AgendaEventType, AgendaStop } from "../models/agenda"
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import WeeklyCommercialPlan from "../components/planning/WeeklyCommercialPlan";
 import AgendaIntelligencePanel from "../components/agenda/AgendaIntelligencePanel";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type Seller = { id: string; name: string };
 
@@ -952,7 +953,7 @@ export default function AgendaPage() {
       closeResultModal();
       setEventsRefreshToken((current) => current + 1);
       toast.success("Visita registrada com sucesso");
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+      triggerDashboardRefresh({ month: brazilMonthKey() });
     } catch (error) {
       toast.error(getApiErrorMessage(error, "Não foi possível salvar o resultado."));
     } finally {

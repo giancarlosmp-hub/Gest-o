@@ -16,6 +16,7 @@ import { getApiErrorMessage } from "../lib/apiError";
 import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -605,7 +606,7 @@ export default function OpportunitiesPage() {
   }), [opportunitiesQueryKey]);
 
   const dashboardMonthlySummaryQueryKey = useMemo(() => ({
-    month: new Date().toISOString().slice(0, 7),
+    month: brazilMonthKey(),
     ownerSellerId: filters.ownerSellerId,
     status: filters.status
   }), [filters.ownerSellerId, filters.status]);
@@ -681,7 +682,7 @@ export default function OpportunitiesPage() {
 
   const invalidateOpportunitiesAndDashboardQueries = useCallback(async () => {
     await refetchOpportunityQueries();
-    triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+    triggerDashboardRefresh({ month: brazilMonthKey() });
   }, [refetchOpportunityQueries]);
 
   useEffect(() => {

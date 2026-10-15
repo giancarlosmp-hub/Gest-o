@@ -32,6 +32,8 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
+import { brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
+import { closedOpportunityPeriodWhere, opportunityPeriodWhere } from "../utils/periodFilters.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -415,7 +417,7 @@ const normalizeTerritoryCityKey = (city?: string | null) =>
     .trim();
 
 const parseTerritoryMonth = (monthParam: unknown) => {
-  const rawMonth = typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : new Date().toISOString().slice(0, 7);
+  const rawMonth = typeof monthParam === "string" && /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : brazilTodayKey().slice(0, 7);
   const [year, month] = rawMonth.split("-").map(Number);
   const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
   const end = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
@@ -634,7 +636,7 @@ type OpportunityFilterParams = {
   search?: string;
   crop?: string;
   season?: string;
-  dateRangeWhere?: { gte?: Date; lte?: Date };
+  period?: { from?: string; to?: string };
   overdueOnly: boolean;
 };
 
@@ -650,17 +652,8 @@ const parseOpportunityFilterParams = (req: Request) => {
   const dateFrom = req.query.dateFrom as string | undefined;
   const dateTo = req.query.dateTo as string | undefined;
 
-  const dateRangeWhere: OpportunityFilterParams["dateRangeWhere"] = {};
-  if (dateFrom) {
-    const parsed = normalizeDateToUtc(dateFrom, false);
-    if (!parsed) return { error: "dateFrom inválido" } as const;
-    dateRangeWhere.gte = parsed;
-  }
-  if (dateTo) {
-    const parsed = normalizeDateToUtc(dateTo, true);
-    if (!parsed) return { error: "dateTo inválido" } as const;
-    dateRangeWhere.lte = parsed;
-  }
+  if (dateFrom && !calendarDayRange(dateFrom)) return { error: "dateFrom inválido" } as const;
+  if (dateTo && !calendarDayRange(undefined, dateTo)) return { error: "dateTo inválido" } as const;
 
   return {
     params: {
@@ -671,7 +664,7 @@ const parseOpportunityFilterParams = (req: Request) => {
       search: req.query.search as string | undefined,
       crop: req.query.crop as string | undefined,
       season: req.query.season as string | undefined,
-      dateRangeWhere: Object.keys(dateRangeWhere).length ? dateRangeWhere : undefined,
+      period: dateFrom || dateTo ? { from: dateFrom, to: dateTo } : undefined,
       overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true"
     } satisfies OpportunityFilterParams
   } as const;
@@ -687,18 +680,7 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
   if (params.clientId) whereFilters.push({ clientId: params.clientId });
   if (params.crop) whereFilters.push({ crop: params.crop });
   if (params.season) whereFilters.push({ season: params.season });
-  if (params.dateRangeWhere) {
-    if (params.status === "closed") {
-      whereFilters.push({
-        OR: [
-          { closedAt: params.dateRangeWhere },
-          { closedAt: null, expectedCloseDate: params.dateRangeWhere }
-        ]
-      });
-    } else {
-      whereFilters.push({ proposalDate: params.dateRangeWhere });
-    }
-  }
+  if (params.period) whereFilters.push(opportunityPeriodWhere(params.status, params.period.from, params.period.to));
   if (params.overdueOnly) {
     whereFilters.push({
       followUpDate: { lt: todayStart },
@@ -806,13 +788,6 @@ const getMonthRangeFromKey = (monthKey: string) => {
     end: new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
   };
 };
-
-const buildWonOpportunityDateRangeFilter = (start: Date, end: Date): Prisma.OpportunityWhereInput => ({
-  OR: [
-    { closedAt: { gte: start, lte: end } },
-    { closedAt: null, expectedCloseDate: { gte: start, lte: end } }
-  ]
-});
 
 const getWeekRangeFromMonday = (weekStartRaw: string) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartRaw)) return null;
@@ -3387,7 +3362,9 @@ router.get("/reports/score-monthly", async (req, res) => {
     return res.status(403).json({ message: "Filtro userId não permitido para perfil vendedor." });
   }
 
-  const { start, end } = getMonthRangeFromKey(month);
+  const period = monthDayBounds(month);
+  if (!period) return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  const createdAtRange = brazilDayRange(period.from, period.to)!;
 
   const [sellers, monthSales, monthGoals, monthPipeline] = await Promise.all([
     prisma.user.findMany({
@@ -3397,7 +3374,7 @@ router.get("/reports/score-monthly", async (req, res) => {
     }),
     loadEffectiveWonTotals({
       stage: "ganho",
-      ...buildWonOpportunityDateRangeFilter(start, end)
+      ...closedOpportunityPeriodWhere(period.from, period.to)
     }),
     prisma.goal.findMany({
       where: { month },
@@ -3405,7 +3382,7 @@ router.get("/reports/score-monthly", async (req, res) => {
     }),
     prisma.opportunity.findMany({
       where: {
-        createdAt: { gte: start, lte: end }
+        createdAt: createdAtRange
       },
       select: {
         ownerSellerId: true,
@@ -3486,10 +3463,8 @@ router.get("/reports/weekly-highlights", async (req, res) => {
   const sellerIdRaw = typeof req.query.sellerId === "string" ? req.query.sellerId.trim() : "";
   const scopedSellerId = req.user?.role === "vendedor" ? req.user.id : sellerIdRaw || undefined;
   const range = getCurrentWeekRangeFromBrazilNow();
-  const previousStart = new Date(range.start);
-  previousStart.setUTCDate(previousStart.getUTCDate() - 7);
-  const previousEnd = new Date(range.end);
-  previousEnd.setUTCDate(previousEnd.getUTCDate() - 7);
+  const weekFrom = range.start.toISOString().slice(0, 10);
+  const weekTo = shiftDayKey(weekFrom, 6);
 
   const weeklyVisitGoal = await getWeeklyVisitGoal();
 
@@ -3501,12 +3476,12 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     loadEffectiveWonTotals({
       stage: "ganho",
       ...sellerWhere(req),
-      ...buildWonOpportunityDateRangeFilter(range.start, range.end)
+      ...closedOpportunityPeriodWhere(weekFrom, weekTo)
     }),
     loadEffectiveWonTotals({
       stage: "ganho",
       ...sellerWhere(req),
-      ...buildWonOpportunityDateRangeFilter(previousStart, previousEnd)
+      ...closedOpportunityPeriodWhere(shiftDayKey(weekFrom, -7), shiftDayKey(weekTo, -7))
     }),
     prisma.activity.findMany({
       where: {
@@ -3532,7 +3507,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       }
     }),
     prisma.opportunity.findMany({
-      where: { createdAt: { gte: range.start, lte: range.end } },
+      where: { createdAt: brazilDayRange(weekFrom, weekTo)! },
       select: { ownerSellerId: true }
     })
   ]);
@@ -3637,6 +3612,9 @@ router.get("/reports/commercial-score", async (req, res) => {
 
   const scopedSellerId = undefined;
   const { start, end } = getMonthRangeFromKey(month);
+  const period = monthDayBounds(month);
+  if (!period) return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  const monthInstantRange = brazilDayRange(period.from, period.to)!;
   const stageOrder: Record<string, number> = {
     prospeccao: 0,
     negociacao: 1,
@@ -3657,7 +3635,7 @@ router.get("/reports/commercial-score", async (req, res) => {
       by: ["sellerId"],
       where: {
         type: "roteiro_visita",
-        startDateTime: { gte: start, lte: end },
+        startDateTime: monthInstantRange,
         ...(scopedSellerId ? { sellerId: scopedSellerId } : {})
       },
       _count: { _all: true }
@@ -3665,7 +3643,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     prisma.opportunity.findMany({
       where: {
         stage: { notIn: ["ganho", "perdido"] },
-        createdAt: { lte: end },
+        createdAt: { lt: monthInstantRange.lt },
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
       },
       select: {
@@ -3676,7 +3654,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     }),
     prisma.opportunity.findMany({
       where: {
-        createdAt: { gte: start, lte: end },
+        createdAt: monthInstantRange,
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
       },
       select: {
@@ -3686,7 +3664,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     prisma.timelineEvent.findMany({
       where: {
         type: "mudanca_etapa",
-        createdAt: { gte: start, lte: end },
+        createdAt: monthInstantRange,
         ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {})
       },
       select: {
@@ -3697,7 +3675,7 @@ router.get("/reports/commercial-score", async (req, res) => {
     loadEffectiveWonTotals({
       stage: "ganho",
       ...(scopedSellerId ? { ownerSellerId: scopedSellerId } : {}),
-      ...buildWonOpportunityDateRangeFilter(start, end)
+      ...closedOpportunityPeriodWhere(period.from, period.to)
     }),
     prisma.goal.findMany({
       where: {
@@ -3914,12 +3892,12 @@ router.get("/reports/consistency", async (req, res) => {
 
   const monthlyStats = await Promise.all(
     monthKeys.map(async (month) => {
-      const { start, end } = getMonthRangeFromKey(month);
+      const period = monthDayBounds(month)!;
       const [sales, goals] = await Promise.all([
         loadEffectiveWonTotals({
           stage: "ganho",
           ownerSellerId: { in: sellers.map((seller) => seller.id) },
-          ...buildWonOpportunityDateRangeFilter(start, end)
+          ...closedOpportunityPeriodWhere(period.from, period.to)
         }),
         prisma.goal.findMany({
           where: {
@@ -8086,13 +8064,14 @@ router.get("/activities/monthly-counts", async (req, res) => {
   }
 
   const sellerId = req.user!.role === "vendedor" ? req.user!.id : sellerIdQuery;
-  const { start, end } = getMonthRangeFromKey(month);
+  const period = monthDayBounds(month);
+  if (!period) return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
 
   const groupedCounts = await prisma.activity.groupBy({
     by: ["ownerSellerId", "type"],
     where: {
       ...(sellerId ? { ownerSellerId: sellerId } : sellerWhere(req)),
-      createdAt: { gte: start, lte: end }
+      createdAt: brazilDayRange(period.from, period.to)!
     },
     _count: { _all: true }
   });
@@ -10745,6 +10724,9 @@ router.delete("/territories/config/cities/:id", authorize("diretor", "gerente"),
 
 router.get("/territories/coverage", async (req, res) => {
   const { rawMonth, start, end } = parseTerritoryMonth(req.query.month);
+  const period = monthDayBounds(rawMonth);
+  if (!period) return res.status(400).json({ message: "month deve estar no formato YYYY-MM" });
+  const monthInstantRange = brazilDayRange(period.from, period.to)!;
   const requestedSellerId = typeof req.query.sellerId === "string" ? req.query.sellerId : undefined;
   const sellerId = req.user?.role === "vendedor" ? req.user.id : requestedSellerId;
 
@@ -10765,8 +10747,8 @@ router.get("/territories/coverage", async (req, res) => {
         sellerId,
         status: ErpOrderSyncStatus.sent,
         OR: [
-          { sentAt: { gte: start, lt: end } },
-          { sentAt: null, createdAt: { gte: start, lt: end } }
+          { sentAt: monthInstantRange },
+          { sentAt: null, createdAt: monthInstantRange }
         ]
       },
       select: {

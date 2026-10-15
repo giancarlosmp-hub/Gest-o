@@ -5,6 +5,7 @@ import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { formatCurrencyBRL, formatNumberBR, formatPercentBR } from "../lib/formatters";
 import { getApiErrorMessage } from "../lib/apiError";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type SellerOption = {
   id: string;
@@ -388,7 +389,7 @@ const statusStyles: Record<TerritoryCityStatus, { badge: string; card: string; d
 };
 
 function getCurrentMonthKey() {
-  return new Date().toISOString().slice(0, 7);
+  return brazilMonthKey();
 }
 
 
