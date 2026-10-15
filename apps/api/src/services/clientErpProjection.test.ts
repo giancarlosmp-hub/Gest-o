@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   CLIENT_FINANCIAL_PROFILE_ALLOWED_KEYS,
   CLIENT_PARTNER_TITLE_ALLOWED_KEYS,
+  ERP_AVERAGE_DELAY_TOLERANCE_DAYS,
   buildClientCreditAlert,
   buildClientDelayMetrics,
   parseErpDueDay,
@@ -72,7 +73,8 @@ test("client response projection replaces raw ERP payload and adds creditAlert",
   });
   assert.equal(response.id, "client-fake");
   assert.doesNotMatch(JSON.stringify(response), /synthetic|LIMITE_CREDITO|NOSSO_NUMERO|FATURAS_RECEBER_ID/);
-  assert.deepEqual(response.creditAlert, { level: "atencao", reasons: ["Atraso médio de 4 dias"] });
+  // DIAS_MEDIAATRASO 4 fica dentro de ERP_AVERAGE_DELAY_TOLERANCE_DAYS: sem aviso.
+  assert.deepEqual(response.creditAlert, { level: "ok", reasons: [] });
   assert.deepEqual(response.delayMetrics, { openDelayDays: 0, overdueTitlesCount: 0, oldestOverdueDueDate: null, unparseableDueDates: 0 });
 });
 
@@ -98,7 +100,8 @@ test("creditAlert matches the legacy web rule (open delay from titles) when ther
     { DIAS_MEDIAATRASO: 0, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
     {},
     { DIAS_MEDIAATRASO: "0", DIAS_MAIORATRASO_AB: null, QTD_CHEQUES_DEV: "" },
-    { DIAS_MEDIAATRASO: 1, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
+    // Média até ERP_AVERAGE_DELAY_TOLERANCE_DAYS saiu da regra antiga de propósito (teste próprio abaixo).
+    { DIAS_MEDIAATRASO: 5, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
     { DIAS_MEDIAATRASO: 15, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
     { DIAS_MEDIAATRASO: "abc", DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
     { DIAS_MEDIAATRASO: -2, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 },
@@ -125,9 +128,9 @@ test("creditAlert reasons are clear for the seller", () => {
     level: "risco",
     reasons: ["Atraso médio de 20 dias", "Maior atraso em aberto: 5 dias", "1 cheque devolvido"]
   });
-  assert.deepEqual(buildClientCreditAlert({ financialProfile: { DIAS_MEDIAATRASO: 1, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 } }), {
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: { DIAS_MEDIAATRASO: 5, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 } }), {
     level: "atencao",
-    reasons: ["Atraso médio de 1 dia"]
+    reasons: ["Atraso médio de 5 dias"]
   });
 });
 
@@ -146,6 +149,41 @@ test("creditAlert considers overdueTitlesTotal as risk", () => {
 
   assert.deepEqual(buildClientCreditAlert({ financialProfile: null, overdueTitlesTotal: 0 }), { level: "ok", reasons: [] });
   assert.deepEqual(buildClientCreditAlert({}), { level: "ok", reasons: [] });
+});
+
+test("creditAlert tolerates the ERP average delay up to ERP_AVERAGE_DELAY_TOLERANCE_DAYS", () => {
+  assert.equal(ERP_AVERAGE_DELAY_TOLERANCE_DAYS, 4);
+  const now = new Date("2026-01-09T15:00:00.000Z");
+  const profile = (average: unknown) => ({ DIAS_MEDIAATRASO: average, DIAS_MAIORATRASO_AB: 0, QTD_CHEQUES_DEV: 0 });
+  const hasAverageReason = (reasons: string[]) => reasons.some((reason) => reason.startsWith("Atraso médio"));
+
+  for (const average of [0, 2, 4, "4", "4,0"]) {
+    assert.deepEqual(buildClientCreditAlert({ financialProfile: profile(average), overdueTitlesTotal: 0 }, now), { level: "ok", reasons: [] }, String(average));
+  }
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: profile(4.1) }, now), { level: "atencao", reasons: ["Atraso médio de 4,1 dias"] });
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: profile("4,5") }, now), { level: "atencao", reasons: ["Atraso médio de 4,5 dias"] });
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: profile(5) }, now), { level: "atencao", reasons: ["Atraso médio de 5 dias"] });
+
+  // Título vencido e maior atraso em aberto pelos títulos continuam sem tolerância.
+  const withOverdue = buildClientCreditAlert({ financialProfile: profile(2), overdueTitlesTotal: 100 }, now);
+  assert.equal(withOverdue.level, "risco");
+  assert.equal(withOverdue.reasons.length, 1);
+  assert.match(withOverdue.reasons[0], /^Cliente com títulos vencidos/);
+  const titleOneDayLate = { DATA_VENCIMENTO: "2026-01-08T03:00:00.000Z", SALDO_CAPITAL: 100 };
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: profile(2), partnerTitles: [titleOneDayLate] }, now), {
+    level: "risco",
+    reasons: ["Maior atraso em aberto: 1 dia"]
+  });
+
+  // Média ausente (sem perfil, chave ausente ou vazia): nenhum aviso por média.
+  assert.deepEqual(buildClientCreditAlert({ financialProfile: null }, now), { level: "ok", reasons: [] });
+  for (const average of [undefined, null, ""]) {
+    const missingAverage = buildClientCreditAlert({ financialProfile: profile(average) }, now);
+    assert.equal(hasAverageReason(missingAverage.reasons), false, String(average));
+  }
+
+  // Selo verde (level ok) quando não sobra nenhum motivo.
+  assert.equal(buildClientCreditAlert({ financialProfile: profile(3), partnerTitles: [{ DATA_VENCIMENTO: "2026-02-01T03:00:00.000Z", SALDO_CAPITAL: 100 }], overdueTitlesTotal: 0 }, now).level, "ok");
 });
 
 // ---------------------------------------------------------------------------------------------
