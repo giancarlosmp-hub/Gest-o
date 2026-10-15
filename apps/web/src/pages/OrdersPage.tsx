@@ -120,7 +120,7 @@ const statusMeta: Record<
     icon: AlertCircle,
   },
   error: {
-    label: "Pendência ou erro",
+    label: "Recusados pelo ERP",
     classes: "bg-slate-100 text-slate-800 ring-slate-300",
     icon: AlertCircle,
   },
@@ -280,7 +280,7 @@ export default function OrdersPage() {
     ["partial", "Parciais", Truck],
     ["finished", "Finalizados", CheckCircle2],
     ["cancelled", "Cancelados", AlertCircle],
-    ["error", "Com pendência", AlertCircle],
+    ["error", "Recusados pelo ERP", AlertCircle],
   ] as const;
   return (
     <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">

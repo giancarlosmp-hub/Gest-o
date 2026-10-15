@@ -1,4 +1,3 @@
-import { isValidErpOrder } from "@salesforce-pro/shared";
 import { sanitizeErpOrderErrorMessage } from "./erpOrderService.js";
 
 export function orderStatusGroup(sync: string, operational: string | null, fulfillment: string | null) {
@@ -54,11 +53,12 @@ export const serializeOrderAttempt = (order: any) => {
   };
 };
 
-// Pedidos e Valor total contam só pedido válido (`sent`); os grupos seguem a projeção de status,
-// então a tentativa recusada aparece apenas em "Com pendência" (error).
+// Na tela Pedidos, Pedidos e Valor total contam toda tentativa não recusada (`sent` e `pending`),
+// para fechar com Aguardando + Em processamento + Parciais + Finalizados + Cancelados. A tentativa
+// recusada (`error`) aparece só em "Recusados pelo ERP". O ganho efetivo segue só com `sent`.
 export function summarizeOrders(items: Array<{ syncStatus: string; statusGroup: string; totalValue: number }>) {
   return items.reduce((acc, item) => {
-    if (isValidErpOrder({ status: item.syncStatus })) { acc.count++; acc.totalValue += item.totalValue; }
+    if (item.syncStatus !== "error") { acc.count++; acc.totalValue += item.totalValue; }
     acc[item.statusGroup]++;
     return acc;
   }, { count: 0, totalValue: 0, pending: 0, processing: 0, partial: 0, finished: 0, cancelled: 0, error: 0 } as Record<string, number>);

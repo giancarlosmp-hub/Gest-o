@@ -46,9 +46,23 @@ test("oportunidade com tentativa recusada e depois aceita conta 1 pedido", () =>
   assert.equal(summary.count, 1); assert.equal(summary.totalValue, 500); assert.equal(summary.finished, 1); assert.equal(summary.error, 1);
 });
 
-test("tentativa pending fica só em Aguardando, fora de Pedidos e Valor total", () => {
+test("tentativa pending entra em Pedidos, Valor total e Aguardando", () => {
   const summary = summarizeOrders([serializeOrderAttempt(attempt("pend-1", "pending"))]);
-  assert.equal(summary.count, 0); assert.equal(summary.totalValue, 0); assert.equal(summary.pending, 1);
+  assert.equal(summary.count, 1); assert.equal(summary.totalValue, 500); assert.equal(summary.pending, 1);
+});
+
+test("Pedidos = Aguardando + Em processamento + Parciais + Finalizados + Cancelados, sem recusadas", () => {
+  const items = [
+    attempt("pend-2", "pending"),
+    attempt("proc-1", "sent", { operationalStatusRaw: "ACEITO" }),
+    attempt("part-1", "sent", { operationalStatusRaw: "PARCIAL" }),
+    accepted,
+    attempt("canc-1", "sent", { operationalStatusRaw: "CANCELADO" }),
+    rejectedWithFakeFinal, rejectedCancelled,
+  ].map(serializeOrderAttempt);
+  const summary = summarizeOrders(items);
+  assert.equal(summary.count, summary.pending + summary.processing + summary.partial + summary.finished + summary.cancelled);
+  assert.equal(summary.count, 5); assert.equal(summary.totalValue, 2500); assert.equal(summary.error, 2);
 });
 
 test("mutante que conta toda tentativa falha", () => {
