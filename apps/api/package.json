@@ -38,7 +38,7 @@
     "smoke:commercial-automations": "tsx src/scripts/commercialAutomationsSmoke.ts",
     "smoke:ai": "tsx src/scripts/aiSmoke.ts",
     "smoke:knowledge-base": "tsx src/scripts/knowledgeBaseSmoke.ts",
-    "smoke:date-only": "tsx src/scripts/dateOnlySmoke.ts && tsx src/utils/dateRange.test.ts",
+    "smoke:date-only": "tsx src/scripts/dateOnlySmoke.ts && tsx src/utils/dateRange.test.ts && tsx src/utils/periodFilters.test.ts",
     "smoke:ultrafv3-order-flow": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/scripts/ultraFv3OrderFlowMockSmoke.ts",
     "test:erp-order-reconciliation": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderReconciliation.test.ts",
     "test:erp-order-manual-resolution": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderManualResolution.test.ts",

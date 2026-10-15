@@ -1,4 +1,5 @@
 import { formatDateBR } from "./formatters";
+import { brazilMonthKey } from "./brazilDate";
 
 type SellerLite = {
   id: string;
@@ -30,7 +31,7 @@ export type SellerCardMetrics = {
 const CLOSED_STAGES = new Set(["ganho", "perdido"]);
 const WON_STAGE = "ganho";
 
-export const getCurrentMonthKey = () => new Date().toISOString().slice(0, 7);
+export const getCurrentMonthKey = () => brazilMonthKey();
 
 const belongsToMonth = (value: string | undefined, monthKey: string) => {
   if (!value) return false;

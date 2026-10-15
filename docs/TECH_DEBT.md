@@ -520,3 +520,26 @@ Fica em aberto:
   "reenvio permanece bloqueado". O comportamento já existia e não foi alterado aqui.
 - A consulta manual `POST /orders/:id/status-consultation` responde 502 ("falhou") quando o pedido só
   não foi localizado (`errorCount` soma não localizado e falha de chamada).
+
+### TD-DATE-FILTERS-BRASILIA — filtros de período fora do dia de Brasília
+
+**Corrigido na branch `fix/inclusive-brasilia-date-filters` (PR #958).** "De D1 até D2" passou a ser
+de D1 00:00 ao fim de D2 em Brasília (UTC-3 fixo) em Oportunidades, Relatórios (encerradas), Pedidos,
+Dashboard, scores mensais, consistência, destaques semanais, contagem mensal de atividades, Territórios
+e auditoria da Saúde. Instantes usam `brazilDayRange`; data pura gravada como meia-noite UTC
+(`proposalDate`, `expectedCloseDate`) usa `calendarDayRange` (`apps/api/src/utils/dateRange.ts`,
+`periodFilters.ts`). Na web, mês e dia padrão vêm de `apps/web/src/lib/brazilDate.ts`.
+
+Fica em aberto:
+- **`Activity.date`/`Activity.dueDate` têm semântica mista (decisão de negócio):** atividade executada
+  grava o instante real; as demais gravam a data escolhida como meia-noite UTC. Nenhum recorte único
+  acerta os dois. Afeta `/activities?month`, `/activity-kpis`, `weekly-missions`, `weekly-visits`,
+  `weekly-discipline`, `planned-vs-realized`, `discipline-ranking`, a parte de execução do
+  `commercial-score` e `getActivityCountByTypeInMonth`. Antes de corrigir, decidir se o campo é dia ou
+  instante e normalizar os dados.
+- "Atrasada" (`getUtcTodayStart`) e a semana do plano comercial de IA (`planningIntelligenceService`)
+  usam o dia UTC: das 21h à meia-noite de Brasília já contam o dia seguinte.
+- Datas padrão de cadastro na web ainda usam `toISOString()` (nova atividade pelo atalho móvel, entrega
+  prevista do pedido em `OpportunityDetailsPage`, data de entrada da oportunidade rápida na Agenda).
+- Código morto: `getWeekRangeFromStart` (`crudRoutes.ts`) e `startOfDay`/`endOfDay` em
+  `conversationalCrmService.ts`.

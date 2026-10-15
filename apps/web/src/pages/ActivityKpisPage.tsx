@@ -4,6 +4,7 @@ import api from "../lib/apiClient";
 import { useAuth } from "../context/AuthContext";
 import { ACTIVITY_TYPE_OPTIONS, normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type Seller = {
   id: string;
@@ -22,7 +23,7 @@ type ActivityTypeKey = (typeof ACTIVITY_TYPE_OPTIONS)[number]["value"];
 type KpiDraftBySeller = Record<string, Record<ActivityTypeKey, number>>;
 
 function getCurrentMonth() {
-  return new Date().toISOString().slice(0, 7);
+  return brazilMonthKey();
 }
 
 const createEmptyDraft = (): Record<ActivityTypeKey, number> =>

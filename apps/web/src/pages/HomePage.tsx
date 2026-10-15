@@ -8,6 +8,7 @@ import { useReminders } from "../hooks/useReminders";
 import { normalizeActivityType } from "../constants/activityTypes";
 import { getApiErrorMessage } from "../lib/apiError";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
+import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
 
 type Activity = {
   id: string;
@@ -226,7 +227,7 @@ export default function HomePage() {
   });
   const startRouteSearch = useMemo(() => {
     const params = new URLSearchParams({
-      date: new Date().toISOString().slice(0, 10),
+      date: brazilTodayKey(),
       view: "hoje",
       highlight: "next",
       execute: "1"
@@ -264,7 +265,7 @@ export default function HomePage() {
   });
   const [draggedPanelId, setDraggedPanelId] = useState<PanelId | null>(null);
 
-  const dashboardQueryKey = useMemo(() => new Date().toISOString().slice(0, 7), []);
+  const dashboardQueryKey = useMemo(() => brazilMonthKey(), []);
   const isSeller = user?.role === "vendedor";
   const canViewCommercialInsights = user?.role === "diretor" || user?.role === "gerente";
 
@@ -289,7 +290,7 @@ export default function HomePage() {
       void refreshReminders(signal);
       try {
         setPipelineError(null);
-        const today = new Date().toISOString().slice(0, 10);
+        const today = brazilTodayKey();
         const [activitiesResponse, opportunitiesResponse, activityKpisResponse, agendaResponse, prioritiesResponse] = await Promise.all([
           api.get("/activities", { signal }),
           api.get("/opportunities?status=open", { signal }),

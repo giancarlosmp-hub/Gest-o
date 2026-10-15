@@ -28,6 +28,7 @@ import {
   isSuccessfulErpOrderSync,
   normalizeErpParameterCode,
 } from "@salesforce-pro/shared";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type EventType = "comentario" | "mudanca_etapa" | "status";
@@ -1183,7 +1184,7 @@ export default function OpportunityDetailsPage() {
     try {
       await api.put(`/opportunities/${item.id}`, payload);
       await load();
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+      triggerDashboardRefresh({ month: brazilMonthKey() });
     } finally {
       setSaving(false);
     }
@@ -1256,7 +1257,7 @@ export default function OpportunityDetailsPage() {
     try {
       await api.delete(`/opportunities/${item.id}`);
       toast.success("Oportunidade excluída");
-      triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+      triggerDashboardRefresh({ month: brazilMonthKey() });
       setShowDeleteModal(false);
       navigate("/oportunidades");
     } catch (error) {

@@ -9,6 +9,7 @@ import { triggerDashboardRefresh } from "../lib/dashboardRefresh";
 import ClientSelect from "../components/ClientSelect";
 import ClientSearchSelect, { type SearchableClientOption } from "../components/clients/ClientSearchSelect";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
+import { brazilMonthKey } from "../lib/brazilDate";
 
 type Opportunity = { id: string; title: string; clientId: string };
 type Seller = { id: string; name: string; role?: string };
@@ -230,7 +231,7 @@ export default function ActivitiesPage() {
 
   const refreshAfterMutation = async () => {
     await loadActivities();
-    triggerDashboardRefresh({ month: new Date().toISOString().slice(0, 7) });
+    triggerDashboardRefresh({ month: brazilMonthKey() });
   };
 
   useEffect(() => {

@@ -46,3 +46,21 @@ export const brazilDayRange = (from?: string, to?: string) => buildRange(from, t
 // Para campos de data pura gravados como meia-noite UTC (proposalDate, expectedCloseDate), que a
 // tela exibe pelo componente YYYY-MM-DD: o dia de Brasília é o próprio dia UTC.
 export const calendarDayRange = (from?: string, to?: string) => buildRange(from, to, 0);
+
+// Dia de Brasília de um instante, como YYYY-MM-DD (independe do fuso do servidor).
+export const brazilDayKeyOf = (instant: Date) =>
+  new Date(instant.getTime() - BRAZIL_UTC_OFFSET_HOURS * 3_600_000).toISOString().slice(0, 10);
+
+export const brazilTodayKey = () => brazilDayKeyOf(new Date());
+
+// Soma dias a um YYYY-MM-DD.
+export const shiftDayKey = (dayKey: string, days: number) =>
+  new Date(Date.parse(`${dayKey}T00:00:00.000Z`) + days * DAY_MS).toISOString().slice(0, 10);
+
+// Primeiro e último dia de um mês YYYY-MM, para usar com brazilDayRange/calendarDayRange.
+export const monthDayBounds = (monthKey: string) => {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey.trim());
+  if (!match || Number(match[2]) < 1 || Number(match[2]) > 12) return null;
+  const lastDay = new Date(Date.UTC(Number(match[1]), Number(match[2]), 0)).getUTCDate();
+  return { from: `${match[1]}-${match[2]}-01`, to: `${match[1]}-${match[2]}-${String(lastDay).padStart(2, "0")}` };
+};

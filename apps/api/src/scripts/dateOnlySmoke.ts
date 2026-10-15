@@ -12,6 +12,8 @@ assert.match(opportunitiesPage, /function toDateInput[\s\S]*dateOnly[\s\S]*retur
 assert.match(opportunitiesPage, /function toDayStart[\s\S]*new Date\(Number\(dateOnly\[1\]\), Number\(dateOnly\[2\]\) - 1, Number\(dateOnly\[3\]\)\)/, "comparações de dia devem parsear date-only como data local");
 assert.match(opportunitiesPage, /Data de entrada — de/, "Filtro inicial deve identificar Data de entrada — de");
 assert.match(opportunitiesPage, /Data de entrada — até/, "Filtro final deve identificar Data de entrada — até");
-assert.match(crudRoutes, /whereFilters\.push\(\{ proposalDate: params\.dateRangeWhere \}\)/, "Filtros dateFrom/dateTo devem continuar aplicados ao campo proposalDate/Data de entrada");
+const periodFilters = readFileSync(resolve(repoRoot, "api/src/utils/periodFilters.ts"), "utf8");
+assert.match(crudRoutes, /whereFilters\.push\(opportunityPeriodWhere\(params\.status, params\.period\.from, params\.period\.to\)\)/, "Filtros dateFrom/dateTo devem continuar aplicados pelo filtro de período de oportunidades");
+assert.match(periodFilters, /\{ proposalDate: calendarDayRange\(from, to\)! \}/, "Filtros dateFrom/dateTo devem continuar aplicados ao campo proposalDate/Data de entrada");
 
 console.log("Date-only opportunity smoke passed");

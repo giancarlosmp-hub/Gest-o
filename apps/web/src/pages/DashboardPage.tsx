@@ -35,6 +35,7 @@ import { useAuth } from "../context/AuthContext";
 import { DASHBOARD_REFRESH_EVENT } from "../lib/dashboardRefresh";
 import { normalizeActivityType, toLabel } from "../constants/activityTypes";
 import DonutLegendChips from "../components/DonutLegendChips";
+import { brazilMonthKey, brazilTodayKey } from "../lib/brazilDate";
 
 ChartJS.register(
   CategoryScale,
@@ -202,10 +203,7 @@ const doughnutCenterTextPlugin: Plugin<"doughnut"> = {
   },
 };
 
-const getCurrentMonth = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-};
+const getCurrentMonth = () => brazilMonthKey();
 
 const getCurrentWeekStart = () => {
   const now = new Date();
@@ -394,7 +392,7 @@ export default function DashboardPage() {
       api.get<ActivityKpi[]>(`/activity-kpis?month=${month}${querySeller}`, { signal }),
       api.get<Activity[]>(`/activities?month=${month}${querySeller}&done=true`, { signal }),
       api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${from}&to=${to}${querySeller}`, { signal }),
-      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${new Date().toISOString().slice(0, 10)}${querySeller}`, { signal }),
+      api.get<DisciplineRankingItem[]>(`/reports/discipline-ranking?from=${getCurrentWeekStart()}&to=${brazilTodayKey()}${querySeller}`, { signal }),
       api.get<WeeklyHighlights>(`/reports/weekly-highlights?weekStart=${getCurrentWeekStart()}${querySeller}`, { signal }),
       api.get<ConsistencyResponse>(`/reports/consistency${querySeller ? `?sellerId=${debouncedSellerId}` : ""}`, { signal }),
       api.get<MonthlyScoreResponse>(`/reports/score-monthly?month=${month}${scoreQuery}`, { signal }),
