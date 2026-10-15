@@ -90,6 +90,7 @@ import { agendaIntelligenceService } from "../services/agendaIntelligenceService
 import { getErpAutomaticSyncRuntimeStatus, refreshErpAutomaticSyncConfig, runAutomaticErpSyncNow, setErpAutomaticSyncEnabled } from "../jobs/erpSyncScheduler.js";
 import { investigateErpPartnerReadOnly } from "../services/erpPartnerInvestigationService.js";
 import { MANUAL_RESOLUTION_CONFIRMATION_PHRASE, resolveAmbiguousErpOrderManually } from "../services/erpOrderManualResolutionService.js";
+import { buildErpHealthcheckResponse } from "../services/erpOrderOperationalSummary.js";
 import { COMMERCIAL_AUTOMATIONS_CONFIG_KEY, DEFAULT_COMMERCIAL_AUTOMATIONS_CONFIG, getCommercialAutomationsStatus, parseCommercialAutomationsConfig, runCommercialAutomations } from "../services/commercialAutomationsService.js";
 import { recordClientCodeChange } from "../services/clientCodeAuditService.js";
 import { buildClientCreditAlert, projectClientForResponse } from "../services/clientErpProjection.js";
@@ -9281,13 +9282,8 @@ router.get("/erp/ultrafv3/healthcheck", authorize("diretor", "gerente"), async (
   const status = await getUltraFv3SyncStatus();
   const integration = getUltraFv3IntegrationDiagnostics(status);
   const operational = await getErpOrderOperationalSummary();
-  const hasOperationalErrors = Object.values(status).some((item) => item.status === "error") || operational.errorOrders > 0;
-  return res.status(hasOperationalErrors ? 207 : 200).json({
-    ok: integration.isConfigured && !hasOperationalErrors,
-    integration,
-    operational,
-    status,
-  });
+  const { httpStatus, body } = buildErpHealthcheckResponse(status, integration, operational);
+  return res.status(httpStatus).json(body);
 });
 
 router.get("/erp/ultrafv3/diagnostics", authorize("diretor", "gerente"), async (_req, res) => {

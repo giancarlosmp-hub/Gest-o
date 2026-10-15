@@ -464,3 +464,20 @@ Fica em aberto:
   o "Executar agora" como última execução do scheduler.
 - Execuções do "Executar agora" gravadas antes desta correção não têm `origin` e continuam contando
   como automáticas até a próxima rodada real do scheduler.
+
+### TD-ERP-OPEN-ORDER-ERRORS — card "Erro" e banner ERP contavam erros já superados
+
+**Corrigido na branch `fix/erp-open-order-errors`.** O card "Erro" da Integração ERP, o banner
+"Alerta operacional ERP" e o 207 de `GET /erp/ultrafv3/healthcheck` contavam toda tentativa
+`ErpOrderSync` com `status = error`. Um reenvio cria outra tentativa e a antiga fica `error` para
+sempre, então o alerta não apagava. Agora contam só oportunidades com erro em aberto: tentativa
+`error` sem resolução manual e sem tentativa `sent` criada depois na mesma oportunidade. A regra fica
+em `findOpenErpOrderErrorOpportunityIds` (`packages/shared`), e `getErpOrderOperationalSummary`
+(`erpOrderOperationalSummary.ts`) também alimenta os cards "Pedidos sincronizados" e "Pedidos com
+erro" da Saúde. O total de tentativas com erro aparece como "N no histórico".
+
+Fica em aberto:
+- A conferência de status (`syncErpOrderStatuses`) consulta de hora em hora todas as tentativas
+  `sent/pending/error` sem resolução manual, sem limite de data. Tentativas recusadas pelo ERP no
+  POST nunca são localizadas e somam em `nonCriticalOrderStatusErrors` a cada rodada.
+- `GET /erp/ultrafv3/diagnostics` ainda expõe `errorOrders` (histórico) no nível de cima.

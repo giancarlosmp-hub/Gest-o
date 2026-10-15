@@ -2,6 +2,7 @@ import { prisma } from "../config/prisma.js";
 import { getAutomaticSyncWindowStartedAt, getErpAutomaticSyncState } from "../jobs/erpSyncScheduler.js";
 import { mergePlatformHealthRuns, PARENT_RUN_WHERE, projectAutomaticEvidence, projectPlatformHealthRuns, projectSellerQuality } from "./platformHealthProjection.js";
 import { readFile } from "node:fs/promises";
+import { getErpOrderOperationalSummary } from "./erpOrderOperationalSummary.js";
 import { PLATFORM_HEALTH_CONTRACT_VERSION, platformHealthSnapshotSchema } from "@salesforce-pro/shared";
 
 export const PLATFORM_HEALTH_CACHE_TTL_MS = 60_000;
@@ -78,7 +79,7 @@ let cache: { expiresAt: number; data: Awaited<ReturnType<typeof querySnapshot>> 
 const querySnapshot = async (days: 7 | 30 | 90) => {
   const since = new Date(Date.now() - days * 86_400_000);
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-  const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend, lastSuccessfulParent] = await Promise.all([
+  const [runs, totalClients, archived, missingDocument, missingSeller, missingRegion, missingCity, missingState, duplicateRows, contactQualityRows, jsonQualityRows, auditToday, auditTrend, lastSuccessfulParent, erpOrders] = await Promise.all([
     loadPlatformHealthRuns(since),
     prisma.client.count(), prisma.client.count({ where: { isArchived: true } }),
     prisma.client.count({ where: { OR: [{ cnpj: null }, { cnpj: "" }] } }),
@@ -90,18 +91,21 @@ const querySnapshot = async (days: 7 | 30 | 90) => {
     prisma.clientCodeAudit.count({ where: { createdAt: { gte: today } } }),
     prisma.clientCodeAudit.groupBy({ by: ["createdAt"], where: { createdAt: { gte: since } }, _count: { _all: true } }),
     loadLastSuccessfulParentRun(),
+    getErpOrderOperationalSummary(),
   ]);
   const runProjection = projectPlatformHealthRuns(runs);
   const metricKeys = ["partnersReceived", "partnersUpdated", "clientsCreated", "clientsUpdated", "ordersSynced", "ordersError", "documentConflicts", "fallbackNoDocument", "codeExact", "documentExact", "rejectConflict", "createNoSafeMatch"];
   const aggregate = runProjection.parentRuns.reduce<MetricMap>((acc, run) => {
     const m = run.metrics;
-    const mappings: Record<string, string[]> = { partnersReceived: ["received"], partnersUpdated: ["updated"], clientsCreated: ["created"], clientsUpdated: ["updated"], ordersSynced: ["ordersSynced", "synced"], ordersError: ["ordersError", "errors"], documentConflicts: ["documentErpConflicts", "rejected_document_conflict"], fallbackNoDocument: ["identity_fallback_no_document"], codeExact: ["code_exact"], documentExact: ["document_exact"], rejectConflict: ["rejected_document_conflict"], createNoSafeMatch: ["create_no_safe_match"] };
+    const mappings: Record<string, string[]> = { partnersReceived: ["received"], partnersUpdated: ["updated"], clientsCreated: ["created"], clientsUpdated: ["updated"], documentConflicts: ["documentErpConflicts", "rejected_document_conflict"], fallbackNoDocument: ["identity_fallback_no_document"], codeExact: ["code_exact"], documentExact: ["document_exact"], rejectConflict: ["rejected_document_conflict"], createNoSafeMatch: ["create_no_safe_match"] };
     for (const [target, keys] of Object.entries(mappings)) {
       const value = metricFrom(m, ...keys);
       if (value !== null) acc[target] = (acc[target] ?? 0) + value;
     }
     return acc;
   }, Object.fromEntries(metricKeys.map(key => [key, null])));
+  // Pedidos vêm de ErpOrderSync, com a mesma função dos cards da Integração ERP; o histórico é só informativo.
+  Object.assign(aggregate, { ordersSynced: erpOrders.syncedOrders, ordersError: erpOrders.openErrorOrders, ordersErrorHistory: erpOrders.errorOrders });
   const duplicates = Number(duplicateRows[0]?.count ?? 0);
   const partnerTitlesInconsistent = Number(jsonQualityRows[0]?.partner_titles ?? 0);
   const financialProfilesOrphaned = Number(jsonQualityRows[0]?.financial_orphans ?? 0);

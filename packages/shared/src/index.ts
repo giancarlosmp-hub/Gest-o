@@ -452,6 +452,39 @@ export const normalizeErpParameterCode = (value: unknown): string => {
   return "";
 };
 
+export type ErpOrderAttemptForOpenError = {
+  opportunityId: string;
+  status: string;
+  createdAt: Date | string;
+  hasManualResolution: boolean;
+};
+
+/** Oportunidades com pedido ERP em erro em aberto: tentativa `error` sem resolução manual e sem
+ * tentativa `sent` criada depois dela na mesma oportunidade. Conta oportunidades, não tentativas:
+ * duas recusas do mesmo pedido são um pedido parado. Oportunidade com erro e nenhum `sent` conta
+ * sempre, para não esconder pedido travado. Regra única para a Integração ERP, a Saúde e o
+ * healthcheck. */
+export const findOpenErpOrderErrorOpportunityIds = (attempts: readonly ErpOrderAttemptForOpenError[]): string[] => {
+  const time = (value: Date | string) => new Date(value).getTime();
+  const lastSentAt = new Map<string, number>();
+  for (const attempt of attempts) {
+    if (attempt.status !== "sent") continue;
+    lastSentAt.set(attempt.opportunityId, Math.max(lastSentAt.get(attempt.opportunityId) ?? -Infinity, time(attempt.createdAt)));
+  }
+  const open = new Set<string>();
+  for (const attempt of attempts) {
+    if (attempt.status !== "error" || attempt.hasManualResolution) continue;
+    if ((lastSentAt.get(attempt.opportunityId) ?? -Infinity) > time(attempt.createdAt)) continue;
+    open.add(attempt.opportunityId);
+  }
+  return [...open];
+};
+
+/** Banner "Alerta operacional ERP" e status 207 do healthcheck: falha de sincronização de algum
+ * escopo ou pedido com erro em aberto. O histórico de erros já superados não acende o alerta. */
+export const hasErpOperationalAlert = (input: { scopeErrors: number; openErrorOrders: number }) =>
+  input.scopeErrors > 0 || input.openErrorOrders > 0;
+
 const erpOrderParameterValueSchema = z.custom<ErpOrderParameterValue>(
   (value) => Boolean(normalizeErpParameterCode(value)),
   { message: "Código ERP obrigatório." },
