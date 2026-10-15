@@ -600,22 +600,25 @@ const clearingOf = () => {
 };
 
 {
-  // Modo simulação: o cliente quitado aparece no Histórico como previsto, mas nada é gravado nele.
+  // Limpeza habilitada: só o cliente quitado planejado é limpo; os bloqueados ficam intocados.
   reset();
   seedPortfolioRound();
   const job = await sync.startSellerPortfolioSyncJob();
   await waitForRun(job.runId);
   const titlesRun = titlesRunOf();
-  assert.equal(titlesRun?.metrics.titleClearSimulation, 1);
+  assert.equal(titlesRun?.metrics.titleClearSimulation, 0);
   assert.equal(titlesRun?.metrics.titleClearPlanned, 1);
-  assert.equal(titlesRun?.metrics.titleClearWritten, 0);
+  assert.equal(titlesRun?.metrics.titleClearWritten, titlesRun?.metrics.titleClearPlanned, "grava exatamente os planejados");
   assert.equal(titlesRun?.metrics.titleClearOwnerPortfolios, 3, "carteira dos três vendedores na rodada");
-  assert.equal(titlesRun?.metrics.titleClearing.mode, "simulation");
+  assert.equal(titlesRun?.metrics.titleClearing.mode, "enabled");
   assert.deepEqual(clearingOf(), { planned: ["2001"], blockedByReason: { ownerWithoutCoverage: 1, notInOwnerPortfolio: 1 } });
   const paid = clients.find((client) => client.id === "client-paid")!;
-  assert.deepEqual([paid.partnerTitles, paid.openTitlesTotal, paid.overdueTitlesTotal], [staleTitles, 70, 70], "simulação não grava");
-  assert.deepEqual(paid.financialProfile, { VALOR_MEDIO: 5 });
-  assert.equal(clients.find((client) => client.id === "client-left")?.openTitlesTotal, 40);
+  assert.deepEqual([paid.partnerTitles, paid.openTitlesTotal, paid.overdueTitlesTotal], [[], 0, 0], "quitado planejado é limpo");
+  assert.deepEqual(paid.financialProfile, { VALOR_MEDIO: 5 }, "limpar não toca no financialProfile");
+  const orphan = clients.find((client) => client.id === "client-orphan")!;
+  assert.deepEqual([orphan.partnerTitles, orphan.openTitlesTotal, orphan.overdueTitlesTotal], [staleTitles, 70, 70], "ownerWithoutCoverage fica intocado");
+  const left = clients.find((client) => client.id === "client-left")!;
+  assert.deepEqual([left.partnerTitles, left.openTitlesTotal, left.overdueTitlesTotal], [[{ PARCEIRO: "2003", DOCTO: 5, PARCELA: 1, SALDO_CAPITAL: 40 }], 40, 0], "notInOwnerPortfolio fica intocado");
   const portfolio = runs.find((item) => item.scope === sync.SELLER_PORTFOLIO_RUN_SCOPE);
   assert.equal(JSON.stringify(portfolio?.metrics ?? {}).includes("clearedClients"), false, "lista de códigos fica só no run de partnerTitles");
 }
@@ -713,7 +716,7 @@ assert.match(service, /run: syncPartnerTitlesAcrossSellers, nonCritical: true/);
 assert.match(service, /export async function syncAllUltraFv3Catalogs[\s\S]*const partnerPortfolioRound = createPartnerPortfolioRound\(\);[\s\S]*step\.run\(\{ correlationId, failIfLocked: true, heartbeat, partnerPortfolioRound \}\)/, "Sincronização Completa passa a carteira da rodada de /partners para os títulos");
 assert.match(service, /export async function syncProducts[\s\S]{0,120}resolveReferenceCredentials\(\)/, "catálogos seguem com o vendedor de referência");
 assert.match(routes, /router\.post\("\/erp\/ultrafv3\/sync\/partners\/all-sellers", authorize\("diretor", "gerente"\), async[\s\S]{0,200}startSellerPortfolioSyncJob/, "mesmos perfis de antes");
-assert.match(service, /^const PARTNER_TITLE_CLEARING_ENABLED = false;$/m, "limpeza de títulos entra em modo simulação");
+assert.match(service, /^const PARTNER_TITLE_CLEARING_ENABLED = true;$/m, "limpeza de títulos habilitada (fase 2)");
 assert.match(service, /data: \{ partnerTitles: \[\] as Prisma\.InputJsonArray, openTitlesTotal: 0, overdueTitlesTotal: 0 \}/, "limpar não toca no financialProfile");
 assert.match(panel, /SELLER_PORTFOLIO_POLL_MAX_MS/);
 assert.match(panel, /Sincronização em andamento, acompanhe pelo Histórico\./);

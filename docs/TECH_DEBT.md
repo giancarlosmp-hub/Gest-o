@@ -330,12 +330,15 @@ retorno e mantém `partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` anti
 crédito fica desatualizado. A correção exige saber quando o retorno é um snapshot completo por
 vendedor; não foi feita no PR da sincronização financeira por vendedor.
 
-Fase 2 implementada em **modo simulação** (`PARTNER_TITLE_CLEARING_ENABLED = false` em
-`ultraFv3SyncService.ts`; regra em `planPartnerTitleClears`, `ultraFv3FinancialMerge.ts`). A rodada por
-vendedor registra no metrics do ErpSyncRun de `partnerTitles` os clientes que seriam limpos
-(`titleClearing.clearedClients`) e os motivos de bloqueio, sem gravar. Ligar a limpeza é trocar a flag
-para `true`, em PR próprio, depois de conferir a simulação em produção. A sincronização com credencial
-global (`syncPartnerTitles`) continua sem limpeza.
+Fase 2 **habilitada** (`PARTNER_TITLE_CLEARING_ENABLED = true` em `ultraFv3SyncService.ts`; regra em
+`planPartnerTitleClears`, `ultraFv3FinancialMerge.ts`) após a validação da simulação em produção
+(14/10/2026): o cliente fora da carteira do dono saiu como `notInOwnerPortfolio` e os quitados
+conferidos no ERP estavam previstos para limpar. A rodada por vendedor grava `partnerTitles` `[]`,
+`openTitlesTotal` 0 e `overdueTitlesTotal` 0 só nos clientes planejados (`financialProfile` intacto) e
+registra no metrics do ErpSyncRun de `partnerTitles` os clientes limpos (`titleClearing.clearedClients`,
+`mode` `"enabled"`), os motivos de bloqueio e `titleClearWritten`. Rollback: reverter o PR que trocou a
+flag (volta ao modo simulação). A sincronização com credencial global (`syncPartnerTitles`) continua
+sem limpeza.
 
 Retorno completo = envelope do conector (`message` = `"OK"`, `data` em array, sem campo de paginação;
 total, se vier, igual ao recebido). Travas: por dono, `returnShrank` quando o número de clientes no
