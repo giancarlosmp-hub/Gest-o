@@ -59,7 +59,8 @@ export const buildPreviewCreditClientFixtures = (now: Date): PreviewCreditClient
     region: "Sul",
     opportunityTitle: "Crédito atenção - fertilizantes safra",
     financialProfile: {
-      // Faixa amarela da regra: atraso médio entre 1 e 15 dias, sem atraso em aberto nem cheque.
+      // Faixa amarela da regra: atraso médio acima de ERP_AVERAGE_DELAY_TOLERANCE_DAYS (4) e até 15 dias,
+      // sem atraso em aberto nem cheque.
       DIAS_MEDIAATRASO: 8,
       DIAS_MAIORATRASO_AB: 0,
       QTD_CHEQUES_DEV: 0,

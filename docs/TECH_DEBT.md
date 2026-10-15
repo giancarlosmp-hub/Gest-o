@@ -436,3 +436,14 @@ pagamento, condição de recebimento ou operação não liberada quando o cache 
 tem linhas. Com o cache ausente ou vazio, a revalidação retorna sem bloquear e o pedido segue para o
 ERP com o código informado. A listagem da tela fica vazia nesse caso, mas um envio direto pela API passa.
 Mantido assim no PR #949; tornar fail-closed em PR próprio.
+
+### TD-ERP-AVERAGE-DELAY-TOLERANCE — média de atraso do ERP até 4 dias não gera aviso de crédito
+
+**Decisão de negócio, registrada.** Vencimento em sábado, domingo ou feriado é liquidado no próximo
+dia útil, e o `DIAS_MEDIAATRASO` do ERP fica entre 1 e 4 dias para clientes que pagam em dia. O
+`creditAlert` (`buildClientCreditAlert` em `apps/api/src/services/clientErpProjection.ts`) só usa a
+média como motivo quando ela passa de `ERP_AVERAGE_DELAY_TOLERANCE_DAYS = 4` (4 não gera; 4,1 e 5
+geram). Títulos vencidos, maior atraso em aberto pelos títulos e cheques devolvidos seguem sem
+tolerância. A média continua visível no Perfil Financeiro. Para reverter, voltar a constante para `0`
+(regra anterior: qualquer média acima de 0 gera atenção) e ajustar o teste de tolerância em
+`clientErpProjection.test.ts`.

@@ -152,6 +152,13 @@ export const buildClientDelayMetrics = (partnerTitles: unknown, now = new Date()
 const LEVEL_RANK: Record<ClientCreditAlertLevel, number> = { ok: 0, atencao: 1, risco: 2 };
 
 /**
+ * Média de atraso do histórico do ERP (DIAS_MEDIAATRASO) até este valor não gera aviso: vencimento
+ * em fim de semana ou feriado é liquidado no próximo dia útil. Só a média tem tolerância; títulos
+ * vencidos, maior atraso em aberto e cheques devolvidos continuam sem tolerância.
+ */
+export const ERP_AVERAGE_DELAY_TOLERANCE_DAYS = 4;
+
+/**
  * Regra de crédito que antes ficava no web (selo Verde/Amarelo/Vermelho do Perfil Financeiro ERP),
  * com os mesmos limites, mais os títulos vencidos (overdueTitlesTotal > 0 é risco). O maior atraso em
  * aberto vem dos títulos (buildClientDelayMetrics); DIAS_MAIORATRASO_AB do ERP não entra na regra.
@@ -182,13 +189,15 @@ export const buildClientCreditAlert = (
   if ((averageDelay ?? 0) > 15) reasons.push(`Atraso médio de ${pluralDays(averageDelay!)}`);
   if (openDelay > 0) reasons.push(`Maior atraso em aberto: ${pluralDays(openDelay)}`);
   if ((bouncedChecks ?? 0) > 0) reasons.push(`${bouncedChecks} ${bouncedChecks === 1 ? "cheque devolvido" : "cheques devolvidos"}`);
+  const averageDelayTolerated =
+    averageDelay !== null && averageDelay >= 0 && averageDelay <= ERP_AVERAGE_DELAY_TOLERANCE_DAYS;
   if (riskFromDelays) {
     raise("risco");
-  } else if (profile && !(averageDelay === 0 && bouncedChecks === 0)) {
-    // Amarelo no selo antigo: atraso médio entre 1 e 15 dias ou dados do ERP incompletos.
+  } else if (profile && !(averageDelayTolerated && bouncedChecks === 0)) {
+    // Amarelo: atraso médio acima da tolerância e até 15 dias, ou dados do ERP incompletos.
     raise("atencao");
     reasons.push(
-      (averageDelay ?? 0) > 0
+      (averageDelay ?? 0) > ERP_AVERAGE_DELAY_TOLERANCE_DAYS
         ? `Atraso médio de ${pluralDays(averageDelay!)}`
         : "Dados de atraso do ERP incompletos; confira com o financeiro"
     );
