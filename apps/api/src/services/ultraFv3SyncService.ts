@@ -20,12 +20,15 @@ import { catalogTenantIdForMode, productCatalogTenantWhere, selectProductCandida
 import { normalizeErpProductPriceObservation } from "./erpProductPriceObservation.js";
 import { readTenancyMode } from "../tenancy/tenancyMode.js";
 import {
+  emptySalesTitleFilterStats,
+  filterSalesReceivableTitles,
   isProvablyCompleteSnapshot,
   isSuccessfulFetch,
   planFinancialProfileWrites,
   planPartnerTitleClears,
   planPartnerTitleWrites,
   resolveFinancialWriteExclusions,
+  salesTitleFilterDiagnostics,
   type FinancialClientTarget,
   type FinancialSellerFetch,
   type FinancialSellerOutcome,
@@ -3541,7 +3544,10 @@ export async function syncPartnerTitles(options?: RunSyncOptions) {
         byPartner.set(code, [...(byPartner.get(code) ?? []), payload]);
       }
       let matchedClients = 0;
-      for (const [code, titles] of byPartner) {
+      // Só receitas de venda são gravadas (TD-ERP-PARTNER-TITLES-NON-SALES); o cache acima segue bruto.
+      const salesFilter = emptySalesTitleFilterStats();
+      for (const [code, rawTitles] of byPartner) {
+        const titles = filterSalesReceivableTitles(rawTitles, salesFilter);
         const openTitlesTotal = titles.reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
         const overdueTitlesTotal = titles.filter((title) => isTitleOverdue(title)).reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
         const result = await prisma.client.updateMany({
@@ -3550,7 +3556,11 @@ export async function syncPartnerTitles(options?: RunSyncOptions) {
         });
         matchedClients += result.count;
       }
-      return { syncedCount: rows.length, diagnostics: { matchedClients, clientsWithTitles: byPartner.size } };
+      return {
+        syncedCount: rows.length,
+        diagnostics: { matchedClients, clientsWithTitles: byPartner.size, ...salesTitleFilterDiagnostics(salesFilter) },
+        historyDetails: { nonSalesTitlesByType: salesFilter.droppedByType },
+      };
     },
     { ...options, authMode: resolved.authMode, sellerId: resolved.sellerId ?? undefined, sellerName: resolved.sellerName ?? undefined },
   );
@@ -3821,23 +3831,27 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
         }
       } else {
         const plan = planPartnerTitleWrites({ ...context, saldoOf: getTitleSaldoCapital });
-        planDiagnostics = plan.diagnostics;
+        // Só receitas de venda são gravadas (TD-ERP-PARTNER-TITLES-NON-SALES). Busca, cobertura, completude,
+        // limpeza e cache seguem com o retorno bruto: cliente só com não-venda é gravado com [] e totais 0.
+        const salesFilter = emptySalesTitleFilterStats();
         for (const write of plan.writes) {
-          const openTitlesTotal = write.titles.reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
-          const overdueTitlesTotal = write.titles.filter((title) => isTitleOverdue(title)).reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+          const titles = filterSalesReceivableTitles(write.titles, salesFilter);
+          const openTitlesTotal = titles.reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
+          const overdueTitlesTotal = titles.filter((title) => isTitleOverdue(title)).reduce((total, title) => total + Math.max(getTitleSaldoCapital(title), 0), 0);
           const updated = await prisma.client.updateMany({
             where: { id: { in: write.clientIds }, isArchived: false },
-            data: { partnerTitles: write.titles as Prisma.InputJsonArray, openTitlesTotal, overdueTitlesTotal },
+            data: { partnerTitles: titles as Prisma.InputJsonArray, openTitlesTotal, overdueTitlesTotal },
           });
           writtenClients += updated.count;
         }
+        planDiagnostics = { ...plan.diagnostics, ...salesTitleFilterDiagnostics(salesFilter) };
         // Sem /partners na mesma rodada (escopo rodado sozinho), a carteira fica vazia e ninguém é limpo.
         const clearing = await clearPartnerTitlesAbsentFromRound({
           fetches, completeSellerIds, knownSellerTenants, exclusions, codeOf, previousCoverageBySeller: coverage,
           ownerPortfolioBySeller: options.partnerPortfolioRound ?? createPartnerPortfolioRound(),
         });
         planDiagnostics = { ...planDiagnostics, ...clearing.diagnostics };
-        historyDetails = { titleClearing: clearing.details };
+        historyDetails = { titleClearing: clearing.details, nonSalesTitlesByType: salesFilter.droppedByType };
       }
 
       // Cobertura e cache só depois de gravar: execução interrompida não registra cobertura nova.

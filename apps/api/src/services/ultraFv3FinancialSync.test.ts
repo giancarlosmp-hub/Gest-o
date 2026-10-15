@@ -364,6 +364,94 @@ const portfolioScenario = {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Só receitas de venda contam como título a receber (TD-ERP-PARTNER-TITLES-NON-SALES)
+// ---------------------------------------------------------------------------------------------
+
+const typedTitle = (type?: unknown) => (type === undefined ? { PARCEIRO: "9400" } : { PARCEIRO: "9400", DSCRECEITA: type });
+
+{
+  // Aceita os 3 tipos com variações de caixa, acento e espaço.
+  for (const type of [
+    "VENDAS", "vendas", "  Vendas  ", "VÉNDAS",
+    "VENDA ENTREGA FUTURA", "venda  entrega\tfutura", " Venda Entrega Fútura ",
+    "VENDA AMBULANTE", "venda ambulante", "VENDA   AMBULÂNTE",
+  ]) {
+    assert.equal(merge.isSalesReceivableTitle(typedTitle(type)), true, `aceita ${JSON.stringify(type)}`);
+  }
+  // Recusa qualquer outro tipo preenchido, sem aceitar prefixo ou "contém".
+  for (const type of [
+    "DEVOLUÇÃO DE ADIANTAMENTO A CLIENTE", "DEVOLUCAO DE ADIANTAMETO A CLIENTE",
+    "DEVOLUÇÃO DE ADIANTAMENTO A FUNCIONÁRIO", "DEVOLUÇÃO DE ADIANTAMENTO A FORNECEDORES",
+    "REEMBOLSO", "PRESTAÇÃO DE SERVIÇOS", "EMPRÉSTIMO PARTICULAR",
+    "VENDAS X", "VENDA", "VENDA ENTREGA", "XVENDAS", "DEVOLUCAO VENDAS",
+  ]) {
+    assert.equal(merge.isSalesReceivableTitle(typedTitle(type)), false, `recusa ${JSON.stringify(type)}`);
+  }
+  // DSCRECEITA ausente ou vazio conta (fail-open).
+  for (const type of [undefined, null, "", "   "]) {
+    assert.equal(merge.isSalesReceivableTitle(typedTitle(type)), true, `sem tipo conta: ${JSON.stringify(type)}`);
+  }
+
+  // Filtro acumula descartados por tipo (normalizado) e os sem tipo.
+  const stats = merge.emptySalesTitleFilterStats();
+  const kept = merge.filterSalesReceivableTitles(
+    [typedTitle("VENDAS"), typedTitle("Reembolso"), typedTitle(), typedTitle("REEMBOLSO "), typedTitle("Devolução de Adiantamento a Cliente"), typedTitle("")],
+    stats,
+  );
+  assert.deepEqual(kept.map((title) => title.DSCRECEITA), ["VENDAS", undefined, ""]);
+  assert.deepEqual(stats, { droppedByType: { REEMBOLSO: 2, "DEVOLUCAO DE ADIANTAMENTO A CLIENTE": 1 }, withoutType: 2 });
+  assert.deepEqual(merge.salesTitleFilterDiagnostics(stats), { nonSalesTitlesDropped: 3, titlesWithoutType: 2 });
+}
+
+{
+  // A limpeza usa o retorno bruto: títulos que não são de venda não mudam planPartnerTitleClears, returnShrank
+  // nem ownerEmptyReturn. Vendedor só com não-venda NÃO vira "vazio", e o cliente dele que veio no retorno
+  // conta como presente (é regravado com [] pela gravação, não pela limpeza).
+  const scenarioWith = (type: string) => ({
+    fetches: [
+      fetchOf("seller-a", [{ PARCEIRO: "9401", DOCTO: 1, PARCELA: 1, DSCRECEITA: "VENDAS" }, ...["9410", "9411", "9412", "9413", "9414", "9415", "9416"].map((code) => ({ PARCEIRO: code, DOCTO: 1, PARCELA: 1, DSCRECEITA: type }))]),
+      fetchOf("seller-b", [{ PARCEIRO: "9501", DOCTO: 1, PARCELA: 1, DSCRECEITA: type }]),
+    ],
+    candidates: [clearTarget("a-paid", "9402", "seller-a"), clearTarget("b-paid", "9502", "seller-b"), clearTarget("b-only-non-sales", "9501", "seller-b")],
+    ownerTenantById: new Map<string, string>(),
+    exclusions: noExclusions,
+    codeOf,
+    completeSellerIds: allComplete,
+    // Rodada anterior com os mesmos 8 códigos de A: sem filtro na busca, o retorno de A não encolhe.
+    previousCoverageBySeller: { "seller-a": ["9401", "9410", "9411", "9412", "9413", "9414", "9415", "9416"], "seller-b": ["9501"] },
+    ownerPortfolioBySeller: portfolioOf({ "seller-a": ["9401", "9402"], "seller-b": ["9501", "9502"] }),
+  });
+  const nonSales = merge.planPartnerTitleClears(scenarioWith("REEMBOLSO"));
+  assert.deepEqual(nonSales, merge.planPartnerTitleClears(scenarioWith("VENDAS")), "mesmo plano com ou sem não-venda no retorno");
+  assert.deepEqual(nonSales.clear.map((client) => client.id), ["a-paid", "b-paid"]);
+  assert.deepEqual(nonSales.blocked, [], "sem ownerEmptyReturn nem returnShrank");
+  assert.equal(nonSales.shrankOwners, 0);
+  assert.equal(nonSales.presentInReturns, 1);
+}
+
+{
+  // Teste de mutação: com a regra desligada (aceita tudo), os títulos que não são de venda seriam gravados.
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { pathToFileURL } = await import("node:url");
+  const source = readFileSync(new URL("./ultraFv3FinancialMerge.ts", import.meta.url), "utf8");
+  const rule = "return !type || SALES_RECEIVABLE_TYPES.has(type);";
+  assert.equal(source.split(rule).length, 2, "regra de receita de venda presente uma vez");
+  const dir = mkdtempSync(join(tmpdir(), "financial-merge-sales-mutant-"));
+  try {
+    const mutantPath = join(dir, "ultraFv3FinancialMerge.mutant.ts");
+    writeFileSync(mutantPath, source.replace(rule, "return true;"));
+    const mutant = await import(pathToFileURL(mutantPath).href);
+    const titles = [typedTitle("VENDAS"), typedTitle("REEMBOLSO"), typedTitle("DEVOLUCAO DE ADIANTAMETO A CLIENTE")];
+    assert.equal(mutant.filterSalesReceivableTitles(titles, mutant.emptySalesTitleFilterStats()).length, 3, "mutante grava os títulos que não são de venda");
+    assert.equal(merge.filterSalesReceivableTitles(titles, merge.emptySalesTitleFilterStats()).length, 1, "regra real grava só o de venda");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Job do botão "todos vendedores" com Prisma e ERP em memória
 // ---------------------------------------------------------------------------------------------
 
@@ -694,6 +782,80 @@ const clearingOf = () => {
   await sync.releaseSellerPortfolioLock("scheduler-run");
 }
 
+// Gravação só com receitas de venda (TD-ERP-PARTNER-TITLES-NON-SALES): títulos mistos e cliente só com não-venda.
+const PAST_DUE = "2020-01-10T03:00:00.000Z";
+const FUTURE_DUE = "2099-01-10T03:00:00.000Z";
+const mixedTitles = [
+  { PARCEIRO: "3001", DOCTO: 1, PARCELA: 1, DSCRECEITA: "VENDAS", DATA_VENCIMENTO: PAST_DUE, SALDO_CAPITAL: 100 },
+  { PARCEIRO: "3001", DOCTO: 2, PARCELA: 1, DSCRECEITA: "DEVOLUÇÃO DE ADIANTAMENTO A CLIENTE", DATA_VENCIMENTO: PAST_DUE, SALDO_CAPITAL: 50 },
+  { PARCEIRO: "3001", DOCTO: 3, PARCELA: 1, DATA_VENCIMENTO: FUTURE_DUE, SALDO_CAPITAL: 20 },
+  { PARCEIRO: "3001", DOCTO: 4, PARCELA: 1, DSCRECEITA: "Venda Entrega Futura", DATA_VENCIMENTO: FUTURE_DUE, SALDO_CAPITAL: 30 },
+];
+const nonSalesOnlyTitles = [
+  { PARCEIRO: "3002", DOCTO: 5, PARCELA: 1, DSCRECEITA: "REEMBOLSO", DATA_VENCIMENTO: PAST_DUE, SALDO_CAPITAL: 40 },
+  { PARCEIRO: "3002", DOCTO: 6, PARCELA: 1, DSCRECEITA: "EMPRÉSTIMO PARTICULAR", DATA_VENCIMENTO: PAST_DUE, SALDO_CAPITAL: 60 },
+];
+const seedSalesOnlyRound = () => {
+  clients = [
+    { id: "client-mixed", code: "3001", tenantId: "tenant-a", ownerSellerId: "seller-a", isArchived: false },
+    { id: "client-non-sales", code: "3002", tenantId: "tenant-a", ownerSellerId: "seller-b", isArchived: false, partnerTitles: nonSalesOnlyTitles, openTitlesTotal: 100, overdueTitlesTotal: 100 },
+  ];
+  for (const key of Object.keys(erpRows)) delete erpRows[key];
+  Object.assign(erpRows, {
+    "seller-a": { financialProfiles: [], partnerTitles: mixedTitles },
+    "seller-b": { financialProfiles: [], partnerTitles: nonSalesOnlyTitles },
+  });
+};
+const titlesOf = (id: string) => {
+  const client = clients.find((item) => item.id === id)!;
+  return [(client.partnerTitles as Row[]).map((title) => title.DOCTO), client.openTitlesTotal, client.overdueTitlesTotal];
+};
+const expectedDroppedByType = { "DEVOLUCAO DE ADIANTAMENTO A CLIENTE": 1, REEMBOLSO: 1, "EMPRESTIMO PARTICULAR": 1 };
+
+{
+  // Todos os vendedores: grava só venda e sem tipo; cliente só com não-venda vira [] e totais 0.
+  reset();
+  seedSalesOnlyRound();
+  await sync.syncPartnerTitlesAcrossSellers();
+  assert.deepEqual(titlesOf("client-mixed"), [[1, 3, 4], 150, 100], "mistos: só venda e sem tipo, totais sem a devolução");
+  assert.deepEqual(titlesOf("client-non-sales"), [[], 0, 0], "só não-venda: [] e totais 0");
+  const metrics = titlesRunOf()?.metrics;
+  assert.equal(metrics?.nonSalesTitlesDropped, 3);
+  assert.equal(metrics?.titlesWithoutType, 1);
+  assert.deepEqual(metrics?.nonSalesTitlesByType, expectedDroppedByType);
+  assert.equal(JSON.stringify(metrics?.nonSalesTitlesByType).includes("300"), false, "só tipo e contagem, sem códigos de cliente");
+  // Cobertura e cache seguem com o retorno bruto.
+  assert.deepEqual(JSON.parse(appConfig.get("erp.ultrafv3.partnerTitles.sellerCoverage")!)["seller-b"], ["3002"], "vendedor só com não-venda mantém a cobertura");
+  assert.equal(JSON.parse(appConfig.get("erp.ultrafv3.partnerTitles")!).length, 6, "cache bruto com todos os títulos");
+  assert.equal(metrics?.titleClearPresentInReturns, 1, "cliente só com não-venda conta como presente no retorno");
+}
+
+{
+  // Caminho legado (syncPartnerTitles, credencial de referência): mesmo filtro na gravação.
+  reset();
+  seedSalesOnlyRound();
+  const original = (prisma as any).client.updateMany;
+  setModel("client", {
+    updateMany: async ({ where, data }: any) => {
+      const matched = clients.filter((client) => client.code === where.code && client.isArchived === where.isArchived);
+      matched.forEach((client) => Object.assign(client, data));
+      return { count: matched.length };
+    },
+  });
+  try {
+    await sync.syncPartnerTitles();
+  } finally {
+    setModel("client", { updateMany: original });
+  }
+  // Credencial de referência = seller-a: só os títulos mistos do 3001 chegam nesse caminho.
+  assert.deepEqual(titlesOf("client-mixed"), [[1, 3, 4], 150, 100]);
+  const legacy = runs.find((item) => item.scope === "partnerTitles" && item.authMode !== "all_sellers");
+  assert.equal(legacy?.metrics.nonSalesTitlesDropped, 1);
+  assert.equal(legacy?.metrics.titlesWithoutType, 1);
+  assert.deepEqual(legacy?.metrics.nonSalesTitlesByType, { "DEVOLUCAO DE ADIANTAMENTO A CLIENTE": 1 });
+  assert.equal(JSON.parse(appConfig.get("erp.ultrafv3.partnerTitles")!).length, 4, "cache bruto do legado inalterado");
+}
+
 // ---------------------------------------------------------------------------------------------
 // Contratos estáticos de integração
 // ---------------------------------------------------------------------------------------------
@@ -718,6 +880,8 @@ assert.match(service, /export async function syncProducts[\s\S]{0,120}resolveRef
 assert.match(routes, /router\.post\("\/erp\/ultrafv3\/sync\/partners\/all-sellers", authorize\("diretor", "gerente"\), async[\s\S]{0,200}startSellerPortfolioSyncJob/, "mesmos perfis de antes");
 assert.match(service, /^const PARTNER_TITLE_CLEARING_ENABLED = true;$/m, "limpeza de títulos habilitada (fase 2)");
 assert.match(service, /data: \{ partnerTitles: \[\] as Prisma\.InputJsonArray, openTitlesTotal: 0, overdueTitlesTotal: 0 \}/, "limpar não toca no financialProfile");
+assert.equal(service.split("filterSalesReceivableTitles(").length - 1, 2, "filtro de receita de venda nos dois caminhos de gravação de títulos");
+assert.doesNotMatch(service, /filterSalesReceivableTitles\((?:rows|allRows|fetch\.rows)/, "busca, cobertura e cache seguem com o retorno bruto");
 assert.match(panel, /SELLER_PORTFOLIO_POLL_MAX_MS/);
 assert.match(panel, /Sincronização em andamento, acompanhe pelo Histórico\./);
 

@@ -364,11 +364,28 @@ limpo) até o dono no CRM ser corrigido ou o cadastro voltar para a carteira del
 
 ### TD-ERP-PARTNER-TITLES-NON-SALES — títulos que não são de venda entram no banner de risco
 
-**Aberto, decisão de negócio pendente.** O `/partnerTitles` traz, além de `DSCRECEITA` = VENDAS, outros
-tipos (DEVOLUÇÃO DE ADIANTAMENTO A CLIENTE, A FUNCIONÁRIO, A FORNECEDORES). Hoje todos entram em
-`partnerTitles`, `openTitlesTotal` e `overdueTitlesTotal` (`ultraFv3SyncService.ts`) e, portanto, no
-banner de crédito. Definir com o negócio quais tipos contam como risco antes de filtrar. Não
-implementado.
+**Resolvido no código, aguardando deploy.** O `/partnerTitles` traz, além das receitas de venda, outros
+tipos em `DSCRECEITA` (devoluções de adiantamento a cliente, funcionário e fornecedores, REEMBOLSO,
+PRESTAÇÃO DE SERVIÇOS, EMPRÉSTIMO PARTICULAR), que entravam no banner de crédito como dívida do cliente.
+
+Decisão de negócio: só contam como título a receber do cliente `VENDAS`, `VENDA ENTREGA FUTURA` e
+`VENDA AMBULANTE`, comparados de forma exata depois de normalizar (maiúsculas, sem acento, espaços
+aparados e colapsados; sem prefixo ou "contém"). `DSCRECEITA` ausente ou vazio conta (fail-open). Qualquer
+outro tipo preenchido deixa de ser gravado em `partnerTitles` e fica fora de `openTitlesTotal`,
+`overdueTitlesTotal`, do atraso calculado pelos títulos, do banner e da tabela da tela.
+
+Regra em `isSalesReceivableTitle` (`ultraFv3FinancialMerge.ts`), aplicada só na gravação, nos dois
+caminhos de `ultraFv3SyncService.ts` (todos os vendedores e o legado `syncPartnerTitles`). Busca,
+cobertura, completude, `planPartnerTitleClears`, travas e o cache bruto em `appConfig` continuam com o
+retorno bruto: cliente que veio só com títulos que não são de venda conta como presente e é gravado com
+`[]` e totais 0. Sem filtro na leitura. O Histórico do run de `partnerTitles` registra
+`nonSalesTitlesDropped`, `nonSalesTitlesByType` (tipo normalizado → contagem, sem códigos de cliente) e
+`titlesWithoutType`.
+
+Dado gravado só se corrige na próxima sincronização de títulos que inclua o cliente. Risco: se o ERP
+renomear um tipo de venda, os títulos dele somem do banner sem erro; conferir `nonSalesTitlesByType` no
+Histórico. Para reverter: reverter o PR; a sincronização seguinte volta a gravar todos os tipos (sem
+migration nem mudança de schema).
 
 ### TD-ERP-DUE-DATE-ISO-DEPENDENCY — vencimento dos títulos lido com `new Date()` na sincronização
 
