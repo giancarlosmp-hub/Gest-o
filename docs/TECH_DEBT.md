@@ -479,5 +479,44 @@ erro" da Saúde. O total de tentativas com erro aparece como "N no histórico".
 Fica em aberto:
 - A conferência de status (`syncErpOrderStatuses`) consulta de hora em hora todas as tentativas
   `sent/pending/error` sem resolução manual, sem limite de data. Tentativas recusadas pelo ERP no
-  POST nunca são localizadas e somam em `nonCriticalOrderStatusErrors` a cada rodada.
+  POST nunca são localizadas e somam em `nonCriticalOrderStatusErrors` a cada rodada. (Recusas
+  definitivas saem da conferência em TD-ERP-ORDER-STATUS-UNMATCHED-WRITES.)
 - `GET /erp/ultrafv3/diagnostics` ainda expõe `errorOrders` (histórico) no nível de cima.
+
+### TD-ERP-ORDER-STATUS-UNMATCHED-WRITES — conferência de status gravava situação sem pedido casado
+
+**Corrigido na branch `fix/order-status-no-unmatched-writes`.** Entre o PR #856 (que passou a usar
+`extractOperationalStatus(response)`) e o commit `1d8ce315`, a conferência gravava em
+`operationalStatusRaw`/`operationalOrderStatus` a situação do primeiro registro da resposta do
+`/orderStatus`, mesmo com outcome `unknown`, e criava evento "situação atualizada" na timeline.
+Tentativas `error` recusadas pelo ERP no POST ganharam assim uma situação falsa. Agora:
+- só há gravação de situação, `orderStatus`, histórico e timeline com registro do ERP casado e outcome
+  diferente de `unknown` (`buildErpOrderStatusReconciliation`). Com `unknown` grava só a conferência;
+- tentativa `error` com recusa definitiva no POST não é mais consultada. A de resultado incerto
+  (timeout/rede, mesma regra do bloqueio de reenvio) é consultada e casada só pela chave de
+  importação (`planErpOrderStatusLookup`);
+- recusa confirmada não sobrescreve mais o `erpResponse` original; o resultado fica em
+  `lastStatusPayload` e em `syncErrors` (que o bloqueio de reenvio já lia);
+- o aviso da rodada separa "não localizado(s) no ERP" de "falha na chamada ao ERP"
+  (`orderStatusNotFound`, `orderStatusCallFailures`; `nonCriticalOrderStatusErrors` segue como soma).
+
+Fica em aberto:
+- **Limpeza de dados (PR separado, com aprovação):** tentativas `error` que ficaram com situação falsa
+  (`operationalStatusRaw`/`operationalOrderStatus`) e os eventos "Pedido ERP …: situação atualizada"
+  criados na rodada de 08/09/2026. Esta correção impede novos casos, mas não apaga os antigos.
+- **Casamento pelo número em tentativas `sent`:** o ERP aceita `NUM_PEDIDO` repetido e há pedidos
+  antigos (antes da sequência 9000xx) com o mesmo número em várias oportunidades.
+  `classifyUltraFv3OrderLookup` aceita o primeiro registro com a mesma chave **ou** o mesmo número,
+  inclusive dentro da resposta da consulta pela chave. Proposta: dar preferência ao registro com a
+  chave de importação. Quando o casamento vier só pelo número, exigir registro único com `PARCEIRO` e
+  `VENDEDOR` iguais aos do `payloadSent`. Com mais de um registro ou divergência, outcome `unknown`, sem
+  gravar situação.
+- **Cliente criado no CRM com código inexistente no ERP:** o POST /orders envia `Client.code` como
+  `PARCEIRO` e o ERP recusa por FK. Proposta (PR separado): bloquear o envio com mensagem clara quando
+  o código do cliente não existir no cadastro de parceiros do ERP.
+- Uma conferência `unknown` grava em `syncErrors` o registro da conferência no lugar da falha original.
+  Com isso, uma tentativa `error` por timeout deixa de parecer incerta para o bloqueio de reenvio
+  (`isUncertainErpOrderFailure` lê `syncErrors` antes de `erpResponse`), apesar da mensagem
+  "reenvio permanece bloqueado". O comportamento já existia e não foi alterado aqui.
+- A consulta manual `POST /orders/:id/status-consultation` responde 502 ("falhou") quando o pedido só
+  não foi localizado (`errorCount` soma não localizado e falha de chamada).
