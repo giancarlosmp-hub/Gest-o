@@ -32,6 +32,7 @@ import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
 import { clientReadableForDetailsWhere } from "../utils/clientHistoricalAccess.js";
 import { normalizeCnpj, normalizeState, normalizeText } from "../utils/normalize.js";
+import { brazilDayRange, calendarDayRange, type DayRange } from "../utils/dateRange.js";
 import { calculatePipelineMetrics, getWeightedValue, isOpportunityOverdue } from "../utils/pipelineMetrics.js";
 import { loadEffectiveWonContributions, loadEffectiveWonTotals, withEffectiveWin } from "../services/effectiveWins.js";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -634,7 +635,8 @@ type OpportunityFilterParams = {
   search?: string;
   crop?: string;
   season?: string;
-  dateRangeWhere?: { gte?: Date; lte?: Date };
+  dateRangeWhere?: DayRange;
+  closedAtRangeWhere?: DayRange;
   overdueOnly: boolean;
 };
 
@@ -650,17 +652,11 @@ const parseOpportunityFilterParams = (req: Request) => {
   const dateFrom = req.query.dateFrom as string | undefined;
   const dateTo = req.query.dateTo as string | undefined;
 
-  const dateRangeWhere: OpportunityFilterParams["dateRangeWhere"] = {};
-  if (dateFrom) {
-    const parsed = normalizeDateToUtc(dateFrom, false);
-    if (!parsed) return { error: "dateFrom inválido" } as const;
-    dateRangeWhere.gte = parsed;
-  }
-  if (dateTo) {
-    const parsed = normalizeDateToUtc(dateTo, true);
-    if (!parsed) return { error: "dateTo inválido" } as const;
-    dateRangeWhere.lte = parsed;
-  }
+  if (dateFrom && !calendarDayRange(dateFrom)) return { error: "dateFrom inválido" } as const;
+  if (dateTo && !calendarDayRange(undefined, dateTo)) return { error: "dateTo inválido" } as const;
+  // proposalDate/expectedCloseDate são data pura; closedAt é instante e segue o dia de Brasília.
+  const dateRangeWhere = calendarDayRange(dateFrom, dateTo)!;
+  const closedAtRangeWhere = brazilDayRange(dateFrom, dateTo)!;
 
   return {
     params: {
@@ -672,6 +668,7 @@ const parseOpportunityFilterParams = (req: Request) => {
       crop: req.query.crop as string | undefined,
       season: req.query.season as string | undefined,
       dateRangeWhere: Object.keys(dateRangeWhere).length ? dateRangeWhere : undefined,
+      closedAtRangeWhere: Object.keys(closedAtRangeWhere).length ? closedAtRangeWhere : undefined,
       overdueOnly: req.query.overdue === "true" || req.query.overdueOnly === "true" || req.query.somenteAtrasadas === "true"
     } satisfies OpportunityFilterParams
   } as const;
@@ -691,7 +688,7 @@ const buildOpportunityWhere = (req: Request, params: OpportunityFilterParams, to
     if (params.status === "closed") {
       whereFilters.push({
         OR: [
-          { closedAt: params.dateRangeWhere },
+          { closedAt: params.closedAtRangeWhere },
           { closedAt: null, expectedCloseDate: params.dateRangeWhere }
         ]
       });

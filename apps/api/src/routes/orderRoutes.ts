@@ -7,6 +7,7 @@ import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sanitizeErpOrderErrorMessage, syncErpOrderStatuses } from "../services/erpOrderService.js";
 import { orderStatusGroup } from "../services/orderStatusProjection.js";
+import { brazilDayRange } from "../utils/dateRange.js";
 
 const router = Router();
 router.use(authMiddleware, appUsageRateLimit);
@@ -15,7 +16,8 @@ const querySchema = z.object({
   search: z.string().trim().max(120).optional(), status: z.string().trim().max(40).optional(),
   sellerId: z.string().trim().max(80).optional(), clientId: z.string().trim().max(80).optional(),
   origin: z.enum(["opportunity"]).optional(), branch: z.string().trim().max(30).optional(),
-  from: z.coerce.date().optional(), to: z.coerce.date().optional(), page: z.coerce.number().int().min(1).default(1),
+  from: z.string().trim().max(40).optional().refine((value) => !value || brazilDayRange(value), "Data inválida"),
+  to: z.string().trim().max(40).optional().refine((value) => !value || brazilDayRange(undefined, value), "Data inválida"), page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(30),
 });
 
@@ -67,7 +69,7 @@ router.get("/orders", async (req, res) => {
     const tenantId = await tenantIdFor(req); const q = parsed.data; const where: Prisma.ErpOrderSyncWhereInput = { ...baseWhere(req, tenantId) };
     if (q.sellerId && req.user!.role !== "vendedor") where.sellerId = q.sellerId;
     if (q.clientId) where.opportunity = { ...(where.opportunity as object), clientId: q.clientId };
-    if (q.from || q.to) where.createdAt = { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) };
+    if (q.from || q.to) where.createdAt = brazilDayRange(q.from, q.to)!;
     if (q.search) where.OR = [
       { numPedido: { contains: q.search, mode: "insensitive" } }, { erpOrderNumber: { contains: q.search, mode: "insensitive" } },
       { opportunity: { client: { tenantId, OR: [{ name: { contains: q.search, mode: "insensitive" } }, { code: { contains: q.search, mode: "insensitive" } }] } } },
