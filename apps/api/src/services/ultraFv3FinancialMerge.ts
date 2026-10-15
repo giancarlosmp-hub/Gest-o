@@ -254,7 +254,9 @@ export type PartnerTitleClearBlockReason =
   | "tenantUnproven"
   | "tenantMismatch"
   | "returnShrank"
-  | "massClearGuard";
+  | "massClearGuard"
+  | "ownerPortfolioUnproven"
+  | "notInOwnerPortfolio";
 
 export type PartnerTitleClearPlan = {
   clear: PartnerTitleClearCandidate[];
@@ -283,8 +285,9 @@ export const ownerReturnShrank = (previousCount: number | undefined, currentCoun
 /**
  * Clientes com títulos gravados que não vieram em nenhum retorno da rodada. Só entram para limpeza
  * quando o dono buscou com sucesso, retorno não vazio e comprovadamente completo, no mesmo tenant do
- * cliente, nenhum vendedor com falha poderia ter retornado o código e o retorno do dono não encolheu
- * bruscamente. Dono sem busca na rodada (sem Login FV3) nunca é limpo. Na dúvida, o cliente fica como está.
+ * cliente, nenhum vendedor com falha poderia ter retornado o código, o retorno do dono não encolheu
+ * bruscamente e o código veio no /partners do dono na mesma rodada (o ERP ainda põe o cliente na
+ * carteira dele). Dono sem busca na rodada (sem Login FV3) nunca é limpo. Na dúvida, o cliente fica como está.
  */
 export function planPartnerTitleClears(input: {
   fetches: FinancialSellerFetch[];
@@ -296,6 +299,11 @@ export function planPartnerTitleClears(input: {
   completeSellerIds: Set<string>;
   /** Códigos retornados por vendedor na rodada bem-sucedida anterior (sellerCoverage de partnerTitles). */
   previousCoverageBySeller: Record<string, string[]>;
+  /**
+   * Códigos do retorno bruto do /partners (antes do filtro IDN_CLIENTE) de cada vendedor que concluiu
+   * o /partners na mesma rodada. Vendedor ausente: /partners não rodou ou falhou para ele.
+   */
+  ownerPortfolioBySeller: Map<string, Set<string>>;
 }): PartnerTitleClearPlan {
   const returnedCodes = new Set<string>();
   const shrankSellerIds = new Set<string>();
@@ -345,5 +353,8 @@ const clearBlockReason = (
   const tenantId = client.tenantId ?? input.ownerTenantById.get(client.ownerSellerId) ?? null;
   if (!tenantId || !ownerFetch.tenantId) return "tenantUnproven";
   if (tenantId !== ownerFetch.tenantId) return "tenantMismatch";
+  const ownerPortfolio = input.ownerPortfolioBySeller.get(client.ownerSellerId);
+  if (!ownerPortfolio) return "ownerPortfolioUnproven";
+  if (!ownerPortfolio.has(client.code)) return "notInOwnerPortfolio";
   return null;
 };

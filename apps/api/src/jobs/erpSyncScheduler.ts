@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { syncErpOrderStatuses } from "../services/erpOrderService.js";
 import {
   acquireSellerPortfolioLock,
+  createPartnerPortfolioRound,
   releaseSellerPortfolioLock,
   sellerPortfolioHeartbeat,
   syncBranches,
@@ -472,6 +473,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
   }> = [];
   let failedStep: { scope: string; label: string; step: number } | null = null;
   let failedStepErrorPrefix: string | null = null;
+  const partnerPortfolioRound = createPartnerPortfolioRound();
 
   try {
     for (const [index, step] of AUTOMATIC_SYNC_STEPS.entries()) {
@@ -491,6 +493,7 @@ async function executeAutomaticErpSync(scheduledFor = nextAutomaticRunAt) {
           failIfLocked: true,
           correlationId,
           heartbeat,
+          partnerPortfolioRound,
         });
         const stepResult = result as { diagnostics?: Record<string, number>; warning?: string } | undefined;
         if ((stepResult?.diagnostics?.partial ?? 0) > 0 || stepResult?.warning) {
