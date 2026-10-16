@@ -43,6 +43,7 @@
     "test:erp-order-reconciliation": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderReconciliation.test.ts",
     "test:erp-order-manual-resolution": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderManualResolution.test.ts",
     "test:cleanup-rejected-order-fake-status": "npm run prisma:generate && tsx src/scripts/cleanupRejectedOrderFakeStatus.test.ts",
+    "test:simulate-client-portfolio-cleanup": "npm run prisma:generate && tsx src/scripts/simulateClientPortfolioCleanup.test.ts",
     "test:erp-order-open-errors": "npm run build -w @salesforce-pro/shared && npm run prisma:generate && tsx src/services/erpOrderOpenErrors.test.ts",
     "smoke:ultrafv3-order-number-parser": "tsx src/scripts/ultraFv3OrderNumberParserSmoke.ts",
     "smoke:ultrafv3-order-protocol-test": "tsx src/scripts/ultraFv3OrderProtocolTestSmoke.ts",
