@@ -8,6 +8,7 @@ import { validateBody } from "../middlewares/validate.js";
 import {
   activityKpiUpsertSchema,
   activitySchema,
+  CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE,
   clientContactSchema,
   clientSchema,
   companySchema,
@@ -1757,16 +1758,14 @@ const resolveImportCreateData = (payload: z.infer<typeof clientImportRowSchema>,
         ? payload.ownerSellerId.trim()
         : resolveOwnerId(req);
 
+  // Código e erpUpdatedAt vêm só da sincronização de parceiros: a planilha não os grava.
   const fantasyName = payload.fantasyName?.trim();
-  const code = payload.code?.trim();
   const lastPurchaseDate = parseImportOptionalDate(payload.lastPurchaseDate);
   const lastPurchaseValue = parseImportOptionalNumber(payload.lastPurchaseValue);
-  const erpUpdatedAt = parseImportOptionalDate(payload.erpUpdatedAt);
 
   const data = {
     name: payload.name.trim(),
     ...(fantasyName ? { fantasyName } : {}),
-    ...(code ? { code } : {}),
     city: payload.city.trim(),
     state: payload.state.trim(),
     region: payload.region.trim(),
@@ -1783,8 +1782,7 @@ const resolveImportCreateData = (payload: z.infer<typeof clientImportRowSchema>,
       ? { farmSizeHa: payload.farmSizeHa }
       : {}),
     ...(lastPurchaseDate ? { lastPurchaseDate } : {}),
-    ...(typeof lastPurchaseValue === "number" ? { lastPurchaseValue } : {}),
-    ...(erpUpdatedAt ? { erpUpdatedAt } : {})
+    ...(typeof lastPurchaseValue === "number" ? { lastPurchaseValue } : {})
   };
 
   return withClientNormalizedFields(data);
@@ -1808,13 +1806,11 @@ const getImportPersistenceErrorMessage = (error: unknown) => {
 const resolveImportUpdateData = (payload: z.infer<typeof clientImportRowSchema>, _req: any, existingClient: any) => {
   const data: Record<string, unknown> = {};
   const fantasyName = payload.fantasyName?.trim();
-  const code = payload.code?.trim();
 
   if (isMeaningfulImportString(payload.city) && isEmptyValue(existingClient.city)) data.city = payload.city.trim();
   if (isMeaningfulImportString(payload.state) && isEmptyValue(existingClient.state)) data.state = payload.state.trim();
   if (isMeaningfulImportString(payload.region) && isEmptyValue(existingClient.region)) data.region = payload.region.trim();
   if (fantasyName && isEmptyValue(existingClient.fantasyName)) data.fantasyName = fantasyName;
-  if (code && isEmptyValue(existingClient.code)) data.code = code;
   if (!existingClient.lastPurchaseDate) {
     const parsedLastPurchaseDate = parseImportOptionalDate(payload.lastPurchaseDate);
     if (parsedLastPurchaseDate) data.lastPurchaseDate = parsedLastPurchaseDate;
@@ -1823,11 +1819,6 @@ const resolveImportUpdateData = (payload: z.infer<typeof clientImportRowSchema>,
     const parsedLastPurchaseValue = parseImportOptionalNumber(payload.lastPurchaseValue);
     if (typeof parsedLastPurchaseValue === "number") data.lastPurchaseValue = parsedLastPurchaseValue;
   }
-  if (!existingClient.erpUpdatedAt) {
-    const parsedErpUpdatedAt = parseImportOptionalDate(payload.erpUpdatedAt);
-    if (parsedErpUpdatedAt) data.erpUpdatedAt = parsedErpUpdatedAt;
-  }
-
   const mergedClientForValidation = {
     name: existingClient.name,
     city: (data.city as string | undefined) ?? existingClient.city,
@@ -4505,7 +4496,18 @@ router.post("/clients/exists-bulk", async (req, res) => {
   res.json({ ...paginated, data });
 });
 
-router.post("/clients", validateBody(clientSchema), async (req, res) => {
+// O ERP é o dono do código do cliente: só a sincronização de parceiros grava Client.code.
+// Recusa explícita (e não descarte silencioso) para quem ainda enviar o campo.
+const CLIENT_CODE_ERP_ONLY_MESSAGE =
+  "O código do cliente vem somente do ERP e não pode ser informado nem alterado no CRM. Cadastre o cliente no ERP e aguarde a próxima sincronização.";
+const rejectClientCodeInBody = (req: any, res: any, next: any) => {
+  if (req.body && typeof req.body === "object" && Object.prototype.hasOwnProperty.call(req.body, "code")) {
+    return res.status(400).json({ message: CLIENT_CODE_ERP_ONLY_MESSAGE });
+  }
+  next();
+};
+
+router.post("/clients", rejectClientCodeInBody, validateBody(clientSchema), async (req, res) => {
   try {
     const tenantId = await resolveUniqueActiveTenantForUser(req.user!.id);
     const ownerSellerId =
@@ -4762,7 +4764,7 @@ router.post("/clients/import", async (req, res) => {
   res.json({ created, updated, ignored, conflicts, errors, results });
 });
 
-router.put("/clients/:id", validateBody(clientSchema.partial()), async (req, res) => {
+router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.partial()), async (req, res) => {
   const old = await prisma.client.findUnique({ where: { id: req.params.id } });
   if (!old) return res.status(404).json({ message: "Não encontrado" });
   if (req.user!.role === "vendedor" && old.ownerSellerId !== req.user!.id) {
@@ -7427,6 +7429,10 @@ router.post(["/opportunities/:id/erp/orders", "/opportunities/:id/orders"], asyn
       include: { client: true, ownerSeller: true, items: { orderBy: [{ lineNumber: "asc" }], include: { product: { select: { stockQuantity: true, unit: true, className: true, rawErpPayload: true } } } } }
     });
     if (!opportunity) throw Object.assign(new Error("Oportunidade não encontrada"), { status: 404 });
+
+    // Verificação prévia: sem código do ERP não há tentativa nem número de pedido reservado.
+    req.erpOrderFailureStage = "client-code";
+    if (!opportunity.client?.code?.trim()) throw Object.assign(new Error(CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE), { status: 422 });
 
     previousOrderCount = await prisma.erpOrderSync.count({ where: { opportunityId: opportunity.id } });
     req.erpOrderFailureStage = "submit-order";

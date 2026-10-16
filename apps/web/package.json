@@ -11,6 +11,7 @@
     "test:responsive": "node ./scripts/verify-mobile-layout.mjs",
     "test:opportunity-quick-action": "npx tsx tests/opportunityQuickAction.test.ts",
     "test:orders": "npx tsx tests/orderPresentation.test.ts",
+    "test:client-code-erp-only": "npx tsx tests/clientCodeErpOnly.test.ts",
     "test:brazil-date": "npx tsx tests/brazilDate.test.ts",
     "test:erp-payment-method-eligibility": "npx tsx tests/erpPaymentMethodEligibility.test.ts",
     "test:whatsapp-link": "npx tsx tests/whatsappLink.test.ts",

@@ -17,6 +17,7 @@ import ClientSearchSelect from "../components/clients/ClientSearchSelect";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import { consumeOpportunityCreateRequest } from "../lib/opportunityQuickAction";
 import { brazilMonthKey } from "../lib/brazilDate";
+import { CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE } from "@salesforce-pro/shared";
 
 type Stage = "prospeccao" | "negociacao" | "proposta" | "ganho" | "perdido";
 type OpportunityStatus = "open" | "closed" | "all";
@@ -369,6 +370,10 @@ const confirmStockWarning = (productName: string, stock?: number | null) => {
     `O produto "${productName}" está com estoque 0 (sem saldo).\n\nDeseja continuar mesmo assim?`,
   );
 };
+
+// Sem os dados do cliente na listagem, a tela de detalhes decide; com eles, bloqueia já aqui.
+const isClientWithoutErpCode = (opportunity: Opportunity) =>
+  Boolean(opportunity.clientData) && !opportunity.clientData?.code?.trim();
 
 function calculateItemTotals(item: OpportunityItemForm) {
   const quantity = Number(item.quantity || 0);
@@ -2142,7 +2147,7 @@ export default function OpportunitiesPage() {
                       {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="font-semibold text-amber-700" onClick={() => onEdit(item)}>Transferir responsável</button> : null}
                       <button type="button" className="text-slate-700" onClick={() => navigate(`/oportunidades/${item.id}`)}>Detalhes</button>
                       {item.stage === "ganho" ? (
-                        <button type="button" className="text-emerald-700" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
+                        <button type="button" className="text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-400" disabled={isClientWithoutErpCode(item)} title={isClientWithoutErpCode(item) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : undefined} onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
                       ) : null}
                       {!["ganho", "perdido"].includes(item.stage) ? (
                         <span className="relative inline-block" data-opportunity-action-menu>
@@ -2182,7 +2187,7 @@ export default function OpportunitiesPage() {
                             {item.ownerSeller?.isActive === false && !["ganho", "perdido"].includes(item.stage) ? <button type="button" className="block w-full px-3 py-1.5 text-left text-sm font-semibold text-amber-700 hover:bg-amber-50" onClick={() => { closeActionMenus(); onEdit(item); }}>Transferir responsável</button> : null}
                             <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50" onClick={() => { closeActionMenus(); navigate(`/oportunidades/${item.id}`); }}>Detalhes</button>
                             {item.stage === "ganho" ? (
-                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50" onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
+                              <button type="button" className="block w-full px-3 py-1.5 text-left text-sm text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent" disabled={isClientWithoutErpCode(item)} title={isClientWithoutErpCode(item) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : undefined} onClick={() => openWonOpportunityErpOrderFlow(item.id)}>Gerar/Reenviar pedido ERP</button>
                             ) : null}
                             {!["ganho", "perdido"].includes(item.stage) ? (
                               <>
@@ -2473,7 +2478,9 @@ export default function OpportunitiesPage() {
               {selectedOpportunity.stage === "ganho" ? (
                 <button
                   type="button"
-                  className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white"
+                  className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-slate-400"
+                  disabled={isClientWithoutErpCode(selectedOpportunity)}
+                  title={isClientWithoutErpCode(selectedOpportunity) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : undefined}
                   onClick={() => openWonOpportunityErpOrderFlow(selectedOpportunity.id)}
                 >
                   Gerar/Reenviar pedido ERP
