@@ -560,3 +560,24 @@ Fica em aberto:
   próprio). A tela e os totais já as ignoram.
 - `erpClientAuditService` (scripts de auditoria/reparo de cliente) e a contagem de dependências do
   desligamento de vendedor contam todas as tentativas; mantidos de propósito (registros, não pedidos).
+
+### TD-CLIENT-CODE-CRM-TYPED — código do cliente digitado ou importado no CRM
+
+**Corrigido na branch `fix/client-code-erp-only`.** `Client.code` passa a vir só da sincronização
+de parceiros do ERP. `POST`/`PUT /clients` recusam `code` com 400 (sem descarte silencioso); o
+cadastro de novo cliente não mostra o campo e a edição o mostra só como leitura. A importação de
+planilha não grava mais `code` nem `erpUpdatedAt` (o código da planilha só serve para achar cliente
+existente). Pedido ERP de cliente sem código responde 422 antes de ler tentativas, criar tentativa ou
+reservar número, e os botões "Gerar/Reenviar pedido ERP" ficam desabilitados com a orientação.
+Teste: `test:client-code-erp-only` (API e web), fora do CI como os demais testes HTTP de rota.
+
+Fica em aberto:
+- Clientes que já têm código digitado ou importado (ver consulta read-only fora do repo): podem
+  coincidir com parceiro real do ERP. Revisão e limpeza em PR próprio.
+- Cliente criado no CRM sem CPF/CNPJ não é ligado pelo Partner Sync quando o parceiro do ERP tem
+  documento: o sync cria outro cliente e o do CRM fica sem código (pedido bloqueado). Proposta:
+  documento obrigatório no cadastro do CRM e fluxo de vínculo/fusão para os existentes.
+- A importação ainda grava `lastPurchaseDate` e `lastPurchaseValue` da planilha (dados de
+  faturamento que o sync não grava hoje); decidir se passam a ser só do ERP.
+- `PUT /companies/:id` e `/clients/diagnostics/merge-duplicates` não gravam código novo (o primeiro
+  descarta `code` pelo schema; o segundo só marca `__MERGED__` no duplicado arquivado).

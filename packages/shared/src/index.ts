@@ -530,11 +530,15 @@ export type ErpOrderReadinessResult = {
 
 const hasTextValue = (value?: string | null) => Boolean(value?.trim());
 
+// O código do cliente só chega pela sincronização de parceiros do ERP.
+export const CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE =
+  "Cliente ainda sem código do ERP. Cadastre o cliente no ERP e aguarde a próxima sincronização (ou use Sincronizar clientes de todos vendedores).";
+
 export const getErpOrderReadiness = (input: ErpOrderReadinessInput): ErpOrderReadinessResult => {
   const reasons = [
     input.stage !== "ganho" ? "Pedido ERP indisponível: oportunidade não está Ganha." : null,
     Number(input.itemCount || 0) < 1 ? "Pedido ERP indisponível: oportunidade sem itens. Inclua pelo menos 1 item antes de gerar o pedido ERP." : null,
-    !hasTextValue(input.clientErpCode) ? "Pedido ERP indisponível: cliente sem código ERP." : null,
+    !hasTextValue(input.clientErpCode) ? CLIENT_WITHOUT_ERP_CODE_ORDER_MESSAGE : null,
     !hasTextValue(input.sellerErpCode) ? "Pedido ERP indisponível: vendedor sem CODVENDEDOR." : null,
     !hasTextValue(input.sellerOperatorCode) ? "Pedido ERP indisponível: vendedor sem OPERADOR. Teste o login FV3 do vendedor em Configurações > Usuários." : null,
     !hasTextValue(input.sellerLoginFv3) ? "Pedido ERP indisponível: vendedor sem Login FV3. Configure o Login FV3 em Configurações > Usuários." : null,

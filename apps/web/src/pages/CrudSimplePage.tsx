@@ -906,11 +906,13 @@ export default function CrudSimplePage({
       sellerId: user?.id
     });
 
+    // O código da planilha só serve para achar cliente existente; a API não o grava.
+    const code = String(row.code ?? "").trim();
     return {
       ...sanitizedPayload,
+      ...(code ? { code } : {}),
       ...(row.lastPurchaseDate ? { lastPurchaseDate: row.lastPurchaseDate } : {}),
-      ...(typeof row.lastPurchaseValue === "number" && Number.isFinite(row.lastPurchaseValue) ? { lastPurchaseValue: row.lastPurchaseValue } : {}),
-      ...(row.erpUpdatedAt ? { erpUpdatedAt: row.erpUpdatedAt } : {})
+      ...(typeof row.lastPurchaseValue === "number" && Number.isFinite(row.lastPurchaseValue) ? { lastPurchaseValue: row.lastPurchaseValue } : {})
     };
   };
 
@@ -2674,6 +2676,28 @@ export default function CrudSimplePage({
                     const isRequired = endpoint === "/clients" ? ["name", "city", "state", "clientType"].includes(f.key) : true;
 
                     const isOwnerSellerField = endpoint === "/clients" && f.key === "ownerSellerId";
+
+                    // Código do cliente: ausente no cadastro e somente leitura na edição (vem do ERP).
+                    if (endpoint === "/clients" && f.key === "code") {
+                      if (!editing) return null;
+                      return (
+                        <div key={f.key} className="space-y-1">
+                          <label className="block text-sm font-medium text-slate-700" htmlFor={`modal-${f.key}`}>
+                            {f.tableLabel ?? f.label}
+                          </label>
+                          <input
+                            id={`modal-${f.key}`}
+                            readOnly
+                            aria-describedby={`modal-${f.key}-help`}
+                            className="w-full cursor-not-allowed rounded-lg border border-slate-200 bg-slate-100 p-2 text-slate-600"
+                            value={typeof form.code === "string" && form.code.trim() ? form.code : "Sem código do ERP"}
+                          />
+                          <p id={`modal-${f.key}-help`} className="text-xs text-slate-500">
+                            O código vem do ERP após o cadastro do cliente lá e a próxima sincronização.
+                          </p>
+                        </div>
+                      );
+                    }
 
                     if (isOwnerSellerField) {
                       const sellerOptions = canChooseOwnerSeller

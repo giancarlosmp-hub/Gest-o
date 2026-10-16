@@ -46,6 +46,7 @@ const normalizeOptionalNumber = (value: unknown): number | undefined | "invalid"
   return Number.isFinite(parsed) ? parsed : "invalid";
 };
 
+// O código do cliente vem só do ERP (sincronização de parceiros); o formulário nunca o envia.
 export function validateClientPayload(payload: ClientPayloadInput, options: ClientValidationOptions): ClientValidationResult {
   const fieldErrors: Partial<Record<keyof ClientPayloadInput, string>> = {};
 
@@ -53,7 +54,6 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
   const city = toTrimmedString(payload.city);
   const state = toTrimmedString(payload.state).toUpperCase();
   const fantasyName = normalizeOptionalString(payload.fantasyName);
-  const code = normalizeOptionalString(payload.code);
   const clientTypeRaw = toTrimmedString(payload.clientType);
   const clientType = clientTypeRaw.toUpperCase();
   const region = normalizeOptionalString(payload.region);
@@ -118,7 +118,6 @@ export function validateClientPayload(payload: ClientPayloadInput, options: Clie
     state,
     clientType,
     ...(fantasyName ? { fantasyName } : {}),
-    ...(code ? { code } : {}),
     ...(region ? { region } : {}),
     ...(typeof potentialHa === "number" ? { potentialHa } : {}),
     ...(typeof farmSizeHa === "number" ? { farmSizeHa } : {}),
