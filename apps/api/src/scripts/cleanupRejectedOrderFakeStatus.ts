@@ -32,7 +32,11 @@ export const TIMELINE_WINDOW_START = new Date("2026-09-07T03:00:00.000Z");
 export const TIMELINE_WINDOW_END_EXCLUSIVE = new Date("2026-09-15T03:00:00.000Z");
 // Mesma expressão de isUncertainErpOrderFailure (erpOrderService.ts).
 export const UNCERTAIN_FAILURE_PATTERN = /(\"status\":504|timeout|Timeout|fora do ar|inacessível|unavailable|ECONNRESET|network|AbortError|TimeoutError)/i;
-export const BACKUP_FORMAT = "cleanupRejectedOrderFakeStatus/v1";
+// Histórico gravado no catch do POST /orders com failure.message (sanitizeUltraOrderFailure).
+export const HISTORY_SOURCE_POST_ERROR = "ultrafv3-orders-error";
+export const POST_ERROR_MESSAGE_FORMAT = /^UltraFV3 rejeitou POST \/orders(?: \(status (\d+)\))?: /;
+export const POST_ERROR_MESSAGE_MAX_LENGTH = 500;
+export const BACKUP_FORMAT ="cleanupRejectedOrderFakeStatus/v1";
 
 // Estado de uma tentativa recusada no POST que nunca passou pela reconciliação: o create grava
 // os defaults do schema e o catch do envio só altera status, erpResponse e syncErrors.
@@ -64,6 +68,10 @@ export type CleanupPlan = {
   ambiguousTimeline: TimelineRow[];
   /** error + situação, mas a falha parece timeout/rede: fora do apply, só contadas. */
   excludedPossibleTimeout: AttemptRow[];
+  /** error + situação com erpResponse sobrescrito e sem fonte confiável do erro original: fora do apply. */
+  excludedUndetermined: AttemptRow[];
+  /** Quantas das definitivas foram classificadas pelo histórico do POST (erpResponse sobrescrito). */
+  definitiveFromHistory: number;
 };
 export type ExpectedCounts = { attempts: number; history: number; timeline: number };
 
@@ -78,7 +86,28 @@ export const hasErpSituation = (attempt: Pick<AttemptRow, "operationalStatusRaw"
 export const looksLikeTimeout = (attempt: Pick<AttemptRow, "erpResponse">) =>
   UNCERTAIN_FAILURE_PATTERN.test(JSON.stringify(attempt.erpResponse ?? {}));
 
-const timelineKey =(attempt: AttemptKeyRow) => attempt.numPedido || attempt.id;
+export type AttemptClassification = "definitive" | "possible_timeout" | "undetermined";
+
+/**
+ * Classifica a falha original do POST /orders. Quando a reconciliação sobrescreveu o erpResponse,
+ * a única outra cópia é o histórico `ultrafv3-orders-error`, que guarda só `failure.message`
+ * (sanitizada, cortada em 500 caracteres) no formato "UltraFV3 rejeitou POST /orders (status N): ...".
+ * O status é reconstruído dessa mensagem para aplicar a mesma expressão. Sem exatamente um registro
+ * nesse formato, ou com a mensagem possivelmente cortada, a classificação é indeterminada.
+ */
+export function classifyRejectedAttempt(attempt: Pick<AttemptRow, "id" | "erpResponse">, history: HistoryRow[]): { classification: AttemptClassification; source: "erpResponse" | "history" | null } {
+  if (!isReconciliationAudit(attempt.erpResponse)) {
+    return { classification: looksLikeTimeout(attempt) ? "possible_timeout" : "definitive", source: "erpResponse" };
+  }
+  const postErrors = history.filter((row) => row.erpOrderSyncId === attempt.id && row.source === HISTORY_SOURCE_POST_ERROR);
+  const message = postErrors.length === 1 ? postErrors[0].errorMessage : null;
+  const format = typeof message === "string" ? POST_ERROR_MESSAGE_FORMAT.exec(message) : null;
+  if (typeof message !== "string" || !format || message.length >= POST_ERROR_MESSAGE_MAX_LENGTH) return { classification: "undetermined", source: null };
+  const original = { status: format[1] ? Number(format[1]) : null, endpoint: "/orders", message };
+  return { classification: UNCERTAIN_FAILURE_PATTERN.test(JSON.stringify(original)) ? "possible_timeout" : "definitive", source: "history" };
+}
+
+const timelineKey = (attempt: AttemptKeyRow) => attempt.numPedido || attempt.id;
 
 /** Situação lida pelo texto do evento quando ele segue o padrão exato da reconciliação para `key`. */
 export const matchReconciliationTimeline = (description: string, key: string) => {
@@ -92,8 +121,8 @@ const inTimelineWindow = (createdAt: Date) =>
 
 /**
  * Critério por regra (nunca por ID):
- * a) tentativa com status = error, situação ERP preenchida e recusa definitiva (falha que não
- *    parece timeout/rede; as que parecem ficam de fora e só são contadas);
+ * a) tentativa com status = error, situação ERP preenchida e recusa definitiva (classifyRejectedAttempt:
+ *    possível timeout/rede ou classificação indeterminada ficam de fora e só são contadas);
  * b) histórico com source = ultrafv3-order-status dessas tentativas;
  * c) timeline type = status, mesma oportunidade, texto exato da reconciliação com o número (ou id)
  *    da tentativa e createdAt na janela. Se o texto puder ser de outra tentativa da mesma
@@ -106,8 +135,12 @@ export function planRejectedOrderStatusCleanup(input: {
   timeline: TimelineRow[];
 }): CleanupPlan {
   const withSituation = input.errorAttempts.filter((attempt) => attempt.status === SEND_STATUS_ERROR && hasErpSituation(attempt));
-  const attempts = withSituation.filter((attempt) => !looksLikeTimeout(attempt));
-  const excludedPossibleTimeout = withSituation.filter(looksLikeTimeout);
+  const classified = withSituation.map((attempt) => ({ attempt, ...classifyRejectedAttempt(attempt, input.history) }));
+  const pick = (classification: AttemptClassification) => classified.filter((row) => row.classification === classification).map((row) => row.attempt);
+  const attempts = pick("definitive");
+  const excludedPossibleTimeout = pick("possible_timeout");
+  const excludedUndetermined = pick("undetermined");
+  const definitiveFromHistory = classified.filter((row) => row.classification === "definitive" && row.source === "history").length;
   const attemptIds = new Set(attempts.map((attempt) => attempt.id));
   const history = input.history.filter((row) => attemptIds.has(row.erpOrderSyncId) && row.source === HISTORY_SOURCE_RECONCILIATION);
   const timeline: TimelineRow[] = [];
@@ -124,7 +157,7 @@ export function planRejectedOrderStatusCleanup(input: {
     if (owners.length === 1 && candidates.every((candidate) => candidate.id === owners[0].id)) timeline.push(event);
     else ambiguousTimeline.push(event);
   }
-  return { attempts, history, timeline, ambiguousTimeline, excludedPossibleTimeout };
+  return { attempts, history, timeline, ambiguousTimeline, excludedPossibleTimeout, excludedUndetermined, definitiveFromHistory };
 }
 
 export function findExpectedCountMismatches(plan: CleanupPlan, expected: ExpectedCounts) {
@@ -174,15 +207,16 @@ export function classifyResendBlock(attempt: Pick<AttemptRow, "syncErrors" | "er
 
 export function summarizePlan(plan: CleanupPlan) {
   return {
-    tentativas: plan.attempts.length,
+    definitivas: plan.attempts.length,
+    definitivasClassificadasPeloHistorico: plan.definitiveFromHistory,
+    excluidasPossivelTimeout: plan.excludedPossibleTimeout.length,
+    excluidasClassificacaoIndeterminada: plan.excludedUndetermined.length,
     historico: plan.history.length,
     timeline: plan.timeline.length,
     timelineAmbiguos: plan.ambiguousTimeline.length,
     tentativasPorSituacao: countBy(plan.attempts, (attempt) => attempt.operationalOrderStatus),
     tentativasPorDiaDaConferencia: countBy(plan.attempts, (attempt) => brasiliaDate(attempt.statusSyncedAt)),
     tentativasComOrderStatus: plan.attempts.filter((attempt) => attempt.orderStatus !== null).length,
-    tentativasComErpResponseSobrescrito: plan.attempts.filter((attempt) => isReconciliationAudit(attempt.erpResponse)).length,
-    excluidasPossivelTimeout: plan.excludedPossibleTimeout.length,
     historicoPorDia: countBy(plan.history, (row) => brasiliaDate(row.occurredAt)),
     timelinePorDia: countBy(plan.timeline, (row) => brasiliaDate(row.createdAt)),
     timelineAmbiguosPorDia: countBy(plan.ambiguousTimeline, (row) => brasiliaDate(row.createdAt)),

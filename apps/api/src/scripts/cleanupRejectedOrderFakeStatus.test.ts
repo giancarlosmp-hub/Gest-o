@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ErpOperationalOrderStatus, ErpOrderSyncStatus, EventType, Prisma } from "@prisma/client";
 import {
+  HISTORY_SOURCE_POST_ERROR,
   HISTORY_SOURCE_RECONCILIATION,
   OPERATIONAL_STATUS_UNKNOWN,
   RECONCILIATION_AUDIT_OPERATION,
@@ -44,6 +45,8 @@ const serviceSource = readFileSync(fileURLToPath(new URL("../services/erpOrderSe
 assert.ok(serviceSource.includes(`source: "${HISTORY_SOURCE_RECONCILIATION}"`));
 assert.ok(serviceSource.includes("`Pedido ERP ${order.numPedido || order.id}: situação atualizada para ${operationalStatusRaw}.`"));
 assert.ok(serviceSource.includes(`operation: "${RECONCILIATION_AUDIT_OPERATION}"`));
+assert.ok(serviceSource.includes(`source: "${HISTORY_SOURCE_POST_ERROR}", errorMessage: sanitizeErpOrderErrorMessage(failure.message).slice(0, 500)`), "histórico do erro do POST mudou de formato");
+assert.ok(serviceSource.includes("message: `UltraFV3 rejeitou POST /orders${status ? ` (status ${status})` : \"\"}: ${ultraMessage}`"), "mensagem do erro do POST mudou de formato");
 assert.ok(serviceSource.includes(`.test(text)`) && serviceSource.includes(UNCERTAIN_FAILURE_PATTERN.source), "regex de bloqueio de reenvio divergente");
 
 // ---------------------------------------------------------------------------------------------
@@ -208,6 +211,44 @@ const createDb = (initial: Tables) => {
   assert.equal(summarizePlan(plan).timelineAmbiguos, 1);
 }
 
+// erpResponse sobrescrito pela reconciliação: classifica pelo erro original do POST no histórico.
+{
+  const overwritten = { ...reconciled, erpResponse: { operation: RECONCILIATION_AUDIT_OPERATION, outcome: "rejected", response: {} } };
+  const postError = (erpOrderSyncId: string, errorMessage: string, opportunityId: string) =>
+    ({ ...history(erpOrderSyncId, HISTORY_SOURCE_POST_ERROR, opportunityId), errorMessage });
+  const definitive = attempt({ ...overwritten, opportunityId: "opp-h1" });
+  const timeoutOriginal = attempt({ ...overwritten, opportunityId: "opp-h2" });
+  const status504 = attempt({ ...overwritten, opportunityId: "opp-h3" });
+  const noSource = attempt({ ...overwritten, opportunityId: "opp-h4" });
+  const truncated = attempt({ ...overwritten, opportunityId: "opp-h5" });
+  const unknownFormat = attempt({ ...overwritten, opportunityId: "opp-h6" });
+  const all = [definitive, timeoutOriginal, status504, noSource, truncated, unknownFormat];
+  const plan = planRejectedOrderStatusCleanup({
+    errorAttempts: all as never,
+    opportunityAttempts: all as never,
+    history: [
+      postError(definitive.id, "UltraFV3 rejeitou POST /orders (status 422): cliente fictício bloqueado", "opp-h1"),
+      postError(timeoutOriginal.id, "UltraFV3 rejeitou POST /orders: Tempo esgotado (timeout) ao chamar o ERP fictício", "opp-h2"),
+      postError(status504.id, "UltraFV3 rejeitou POST /orders (status 504): gateway fictício", "opp-h3"),
+      postError(truncated.id, `UltraFV3 rejeitou POST /orders (status 422): ${"x".repeat(500)}`.slice(0, 500), "opp-h5"),
+      postError(unknownFormat.id, "mensagem fictícia em outro formato", "opp-h6"),
+      ...all.map((row) => history(row.id, HISTORY_SOURCE_RECONCILIATION, row.opportunityId)),
+    ] as never,
+    timeline: all.map((row) => timeline(row.opportunityId, `Pedido ERP ${row.numPedido}: situação atualizada para FINALIZADO.`)) as never,
+  });
+  assert.deepEqual(plan.attempts.map((row) => row.id), [definitive.id], "sobrescrito com erro original definitivo no histórico entra");
+  assert.equal(plan.definitiveFromHistory, 1);
+  assert.deepEqual(plan.excludedPossibleTimeout.map((row) => row.id), [timeoutOriginal.id, status504.id], "sobrescrito com erro original de timeout fica fora");
+  assert.deepEqual(plan.excludedUndetermined.map((row) => row.id), [noSource.id, truncated.id, unknownFormat.id], "sobrescrito sem fonte confiável fica fora");
+  assert.deepEqual(plan.history.map((row) => row.erpOrderSyncId), [definitive.id], "eventos das excluídas não entram");
+  assert.deepEqual(plan.timeline.map((row) => row.opportunityId), ["opp-h1"]);
+  const summary = summarizePlan(plan);
+  assert.deepEqual(
+    [summary.definitivas, summary.excluidasPossivelTimeout, summary.excluidasClassificacaoIndeterminada, summary.definitivasClassificadasPeloHistorico],
+    [1, 2, 3, 1],
+  );
+}
+
 // Resumo: só contagens e formatos, nunca IDs, números de pedido ou conteúdo.
 {
   const affected = attempt({ ...reconciled, numPedido: "4242" });
@@ -263,8 +304,9 @@ for (const args of invalidArgs) {
   const affected = attempt(reconciled);
   const untouched = attempt({ opportunityId: "opp-c" });
   const timeoutLike = attempt({ ...reconciled, opportunityId: "opp-d", erpResponse: { endpoint: "/orders", message: "Timeout ao chamar o ERP fictício", status: 504 } });
+  const undetermined = attempt({ ...reconciled, opportunityId: "opp-e", erpResponse: { operation: RECONCILIATION_AUDIT_OPERATION, outcome: "rejected" } });
   const initial: Tables = {
-    erpOrderSync: [affected, untouched, timeoutLike],
+    erpOrderSync: [affected, untouched, timeoutLike, undetermined],
     erpOrderStatusHistory: [
       history(affected.id, "ultrafv3-orders-error"),
       history(affected.id, HISTORY_SOURCE_RECONCILIATION),
@@ -291,7 +333,8 @@ for (const args of invalidArgs) {
   assert.ok(disconnected);
   assert.deepEqual(state(), clone(initial), "simulação não grava");
   const simulation = JSON.parse(printed.join("\n")) as Record<string, unknown>;
-  assert.equal(simulation.tentativas, 1);
+  assert.equal(simulation.definitivas, 1);
+  assert.equal(simulation.excluidasClassificacaoIndeterminada, 1);
   assert.equal(simulation.excluidasPossivelTimeout, 1);
   for (const secret of [affected.id, timeoutLike.id, String(affected.numPedido), "opp-a", "tenant-ficticio"]) assert.ok(!printed.join("\n").includes(secret), `simulação vazou ${secret}`);
 
@@ -315,6 +358,7 @@ for (const args of invalidArgs) {
   }
   assert.deepEqual(after.erpOrderSync.find((row) => row.id === untouched.id), untouched);
   assert.deepEqual(after.erpOrderSync.find((row) => row.id === timeoutLike.id), clone(initial).erpOrderSync[2], "possível timeout não é alterado");
+  assert.deepEqual(after.erpOrderSync.find((row) => row.id === undetermined.id), clone(initial).erpOrderSync[3], "classificação indeterminada não é alterada");
   assert.deepEqual(after.erpOrderStatusHistory.map((row) => [row.erpOrderSyncId, row.source]), [[affected.id, "ultrafv3-orders-error"], [timeoutLike.id, HISTORY_SOURCE_RECONCILIATION]]);
   assert.deepEqual(after.timelineEvent.map((row) => row.opportunityId), ["opp-a", "opp-d"]);
   assert.equal(after.timelineEvent[0].type, "comentario");
@@ -322,6 +366,7 @@ for (const args of invalidArgs) {
   const again = await loadCleanupPlan(db);
   assert.deepEqual([again.attempts.length, again.history.length, again.timeline.length], [0, 0, 0], "idempotente");
   assert.equal(again.excludedPossibleTimeout.length, 1);
+  assert.equal(again.excludedUndetermined.length, 1);
 
   const backup = parseBackupFile(readFileSync(result.backupFile, "utf8"));
   assert.equal(backup.attempts.length, 1);
