@@ -19,7 +19,7 @@ test("dashboard, opportunities, reports and CSV consume the shared effective pro
 
 test("conversion formula is unchanged except for cancelled won participation", () => {
   const won = effectiveWonContribution({ tenantId: "t", value: 100 });
-  const cancelled = effectiveWonContribution({ tenantId: "t", value: 100, erpOrderSyncs: [{ id: "o", tenantId: "t", operationalOrderStatus: "CANCELADO", pedidoIdImportacao: "i" }] });
+  const cancelled = effectiveWonContribution({ tenantId: "t", value: 100, erpOrderSyncs: [{ id: "o", tenantId: "t", status: "sent", operationalOrderStatus: "CANCELADO", pedidoIdImportacao: "i" }] });
   const lost = 1;
   assert.equal((won.count / (won.count + lost)) * 100, 50);
   assert.equal(cancelled.count + lost > 0 ? (cancelled.count / (cancelled.count + lost)) * 100 : 0, 0);

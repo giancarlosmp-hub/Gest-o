@@ -1,8 +1,10 @@
+import { VALID_ERP_ORDER_SYNC_STATUS, isValidErpOrder } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 
 export type EffectiveOrder = {
   id: string;
   tenantId: string | null;
+  status: string;
   operationalOrderStatus: string;
   erpOrderId?: string | null;
   erpOrderNumber?: string | null;
@@ -28,7 +30,8 @@ const identity = (order: EffectiveOrder) => order.erpOrderId || order.erpOrderNu
 
 /** Pure, idempotent projection. Commercial stage/history are intentionally not mutated. */
 export function effectiveWonContribution(opportunity: { tenantId: string | null; value: number; erpOrderSyncs?: EffectiveOrder[] }): EffectiveWinState {
-  const linked = (opportunity.erpOrderSyncs || []).filter((order) => order.tenantId === opportunity.tenantId);
+  // Só pedido válido (`sent`): tentativa recusada ou sem confirmação nunca cancela nem reparte o ganho.
+  const linked = (opportunity.erpOrderSyncs || []).filter((order) => order.tenantId === opportunity.tenantId && isValidErpOrder(order));
   const unchanged = { value: opportunity.value, count: 1 as const, disregarded: false, partialCancellation: false, reason: null, originalValue: opportunity.value };
   if (!linked.length) return unchanged;
 
@@ -72,8 +75,8 @@ export async function loadEffectiveWonContributions(opportunities: Array<{ id: s
   if (!opportunities.length) return new Map<string, EffectiveWinState>();
   const tenantByOpportunity = new Map(opportunities.map((opportunity) => [opportunity.id, opportunity.client.tenantId]));
   const orders = await prisma.erpOrderSync.findMany({
-    where: { opportunityId: { in: opportunities.map((opportunity) => opportunity.id) } },
-    select: { id: true, opportunityId: true, tenantId: true, operationalOrderStatus: true, erpOrderId: true, erpOrderNumber: true, pedidoIdImportacao: true, supersedesErpOrderSyncId: true, payloadSent: true },
+    where: { opportunityId: { in: opportunities.map((opportunity) => opportunity.id) }, status: VALID_ERP_ORDER_SYNC_STATUS },
+    select: { id: true, opportunityId: true, tenantId: true, status: true, operationalOrderStatus: true, erpOrderId: true, erpOrderNumber: true, pedidoIdImportacao: true, supersedesErpOrderSyncId: true, payloadSent: true },
   });
   const byOpportunity = new Map<string, EffectiveOrder[]>();
   for (const order of orders) {

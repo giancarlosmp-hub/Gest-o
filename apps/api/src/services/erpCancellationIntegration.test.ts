@@ -9,7 +9,7 @@ test("representative ERP payload crosses normalization, persisted projection, AP
   const payload = { status: "FINALIZADO", data: [{ PEDIDO_ID_IMPORTACAO: "synthetic-900169", NUM_PEDIDO: "900169", CODFILIAL: 1, SITUACAO_PEDIDO: "CANCELADO", VALOR_LIQUIDO: 369.86 }] };
   const classification = classifyUltraFv3OrderLookup(payload, expected);
   const raw = extractMatchedOperationalStatus(payload, expected);
-  const persisted = { id: "order-900169", tenantId: "tenant-a", pedidoIdImportacao: expected.pedidoIdImportacao, erpOrderNumber: "900169", operationalOrderStatus: normalizeOperationalOrderStatus(raw), payloadSent: { VALOR_LIQUIDO: 369.86 } };
+  const persisted = { id: "order-900169", tenantId: "tenant-a", status: "sent", pedidoIdImportacao: expected.pedidoIdImportacao, erpOrderNumber: "900169", operationalOrderStatus: normalizeOperationalOrderStatus(raw), payloadSent: { VALOR_LIQUIDO: 369.86 } };
   assert.equal(classification.orderStatus, "cancelado");
   assert.equal(raw, "CANCELADO");
   assert.equal(orderStatusGroup("sent", raw, classification.orderStatus), "cancelled");

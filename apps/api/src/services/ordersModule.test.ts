@@ -20,12 +20,13 @@ assert.equal(classifyUltraFv3OrderLookup({ PEDIDO_ID: "erp-7", SITUACAO_PEDIDO: 
 assert.equal(classifyUltraFv3OrderLookup({ NUM_PEDIDO: "900118", SITUACAO_PEDIDO: "FINALIZADO" }, { ...expected, erpOrderNumber: "900118" }).matched, true);
 assert.doesNotMatch(sanitizeErpOrderErrorMessage("token=secret password=hunter2 CPF 123.456.789-00"), /secret|hunter2|456[.]789/);
 
-const routes = fs.readFileSync(new URL("../routes/orderRoutes.ts", import.meta.url), "utf8");
+// A projeção por pedido saiu da rota para orderStatusProjection.ts; as asserções leem os dois.
+const routes = fs.readFileSync(new URL("../routes/orderRoutes.ts", import.meta.url), "utf8") + fs.readFileSync(new URL("./orderStatusProjection.ts", import.meta.url), "utf8");
 assert.match(routes, /client:\s*\{ tenantId \}/, "listagem deve restringir pelo tenant do cliente");
 assert.match(routes, /role === "vendedor"[\s\S]*ownerSellerId: req\.user!\.id/, "vendedor deve ser restrito ao próprio escopo");
 assert.doesNotMatch(routes, /req\.(body|query)\.tenantId/, "tenant nunca pode vir do navegador");
 assert.match(routes, /requestAuthorizationStatus/, "autorização de solicitações deve permanecer separada do status operacional");
-assert.match(routes, /reduce\(\(acc, item\)/, "agregação deve operar uma vez por pedido projetado");
+assert.match(routes, /summarizeOrders\(items\)/, "agregação deve operar uma vez por pedido projetado");
 assert.match(routes, /status-consultation/, "consulta explícita de status deve existir");
 assert.match(routes, /nullableNumber/, "quantidade ausente não pode virar zero");
 const service = fs.readFileSync(new URL("./erpOrderService.ts", import.meta.url), "utf8");

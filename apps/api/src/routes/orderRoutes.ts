@@ -6,7 +6,7 @@ import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sanitizeErpOrderErrorMessage, syncErpOrderStatuses } from "../services/erpOrderService.js";
-import { orderStatusGroup } from "../services/orderStatusProjection.js";
+import { array, first, nullableNumber, number, object, responseRoot, serializeOrderAttempt as serialize, summarizeOrders, text } from "../services/orderStatusProjection.js";
 import { brazilDayRange } from "../utils/dateRange.js";
 
 const router = Router();
@@ -21,17 +21,6 @@ const querySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(30),
 });
 
-const object = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const array = (value: unknown): unknown[] => Array.isArray(value) ? value : [];
-const first = (row: Record<string, unknown>, keys: string[]) => keys.map((key) => row[key]).find((value) => value !== undefined && value !== null && String(value).trim() !== "");
-const number = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
-const nullableNumber = (value: unknown) => value === undefined || value === null || String(value).trim() === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
-const text = (value: unknown) => value === undefined || value === null ? null : String(value).trim() || null;
-const responseRoot = (value: unknown): Record<string, unknown> => {
-  if (Array.isArray(value)) return object(value[0]);
-  const root = object(value); const nested = root.response ?? root.data ?? root.result ?? root.pedido ?? root.order;
-  return nested === undefined ? root : responseRoot(nested);
-};
 async function tenantIdFor(req: Request) {
   const memberships = await prisma.tenantMembership.findMany({ where: { userId: req.user!.id, status: "active", tenant: { status: "active" } }, select: { tenantId: true } });
   if (memberships.length !== 1) throw Object.assign(new Error("Contexto de tenant ausente ou ambíguo."), { status: 403 });
@@ -41,27 +30,6 @@ async function tenantIdFor(req: Request) {
 const baseWhere = (req: Request, tenantId: string): Prisma.ErpOrderSyncWhereInput => ({
   opportunity: { client: { tenantId }, ...(req.user!.role === "vendedor" ? { ownerSellerId: req.user!.id } : {}) },
 });
-
-const serialize = (order: any) => {
-  const payload = object(order.payloadSent); const erp = responseRoot(order.erpResponse); const statusPayload = responseRoot(order.lastStatusPayload);
-  const source = Object.keys(statusPayload).length ? statusPayload : erp;
-  const ordered = number(first(source, ["QTD_PEDIDO"]) ?? first(payload, ["QTD_PEDIDO"]));
-  const billed = nullableNumber(first(source, ["QTD_FATURADO"])); const shipped = nullableNumber(first(source, ["QTD_EXPEDIDO"]));
-  const cancelled = nullableNumber(first(source, ["QTD_CANCELADO"])); const pending = nullableNumber(first(source, ["QTD_AEXPEDIR"]));
-  const operational = order.operationalStatusRaw || text(first(source, ["SITUACAO_PEDIDO", "situacao", "status"]));
-  return {
-    id: order.id, internalNumber: order.numPedido, erpOrderId: order.erpOrderId, erpOrderNumber: order.erpOrderNumber,
-    importId: order.pedidoIdImportacao, createdAt: order.createdAt, expectedDeliveryDate: first(payload, ["DATA_PREV_ENTREGA"]),
-    lastSyncAt: order.statusSyncedAt, syncStatus: order.status,
-    opportunityStatus: order.opportunity.stage, operationalOrderStatus: order.operationalOrderStatus,
-    requestAuthorizationStatus: order.requestAuthorizationStatus,
-    fulfillmentStatus: order.orderStatus, operationalStatus: operational, statusGroup: orderStatusGroup(order.status, operational, order.orderStatus),
-    client: order.opportunity.client, seller: order.seller, opportunity: { id: order.opportunity.id, title: order.opportunity.title, stage: order.opportunity.stage },
-    branch: text(first(payload, ["CODFILIAL"])), origin: "opportunity", totalValue: number(first(payload, ["VALOR_LIQUIDO"])) || number(order.opportunity.value),
-    quantities: { ordered, billed, shipped, cancelled, pending }, invoice: { available: false, reason: "Associação pedido–NFe não instrumentada" },
-    hasError: Boolean(order.syncErrors),
-  };
-};
 
 router.get("/orders", async (req, res) => {
   try {
@@ -78,7 +46,7 @@ router.get("/orders", async (req, res) => {
     let items = rows.map(serialize);
     if (q.status) items = items.filter((item) => item.statusGroup === q.status || item.operationalStatus?.toLowerCase() === q.status?.toLowerCase());
     if (q.branch) items = items.filter((item) => item.branch === q.branch);
-    const summary = items.reduce((acc, item) => { acc.count++; acc.totalValue += item.totalValue; acc[item.statusGroup]++; return acc; }, { count: 0, totalValue: 0, pending: 0, processing: 0, partial: 0, finished: 0, cancelled: 0, error: 0 } as Record<string, number>);
+    const summary = summarizeOrders(items);
     const start = (q.page - 1) * q.pageSize;
     return res.json({ items: items.slice(start, start + q.pageSize), summary, pagination: { page: q.page, pageSize: q.pageSize, total: items.length }, filters: { sellers: Array.from(new Map(items.map((item) => [item.seller.id, item.seller])).values()) } });
   } catch (error) { return res.status((error as any)?.status || 500).json({ message: sanitizeErpOrderErrorMessage(error instanceof Error ? error.message : error) }); }
