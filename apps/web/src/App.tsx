@@ -93,7 +93,7 @@ export default function App() {
                 { key: "farmSizeHa", label: "Área total (ha)", type: "number" },
                 { key: "clientType", label: "Tipo (PJ/PF)" },
                 { key: "cnpj", label: "CNPJ/CPF" },
-                { key: "segment", label: "Segmento" },
+                { key: "segment", label: "Endereço" },
                 { key: "ownerSellerId", label: "Vendedor responsável" }
               ]}
             />

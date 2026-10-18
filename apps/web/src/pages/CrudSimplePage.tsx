@@ -216,7 +216,7 @@ const clientImportTemplateColumns = [
   "area_total_ha",
   "tipo_cliente",
   "cnpj_cpf",
-  "segmento",
+  "endereco",
   "vendedor_responsavel",
   "last_purchase_date",
   "last_purchase_value",
@@ -237,7 +237,7 @@ const clientImportFieldDefinitions: ClientImportFieldDefinition[] = [
   { key: "potentialHa", label: "potencial_ha", required: false },
   { key: "farmSizeHa", label: "area_total_ha", required: false },
   { key: "cnpj", label: "cnpj_cpf", required: false },
-  { key: "segment", label: "segmento", required: false },
+  { key: "segment", label: "endereco", required: false },
   { key: "ownerSellerId", label: "vendedor_responsavel", required: false },
   { key: "lastPurchaseDate", label: "last_purchase_date", required: false },
   { key: "lastPurchaseValue", label: "last_purchase_value", required: false },
@@ -569,7 +569,7 @@ export default function CrudSimplePage({
   const downloadImportTemplate = async () => {
     const worksheetData: Array<Array<string | number>> = [
       [...clientImportTemplateColumns],
-      ["Fazenda Santa Rita", "Santa Rita Agro", "ERP-000123", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Soja e milho", "Ana Souza"]
+      ["Fazenda Santa Rita", "Santa Rita Agro", "ERP-000123", "Sorriso", "MT", "Centro-Oeste", 1200, 2500, "PJ", "12.345.678/0001-99", "Rua das Palmeiras, 100, Centro", "Ana Souza"]
     ];
 
     const xlsx = await loadXlsxLibrary();
@@ -592,7 +592,7 @@ export default function CrudSimplePage({
       potentialHa: ["potentialha", "potencial", "hapotencial", "potencialha"],
       farmSizeHa: ["farmsizeha", "area", "tamanho", "hatotal", "areatotal", "areatotalha"],
       cnpj: ["cnpj", "cpf", "cnpjcpf", "documento", "cnpj_cpf"],
-      segment: ["segment", "segmento", "atividade", "perfil"],
+      segment: ["segment", "segmento", "endereco", "atividade", "perfil"],
       ownerSellerId: ["ownersellerid", "ownerseller", "vendedor", "responsavel", "vendedorresponsavel", "idseller", "vendedorresponsavelid", "vendedor_responsavel_id", "vendedor_responsavel"],
       lastPurchaseDate: ["lastpurchasedate", "last_purchase_date", "ultimacompra", "dataultimacompra", "ultima_compra_data"],
       lastPurchaseValue: ["lastpurchasevalue", "last_purchase_value", "valorultimacompra", "valor_ultima_compra"],
