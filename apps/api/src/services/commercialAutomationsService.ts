@@ -111,7 +111,7 @@ const parseDateValue = (value: unknown): Date | null => {
 const readFinancialProfileRecord = (value: Prisma.JsonValue | null) =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 
-const resolvePurchaseDate = (client: { lastPurchaseDate: Date | null; financialProfile: Prisma.JsonValue | null }) => {
+export const resolvePurchaseDate = (client: { lastPurchaseDate: Date | null; financialProfile: Prisma.JsonValue | null }) => {
   if (client.lastPurchaseDate) return client.lastPurchaseDate;
   return parseDateValue(readFinancialProfileRecord(client.financialProfile).DATA_ULTFATURA);
 };

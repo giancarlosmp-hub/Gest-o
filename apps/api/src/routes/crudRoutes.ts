@@ -27,7 +27,9 @@ import {
   commercialAutomationsConfigSchema,
   erpOrderGenerationSchema,
   knowledgeDocumentCreateSchema,
-  knowledgeDocumentUpdateSchema
+  knowledgeDocumentUpdateSchema,
+  isVisibleInRanking,
+  rankingSellerName
 } from "@salesforce-pro/shared";
 import { authorize } from "../middlewares/authorize.js";
 import { resolveOwnerId, sellerWhere } from "../utils/access.js";
@@ -45,6 +47,7 @@ import { hashPassword } from "../utils/password.js";
 import { calculateOpportunityRisk } from "../services/opportunityInsight.js";
 import { generateSalesMessage } from "../services/opportunitySalesMessage.js";
 import { buildClientAiContext } from "../services/clientAiContext.js";
+import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
 import { generateClientSuggestion } from "../services/clientSuggestion.js";
 import { buildAssistantWhatsappContext, generateAssistantWhatsappMessage } from "../services/assistantWhatsapp.js";
 import { aiService } from "../services/ai/aiService.js";
@@ -3470,7 +3473,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
   const [sellers, currentWonOpportunities, previousWonOpportunities, visitActivities, followUpActivities, opportunitiesCreated] = await Promise.all([
     prisma.user.findMany({
       where: { role: "vendedor", ...(scopedSellerId ? { id: scopedSellerId } : {}) },
-      select: { id: true, name: true }
+      select: { id: true, name: true, isActive: true }
     }),
     loadEffectiveWonTotals({
       stage: "ganho",
@@ -3530,15 +3533,18 @@ router.get("/reports/weekly-highlights", async (req, res) => {
     return acc;
   }, {});
 
-  const topByMetric = <T extends { metricValue: number }>(rows: T[]) => {
-    if (rows.length === 0) return null;
-    return rows.reduce((best, row) => (row.metricValue > best.metricValue ? row : best));
+  const topByMetric = <T extends { sellerName: string; metricValue: number; isActive: boolean }>(rows: T[]) => {
+    const visibleRows = rows.filter((row) => isVisibleInRanking(row.isActive, row.metricValue));
+    if (visibleRows.length === 0) return null;
+    const { isActive, ...best } = visibleRows.reduce((top, row) => (row.metricValue > top.metricValue ? row : top));
+    return { ...best, sellerName: rankingSellerName(best.sellerName, isActive) };
   };
 
   const bestResult = topByMetric(
     sellers.map((seller) => ({
       sellerId: seller.id,
       sellerName: seller.name,
+      isActive: seller.isActive,
       metricLabel: "Valor vendido na semana",
       metricValue: currentSalesMap[seller.id] || 0,
       medal: "🏆"
@@ -3554,6 +3560,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       return {
         sellerId: seller.id,
         sellerName: seller.name,
+        isActive: seller.isActive,
         metricLabel: "Crescimento vs semana anterior (%)",
         metricValue: growthPercent,
         medal: "📈"
@@ -3572,6 +3579,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       return {
         sellerId: seller.id,
         sellerName: seller.name,
+        isActive: seller.isActive,
         metricLabel: "Disciplina de execução da semana",
         metricValue,
         medal: "🥇"
@@ -3588,6 +3596,7 @@ router.get("/reports/weekly-highlights", async (req, res) => {
       return {
         sellerId: seller.id,
         sellerName: seller.name,
+        isActive: seller.isActive,
         metricLabel: "Oportunidades criadas / atividades executadas (%)",
         metricValue: conversionRate,
         medal: "🎯"
@@ -3885,7 +3894,7 @@ router.get("/reports/consistency", async (req, res) => {
       : { role: "vendedor" as const, ...(sellerIdRaw ? { id: sellerIdRaw } : {}) };
   const sellers = await prisma.user.findMany({
     where: scopedSellerFilter,
-    select: { id: true, name: true },
+    select: { id: true, name: true, isActive: true },
     orderBy: { name: "asc" }
   });
 
@@ -3922,6 +3931,7 @@ router.get("/reports/consistency", async (req, res) => {
   );
 
   const ranking = sellers
+    .filter((seller) => isVisibleInRanking(seller.isActive, monthlyStats.reduce((sum, stats) => sum + (stats.salesBySeller[seller.id] || 0), 0)))
     .map((seller) => {
       const monthlyPerformance = monthKeys.map((month, index) => {
         const soldValue = monthlyStats[index]?.salesBySeller[seller.id] || 0;
@@ -3951,7 +3961,7 @@ router.get("/reports/consistency", async (req, res) => {
 
       return {
         sellerId: seller.id,
-        sellerName: seller.name,
+        sellerName: rankingSellerName(seller.name, seller.isActive),
         averageScore: Number(averageScore.toFixed(2)),
         metaHitRate: Number(metaHitRate.toFixed(2)),
         stdDevResult: Number(stdDevResult.toFixed(2)),
@@ -4116,7 +4126,7 @@ router.get("/clients/:id", async (req, res) => {
 
   if (!data) return res.status(404).json({ message: "Não encontrado" });
 
-  const [openOpportunitiesCount, lastActivityAggregate, totalCompletedActivities] = await Promise.all([
+  const [openOpportunitiesCount, lastActivityAggregate, totalCompletedActivities, lastSentCrmOrderByClient] = await Promise.all([
     prisma.opportunity.count({
       where: {
         clientId: data.id,
@@ -4139,7 +4149,8 @@ router.get("/clients/:id", async (req, res) => {
         clientId: data.id,
         done: true
       }
-    })
+    }),
+    loadLastSentCrmOrderByClient({ id: data.id })
   ]);
 
   const commercialSummary = {
@@ -4150,7 +4161,8 @@ router.get("/clients/:id", async (req, res) => {
     totalCompletedActivities,
     clientCode: data.code ?? null,
     fantasyName: data.fantasyName ?? null,
-    erpUpdatedAt: data.erpUpdatedAt ?? null
+    erpUpdatedAt: data.erpUpdatedAt ?? null,
+    portfolioStatus: portfolioStatusOf(data, lastSentCrmOrderByClient, new Date())
   };
 
   res.json({
@@ -9851,7 +9863,7 @@ router.get("/activity-kpis", async (req, res) => {
       },
       include: {
         seller: {
-          select: { id: true, name: true, email: true }
+          select: { id: true, name: true, email: true, isActive: true }
         }
       },
       orderBy: [{ sellerId: "asc" }, { type: "asc" }]

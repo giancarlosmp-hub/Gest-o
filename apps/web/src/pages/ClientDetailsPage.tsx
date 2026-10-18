@@ -8,6 +8,7 @@ import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
 import { useAuth } from "../context/AuthContext";
 import { canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
+import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
 
 type CommercialSummary = {
   openOpportunitiesCount: number;
@@ -18,6 +19,14 @@ type CommercialSummary = {
   clientCode?: string | null;
   fantasyName?: string | null;
   erpUpdatedAt?: string | null;
+  portfolioStatus?: PortfolioStatus;
+};
+
+const portfolioStatusBadgeClass: Record<PortfolioStatus, string> = {
+  ativo: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  inativoRecente: "bg-amber-50 text-amber-800 ring-amber-300",
+  exCliente: "bg-red-50 text-red-800 ring-red-300",
+  prospect: "bg-slate-100 text-slate-700 ring-slate-300"
 };
 
 type Client = {
@@ -444,6 +453,8 @@ export default function ClientDetailsPage() {
 
   const archiveBadgeLabel = clientArchiveBadgeLabel(client);
   const showReactivateButton = canReactivateClient(user?.role, client);
+  // Carteira = clientes não arquivados; o arquivado já mostra o próprio selo.
+  const portfolioStatus = client.isArchived ? null : client.commercialSummary?.portfolioStatus ?? null;
 
   const reactivateClient = async () => {
     if (!id) return;
@@ -483,7 +494,14 @@ export default function ClientDetailsPage() {
   return (
     <div className="space-y-4 pb-5">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-900">Detalhes do Cliente</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-2xl font-bold text-slate-900">Detalhes do Cliente</h2>
+          {portfolioStatus ? (
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${portfolioStatusBadgeClass[portfolioStatus]}`}>
+              {PORTFOLIO_STATUS_LABELS[portfolioStatus]}
+            </span>
+          ) : null}
+        </div>
         <button
           type="button"
           className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
