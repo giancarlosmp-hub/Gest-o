@@ -663,8 +663,7 @@ export default function DashboardPage() {
         {
           0: "/clientes?status=ativos",
           1: "/clientes?status=inativos_recentes",
-          2: "/clientes?status=ex_clientes",
-          3: "/clientes?status=prospects",
+          2: "/clientes?status=inativos_antigos",
         },
         {
           tooltip: {
