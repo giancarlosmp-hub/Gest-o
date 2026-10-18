@@ -38,6 +38,7 @@ export const TIMELINE_TYPE_STATUS = "status";
 export const CLOSED_STAGES = ["ganho", "perdido"];
 export const CACHE_MAX_AGE_DAYS = 7;
 export const BACKUP_FORMAT = "archivePortfolioCleanup/v1";
+// Lote das gravações: 500 linhas × 7 colunas no createMany fica longe do limite de 32.767 parâmetros do Postgres.
 const UPDATE_CHUNK_SIZE = 500;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const BRASILIA_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC-3, sem horário de verão desde 2019.
@@ -353,8 +354,11 @@ export async function applyArchive(runInTransaction: TransactionRunner, options:
       const updated = await tx.client.updateMany({ where: { id: { in: chunk }, isArchived: false }, data: { isArchived: true, archiveReason } });
       if (updated.count !== chunk.length) throw new Error("Arquivamento divergente do plano; transação desfeita.");
     }
-    const created = await tx.timelineEvent.createMany({ data: timeline.map((event) => ({ ...event, createdAt: now })) });
-    if (created.count !== timeline.length) throw new Error("Eventos de timeline divergentes do plano; transação desfeita.");
+    let created = 0;
+    for (const chunk of chunks(timeline)) {
+      created += (await tx.timelineEvent.createMany({ data: chunk.map((event) => ({ ...event, createdAt: now })) })).count;
+    }
+    if (created !== timeline.length) throw new Error("Eventos de timeline divergentes do plano; transação desfeita.");
     return { summary, backupFile, archived: ids.length };
   });
 }
@@ -394,9 +398,10 @@ export async function restoreFromBackup(runInTransaction: TransactionRunner, bac
         if (updated.count !== chunk.length) throw new Error("Restauração divergente do backup; transação desfeita.");
       }
     }
-    const removed = await tx.timelineEvent.deleteMany({ where: { id: { in: eventIds } } });
-    if (removed.count !== eventIds.length) throw new Error("Remoção de eventos divergente do backup; transação desfeita.");
-    return { clientesRestaurados: ids.length, eventosRemovidos: removed.count };
+    let removed = 0;
+    for (const chunk of chunks(eventIds)) removed += (await tx.timelineEvent.deleteMany({ where: { id: { in: chunk } } })).count;
+    if (removed !== eventIds.length) throw new Error("Remoção de eventos divergente do backup; transação desfeita.");
+    return { clientesRestaurados: ids.length, eventosRemovidos: removed };
   });
 }
 

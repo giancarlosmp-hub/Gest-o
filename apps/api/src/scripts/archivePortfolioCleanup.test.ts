@@ -463,6 +463,50 @@ for (const args of invalidArgs) {
   assert.deepEqual(state(), before, "restore recusado não grava nada");
 }
 
+// Volume: 1.201 candidatos gravados em lotes de 500 (3 updateMany e 3 createMany), tudo numa transação.
+{
+  const tables = initialTables();
+  const many = Array.from({ length: 1201 }, (_, index) => String(50000 + index));
+  tables.client = many.map((code) => client(`c-volume-${code}`, code, "u-ativo"));
+  const cache = many.map((code) => partner(code, { IDN_CLIENTE: "N" }));
+  tables.appConfig = [
+    { key: PARTNERS_CONFIG_KEY, value: JSON.stringify(cache) },
+    { key: PARTNERS_LAST_SEEN_CONFIG_KEY, value: JSON.stringify(Object.fromEntries(many.map((code) => [code, FRESH]))) },
+  ];
+  const { run, state, writes } = createDb(tables);
+  const backupDir = mkdtempSync(join(tmpdir(), "portfolio-cleanup-archive-"));
+  const result = await applyArchive(run, { expected: 1201, backupDir, now: NOW });
+  assert.equal(result.archived, 1201);
+  assert.deepEqual(writes, ["client.updateMany", "client.updateMany", "client.updateMany", "timelineEvent.createMany", "timelineEvent.createMany", "timelineEvent.createMany"]);
+  assert.ok(state().client.every((row) => row.isArchived));
+  assert.equal(state().timelineEvent.length, timelineEvents.length + 1201);
+  writes.length = 0;
+  await restoreFromBackup(run, parseBackupFile(readFileSync(result.backupFile!, "utf8")));
+  assert.deepEqual(writes, ["client.updateMany", "client.updateMany", "client.updateMany", "timelineEvent.deleteMany", "timelineEvent.deleteMany", "timelineEvent.deleteMany"]);
+  assert.deepEqual(state(), tables, "restore em lotes devolve o estado original");
+}
+
+// Falha num lote do meio desfaz os anteriores (tudo ou nada).
+{
+  const tables = initialTables();
+  const many = Array.from({ length: 1201 }, (_, index) => String(60000 + index));
+  tables.client = many.map((code) => client(`c-falha-${code}`, code, "u-ativo"));
+  tables.appConfig = [
+    { key: PARTNERS_CONFIG_KEY, value: JSON.stringify(many.map((code) => partner(code, { IDN_CLIENTE: "N" }))) },
+    { key: PARTNERS_LAST_SEEN_CONFIG_KEY, value: JSON.stringify(Object.fromEntries(many.map((code) => [code, FRESH]))) },
+  ];
+  const { db, run, state } = createDb(tables);
+  const realCreateMany = db.timelineEvent.createMany;
+  let calls = 0;
+  db.timelineEvent.createMany = async (args: unknown) => {
+    calls += 1;
+    if (calls === 2) throw new Error("falha simulada no segundo lote");
+    return realCreateMany(args);
+  };
+  await assert.rejects(applyArchive(run, { expected: 1201, backupDir: mkdtempSync(join(tmpdir(), "portfolio-cleanup-archive-")), now: NOW }), /falha simulada/);
+  assert.deepEqual(state(), tables, "nenhum lote fica gravado");
+}
+
 // Backup em formato inesperado é recusado antes de abrir transação.
 assert.throws(() => parseBackupFile(JSON.stringify({ format: "outro" })), /formato inesperado/);
 assert.throws(() => parseBackupFile(JSON.stringify({ format: "archivePortfolioCleanup/v1", archiveReason: "MERGED_INTO:x", clients: [], timeline: [] })), /formato inesperado/);
