@@ -1,9 +1,11 @@
 import { Router } from "express";
+import { isVisibleInRanking, rankingSellerName, type PortfolioStatus } from "@salesforce-pro/shared";
 import { prisma } from "../config/prisma.js";
 import { authMiddleware } from "../middlewares/auth.js";
 import { appUsageRateLimit } from "../middlewares/rateLimit.js";
 import { sellerWhere } from "../utils/access.js";
 import { loadEffectiveWonContributions } from "../services/effectiveWins.js";
+import { loadLastSentCrmOrderByClient, portfolioStatusOf } from "../services/clientPortfolioStatus.js";
 import { brazilDayKeyOf, brazilDayRange, brazilTodayKey, calendarDayRange, monthDayBounds, shiftDayKey } from "../utils/dateRange.js";
 import { closedOpportunityPeriodWhere } from "../utils/periodFilters.js";
 
@@ -128,6 +130,7 @@ router.get("/summary", async (req, res) => {
   const objectiveTotal = goals.reduce((acc, goal) => acc + goal.targetValue, 0);
 
   const performance = users
+    .filter((user) => isVisibleInRanking(user.isActive, salesBySeller[user.id]?.revenue || 0))
     .map((user) => {
       const sellerSales = salesBySeller[user.id];
       const sellerObjective = goals.find((goal) => goal.sellerId === user.id)?.targetValue || 0;
@@ -136,7 +139,7 @@ router.get("/summary", async (req, res) => {
       const denominator = sellerObjective || objectiveTotal || 0;
       return {
         sellerId: user.id,
-        seller: user.name,
+        seller: rankingSellerName(user.name, user.isActive),
         sales: salesCount,
         revenue,
         objective: sellerObjective,
@@ -262,20 +265,13 @@ router.get("/sales-series", async (req, res) => {
 router.get("/portfolio", async (req, res) => {
   const { period } = resolveMonth(req.query.month);
   if (!period) return res.status(400).json(INVALID_MONTH);
-  const end = new Date(brazilDayRange(undefined, period.to)!.lt!.getTime() - 1);
   const whereOwner = sellerWhere(req);
   const today = brazilTodayKey();
+  const portfolioClientWhere = { ...whereOwner, isArchived: false };
 
-  const [clients, wonOpportunities, recentWonOpportunities, soldTodayData] = await Promise.all([
-    prisma.client.findMany({ where: { ...whereOwner, isArchived: false }, select: { id: true, name: true } }),
-    prisma.opportunity.findMany({
-      where: {
-        ...whereOwner,
-        stage: "ganho",
-        ...closedOpportunityPeriodWhere(undefined, period.to)
-      },
-      select: { id: true, client: { select: { tenantId: true } }, clientId: true, value: true, expectedCloseDate: true, closedAt: true }
-    }),
+  const [clients, lastSentCrmOrderByClient, recentWonOpportunities, soldTodayData] = await Promise.all([
+    prisma.client.findMany({ where: portfolioClientWhere, select: { id: true, name: true, lastPurchaseDate: true, financialProfile: true } }),
+    loadLastSentCrmOrderByClient(portfolioClientWhere),
     prisma.opportunity.findMany({
       where: {
         ...whereOwner,
@@ -294,29 +290,13 @@ router.get("/portfolio", async (req, res) => {
     })
   ]);
 
-  const portfolioStates = await loadEffectiveWonContributions([...wonOpportunities, ...recentWonOpportunities, ...soldTodayData]);
-  const lastSaleByClient = new Map<string, Date>();
-  for (const opportunity of wonOpportunities) {
-    if (portfolioStates.get(opportunity.id)!.count === 0) continue;
-    const currentDate = lastSaleByClient.get(opportunity.clientId);
-    const effectiveCloseDate = opportunity.closedAt || opportunity.expectedCloseDate;
-    if (!currentDate || effectiveCloseDate > currentDate) {
-      lastSaleByClient.set(opportunity.clientId, effectiveCloseDate);
-    }
-  }
+  const portfolioStates = await loadEffectiveWonContributions([...recentWonOpportunities, ...soldTodayData]);
 
-  const walletStatus = { active: 0, inactiveRecent: 0, inactiveOld: 0 };
+  // A carteira é a situação de hoje: a data de compra do ERP não tem histórico por mês.
+  const now = new Date();
+  const walletStatus: Record<PortfolioStatus, number> = { ativo: 0, inativoRecente: 0, exCliente: 0, prospect: 0 };
   for (const client of clients) {
-    const lastSaleDate = lastSaleByClient.get(client.id);
-    if (!lastSaleDate) {
-      walletStatus.inactiveOld += 1;
-      continue;
-    }
-
-    const diffDays = Math.floor((end.getTime() - lastSaleDate.getTime()) / 86400000);
-    if (diffDays <= 30) walletStatus.active += 1;
-    else if (diffDays <= 90) walletStatus.inactiveRecent += 1;
-    else walletStatus.inactiveOld += 1;
+    walletStatus[portfolioStatusOf(client, lastSentCrmOrderByClient, now)] += 1;
   }
 
   const revenueByClient = new Map<string, number>();
