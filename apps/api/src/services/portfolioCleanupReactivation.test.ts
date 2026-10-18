@@ -135,6 +135,18 @@ setModel("erpSyncRun", {
   findFirst: async () => null,
 });
 (prisma as any).$transaction = async (fn: (tx: unknown) => Promise<unknown>) => fn(prisma);
+// Único SQL cru do /partners: a mescla do lastSeenAt dentro do UPDATE. O mock faz a mesma mescla (||).
+const rawStatements: string[] = [];
+(prisma as any).$executeRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+  const sql = strings.join("?");
+  rawStatements.push(sql);
+  assert.match(sql, /^\s*INSERT INTO "AppConfig"/, "SQL cru inesperado no teste");
+  const [, key, value] = values as [string, string, string];
+  const current = appConfig.get(key);
+  const base = current && /^\s*\{/.test(current) ? JSON.parse(current) : {};
+  appConfig.set(key, JSON.stringify({ ...base, ...JSON.parse(value) }));
+  return 1;
+};
 
 const partnerRows: Row[] = [];
 const financialRows: Row[] = [];
@@ -168,6 +180,11 @@ const resetPartnerScenario = () => {
     baseClient({ id: "fornecedor", code: "8005" }),
     baseClient({ id: "vendedor-sem-usuario", code: "8006" }),
     baseClient({ id: "vendedor-desligado", code: "8008" }),
+    // Sem código no CRM: o /partners só acha pelo documento ou por nome + cidade + UF.
+    baseClient({ id: "limpeza-documento", code: null, cnpj: "11.222.333/0001-81", cnpjNormalized: "11222333000181",
+      isArchived: true, archiveReason: CLEANUP_REASON, name: "Cliente Documento Ficticio", nameNormalized: "cliente documento ficticio" }),
+    baseClient({ id: "limpeza-identidade", code: null, isArchived: true, archiveReason: CLEANUP_REASON, name: "Cliente Identidade Ficticio",
+      nameNormalized: "cliente identidade ficticio", city: "Cidade Nova Ficticia", cityNormalized: "cidade nova ficticia", state: "SC" }),
   ];
   partnerRows.splice(0, partnerRows.length,
     partner("8001", "Cliente Limpeza Ficticio Renomeado"),
@@ -178,6 +195,8 @@ const resetPartnerScenario = () => {
     partner("8006", "Cliente Vendedor Sem Usuario Ficticio", { VENDEDOR_DO_PARCEIRO: "999" }),
     partner("8007", "Fornecedor Novo Ficticio", { IDN_CLIENTE: "N", VENDEDOR_DO_PARCEIRO: "999" }),
     partner("8008", "Cliente Vendedor Desligado Ficticio", { VENDEDOR_DO_PARCEIRO: "066" }),
+    partner("8101", "Cliente Documento Ficticio", { CNPJ: "11.222.333/0001-81" }),
+    partner("8102", "Cliente Identidade Ficticio"),
   );
 };
 const expectPartnerOutcome = (label: string) => {
@@ -188,6 +207,15 @@ const expectPartnerOutcome = (label: string) => {
   assert.equal(kept.city, "Cidade Nova Ficticia", label);
   assert.equal(kept.ownerSellerId, "seller-novo", `${label}: vendedor do ERP atualizado`);
   assert.ok(!timelineOf("limpeza").includes(PARTNER_REACTIVATION), `${label}: sem evento de reativação`);
+  // Duplicidade: o arquivado é encontrado (código, documento, nome + cidade + UF) e nenhum cliente novo é criado.
+  assert.equal(clients.filter((client) => String(client.id).startsWith("created-")).length, 0, `${label}: nenhum cliente novo`);
+  for (const [id, code] of [["limpeza", "8001"], ["limpeza-documento", "8101"], ["limpeza-identidade", "8102"]]) {
+    const matched = clients.filter((client) => client.code === code);
+    assert.deepEqual(matched.map((client) => client.id), [id], `${label}: ${code} casou com o arquivado ${id}`);
+    assert.equal(matched[0].isArchived, true, `${label}: ${id} segue arquivado`);
+    assert.equal(matched[0].archiveReason, CLEANUP_REASON, label);
+    assert.ok(!timelineOf(id).includes(PARTNER_REACTIVATION), label);
+  }
   for (const id of ["legado", "manual", "sem-motivo"]) {
     assert.equal(byId(id).isArchived, false, `${label}: ${id} reativado como hoje`);
     assert.equal(byId(id).archiveReason, null, label);
@@ -202,7 +230,7 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   const before = Date.now();
   const result = await sync.syncPartnersByUser("seller-novo");
   expectPartnerOutcome("por vendedor");
-  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 1);
+  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 3);
   // Diagnóstico (só conta): 8005 com N; 8006 com vendedor 999 e 8008 com vendedor desligado. 8007 não existe no CRM.
   assert.equal(result.diagnostics?.existingClientsNotCustomer, 1);
   assert.equal(result.diagnostics?.existingClientsSellerWithoutActiveUser, 2);
@@ -210,7 +238,7 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   assert.equal(runs.at(-1)!.metrics.existingClientsNotCustomer, 1, "contagens no Histórico da rodada");
   // Cache: data de visto por parceiro, inclusive os N (o cache guarda o retorno bruto).
   const seen = lastSeen();
-  assert.deepEqual(Object.keys(seen).sort(), ["8001", "8002", "8003", "8004", "8005", "8006", "8007", "8008"]);
+  assert.deepEqual(Object.keys(seen).sort(), ["8001", "8002", "8003", "8004", "8005", "8006", "8007", "8008", "8101", "8102"]);
   assert.ok(Object.values(seen).every((value) => Date.parse(value) >= before - 1000));
 
   // Próxima rodada sem 8001: a linha do cache fica, mas a data de visto não avança.
@@ -223,6 +251,20 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   assert.equal(next["9999"], old, "datas anteriores são preservadas");
   assert.ok(Date.parse(next["8002"]) > Date.parse(old));
   assert.ok((JSON.parse(appConfig.get("erp.ultrafv3.partners")!) as Row[]).some((row) => row.PARCEIRO === "8001"), "linha antiga continua no cache");
+
+  // A data de visto é mesclada pelo próprio banco (um INSERT ... ON CONFLICT por rodada), sem leitura antes.
+  rawStatements.length = 0;
+  await sync.syncPartnersByUser("seller-novo");
+  assert.equal(rawStatements.length, 1, "uma gravação de data de visto por rodada");
+  assert.match(rawStatements[0], /ON CONFLICT \("key"\) DO UPDATE SET/);
+  assert.match(rawStatements[0], /\|\| EXCLUDED\."value"::jsonb/, "mescla dentro do UPDATE");
+  assert.ok(!rawStatements[0].includes("\\"), "sem barra invertida no SQL (o Prisma a remove)");
+  // Rodada vazia não grava data de visto.
+  const savedRows = partnerRows.splice(0, partnerRows.length);
+  rawStatements.length = 0;
+  await sync.syncPartnersByUser("seller-novo");
+  assert.equal(rawStatements.length, 0);
+  partnerRows.push(...savedRows);
 }
 
 {
@@ -230,7 +272,7 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   resetPartnerScenario();
   const result = await sync.syncPartners();
   expectPartnerOutcome("global");
-  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 1);
+  assert.equal(result.diagnostics?.portfolioCleanupKeptArchived, 3);
   assert.equal(result.diagnostics?.existingClientsNotCustomer, 1);
   assert.equal(result.diagnostics?.existingClientsSellerWithoutActiveUser, 2);
 }
@@ -239,7 +281,7 @@ const lastSeen = () => JSON.parse(appConfig.get("erp.ultrafv3.partners.lastSeenA
   // Todos os vendedores: contagens somadas no resumo.
   resetPartnerScenario();
   const summary = await sync.syncPartnersForAllConfiguredSellers();
-  assert.equal(summary.portfolioCleanupKeptArchived, 1);
+  assert.equal(summary.portfolioCleanupKeptArchived, 3);
   assert.equal(summary.existingClientsNotCustomer, 1);
   assert.equal(summary.existingClientsSellerWithoutActiveUser, 2);
 }

@@ -339,17 +339,6 @@ const parseCachedRows = (value?: string | null) => {
   }
 };
 
-const parsePartnerLastSeen = (value?: string | null): Record<string, string> => {
-  if (!value) return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter(([, seenAt]) => typeof seenAt === "string")) as Record<string, string>;
-  } catch {
-    return {};
-  }
-};
-
 const cachePartnerRows = async (rows: unknown[], seenAt = new Date()) => {
   const stored = await prisma.appConfig.findUnique({
     where: { key: PARTNERS_CONFIG_KEY },
@@ -372,18 +361,37 @@ const cachePartnerRows = async (rows: unknown[], seenAt = new Date()) => {
       value: JSON.stringify([...merged.values()]),
     },
   });
-  // A linha do cache fica mesmo quando o parceiro deixa de vir; a data separa linha atual de antiga.
-  const storedLastSeen = await prisma.appConfig.findUnique({ where: { key: PARTNERS_LAST_SEEN_CONFIG_KEY }, select: { value: true } });
-  const lastSeen = parsePartnerLastSeen(storedLastSeen?.value);
+  await recordPartnerLastSeen(rows, seenAt);
+};
+
+/**
+ * A linha do cache fica mesmo quando o parceiro deixa de vir; a data separa linha atual de antiga.
+ * Rodadas de vendedores diferentes podem rodar ao mesmo tempo (locks por vendedor), então a mescla é
+ * feita dentro do próprio UPDATE: o Postgres trava a linha no ON CONFLICT e junta as chaves (||, a
+ * rodada recebida prevalece na mesma chave). Leitura-modificação-gravação aqui apagaria datas.
+ * Valor gravado que não comece por "{" recomeça do zero. É diagnóstico: erro não derruba a sincronização.
+ */
+const recordPartnerLastSeen = async (rows: unknown[], seenAt: Date) => {
+  const seen: Record<string, string> = {};
   for (const row of rows) {
     const key = getPartnerCacheKey(row);
-    if (key) lastSeen[key] = seenAt.toISOString();
+    if (key) seen[key] = seenAt.toISOString();
   }
-  await prisma.appConfig.upsert({
-    where: { key: PARTNERS_LAST_SEEN_CONFIG_KEY },
-    update: { value: JSON.stringify(lastSeen) },
-    create: { key: PARTNERS_LAST_SEEN_CONFIG_KEY, value: JSON.stringify(lastSeen) },
-  });
+  if (!Object.keys(seen).length) return;
+  const value = JSON.stringify(seen);
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO "AppConfig" ("id", "key", "value", "updatedAt")
+      VALUES (${randomUUID()}, ${PARTNERS_LAST_SEEN_CONFIG_KEY}, ${value}, NOW())
+      ON CONFLICT ("key") DO UPDATE SET
+        "value" = (
+          CASE WHEN "AppConfig"."value" ~ '^[[:space:]]*[{]' THEN "AppConfig"."value"::jsonb ELSE '{}'::jsonb END
+          || EXCLUDED."value"::jsonb
+        )::text,
+        "updatedAt" = NOW()`;
+  } catch (error) {
+    logApiEvent("WARN", "[ultrafv3 sync partners] last-seen cache not recorded", { partners: Object.keys(seen).length, error: formatError(error) });
+  }
 };
 
 const pickPartnerDocument = (payload: Record<string, unknown>) =>
