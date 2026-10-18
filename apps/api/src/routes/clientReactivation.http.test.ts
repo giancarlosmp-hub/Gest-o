@@ -137,10 +137,14 @@ try {
   for (const userId of ["manager-a", "director-a"]) {
     const list = await request(userId, "GET", "/clients?page=1&pageSize=10&includeArchived=1");
     assert.equal(list.status, 200);
-    assert.equal("isArchived" in listWheres.at(-1)!, false, `${userId}: mostra arquivados`);
-    assert.ok(list.json.items.some((item: Row) => item.isArchived === true && item.archiveReason === "MERGED_INTO:client-ativo"));
-    await request(userId, "GET", "/clients?page=1&pageSize=10");
+    assert.equal(listWheres.at(-1)?.isArchived, true, `${userId}: com o filtro, só arquivados`);
+    assert.ok(list.json.items.length > 0);
+    assert.ok(list.json.items.every((item: Row) => item.isArchived === true), `${userId}: nenhum ativo com o filtro`);
+    assert.ok(list.json.items.some((item: Row) => item.archiveReason === "MERGED_INTO:client-ativo"));
+    const activeList = await request(userId, "GET", "/clients?page=1&pageSize=10");
     assert.equal(listWheres.at(-1)?.isArchived, false, `${userId}: sem o filtro, só ativos`);
+    assert.ok(activeList.json.items.length > 0);
+    assert.ok(activeList.json.items.every((item: Row) => item.isArchived === false), `${userId}: nenhum arquivado sem o filtro`);
   }
 } finally {
   server.close();

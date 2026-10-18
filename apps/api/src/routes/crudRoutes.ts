@@ -4013,15 +4013,16 @@ router.get("/clients", async (req, res) => {
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
-  // "Mostrar arquivados": só gerente e diretor; o vendedor segue vendo só os ativos.
-  const includeArchived = req.user?.role !== "vendedor" && ["1", "true"].includes(String(req.query.includeArchived || ""));
+  // "Mostrar arquivados" (includeArchived=1): lista só os arquivados; só gerente e diretor.
+  // Sem o filtro, e sempre para o vendedor, lista só os ativos.
+  const showArchivedOnly = req.user?.role !== "vendedor" && ["1", "true"].includes(String(req.query.includeArchived || ""));
 
   const parsedClientType = clientType.toUpperCase();
   const isValidClientType = parsedClientType === ClientType.PF || parsedClientType === ClientType.PJ;
 
   const where: Prisma.ClientWhereInput = {
     ...sellerWhere(req),
-    ...(includeArchived ? {} : { isArchived: false }),
+    isArchived: showArchivedOnly,
     ...(state ? { state: { equals: state, mode: "insensitive" } } : {}),
     ...(region ? { region: { equals: region, mode: "insensitive" } } : {}),
     ...(isValidClientType ? { clientType: parsedClientType } : {}),
