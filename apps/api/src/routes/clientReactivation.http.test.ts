@@ -62,6 +62,7 @@ setModel("client", {
   },
   count: async ({ where }: any) => clients.filter((row) => where.isArchived === undefined || row.isArchived === where.isArchived).length,
 });
+setModel("erpOrderSync", { findMany: async () => [] }); // selo da situação na lista
 setModel("timelineEvent", { create: async ({ data }: any) => { createdEvents.push(data); return data; } });
 setModel("clientCodeAudit", { create: async ({ data }: any) => { createdAudits.push(data); return data; } });
 (prisma as any).$transaction = async (input: any) => (typeof input === "function" ? input(prisma) : Promise.all(input));

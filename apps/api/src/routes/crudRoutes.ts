@@ -28,6 +28,7 @@ import {
   erpOrderGenerationSchema,
   knowledgeDocumentCreateSchema,
   knowledgeDocumentUpdateSchema,
+  isPortfolioStatus,
   isVisibleInRanking,
   rankingSellerName
 } from "@salesforce-pro/shared";
@@ -4020,6 +4021,8 @@ router.get("/clients", async (req, res) => {
   const region = String(req.query.regiao || "").trim();
   const clientType = String(req.query.tipo || "").trim();
   const ownerSellerIdFilter = String(req.query.ownerSellerId || req.query.vendedorId || "").trim();
+  // Situação da carteira (?status=ativo|inativoRecente|exCliente|prospect); valor inválido é ignorado.
+  const portfolioStatusFilter = isPortfolioStatus(req.query.status) ? req.query.status : null;
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
@@ -4053,7 +4056,7 @@ router.get("/clients", async (req, res) => {
       : {})
   };
 
-  const hasAdvancedQuery = ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
+  const hasAdvancedQuery = Boolean(portfolioStatusFilter) || ["q", "uf", "regiao", "tipo", "ownerSellerId", "vendedorId", "page", "pageSize", "sort"].some(
     (key) => req.query[key] !== undefined
   );
 
@@ -4088,6 +4091,39 @@ router.get("/clients", async (req, res) => {
     return res.json(data.map(projectClientForResponse));
   }
 
+  const ownerSellerInclude = { ownerSeller: { select: { id: true, name: true } } } as const;
+  const now = new Date();
+
+  if (portfolioStatusFilter) {
+    // Mesma regra e mesmo recorte do card do Dashboard (só não arquivados): a situação não é coluna, então
+    // classifica em memória os clientes que passam nos demais filtros, na ordem pedida, e pagina os ids.
+    // Com "Mostrar arquivados" a lista fica vazia: arquivado nunca entra na carteira.
+    const [candidates, lastSentCrmOrderByClient] = await Promise.all([
+      prisma.client.findMany({ where, orderBy, select: { id: true, lastPurchaseDate: true, financialProfile: true } }),
+      loadLastSentCrmOrderByClient(where)
+    ]);
+    const matchingIds = showArchivedOnly
+      ? []
+      : candidates.filter((client) => portfolioStatusOf(client, lastSentCrmOrderByClient, now) === portfolioStatusFilter).map((client) => client.id);
+    const pageIds = matchingIds.slice((page - 1) * pageSize, page * pageSize);
+    const pageRows = pageIds.length
+      ? await prisma.client.findMany({ where: { ...where, id: { in: pageIds } }, include: ownerSellerInclude })
+      : [];
+    const rowsById = new Map(pageRows.map((row) => [row.id, row]));
+
+    await runShadow(candidates.length);
+
+    return res.json({
+      items: pageIds.flatMap((id) => {
+        const row = rowsById.get(id);
+        return row ? [{ ...projectClientForResponse(row), portfolioStatus: portfolioStatusFilter }] : [];
+      }),
+      total: matchingIds.length,
+      page,
+      pageSize
+    });
+  }
+
   const [items, total] = await Promise.all([
     prisma.client.findMany({
       where,
@@ -4108,8 +4144,11 @@ router.get("/clients", async (req, res) => {
 
   await runShadow(total);
 
+  // Selo da situação na lista: só os pedidos sent dos clientes desta página.
+  const lastSentCrmOrderByClient = items.length ? await loadLastSentCrmOrderByClient({ id: { in: items.map((item) => item.id) } }) : new Map<string, Date>();
+
   res.json({
-    items: items.map(projectClientForResponse),
+    items: items.map((item) => ({ ...projectClientForResponse(item), portfolioStatus: portfolioStatusOf(item, lastSentCrmOrderByClient, now) })),
     total,
     page,
     pageSize
