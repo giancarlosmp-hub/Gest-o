@@ -23,6 +23,7 @@ import type {
   WeeklyHighlightItem,
   WeeklyHighlights,
 } from "@salesforce-pro/shared";
+import { isVisibleInRanking, rankingSellerName } from "@salesforce-pro/shared";
 
 import api from "../lib/apiClient";
 import {
@@ -54,7 +55,7 @@ type ActivityKpi = {
   type: string;
   targetValue: number;
   logicalCount?: number;
-  seller?: { id: string; name: string };
+  seller?: { id: string; name: string; isActive?: boolean };
 };
 
 type Activity = {
@@ -152,6 +153,7 @@ const dashboardStatusColors = {
   positive: "#16a34a",
   attention: "#eab308",
   negative: "#dc2626",
+  neutral: "#64748b",
 };
 
 const donutSegmentColors = [
@@ -159,6 +161,8 @@ const donutSegmentColors = [
   dashboardStatusColors.attention,
   dashboardStatusColors.negative,
 ];
+
+const walletSegmentColors = [...donutSegmentColors, dashboardStatusColors.neutral];
 
 const cardClass = "dashboard-card-enter rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
 const doughnutContainerClass = "mx-auto flex h-[200px] w-full max-w-[200px] items-center justify-center sm:h-[240px] sm:max-w-[240px]";
@@ -575,20 +579,22 @@ export default function DashboardPage() {
 
   const walletData = useMemo(
     () => [
-      portfolio?.walletStatus.active ?? 0,
-      portfolio?.walletStatus.inactiveRecent ?? 0,
-      portfolio?.walletStatus.inactiveOld ?? 0,
+      portfolio?.walletStatus.ativo ?? 0,
+      portfolio?.walletStatus.inativoRecente ?? 0,
+      portfolio?.walletStatus.exCliente ?? 0,
+      portfolio?.walletStatus.prospect ?? 0,
     ],
-    [portfolio?.walletStatus.active, portfolio?.walletStatus.inactiveRecent, portfolio?.walletStatus.inactiveOld]
+    [portfolio?.walletStatus.ativo, portfolio?.walletStatus.inativoRecente, portfolio?.walletStatus.exCliente, portfolio?.walletStatus.prospect]
   );
 
   const walletTotal = useMemo(() => walletData.reduce((acc, value) => acc + value, 0), [walletData]);
 
   const walletSegments = useMemo(
     () => [
-      { label: "Ativos", value: walletData[0], color: donutSegmentColors[0] },
-      { label: "Inativos recentes", value: walletData[1], color: donutSegmentColors[1] },
-      { label: "Inativos antigos", value: walletData[2], color: donutSegmentColors[2] },
+      { label: "Ativos", value: walletData[0], color: walletSegmentColors[0] },
+      { label: "Inativos recentes", value: walletData[1], color: walletSegmentColors[1] },
+      { label: "Ex-clientes", value: walletData[2], color: walletSegmentColors[2] },
+      { label: "Prospects", value: walletData[3], color: walletSegmentColors[3] },
     ],
     [walletData]
   );
@@ -614,7 +620,7 @@ export default function DashboardPage() {
   );
 
   const walletQuickKpi = useMemo(() => {
-    const activeClients = portfolio?.walletStatus.active;
+    const activeClients = portfolio?.walletStatus.ativo;
     const totalClients = portfolio?.totalClients;
     const activePercent =
       typeof activeClients === "number" && typeof totalClients === "number" && totalClients > 0
@@ -625,7 +631,7 @@ export default function DashboardPage() {
       primary: formatKpiValue(typeof activeClients === "number" ? formatNumberBR(activeClients) : null),
       secondary: `Ativos • ${formatKpiValue(activePercent === null ? null : formatPercentBR(activePercent))}`,
     };
-  }, [portfolio?.totalClients, portfolio?.walletStatus.active]);
+  }, [portfolio?.totalClients, portfolio?.walletStatus.ativo]);
 
   const abcQuickKpi = useMemo(() => {
     const classAClients = portfolio?.abcCurve.A.clients;
@@ -657,7 +663,8 @@ export default function DashboardPage() {
         {
           0: "/clientes?status=ativos",
           1: "/clientes?status=inativos_recentes",
-          2: "/clientes?status=inativos_antigos",
+          2: "/clientes?status=ex_clientes",
+          3: "/clientes?status=prospects",
         },
         {
           tooltip: {
@@ -833,10 +840,10 @@ export default function DashboardPage() {
     const rankingBySeller = user?.role === "vendedor"
       ? []
       : Array.from(
-          activityKpis.reduce<Map<string, { seller: string; target: number; realized: number }>>((acc, item) => {
+          activityKpis.reduce<Map<string, { seller: string; isActive: boolean; target: number; realized: number }>>((acc, item) => {
             const sellerName = item.seller?.name ?? sellers.find((seller) => seller.id === item.sellerId)?.name ?? "Sem nome";
             if (!acc.has(item.sellerId)) {
-              acc.set(item.sellerId, { seller: sellerName, target: 0, realized: 0 });
+              acc.set(item.sellerId, { seller: sellerName, isActive: item.seller?.isActive !== false, target: 0, realized: 0 });
             }
             const entry = acc.get(item.sellerId)!;
             entry.target += Number(item.targetValue || 0);
@@ -844,9 +851,10 @@ export default function DashboardPage() {
             return acc;
           }, new Map())
         )
+          .filter(([, values]) => isVisibleInRanking(values.isActive, values.realized))
           .map(([sellerId, values]) => ({
             sellerId,
-            seller: values.seller,
+            seller: rankingSellerName(values.seller, values.isActive),
             target: values.target,
             realized: values.realized,
             reachedPercent: values.target > 0 ? (values.realized / values.target) * 100 : 0,
@@ -1043,8 +1051,8 @@ export default function DashboardPage() {
           { label: "Vendas no mês", value: formatNumberBR(summary.totalSales) },
           { label: "Vendido hoje", value: formatCurrencyBRL(salesPace.soldToday) },
           { label: "% do objetivo atingido", value: formatPercentBR(salesPace.percentObjectiveReached) },
-          { label: "Clientes ativos", value: formatNumberBR(portfolio.walletStatus.active) },
-          { label: "Inativos 31–90 / >90", value: `${formatNumberBR(portfolio.walletStatus.inactiveRecent)} / ${formatNumberBR(portfolio.walletStatus.inactiveOld)}` },
+          { label: "Clientes ativos", value: formatNumberBR(portfolio.walletStatus.ativo) },
+          { label: "Inativos recentes / Ex-clientes", value: `${formatNumberBR(portfolio.walletStatus.inativoRecente)} / ${formatNumberBR(portfolio.walletStatus.exCliente)}` },
         ].map((item) => (
           <div key={item.label} className={cardClass}>
             <div className="text-sm text-slate-500">{item.label}</div>
@@ -1503,11 +1511,11 @@ export default function DashboardPage() {
               plugins={[doughnutCenterTextPlugin]}
               options={walletDoughnutOptions}
               data={{
-                labels: ["Ativos", "Inativos recentes", "Inativos antigos"],
+                labels: ["Ativos", "Inativos recentes", "Ex-clientes", "Prospects"],
                 datasets: [
                   {
                     data: walletData,
-                    backgroundColor: donutSegmentColors,
+                    backgroundColor: walletSegmentColors,
                     borderColor: palette.surface,
                     borderWidth: 2,
                     hoverOffset: 8,
