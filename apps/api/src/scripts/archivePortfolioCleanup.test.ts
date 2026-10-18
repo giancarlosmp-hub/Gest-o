@@ -7,6 +7,7 @@ import { EventType, OpportunityStage } from "@prisma/client";
 import {
   ARCHIVE_REASON_PREFIX,
   CLOSED_STAGES,
+  MANUAL_REACTIVATION_AUDIT_ORIGIN,
   PARTNERS_CONFIG_KEY,
   PARTNERS_LAST_SEEN_CONFIG_KEY,
   PARTNER_CODE_KEYS,
@@ -30,6 +31,7 @@ import {
 import { isSystemTimeline } from "./simulateClientPortfolioCleanup.js";
 import {
   PORTFOLIO_CLEANUP_ARCHIVE_REASON_PREFIX,
+  PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN,
   buildPortfolioCleanupArchiveReason,
   portfolioCleanupArchiveTimelineDescription,
 } from "../services/portfolioCleanupArchive.js";
@@ -59,6 +61,7 @@ assert.deepEqual([...sellerBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1]
 assert.ok(sync.includes('value.trim().replace(/^0+(?=\\d)/, "") || value.trim();'), "normalização do código do parceiro mudou");
 assert.ok(sync.includes('return String(raw).trim().toUpperCase() === "S" ? "customer" : "not_customer";'), "regra do IDN_CLIENTE mudou");
 assert.equal(ARCHIVE_REASON_PREFIX, PORTFOLIO_CLEANUP_ARCHIVE_REASON_PREFIX);
+assert.equal(MANUAL_REACTIVATION_AUDIT_ORIGIN, PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN, "origem da auditoria da reativação manual");
 const sampleDate = new Date("2026-10-18T12:34:56.789Z");
 assert.equal(buildArchiveReason(sampleDate), buildPortfolioCleanupArchiveReason(sampleDate), "motivo igual ao de buildPortfolioCleanupArchiveReason");
 for (const rule of ["a", "b"] as const) {
@@ -161,12 +164,13 @@ const timelineEvents: Row[] = [
 
 // ---------------------------------------------------------------------------------------------
 // Banco em memória com a mesma interface mínima usada pelo script; transação desfaz em erro.
-type Tables = { client: Row[]; user: Row[]; opportunity: Row[]; erpOrderSync: Row[]; timelineEvent: Row[]; appConfig: Row[] };
+type Tables = { client: Row[]; user: Row[]; opportunity: Row[]; erpOrderSync: Row[]; clientCodeAudit: Row[]; timelineEvent: Row[]; appConfig: Row[] };
 const initialTables = (): Tables => structuredClone({
   client: clients,
   user: users,
   opportunity: opportunities,
   erpOrderSync: orders,
+  clientCodeAudit: [],
   timelineEvent: timelineEvents,
   appConfig: [
     { key: PARTNERS_CONFIG_KEY, value: JSON.stringify(cacheRows) },
@@ -213,7 +217,7 @@ const createDb = (initial: Tables) => {
   });
   const db = {
     client: delegate("client"), user: delegate("user"), opportunity: delegate("opportunity"),
-    erpOrderSync: delegate("erpOrderSync"), timelineEvent: delegate("timelineEvent"), appConfig: delegate("appConfig"),
+    erpOrderSync: delegate("erpOrderSync"), clientCodeAudit: delegate("clientCodeAudit"), timelineEvent: delegate("timelineEvent"), appConfig: delegate("appConfig"),
   } as unknown as ArchiveDb;
   const run: TransactionRunner = async (fn) => {
     const snapshot = structuredClone(tables);
@@ -287,7 +291,7 @@ const initial = initialTables();
 
   const summary = summarizePlan(plan, input.users, NOW);
   assert.deepEqual(summary.candidatos, { total: 9, regraA: 6, regraB: 3, regraBAusenteDoCache: 1, regraBVendedorErpSemUsuarioAtivo: 2 });
-  assert.deepEqual(summary.protegidos, { total: 3, porMotivo: { oportunidadeAberta: 1, pedidoPendente: 2 }, porRegra: { a: 2, b: 1 } });
+  assert.deepEqual(summary.protegidos, { total: 3, porMotivo: { oportunidadeAberta: 1, pedidoPendente: 2, reativadoManualmente: 0 }, porRegra: { a: 2, b: 1 } });
   assert.deepEqual(summary.cacheDesatualizado, { total: 2, semDataDeVisto: 1, vistaHaMaisDe7Dias: 1 });
   assert.deepEqual(summary.naoCandidatos, {
     idnClienteS: 1, linhaSemIdnClienteComVendedorErpAtivo: 1, linhaSemIdnClienteComResponsavelAtivo: 1, ausenteDoCacheComResponsavelAtivo: 1, semCacheDoPartners: 0,
@@ -305,6 +309,29 @@ const initial = initialTables();
     assert.ok(!printed.includes(row.name), `resumo vazou nome ${row.name}`);
   }
   for (const code of ["1001", "1005", "1013"]) assert.ok(!printed.includes(code), `resumo vazou código ${code}`);
+}
+
+// Reativado manualmente (auditoria da reativação manual): atende a regra, mas fica protegido.
+// Auditoria de outra origem (reativação automática pela sincronização) não protege.
+{
+  const tables = initialTables();
+  tables.clientCodeAudit = [
+    { id: "aud-1", clientId: "c-a1", origin: MANUAL_REACTIVATION_AUDIT_ORIGIN, requestId: "req-ficticio" },
+    { id: "aud-2", clientId: "c-a1", origin: MANUAL_REACTIVATION_AUDIT_ORIGIN, requestId: "req-ficticio-2" },
+    { id: "aud-3", clientId: "c-b-ausente", origin: MANUAL_REACTIVATION_AUDIT_ORIGIN, requestId: "req-ficticio" },
+    { id: "aud-4", clientId: "c-a2", origin: "UltraFV3 Portfolio Reactivation", requestId: "req-ficticio" },
+  ];
+  const { db } = createDb(tables);
+  const input = await loadArchiveInput(db);
+  assert.deepEqual(input.manuallyReactivatedClientIds.sort(), ["c-a1", "c-b-ausente"]);
+  const plan = planPortfolioArchive(input, NOW);
+  const decisionOf = (id: string) => plan.decisions.find((row) => row.client.id === id)!.decision;
+  assert.deepEqual(decisionOf("c-a1"), { kind: "protegido", rule: "a", detail: "idnClienteN", reasons: ["reativadoManualmente"] });
+  assert.deepEqual(decisionOf("c-b-ausente"), { kind: "protegido", rule: "b", detail: "ausenteDoCache", reasons: ["reativadoManualmente"] });
+  assert.equal(decisionOf("c-a2").kind, "candidato");
+  assert.equal(plan.candidates.length, 7);
+  const summary = summarizePlan(plan, input.users, NOW);
+  assert.deepEqual(summary.protegidos, { total: 5, porMotivo: { oportunidadeAberta: 1, pedidoPendente: 2, reativadoManualmente: 2 }, porRegra: { a: 3, b: 2 } });
 }
 
 // Sem cache do /partners: nada é decidido (ausente do cache não vira regra b).
@@ -449,6 +476,27 @@ for (const args of invalidArgs) {
   // Segundo restore: estado atual não é o pós-arquivamento; nada muda.
   await assert.rejects(restoreFromBackup(run, backup), /nada foi restaurado/);
   assert.deepEqual(state(), initial);
+}
+
+// Arquiva, o gerente reativa manualmente (estado gravado por POST /clients/:id/reactivate) e um novo apply
+// não arquiva o cliente de novo.
+{
+  const { db, run, state } = createDb(initial);
+  const backupDir = mkdtempSync(join(tmpdir(), "portfolio-cleanup-archive-"));
+  await applyArchive(run, { expected: 9, backupDir, now: NOW });
+  await db.client.updateMany({ where: { id: "c-a1" }, data: { isArchived: false, archiveReason: null } });
+  const audit = db.clientCodeAudit as unknown as { createMany(args: unknown): Promise<unknown> };
+  await audit.createMany({ data: [{ id: "aud-manual", clientId: "c-a1", origin: MANUAL_REACTIVATION_AUDIT_ORIGIN, requestId: "req-ficticio" }] });
+
+  const plan = planPortfolioArchive(await loadArchiveInput(db), new Date(NOW.getTime() + 1000));
+  assert.equal(plan.candidates.length, 0, "reativado manualmente não volta a ser candidato");
+  assert.deepEqual(plan.decisions.find((row) => row.client.id === "c-a1")!.decision, { kind: "protegido", rule: "a", detail: "idnClienteN", reasons: ["reativadoManualmente"] });
+  const result = await applyArchive(run, { expected: 0, backupDir, now: new Date(NOW.getTime() + 1000) });
+  assert.equal(result.archived, 0);
+  assert.equal(result.summary.protegidos.porMotivo.reativadoManualmente, 1);
+  const reactivated = state().client.find((row) => row.id === "c-a1")!;
+  assert.equal(reactivated.isArchived, false);
+  assert.equal(reactivated.archiveReason, null);
 }
 
 // Restore recusado se algum cliente mudou depois do apply (ex.: reativado pela sincronização).

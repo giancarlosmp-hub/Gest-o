@@ -8,7 +8,8 @@
  *   b) ausente do cache, ou linha sem IDN_CLIENTE com vendedor do ERP sem usuário ativo no CRM, E o
  *      responsável no CRM é um usuário inativo.
  * IDN_CLIENTE = S nunca é arquivado. Protegido mesmo atendendo a regra: oportunidade aberta (etapa
- * diferente de ganho/perdido) ou pedido pendente. Linha do cache com mais de 7 dias ou sem data de visto
+ * diferente de ganho/perdido), pedido pendente ou reativação manual por gerente/diretor (auditoria com a
+ * origem MANUAL_REACTIVATION_AUDIT_ORIGIN). Linha do cache com mais de 7 dias ou sem data de visto
  * não decide nada (conta como cache desatualizado). Sem código ERP: fora do script, só contagem.
  *
  * Uso no container da API (compilado em dist/scripts):
@@ -34,6 +35,7 @@ export const PARTNER_CODE_KEYS = ["PARCEIRO", "CODPARCEIRO", "CODCLIENTE", "code
 export const PARTNER_SELLER_CODE_KEYS = ["VENDEDOR_DO_PARCEIRO", "CODVENDEDOR", "sellerCode", "salesmanCode", "codVendedor", "vendedorCodigo", "VENDEDOR"];
 export const ARCHIVE_REASON_PREFIX = "PORTFOLIO_CLEANUP:";
 export const ARCHIVE_TIMELINE_PREFIX = "Cliente arquivado pela limpeza da carteira (regra ";
+export const MANUAL_REACTIVATION_AUDIT_ORIGIN = "Manual Portfolio Reactivation";
 export const TIMELINE_TYPE_STATUS = "status";
 export const CLOSED_STAGES = ["ganho", "perdido"];
 export const CACHE_MAX_AGE_DAYS = 7;
@@ -60,6 +62,8 @@ export type ArchiveInput = {
   opportunities: OpportunityRow[];
   /** Tentativas de pedido ERP com status pending ou sent. */
   orders: OrderRow[];
+  /** Clientes reativados manualmente (auditoria da reativação manual): nunca são arquivados de novo. */
+  manuallyReactivatedClientIds: string[];
   /** Linhas brutas do cache do /partners, ou null se não houver cache legível. */
   partnerCacheRows: unknown[] | null;
   /** Código normalizado do parceiro → data em que ele veio do /partners pela última vez. */
@@ -124,7 +128,7 @@ export function isPendingOrder(order: Pick<OrderRow, "status" | "operationalStat
 // ---------------------------------------------------------------------------------------------
 // Regra.
 
-export type ProtectionReason = "oportunidadeAberta" | "pedidoPendente";
+export type ProtectionReason = "oportunidadeAberta" | "pedidoPendente" | "reativadoManualmente";
 export type RuleDetail = "idnClienteN" | "ausenteDoCache" | "vendedorErpSemUsuarioAtivo";
 export type NotCandidateReason =
   | "idnClienteS"
@@ -160,6 +164,7 @@ export function planPortfolioArchive(input: ArchiveInput, now: Date): ArchivePla
   const openOpportunityClients = new Set(input.opportunities.filter((row) => !CLOSED_STAGES.includes(row.stage)).map((row) => row.clientId));
   const opportunityClient = new Map(input.opportunities.map((row) => [row.id, row.clientId]));
   const pendingOrderClients = new Set(input.orders.filter(isPendingOrder).map((row) => opportunityClient.get(row.opportunityId)).filter((id): id is string => Boolean(id)));
+  const manuallyReactivated = new Set(input.manuallyReactivatedClientIds);
 
   const decide = (client: ClientRow): ClientDecision => {
     const code = client.code?.trim() ? normalizePartnerCode(client.code) : "";
@@ -187,6 +192,7 @@ export function planPortfolioArchive(input: ArchiveInput, now: Date): ArchivePla
     const reasons: ProtectionReason[] = [];
     if (openOpportunityClients.has(client.id)) reasons.push("oportunidadeAberta");
     if (pendingOrderClients.has(client.id)) reasons.push("pedidoPendente");
+    if (manuallyReactivated.has(client.id)) reasons.push("reativadoManualmente");
     return reasons.length ? { kind: "protegido", ...match, reasons } : { kind: "candidato", ...match };
   };
 
@@ -232,6 +238,7 @@ export function summarizePlan(plan: ArchivePlan, users: UserRow[], now: Date) {
       porMotivo: {
         oportunidadeAberta: count(protectedRows, (row) => row.reasons.includes("oportunidadeAberta")),
         pedidoPendente: count(protectedRows, (row) => row.reasons.includes("pedidoPendente")),
+        reativadoManualmente: count(protectedRows, (row) => row.reasons.includes("reativadoManualmente")),
       },
       porRegra: { a: count(protectedRows, (row) => row.rule === "a"), b: count(protectedRows, (row) => row.rule === "b") },
     },
@@ -262,6 +269,7 @@ export type ArchiveDb = {
   user: Reader;
   opportunity: Reader;
   erpOrderSync: Reader;
+  clientCodeAudit: Reader;
   timelineEvent: Reader & { createMany(args: unknown): Promise<{ count: number }>; deleteMany(args: unknown): Promise<{ count: number }> };
   appConfig: { findUnique(args: unknown): Promise<unknown> };
 };
@@ -270,11 +278,12 @@ export type TransactionRunner = <T>(fn: (tx: ArchiveDb) => Promise<T>) => Promis
 const CLIENT_DECISION_SELECT = { id: true, code: true, isArchived: true, archiveReason: true, ownerSellerId: true };
 
 export async function loadArchiveInput(db: ArchiveDb): Promise<ArchiveInput> {
-  const [clients, users, opportunities, orders, partnerCache, partnerLastSeen] = await Promise.all([
+  const [clients, users, opportunities, orders, manualReactivations, partnerCache, partnerLastSeen] = await Promise.all([
     db.client.findMany({ where: { isArchived: false }, select: CLIENT_DECISION_SELECT }),
     db.user.findMany({ select: { id: true, name: true, isActive: true, erpCode: true } }),
     db.opportunity.findMany({ select: { id: true, clientId: true, stage: true } }),
     db.erpOrderSync.findMany({ where: { status: { in: ["pending", "sent"] } }, select: { opportunityId: true, status: true, operationalStatusRaw: true, orderStatus: true } }),
+    db.clientCodeAudit.findMany({ where: { origin: MANUAL_REACTIVATION_AUDIT_ORIGIN }, select: { clientId: true } }),
     db.appConfig.findUnique({ where: { key: PARTNERS_CONFIG_KEY }, select: { value: true } }),
     db.appConfig.findUnique({ where: { key: PARTNERS_LAST_SEEN_CONFIG_KEY }, select: { value: true } }),
   ]);
@@ -283,6 +292,7 @@ export async function loadArchiveInput(db: ArchiveDb): Promise<ArchiveInput> {
     users: users as UserRow[],
     opportunities: opportunities as OpportunityRow[],
     orders: orders as OrderRow[],
+    manuallyReactivatedClientIds: [...new Set((manualReactivations as { clientId: string }[]).map((row) => row.clientId))],
     partnerCacheRows: parsePartnerCache((partnerCache as { value: string } | null)?.value),
     partnerLastSeen: parsePartnerLastSeen((partnerLastSeen as { value: string } | null)?.value),
   };
