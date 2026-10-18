@@ -101,7 +101,14 @@ import { ensureInitialKnowledgeDocuments, getKnowledgeContextForAi, searchKnowle
 import { formatTenantReadPilotMarker, isTenantReadPilotActive, runClientListShadowPilot } from "../tenancy/tenantReadPilot.js";
 import { PrismaTenantControlPlaneReader } from "../tenancy/prismaTenantControlPlaneReader.js";
 import type { ClientTenantDelegate } from "../tenancy/clientTenantRepository.js";
-import { isPortfolioCleanupArchiveReason, PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE } from "../services/portfolioCleanupArchive.js";
+import {
+  ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE,
+  isPortfolioCleanupArchiveReason,
+  PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE,
+  PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN,
+  parsePortfolioCleanupArchivedAt,
+  portfolioCleanupManualReactivationDescription,
+} from "../services/portfolioCleanupArchive.js";
 
 const router = Router();
 
@@ -4006,13 +4013,15 @@ router.get("/clients", async (req, res) => {
   const page = parsePositiveInt(req.query.page, 1);
   const pageSize = Math.min(parsePositiveInt(req.query.pageSize, 20), 100);
   const orderBy = parseClientSort(String(req.query.sort || "").trim() || undefined);
+  // "Mostrar arquivados": só gerente e diretor; o vendedor segue vendo só os ativos.
+  const includeArchived = req.user?.role !== "vendedor" && ["1", "true"].includes(String(req.query.includeArchived || ""));
 
   const parsedClientType = clientType.toUpperCase();
   const isValidClientType = parsedClientType === ClientType.PF || parsedClientType === ClientType.PJ;
 
   const where: Prisma.ClientWhereInput = {
     ...sellerWhere(req),
-    isArchived: false,
+    ...(includeArchived ? {} : { isArchived: false }),
     ...(state ? { state: { equals: state, mode: "insensitive" } } : {}),
     ...(region ? { region: { equals: region, mode: "insensitive" } } : {}),
     ...(isValidClientType ? { clientType: parsedClientType } : {}),
@@ -4763,6 +4772,44 @@ router.post("/clients/import", async (req, res) => {
   }
 
   res.json({ created, updated, ignored, conflicts, errors, results });
+});
+
+// Reativação manual de cliente arquivado pela limpeza da carteira. Duplicado arquivado (fusão ou limpeza de
+// duplicados) não volta: o histórico já está no cliente principal.
+router.post("/clients/:id/reactivate", authorize("diretor", "gerente"), async (req, res) => {
+  const client = await prisma.client.findFirst({
+    where: { id: req.params.id, ...clientReadableForDetailsWhere(req) },
+    select: { id: true, code: true, isArchived: true, archiveReason: true, ownerSellerId: true },
+  });
+  if (!client) return res.status(404).json({ message: "Não encontrado" });
+  if (!client.isArchived) return res.status(409).json({ message: "Cliente não está arquivado." });
+  if (!isPortfolioCleanupArchiveReason(client.archiveReason)) return res.status(409).json({ message: ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE });
+
+  const actor = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { name: true } });
+  const reactivated = await prisma.$transaction(async (tx) => {
+    // O where repete o motivo: se o cliente mudou desde a leitura, nada é gravado.
+    const updated = await tx.client.updateMany({
+      where: { id: client.id, isArchived: true, archiveReason: client.archiveReason },
+      data: { isArchived: false, archiveReason: null },
+    });
+    if (!updated.count) return null;
+    await tx.timelineEvent.create({ data: {
+      type: "status", clientId: client.id, ownerSellerId: client.ownerSellerId,
+      description: portfolioCleanupManualReactivationDescription(actor?.name || req.user!.email),
+    } });
+    await tx.clientCodeAudit.create({ data: {
+      clientId: client.id, oldValue: client.code, newValue: client.code, partnerErp: client.code,
+      origin: PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN, actorUserId: req.user!.id, actorEmail: req.user!.email,
+      requestIp: req.ip, requestId: req.requestId || "request-id-unavailable",
+      metadata: {
+        operation: "portfolio_cleanup_manual_reactivation",
+        archivedAt: parsePortfolioCleanupArchivedAt(client.archiveReason)?.toISOString() ?? null,
+      },
+    } });
+    return tx.client.findUnique({ where: { id: client.id } });
+  });
+  if (!reactivated) return res.status(409).json({ message: "O cadastro mudou durante a reativação. Recarregue a página." });
+  return res.json(projectClientForResponse(reactivated));
 });
 
 router.put("/clients/:id", rejectClientCodeInBody, validateBody(clientSchema.partial()), async (req, res) => {
