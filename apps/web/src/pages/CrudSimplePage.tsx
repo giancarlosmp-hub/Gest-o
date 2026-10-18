@@ -14,6 +14,7 @@ import {
 } from "../components/ClientImportColumnMappingStep";
 import QuickCreateClientSection from "../components/clients/QuickCreateClientSection";
 import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
+import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
 
 type CrudSimplePageProps = {
@@ -282,6 +283,7 @@ export default function CrudSimplePage({
     ownerSellerId: ""
   });
   const [userStatusFilter, setUserStatusFilter] = useState<"active" | "inactive" | "all">("active");
+  const [showArchived, setShowArchived] = useState(false);
 
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -323,6 +325,7 @@ export default function CrudSimplePage({
   const canFilterBySeller = isClientsPage && (user?.role === "diretor" || user?.role === "gerente");
   const isSeller = user?.role === "vendedor";
   const canChooseOwnerSeller = user?.role === "diretor" || user?.role === "gerente";
+  const canShowArchived = isClientsPage && canManageArchivedClients(user?.role);
 
   const load = async () => {
     setLoading(true);
@@ -352,6 +355,7 @@ export default function CrudSimplePage({
     if (quickFilters.region) params.region = quickFilters.region;
     if (quickFilters.clientType) params.clientType = quickFilters.clientType;
     if (canFilterBySeller && quickFilters.ownerSellerId) params.ownerSellerId = quickFilters.ownerSellerId;
+    if (canShowArchived && showArchived) params.includeArchived = 1;
 
     try {
       const response = await api.get(endpoint, { params });
@@ -420,6 +424,8 @@ export default function CrudSimplePage({
     quickFilters.clientType,
     quickFilters.ownerSellerId,
     canFilterBySeller,
+    showArchived,
+    canShowArchived,
     isUsersPage,
     userStatusFilter
   ]);
@@ -515,10 +521,18 @@ export default function CrudSimplePage({
     return String(value);
   };
 
+  const renderArchiveBadge = (item: ClientListItem) => {
+    const label = clientArchiveBadgeLabel(item);
+    if (!label) return null;
+    const tone = isPortfolioCleanupArchivedClient(item) ? "bg-amber-50 text-amber-800 ring-amber-200" : "bg-slate-100 text-slate-700 ring-slate-300";
+    return <span className={`mt-1 flex w-fit whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${tone}`}>{label}</span>;
+  };
+
   const clearClientFilters = () => {
     setSearch("");
     setDebouncedSearch("");
     setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+    setShowArchived(false);
     setPage(1);
   };
 
@@ -531,6 +545,7 @@ export default function CrudSimplePage({
     quickFilters.region,
     quickFilters.clientType,
     quickFilters.ownerSellerId,
+    showArchived,
     isClientsPage
   ]);
 
@@ -1949,7 +1964,20 @@ export default function CrudSimplePage({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="text-sm text-slate-600">{totalItems} clientes encontrados</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-slate-600">{totalItems} clientes encontrados</span>
+              {canShowArchived ? (
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300"
+                    checked={showArchived}
+                    onChange={(e) => setShowArchived(e.target.checked)}
+                  />
+                  Mostrar arquivados
+                </label>
+              ) : null}
+            </div>
             <button
               type="button"
               className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
@@ -2059,6 +2087,7 @@ export default function CrudSimplePage({
                     onClick={(event) => onRowClick(event, it.id)}
                   >
                     <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
+                    {renderArchiveBadge(it)}
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                       <div>
                         <dt className="text-slate-500">Cidade</dt>
@@ -2168,6 +2197,7 @@ export default function CrudSimplePage({
                       {fields.filter((field) => !field.formOnly).map((f) => (
                         <td key={f.key} className="p-2 text-slate-700">
                           {getCellValue(it, f.key)}
+                          {isClientsPage && f.key === "name" ? renderArchiveBadge(it) : null}
                         </td>
                       ))}
                       {detailsPath || !readOnly ? (

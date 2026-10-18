@@ -13,6 +13,11 @@ export const PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN = "UltraFV3 Portfolio R
 export const PORTFOLIO_CLEANUP_ARCHIVE_TIMELINE_PREFIX = "Cliente arquivado pela limpeza da carteira (regra ";
 export const portfolioCleanupArchiveTimelineDescription = (rule: "a" | "b") => `${PORTFOLIO_CLEANUP_ARCHIVE_TIMELINE_PREFIX}${rule})`;
 export const PORTFOLIO_CLEANUP_ARCHIVED_OPPORTUNITY_MESSAGE = "Cliente arquivado na limpeza da carteira. Peça ao gerente para reativar o cadastro.";
+// Reativação manual (POST /clients/:id/reactivate, gerente ou diretor). A auditoria com esta origem protege o
+// cliente: o script archivePortfolioCleanup não o arquiva de novo.
+export const PORTFOLIO_CLEANUP_MANUAL_REACTIVATION_AUDIT_ORIGIN = "Manual Portfolio Reactivation";
+export const portfolioCleanupManualReactivationDescription = (userName: string) => `Cliente reativado manualmente por ${userName}`;
+export const ARCHIVED_DUPLICATE_REACTIVATION_MESSAGE = "Cadastro duplicado arquivado: use o cliente principal.";
 
 const BRASILIA_OFFSET_MS = 3 * 60 * 60 * 1000; // UTC-3, sem horário de verão desde 2019.
 const brasiliaDayKey = (date: Date) => new Date(date.getTime() - BRASILIA_OFFSET_MS).toISOString().slice(0, 10);
