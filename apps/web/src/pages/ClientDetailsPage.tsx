@@ -28,6 +28,7 @@ type Client = {
   region: string;
   potentialHa?: number | null;
   farmSizeHa?: number | null;
+  segment?: string | null;
   commercialSummary?: CommercialSummary | null;
   financialProfile?: Record<string, unknown> | null;
   partnerTitles?: Array<Record<string, unknown>> | null;
@@ -575,6 +576,7 @@ export default function ClientDetailsPage() {
           <p><strong>Região:</strong> {client.region}</p>
           <p><strong>Potencial (ha):</strong> {client.potentialHa ?? "-"}</p>
           <p><strong>Área total (ha):</strong> {client.farmSizeHa ?? "-"}</p>
+          <p><strong>Endereço:</strong> {client.segment || "-"}</p>
         </div>
       </section>
 
