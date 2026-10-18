@@ -6,6 +6,8 @@ import TimelineEventList, { TimelineEventItem } from "../components/TimelineEven
 import TimelineIntelligenceCard from "../components/TimelineIntelligenceCard";
 import ClientAutoSummaryCard from "../components/clients/ClientAutoSummaryCard";
 import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/clients/ClientCreditAlertBanner";
+import { useAuth } from "../context/AuthContext";
+import { canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 
 type CommercialSummary = {
   openOpportunitiesCount: number;
@@ -33,6 +35,8 @@ type Client = {
   overdueTitlesTotal?: number | null;
   delayMetrics?: ClientDelayMetrics | null;
   creditAlert?: ClientCreditAlert | null;
+  isArchived?: boolean;
+  archiveReason?: string | null;
 };
 
 // Atraso calculado pela API a partir dos títulos em aberto (partnerTitles).
@@ -168,7 +172,9 @@ const numberFromErp = (value: unknown) => {
 export default function ClientDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [client, setClient] = useState<Client | null>(null);
+  const [reactivating, setReactivating] = useState(false);
   const [events, setEvents] = useState<TimelineEventItem[]>([]);
   const [eventsCursor, setEventsCursor] = useState<string | null>(null);
   const [loadingMoreEvents, setLoadingMoreEvents] = useState(false);
@@ -435,6 +441,28 @@ export default function ClientDetailsPage() {
     }
   };
 
+  const archiveBadgeLabel = clientArchiveBadgeLabel(client);
+  const showReactivateButton = canReactivateClient(user?.role, client);
+
+  const reactivateClient = async () => {
+    if (!id) return;
+    if (!window.confirm("Reativar este cliente? Ele volta para a carteira ativa do vendedor responsável.")) return;
+
+    setReactivating(true);
+    try {
+      await api.post(`/clients/${id}/reactivate`);
+      setClient((current) => (current ? { ...current, isArchived: false, archiveReason: null } : current));
+      toast.success("Cliente reativado.");
+      const eventsRes = await api.get(`/events?clientId=${id}&take=20`);
+      setEvents(eventsRes.data?.items || []);
+      setEventsCursor(eventsRes.data?.nextCursor || null);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || "Não foi possível reativar o cliente.");
+    } finally {
+      setReactivating(false);
+    }
+  };
+
   const removeContact = async (contactId: string) => {
     if (!id) return;
 
@@ -463,6 +491,31 @@ export default function ClientDetailsPage() {
           Voltar
         </button>
       </div>
+
+      {archiveBadgeLabel ? (
+        <section className="flex flex-col justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 sm:flex-row sm:items-center">
+          <div>
+            <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${isPortfolioCleanupArchivedClient(client) ? "bg-white text-amber-800 ring-amber-300" : "bg-slate-100 text-slate-700 ring-slate-300"}`}>
+              {archiveBadgeLabel}
+            </span>
+            <p className="mt-2 text-sm text-slate-700">
+              {isPortfolioCleanupArchivedClient(client)
+                ? "Cliente fora da carteira ativa. Não recebe oportunidade nova enquanto estiver arquivado."
+                : "Cadastro duplicado arquivado: use o cliente principal."}
+            </p>
+          </div>
+          {showReactivateButton ? (
+            <button
+              type="button"
+              className="rounded-lg bg-brand-700 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-800 disabled:opacity-60"
+              onClick={() => void reactivateClient()}
+              disabled={reactivating}
+            >
+              {reactivating ? "Reativando..." : "Reativar cliente"}
+            </button>
+          ) : null}
+        </section>
+      ) : null}
 
       <ClientCreditAlertBanner alert={client.creditAlert} />
 
