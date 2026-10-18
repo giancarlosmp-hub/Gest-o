@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export * from "./portfolioStatus.js";
+export * from "./rankingSellers.js";
+
 /** The browser-facing route. Reverse proxies may forward it with or without
  * `/api`; the API registers both forms, but callers must only use this value. */
 export const PLATFORM_HEALTH_API_PATH = "/platform-health" as const;
@@ -363,9 +366,10 @@ export const dashboardSalesSeriesSchema = z.object({
 
 export const dashboardPortfolioSchema = z.object({
   walletStatus: z.object({
-    active: z.number(),
-    inactiveRecent: z.number(),
-    inactiveOld: z.number()
+    ativo: z.number(),
+    inativoRecente: z.number(),
+    exCliente: z.number(),
+    prospect: z.number()
   }),
   abcCurve: z.object({
     A: z.object({ clients: z.number(), percentRevenue: z.number() }),
