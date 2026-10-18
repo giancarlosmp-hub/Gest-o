@@ -661,9 +661,10 @@ export default function DashboardPage() {
     () =>
       buildInteractiveDoughnutOptions(
         {
-          0: "/clientes?status=ativos",
-          1: "/clientes?status=inativos_recentes",
-          2: "/clientes?status=inativos_antigos",
+          0: "/clientes?status=ativo",
+          1: "/clientes?status=inativoRecente",
+          2: "/clientes?status=exCliente",
+          3: "/clientes?status=prospect",
         },
         {
           tooltip: {

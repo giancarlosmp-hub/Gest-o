@@ -11,6 +11,11 @@ export const PORTFOLIO_STATUS_LABELS: Record<PortfolioStatus, string> = {
   prospect: "Prospect"
 };
 
+export const PORTFOLIO_STATUSES = Object.keys(PORTFOLIO_STATUS_LABELS) as PortfolioStatus[];
+
+export const isPortfolioStatus = (value: unknown): value is PortfolioStatus =>
+  typeof value === "string" && (PORTFOLIO_STATUSES as string[]).includes(value);
+
 const BRAZIL_UTC_OFFSET_MS = 3 * 3_600_000;
 
 type DateInput = Date | string | null | undefined;

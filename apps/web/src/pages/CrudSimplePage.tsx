@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { PORTFOLIO_STATUSES, PORTFOLIO_STATUS_LABELS, isPortfolioStatus } from "@salesforce-pro/shared";
 import api from "../lib/apiClient";
 import { toast } from "sonner";
 import { useAuth } from "../context/AuthContext";
@@ -16,6 +17,7 @@ import QuickCreateClientSection from "../components/clients/QuickCreateClientSec
 import { buildDuplicateClientMessage, checkClientDuplicate } from "../lib/clientDuplicateCheck";
 import { canManageArchivedClients, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { getApiErrorMessage } from "../lib/apiError";
+import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 
 type CrudSimplePageProps = {
   endpoint: string;
@@ -258,6 +260,7 @@ export default function CrudSimplePage({
   createModalTitle = "Novo registro"
 }: CrudSimplePageProps) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
 
   const [items, setItems] = useState<ClientListItem[]>([]);
@@ -276,11 +279,14 @@ export default function CrudSimplePage({
   >({});
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  // Situação da carteira vem de ?status= (links do donut do Dashboard); valor inválido é ignorado.
+  const urlPortfolioStatus = endpoint === "/clients" && isPortfolioStatus(searchParams.get("status")) ? searchParams.get("status")! : "";
   const [quickFilters, setQuickFilters] = useState({
     uf: "",
     region: "",
     clientType: "",
-    ownerSellerId: ""
+    ownerSellerId: "",
+    portfolioStatus: urlPortfolioStatus
   });
   const [userStatusFilter, setUserStatusFilter] = useState<"active" | "inactive" | "all">("active");
   const [showArchived, setShowArchived] = useState(false);
@@ -356,6 +362,7 @@ export default function CrudSimplePage({
     if (quickFilters.clientType) params.clientType = quickFilters.clientType;
     if (canFilterBySeller && quickFilters.ownerSellerId) params.ownerSellerId = quickFilters.ownerSellerId;
     if (canShowArchived && showArchived) params.includeArchived = 1;
+    if (quickFilters.portfolioStatus) params.status = quickFilters.portfolioStatus;
 
     try {
       const response = await api.get(endpoint, { params });
@@ -423,12 +430,32 @@ export default function CrudSimplePage({
     quickFilters.region,
     quickFilters.clientType,
     quickFilters.ownerSellerId,
+    quickFilters.portfolioStatus,
     canFilterBySeller,
     showArchived,
     canShowArchived,
     isUsersPage,
     userStatusFilter
   ]);
+
+  // URL e filtro de situação andam juntos: voltar/avançar no navegador muda o filtro e o filtro muda a URL.
+  useEffect(() => {
+    if (!isClientsPage) return;
+    setQuickFilters((prev) => (prev.portfolioStatus === urlPortfolioStatus ? prev : { ...prev, portfolioStatus: urlPortfolioStatus }));
+  }, [isClientsPage, urlPortfolioStatus]);
+
+  const changePortfolioStatus = (value: string) => {
+    setQuickFilters((prev) => ({ ...prev, portfolioStatus: value }));
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set("status", value);
+        else next.delete("status");
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   useEffect(() => {
     if (!isClientsPage || !canFilterBySeller) {
@@ -528,10 +555,20 @@ export default function CrudSimplePage({
     return <span className={`mt-1 flex w-fit whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${tone}`}>{label}</span>;
   };
 
+  const renderPortfolioStatusBadge = (item: ClientListItem) => {
+    if (!isPortfolioStatus(item.portfolioStatus)) return null;
+    return (
+      <span className={`mt-1 flex w-fit whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${portfolioStatusBadgeClass[item.portfolioStatus]}`}>
+        {PORTFOLIO_STATUS_LABELS[item.portfolioStatus]}
+      </span>
+    );
+  };
+
   const clearClientFilters = () => {
     setSearch("");
     setDebouncedSearch("");
-    setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "" });
+    setQuickFilters({ uf: "", region: "", clientType: "", ownerSellerId: "", portfolioStatus: "" });
+    changePortfolioStatus("");
     setShowArchived(false);
     setPage(1);
   };
@@ -545,6 +582,7 @@ export default function CrudSimplePage({
     quickFilters.region,
     quickFilters.clientType,
     quickFilters.ownerSellerId,
+    quickFilters.portfolioStatus,
     showArchived,
     isClientsPage
   ]);
@@ -1903,7 +1941,7 @@ export default function CrudSimplePage({
 
       {isClientsPage ? (
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <input
               className="rounded-lg border border-slate-300 px-3 py-2"
               placeholder="Buscar clientes..."
@@ -1961,6 +1999,20 @@ export default function CrudSimplePage({
                 ))}
               </select>
             ) : null}
+
+            <select
+              className="rounded-lg border border-slate-300 px-3 py-2"
+              aria-label="Situação da carteira"
+              value={quickFilters.portfolioStatus}
+              onChange={(e) => changePortfolioStatus(e.target.value)}
+            >
+              <option value="">Situação (todas)</option>
+              {PORTFOLIO_STATUSES.map((status) => (
+                <option key={status} value={status}>
+                  {PORTFOLIO_STATUS_LABELS[status]}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2088,6 +2140,7 @@ export default function CrudSimplePage({
                   >
                     <h3 className="text-base font-semibold text-slate-900">{String(getCellValue(it, "name") || "-")}</h3>
                     {renderArchiveBadge(it)}
+                    {renderPortfolioStatusBadge(it)}
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
                       <div>
                         <dt className="text-slate-500">Cidade</dt>
@@ -2198,6 +2251,7 @@ export default function CrudSimplePage({
                         <td key={f.key} className="p-2 text-slate-700">
                           {getCellValue(it, f.key)}
                           {isClientsPage && f.key === "name" ? renderArchiveBadge(it) : null}
+                          {isClientsPage && f.key === "name" ? renderPortfolioStatusBadge(it) : null}
                         </td>
                       ))}
                       {detailsPath || !readOnly ? (

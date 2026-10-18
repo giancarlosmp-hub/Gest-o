@@ -9,6 +9,7 @@ import ClientCreditAlertBanner, { ClientCreditAlert } from "../components/client
 import { useAuth } from "../context/AuthContext";
 import { canReactivateClient, clientArchiveBadgeLabel, isPortfolioCleanupArchivedClient } from "../lib/clientArchiveStatus";
 import { PORTFOLIO_STATUS_LABELS, type PortfolioStatus } from "@salesforce-pro/shared";
+import { portfolioStatusBadgeClass } from "../lib/portfolioStatusBadge";
 
 type CommercialSummary = {
   openOpportunitiesCount: number;
@@ -20,13 +21,6 @@ type CommercialSummary = {
   fantasyName?: string | null;
   erpUpdatedAt?: string | null;
   portfolioStatus?: PortfolioStatus;
-};
-
-const portfolioStatusBadgeClass: Record<PortfolioStatus, string> = {
-  ativo: "bg-emerald-50 text-emerald-800 ring-emerald-300",
-  inativoRecente: "bg-amber-50 text-amber-800 ring-amber-300",
-  exCliente: "bg-red-50 text-red-800 ring-red-300",
-  prospect: "bg-slate-100 text-slate-700 ring-slate-300"
 };
 
 type Client = {
