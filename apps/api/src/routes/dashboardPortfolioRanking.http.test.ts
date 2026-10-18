@@ -25,6 +25,7 @@ const clients: Row[] = [
   { id: "c-perfil", ownerSellerId: "seller-ativo", isArchived: false, lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: daysAgo(60).toISOString() } },
   { id: "c-pedido-enviado", ownerSellerId: "seller-ativo", isArchived: false, lastPurchaseDate: daysAgo(900), financialProfile: null },
   { id: "c-pedido-pendente", ownerSellerId: "seller-ativo", isArchived: false, lastPurchaseDate: daysAgo(900), financialProfile: null },
+  { id: "c-pedido-cancelado", ownerSellerId: "seller-ativo", isArchived: false, lastPurchaseDate: daysAgo(900), financialProfile: null },
   { id: "c-arquivado", ownerSellerId: "seller-ativo", isArchived: true, lastPurchaseDate: daysAgo(10), financialProfile: null },
   { id: "c-outro-vendedor", ownerSellerId: "seller-desligado-com-venda", isArchived: false, lastPurchaseDate: null, financialProfile: null },
 ];
@@ -33,6 +34,7 @@ const erpOrders: Row[] = [
   { clientId: "c-pedido-pendente", status: "pending", sentAt: null, createdAt: daysAgo(5) },
   { clientId: "c-pedido-pendente", status: "error", sentAt: null, createdAt: daysAgo(4) },
   { clientId: "c-arquivado", status: "sent", sentAt: daysAgo(3), createdAt: daysAgo(3) },
+  { clientId: "c-pedido-cancelado", status: "sent", sentAt: daysAgo(6), createdAt: daysAgo(6), orderStatus: "cancelado", operationalOrderStatus: "CANCELADO" },
 ];
 const wonOpportunities: Row[] = [
   { id: "opp-ativo", ownerSellerId: "seller-ativo", clientId: "c-ativo", value: 1000 },
@@ -84,7 +86,7 @@ setModel("erpOrderSync", {
     if (!where?.opportunity) return [];
     return erpOrders
       .filter((order) => order.status === where.status && matches(clients.find((client) => client.id === order.clientId)!, where.opportunity.client))
-      .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, opportunity: { clientId: order.clientId } }));
+      .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, orderStatus: order.orderStatus ?? null, operationalOrderStatus: order.operationalOrderStatus ?? "UNKNOWN", opportunity: { clientId: order.clientId } }));
   },
 });
 setModel("opportunity", {
@@ -114,23 +116,24 @@ const get = async (path: string, userId = "director-a") => {
 const originalInfo = console.info;
 console.info = () => undefined; // /dashboard/summary loga diagnóstico fora de produção.
 try {
-  // Carteira: 4 faixas, arquivado fora, pedido sent conta e pending/error não.
+  // Carteira: 4 faixas, arquivado fora, pedido sent conta e pending/error/cancelado não.
   const portfolio = await get("/dashboard/portfolio");
   assert.equal(portfolio.status, 200);
-  assert.deepEqual(portfolio.json.walletStatus, { ativo: 3, inativoRecente: 1, exCliente: 2, prospect: 2 });
-  assert.equal(portfolio.json.totalClients, 8, "total = não arquivados");
+  assert.deepEqual(portfolio.json.walletStatus, { ativo: 3, inativoRecente: 1, exCliente: 3, prospect: 2 });
+  assert.equal(portfolio.json.totalClients, 9, "total = não arquivados");
   assert(clientWheres.every((where) => where.isArchived === false), "carteira só consulta não arquivados");
 
   // Filtro por vendedor que já existia.
   const bySeller = await get("/dashboard/portfolio?sellerId=seller-ativo");
-  assert.deepEqual(bySeller.json.walletStatus, { ativo: 3, inativoRecente: 1, exCliente: 2, prospect: 1 });
-  assert.equal(bySeller.json.totalClients, 7);
+  assert.deepEqual(bySeller.json.walletStatus, { ativo: 3, inativoRecente: 1, exCliente: 3, prospect: 1 });
+  assert.equal(bySeller.json.totalClients, 8);
   const asSeller = await get("/dashboard/portfolio", "seller-ativo");
-  assert.equal(asSeller.json.totalClients, 7, "vendedor vê só a própria carteira");
+  assert.equal(asSeller.json.totalClients, 8, "vendedor vê só a própria carteira");
 
   // Selo no detalhe do cliente.
   assert.equal((await get("/clients/c-pedido-enviado")).json.commercialSummary.portfolioStatus, "ativo");
   assert.equal((await get("/clients/c-pedido-pendente")).json.commercialSummary.portfolioStatus, "exCliente");
+  assert.equal((await get("/clients/c-pedido-cancelado")).json.commercialSummary.portfolioStatus, "exCliente", "sent + cancelado não vira ativo");
   assert.equal((await get("/clients/c-recente")).json.commercialSummary.portfolioStatus, "inativoRecente");
   assert.equal((await get("/clients/c-prospect")).json.commercialSummary.portfolioStatus, "prospect");
 
@@ -167,4 +170,4 @@ try {
   await (prisma as any).$disconnect?.();
 }
 
-console.log("DASHBOARD_PORTFOLIO_RANKING=PASS wallet_bands=PASS archived_excluded=PASS seller_filter=PASS client_badge=PASS performance=PASS consistency=PASS weekly_highlights=PASS");
+console.log("DASHBOARD_PORTFOLIO_RANKING=PASS wallet_bands=PASS cancelled_order=PASS archived_excluded=PASS seller_filter=PASS client_badge=PASS performance=PASS consistency=PASS weekly_highlights=PASS");

@@ -33,20 +33,24 @@ assert.equal(classifyPortfolioStatus(null, new Date("2025-04-10T15:00:00.000Z"),
 assert.equal(classifyPortfolioStatus(new Date("2026-09-01T15:00:00.000Z"), new Date("2023-01-10T15:00:00.000Z"), now), "ativo");
 
 // Só pedido sent conta: pending e error ficam fora da consulta.
-type OrderRow = { clientId: string; status: "pending" | "sent" | "error"; sentAt: Date | null; createdAt: Date };
+type OrderRow = { clientId: string; status: "pending" | "sent" | "error"; sentAt: Date | null; createdAt: Date; orderStatus?: string | null; operationalOrderStatus?: string };
 const orders: OrderRow[] = [
   { clientId: "cliente-pedido-enviado", status: "sent", sentAt: new Date("2026-10-10T15:00:00.000Z"), createdAt: new Date("2026-10-10T14:00:00.000Z") },
   { clientId: "cliente-pedido-enviado", status: "sent", sentAt: new Date("2026-08-10T15:00:00.000Z"), createdAt: new Date("2026-08-10T14:00:00.000Z") },
   { clientId: "cliente-pedido-pendente", status: "pending", sentAt: null, createdAt: new Date("2026-10-15T14:00:00.000Z") },
   { clientId: "cliente-pedido-pendente", status: "error", sentAt: null, createdAt: new Date("2026-10-16T14:00:00.000Z") },
   { clientId: "cliente-sem-sentAt", status: "sent", sentAt: null, createdAt: new Date("2026-10-12T14:00:00.000Z") },
+  { clientId: "cliente-cancelado-entrega", status: "sent", sentAt: new Date("2026-10-11T15:00:00.000Z"), createdAt: new Date("2026-10-11T14:00:00.000Z"), orderStatus: "cancelado", operationalOrderStatus: "UNKNOWN" },
+  { clientId: "cliente-cancelado-operacional", status: "sent", sentAt: new Date("2026-10-11T15:00:00.000Z"), createdAt: new Date("2026-10-11T14:00:00.000Z"), orderStatus: null, operationalOrderStatus: "CANCELADO" },
+  { clientId: "cliente-um-cancelado", status: "sent", sentAt: new Date("2026-10-13T15:00:00.000Z"), createdAt: new Date("2026-10-13T14:00:00.000Z"), orderStatus: null, operationalOrderStatus: "CANCELADO" },
+  { clientId: "cliente-um-cancelado", status: "sent", sentAt: new Date("2025-03-01T15:00:00.000Z"), createdAt: new Date("2025-03-01T14:00:00.000Z"), orderStatus: "faturado", operationalOrderStatus: "FINALIZADO" },
 ];
 let capturedWhere: any = null;
 (prisma as any).erpOrderSync.findMany = async ({ where }: any) => {
   capturedWhere = where;
   return orders
     .filter((order) => order.status === where.status)
-    .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, opportunity: { clientId: order.clientId } }));
+    .map((order) => ({ sentAt: order.sentAt, createdAt: order.createdAt, orderStatus: order.orderStatus ?? null, operationalOrderStatus: order.operationalOrderStatus ?? "UNKNOWN", opportunity: { clientId: order.clientId } }));
 };
 
 const lastSent = await loadLastSentCrmOrderByClient({ ownerSellerId: "vendedor-ficticio", isArchived: false });
@@ -55,10 +59,16 @@ assert.deepEqual(capturedWhere.opportunity, { client: { ownerSellerId: "vendedor
 assert.equal(lastSent.get("cliente-pedido-enviado")?.toISOString(), "2026-10-10T15:00:00.000Z", "o mais recente dos enviados");
 assert.equal(lastSent.has("cliente-pedido-pendente"), false, "pending/error não contam");
 assert.equal(lastSent.get("cliente-sem-sentAt")?.toISOString(), "2026-10-12T14:00:00.000Z", "sem sentAt usa createdAt");
+assert.equal(lastSent.has("cliente-cancelado-entrega"), false, "sent + orderStatus cancelado não conta");
+assert.equal(lastSent.has("cliente-cancelado-operacional"), false, "sent + operationalOrderStatus CANCELADO não conta");
+assert.equal(lastSent.get("cliente-um-cancelado")?.toISOString(), "2025-03-01T15:00:00.000Z", "cancelado ignorado; vale o enviado anterior");
 
 const erpExCliente = new Date("2023-01-10T15:00:00.000Z");
 assert.equal(portfolioStatusOf({ id: "cliente-pedido-enviado", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent, now), "ativo");
 assert.equal(portfolioStatusOf({ id: "cliente-pedido-pendente", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent, now), "exCliente");
+assert.equal(portfolioStatusOf({ id: "cliente-cancelado-entrega", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent, now), "exCliente", "sent + cancelado não vira ativo");
+assert.equal(portfolioStatusOf({ id: "cliente-cancelado-operacional", lastPurchaseDate: null, financialProfile: null }, lastSent, now), "prospect", "sent + cancelado não conta como compra");
+assert.equal(portfolioStatusOf({ id: "cliente-um-cancelado", lastPurchaseDate: erpExCliente, financialProfile: null }, lastSent, now), "inativoRecente");
 // Fallback do perfil financeiro (DATA_ULTFATURA), como em commercialAutomationsService.
 assert.equal(portfolioStatusOf({ id: "cliente-perfil", lastPurchaseDate: null, financialProfile: { DATA_ULTFATURA: "2025-06-01T03:00:00.000Z" } }, lastSent, now), "inativoRecente");
 assert.equal(portfolioStatusOf({ id: "cliente-perfil", lastPurchaseDate: null, financialProfile: {} }, lastSent, now), "prospect");
@@ -72,4 +82,4 @@ assert.equal(rankingSellerName("Vendedora Ficticia", true), "Vendedora Ficticia"
 assert.equal(rankingSellerName("Vendedora Ficticia", false), "Vendedora Ficticia (desligado)");
 
 await (prisma as any).$disconnect?.();
-console.log("CLIENT_PORTFOLIO_STATUS=PASS bands=PASS borders_brasilia=PASS sent_order=PASS pending_error_ignored=PASS ranking_helpers=PASS");
+console.log("CLIENT_PORTFOLIO_STATUS=PASS bands=PASS borders_brasilia=PASS sent_order=PASS pending_error_ignored=PASS cancelled_ignored=PASS ranking_helpers=PASS");
