@@ -38,7 +38,9 @@ import {
 import {
   isPortfolioCleanupArchiveReason,
   planPortfolioCleanupPurchase,
+  parsePortfolioCleanupArchivedAt,
   PORTFOLIO_CLEANUP_ARCHIVE_REASON_PREFIX,
+  PORTFOLIO_CLEANUP_PARTNER_REACTIVATION_DESCRIPTION,
   PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN,
   PORTFOLIO_CLEANUP_REACTIVATION_DESCRIPTION,
 } from "./portfolioCleanupArchive.js";
@@ -1555,6 +1557,8 @@ type PartnerPersistenceDiagnostics = {
   skippedCustomerFlagMissing?: number;
   /** Arquivados pela limpeza da carteira: cadastro atualizado, arquivamento mantido. */
   portfolioCleanupKeptArchived?: number;
+  /** Arquivados pela limpeza da carteira reativados: vieram com IDN_CLIENTE = S e vendedor do ERP de usuário ativo. */
+  portfolioCleanupReactivated?: number;
   /** Só contagem: clientes não arquivados do CRM com código vindo nesta rodada com IDN_CLIENTE = N. */
   existingClientsNotCustomer?: number;
   /** Só contagem: clientes não arquivados do CRM com código vindo com vendedor do ERP sem usuário ativo no CRM. */
@@ -2025,8 +2029,11 @@ async function persistPartnerPayload(
   const primary = choosePrimaryPartnerClient(candidates, ownerSellerId);
   const duplicates = primary ? candidates.filter((candidate) => candidate.id !== primary.id) : [];
   if (candidates.length > 1) diagnostics.duplicatesFound += candidates.length;
-  // Arquivado pela limpeza da carteira: só a sincronização financeira reativa (nova compra no ERP).
-  const keepPortfolioCleanupArchive = Boolean(primary?.isArchived && isPortfolioCleanupArchiveReason(primary.archiveReason));
+  // Arquivado pela limpeza da carteira: reativa só se o ERP diz que é cliente da carteira (IDN_CLIENTE = S e
+  // vendedor do ERP de um usuário ativo do CRM); senão atualiza o cadastro e mantém o arquivamento.
+  const portfolioCleanupArchived = Boolean(primary?.isArchived && isPortfolioCleanupArchiveReason(primary.archiveReason));
+  const reactivatePortfolioCleanup = portfolioCleanupArchived && isErpPortfolioCustomer(payload, await loadActiveErpSellerCodes());
+  const keepPortfolioCleanupArchive = portfolioCleanupArchived && !reactivatePortfolioCleanup;
 
   const updateData: Prisma.ClientUpdateInput = {
     tenant: { connect: { id: authority.tenantId } },
@@ -2049,7 +2056,7 @@ async function persistPartnerPayload(
 
   if (primary) {
     const sellerChanged = primary.ownerSellerId !== ownerSellerId;
-    const wasArchived = primary.isArchived && !keepPortfolioCleanupArchive;
+    const wasArchived = primary.isArchived && !portfolioCleanupArchived;
     const currentCityPlaceholder = isPlaceholderCity(primary.city);
     const cityChanged = Boolean(mappedCity) && normalizeText(primary.city) !== normalizeText(data.city);
     await prisma.$transaction(async (tx) => {
@@ -2088,10 +2095,23 @@ async function persistPartnerPayload(
           description: "Cliente reativado automaticamente pela sincronização UltraFV3 por corresponder ao cadastro principal do ERP.",
         });
       }
+      if (reactivatePortfolioCleanup) {
+        await createUltraFv3ClientAuditEvent(tx, { clientId: primary.id, ownerSellerId, description: PORTFOLIO_CLEANUP_PARTNER_REACTIVATION_DESCRIPTION });
+        await tx.clientCodeAudit.create({ data: {
+          clientId: primary.id, oldValue: primary.code, newValue: data.code, partnerErp: data.code,
+          origin: PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN, requestId: correlationId,
+          metadata: {
+            operation: "portfolio_cleanup_reactivation",
+            trigger: "partners",
+            archivedAt: parsePortfolioCleanupArchivedAt(primary.archiveReason)?.toISOString() ?? null,
+          },
+        } });
+      }
     });
     diagnostics.updated += 1;
     diagnostics.merged += duplicates.length;
     if (keepPortfolioCleanupArchive) diagnostics.portfolioCleanupKeptArchived = (diagnostics.portfolioCleanupKeptArchived ?? 0) + 1;
+    if (reactivatePortfolioCleanup) diagnostics.portfolioCleanupReactivated = (diagnostics.portfolioCleanupReactivated ?? 0) + 1;
     if (sellerChanged) diagnostics.sellerChangedCount += 1;
     if (cityChanged || (currentCityPlaceholder && mappedCity)) diagnostics.cityCorrectedCount += 1;
     if (normalizedDocument) diagnostics.updatedDocumentCount += 1;
@@ -2140,13 +2160,25 @@ async function persistPartnerPayload(
   return true;
 }
 
+/** Códigos de vendedor do ERP (normalizados) de usuários ativos do CRM. */
+async function loadActiveErpSellerCodes() {
+  const activeUsers = await prisma.user.findMany({ where: { isActive: true, erpCode: { not: null } }, select: { erpCode: true } });
+  return new Set(activeUsers.map((user) => normalizePartnerCacheCode(user.erpCode ?? "")).filter(Boolean));
+}
+
+/** O ERP diz que é cliente da carteira: IDN_CLIENTE = S e vendedor do ERP de um usuário ativo do CRM. */
+const isErpPortfolioCustomer = (payload: Record<string, unknown>, activeSellerCodes: Set<string>) => {
+  if (classifyPartnerCustomerFlag(payload) !== "customer") return false;
+  const sellerCode = normalizePartnerCacheCode(pickFirstString(payload, partnerSellerCodeKeys));
+  return Boolean(sellerCode) && activeSellerCodes.has(sellerCode);
+};
+
 /**
  * Diagnóstico da rodada (só leitura): clientes não arquivados do CRM cujo código veio com IDN_CLIENTE = N,
  * e os que vieram com código de vendedor do ERP que não é de nenhum usuário ativo do CRM.
  */
 async function countExistingClientsInPartnerRound(rows: unknown[]) {
-  const activeUsers = await prisma.user.findMany({ where: { isActive: true, erpCode: { not: null } }, select: { erpCode: true } });
-  const activeSellerCodes = new Set(activeUsers.map((user) => normalizePartnerCacheCode(user.erpCode ?? "")).filter(Boolean));
+  const activeSellerCodes = await loadActiveErpSellerCodes();
   const notCustomerCodes = new Set<string>();
   const sellerWithoutUserCodes = new Set<string>();
   for (const row of rows) {
@@ -2642,6 +2674,7 @@ export async function syncPartnersForAllConfiguredSellers(
     skippedNotCustomer: 0,
     skippedCustomerFlagMissing: 0,
     portfolioCleanupKeptArchived: 0,
+    portfolioCleanupReactivated: 0,
     existingClientsNotCustomer: 0,
     existingClientsSellerWithoutActiveUser: 0,
   };
@@ -2690,6 +2723,7 @@ export async function syncPartnersForAllConfiguredSellers(
       summary.skippedNotCustomer += result.diagnostics?.skippedNotCustomer ?? 0;
       summary.skippedCustomerFlagMissing += result.diagnostics?.skippedCustomerFlagMissing ?? 0;
       summary.portfolioCleanupKeptArchived += result.diagnostics?.portfolioCleanupKeptArchived ?? 0;
+      summary.portfolioCleanupReactivated += result.diagnostics?.portfolioCleanupReactivated ?? 0;
       summary.existingClientsNotCustomer += result.diagnostics?.existingClientsNotCustomer ?? 0;
       summary.existingClientsSellerWithoutActiveUser += result.diagnostics?.existingClientsSellerWithoutActiveUser ?? 0;
       results.push({
@@ -3624,9 +3658,11 @@ export async function syncFinancialProfiles(options?: RunSyncOptions) {
         profileByCode.set(code, payload);
       }
       const portfolioCleanup = emptyPortfolioCleanupPurchaseStats();
-      for (const client of await findPortfolioCleanupArchivedTargets([...profileByCode.keys()])) {
+      const archived = await findPortfolioCleanupArchivedTargets([...profileByCode.keys()]);
+      const portfolioCustomers = archived.length ? await loadErpPortfolioCustomerCodes() : new Set<string>();
+      for (const client of archived) {
         const profile = profileByCode.get(client.code);
-        if (profile) await applyPortfolioCleanupPurchase(client, profile, correlationId, portfolioCleanup);
+        if (profile) await applyPortfolioCleanupPurchase(client, profile, portfolioCustomers, correlationId, portfolioCleanup);
       }
       return { syncedCount: rows.length, diagnostics: { matchedClients, ...portfolioCleanup } };
     },
@@ -3751,21 +3787,42 @@ const emptyPortfolioCleanupPurchaseStats = () => ({
   portfolioCleanupReactivated: 0,
   portfolioCleanupWithoutPurchaseDate: 0,
   portfolioCleanupArchiveDateUnreadable: 0,
+  portfolioCleanupNotPortfolioCustomer: 0,
 });
 
 /**
+ * Códigos (normalizados) que o ERP diz serem clientes da carteira, pela última linha de cada parceiro no
+ * cache do /partners: IDN_CLIENTE = S e vendedor do ERP de um usuário ativo. Ausente do cache: não é.
+ */
+async function loadErpPortfolioCustomerCodes() {
+  const [stored, activeSellerCodes] = await Promise.all([
+    prisma.appConfig.findUnique({ where: { key: PARTNERS_CONFIG_KEY }, select: { value: true } }),
+    loadActiveErpSellerCodes(),
+  ]);
+  const codes = new Set<string>();
+  for (const row of parseCachedRows(stored?.value)) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const key = getPartnerCacheKey(row);
+    if (key && isErpPortfolioCustomer(row as Record<string, unknown>, activeSellerCodes)) codes.add(key);
+  }
+  return codes;
+}
+
+/**
  * Cliente arquivado pela limpeza da carteira: grava só lastPurchaseDate (os demais dados financeiros de
- * arquivados seguem sem gravação) e reativa quando a compra é de dia posterior ao arquivamento. O where
- * repete isArchived e archiveReason: se o cliente mudou desde a leitura, nada é gravado.
+ * arquivados seguem sem gravação) e reativa quando a compra é de dia posterior ao arquivamento e o ERP diz
+ * que é cliente da carteira (`portfolioCustomers`). O where repete isArchived e archiveReason: se o cliente
+ * mudou desde a leitura, nada é gravado.
  */
 async function applyPortfolioCleanupPurchase(
   client: PortfolioCleanupArchivedTarget,
   profile: Record<string, unknown>,
+  portfolioCustomers: Set<string>,
   correlationId: string,
   stats: ReturnType<typeof emptyPortfolioCleanupPurchaseStats>,
 ) {
   stats.portfolioCleanupArchivedMatched += 1;
-  const plan = planPortfolioCleanupPurchase(client.archiveReason, profile.DATA_ULTFATURA);
+  const plan = planPortfolioCleanupPurchase(client.archiveReason, profile.DATA_ULTFATURA, portfolioCustomers.has(normalizePartnerCacheCode(client.code)));
   if (plan.action === "none") {
     stats.portfolioCleanupWithoutPurchaseDate += 1;
     return;
@@ -3773,6 +3830,7 @@ async function applyPortfolioCleanupPurchase(
   const stillArchived = { id: client.id, isArchived: true, archiveReason: client.archiveReason };
   if (plan.action === "updatePurchaseDate") {
     if (plan.reason === "dataDoArquivamentoIlegivel") stats.portfolioCleanupArchiveDateUnreadable += 1;
+    if (plan.reason === "naoEClienteDaCarteiraNoErp") stats.portfolioCleanupNotPortfolioCustomer += 1;
     const updated = await prisma.client.updateMany({ where: stillArchived, data: { lastPurchaseDate: plan.lastPurchaseDate } });
     stats.portfolioCleanupPurchaseDateUpdated += updated.count;
     return;
@@ -3793,6 +3851,7 @@ async function applyPortfolioCleanupPurchase(
       origin: PORTFOLIO_CLEANUP_REACTIVATION_AUDIT_ORIGIN, requestId: correlationId,
       metadata: {
         operation: "portfolio_cleanup_reactivation",
+        trigger: "financialProfiles",
         archivedAt: plan.archivedAt.toISOString(),
         lastPurchaseDate: plan.lastPurchaseDate.toISOString(),
       },
@@ -4027,9 +4086,10 @@ async function syncFinancialScopeForAllConfiguredSellers(scope: FinancialScope, 
             exclusions: resolveFinancialWriteExclusions({ failedSellerIds, candidateClients: [...clients, ...archived], coverageBySeller: coverage }),
           });
           const archivedById = new Map(archived.map((client) => [client.id, client]));
+          const portfolioCustomers = await loadErpPortfolioCustomerCodes();
           for (const write of archivedPlan.writes) {
             for (const clientId of write.clientIds) {
-              await applyPortfolioCleanupPurchase(archivedById.get(clientId)!, write.profile, correlationId, portfolioCleanup);
+              await applyPortfolioCleanupPurchase(archivedById.get(clientId)!, write.profile, portfolioCustomers, correlationId, portfolioCleanup);
             }
           }
         }
@@ -4144,6 +4204,7 @@ export async function syncPartnersAcrossSellers(options?: RunSyncOptions): Promi
       skippedNotCustomer: summary.skippedNotCustomer,
       skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing,
       portfolioCleanupKeptArchived: summary.portfolioCleanupKeptArchived,
+      portfolioCleanupReactivated: summary.portfolioCleanupReactivated,
       // Soma das rodadas por vendedor: o mesmo cliente pode contar mais de uma vez.
       existingClientsNotCustomer: summary.existingClientsNotCustomer,
       existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser,
@@ -4198,7 +4259,7 @@ async function runSellerPortfolioSync(baseOptions: RunSyncOptions) {
       status: summary.status,
       durationMs: Date.now() - partnersStartedAt,
       syncedCount: summary.processed,
-      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated, skippedNotCustomer: summary.skippedNotCustomer, skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing, portfolioCleanupKeptArchived: summary.portfolioCleanupKeptArchived, existingClientsNotCustomer: summary.existingClientsNotCustomer, existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser },
+      diagnostics: { sellerCount: summary.sellerCount, successCount: summary.successCount, emptyCount: summary.emptyCount, errorCount: summary.errorCount, skippedCount: summary.skippedCount, created: summary.created, updated: summary.updated, skippedNotCustomer: summary.skippedNotCustomer, skippedCustomerFlagMissing: summary.skippedCustomerFlagMissing, portfolioCleanupKeptArchived: summary.portfolioCleanupKeptArchived, portfolioCleanupReactivated: summary.portfolioCleanupReactivated, existingClientsNotCustomer: summary.existingClientsNotCustomer, existingClientsSellerWithoutActiveUser: summary.existingClientsSellerWithoutActiveUser },
       ...(summary.skippedCustomerFlagMissing ? { error: customerFlagMissingWarning(summary.skippedCustomerFlagMissing) } : {}),
     };
   } catch (error) {
